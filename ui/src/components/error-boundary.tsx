@@ -1,6 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { AlertTriangle, RefreshCw, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { isStaleChunkError, reloadForNewBuild } from "@/lib/stale-build";
 
 interface Props {
   /** Where the boundary sits (shown in the message and in the console). */
@@ -27,6 +28,8 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
+    // a page of a previous deploy: reload once to get the current build
+    if (isStaleChunkError(error) && reloadForNewBuild()) return;
     this.setState({ componentStack: info.componentStack ?? "" });
     console.error(`[ErrorBoundary:${this.props.area}]`, error, info.componentStack);
   }

@@ -4,6 +4,8 @@ import type { Task, TaskResult, RunnerConfig } from "./types.js";
 import { agentMemoryScope } from "./memory-store.js";
 import { agentEgressName, computerContext, tailnetEgressFor, normalizeSandboxSettings, resolveSandbox, SandboxVolumeGrantError, type ResolvedSandboxVolume, type SandboxSettings } from "./sandbox.js";
 import type { RunRecord } from "./run-store.js";
+import { buildRunContext, finishRunContext, mergeRunContext, upsertTaskRun } from "./run-context.js";
+import { normalizeDependencyResultsSettings, renderDependencyResults, resolveDependencies } from "./dependency-results.js";
 
 // ── Pure path helpers (no node:path dependency) ─────────────────────────
 
@@ -35,6 +37,8 @@ export class TaskRunner {
   private knownOutcomes = new Map<string, Set<string>>();
   /** Compactions already announced per running task (context:compacted). */
   private knownCompactions = new Map<string, number>();
+  /** The engine's run context last merged into the task, per run (Task.runs). */
+  private knownRunContexts = new Map<string, string>();
 
   constructor(private ctx: OrchestratorContext) {}
 
@@ -65,10 +69,15 @@ export class TaskRunner {
           level: "info",
           message: `[${run.taskId}] Human continuation superseded terminal run ${run.id}`,
         });
+        await this.finishTaskRun(run);
         await this.ctx.runStore.deleteRun(run.id);
         this.staleWarned.delete(run.taskId);
         continue;
       }
+
+      // Close the run's entry in Task.runs (where and with what it ran), with what the engine reported
+      await this.finishTaskRun(run);
+      this.knownRunContexts.delete(run.id);
 
       // Persist sessionId on the task before deleting the run
       const sid = run.sessionId ?? run.activity.sessionId;
@@ -76,11 +85,22 @@ export class TaskRunner {
         try { await this.ctx.registry.updateTask(run.taskId, { sessionId: sid }); } catch { /* task may already be gone */ }
       }
       // Persist auto-collected outcomes on the task.
-      // REPLACE (not append) — each execution produces its own definitive outcomes.
-      // Appending caused "exponential outcome" accumulation across retries/fix cycles.
+      // A new execution (retry, fix, Q&A re-run) REPLACES them: it produces its own definitive
+      // outcomes (appending caused "exponential outcome" accumulation across retries/fix cycles).
+      // A continuation ("continue" direction claimed by this run) builds on the previous runs'
+      // work, so its outcomes are APPENDED to the task's (by id: never twice). Same for Polpo's
+      // engine and the agent harnesses.
       if (run.outcomes && run.outcomes.length > 0) {
         try {
-          await this.ctx.registry.updateTask(run.taskId, { outcomes: run.outcomes });
+          const continued = this.ctx.taskControlStore
+            ? (await this.ctx.taskControlStore.listDirections(run.taskId)).some((d) => d.mode === "continue" && d.runId === run.id)
+            : false;
+          let outcomes = run.outcomes;
+          if (continued && task?.outcomes?.length) {
+            const fresh = new Set(run.outcomes.map((o) => o.id));
+            outcomes = [...task.outcomes.filter((o) => !fresh.has(o.id)), ...run.outcomes];
+          }
+          await this.ctx.registry.updateTask(run.taskId, { outcomes });
         } catch { /* task may already be gone */ }
       }
       if (run.result) {
@@ -104,6 +124,41 @@ export class TaskRunner {
       await this.ctx.runStore.deleteRun(run.id);
       this.staleWarned.delete(run.taskId);
     }
+  }
+
+  /** Close a terminal run's entry in Task.runs (status, end, duration, exit code, engine report). */
+  private async finishTaskRun(run: RunRecord): Promise<void> {
+    try {
+      const task = await this.ctx.registry.getTask(run.taskId);
+      const entry = task?.runs?.find((r) => r.runId === run.id);
+      if (!task || !entry) return;
+      const status = run.status === "running" ? "failed" : run.status;
+      const finished = finishRunContext(entry, {
+        status,
+        endedAt: run.updatedAt,
+        ...(run.result ? { exitCode: run.status === "killed" ? 1 : run.result.exitCode, durationMs: run.result.duration || undefined } : {}),
+      }, run.activity?.runContext);
+      if (run.activity?.totalTokens && finished.cost?.tokens === undefined) finished.cost = { ...finished.cost, tokens: run.activity.totalTokens };
+      await this.ctx.registry.updateTask(run.taskId, { runs: upsertTaskRun(task.runs, finished) });
+    } catch { /* the run context is informational: never block the result */ }
+  }
+
+  /** Merge what a running engine reported (session, cost, VM id) into its Task.runs entry. */
+  private async mergeTaskRun(run: RunRecord): Promise<void> {
+    const rt = run.activity?.runContext;
+    if (!rt) return;
+    // write when something visible changed: not on every token (cost to the cent)
+    const { cost, ...rest } = rt;
+    const cents = (v: number | undefined) => (v === undefined ? undefined : Math.round(v * 100));
+    const signature = JSON.stringify({ ...rest, h: cents(cost?.harnessUsd), m: cents(cost?.modelUsd) });
+    if (this.knownRunContexts.get(run.id) === signature) return;
+    this.knownRunContexts.set(run.id, signature);
+    try {
+      const task = await this.ctx.registry.getTask(run.taskId);
+      const entry = task?.runs?.find((r) => r.runId === run.id);
+      if (!task || !entry) return;
+      await this.ctx.registry.updateTask(run.taskId, { runs: upsertTaskRun(task.runs, mergeRunContext(entry, rt)) });
+    } catch { /* informational */ }
   }
 
   private async recoverInterruptedDirections(run: RunRecord): Promise<boolean> {
@@ -336,6 +391,9 @@ export class TaskRunner {
       }
     }
 
+    // The engine's report of where and with what it runs (harness session, cost, VM id) -> Task.runs
+    for (const r of active) await this.mergeTaskRun(r);
+
     // Announce outcomes as the agent registers them, not only when the task ends
     for (const r of active) {
       if (!r.outcomes?.length) continue;
@@ -412,6 +470,7 @@ export class TaskRunner {
         await this.ctx.runStore.completeRun(run.id, "failed", {
           exitCode: 1, stdout: "", stderr: "Runner process died", duration: 0,
         });
+        await this.finishTaskRun({ ...run, status: "failed", result: { exitCode: 1, stdout: "", stderr: "Runner process died", duration: 0 } });
         await this.ctx.runStore.deleteRun(run.id);
       }
     }
@@ -560,6 +619,17 @@ export class TaskRunner {
       } catch { /* best effort — mission may have been deleted */ }
     }
 
+    // 3. The results of the tasks this one depends on (missions and standalone tasks, every
+    // engine, every run: first, retry, fix, continuation), within the configured budget
+    if (task.dependsOn?.length) {
+      try {
+        const { tasks: deps, missing } = resolveDependencies(task, await this.ctx.registry.getAllTasks());
+        const budget = normalizeDependencyResultsSettings(this.ctx.config.settings.dependencyResults);
+        const section = renderDependencyResults(deps, { ...budget, missing });
+        if (section) contextParts.push(section);
+      } catch { /* best effort: the task still runs */ }
+    }
+
     if (contextParts.length > 0) {
       taskWithContext.description = contextParts.join("\n\n") + "\n\n" + task.description;
     }
@@ -672,10 +742,26 @@ export class TaskRunner {
       };
       await this.ctx.runStore.upsertRun(runRecord);
 
+      // where and with what this run executes (no secrets): the task keeps one entry per run
+      let runCtx: ReturnType<typeof buildRunContext> | undefined;
+      try {
+        const continuation = this.ctx.taskControlStore
+          ? (await this.ctx.taskControlStore.listDirections(task.id)).some((d) => d.mode === "continue" && d.status === "queued")
+          : false;
+        runCtx = buildRunContext({
+          runId, startedAt: now, agent, settings: this.ctx.config.settings as never, sandbox,
+          browserEgress: runnerConfig.browserEgress, continuation,
+          ...(task.toolScope ? { toolScope: task.toolScope } : {}),
+        });
+        const fresh = await this.ctx.registry.getTask(task.id);
+        await this.ctx.registry.updateTask(task.id, { runs: upsertTaskRun(fresh?.runs ?? task.runs, runCtx) });
+      } catch { /* informational: never block the run */ }
+
       this.ctx.emitter.emit("agent:spawned", {
         taskId: task.id,
         agentName: agent.name,
         taskTitle: task.title,
+        ...(runCtx ? { engine: runCtx.engine, computerId: runCtx.computer.id } : {}),
       });
       this.ctx.emitter.emit("sandbox:created", {
         workspaceId: runId, provider: sandbox.provider, scope: "task", taskId: task.id, runId,

@@ -55,7 +55,7 @@ function CopyAction({ text }: { text: string }) {
         setTimeout(() => setCopied(false), 2000);
       }}
     >
-      {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+      {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
     </MessageAction>
   );
 }
@@ -181,7 +181,7 @@ export function GroupConversation({
         type="button"
         disabled={!target}
         onClick={() => target && scrollToMessage(target.id)}
-        className="mb-1 flex max-w-full items-center gap-1 rounded text-left text-[11px] text-muted-foreground transition-colors enabled:hover:text-foreground"
+        className="mb-1 flex max-w-full items-center gap-1 rounded text-left text-caption text-muted-foreground transition-colors enabled:hover:text-foreground"
         title={target ? "Show the message this replies to" : undefined}
       >
         <CornerDownRight className="h-3 w-3 shrink-0" />
@@ -222,7 +222,7 @@ export function GroupConversation({
                     <MentionText text={message.text} variant="inverted" />
                   </CollapsibleUserMessage>
                 </div>
-                <div className="mt-1 flex max-w-full items-center justify-end gap-1.5 text-[10px] text-muted-foreground">
+                <div className="mt-1 flex max-w-full items-center justify-end gap-1.5 text-micro text-muted-foreground">
                   {addressedHint(message)}
                   {readOnly && message.authorName && <span className="shrink-0 font-medium">{message.authorName}</span>}
                   <span className="shrink-0" title={fullTime(message.ts)}>{timeAgo(message.ts, now)}</span>
@@ -242,8 +242,8 @@ export function GroupConversation({
               <div className="min-w-0 flex-1">
                 <div className="mb-1 flex min-w-0 items-center gap-2">
                   <p className="truncate text-xs font-semibold">{author.name}</p>
-                  {author.role && <span className="hidden truncate text-[10px] text-muted-foreground/70 sm:inline">{author.role}</span>}
-                  <span className="shrink-0 text-[10px] text-muted-foreground" title={fullTime(message.ts)}>
+                  {author.role && <span className="hidden truncate text-micro text-muted-foreground/70 sm:inline">{author.role}</span>}
+                  <span className="shrink-0 text-micro text-muted-foreground" title={fullTime(message.ts)}>
                     {timeAgo(message.ts, now)}
                   </span>
                 </div>
@@ -259,7 +259,7 @@ export function GroupConversation({
                     </MessageAction>
                   )}
                   {message.addressedTo?.length ? (
-                    <span className="ml-1 min-w-0 text-[10px] text-muted-foreground">{addressedHint(message)}</span>
+                    <span className="ml-1 min-w-0 text-micro text-muted-foreground">{addressedHint(message)}</span>
                   ) : null}
                 </MessageActions>
               </div>
@@ -285,13 +285,13 @@ export function GroupConversation({
             <div className="flex min-w-0 items-center gap-1.5">
               <h2 className="truncate text-sm font-semibold tracking-tight">{room.title || "Untitled group"}</h2>
               {readOnly && (
-                <Badge variant="outline" className="h-4 shrink-0 gap-1 px-1.5 text-[9px] font-semibold uppercase tracking-wider">
+                <Badge variant="outline" className="h-4 shrink-0 gap-1 px-1.5 text-micro font-semibold uppercase tracking-wider">
                   <ChannelLogo type="telegram" size={10} />
                   Telegram
                 </Badge>
               )}
             </div>
-            <p className="truncate text-[11px] text-muted-foreground">
+            <p className="truncate text-caption text-muted-foreground">
               {members.map((m) => m.name).join(", ") || "No agents"}
               {!readOnly && (
                 <>
@@ -338,7 +338,7 @@ export function GroupConversation({
   const composer = room && !readOnly ? (
     <>
       {replyingTo && (
-        <div className="mx-auto mb-1.5 flex max-w-3xl items-center gap-1.5 px-1 text-[11px] text-muted-foreground">
+        <div className="mx-auto mb-1.5 flex max-w-3xl items-center gap-1.5 px-1 text-caption text-muted-foreground">
           <CornerDownRight className="h-3 w-3 shrink-0" />
           <span className="shrink-0">Replying to</span>
           <span className="shrink-0 font-medium text-foreground/80">{nameOf(replyingTo)}</span>
@@ -360,13 +360,13 @@ export function GroupConversation({
         autoFocus={autoFocusComposer}
         placeholder={`Message ${room.title || "the group"}…`}
       />
-      <div className="mt-1 hidden flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground lg:flex">
-        <span className="inline-flex items-center gap-1 text-[11px]">
-          <span className="font-mono text-[10px] font-semibold text-foreground">@</span>
+      <div className="mt-1 hidden flex-wrap items-center justify-center gap-x-2 gap-y-1 text-micro text-muted-foreground lg:flex">
+        <span className="inline-flex items-center gap-1 text-caption">
+          <span className="font-mono text-micro font-semibold text-foreground">@</span>
           <span>to mention</span>
         </span>
         <span aria-hidden="true">·</span>
-        <span className="text-[11px]">Shift+Enter for a new line</span>
+        <span className="text-caption">Shift+Enter for a new line</span>
       </div>
     </>
   ) : null;
@@ -420,7 +420,7 @@ export function GroupConversation({
 
         {!atBottom && messages.length > 0 && (
           <Button
-            className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full shadow-md"
+            className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full shadow-raised"
             size="icon"
             variant="outline"
             aria-label="Scroll to the latest message"
@@ -432,7 +432,7 @@ export function GroupConversation({
       </div>
 
       {room && (readOnly ? (
-        <div className="flex shrink-0 items-center justify-center gap-1.5 border-t border-border/40 px-4 py-3 pb-[max(0.75rem,var(--safe-bottom))] text-[11px] text-muted-foreground">
+        <div className="flex shrink-0 items-center justify-center gap-1.5 border-t border-border/40 px-4 py-3 pb-[max(0.75rem,var(--safe-bottom))] text-caption text-muted-foreground">
           <ChannelLogo type="telegram" size={12} />
           Written on Telegram — read-only here.
         </div>
@@ -455,7 +455,7 @@ const GROUP_LIST_COMPONENTS = {
         <div className="flex w-7 shrink-0 justify-center">
           <TypingDots />
         </div>
-        <span className="text-[11px] text-muted-foreground" aria-live="polite">{typingLabel(context.typingNames)}</span>
+        <span className="text-caption text-muted-foreground" aria-live="polite">{typingLabel(context.typingNames)}</span>
       </div>
     </div>
   ) : <div className="h-3" />),

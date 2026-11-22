@@ -213,8 +213,8 @@ export function VolumeDialog({ open, entry, projectRoot, storage, onClose, onSav
                 <button key={id} type="button" disabled={!!entry && kind !== id} onClick={() => setKind(id)}
                   className={cn("border p-2 text-left disabled:opacity-40", kind === id ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50")}>
                   <Icon className="h-4 w-4 text-primary" />
-                  <span className="mt-2 block text-[11px] font-medium">{title}</span>
-                  <span className="block text-[10px] text-muted-foreground">{text}</span>
+                  <span className="mt-2 block text-caption font-medium">{title}</span>
+                  <span className="block text-micro text-muted-foreground">{text}</span>
                 </button>
               ))}
             </div>
@@ -224,7 +224,7 @@ export function VolumeDialog({ open, entry, projectRoot, storage, onClose, onSav
             <Field label="Name"><Input value={name} onChange={(event) => setName(event.target.value)} placeholder="listini" /></Field>
             <Field label="Description"><Input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What it contains" /></Field>
           </div>
-          {name.trim() && <p className={cn("-mt-2 font-mono text-[10px]", badName ? "text-destructive" : "text-muted-foreground")}>
+          {name.trim() && <p className={cn("-mt-2 font-mono text-micro", badName ? "text-destructive" : "text-muted-foreground")}>
             {badName ? "The name must start with a letter (lowercase letters, digits and dashes)" : local ? `Agents on this machine: ${localPath.trim() || "…"}` : `In sandboxes: /volumes/${slug}`}
           </p>}
 
@@ -236,8 +236,8 @@ export function VolumeDialog({ open, entry, projectRoot, storage, onClose, onSav
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               {PRESETS.map((item) => (
                 <button key={item.id} type="button" onClick={() => choosePreset(item.id)} className={cn("border p-2 text-left", preset === item.id ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50")}>
-                  <span className="block text-[11px] font-medium">{item.label}</span>
-                  <span className="block text-[10px] text-muted-foreground">{item.description}</span>
+                  <span className="block text-caption font-medium">{item.label}</span>
+                  <span className="block text-micro text-muted-foreground">{item.description}</span>
                 </button>
               ))}
             </div>
@@ -247,7 +247,7 @@ export function VolumeDialog({ open, entry, projectRoot, storage, onClose, onSav
             </div>
             {preset === "r2" && <Field label="Cloudflare account ID"><Input value={accountId} onChange={(event) => setAccountId(event.target.value)} className="font-mono" placeholder="0123456789abcdef0123456789abcdef" /></Field>}
             {preset === "other" && <Field label="Endpoint"><Input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} className="font-mono" placeholder="https://s3.example.com" /></Field>}
-            {resolvedEndpoint && preset === "r2" && <p className="-mt-2 font-mono text-[10px] text-muted-foreground">{resolvedEndpoint}</p>}
+            {resolvedEndpoint && preset === "r2" && <p className="-mt-2 font-mono text-micro text-muted-foreground">{resolvedEndpoint}</p>}
           </>)}
 
           <div className="grid gap-2 sm:grid-cols-3">
@@ -260,7 +260,7 @@ export function VolumeDialog({ open, entry, projectRoot, storage, onClose, onSav
             <section className="grid gap-3 border-t border-border pt-4">
               <div>
                 <h3 className="text-xs font-semibold">In sandboxes</h3>
-                <p className="mt-1 text-[11px] text-muted-foreground">
+                <p className="mt-1 text-caption text-muted-foreground">
                   Live: files read and written in the bucket as they change. Copy: copied in when the run starts and written back at the end
                   (or only when the agent calls sandbox_volume_checkpoint); if someone else changed it meanwhile, the run's version goes to .conflicts/.
                 </p>
@@ -314,7 +314,7 @@ export function VolumeDialog({ open, entry, projectRoot, storage, onClose, onSav
             <section className="grid gap-3 border-t border-border pt-4">
               <div>
                 <h3 className="text-xs font-semibold">Keys</h3>
-                <p className="mt-1 text-[11px] text-muted-foreground">
+                <p className="mt-1 text-caption text-muted-foreground">
                   The vault entry with this bucket's access key ID and secret (used on this server). Remote sandboxes need a key inside the VM:
                   a fixed key limited to this bucket, or temporary keys minted per run. Without one, remote sandboxes cannot attach it.
                 </p>
@@ -325,7 +325,7 @@ export function VolumeDialog({ open, entry, projectRoot, storage, onClose, onSav
               <div className="grid grid-cols-2 gap-2">
                 {([["fixed", "Fixed sandbox key", "One key limited to this bucket, in a vault entry."], ["temporary", "Temporary keys per run", "Minted per run, expire with it."]] as const).map(([id, title, text]) => (
                   <button key={id} type="button" onClick={() => setKeyMode(id)} className={cn("border p-2 text-left", keyMode === id ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50")}>
-                    <span className="block text-xs font-medium">{title}</span><span className="block text-[11px] text-muted-foreground">{text}</span>
+                    <span className="block text-xs font-medium">{title}</span><span className="block text-caption text-muted-foreground">{text}</span>
                   </button>
                 ))}
               </div>
@@ -355,7 +355,7 @@ export function VolumeDialog({ open, entry, projectRoot, storage, onClose, onSav
             <div className="flex items-start gap-2">
               <div className="min-w-0 flex-1">
                 <h3 className="text-xs font-semibold">Agents</h3>
-                <p className="mt-1 text-[11px] text-muted-foreground">Only these agents can use it (then they pick it in Agent → Sandbox → Volumes).</p>
+                <p className="mt-1 text-caption text-muted-foreground">Only these agents can use it (then they pick it in Agent → Sandbox → Volumes).</p>
               </div>
               <Button type="button" variant="outline" size="sm" className="h-8" onClick={() => setGrants((current) => [...current, { agent: "", access: "read" }])}><Plus className="h-3.5 w-3.5" /> Add agent</Button>
             </div>
@@ -377,14 +377,14 @@ export function VolumeDialog({ open, entry, projectRoot, storage, onClose, onSav
                 <Button type="button" size="icon" variant="ghost" className="h-8 w-8" aria-label="Remove access" onClick={() => setGrants((current) => current.filter((_, i) => i !== index))}><X className="h-3.5 w-3.5" /></Button>
               </div>
             ))}
-            {grants.length === 0 && <p className="text-[11px] text-muted-foreground">No agent can use it yet.</p>}
+            {grants.length === 0 && <p className="text-caption text-muted-foreground">No agent can use it yet.</p>}
           </section>
 
           {entry && !local && !entry.readOnly && (
             <section className="grid gap-3 border-t border-border pt-4">
               <div>
                 <h3 className="text-xs font-semibold">Copy a folder into this bucket</h3>
-                <p className="mt-1 text-[11px] text-muted-foreground">Moves existing files onto the volume. The folder (relative to the project) is not changed; node_modules, .venv and .git are skipped.</p>
+                <p className="mt-1 text-caption text-muted-foreground">Moves existing files onto the volume. The folder (relative to the project) is not changed; node_modules, .venv and .git are skipped.</p>
               </div>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto]">
                 <Input value={importSource} onChange={(event) => setImportSource(event.target.value)} placeholder="Folder, e.g. dev/my-project" className="h-8 font-mono text-xs" />
@@ -394,7 +394,7 @@ export function VolumeDialog({ open, entry, projectRoot, storage, onClose, onSav
                 </Button>
               </div>
               {job && (
-                <p className={cn("text-[11px]", job.state === "failed" ? "text-destructive" : "text-muted-foreground")}>
+                <p className={cn("text-caption", job.state === "failed" ? "text-destructive" : "text-muted-foreground")}>
                   {job.state === "running" ? `Copying… ${job.files ?? 0} file(s) so far` : job.state === "done" ? `Done: ${job.files ?? 0} file(s) copied` : `Failed: ${job.error ?? "unknown error"}`}
                 </p>
               )}
@@ -422,7 +422,7 @@ function Toggle({ label, hint, checked, onChange }: { label: string; hint: strin
   return (
     <label className={cn("flex cursor-pointer items-start gap-2 border p-2", checked ? "border-primary/40 bg-primary/5" : "border-border hover:bg-muted/50")}>
       <input type="checkbox" className="mt-0.5" checked={checked} onChange={(event) => onChange(event.target.checked)} />
-      <span className="min-w-0"><span className="block text-[11px] font-medium">{label}</span><span className="block text-[10px] text-muted-foreground">{hint}</span></span>
+      <span className="min-w-0"><span className="block text-caption font-medium">{label}</span><span className="block text-micro text-muted-foreground">{hint}</span></span>
     </label>
   );
 }

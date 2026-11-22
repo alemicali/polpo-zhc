@@ -41,7 +41,8 @@ export interface PolpoEventMap {
   "task:direction": { taskId: string; action: TaskDirectionMode; direction: TaskDirection };
 
   // Agent lifecycle
-  "agent:spawned": { taskId: string; agentName: string; taskTitle: string };
+  /** engine: "polpo", "claude-code" or "codex"; computerId: "host", a computer id or "ephemeral" (see Task.runs). */
+  "agent:spawned": { taskId: string; agentName: string; taskTitle: string; engine?: import("./run-context.js").RunEngine; computerId?: string };
   "agent:finished": { taskId: string; agentName: string; exitCode: number; duration: number; sessionId?: string };
   "agent:activity": { taskId: string; agentName: string; tool?: string; file?: string; summary?: string };
   "agent:created": { agentName: string; teamName?: string; agents: AgentConfig[]; teams: Team[]; timestamp: string };
@@ -118,6 +119,10 @@ export interface PolpoEventMap {
   "mission:completed": { missionId: string; group: string; allPassed: boolean; report: MissionReport };
   "mission:resumed": { missionId: string; name: string; retried: number; pending: number };
   "mission:deleted": { missionId: string; deletedTasks?: number };
+  /** What the mission spent reached its budget: no new task starts and it pauses (running ones finish). */
+  "mission:budget-exceeded": { missionId: string; name: string; spentUsd: number; budgetUsd: number; reason: string };
+  /** The budget was raised or cleared: the mission paused by it goes on. */
+  "mission:budget-resumed": { missionId: string; name: string; spentUsd: number; budgetUsd?: number };
 
   // Chat sessions
   "session:created": { sessionId: string; title?: string };
@@ -242,6 +247,13 @@ export interface PolpoEventMap {
     /** Durable facts saved to memory by this compaction. */
     savedFacts?: number;
   } & EventOrigin;
+  /** A branch of a chat started with its parent's context checkpoint (no need to compact the copied history again). */
+  "context:checkpoint-carried": {
+    sessionId: string; parentSessionId: string; agentName?: string;
+    /** Messages with text the carried summary covers. */
+    coveredMessages: number;
+    compactionCount: number;
+  };
 
   // Sandboxes (where agents' tools run) and storage (mounted buckets)
   "sandbox:created": { workspaceId: string; provider: string; scope: "chat" | "task"; taskId?: string; runId?: string; sessionId?: string; agentName?: string; network: string };

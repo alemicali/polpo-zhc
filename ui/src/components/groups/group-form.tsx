@@ -5,6 +5,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Check, ChevronRight, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import type { RoomReplyMode, RoomReplyOrder, RoomSettings } from "@/lib/rooms-api";
@@ -26,25 +27,13 @@ function Segmented<T extends string>({ value, options, onChange, disabled }: {
   disabled?: boolean;
 }) {
   return (
-    <div className={cn("inline-flex items-center gap-0.5 rounded-md bg-muted/60 p-0.5", disabled && "opacity-50")}>
+    <SegmentedControl size="sm" value={value} onValueChange={onChange} disabled={disabled}>
       {options.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          disabled={disabled}
-          aria-pressed={value === option.value}
-          onClick={() => onChange(option.value)}
-          className={cn(
-            "flex h-7 items-center justify-center rounded px-2.5 text-[11px] font-medium transition-colors",
-            value === option.value
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
+        <ToggleGroupItem key={option.value} value={option.value}>
           {option.label}
-        </button>
+        </ToggleGroupItem>
       ))}
-    </div>
+    </SegmentedControl>
   );
 }
 
@@ -58,12 +47,12 @@ function Switch({ checked, onChange, label }: { checked: boolean; onChange: (che
       onClick={() => onChange(!checked)}
       className={cn(
         "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors",
-        checked ? "bg-emerald-500/70" : "bg-muted",
+        checked ? "bg-success/70" : "bg-muted",
       )}
     >
       <span
         className={cn(
-          "inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform",
+          "inline-block h-3.5 w-3.5 transform rounded-full bg-background transition-transform dark:bg-foreground",
           checked ? "translate-x-[1.125rem]" : "translate-x-0.5",
         )}
       />
@@ -75,8 +64,8 @@ function SettingRow({ title, description, children }: { title: string; descripti
   return (
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
       <div className="min-w-0 flex-1 basis-48">
-        <p className="text-[13px] font-medium leading-tight">{title}</p>
-        <p className="mt-0.5 text-[11px] text-muted-foreground">{description}</p>
+        <p className="text-small font-medium leading-tight">{title}</p>
+        <p className="mt-0.5 text-caption text-muted-foreground">{description}</p>
       </div>
       <div className="shrink-0">{children}</div>
     </div>
@@ -124,7 +113,7 @@ export function MemberPicker({ members, selected, onChange, isLoading }: {
       )}
       <div className="max-h-56 overflow-y-auto p-1">
         {isLoading && members.length <= 1 && (
-          <p className="px-3 py-2 text-[11px] text-muted-foreground">Loading agents…</p>
+          <p className="px-3 py-2 text-caption text-muted-foreground">Loading agents…</p>
         )}
         {filtered.length === 0 ? (
           <p className="px-3 py-4 text-center text-xs text-muted-foreground">No agents match “{query}”.</p>
@@ -145,18 +134,18 @@ export function MemberPicker({ members, selected, onChange, isLoading }: {
               <MemberAvatar member={member} size="sm" />
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-1.5">
-                  <span className="truncate text-[13px] font-medium">{member.name}</span>
+                  <span className="truncate text-small font-medium">{member.name}</span>
                   {member.isOrchestrator && (
-                    <span className="shrink-0 rounded-sm border border-border/60 px-1 py-px text-[8px] font-bold uppercase leading-none tracking-[0.12em] text-muted-foreground/70">
+                    <span className="shrink-0 rounded-sm border border-border/60 px-1 py-px text-micro font-bold uppercase leading-none tracking-[0.12em] text-muted-foreground/70">
                       Orchestrator
                     </span>
                   )}
                   {!member.known && (
-                    <span className="shrink-0 text-[10px] text-amber-600 dark:text-amber-400">not configured</span>
+                    <span className="shrink-0 text-micro text-warning">not configured</span>
                   )}
                 </span>
                 {(member.role || member.id !== member.name) && (
-                  <span className="block truncate text-[11px] text-muted-foreground">
+                  <span className="block truncate text-caption text-muted-foreground">
                     {member.role ?? `@${member.id}`}
                   </span>
                 )}
@@ -264,7 +253,7 @@ export function GroupSettingsFields({ settings, onChange, members = [] }: {
         <CollapsibleTrigger asChild>
           <button
             type="button"
-            className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+            className="flex items-center gap-1 text-caption font-medium text-muted-foreground transition-colors hover:text-foreground"
           >
             <ChevronRight className={cn("h-3 w-3 transition-transform", advancedOpen && "rotate-90")} />
             Advanced
@@ -301,7 +290,7 @@ export function FieldLabel({ children, hint }: { children: ReactNode; hint?: Rea
   return (
     <div className="flex items-baseline justify-between gap-2">
       <span className="text-sm font-medium">{children}</span>
-      {hint && <span className="text-[11px] text-muted-foreground">{hint}</span>}
+      {hint && <span className="text-caption text-muted-foreground">{hint}</span>}
     </div>
   );
 }

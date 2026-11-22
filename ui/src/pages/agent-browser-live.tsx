@@ -164,7 +164,7 @@ export function AgentBrowserLivePage() {
         client.showDotCursor = true;
         client.qualityLevel = 6;
         client.compressionLevel = 6;
-        client.background = "#20211f";
+        client.background = "var(--muted)";
         client.addEventListener("connect", () => {
           if (!disposed && activeClient === client) {
             reconnectAttempt = 0;
@@ -313,7 +313,7 @@ export function AgentBrowserLivePage() {
   return (
     <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
       {statusError && (
-        <div className="shrink-0 border-b border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-700 dark:text-amber-300">
+        <div className="shrink-0 border-b border-warning/30 bg-warning/10 px-2 py-1.5 text-xs text-warning">
           <TriangleAlert className="mr-1.5 inline h-3.5 w-3.5 align-text-bottom" />
           {statusError}
         </div>
@@ -330,7 +330,7 @@ export function AgentBrowserLivePage() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-48">
-                <DropdownMenuLabel className="text-[10px] font-semibold uppercase text-muted-foreground/70">
+                <DropdownMenuLabel className="text-label text-muted-foreground/70">
                   Resolution
                 </DropdownMenuLabel>
                 <DropdownMenuItem onSelect={() => setViewportMode("responsive")} className="gap-2 text-xs">
@@ -338,14 +338,14 @@ export function AgentBrowserLivePage() {
                     {viewportMode === "responsive" && <Check className="h-3.5 w-3.5 text-primary" />}
                   </span>
                   <span className="flex-1">Responsive</span>
-                  <span className="text-[10px] text-muted-foreground">Fit panel</span>
+                  <span className="text-micro text-muted-foreground">Fit panel</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => setViewportMode("full-hd")} className="gap-2 text-xs">
                   <span className="flex h-4 w-4 items-center justify-center">
                     {viewportMode === "full-hd" && <Check className="h-3.5 w-3.5 text-primary" />}
                   </span>
                   <span className="flex-1">Full HD</span>
-                  <span className="text-[10px] text-muted-foreground">1920 x 1080</span>
+                  <span className="text-micro text-muted-foreground">1920 x 1080</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -357,7 +357,7 @@ export function AgentBrowserLivePage() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-52">
-                <DropdownMenuLabel className="text-[10px] font-semibold uppercase text-muted-foreground/70">
+                <DropdownMenuLabel className="text-label text-muted-foreground/70">
                   User-Agent - {userAgentLabel}
                 </DropdownMenuLabel>
                 <DropdownMenuItem onSelect={() => void setUserAgent("Default", null)} className="text-xs">
@@ -385,11 +385,11 @@ export function AgentBrowserLivePage() {
                 <Button type="button" size="sm" variant="ghost" className="h-7 gap-1.5 px-2 text-xs" title={`${sessions.length} browser session${sessions.length === 1 ? "" : "s"}`}>
                   <PanelsTopLeft className="h-3.5 w-3.5" />
                   <span>{selected.session}</span>
-                  <span className="text-[10px] text-muted-foreground">{sessions.length}</span>
+                  <span className="text-micro text-muted-foreground">{sessions.length}</span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-56">
-                <DropdownMenuLabel className="text-[10px] font-semibold uppercase text-muted-foreground/70">
+                <DropdownMenuLabel className="text-label text-muted-foreground/70">
                   Active sessions
                 </DropdownMenuLabel>
                 {sessions.length === 0 ? (
@@ -402,14 +402,14 @@ export function AgentBrowserLivePage() {
                       {session.session === selected.session && <Check className="h-3.5 w-3.5 text-primary" />}
                     </span>
                     <span className="min-w-0 flex-1 truncate font-medium text-foreground">{session.session}</span>
-                    <span className="text-[10px] text-muted-foreground">{session.engine}</span>
-                    <span className="font-mono text-[10px] text-muted-foreground">:{session.port}</span>
+                    <span className="text-micro text-muted-foreground">{session.engine}</span>
+                    <span className="font-mono text-micro text-muted-foreground">:{session.port}</span>
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
             <span
-              className={cn("h-2 w-2 shrink-0 rounded-full", vncState === "live" ? "bg-emerald-500" : vncState === "connecting" || vncState === "reconnecting" ? "animate-pulse bg-amber-500" : "bg-destructive")}
+              className={cn("h-2 w-2 shrink-0 rounded-full", vncState === "live" ? "bg-success" : vncState === "connecting" || vncState === "reconnecting" ? "animate-pulse bg-warning" : "bg-destructive")}
               title={vncState === "live" ? "VNC connected" : vncState === "connecting" || vncState === "reconnecting" ? "VNC connecting" : "VNC disconnected"}
             />
             <Button type="button" size="sm" variant="ghost" className="h-7 gap-1.5 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={stopChrome} disabled={chromeBusy} title="Stop Chrome">
@@ -420,17 +420,17 @@ export function AgentBrowserLivePage() {
 
           <div
             ref={vncViewportRef}
-            className="relative min-h-0 flex-1 overflow-hidden bg-[#20211f] outline-none ring-1 ring-inset ring-border"
+            className="relative min-h-0 flex-1 overflow-hidden bg-muted outline-none ring-1 ring-inset ring-border"
             role="application"
             aria-label="Interactive browser viewport"
             onPointerDown={() => vncClientRef.current?.focus({ preventScroll: true })}
           >
             <div
               ref={vncScreenRef}
-              className="absolute inset-0 flex items-center justify-center overflow-hidden bg-[#20211f] [&_canvas]:outline-none"
+              className="absolute inset-0 flex items-center justify-center overflow-hidden bg-muted [&_canvas]:outline-none"
             />
             {vncState !== "live" && (
-              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[#20211f] text-xs text-[#b6b7b0]">
+              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 bg-muted text-xs text-muted-foreground">
                 {vncState === "connecting" || vncState === "reconnecting"
                   ? <Loader2 className="h-5 w-5 animate-spin" />
                   : <WifiOff className="h-6 w-6 opacity-70" />}

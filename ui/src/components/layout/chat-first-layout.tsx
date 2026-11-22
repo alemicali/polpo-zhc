@@ -88,7 +88,7 @@ import { cn } from "@/lib/utils";
 import { PwaInstallQrButton } from "./pwa-install-qr-button";
 import { LogoutButton } from "./logout-button";
 import { BrandMark } from "@/components/shared/brand-mark";
-import { DEFAULT_PRODUCT_NAME, DEFAULT_PRODUCT_TAGLINE } from "@/lib/branding";
+import { productName, productTagline, useInstanceBranding } from "@/lib/branding";
 import { MobileNavSheet } from "./mobile-nav-sheet";
 import { PersistentPageOutlet } from "./persistent-page-outlet";
 import { ChatTabs } from "./chat-tabs";
@@ -208,7 +208,9 @@ function isSecondaryPath(pathname: string): boolean {
 // ── Left panel header ──
 
 function ChatPanelHeader() {
-  const { info } = useProjectInfo();
+  // loads the project info (and with it the latest branding and appearance scope)
+  useProjectInfo();
+  const branding = useInstanceBranding();
   const sessionsOpen = useChatFirstSessionsOpen();
   const chatActions = useChatActions();
 
@@ -228,11 +230,11 @@ function ChatPanelHeader() {
             </Button>
           </MobileNavSheet>
         </div>
-        <BrandMark branding={info?.branding} className="h-7 w-7 rounded-md text-sm" />
+        <BrandMark className="h-7 w-7 rounded-md text-sm" />
         <div className="min-w-0">
-          <h2 className="truncate text-sm font-bold tracking-tight">{info?.branding?.productName || DEFAULT_PRODUCT_NAME}</h2>
-          <p className="truncate text-[9px] font-mono uppercase text-muted-foreground/50 leading-none">
-            {info?.branding?.tagline || DEFAULT_PRODUCT_TAGLINE}
+          <h2 className="truncate text-sm font-bold tracking-tight">{productName(branding)}</h2>
+          <p className="truncate text-micro font-mono uppercase text-muted-foreground/50 leading-none">
+            {productTagline(branding)}
           </p>
         </div>
       </div>
@@ -287,7 +289,7 @@ function HeaderTabButton({ tab, active, onSelect }: {
       className={cn(
         "inline-flex h-7 shrink-0 items-center justify-center gap-1.5 rounded-md px-2 transition-colors",
         active
-          ? "bg-background text-foreground shadow-sm"
+          ? "bg-background text-foreground shadow-card"
           : "text-muted-foreground hover:bg-background/55 hover:text-foreground",
       )}
     >
@@ -323,7 +325,7 @@ function GroupedHeaderNavigation({ pathname, navigate }: {
                 className={cn(
                   "inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-md px-2 transition-colors",
                   activeTab
-                    ? "bg-background text-foreground shadow-sm"
+                    ? "bg-background text-foreground shadow-card"
                     : "text-muted-foreground hover:bg-background/55 hover:text-foreground",
                 )}
               >
@@ -333,7 +335,7 @@ function GroupedHeaderNavigation({ pathname, navigate }: {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="min-w-44">
-              <DropdownMenuLabel className="text-[10px] font-semibold uppercase text-muted-foreground/70">
+              <DropdownMenuLabel className="text-label text-muted-foreground/70">
                 {group.label}
               </DropdownMenuLabel>
               {group.tabs.map(tab => {
@@ -385,7 +387,7 @@ function NavigationModeMenu({ mode }: { mode: ChatFirstNavMode }) {
         <TooltipContent side="bottom" className="text-xs">Page navigation</TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="end" className="w-64">
-        <DropdownMenuLabel className="text-[10px] font-semibold uppercase text-muted-foreground/70">
+        <DropdownMenuLabel className="text-label text-muted-foreground/70">
           Chat-first navigation
         </DropdownMenuLabel>
         {navModeOptions.map(option => {
@@ -399,7 +401,7 @@ function NavigationModeMenu({ mode }: { mode: ChatFirstNavMode }) {
               <Icon className="mt-0.5 h-4 w-4" />
               <span className="min-w-0 flex-1">
                 <span className="block text-xs font-medium leading-tight">{option.label}</span>
-                <span className="mt-0.5 block text-[10px] leading-snug text-muted-foreground">{option.description}</span>
+                <span className="mt-0.5 block text-micro leading-snug text-muted-foreground">{option.description}</span>
               </span>
               {mode === option.value && <Check className="mt-0.5 h-3.5 w-3.5 text-primary" />}
             </DropdownMenuItem>
@@ -505,7 +507,7 @@ const PagesPanelHeader = memo(function PagesPanelHeader() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="min-w-[220px] bg-popover/95 backdrop-blur-lg border-border/50">
-            <DropdownMenuLabel className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+            <DropdownMenuLabel className="text-label text-muted-foreground/70">
               Mode
             </DropdownMenuLabel>
             <DropdownMenuItem onSelect={() => setTheme("light")} className="gap-2.5 text-xs">
@@ -521,7 +523,7 @@ const PagesPanelHeader = memo(function PagesPanelHeader() {
               {theme === "system" && <Check className="ml-auto h-3 w-3 text-primary" />}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 flex items-center gap-1.5">
+            <DropdownMenuLabel className="text-label text-muted-foreground/70 flex items-center gap-1.5">
               <PaletteIcon className="h-3 w-3" /> Palette
             </DropdownMenuLabel>
             {PALETTES.map((p) => {
@@ -539,7 +541,7 @@ const PagesPanelHeader = memo(function PagesPanelHeader() {
                   </span>
                   <span className="flex-1 min-w-0">
                     <span className="block leading-tight">{p.name}</span>
-                    <span className="block text-[10px] text-muted-foreground/70 leading-tight">{p.blurb}</span>
+                    <span className="block text-micro text-muted-foreground/70 leading-tight">{p.blurb}</span>
                   </span>
                   {palette === p.id && <Check className="h-3 w-3 text-primary shrink-0" />}
                 </DropdownMenuItem>
@@ -571,7 +573,7 @@ function MoreNavigation({ pathname }: { pathname: string }) {
   const navigate = useNavigate();
 
   return (
-    <aside className="flex h-full min-h-0 w-14 shrink-0 flex-col overflow-y-auto overscroll-contain border-r border-border/50 bg-muted/10 px-1.5 py-3 lg:w-44 lg:px-2.5">
+    <aside className="flex h-full min-h-0 w-14 shrink-0 flex-col overflow-y-auto overscroll-contain border-r border-sidebar-border sidebar-surface text-sidebar-foreground px-1.5 py-3 lg:w-44 lg:px-2.5">
       <div className="mb-3 hidden items-center gap-2 px-2 lg:flex">
         <MoreHorizontal className="h-4 w-4 text-primary" />
         <span className="text-xs font-semibold">More</span>
@@ -579,7 +581,7 @@ function MoreNavigation({ pathname }: { pathname: string }) {
       <nav className="space-y-3 pb-3" aria-label="More pages">
         {secondaryGroups.map(group => (
           <div key={group.label}>
-            <p className="mb-1 hidden px-2 text-[9px] font-semibold uppercase text-muted-foreground/55 lg:block">
+            <p className="text-label mb-1 hidden px-2 text-sidebar-foreground/55 lg:block">
               {group.label}
             </p>
             <div className="space-y-0.5">
@@ -595,8 +597,8 @@ function MoreNavigation({ pathname }: { pathname: string }) {
                     className={cn(
                       "flex h-9 w-full items-center justify-center gap-2 rounded-md transition-colors lg:justify-start lg:px-2",
                       active
-                        ? "bg-primary/10 text-primary"
-                        : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                        ? "bg-sidebar-primary/10 text-sidebar-primary"
+                        : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                     )}
                   >
                     <Icon className="h-4 w-4 shrink-0" />

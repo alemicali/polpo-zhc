@@ -43,15 +43,15 @@ export function TelegramTokenCheck({ api, botToken, channel }: { api: PolpoApi; 
 
   return (
     <div className="flex items-center gap-2">
-      <Button type="button" variant="outline" size="sm" className="h-7 text-[11px] gap-1.5" onClick={check}
+      <Button type="button" variant="outline" size="sm" className="h-7 text-caption gap-1.5" onClick={check}
         disabled={!botToken?.trim() || state.status === "checking"}>
         {state.status === "checking" ? <Loader2 className="h-3 w-3 animate-spin" /> : <ShieldCheck className="h-3 w-3" />}
         Verify token
       </Button>
       {state.status === "ok" && (
-        <span className="flex items-center gap-1 text-[11px] text-emerald-600"><Check className="h-3 w-3" /> {state.text}</span>
+        <span className="flex items-center gap-1 text-caption text-success"><Check className="h-3 w-3" /> {state.text}</span>
       )}
-      {state.status === "error" && <span className="text-[11px] text-destructive">{state.text}</span>}
+      {state.status === "error" && <span className="text-caption text-destructive">{state.text}</span>}
     </div>
   );
 }
@@ -115,31 +115,31 @@ export function TelegramChatFinder({ api, botToken, currentChatId, onConfirm }: 
   };
 
   return (
-    <div className="rounded-md border border-sky-500/25 bg-sky-500/5 px-2.5 py-2.5 space-y-2">
+    <div className="rounded-md border border-info/25 bg-info/5 px-2.5 py-2.5 space-y-2">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] font-medium flex items-center gap-1.5"><MessageCircle className="h-3 w-3" /> Find your chat</span>
+        <span className="text-caption font-medium flex items-center gap-1.5"><MessageCircle className="h-3 w-3" /> Find your chat</span>
         {state === "waiting" ? (
-          <Button type="button" size="sm" variant="ghost" className="h-7 text-[11px] gap-1" onClick={cancel}><X className="h-3 w-3" /> Stop</Button>
+          <Button type="button" size="sm" variant="ghost" className="h-7 text-caption gap-1" onClick={cancel}><X className="h-3 w-3" /> Stop</Button>
         ) : (
-          <Button type="button" size="sm" variant="secondary" className="h-7 text-[11px] gap-1.5" onClick={start} disabled={!botToken?.trim()}>
+          <Button type="button" size="sm" variant="secondary" className="h-7 text-caption gap-1.5" onClick={start} disabled={!botToken?.trim()}>
             <MessageCircle className="h-3 w-3" /> {state === "idle" ? "Find my chat" : "Search again"}
           </Button>
         )}
       </div>
 
       {state === "idle" && !error && (
-        <p className="text-[10.5px] leading-relaxed text-muted-foreground">
+        <p className="text-caption leading-relaxed text-muted-foreground">
           {currentChatId ? "Chat ID already set. " : ""}Press the button, then send any message to your bot on Telegram: the chat is detected automatically.
         </p>
       )}
-      {error && <p className="text-[11px] text-destructive">{error}</p>}
+      {error && <p className="text-caption text-destructive">{error}</p>}
 
       {state === "waiting" && (
-        <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        <p className="flex items-center gap-1.5 text-caption text-muted-foreground">
           <Loader2 className="h-3 w-3 animate-spin" />
           Waiting… open
           {botName
-            ? <a href={`https://t.me/${botName}`} target="_blank" rel="noreferrer" className="text-sky-600 hover:underline">@{botName}</a>
+            ? <a href={`https://t.me/${botName}`} target="_blank" rel="noreferrer" className="text-info hover:underline">@{botName}</a>
             : " your bot"}
           and send any message (or press Start).
         </p>
@@ -148,19 +148,19 @@ export function TelegramChatFinder({ api, botToken, currentChatId, onConfirm }: 
       {state === "found" && (
         <div className="space-y-1.5">
           {chats.map((chat) => (
-            <div key={chat.chatId} className="flex items-center gap-2 text-[11px]">
+            <div key={chat.chatId} className="flex items-center gap-2 text-caption">
               <span className="flex-1 min-w-0 truncate">
                 <span className="font-medium">{chat.name}</span>
                 <span className="text-muted-foreground"> · {chat.type} · </span>
-                <code className="font-mono text-[10px]">{chat.chatId}</code>
+                <code className="font-mono text-micro">{chat.chatId}</code>
                 {chat.text && <span className="text-muted-foreground"> · “{chat.text}”</span>}
               </span>
-              <Button type="button" size="sm" className="h-6 px-2 text-[10.5px] gap-1" onClick={() => confirm(chat)}>
+              <Button type="button" size="sm" className="h-6 px-2 text-caption gap-1" onClick={() => confirm(chat)}>
                 <Check className="h-3 w-3" /> Use this chat
               </Button>
             </div>
           ))}
-          <label className="flex items-center gap-1.5 text-[10.5px] text-muted-foreground">
+          <label className="flex items-center gap-1.5 text-caption text-muted-foreground">
             <input type="checkbox" checked={authorize} onChange={(e) => setAuthorize(e.target.checked)} />
             Also allow this person to chat with Polpo (no pairing code)
           </label>
@@ -168,7 +168,7 @@ export function TelegramChatFinder({ api, botToken, currentChatId, onConfirm }: 
       )}
 
       {state === "done" && (
-        <p className="flex items-center gap-1.5 text-[11px] text-emerald-600"><Check className="h-3.5 w-3.5" /> Chat ID filled in. Save the channel to apply.</p>
+        <p className="flex items-center gap-1.5 text-caption text-success"><Check className="h-3.5 w-3.5" /> Chat ID filled in. Save the channel to apply.</p>
       )}
     </div>
   );
@@ -239,18 +239,18 @@ export function TelegramConnect({ api, channel, gatewayRunning, currentChatId, o
 
   if (!gatewayRunning) {
     return (
-      <p className="rounded-md border border-border/30 bg-muted/15 px-2.5 py-2 text-[10.5px] leading-relaxed text-muted-foreground">
+      <p className="rounded-md border border-border/30 bg-muted/15 px-2.5 py-2 text-caption leading-relaxed text-muted-foreground">
         To connect your Telegram account, enable the inbound gateway below and save the channel, then open it again.
       </p>
     );
   }
 
   return (
-    <div className="rounded-md border border-sky-500/25 bg-sky-500/5 px-2.5 py-2.5 space-y-2">
+    <div className="rounded-md border border-info/25 bg-info/5 px-2.5 py-2.5 space-y-2">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] font-medium flex items-center gap-1.5"><Link2 className="h-3 w-3" /> Connect Telegram</span>
+        <span className="text-caption font-medium flex items-center gap-1.5"><Link2 className="h-3 w-3" /> Connect Telegram</span>
         {invite?.status !== "pending" && (
-          <Button type="button" size="sm" variant="secondary" className="h-7 text-[11px] gap-1.5" onClick={create} disabled={creating}>
+          <Button type="button" size="sm" variant="secondary" className="h-7 text-caption gap-1.5" onClick={create} disabled={creating}>
             {creating ? <Loader2 className="h-3 w-3 animate-spin" /> : invite ? <RefreshCw className="h-3 w-3" /> : <Link2 className="h-3 w-3" />}
             {invite ? "New link" : "Connect my Telegram"}
           </Button>
@@ -258,34 +258,34 @@ export function TelegramConnect({ api, channel, gatewayRunning, currentChatId, o
       </div>
 
       {!invite && !error && (
-        <p className="text-[10.5px] leading-relaxed text-muted-foreground">
+        <p className="text-caption leading-relaxed text-muted-foreground">
           Creates a one-time link. Open it on your phone and press Start: the account is approved automatically
           {currentChatId ? "." : " and its chat becomes the notification chat."}
         </p>
       )}
-      {error && <p className="text-[11px] text-destructive">{error}</p>}
+      {error && <p className="text-caption text-destructive">{error}</p>}
 
       {invite?.status === "pending" && (
         <div className="flex gap-3">
           {qr && <img src={qr} alt="Telegram invite QR code" className="h-28 w-28 rounded bg-white p-1 shrink-0" />}
-          <div className="min-w-0 space-y-1.5 text-[11px]">
+          <div className="min-w-0 space-y-1.5 text-caption">
             {invite.link ? (
-              <a href={invite.link} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-sky-600 hover:underline break-all">
+              <a href={invite.link} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-info hover:underline break-all">
                 <ExternalLink className="h-3 w-3 shrink-0" /> Open @{invite.botUsername}
               </a>
             ) : (
               <p className="text-muted-foreground">Send this to the bot:</p>
             )}
             <div className="flex items-center gap-1">
-              <code className="font-mono text-[10px] bg-muted/40 rounded px-1.5 py-0.5 truncate">{invite.command}</code>
+              <code className="font-mono text-micro bg-muted/40 rounded px-1.5 py-0.5 truncate">{invite.command}</code>
               <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={() => copy(invite.link ?? invite.command)} aria-label="Copy">
-                {copied ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                {copied ? <Check className="h-3 w-3 text-success" /> : <Copy className="h-3 w-3" />}
               </Button>
             </div>
             <p className="flex items-center gap-1.5 text-muted-foreground">
               <Loader2 className="h-3 w-3 animate-spin" /> Waiting for Start… expires {new Date(invite.expiresAt).toLocaleTimeString()}
             </p>
-            <Button type="button" variant="ghost" size="sm" className="h-6 px-1.5 text-[10.5px] gap-1" onClick={() => setInvite(null)}>
+            <Button type="button" variant="ghost" size="sm" className="h-6 px-1.5 text-caption gap-1" onClick={() => setInvite(null)}>
               <X className="h-3 w-3" /> Cancel
             </Button>
           </div>
@@ -293,11 +293,11 @@ export function TelegramConnect({ api, channel, gatewayRunning, currentChatId, o
       )}
 
       {invite?.status === "paired" && (
-        <p className="flex items-center gap-1.5 text-[11px] text-emerald-600">
+        <p className="flex items-center gap-1.5 text-caption text-success">
           <Check className="h-3.5 w-3.5" /> Connected{invite.displayName ? `: ${invite.displayName}` : ""} (chat {invite.chatId}). Save the channel to keep this chat for notifications.
         </p>
       )}
-      {invite?.status === "expired" && <p className="text-[11px] text-muted-foreground">The link expired. Create a new one.</p>}
+      {invite?.status === "expired" && <p className="text-caption text-muted-foreground">The link expired. Create a new one.</p>}
     </div>
   );
 }
@@ -347,15 +347,15 @@ export function ChannelAccessPanel({ api, channel }: { api: PolpoApi; channel: "
     <div className="pt-1.5 mt-1.5 border-t border-border/20 space-y-1.5">
       {pending.length > 0 && (
         <div className="space-y-1">
-          <span className="text-[10.5px] font-medium text-amber-600">Waiting for approval</span>
+          <span className="text-caption font-medium text-warning">Waiting for approval</span>
           {pending.map((req) => (
-            <div key={req.code} className="flex items-center gap-1.5 text-[11px]">
-              <span className="truncate flex-1">{req.displayName ?? req.externalId} <code className="font-mono text-[10px] text-muted-foreground">{req.code}</code></span>
-              <Button size="sm" variant="secondary" className="h-6 px-1.5 text-[10.5px] gap-1" disabled={busy === req.code}
+            <div key={req.code} className="flex items-center gap-1.5 text-caption">
+              <span className="truncate flex-1">{req.displayName ?? req.externalId} <code className="font-mono text-micro text-muted-foreground">{req.code}</code></span>
+              <Button size="sm" variant="secondary" className="h-6 px-1.5 text-caption gap-1" disabled={busy === req.code}
                 onClick={() => act(req.code, "/peers/pair", "POST", { code: req.code })}>
                 <UserCheck className="h-3 w-3" /> Approve
               </Button>
-              <Button size="sm" variant="ghost" className="h-6 px-1.5 text-[10.5px] gap-1 text-muted-foreground" disabled={busy === req.code}
+              <Button size="sm" variant="ghost" className="h-6 px-1.5 text-caption gap-1 text-muted-foreground" disabled={busy === req.code}
                 onClick={() => act(req.code, `/peers/pairings/${req.code}/reject`, "POST")}>
                 <UserX className="h-3 w-3" /> Reject
               </Button>
@@ -364,10 +364,10 @@ export function ChannelAccessPanel({ api, channel }: { api: PolpoApi; channel: "
         </div>
       )}
       <div className="flex flex-wrap items-center gap-1">
-        <span className="text-[10.5px] text-muted-foreground mr-1">Authorized</span>
-        {people.length === 0 && <span className="text-[10.5px] text-muted-foreground/70">nobody yet</span>}
+        <span className="text-caption text-muted-foreground mr-1">Authorized</span>
+        {people.length === 0 && <span className="text-caption text-muted-foreground/70">nobody yet</span>}
         {people.map((id) => (
-          <Badge key={id} variant="secondary" className={cn("text-[10px] gap-1 pr-0.5 h-5")}>
+          <Badge key={id} variant="secondary" className={cn("text-micro gap-1 pr-0.5 h-5")}>
             {peers[id]?.displayName ?? id.split(":")[1]}
             <button type="button" className="rounded hover:bg-destructive/15 p-0.5" aria-label={`Revoke ${id}`} disabled={busy === id}
               onClick={() => act(id, `/peers/allowlist/${encodeURIComponent(id)}`, "DELETE")}>
@@ -378,9 +378,9 @@ export function ChannelAccessPanel({ api, channel }: { api: PolpoApi; channel: "
       </div>
       {groups.length > 0 && (
         <div className="flex flex-wrap items-center gap-1">
-          <span className="text-[10.5px] text-muted-foreground mr-1">Groups</span>
+          <span className="text-caption text-muted-foreground mr-1">Groups</span>
           {groups.map((id) => (
-            <Badge key={id} variant="secondary" className={cn("text-[10px] gap-1 pr-0.5 h-5")} title="Everyone in this group can talk to the agents">
+            <Badge key={id} variant="secondary" className={cn("text-micro gap-1 pr-0.5 h-5")} title="Everyone in this group can talk to the agents">
               <Users className="h-2.5 w-2.5" />
               {peers[id]?.displayName ?? id.split(":").pop()}
               <button type="button" className="rounded hover:bg-destructive/15 p-0.5" aria-label={`Disable ${id}`} disabled={busy === id}

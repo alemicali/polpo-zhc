@@ -52,8 +52,13 @@ export interface McpDeps {
   principal?: McpPrincipal;
   /** The toolsets this instance offers (settings.mcp.toolsets / POLPO_MCP_TOOLSETS); default: every toolset that is on by default. */
   toolsets?: readonly string[];
-  /** The dashboard's public URL, for links (e.g. where to enter a secret). */
+  /** The instance's public URL (the API's origin), for links to its files and assets. */
   publicUrl?: string;
+  /**
+   * The dashboard's public URL (POLPO_DASHBOARD_URL, else POLPO_UI_PUBLIC_URL), for links where a
+   * person enters a secret; without it, publicUrl (the dashboard on the API's origin).
+   */
+  dashboardUrl?: string;
   /** How often wait tools look again (ms, default 1000). */
   pollIntervalMs?: number;
   /** For fetching remote files (logo URLs); default: global fetch. */
@@ -76,10 +81,10 @@ export const TOOLSETS = {
   tasks: { default: true, description: "Tasks: list, read, create, update, retry, kill, direct, wait, logs" },
   missions: { default: true, description: "Missions and playbooks: list, read, create, update, run, abort, wait" },
   artifacts: { default: true, description: "Artifacts: documents, html dashboards and designs, diagrams" },
-  data: { default: true, description: "Structured data sources and queries" },
+  data: { default: true, description: "Data sources (schema, test, activity, who may use them; changes need admin scope), queries, read-only SQL, row changes, data views" },
   files: { default: true, description: "The instance's files: browse, search, read, write (writes need files scope)" },
   team: { default: true, description: "Agents and teams: read, create, update, delete, avatars (changes need admin scope)" },
-  config: { default: true, description: "Settings, branding, providers and models (changes need admin scope)" },
+  config: { default: true, description: "Settings (general ones too), branding and appearance, providers and models (changes need admin scope)" },
   rooms: { default: true, description: "Group chats of people and agents: rooms, their messages, posting and waiting for replies" },
   chat: { default: true, description: "Chat sessions with Polpo and agents: list, read, rename, star, delete" },
   memory: { default: true, description: "Shared and per-agent memory: read, write, clear" },
@@ -88,6 +93,7 @@ export const TOOLSETS = {
   connectors: { default: true, description: "Connectors (MCP servers agents use): catalog, add, access, test, OAuth link (changes need connectors scope)" },
   channels: { default: true, description: "Notification channels and rules; send a message on Telegram, WhatsApp or email (sending needs messages scope, rules admin scope)" },
   computers: { default: true, description: "Computers (persistent machines agents work on): live status, create, start, stop, reset, delete (changes need computers scope)" },
+  settings: { default: true, description: "The rest of Configuration: sandbox, policies (approval gates, escalation, SLA), members, MCP access, cloud sync, custom LLM providers, channels end to end (setup with write-only secrets, routes, Telegram invites, pairings and allowlist, WhatsApp sign-in) (changes need admin scope)" },
   brain: { default: false, description: "The company brain: search, read, save and delete entities, relations and claims" },
   learning: { default: false, description: "What agents learned: changes, review now, revert (needs admin scope)" },
   watchers: { default: false, description: "Watchers that act when a task reaches a status" },
@@ -129,13 +135,13 @@ export function resolveToolsets(...sources: Array<string | readonly string[] | u
 /** The scopes, in the order people see them, with what they allow in plain words. */
 export const SCOPES = {
   "polpo:read": { label: "Read", description: "See tasks, missions, artifacts, data, files, agents, rooms, chats, memory, schedules, connectors, computers and settings" },
-  "polpo:work": { label: "Work", description: "Ask Polpo and chat with agents; create, change, run and stop tasks, missions, artifacts, rooms, memory, schedules and checks; resolve approvals" },
+  "polpo:work": { label: "Work", description: "Ask Polpo and chat with agents; create, change, run and stop tasks, missions, artifacts, data views and rows, rooms, memory, schedules and checks; resolve approvals" },
   "polpo:files": { label: "Files", description: "Write, move and delete the instance's files" },
   "polpo:messages": { label: "Messages", description: "Send messages on Telegram, WhatsApp and email, as Polpo or an agent" },
   "polpo:connectors": { label: "Connectors", description: "Add, change, connect, disconnect and remove connectors (the services agents use)" },
   "polpo:computers": { label: "Computers", description: "Create, start, stop, reset and delete computers (they may cost money)" },
   "polpo:vault": { label: "Vault", description: "See the names of vault entries (never their values) and delete them" },
-  "polpo:admin": { label: "Admin", description: "Change the instance itself: agents and teams, settings and branding, skills, channels and their rules, learning, the read-only REST fallback; includes every scope above" },
+  "polpo:admin": { label: "Admin", description: "Change the instance itself: agents and teams, settings and branding, data sources and who may use them, skills, channels and their rules, learning, the read-only REST fallback; includes every scope above" },
 } as const;
 
 export type PolpoScope = keyof typeof SCOPES;
@@ -163,7 +169,7 @@ export function normalizeScopes(input: string | readonly string[] | undefined | 
 }
 
 /** Toolsets whose writes change the instance itself: they need "polpo:admin". */
-const ADMIN_WRITES = new Set<string>(["admin", "config", "team", "skills", "channels", "learning"]);
+const ADMIN_WRITES = new Set<string>(["admin", "config", "settings", "team", "skills", "channels", "learning"]);
 /** Toolsets whose writes have a scope of their own (polpo:admin holds them too). */
 const AREA_WRITES: Partial<Record<ToolsetName, PolpoScope>> = {
   files: "polpo:files", connectors: "polpo:connectors", computers: "polpo:computers", vault: "polpo:vault",
@@ -252,6 +258,13 @@ export async function apiGet(deps: McpDeps, path: string): Promise<Unwrapped> {
   return unwrap(await deps.api("GET", `/api/v1${path}`));
 }
 
+/** The orchestrator's display name (settings.orchestratorName) for replies; "Polpo" when unknown. */
+export async function orchestratorLabel(deps: McpDeps): Promise<string> {
+  const r = await apiGet(deps, "/config/orchestrator").catch(() => undefined);
+  const name = r?.ok ? (r.data as { name?: unknown } | undefined)?.name : undefined;
+  return typeof name === "string" && name.trim() ? name.trim() : "Polpo";
+}
+
 /** A write to /api/v1{path}. */
 export async function apiSend(deps: McpDeps, method: string, path: string, body?: unknown): Promise<Unwrapped> {
   return unwrap(await deps.api(method, `/api/v1${path}`, body));
@@ -325,7 +338,8 @@ export function pageBackwards<T>(items: T[], limit: number, cursor: string | und
 
 /** A link into the dashboard (absolute when the public URL is known). */
 export function dashboardLink(deps: McpDeps, path: string): string {
-  return deps.publicUrl ? `${deps.publicUrl.replace(/\/+$/, "")}${path}` : path;
+  const base = deps.dashboardUrl || deps.publicUrl;
+  return base ? `${base.replace(/\/+$/, "")}${path}` : path;
 }
 
 /** Output schema pieces. */

@@ -8,6 +8,7 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   Tooltip,
   TooltipContent,
@@ -36,38 +37,26 @@ function ViewToggle() {
   const { view } = state;
 
   return (
-    <div className="flex items-center rounded-lg border border-border/40 bg-muted/20 p-0.5">
+    <SegmentedControl size="sm" aria-label="Agents view" value={view} onValueChange={actions.setView}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <button
-            className={cn(
-              "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors",
-              view === "chart" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-            )}
-            onClick={() => actions.setView("chart")}
-          >
-            <Network className="h-3.5 w-3.5" />
+          <ToggleGroupItem value="chart" aria-label="Org Chart">
+            <Network className="h-4 w-4" />
             <span className="hidden sm:inline">Org Chart</span>
-          </button>
+          </ToggleGroupItem>
         </TooltipTrigger>
         <TooltipContent className="text-xs">Visual org chart with reporting structure</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
-          <button
-            className={cn(
-              "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors",
-              view === "list" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-            )}
-            onClick={() => actions.setView("list")}
-          >
-            <LayoutList className="h-3.5 w-3.5" />
+          <ToggleGroupItem value="list" aria-label="List">
+            <LayoutList className="h-4 w-4" />
             <span className="hidden sm:inline">List</span>
-          </button>
+          </ToggleGroupItem>
         </TooltipTrigger>
         <TooltipContent className="text-xs">Grouped list view by team</TooltipContent>
       </Tooltip>
-    </div>
+    </SegmentedControl>
   );
 }
 
@@ -78,7 +67,7 @@ function SearchBar() {
       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
       <Input
         placeholder="Search agents..."
-        className="pl-9 h-8 bg-input/50 border-border/40"
+        className="pl-9 h-8"
         value={state.search}
         onChange={(e) => actions.setSearch(e.target.value)}
       />
@@ -115,7 +104,7 @@ function Toolbar() {
 
 function EmptyState() {
   return (
-    <Card className="bg-card/60 backdrop-blur-sm flex-1">
+    <Card className="flex-1">
       <CardContent className="flex flex-col items-center justify-center py-16 text-muted-foreground h-full">
         <Bot className="h-12 w-12 mb-4 opacity-40" />
         <p className="text-sm font-medium">No agents yet</p>

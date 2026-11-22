@@ -9,7 +9,7 @@
  * - search_find_similar: Find pages similar to a given URL
  */
 
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ResolvedVault } from "../vault/index.js";
 

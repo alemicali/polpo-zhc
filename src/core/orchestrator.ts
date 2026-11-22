@@ -5,6 +5,7 @@ import { mkdirSync, existsSync, readFileSync, writeFileSync, watch, type FSWatch
 import { getPolpoDir } from "./constants.js";
 import type { Server } from "node:net";
 import { parseConfig, loadPolpoConfig, savePolpoConfig, loadEnvFile, parseProviders } from "./config.js";
+import { orchestratorName } from "./orchestrator-name.js";
 import { findLogForTask, buildExecutionSummary } from "../assessment/transcript-parser.js";
 import { FileTaskStore } from "../stores/file-task-store.js";
 import { FileRunStore } from "../stores/file-run-store.js";
@@ -28,6 +29,9 @@ import { analyzeBlockedTasks, resolveDeadlock, isResolving } from "./deadlock-re
 import { OrchestratorEngine } from "@polpo-ai/core";
 import type { DeadlockResolverPort, DeadlockFacade, MissionEdit } from "@polpo-ai/core";
 import { MISSION_EDIT } from "@polpo-ai/core";
+import { agentEngineProblem, HarnessConfigError, parseAgentEngine } from "@polpo-ai/core";
+import { agentHarnessBudgetUsd, computeMissionCost, plannedAgentsOf, summarizeMissionCost, tasksOfMission, type MissionCost, type MissionCostSummary } from "@polpo-ai/core";
+import { daytonaApiVersion } from "@polpo-ai/core/sandbox";
 import { TypedEmitter, withEventOrigin } from "./events.js";
 import type { PolpoEventMap } from "@polpo-ai/core";
 import type { TaskStore } from "./task-store.js";
@@ -121,6 +125,8 @@ import { WorkspaceFileSystem } from "../sandbox/workspace-fs.js";
 import type { RemoteWorkspaceEvent } from "../sandbox/remote.js";
 import type { FileSystem } from "@polpo-ai/core/filesystem";
 import { protectPolpoDir } from "../tools/path-sandbox.js";
+import { checkTaskToolScope, requireTaskToolScope, TaskToolScopeError, type TaskToolScopeCheckHost } from "./task-tool-scope.js";
+import { connectorManagerFor } from "../mcp/runtime.js";
 import { availableProviders, createWorkspace, effectiveSandbox, WorkspaceShell } from "../sandbox/manager.js";
 import { RemoteWorkspace } from "../sandbox/remote.js";
 import { remoteThenLocal } from "../sandbox/workspace-fs.js";
@@ -1465,7 +1471,63 @@ export class Orchestrator extends TypedEmitter {
     expectations?: TaskExpectation[]; expectedOutcomes?: ExpectedOutcome[];
     dependsOn?: string[]; group?: string; maxDuration?: number; retryPolicy?: RetryPolicy;
     notifications?: ScopedNotificationRules; sideEffects?: boolean; draft?: boolean; maxRetries?: number;
-  }): Promise<Task> { return this.engine.addTask(opts); }
+    /** Narrowing of the run's tools (validated: it may only narrow what the agent has). */
+    toolScope?: unknown;
+  }): Promise<Task> {
+    const { toolScope, ...rest } = opts;
+    if (toolScope === undefined || toolScope === null) return this.engine.addTask(rest);
+    const scope = await requireTaskToolScope(this.toolScopeHost(), opts.assignTo, toolScope, { live: true });
+    return this.engine.addTask({ ...rest, ...(scope ? { toolScope: scope } : {}) });
+  }
+
+  /** What a tool scope check needs: the agents, the connectors and their tools. */
+  toolScopeHost(): TaskToolScopeCheckHost {
+    return {
+      agents: () => this.getAgents(),
+      connectors: () => connectorManagerFor(this).store.list(),
+      listConnectorTools: async (id) => (await connectorManagerFor(this).listTools(id)).map((t) => t.name),
+    };
+  }
+
+  /**
+   * Set or clear (null) a task's tool scope. Validated against its agent: it may only narrow
+   * what the agent has (TaskToolScopeError otherwise). A running task keeps its current run.
+   */
+  async updateTaskToolScope(taskId: string, value: unknown): Promise<Task> {
+    const task = await this.getStore().getTask(taskId);
+    if (!task) throw new Error(`Task not found: ${taskId}`);
+    const scope = value === null || value === undefined
+      ? undefined
+      : await requireTaskToolScope(this.toolScopeHost(), task.assignTo, value, { live: true });
+    return this.getStore().updateTask(taskId, { toolScope: scope });
+  }
+
+  /**
+   * What of a task's tool scope its agent no longer has (a connector removed or no longer granted,
+   * a tool renamed or deselected on the agent): shown as stale. Empty without a scope.
+   */
+  async taskToolScopeStale(task: Pick<Task, "assignTo" | "toolScope">): Promise<string[]> {
+    if (!task.toolScope) return [];
+    try {
+      return (await checkTaskToolScope(this.toolScopeHost(), task.assignTo, task.toolScope)).problems;
+    } catch {
+      return [];
+    }
+  }
+
+  /** Reject a mission document whose tasks' tool scopes ask for more than their agents have. */
+  private async checkMissionToolScopes(data: string | undefined): Promise<void> {
+    if (!data) return;
+    let doc: { tasks?: Array<{ title?: string; assignTo?: string; toolScope?: unknown }> };
+    try { doc = JSON.parse(data); } catch { return; }
+    const problems: string[] = [];
+    for (const t of Array.isArray(doc?.tasks) ? doc.tasks : []) {
+      if (t?.toolScope === undefined || t.toolScope === null) continue;
+      const r = await checkTaskToolScope(this.toolScopeHost(), t.assignTo, t.toolScope);
+      problems.push(...r.problems.map((p) => `task "${t.title ?? "?"}": ${p}`));
+    }
+    if (problems.length) throw new TaskToolScopeError(problems);
+  }
   async updateTaskDescription(taskId: string, description: string): Promise<void> { return this.engine.updateTaskDescription(taskId, description); }
   async updateTaskAssignment(taskId: string, agentName: string): Promise<void> { return this.engine.updateTaskAssignment(taskId, agentName); }
   async updateTaskExpectations(taskId: string, expectations: TaskExpectation[]): Promise<void> { return this.engine.updateTaskExpectations(taskId, expectations); }
@@ -1675,7 +1737,7 @@ export class Orchestrator extends TypedEmitter {
       intent: this.getGroupIntent(),
       profile: async (name) => {
         if (name === POLPO) {
-          return { id: POLPO, name: "Polpo", role: "the orchestrator: plans and coordinates the company's work, assigns tasks to the agents", responsibilities: [] };
+          return { id: POLPO, name: orchestratorName(this.getConfig()?.settings), role: "the orchestrator: plans and coordinates the company's work, assigns tasks to the agents", responsibilities: [] };
         }
         const agent = (await this.getAgents()).find(a => a.name === name);
         const id = agent?.identity;
@@ -1735,7 +1797,27 @@ export class Orchestrator extends TypedEmitter {
     await this.engine.renameTeam(oldName, newName);
     await this.emitTeamSnapshot("team:updated", { oldName, teamName: newName });
   }
+  /**
+   * An agent's engine (agent.engine) normalized ("polpo" → unset) and checked against the settings
+   * (harness enabled, a computer that can run it): HarnessConfigError otherwise.
+   */
+  checkAgentEngine(agent: Pick<AgentConfig, "name" | "engine" | "defaultComputer">): AgentConfig["engine"] {
+    const engine = parseAgentEngine(agent.engine, `Agent "${agent.name}": engine`);
+    if (!engine) return undefined;
+    const settings = this.config?.settings;
+    const problem = agentEngineProblem({ ...agent, engine }, settings as any, {
+      daytonaApi: daytonaApiVersion((settings?.sandbox as { providers?: Record<string, Record<string, unknown>> } | undefined)?.providers?.daytona),
+    });
+    if (problem) throw new HarnessConfigError(problem);
+    return engine;
+  }
+
   async addAgent(agent: AgentConfig, teamName?: string): Promise<void> {
+    if (agent.engine !== undefined) {
+      const engine = this.checkAgentEngine(agent);
+      agent = { ...agent, engine };
+      if (!engine) delete agent.engine;
+    }
     await this.engine.addAgent(agent, teamName);
     await this.emitTeamSnapshot("agent:created", { agentName: agent.name, teamName });
     this.refreshDedicatedTelegramBots(agent.name);
@@ -1746,6 +1828,13 @@ export class Orchestrator extends TypedEmitter {
     return removed;
   }
   async updateAgent(name: string, updates: AgentUpdate): Promise<AgentConfig> {
+    if ("engine" in updates || "defaultComputer" in updates) {
+      const current = (await this.engine.getAgents()).find((a) => a.name === name);
+      if (current) {
+        const engine = this.checkAgentEngine({ ...current, ...updates, name } as AgentConfig);
+        if ("engine" in updates) updates = { ...updates, engine };
+      }
+    }
     const agent = await this.engine.updateAgent(name, updates);
     await this.emitTeamSnapshot("agent:updated", { agentName: agent.name });
     this.refreshDedicatedTelegramBots(agent.name);
@@ -1770,19 +1859,64 @@ export class Orchestrator extends TypedEmitter {
 
   // ─── Mission Management (delegates to OrchestratorEngine → MissionExecutor) ──
 
-  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules }): Promise<Mission> { return this.engine.saveMission(opts); }
+  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules; budgetUsd?: number }): Promise<Mission> {
+    await this.checkMissionToolScopes(opts.data);
+    return this.engine.saveMission(opts);
+  }
+
+  /**
+   * What a mission cost so far: every recorded run of its tasks (Task.runs), by agent and engine,
+   * against its budget (see @polpo-ai/core mission-cost). `harnessUsage` (token-usage records per
+   * task id) only fills in tasks whose older runs were dropped.
+   */
+  async getMissionCost(missionId: string, opts?: { harnessUsage?: Record<string, { usd: number; tokens: number }> }): Promise<MissionCost | undefined> {
+    const mission = await this.getMission(missionId);
+    if (!mission) return undefined;
+    return this.missionCostOf(mission, await this.registry.getAllTasks(), await this.getAgents(), opts);
+  }
+
+  /** The compact cost of every mission (lists), from one read of the tasks. */
+  async getMissionCostSummaries(missions?: Mission[]): Promise<Record<string, MissionCostSummary>> {
+    const all = missions ?? await this.getAllMissions();
+    const tasks = await this.registry.getAllTasks();
+    const out: Record<string, MissionCostSummary> = {};
+    for (const m of all) out[m.id] = summarizeMissionCost(this.missionCostOf(m, tasks, undefined));
+    return out;
+  }
+
+  private missionCostOf(mission: Mission, tasks: Task[], agents: AgentConfig[] | undefined, opts?: { harnessUsage?: Record<string, { usd: number; tokens: number }> }): MissionCost {
+    return computeMissionCost(tasksOfMission(mission, tasks), {
+      ...(mission.budgetUsd !== undefined ? { budgetUsd: mission.budgetUsd } : {}),
+      ...(opts?.harnessUsage ? { harnessUsage: opts.harnessUsage } : {}),
+      ...(agents ? { agentBudgets: Object.fromEntries(agents.map((a) => [a.name, agentHarnessBudgetUsd(a)])), plannedAgents: plannedAgentsOf(mission.data) } : {}),
+    });
+  }
   async getMission(missionId: string): Promise<Mission | undefined> { return this.engine.getMission(missionId); }
   async getMissionByName(name: string): Promise<Mission | undefined> { return this.engine.getMissionByName(name); }
   async getAllMissions(): Promise<Mission[]> { return this.engine.getAllMissions(); }
-  async updateMission(missionId: string, updates: Partial<Omit<Mission, "id">>): Promise<Mission> { return this.engine.updateMission(missionId, updates); }
+  async updateMission(missionId: string, updates: Partial<Omit<Mission, "id">>): Promise<Mission> {
+    await this.checkMissionToolScopes(updates.data);
+    return this.engine.updateMission(missionId, updates);
+  }
   async deleteMission(missionId: string): Promise<boolean> { return this.engine.deleteMission(missionId); }
 
   // ─── Atomic Mission Data Operations (delegates to OrchestratorEngine → MissionExecutor) ──
 
-  async addMissionTask(missionId: string, task: { title: string; description: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown }): Promise<Mission> {
+  async addMissionTask(missionId: string, task: { title: string; description: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown; sideEffects?: boolean; toolScope?: import("@polpo-ai/core").TaskToolScope | null }): Promise<Mission> {
+    if (task.toolScope) task = { ...task, toolScope: await requireTaskToolScope(this.toolScopeHost(), task.assignTo, task.toolScope, { live: true }) ?? null };
+    if (task.toolScope === null) { const { toolScope: _drop, ...rest } = task; task = rest; }
     return this.engine.addMissionTask(missionId, task);
   }
-  async updateMissionTask(missionId: string, taskTitle: string, updates: { title?: string; description?: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown }): Promise<Mission> {
+  async updateMissionTask(missionId: string, taskTitle: string, updates: { title?: string; description?: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown; sideEffects?: boolean; toolScope?: import("@polpo-ai/core").TaskToolScope | null }): Promise<Mission> {
+    if (updates.toolScope) {
+      // checked against the agent it will have: the new one, else the task's current one
+      let agent = updates.assignTo;
+      if (!agent) {
+        const mission = await this.getMission(missionId);
+        try { agent = (JSON.parse(mission?.data ?? "{}") as { tasks?: Array<{ title?: string; assignTo?: string }> }).tasks?.find((t) => t.title === taskTitle)?.assignTo; } catch { /* checked by the executor */ }
+      }
+      updates = { ...updates, toolScope: await requireTaskToolScope(this.toolScopeHost(), agent, updates.toolScope, { live: true }) ?? null };
+    }
     return this.engine.updateMissionTask(missionId, taskTitle, updates);
   }
   async removeMissionTask(missionId: string, taskTitle: string): Promise<Mission> {

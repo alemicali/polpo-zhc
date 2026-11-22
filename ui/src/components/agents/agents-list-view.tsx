@@ -25,6 +25,8 @@ import {
 } from "lucide-react";
 import type { AgentConfig, AgentProcess } from "@polpo-ai/react";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
+import { EngineBadge } from "@/components/shared/run-context";
+import { agentEngineId } from "@/lib/run-context";
 import { useAsyncAction } from "@/hooks/use-polpo";
 import { RemoveAgentDialog } from "./agents-dialogs";
 import { useAgentsPage } from "./agents-page-context";
@@ -101,7 +103,7 @@ function AgentCard({
     <Link to={`/agents/${encodeURIComponent(agent.name)}`} className="group block max-w-full min-w-0">
       <div className={cn(
         "max-w-full overflow-hidden rounded-lg border bg-card/80 transition-all hover:bg-accent/5",
-        process ? "border-primary/30 shadow-[0_0_20px_oklch(0.7_0.15_200_/_8%)]" : "border-border/40 hover:border-primary/20",
+        process ? "border-primary/30 shadow-[0_0_20px_color-mix(in_oklch,var(--primary)_8%,transparent)]" : "border-border/40 hover:border-primary/20",
       )}>
         <div className="flex items-center gap-2 p-3 sm:gap-3 sm:p-4">
           <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-lg", teamColor?.bg ?? "bg-primary/10")}>
@@ -113,26 +115,27 @@ function AgentCard({
                 {agent.identity?.displayName ?? agent.name}
               </span>
               {agent.identity?.displayName && agent.identity.displayName !== agent.name && (
-                <span className="hidden truncate text-[10px] font-mono text-muted-foreground sm:inline">@{agent.name}</span>
+                <span className="hidden truncate text-micro font-mono text-muted-foreground sm:inline">@{agent.name}</span>
               )}
               {!!agent.volatile && (
-                <Badge variant="outline" className="text-[10px] text-amber-400 border-amber-500/30">
+                <Badge variant="outline" className="text-micro text-warning border-warning/30">
                   <Zap className="h-2.5 w-2.5 mr-0.5" /> mission
                 </Badge>
               )}
+              <EngineBadge engine={agentEngineId((agent as { engine?: unknown }).engine)} model={((agent as { engine?: { model?: string } }).engine?.model)} withLabel size={13} className="text-micro text-muted-foreground" />
             </div>
             <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-              {agent.identity?.title && <span className="text-[10px] text-muted-foreground truncate max-w-[200px]">{agent.identity.title}</span>}
+              {agent.identity?.title && <span className="text-micro text-muted-foreground truncate max-w-[200px]">{agent.identity.title}</span>}
               {agent.model && (
-                <span className="max-w-full truncate text-[10px] font-mono text-muted-foreground sm:max-w-[200px]">
+                <span className="max-w-full truncate text-micro font-mono text-muted-foreground sm:max-w-[200px]">
                   {agent.identity?.title ? <>&middot; </> : ""}{agent.model}
                 </span>
               )}
               {agent.role && !agent.identity?.title && (
-                <span className="text-[10px] text-muted-foreground truncate max-w-[200px] hidden lg:inline">&middot; {agent.role}</span>
+                <span className="text-micro text-muted-foreground truncate max-w-[200px] hidden lg:inline">&middot; {agent.role}</span>
               )}
               {agent.reportsTo && (
-                <span className="text-[10px] text-muted-foreground hidden md:inline">&middot; reports to <span className="font-mono">{agent.reportsTo}</span></span>
+                <span className="text-micro text-muted-foreground hidden md:inline">&middot; reports to <span className="font-mono">{agent.reportsTo}</span></span>
               )}
             </div>
           </div>
@@ -140,10 +143,10 @@ function AgentCard({
             {process && (
               <div className="flex items-center gap-1.5">
                 <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
-                <span className="text-[10px] text-primary font-medium">Working</span>
+                <span className="text-micro text-primary font-medium">Working</span>
               </div>
             )}
-            {capabilityCount > 0 && <Badge variant="secondary" className="text-[10px] hidden sm:flex">{capabilityCount} cap.</Badge>}
+            {capabilityCount > 0 && <Badge variant="secondary" className="text-micro hidden sm:flex">{capabilityCount} cap.</Badge>}
             {showRemove && <RemoveAgentDialog agentName={agent.name} />}
             <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
           </div>
@@ -152,13 +155,13 @@ function AgentCard({
           <div className="flex items-center gap-3 px-4 py-1.5 bg-primary/5 border-t border-primary/10">
             <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse shrink-0" />
             {process.activity.lastTool && (
-              <Badge variant="outline" className="text-[9px] font-mono px-1.5 py-0 text-primary border-primary/30 shrink-0">
+              <Badge variant="outline" className="text-micro font-mono px-1.5 py-0 text-primary border-primary/30 shrink-0">
                 <Wrench className="h-2 w-2 mr-0.5" />{process.activity.lastTool}
               </Badge>
             )}
-            {process.activity.lastFile && <span className="text-[10px] font-mono text-muted-foreground truncate">{process.activity.lastFile.split("/").pop()}</span>}
-            {process.activity.summary && !process.activity.lastTool && <span className="text-[10px] text-muted-foreground truncate">{process.activity.summary}</span>}
-            <span className="text-[10px] text-muted-foreground ml-auto shrink-0">{process.activity.toolCalls} calls</span>
+            {process.activity.lastFile && <span className="text-micro font-mono text-muted-foreground truncate">{process.activity.lastFile.split("/").pop()}</span>}
+            {process.activity.summary && !process.activity.lastTool && <span className="text-micro text-muted-foreground truncate">{process.activity.summary}</span>}
+            <span className="text-micro text-muted-foreground ml-auto shrink-0">{process.activity.toolCalls} calls</span>
           </div>
         )}
       </div>
@@ -194,8 +197,8 @@ export function ListView() {
               <div className={cn("flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg border px-3 py-2 sm:gap-x-3", tc.border, tc.bg)}>
                 <div className={cn("h-2 w-2 shrink-0 rounded-full", tc.dot)} />
                 <TeamNameEditor teamName={team.name} teamDescription={team.description} />
-                <Badge variant="secondary" className="shrink-0 text-[9px]">{team.agents.length} agent{team.agents.length !== 1 ? "s" : ""}</Badge>
-                {team.description && <span className="text-[10px] text-muted-foreground truncate hidden md:inline">{team.description}</span>}
+                <Badge variant="secondary" className="shrink-0 text-micro">{team.agents.length} agent{team.agents.length !== 1 ? "s" : ""}</Badge>
+                {team.description && <span className="text-micro text-muted-foreground truncate hidden md:inline">{team.description}</span>}
                 <div className="ml-auto flex items-center gap-1">
                   {teams.length > 1 && (
                     <Tooltip>
@@ -216,7 +219,7 @@ export function ListView() {
 
               {/* Agents in this team — rendered with hierarchy indentation */}
               {teamAgents.length > 0 ? (
-                <div className="ml-1 space-y-2 border-l-2 pl-2 sm:pl-3" style={{ borderColor: `oklch(0.7 0.12 ${[250, 280, 160, 80, 0, 200][teamIdx % 6]} / 30%)` }}>
+                <div className={cn("ml-1 space-y-2 border-l-2 pl-2 sm:pl-3", tc.border)}>
                   {(() => {
                     // Build hierarchy from reportsTo
                     const nameSet = new Set(teamAgents.map(a => a.name));

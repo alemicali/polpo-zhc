@@ -65,7 +65,7 @@ function InlineImage({ path, onOpen }: { path: string; onOpen: () => void }) {
         loading="lazy"
         onError={() => setFailed(true)}
       />
-      <span className="absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-background/90 px-2 py-1 text-[10px] text-foreground backdrop-blur-sm">
+      <span className="absolute inset-x-0 bottom-0 flex items-center gap-1.5 bg-background/90 px-2 py-1 text-micro text-foreground backdrop-blur-sm">
         <ImageIcon className="h-3 w-3 shrink-0 text-primary" />
         <span className="min-w-0 flex-1 truncate">{path.split("/").pop()}</span>
         <ExternalLink className="h-3 w-3 shrink-0 opacity-60" />
@@ -104,7 +104,7 @@ export function ToolResultArtifacts({ result, className }: { result: string; cla
                 key={path}
                 type="button"
                 onClick={() => openPath(path)}
-                className="inline-flex h-7 max-w-full items-center gap-1.5 border border-border bg-background px-2 text-[10px] text-primary hover:bg-accent"
+                className="inline-flex h-7 max-w-full items-center gap-1.5 border border-border bg-background px-2 text-micro text-primary hover:bg-accent"
                 title={`Open ${path}`}
               >
                 <FileText className="h-3 w-3 shrink-0" />

@@ -17,6 +17,32 @@ export interface ConnectorIcon {
   color?: string;
 }
 
+/** Where a custom connector's icon came from (catalog connectors use their bundled icon instead). */
+export type ConnectorIconSource = "mcp" | "oauth" | "website" | "upload" | "url";
+
+/** One stored icon image (the bytes are kept by the server and served at GET /connectors/:id/icon). */
+export interface ConnectorIconImage {
+  mimeType: string;
+  /** Content hash: the ETag, and the cache-busting `v` of the icon URL. */
+  hash: string;
+  width?: number;
+  height?: number;
+  /** Where the image was fetched from (absent for uploads and inline data). */
+  src?: string;
+}
+
+/**
+ * A custom connector's icon: discovered (the MCP server's `serverInfo.icons`, the OAuth metadata,
+ * the vendor's website) or set by the person (upload / URL, `pinned`: discovery leaves it alone).
+ */
+export interface ConnectorIconAsset extends ConnectorIconImage {
+  source: ConnectorIconSource;
+  /** A variant made for dark backgrounds (MCP `theme: "dark"`). */
+  dark?: ConnectorIconImage;
+  fetchedAt: string;
+  pinned?: boolean;
+}
+
 /** How the client reaches the MCP server. */
 export interface ConnectorTransport {
   /** "http": streamable HTTP, falling back to SSE automatically; "sse": legacy SSE; "stdio": a local process (admin only). */
@@ -78,7 +104,10 @@ export type ConnectorStatus =
 export interface ConnectorConfig {
   /** Slug: [a-z0-9][a-z0-9-]{0,39}. Used in tool names (mcp__<id>__<tool>) and as the vault service. */
   id: string;
+  /** Display name. Several accounts of one catalog app tell themselves apart by it ("Gmail – info@acme.com"). */
   name: string;
+  /** The signed-in account (e.g. an email), when the sign-in revealed it at no extra cost (an OpenID id_token). */
+  account?: string;
   /** Only "mcp" today; kept for forward compatibility. */
   kind: "mcp";
   description?: string;
@@ -90,6 +119,10 @@ export interface ConnectorConfig {
   catalogId?: string;
   /** Icon copied from the catalog entry. */
   icon?: ConnectorIcon;
+  /** Custom connectors: the discovered or uploaded icon (catalog connectors keep their bundled one). */
+  iconAsset?: ConnectorIconAsset;
+  /** Last icon discovery attempt (also when nothing was found), so it is not retried on every list. */
+  iconCheckedAt?: string;
   /** Tool call timeout (ms); default 60 000. */
   toolTimeoutMs?: number;
   /** Per-tool policy keyed by the server's tool name (not the prefixed one). Missing = "allow". */
@@ -149,6 +182,11 @@ export interface ConnectorCatalogEntry {
   verified: boolean;
   /** Setup steps shown before connecting (e.g. Google: create a Web OAuth client…). */
   setup?: string;
+  /**
+   * An app manifest to create the vendor's OAuth app from (e.g. Slack: JSON with the user scopes),
+   * with "<public URL>/api/v1/connectors/oauth/callback" where this instance's redirect URI goes.
+   */
+  setupManifest?: string;
 }
 
 /** Event payload for `connector:changed`. */
@@ -171,6 +209,47 @@ export function connectorGrants(connector: Pick<ConnectorConfig, "access" | "ena
   if (agent === undefined) return !!connector.access?.polpo;
   const agents = connector.access?.agents;
   return agents === "*" || (Array.isArray(agents) && agents.includes(agent));
+}
+
+/**
+ * Per-agent selection of a connector's tools, keyed by connector id. A missing key or "*" means every
+ * current and future tool of that connector; a list means only those tools (the server's raw tool
+ * names, not the prefixed `mcp__…` ones). It narrows what connector access grants; it never grants.
+ */
+export type AgentConnectorTools = Record<string, "*" | string[]>;
+
+/** Whether `agent.connectorTools` lets the agent use `toolName` of connector `connectorId`. */
+export function connectorToolSelected(selection: AgentConnectorTools | undefined, connectorId: string, toolName: string): boolean {
+  const entry = selection?.[connectorId];
+  if (entry === undefined || entry === "*") return true;
+  return Array.isArray(entry) && entry.includes(toolName);
+}
+
+/** Problems with a `connectorTools` value (empty when valid). */
+export function connectorToolsProblems(value: unknown): string[] {
+  if (value === undefined || value === null) return [];
+  if (typeof value !== "object" || Array.isArray(value)) return ["connectorTools must be an object keyed by connector id"];
+  const problems: string[] = [];
+  for (const [id, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (!CONNECTOR_ID_PATTERN.test(id)) problems.push(`connectorTools: "${id}" is not a connector id`);
+    else if (entry === "*") continue;
+    else if (!Array.isArray(entry) || entry.some((t) => typeof t !== "string" || t.trim() === "")) problems.push(`connectorTools.${id} must be "*" or a list of tool names`);
+  }
+  return problems;
+}
+
+/**
+ * Tidy a connectorTools value: deduplicated lists, "*" entries dropped (they are the default), an
+ * empty object becomes undefined. Lists stay lists, even empty ones (= no tool of that connector).
+ */
+export function normalizeConnectorTools(value: AgentConnectorTools | undefined | null): AgentConnectorTools | undefined {
+  if (!value) return undefined;
+  const out: AgentConnectorTools = {};
+  for (const [id, entry] of Object.entries(value)) {
+    if (entry === "*") continue;
+    if (Array.isArray(entry)) out[id] = [...new Set(entry.map((t) => t.trim()).filter(Boolean))];
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 /** Slugify a name into a connector id. */

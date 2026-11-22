@@ -36,6 +36,19 @@ const ScopedNotificationRulesSchema = z.object({
 
 // ── Task schemas ──────────────────────────────────────────────────────
 
+/**
+ * Optional narrowing of the tools a task's runs may use; absent = everything its agent has. It
+ * only narrows: a connector or tool the agent does not have is rejected (400 INVALID_TOOL_SCOPE).
+ */
+export const TaskToolScopeSchema = z.object({
+  connectors: z.union([z.literal("none"), z.array(z.string().min(1))]).optional()
+    .openapi({ description: "Connector ids the run may use (each account of an app is its own connector, e.g. gmail-2), or \"none\". Absent: every connector the agent has." }),
+  connectorTools: z.record(z.string(), z.union([z.literal("*"), z.array(z.string().min(1))])).optional()
+    .openapi({ description: "Per connector id: \"*\" or the server's raw tool names. Narrows the agent's own connectorTools." }),
+  allowedTools: z.array(z.string().min(1)).optional()
+    .openapi({ description: "Built-in tools or patterns (read, bash, browser_*), not connector tools. Narrows the agent's allowedTools (or its default tools)." }),
+}).strict().openapi("TaskToolScope");
+
 export const CreateTaskSchema = z.object({
   title: z.string().min(1),
   description: z.string().min(1),
@@ -59,6 +72,8 @@ export const CreateTaskSchema = z.object({
   notifications: ScopedNotificationRulesSchema.optional(),
   /** Whether this task produces irreversible side effects. Blocks automatic retry/fix. */
   sideEffects: z.boolean().optional(),
+  /** Narrowing of the run's tools (connectors, their tools, built-in tools); absent: the agent's. */
+  toolScope: TaskToolScopeSchema.optional(),
 });
 
 export const UpdateTaskSchema = z.object({
@@ -70,6 +85,8 @@ export const UpdateTaskSchema = z.object({
   maxRetries: z.number().int().min(0).optional(),
   /** Whether this task produces irreversible side effects. Blocks automatic retry/fix. */
   sideEffects: z.boolean().optional(),
+  /** Narrowing of the run's tools; null clears it (back to everything the agent has). */
+  toolScope: TaskToolScopeSchema.nullable().optional(),
 });
 
 // ── Mission schemas ──────────────────────────────────────────────────
@@ -84,6 +101,8 @@ export const CreateMissionSchema = z.object({
   /** End date for recurring schedules (ISO timestamp). */
   endDate: z.string().datetime().optional(),
   notifications: ScopedNotificationRulesSchema.optional(),
+  /** Spending limit in USD for the whole mission: at it, no new task starts and the mission pauses. */
+  budgetUsd: z.number().positive().finite().optional().openapi({ description: "Spending limit in USD for the whole mission (all its tasks' runs). When reached, no new task starts (running ones finish) and the mission pauses until the budget is raised or cleared." }),
 });
 
 export const UpdateMissionSchema = z.object({
@@ -94,6 +113,8 @@ export const UpdateMissionSchema = z.object({
   name: z.string().optional(),
   /** End date for recurring schedules (ISO timestamp). */
   endDate: z.string().datetime().nullable().optional(),
+  /** Spending limit in USD for the whole mission; null clears it. */
+  budgetUsd: z.number().positive().finite().nullable().optional().openapi({ description: "Spending limit in USD for the whole mission; null clears it. Raising or clearing it lets a mission paused by its budget go on." }),
 });
 
 // ── Atomic mission data schemas ──────────────────────────────────
@@ -112,6 +133,7 @@ export const AddMissionTaskSchema = z.object({
   }).optional(),
   notifications: z.any().optional(),
   sideEffects: z.boolean().optional(),
+  toolScope: TaskToolScopeSchema.optional(),
 });
 
 export const UpdateMissionTaskSchema = z.object({
@@ -128,6 +150,8 @@ export const UpdateMissionTaskSchema = z.object({
   }).optional(),
   notifications: z.any().optional(),
   sideEffects: z.boolean().optional(),
+  /** null clears it. */
+  toolScope: TaskToolScopeSchema.nullable().optional(),
 });
 
 export const ReorderMissionTasksSchema = z.object({
@@ -220,14 +244,36 @@ export const UpdateSettingsSchema = z.object({
   sandbox: z.any().optional(),
   /** Context compaction settings (null removes them). */
   compaction: z.any().optional(),
+  /** Progressive tool discovery for agents and Polpo (null removes it: defaults). */
+  tools: z.object({
+    progressiveThreshold: z.number().int().min(0).optional(),
+    progressive: z.enum(["auto", "always", "never"]).optional(),
+  }).strict().nullable().optional(),
+  /** How much of their dependencies' results tasks receive in their prompt (null removes it: defaults 2000 / 20000). */
+  dependencyResults: z.object({
+    perTaskChars: z.number().int().min(240).max(200_000).optional(),
+    totalChars: z.number().int().min(480).max(1_000_000).optional(),
+  }).strict().nullable().optional(),
   orchestratorModel: z.union([z.string(), ModelConfigSchema]).optional(),
+  /** The orchestrator's display name (default "Polpo"); null or "" restores the default. */
+  orchestratorName: z.string().trim().max(40, "at most 40 characters")
+    .regex(/^[^\r\n]*$/, "a single line").nullable().optional(),
   imageModel: z.string().nullable().optional(),
   reasoning: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
   branding: z.object({
     productName: z.string().trim().max(80).optional(),
     tagline: z.string().trim().max(120).optional(),
     logoUrl: z.union([z.url(), z.literal("/api/v1/config/branding/logo"), z.literal("")]).optional(),
+    /** The logo for dark mode (the light one when absent). */
+    logoDarkUrl: z.union([z.url(), z.literal("/api/v1/config/branding/logo-dark"), z.literal("")]).optional(),
+    /** How the logo is shown: "box" (default) in a tile, "none" bare; "" restores the default. */
+    logoFrame: z.enum(["box", "none", ""]).optional(),
   }).optional(),
+  /**
+   * The dashboard's default look for everyone: { theme, palette, custom: { enabled, light, dark } }
+   * (validated by parseAppearanceSettings); replaces it, null removes it.
+   */
+  appearance: z.record(z.string(), z.unknown()).nullable().optional(),
   /** Named egress proxies for agents' browsers ({ home: "socks5://…" }); replaces them all, null removes them. */
   egressProxies: z.record(z.string(), z.string()).nullable().optional(),
   /**
@@ -239,7 +285,86 @@ export const UpdateSettingsSchema = z.object({
     tags: z.array(z.string()).optional(),
     hostnamePrefix: z.string().optional(),
   }).nullable().optional(),
+  /**
+   * Official agent harnesses agents may run on (agent.engine): { enabled: ["claude-code" | "codex"],
+   * allowHost?, "claude-code"?: { auth: "api-key" | "bedrock" | "vertex" | "ai-gateway" | "gateway", credentialRef: { owner, service },
+   * bedrock?: { region }, vertex?: { region, projectId }, gateway?: {...}, model? }, codex?: { auth: "api-key" | "ai-gateway" | "gateway",
+   * credentialRef | gateway, model? } }. gateway: ai-gateway → { baseUrl?, credentialRef }; gateway → { format: "anthropic" |
+   * "openai-responses", baseUrl, credentialRef?, authScheme: "x-api-key" | "bearer" | "none", headers?: [{ name, credentialRef?,
+   * field?, prefix?, value? }], models?: { main, haiku?, sonnet?, opus? }, nonClaude? }.
+   * Credentials are vault references only (a Claude subscription is refused). Replaces it; null removes it.
+   */
+  harnesses: z.record(z.string(), z.unknown()).nullable().optional(),
+
+  // General settings (Configuration → General). null goes back to the default where there is one.
+  maxRetries: z.number().int().min(0).max(20).optional(),
+  logLevel: z.enum(["quiet", "normal", "verbose"]).optional(),
+  maxConcurrency: z.number().int().min(1).max(1000).nullable().optional(),
+  /** Default timeout per task (ms); null: the default (30 min). */
+  taskTimeout: z.number().int().min(1000).nullable().optional(),
+  /** Idle time (ms) before an agent is considered stale; null: the default (5 min). */
+  staleThreshold: z.number().int().min(1000).nullable().optional(),
+  maxFixAttempts: z.number().int().min(0).max(20).nullable().optional(),
+  maxQuestionRounds: z.number().int().min(0).max(20).nullable().optional(),
+  maxResolutionAttempts: z.number().int().min(0).max(20).nullable().optional(),
+  maxAssessmentRetries: z.number().int().min(0).max(20).nullable().optional(),
+  defaultQualityThreshold: z.number().min(1).max(5).nullable().optional(),
+  autoCorrectExpectations: z.boolean().nullable().optional(),
+  enableScheduler: z.boolean().nullable().optional(),
+  enableVolatileTeams: z.boolean().nullable().optional(),
+  volatileCleanup: z.enum(["on_complete", "manual"]).nullable().optional(),
+  /** Days of event logs kept (0: forever). */
+  logRetentionDays: z.number().int().min(0).max(3650).nullable().optional(),
+  emailAllowedDomains: z.array(z.string().trim().min(1).max(253).regex(/^[A-Za-z0-9.*-]+$/, "a domain like example.com")).nullable().optional(),
+  /** Polpo's own voice replies in chats. */
+  voiceReplies: z.enum(["off", "voice", "always"]).nullable().optional(),
+  defaultRetryPolicy: z.object({
+    escalateAfter: z.number().int().min(0).max(20).optional(),
+    fallbackAgent: z.string().min(1).optional(),
+    escalateModel: z.string().min(3).optional(),
+  }).strict().nullable().optional(),
+  /** Remote connectors on private addresses, and their default tool timeout. */
+  connectors: z.object({
+    allowPrivateNetwork: z.boolean().optional(),
+    toolTimeoutMs: z.number().int().min(1000).max(3_600_000).optional(),
+  }).strict().nullable().optional(),
+  /** Polpo's own MCP server: toolsets offered and named keys (vault references); the keys given change, null removes it. */
+  mcp: z.object({
+    toolsets: z.array(z.string().trim().min(1)).optional(),
+    keys: z.array(z.object({
+      name: z.string().trim().min(1).max(80),
+      keyRef: z.object({ owner: z.string().min(1), service: z.string().min(1) }),
+      scopes: z.array(z.string().min(1)).optional(),
+    }).strict()).optional(),
+  }).strict().nullable().optional(),
+
+  // Policies (Configuration → Policies)
+  escalationPolicy: z.object({
+    name: z.string().trim().min(1).max(120),
+    levels: z.array(z.object({
+      level: z.number().int().min(0),
+      handler: z.enum(["agent", "orchestrator", "human"]),
+      target: z.string().min(1).optional(),
+      timeoutMs: z.number().int().min(0).optional(),
+      notifyChannels: z.array(z.string().min(1)).optional(),
+    }).strict()).min(1),
+  }).strict().nullable().optional(),
+  sla: z.object({
+    warningThreshold: z.number().min(0).max(1).optional(),
+    checkIntervalMs: z.number().int().min(1000).optional(),
+    warningChannels: z.array(z.string().min(1)).optional(),
+    violationChannels: z.array(z.string().min(1)).optional(),
+    violationAction: z.enum(["notify", "fail"]).optional(),
+  }).strict().nullable().optional(),
 });
+
+/** Settings PATCH keys that are set as given, or removed with null (validated by UpdateSettingsSchema). */
+export const PLAIN_SETTINGS_KEYS = [
+  "maxRetries", "logLevel", "maxConcurrency", "taskTimeout", "staleThreshold", "maxFixAttempts", "maxQuestionRounds",
+  "maxResolutionAttempts", "maxAssessmentRetries", "defaultQualityThreshold", "autoCorrectExpectations", "enableScheduler",
+  "enableVolatileTeams", "volatileCleanup", "logRetentionDays", "emailAllowedDomains", "voiceReplies", "defaultRetryPolicy",
+  "connectors", "escalationPolicy", "sla",
+] as const;
 
 // ── Notification rule (full top-level, with action passthrough) ───────
 
@@ -394,6 +519,26 @@ const AgentDriveSchema = z.object({
   dayStartsAt: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
 }).strict();
 
+/** An agent's engine: "polpo" or an official agent harness (see @polpo-ai/core harnesses.ts). */
+export const AgentEngineSchema = z.union([
+  z.literal("polpo"),
+  z.object({
+    harness: z.enum(["claude-code", "codex"]),
+    model: z.string().max(200).optional(),
+    permissionMode: z.enum(["allow-all", "allow-edits", "allow-reads"]).optional(),
+    effort: z.enum(["low", "medium", "high", "xhigh", "max"]).optional(),
+    maxBudgetUsd: z.number().positive().max(10000).optional(),
+    /** This agent's own credential (cost separation): a vault reference that replaces the harness's API key or gateway key. */
+    credentialRef: z.object({ owner: z.string().min(1), service: z.string().min(1) }).optional(),
+  }),
+]);
+
+/** Per-connector tool selection: { <connector id>: "*" (all tools, the default) | [raw MCP tool names] }. */
+export const AgentConnectorToolsSchema = z.record(
+  z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/, "a connector id"),
+  z.union([z.literal("*"), z.array(z.string().trim().min(1).max(200)).max(1000)]),
+);
+
 export const AddAgentSchema = z.object({
   name: z.string().min(1).refine((n) => !n.trim().startsWith("$"), { message: 'Agent names starting with "$" are reserved' }),
   role: z.string().optional(),
@@ -416,8 +561,14 @@ export const AddAgentSchema = z.object({
   computers: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/)).optional(),
   /** Its default machine for chats and tasks: a computer id or "host"; "" (update) clears it. */
   defaultComputer: z.string().regex(/^([a-z0-9][a-z0-9-]{0,39})?$/).optional(),
+  /** Engine: "polpo" (default) or an official harness running in its computer ({ harness: "claude-code" | "codex", model?, permissionMode?, effort?, maxBudgetUsd? }); null clears it. */
+  engine: AgentEngineSchema.nullable().optional(),
   sandbox: z.any().optional(),
   compaction: z.any().optional(),
+  /** Progressive tool discovery: auto (default: above settings.tools.progressiveThreshold), always, never. */
+  progressiveTools: z.enum(["auto", "always", "never"]).optional(),
+  /** Which tools of each granted connector it gets: "*" or a missing key = all, a list = only those. */
+  connectorTools: AgentConnectorToolsSchema.optional(),
   voiceReplies: z.enum(["off", "voice", "always"]).optional(),
   learning: z.object({
     enabled: z.boolean().optional(),
@@ -446,6 +597,10 @@ export const UpdateAgentSchema = z.object({
   sandbox: z.any().optional(),
   /** Context compaction overrides for this agent. */
   compaction: z.any().optional(),
+  /** Progressive tool discovery: auto (default: above settings.tools.progressiveThreshold), always, never; null clears it. */
+  progressiveTools: z.enum(["auto", "always", "never"]).nullable().optional(),
+  /** Which tools of each granted connector it gets ("*" or a missing key = all, a list = only those); null clears it (all tools). */
+  connectorTools: AgentConnectorToolsSchema.nullable().optional(),
   /** Voice replies on Telegram: off (default), voice, always. */
   voiceReplies: z.enum(["off", "voice", "always"]).optional(),
   /** Learning from its conversations (memory, own skills); off by default. */
@@ -467,6 +622,8 @@ export const UpdateAgentSchema = z.object({
   computers: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/)).nullable().optional(),
   /** Its default machine for chats and tasks: a computer id or "host"; "" (update) clears it. */
   defaultComputer: z.string().regex(/^([a-z0-9][a-z0-9-]{0,39})?$/).optional(),
+  /** Engine: "polpo" (default) or an official harness running in its computer ({ harness: "claude-code" | "codex", model?, permissionMode?, effort?, maxBudgetUsd? }); null clears it. */
+  engine: AgentEngineSchema.nullable().optional(),
   emailAllowedDomains: z.array(z.string()).optional(),
   team: z.string().optional(),
 });

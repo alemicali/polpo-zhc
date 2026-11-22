@@ -14,7 +14,7 @@
  * output. Tools that use the vault internally (email, image, storage…) are unaffected.
  */
 
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ResolvedVault } from "../vault/index.js";
 import { isNonSecretVaultField, suggestedEnvVarName, SECRET_MASK } from "../vault/env-from-vault.js";

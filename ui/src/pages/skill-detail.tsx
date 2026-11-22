@@ -43,11 +43,11 @@ function CopyableText({ text, label }: { text: string; label?: string }) {
       onClick={handleCopy}
       className="group/copy flex items-center gap-1.5 text-left min-w-0"
     >
-      <code className="text-[11px] font-mono text-muted-foreground truncate" title={text}>
+      <code className="text-caption font-mono text-muted-foreground truncate" title={text}>
         {label ?? text}
       </code>
       {copied ? (
-        <Check className="h-3 w-3 text-emerald-400 shrink-0" />
+        <Check className="h-3 w-3 text-success shrink-0" />
       ) : (
         <Copy className="h-3 w-3 text-muted-foreground/40 opacity-0 group-hover/copy:opacity-100 transition-opacity shrink-0" />
       )}
@@ -60,7 +60,7 @@ function CopyableText({ text, label }: { text: string; label?: string }) {
 function SourceBadge({ source }: { source: string }) {
   const isGlobal = source === "global";
   return (
-    <Badge variant="outline" className={cn("text-[10px] gap-1", isGlobal ? "text-sky-400" : "text-emerald-400")}>
+    <Badge variant="outline" className={cn("text-micro gap-1", isGlobal ? "text-info" : "text-success")}>
       {isGlobal ? <Globe className="h-3 w-3" /> : <HardDrive className="h-3 w-3" />}
       {isGlobal ? "Global" : "Project"}
     </Badge>
@@ -95,9 +95,9 @@ function MetadataCard({
         <div className="space-y-2">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold truncate">{skill.name}</h3>
+              <h3 className="font-heading text-h3 truncate">{skill.name}</h3>
               {skill.category && (
-                <span className="text-[10px] text-amber-300/80 shrink-0">{skill.category}</span>
+                <span className="text-micro text-chart-4 shrink-0">{skill.category}</span>
               )}
             </div>
             <SourceBadge source={skill.source} />
@@ -112,10 +112,10 @@ function MetadataCard({
         {/* Agents */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+            <span className="text-label text-muted-foreground">
               Agents
             </span>
-            <span className="text-[10px] text-muted-foreground tabular-nums">
+            <span className="text-micro text-muted-foreground tabular-nums">
               {skill.assignedTo.length} / {totalAgents}
             </span>
           </div>
@@ -127,7 +127,7 @@ function MetadataCard({
                   <Tooltip key={agent}>
                     <TooltipTrigger asChild>
                       <span>
-                        <Badge variant="secondary" className="text-[10px] gap-1">
+                        <Badge variant="secondary" className="text-micro gap-1">
                           <Bot className="h-2.5 w-2.5" />
                           {agent}
                         </Badge>
@@ -139,7 +139,7 @@ function MetadataCard({
               })}
             </div>
           ) : (
-            <p className="text-[11px] text-muted-foreground/60 italic">Not assigned to any agent</p>
+            <p className="text-caption text-muted-foreground/60 italic">Not assigned to any agent</p>
           )}
         </div>
 
@@ -148,12 +148,12 @@ function MetadataCard({
           <>
             <Separator />
             <div className="space-y-2">
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+              <span className="text-label text-muted-foreground">
                 Teams
               </span>
               <div className="flex flex-wrap gap-1">
                 {skillTeams.map((team) => (
-                  <Badge key={team} variant="outline" className="text-[10px] gap-1">
+                  <Badge key={team} variant="outline" className="text-micro gap-1">
                     <Users className="h-2.5 w-2.5" />
                     {team}
                   </Badge>
@@ -168,12 +168,12 @@ function MetadataCard({
           <>
             <Separator />
             <div className="space-y-2">
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+              <span className="text-label text-muted-foreground">
                 Tags
               </span>
               <div className="flex flex-wrap gap-1">
                 {skill.tags.map((tag) => (
-                  <Badge key={tag} variant="outline" className="text-[9px] py-0 px-1.5 bg-blue-500/10 text-blue-300 border-blue-500/20">
+                  <Badge key={tag} variant="outline" className="text-micro py-0 px-1.5 bg-info/10 text-info border-info/20">
                     {tag}
                   </Badge>
                 ))}
@@ -187,12 +187,12 @@ function MetadataCard({
           <>
             <Separator />
             <div className="space-y-2">
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+              <span className="text-label text-muted-foreground">
                 Allowed Tools
               </span>
               <div className="flex flex-wrap gap-1">
                 {skill.allowedTools.map((t) => (
-                  <Badge key={t} variant="outline" className="text-[9px] font-mono py-0 px-1.5">
+                  <Badge key={t} variant="outline" className="text-micro font-mono py-0 px-1.5">
                     <Wrench className="h-2.5 w-2.5 mr-0.5" />
                     {t}
                   </Badge>
@@ -205,7 +205,7 @@ function MetadataCard({
         {/* Path */}
         <Separator />
         <div className="space-y-1.5">
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+          <span className="text-label text-muted-foreground">
             Path
           </span>
           <div className="flex items-center gap-1.5 min-w-0">
@@ -295,15 +295,15 @@ export function SkillDetailPage() {
 
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <h1 className="text-base font-semibold truncate">{skill.name}</h1>
+            <h1 className="font-heading text-h2 truncate">{skill.name}</h1>
             {skill.category && (
-              <span className="text-[11px] text-amber-300/80 shrink-0">{skill.category}</span>
+              <span className="text-caption text-chart-4 shrink-0">{skill.category}</span>
             )}
           </div>
           <div className="flex items-center gap-2 mt-0.5">
             <SourceBadge source={skill.source} />
             {skill.assignedTo.length > 0 && (
-              <span className="text-[11px] text-muted-foreground">
+              <span className="text-caption text-muted-foreground">
                 {skill.assignedTo.length} agent{skill.assignedTo.length !== 1 ? "s" : ""}
               </span>
             )}

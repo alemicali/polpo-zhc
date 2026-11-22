@@ -7,13 +7,15 @@ import { useNavigate } from "react-router-dom";
 import { Megaphone } from "lucide-react";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { CHANGELOG } from "@/lib/changelog";
-import { markAllChangelogSeen } from "@/hooks/use-whats-new";
+import { markAllChangelogSeen, useChangelogUnreadSnapshot } from "@/hooks/use-whats-new";
 import { closeWhatsNew, setWhatsNewOpen, useWhatsNewOpen } from "@/hooks/use-whats-new-drawer";
 import { ChangelogTimeline } from "./changelog-timeline";
 
 export function WhatsNewDrawer() {
   const open = useWhatsNewOpen();
   const navigate = useNavigate();
+  // what arrived since the last visit, read before opening marks it all as seen
+  const unreadIds = useChangelogUnreadSnapshot(open);
 
   useEffect(() => {
     if (open) markAllChangelogSeen(CHANGELOG);
@@ -21,7 +23,7 @@ export function WhatsNewDrawer() {
 
   return (
     <Sheet open={open} onOpenChange={setWhatsNewOpen}>
-      <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 sm:max-w-[440px]">
+      <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 sm:max-w-[34rem]">
         <SheetHeader className="relative isolate shrink-0 overflow-hidden border-b border-primary/15 px-5 py-4 text-left">
           <div aria-hidden className="pointer-events-none absolute -right-16 -top-20 -z-10 h-44 w-44 rounded-full bg-primary/20 blur-3xl" />
           <div className="flex items-center gap-3">
@@ -34,10 +36,11 @@ export function WhatsNewDrawer() {
             </div>
           </div>
         </SheetHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-5">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-3 pb-[env(safe-area-inset-bottom)]">
           <ChangelogTimeline
             compact
             entries={CHANGELOG}
+            unreadIds={unreadIds}
             onAction={(to) => {
               closeWhatsNew();
               navigate(to);

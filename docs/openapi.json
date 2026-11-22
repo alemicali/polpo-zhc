@@ -25,6 +25,59 @@
       }
     },
     "schemas": {
+      "TaskToolScope": {
+        "type": "object",
+        "properties": {
+          "connectors": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "none"
+                ]
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            ],
+            "description": "Connector ids the run may use (each account of an app is its own connector, e.g. gmail-2), or \"none\". Absent: every connector the agent has."
+          },
+          "connectorTools": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "*"
+                  ]
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              ]
+            },
+            "description": "Per connector id: \"*\" or the server's raw tool names. Narrows the agent's own connectorTools."
+          },
+          "allowedTools": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Built-in tools or patterns (read, bash, browser_*), not connector tools. Narrows the agent's allowedTools (or its default tools)."
+          }
+        },
+        "additionalProperties": false
+      },
       "PipelineStep": {
         "anyOf": [
           {
@@ -174,6 +227,53 @@
             ]
           }
         ]
+      },
+      "MemberPreferences": {
+        "type": "object",
+        "properties": {
+          "chatNavigation": {
+            "type": "object",
+            "properties": {
+              "lastSessionId": {
+                "type": "string",
+                "nullable": true,
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "lastRoomId": {
+                "type": "string",
+                "nullable": true,
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "lastAgent": {
+                "type": "string",
+                "nullable": true,
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "openTabs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "maxItems": 50
+              },
+              "sidePanelOpen": {
+                "type": "boolean"
+              },
+              "threadsOpen": {
+                "type": "boolean"
+              },
+              "updatedAt": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
       }
     },
     "parameters": {}
@@ -219,6 +319,894 @@
                   "required": [
                     "ok",
                     "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/config/status": {
+      "get": {
+        "tags": [
+          "Config"
+        ],
+        "summary": "Check if Polpo is configured and initialized",
+        "responses": {
+          "200": {
+            "description": "Configuration and initialization status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "initialized": {
+                          "type": "boolean"
+                        },
+                        "hasConfig": {
+                          "type": "boolean"
+                        },
+                        "hasProviders": {
+                          "type": "boolean"
+                        },
+                        "detectedProviders": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "envVar": {
+                                "type": "string"
+                              },
+                              "hasKey": {
+                                "type": "boolean"
+                              },
+                              "source": {
+                                "type": "string",
+                                "enum": [
+                                  "env",
+                                  "oauth",
+                                  "none"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "hasKey",
+                              "source"
+                            ]
+                          }
+                        },
+                        "auth": {
+                          "type": "object",
+                          "properties": {
+                            "enabled": {
+                              "type": "boolean"
+                            },
+                            "configured": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "enabled",
+                            "configured"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "initialized",
+                        "hasConfig",
+                        "hasProviders",
+                        "detectedProviders",
+                        "auth"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/config/initialize": {
+      "post": {
+        "tags": [
+          "Config"
+        ],
+        "summary": "Save config and initialize the orchestrator",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "orgName": {
+                    "type": "string"
+                  },
+                  "workDir": {
+                    "type": "string"
+                  },
+                  "model": {
+                    "type": "string"
+                  },
+                  "agentName": {
+                    "type": "string"
+                  },
+                  "agentRole": {
+                    "type": "string"
+                  },
+                  "adminEmail": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "providers": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "baseUrl": {
+                          "type": "string"
+                        },
+                        "api": {
+                          "type": "string",
+                          "enum": [
+                            "openai-completions",
+                            "openai-responses",
+                            "anthropic-messages"
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "localProvider": {
+                    "type": "object",
+                    "properties": {
+                      "preset": {
+                        "type": "string"
+                      },
+                      "baseUrl": {
+                        "type": "string"
+                      },
+                      "models": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "contextWindow": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "exclusiveMinimum": true
+                            },
+                            "maxTokens": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "exclusiveMinimum": true
+                            },
+                            "reasoning": {
+                              "type": "boolean"
+                            },
+                            "input": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "enum": [
+                                  "text",
+                                  "image"
+                                ]
+                              }
+                            }
+                          },
+                          "required": [
+                            "id"
+                          ]
+                        },
+                        "minItems": 1
+                      }
+                    },
+                    "required": [
+                      "preset",
+                      "models"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Initialization complete",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid setup request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already initialized or initialization in progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Initialization failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/instance/status": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Get instance auth status",
+        "responses": {
+          "200": {
+            "description": "Auth status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "configured": {
+                          "type": "boolean"
+                        },
+                        "authenticated": {
+                          "type": "boolean"
+                        },
+                        "email": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "configured",
+                        "authenticated"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/instance/magic-link": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Request a magic login link",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  }
+                },
+                "required": [
+                  "email"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Magic link request accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "sent": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "sent"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Magic link failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/instance/setup": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Configure the first instance auth admin",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  }
+                },
+                "required": [
+                  "email"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Instance auth configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "configured": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "configured"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Instance auth is disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Instance auth is already configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/instance/callback": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Consume magic login token",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "token",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect after login"
+          },
+          "400": {
+            "description": "Invalid token"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/instance/logout": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Logout",
+        "responses": {
+          "200": {
+            "description": "Logged out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "loggedOut": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "loggedOut"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/instance/members": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "List allowed instance members",
+        "responses": {
+          "200": {
+            "description": "Allowed members",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "members": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "email": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "email"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "members"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Add an allowed instance member",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "sendInvite": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "email"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Member added",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "members": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "email": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "email"
+                            ]
+                          }
+                        },
+                        "invited": {
+                          "type": "boolean"
+                        },
+                        "inviteError": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "members"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/instance/members/{email}": {
+      "delete": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Remove an allowed instance member",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "email",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Member removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "members": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "email": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "email"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "members"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Cannot remove member",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Login required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
                   ]
                 }
               }
@@ -415,6 +1403,762 @@
                   "required": [
                     "ok",
                     "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers": {
+      "get": {
+        "tags": [
+          "Providers"
+        ],
+        "summary": "List all LLM providers with credential status",
+        "responses": {
+          "200": {
+            "description": "Provider list with credential status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "envVar": {
+                            "type": "string"
+                          },
+                          "hasKey": {
+                            "type": "boolean"
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "env",
+                              "oauth",
+                              "none"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "hasKey",
+                          "source"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers/models": {
+      "get": {
+        "tags": [
+          "Providers"
+        ],
+        "summary": "List all available models, optionally filtered by provider",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "provider",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Model list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "nullable": true
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers/oauth": {
+      "get": {
+        "tags": [
+          "Providers"
+        ],
+        "summary": "List available OAuth providers",
+        "responses": {
+          "200": {
+            "description": "OAuth provider list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "flow": {
+                            "type": "string"
+                          },
+                          "free": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "flow",
+                          "free"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers/oauth/start": {
+      "post": {
+        "tags": [
+          "Providers"
+        ],
+        "summary": "Start an OAuth login flow",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "provider"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OAuth flow started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "flowId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "flowId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid provider",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers/oauth/status/{flowId}": {
+      "get": {
+        "tags": [
+          "Providers"
+        ],
+        "summary": "Poll OAuth flow status",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "flowId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OAuth flow status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string"
+                        },
+                        "authUrl": {
+                          "type": "string"
+                        },
+                        "instructions": {
+                          "type": "string"
+                        },
+                        "promptMessage": {
+                          "type": "string"
+                        },
+                        "promptPlaceholder": {
+                          "type": "string"
+                        },
+                        "promptType": {
+                          "type": "string",
+                          "enum": [
+                            "text",
+                            "secret",
+                            "select",
+                            "manual_code"
+                          ]
+                        },
+                        "promptOptions": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "label"
+                            ]
+                          }
+                        },
+                        "deviceCode": {
+                          "type": "string"
+                        },
+                        "deviceVerificationUri": {
+                          "type": "string"
+                        },
+                        "deviceCodeExpiresAt": {
+                          "type": "number"
+                        },
+                        "progressMessage": {
+                          "type": "string"
+                        },
+                        "profileId": {
+                          "type": "string"
+                        },
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "status"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Flow not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers/oauth/input/{flowId}": {
+      "post": {
+        "tags": [
+          "Providers"
+        ],
+        "summary": "Send user input for an OAuth flow",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "flowId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "value"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Input received",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Flow not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers/{name}/models": {
+      "get": {
+        "tags": [
+          "Providers"
+        ],
+        "summary": "List models for a specific provider",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Provider models",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "nullable": true
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers/{name}/api-key": {
+      "post": {
+        "tags": [
+          "Providers"
+        ],
+        "summary": "Save an API key for a provider",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "apiKey": {
+                    "type": "string"
+                  },
+                  "workDir": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "apiKey"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "API key saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown provider",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Providers"
+        ],
+        "summary": "Remove an API key for a provider",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "workDir": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "API key removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown provider",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers/{name}/disconnect": {
+      "delete": {
+        "tags": [
+          "Providers"
+        ],
+        "summary": "Disconnect a provider — removes API key and OAuth profiles",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "workDir": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Provider disconnected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown provider",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
                   ]
                 }
               }
@@ -881,10 +2625,10 @@
                   ]
                 }
               ],
-              "description": "If `true`, returns a slim projection: drops `outcomes`, `result.stdout/stderr` (keeps `result.assessment`), `expectations`, `metrics`, `maxRetries`, and truncates `description` to 200 chars. Default `false` — full record for backwards compat with the SDK and web UI. Bandwidth-sensitive clients (mobile) should opt in."
+              "description": "If `true`, returns a slim projection: drops `outcomes`, `result.stdout/stderr` (keeps `result.assessment`; a failed task gets `failure`: its reason in a line, `retryable`, `kind`), `expectations`, `metrics`, `maxRetries`, `runs` (replaced by `lastRun`: engine, model, computer of the latest run, and `cost`: the total of every run `{ usd, tokens, runs, partial? }`), and truncates `description` to 200 chars. Default `false` — full record for backwards compat with the SDK and web UI. Bandwidth-sensitive clients (mobile) should opt in."
             },
             "required": false,
-            "description": "If `true`, returns a slim projection: drops `outcomes`, `result.stdout/stderr` (keeps `result.assessment`), `expectations`, `metrics`, `maxRetries`, and truncates `description` to 200 chars. Default `false` — full record for backwards compat with the SDK and web UI. Bandwidth-sensitive clients (mobile) should opt in.",
+            "description": "If `true`, returns a slim projection: drops `outcomes`, `result.stdout/stderr` (keeps `result.assessment`; a failed task gets `failure`: its reason in a line, `retryable`, `kind`), `expectations`, `metrics`, `maxRetries`, `runs` (replaced by `lastRun`: engine, model, computer of the latest run, and `cost`: the total of every run `{ usd, tokens, runs, partial? }`), and truncates `description` to 200 chars. Default `false` — full record for backwards compat with the SDK and web UI. Bandwidth-sensitive clients (mobile) should opt in.",
             "name": "summary",
             "in": "query"
           },
@@ -904,10 +2648,10 @@
                   ]
                 }
               ],
-              "description": "Alias for `summary=true`. Returns the slim projection (id, title, status, phase, assignTo, group, missionId, dependsOn, retries, timestamps, optional slim assessment, descriptionPreview)."
+              "description": "Alias for `summary=true`. Returns the slim projection (id, title, status, phase, assignTo, group, missionId, dependsOn, retries, timestamps, optional slim assessment, descriptionPreview, lastRun, cost (every run's total), failure, toolScope)."
             },
             "required": false,
-            "description": "Alias for `summary=true`. Returns the slim projection (id, title, status, phase, assignTo, group, missionId, dependsOn, retries, timestamps, optional slim assessment, descriptionPreview).",
+            "description": "Alias for `summary=true`. Returns the slim projection (id, title, status, phase, assignTo, group, missionId, dependsOn, retries, timestamps, optional slim assessment, descriptionPreview, lastRun, cost (every run's total), failure, toolScope).",
             "name": "slim",
             "in": "query"
           },
@@ -1167,6 +2911,9 @@
                   },
                   "sideEffects": {
                     "type": "boolean"
+                  },
+                  "toolScope": {
+                    "$ref": "#/components/schemas/TaskToolScope"
                   }
                 },
                 "required": [
@@ -1201,7 +2948,7 @@
             }
           },
           "400": {
-            "description": "dependsOn names a task that does not exist",
+            "description": "dependsOn names a task that does not exist (UNKNOWN_DEPENDENCY), or toolScope asks for a connector or tool the agent does not have (INVALID_TOOL_SCOPE)",
             "content": {
               "application/json": {
                 "schema": {
@@ -1363,7 +3110,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Task details",
+            "description": "Task details. `runs`: where and with what each run executed (engine polpo / claude-code / codex, model, auth kind, computer, sandbox, egress, harness session, cost, budget, status, duration), newest last. `result.stderr` of a failed task is its labelled reason (a harness error says what to change); `result.retryable: false`: it was not retried automatically (model not enabled for the account, credentials refused). `failure` sums it up: `{ reason, retryable, kind }` (kind: model_access, auth, budget, killed, assessment, error). `cost`: what every run of the task cost in all (first run, retries, continuations, directions): `{ usd, harnessUsd, modelUsd, tokens, runs, lastRunUsd, byEngine, perRun, partial, recoveredUsd? }` — `partial: true` when older runs were dropped (a task keeps its latest 20) and could not be recovered from the usage records.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1469,6 +3216,16 @@
                   },
                   "sideEffects": {
                     "type": "boolean"
+                  },
+                  "toolScope": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/TaskToolScope"
+                      },
+                      {
+                        "nullable": true
+                      }
+                    ]
                   }
                 }
               }
@@ -1492,6 +3249,32 @@
                   },
                   "required": [
                     "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "toolScope asks for a connector or tool the agent does not have (INVALID_TOOL_SCOPE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
                   ]
                 }
               }
@@ -2168,17 +3951,17 @@
                   ]
                 }
               ],
-              "description": "Alias for `summary=true`. Returns a slim projection (id, name, status, schedule, deadline, endDate, qualityThreshold, timestamps, taskCount, promptPreview)."
+              "description": "Alias for `summary=true`. Returns a slim projection (id, name, status, schedule, deadline, endDate, qualityThreshold, budgetUsd, pauseReason, cost, timestamps, taskCount, promptPreview)."
             },
             "required": false,
-            "description": "Alias for `summary=true`. Returns a slim projection (id, name, status, schedule, deadline, endDate, qualityThreshold, timestamps, taskCount, promptPreview).",
+            "description": "Alias for `summary=true`. Returns a slim projection (id, name, status, schedule, deadline, endDate, qualityThreshold, budgetUsd, pauseReason, cost, timestamps, taskCount, promptPreview).",
             "name": "slim",
             "in": "query"
           }
         ],
         "responses": {
           "200": {
-            "description": "List of missions",
+            "description": "List of missions, each with a compact `cost` (usd, tokens, runs, partial, budgetUsd, overBudget)",
             "content": {
               "application/json": {
                 "schema": {
@@ -2331,6 +4114,12 @@
                     "required": [
                       "rules"
                     ]
+                  },
+                  "budgetUsd": {
+                    "type": "number",
+                    "minimum": 0,
+                    "exclusiveMinimum": true,
+                    "description": "Spending limit in USD for the whole mission (all its tasks' runs). When reached, no new task starts (running ones finish) and the mission pauses until the budget is raised or cleared."
                   }
                 },
                 "required": [
@@ -2357,6 +4146,32 @@
                   },
                   "required": [
                     "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A task's toolScope asks for a connector or tool its agent does not have (INVALID_TOOL_SCOPE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
                   ]
                 }
               }
@@ -2488,7 +4303,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Mission details",
+            "description": "Mission details, with `cost`: what its tasks' recorded runs cost (usd, tokens, runs, harnessUsd vs modelUsd, byAgent, byEngine, partial when older runs were dropped) against `budgetUsd` (remainingUsd, budgetUsed, overBudget), or agentBudgetCapUsd when it has no budget",
             "content": {
               "application/json": {
                 "schema": {
@@ -2581,6 +4396,13 @@
                     "type": "string",
                     "nullable": true,
                     "format": "date-time"
+                  },
+                  "budgetUsd": {
+                    "type": "number",
+                    "nullable": true,
+                    "minimum": 0,
+                    "exclusiveMinimum": true,
+                    "description": "Spending limit in USD for the whole mission; null clears it. Raising or clearing it lets a mission paused by its budget go on."
                   }
                 }
               }
@@ -2604,6 +4426,32 @@
                   },
                   "required": [
                     "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A task's toolScope asks for a connector or tool its agent does not have (INVALID_TOOL_SCOPE)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
                   ]
                 }
               }
@@ -3018,6 +4866,9 @@
                   },
                   "sideEffects": {
                     "type": "boolean"
+                  },
+                  "toolScope": {
+                    "$ref": "#/components/schemas/TaskToolScope"
                   }
                 },
                 "required": [
@@ -3183,6 +5034,16 @@
                   },
                   "sideEffects": {
                     "type": "boolean"
+                  },
+                  "toolScope": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/TaskToolScope"
+                      },
+                      {
+                        "nullable": true
+                      }
+                    ]
                   }
                 }
               }
@@ -5175,11 +7036,114 @@
                     "type": "string",
                     "pattern": "^([a-z0-9][a-z0-9-]{0,39})?$"
                   },
+                  "engine": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "polpo"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "harness": {
+                            "type": "string",
+                            "enum": [
+                              "claude-code",
+                              "codex"
+                            ]
+                          },
+                          "model": {
+                            "type": "string",
+                            "maxLength": 200
+                          },
+                          "permissionMode": {
+                            "type": "string",
+                            "enum": [
+                              "allow-all",
+                              "allow-edits",
+                              "allow-reads"
+                            ]
+                          },
+                          "effort": {
+                            "type": "string",
+                            "enum": [
+                              "low",
+                              "medium",
+                              "high",
+                              "xhigh",
+                              "max"
+                            ]
+                          },
+                          "maxBudgetUsd": {
+                            "type": "number",
+                            "minimum": 0,
+                            "exclusiveMinimum": true,
+                            "maximum": 10000
+                          },
+                          "credentialRef": {
+                            "type": "object",
+                            "properties": {
+                              "owner": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "service": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": [
+                              "owner",
+                              "service"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "harness"
+                        ]
+                      },
+                      {
+                        "nullable": true
+                      }
+                    ]
+                  },
                   "sandbox": {
                     "nullable": true
                   },
                   "compaction": {
                     "nullable": true
+                  },
+                  "progressiveTools": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "always",
+                      "never"
+                    ]
+                  },
+                  "connectorTools": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "*"
+                          ]
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "maxItems": 1000
+                        }
+                      ]
+                    }
                   },
                   "voiceReplies": {
                     "type": "string",
@@ -5560,6 +7524,39 @@
                   "compaction": {
                     "nullable": true
                   },
+                  "progressiveTools": {
+                    "type": "string",
+                    "nullable": true,
+                    "enum": [
+                      "auto",
+                      "always",
+                      "never",
+                      null
+                    ]
+                  },
+                  "connectorTools": {
+                    "type": "object",
+                    "nullable": true,
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "*"
+                          ]
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "maxItems": 1000
+                        }
+                      ]
+                    }
+                  },
                   "voiceReplies": {
                     "type": "string",
                     "enum": [
@@ -5729,6 +7726,79 @@
                   "defaultComputer": {
                     "type": "string",
                     "pattern": "^([a-z0-9][a-z0-9-]{0,39})?$"
+                  },
+                  "engine": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "polpo"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "harness": {
+                            "type": "string",
+                            "enum": [
+                              "claude-code",
+                              "codex"
+                            ]
+                          },
+                          "model": {
+                            "type": "string",
+                            "maxLength": 200
+                          },
+                          "permissionMode": {
+                            "type": "string",
+                            "enum": [
+                              "allow-all",
+                              "allow-edits",
+                              "allow-reads"
+                            ]
+                          },
+                          "effort": {
+                            "type": "string",
+                            "enum": [
+                              "low",
+                              "medium",
+                              "high",
+                              "xhigh",
+                              "max"
+                            ]
+                          },
+                          "maxBudgetUsd": {
+                            "type": "number",
+                            "minimum": 0,
+                            "exclusiveMinimum": true,
+                            "maximum": 10000
+                          },
+                          "credentialRef": {
+                            "type": "object",
+                            "properties": {
+                              "owner": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "service": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": [
+                              "owner",
+                              "service"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "harness"
+                        ]
+                      },
+                      {
+                        "nullable": true
+                      }
+                    ]
                   },
                   "emailAllowedDomains": {
                     "type": "array",
@@ -9663,6 +11733,42 @@
                   "compaction": {
                     "nullable": true
                   },
+                  "tools": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "progressiveThreshold": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "progressive": {
+                        "type": "string",
+                        "enum": [
+                          "auto",
+                          "always",
+                          "never"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "dependencyResults": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "perTaskChars": {
+                        "type": "integer",
+                        "minimum": 240,
+                        "maximum": 200000
+                      },
+                      "totalChars": {
+                        "type": "integer",
+                        "minimum": 480,
+                        "maximum": 1000000
+                      }
+                    },
+                    "additionalProperties": false
+                  },
                   "orchestratorModel": {
                     "anyOf": [
                       {
@@ -9683,6 +11789,12 @@
                         }
                       }
                     ]
+                  },
+                  "orchestratorName": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 40,
+                    "pattern": "^[^\\r\\n]*$"
                   },
                   "imageModel": {
                     "type": "string",
@@ -9730,7 +11842,42 @@
                             ]
                           }
                         ]
+                      },
+                      "logoDarkUrl": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "format": "uri"
+                          },
+                          {
+                            "type": "string",
+                            "enum": [
+                              "/api/v1/config/branding/logo-dark"
+                            ]
+                          },
+                          {
+                            "type": "string",
+                            "enum": [
+                              ""
+                            ]
+                          }
+                        ]
+                      },
+                      "logoFrame": {
+                        "type": "string",
+                        "enum": [
+                          "box",
+                          "none",
+                          ""
+                        ]
                       }
+                    }
+                  },
+                  "appearance": {
+                    "type": "object",
+                    "nullable": true,
+                    "additionalProperties": {
+                      "nullable": true
                     }
                   },
                   "egressProxies": {
@@ -9772,6 +11919,304 @@
                     "required": [
                       "authKey"
                     ]
+                  },
+                  "harnesses": {
+                    "type": "object",
+                    "nullable": true,
+                    "additionalProperties": {
+                      "nullable": true
+                    }
+                  },
+                  "maxRetries": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 20
+                  },
+                  "logLevel": {
+                    "type": "string",
+                    "enum": [
+                      "quiet",
+                      "normal",
+                      "verbose"
+                    ]
+                  },
+                  "maxConcurrency": {
+                    "type": "integer",
+                    "nullable": true,
+                    "minimum": 1,
+                    "maximum": 1000
+                  },
+                  "taskTimeout": {
+                    "type": "integer",
+                    "nullable": true,
+                    "minimum": 1000
+                  },
+                  "staleThreshold": {
+                    "type": "integer",
+                    "nullable": true,
+                    "minimum": 1000
+                  },
+                  "maxFixAttempts": {
+                    "type": "integer",
+                    "nullable": true,
+                    "minimum": 0,
+                    "maximum": 20
+                  },
+                  "maxQuestionRounds": {
+                    "type": "integer",
+                    "nullable": true,
+                    "minimum": 0,
+                    "maximum": 20
+                  },
+                  "maxResolutionAttempts": {
+                    "type": "integer",
+                    "nullable": true,
+                    "minimum": 0,
+                    "maximum": 20
+                  },
+                  "maxAssessmentRetries": {
+                    "type": "integer",
+                    "nullable": true,
+                    "minimum": 0,
+                    "maximum": 20
+                  },
+                  "defaultQualityThreshold": {
+                    "type": "number",
+                    "nullable": true,
+                    "minimum": 1,
+                    "maximum": 5
+                  },
+                  "autoCorrectExpectations": {
+                    "type": "boolean",
+                    "nullable": true
+                  },
+                  "enableScheduler": {
+                    "type": "boolean",
+                    "nullable": true
+                  },
+                  "enableVolatileTeams": {
+                    "type": "boolean",
+                    "nullable": true
+                  },
+                  "volatileCleanup": {
+                    "type": "string",
+                    "nullable": true,
+                    "enum": [
+                      "on_complete",
+                      "manual",
+                      null
+                    ]
+                  },
+                  "logRetentionDays": {
+                    "type": "integer",
+                    "nullable": true,
+                    "minimum": 0,
+                    "maximum": 3650
+                  },
+                  "emailAllowedDomains": {
+                    "type": "array",
+                    "nullable": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 253,
+                      "pattern": "^[A-Za-z0-9.*-]+$"
+                    }
+                  },
+                  "voiceReplies": {
+                    "type": "string",
+                    "nullable": true,
+                    "enum": [
+                      "off",
+                      "voice",
+                      "always",
+                      null
+                    ]
+                  },
+                  "defaultRetryPolicy": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "escalateAfter": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 20
+                      },
+                      "fallbackAgent": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "escalateModel": {
+                        "type": "string",
+                        "minLength": 3
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "connectors": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "allowPrivateNetwork": {
+                        "type": "boolean"
+                      },
+                      "toolTimeoutMs": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 3600000
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "mcp": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "toolsets": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "keys": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 80
+                            },
+                            "keyRef": {
+                              "type": "object",
+                              "properties": {
+                                "owner": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "service": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": [
+                                "owner",
+                                "service"
+                              ]
+                            },
+                            "scopes": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "keyRef"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "escalationPolicy": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120
+                      },
+                      "levels": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "level": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "handler": {
+                              "type": "string",
+                              "enum": [
+                                "agent",
+                                "orchestrator",
+                                "human"
+                              ]
+                            },
+                            "target": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "timeoutMs": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "notifyChannels": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            }
+                          },
+                          "required": [
+                            "level",
+                            "handler"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "minItems": 1
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "levels"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "sla": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "warningThreshold": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      "checkIntervalMs": {
+                        "type": "integer",
+                        "minimum": 1000
+                      },
+                      "warningChannels": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "violationChannels": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "violationAction": {
+                        "type": "string",
+                        "enum": [
+                          "notify",
+                          "fail"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
                   }
                 }
               }
@@ -10503,6 +12948,28 @@
               }
             }
           },
+          "400": {
+            "description": "The id in the body does not match the URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
           "404": {
             "description": "No configuration loaded",
             "content": {
@@ -10765,6 +13232,28 @@
               }
             }
           },
+          "400": {
+            "description": "The id in the body does not match the URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
           "404": {
             "description": "No configuration loaded",
             "content": {
@@ -10901,8 +13390,20 @@
         "tags": [
           "Config"
         ],
-        "summary": "Upload the managed instance logo",
+        "summary": "Upload the managed instance logo (?variant=dark: the logo for dark mode)",
         "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "light",
+                "dark"
+              ]
+            },
+            "required": false,
+            "name": "variant",
+            "in": "query"
+          },
           {
             "schema": {
               "type": "string"
@@ -11050,8 +13551,20 @@
         "tags": [
           "Config"
         ],
-        "summary": "Remove the managed instance logo",
+        "summary": "Remove the managed instance logo (?variant=dark: the logo for dark mode)",
         "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "light",
+                "dark"
+              ]
+            },
+            "required": false,
+            "name": "variant",
+            "in": "query"
+          },
           {
             "schema": {
               "type": "string"
@@ -15424,6 +17937,147 @@
                       },
                       "required": [
                         "entries"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/preferences": {
+      "get": {
+        "tags": [
+          "Preferences"
+        ],
+        "summary": "Get the signed-in member's dashboard preferences",
+        "responses": {
+          "200": {
+            "description": "Preferences",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "member": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "preferences": {
+                          "$ref": "#/components/schemas/MemberPreferences"
+                        }
+                      },
+                      "required": [
+                        "member",
+                        "preferences"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Preferences"
+        ],
+        "summary": "Update the signed-in member's dashboard preferences",
+        "description": "Merges the given fields into the stored preferences (per section, field by field).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "chatNavigation": {
+                    "type": "object",
+                    "properties": {
+                      "lastSessionId": {
+                        "type": "string",
+                        "nullable": true,
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "lastRoomId": {
+                        "type": "string",
+                        "nullable": true,
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "lastAgent": {
+                        "type": "string",
+                        "nullable": true,
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "openTabs": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "maxItems": 50
+                      },
+                      "sidePanelOpen": {
+                        "type": "boolean"
+                      },
+                      "threadsOpen": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated preferences",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "member": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "preferences": {
+                          "$ref": "#/components/schemas/MemberPreferences"
+                        }
+                      },
+                      "required": [
+                        "member",
+                        "preferences"
                       ]
                     }
                   },

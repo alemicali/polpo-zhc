@@ -38,7 +38,7 @@ function MemoryStats({ content }: { content: string }) {
   const chars = content.length;
 
   return (
-    <div className="flex items-center gap-3 text-[10px] text-muted-foreground font-mono">
+    <div className="flex items-center gap-3 text-micro text-muted-foreground font-mono">
       <span>{lines} lines</span>
       <span>&middot;</span>
       <span>{words} words</span>
@@ -220,10 +220,10 @@ function MemoryEditorUI({
             <CardTitle className="text-sm">{title}</CardTitle>
             <div className="flex items-center gap-2 mt-0.5">
               {!exists && (
-                <Badge variant="secondary" className="text-[10px]">New</Badge>
+                <Badge variant="secondary" className="text-micro">New</Badge>
               )}
               {dirty && (
-                <Badge variant="outline" className="text-[10px] text-amber-400 border-amber-500/30">
+                <Badge variant="outline" className="text-micro text-warning border-warning/30">
                   Unsaved changes
                 </Badge>
               )}
@@ -234,10 +234,10 @@ function MemoryEditorUI({
         <div className="flex items-center gap-2">
           <Tabs value={memoryView} onValueChange={(v) => onViewChange(v as "edit" | "preview")}>
             <TabsList className="h-8">
-              <TabsTrigger value="edit" className="text-xs px-2.5 h-6 gap-1">
+              <TabsTrigger value="edit" className="text-small">
                 <Pencil className="h-3 w-3" /> Edit
               </TabsTrigger>
-              <TabsTrigger value="preview" className="text-xs px-2.5 h-6 gap-1">
+              <TabsTrigger value="preview" className="text-small">
                 <Eye className="h-3 w-3" /> Preview
               </TabsTrigger>
             </TabsList>
@@ -263,7 +263,7 @@ function MemoryEditorUI({
       <CardContent className="flex-1 overflow-hidden">
         {memoryView === "edit" ? (
           <Textarea
-            className="h-full min-h-0 font-mono text-sm resize-none bg-input/50 border-border/40 focus:border-primary/50"
+            className="h-full min-h-0 font-mono text-sm resize-none"
             placeholder={placeholder}
             value={content}
             onChange={(e) => onContentChange(e.target.value)}
@@ -298,7 +298,7 @@ export function MemoryPage() {
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      <Card className="flex flex-col h-full overflow-hidden bg-card/80 backdrop-blur-sm border-border/40">
+      <Card className="flex flex-col h-full overflow-hidden">
         {/* Scope selector */}
         <div className="flex items-center gap-3 px-6 pt-4 pb-0 shrink-0">
           <span className="text-xs text-muted-foreground font-medium">Scope:</span>

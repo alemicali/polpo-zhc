@@ -20,8 +20,8 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import {
-  connectorGrants, DEFAULT_CONNECTOR_TOOL_TIMEOUT_MS,
-  type ConnectorChangedEvent, type ConnectorConfig, type ConnectorStatus, type PolpoSettings, type VaultStore,
+  connectorGrants, connectorToolSelected, DEFAULT_CONNECTOR_TOOL_TIMEOUT_MS,
+  type AgentConnectorTools, type ConnectorChangedEvent, type ConnectorConfig, type ConnectorStatus, type PolpoSettings, type VaultStore,
 } from "@polpo-ai/core";
 import { safeEnv } from "../tools/safe-env.js";
 import { allowPrivateNetwork, checkConnectorUrl, type ResolveHost } from "./net.js";
@@ -29,8 +29,11 @@ import { OAuthHttpError } from "./oauth-errors.js";
 import { VaultOAuthProvider, type PreregisteredClient } from "./oauth-provider.js";
 import { ConnectorSecrets, OAUTH_KEYS, resolveSecretRefs, SECRET_KEYS } from "./secrets.js";
 import { ConnectorStore } from "./store.js";
+import { ConnectorIcons } from "./icon-store.js";
+import type { IconFetcher } from "./icons.js";
 import { bridgeMcpTool, connectorToolAllowed, type McpToolInfo } from "./tools.js";
 import { clientMetadataUrlFor } from "./paths.js";
+import { accountFromIdToken, connectorLabel } from "./view.js";
 
 const VERSION = "1.0.0";
 const CONNECT_TIMEOUT_MS = 20_000;
@@ -49,6 +52,10 @@ export interface ConnectorManagerOptions {
   listTtlMs?: number;
   /** stdio connectors' working directory (default: the .polpo dir). */
   cwd?: string;
+  /** Look custom connectors' icons up on create / connect / list (the server; off in task runners). */
+  autoDiscoverIcons?: boolean;
+  /** Tests: the network for icon discovery. */
+  iconFetcher?: IconFetcher;
 }
 
 interface Connection {
@@ -76,6 +83,15 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** A log line for a started authorization: where it goes and with which client (no state, PKCE or secrets). */
+function describeAuthorization(url: URL, clientMetadataUrl: string | undefined, preregistered: boolean): string {
+  const clientId = url.searchParams.get("client_id") ?? "";
+  const client = preregistered ? "pre-registered client"
+    : clientMetadataUrl && clientId === clientMetadataUrl ? `client_id ${clientId} (metadata document)`
+    : "dynamically registered client";
+  return `authorize at ${url.origin}${url.pathname}, ${client}, redirect_uri ${url.searchParams.get("redirect_uri") ?? "(none)"}`;
+}
+
 function safeEqual(a: string, b: string): boolean {
   const x = Buffer.from(a);
   const y = Buffer.from(b);
@@ -90,6 +106,8 @@ function isSessionGone(err: unknown): boolean {
 
 export class ConnectorManager {
   readonly store: ConnectorStore;
+  /** Custom connectors' icons (discovered or set by the person). */
+  readonly icons: ConnectorIcons;
   secrets: ConnectorSecrets;
   private readonly connections = new Map<string, Connection>();
   private readonly connecting = new Map<string, Promise<Connection>>();
@@ -97,6 +115,15 @@ export class ConnectorManager {
   constructor(private options: ConnectorManagerOptions) {
     this.store = new ConnectorStore(options.polpoDir);
     this.secrets = new ConnectorSecrets(options.vaultStore);
+    this.icons = new ConnectorIcons({
+      polpoDir: options.polpoDir,
+      store: this.store,
+      policy: () => ({ allowPrivateNetwork: allowPrivateNetwork(this.options.settings?.()), resolve: this.options.resolveHost }),
+      autoDiscover: () => !!this.options.autoDiscoverIcons,
+      ...(options.iconFetcher ? { fetcher: options.iconFetcher } : {}),
+      onChange: (id) => this.announce(id, "updated"),
+      log: (m) => this.log(`icon ${m}`),
+    });
   }
 
   /** Swap the dependencies (the vault store may appear after setup). */
@@ -106,7 +133,7 @@ export class ConnectorManager {
   }
 
   private log(message: string): void {
-    (this.options.log ?? ((m: string) => console.log(m)))(`[connectors] ${message}`);
+    (this.options.log ?? ((m: string) => console.log(m)))(`[polpo/connectors] ${message}`);
   }
 
   private urlPolicy() {
@@ -215,6 +242,8 @@ export class ConnectorManager {
       try {
         await client.connect(transport, { timeout: CONNECT_TIMEOUT_MS });
         const connection: Connection = { client, transport, signature: this.signature(connector), provider };
+        // the server's icons (MCP serverInfo.icons): looked at in the background, never blocking the connection
+        try { this.icons.noteConnected(connector, client.getServerVersion()); } catch { /* icons never break a connection */ }
         client.setNotificationHandler(ToolListChangedNotificationSchema, async () => {
           connection.tools = undefined;
         });
@@ -372,10 +401,11 @@ export class ConnectorManager {
 
   /**
    * The tools of the connectors granted to `agent` (or to Polpo when undefined), as AgentTools,
-   * filtered by the connector's tool policy and, for agents, by allowedTools. A connector that cannot
+   * filtered by the connector's tool policy and, for agents, by their per-connector selection
+   * (`connectorTools`) and allowedTools: the intersection of the four. A connector that cannot
    * connect is skipped with a note; it never breaks the caller.
    */
-  async toolsFor(agent: string | undefined, allowedTools?: string[]): Promise<ConnectorToolsResult> {
+  async toolsFor(agent: string | undefined, allowedTools?: string[], connectorTools?: AgentConnectorTools): Promise<ConnectorToolsResult> {
     const connectors = this.store.list().filter((c) => connectorGrants(c, agent));
     const notes: string[] = [];
     const lists = await Promise.all(connectors.map(async (connector) => {
@@ -399,7 +429,8 @@ export class ConnectorManager {
         const policy = connector.toolPolicy?.[tool.name] ?? "allow";
         if (policy === "off") continue;
         // TODO(connectors): "ask" should pause for the person's approval in chat; treated as "allow" until an approval hook exists.
-        const bridged = bridgeMcpTool(connector.id, connector.name, tool, (name, args, signal) => this.callTool(connector.id, name, args, signal));
+        const bridged = bridgeMcpTool(connector.id, connectorLabel(connector), tool, (name, args, signal) => this.callTool(connector.id, name, args, signal));
+        if (agent !== undefined && !connectorToolSelected(connectorTools, connector.id, tool.name)) continue;
         if (agent !== undefined && !connectorToolAllowed(allowedTools, bridged.name)) continue;
         if (seen.has(bridged.name)) continue;
         seen.add(bridged.name);
@@ -425,18 +456,44 @@ export class ConnectorManager {
         ...(metadataUrl ? { clientMetadataUrl: metadataUrl } : {}),
       }).init();
       if (connector.status === "needs_reauth") await provider.invalidateCredentials("tokens");
+      // a client registered for another public URL (e.g. before POLPO_PUBLIC_URL was set) would fail at the provider
+      if (!(await provider.tokens())) {
+        const stale = await provider.dropStaleClient();
+        if (stale) this.log(`oauth start ${id}: dropped the stored OAuth client (${stale}); registering again`);
+      }
       const scopes = connector.auth.oauth?.scopes;
       const result = await auth(provider, { serverUrl: url, fetchFn: provider.fetch, ...(scopes?.length ? { scope: scopes.join(" ") } : {}) });
       if (result === "AUTHORIZED") {
+        this.log(`oauth start ${id}: already authorized (stored tokens)`);
         await this.close(id);
         return { authorized: true };
       }
       if (!provider.authorizationUrl) throw new ConnectorError("The server did not start an authorization", "error");
       if (connector.lastError) this.setStatus(id, "needs_auth");
+      this.log(`oauth start ${id}: ${describeAuthorization(provider.authorizationUrl, provider.clientMetadataUrl, !!provider.preregisteredClient)}`);
       return { authorizationUrl: provider.authorizationUrl.toString() };
     } catch (err) {
-      throw this.recordFailure(id, this.oauthFailure(connector, err, provider) ?? err);
+      const failure = this.recordFailure(id, this.oauthFailure(connector, err, provider) ?? err);
+      this.log(`oauth start ${id} failed (redirect_uri ${redirectUrl}): ${errorMessage(failure)}`);
+      throw failure;
     }
+  }
+
+  /**
+   * The provider sent the browser back with an error (access_denied, invalid_client…) instead of a
+   * code: drop the pending authorization and keep the reason as the connector's lastError.
+   */
+  async abortOAuth(state: string, error: string, description?: string): Promise<ConnectorConfig | undefined> {
+    const reason = [error, description].filter(Boolean).join(": ");
+    const pending = await this.findPendingState(state);
+    if (!pending) {
+      this.log(`oauth callback (unknown or expired state): provider returned ${reason}`);
+      return undefined;
+    }
+    await this.secrets.unset(pending.id, [SECRET_KEYS.state, SECRET_KEYS.stateExpires, SECRET_KEYS.verifier]);
+    this.setStatus(pending.id, "error", { error: `Authorization was not completed (${reason}).` });
+    this.log(`oauth callback ${pending.id}: provider returned ${reason}`);
+    return this.store.get(pending.id) ?? pending;
   }
 
   /** The connector waiting for this state (unexpired), if any. */
@@ -458,7 +515,10 @@ export class ConnectorManager {
   /** The browser came back: exchange the code (state is single use), store the tokens, connect. */
   async finishOAuth(state: string, code: string): Promise<{ connector: ConnectorConfig; toolCount?: number; error?: string }> {
     const connector = await this.findPendingState(state);
-    if (!connector) throw new ConnectorError("Unknown or expired authorization: start connecting again", "error");
+    if (!connector) {
+      this.log("oauth callback: unknown or expired state");
+      throw new ConnectorError("Unknown or expired authorization: start connecting again", "error");
+    }
     // single use: the state goes before anything else
     await this.secrets.unset(connector.id, [SECRET_KEYS.state, SECRET_KEYS.stateExpires]);
     let provider: VaultOAuthProvider | undefined;
@@ -468,13 +528,19 @@ export class ConnectorManager {
       }).init();
       await auth(provider, { serverUrl: connector.transport.url!, authorizationCode: code, fetchFn: provider.fetch });
     } catch (err) {
-      throw this.recordFailure(connector.id, this.oauthFailure(connector, err, provider) ??
+      const failure = this.recordFailure(connector.id, this.oauthFailure(connector, err, provider) ??
         new ConnectorError(`Authorization failed: ${errorMessage(err)}`, "error"));
+      this.log(`oauth callback ${connector.id}: code exchange failed: ${errorMessage(failure)}`);
+      throw failure;
     } finally {
       await this.secrets.unset(connector.id, [SECRET_KEYS.verifier]);
     }
+    // which account signed in, when the token response says so at no extra cost (an OpenID id_token)
+    const account = accountFromIdToken((await provider?.tokens().catch(() => undefined))?.id_token);
+    if (account && account !== connector.account) this.store.update(connector.id, { account });
     await this.close(connector.id);
     const result = await this.test(connector.id);
+    this.log(`oauth callback ${connector.id}: authorized${result.error ? `, but the first connection failed: ${result.error}` : result.tools ? `, ${result.tools.length} tools` : ""}`);
     return { connector: this.store.get(connector.id) ?? connector, ...(result.tools ? { toolCount: result.tools.length } : {}), ...(result.error ? { error: result.error } : {}) };
   }
 
@@ -486,6 +552,8 @@ export class ConnectorManager {
     if (connector.auth.type === "oauth") {
       await this.revoke(connector).catch((err) => this.log(`${id}: revoke failed: ${errorMessage(err)}`));
       await this.secrets.unset(id, OAUTH_KEYS.filter((k) => k !== SECRET_KEYS.clientInfo && k !== SECRET_KEYS.discovery));
+      // the next sign-in may be another account
+      if (connector.account) this.store.update(id, { account: undefined });
       this.setStatus(id, "needs_auth", { action: "updated" });
     } else {
       this.setStatus(id, "disconnected", { action: "updated" });
@@ -519,6 +587,7 @@ export class ConnectorManager {
     if (connector.auth.type === "oauth") await this.revoke(connector).catch(() => undefined);
     await this.secrets.remove(id);
     this.store.remove(id);
+    this.icons.remove(id);
     this.options.emit?.({ id, status: "disconnected", action: "deleted" });
     return true;
   }

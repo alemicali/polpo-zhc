@@ -49,13 +49,13 @@ export function BrowserTab({ workspaceId, defaultUrl }: { workspaceId?: string; 
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={initial}
-          className="h-6 min-w-0 flex-1 border-0 bg-muted px-2 font-mono text-[11px] text-foreground shadow-none focus-visible:ring-1"
+          className="h-6 min-w-0 flex-1 border-0 bg-muted px-2 font-mono text-caption text-foreground shadow-none focus-visible:ring-1"
         />
         <Button
           type="submit"
           variant="ghost"
           size="sm"
-          className="h-6 rounded px-2 text-[10px] font-medium"
+          className="h-6 rounded px-2 text-micro font-medium"
         >
           Go
         </Button>
@@ -94,7 +94,7 @@ export function BrowserTab({ workspaceId, defaultUrl }: { workspaceId?: string; 
         <div className="flex h-full items-center justify-center p-6">
           <div className="text-center">
             <p className="text-xs font-medium text-foreground">Browser preview</p>
-            <p className="mt-1 text-[11px] text-muted-foreground">Enter a URL above and press Enter to load it.</p>
+            <p className="mt-1 text-caption text-muted-foreground">Enter a URL above and press Enter to load it.</p>
           </div>
         </div>
       )}

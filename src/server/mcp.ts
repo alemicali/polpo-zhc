@@ -16,9 +16,11 @@ import {
   type McpDeps, type McpPrincipal, type PolpoScope, type ToolScope, type ToolsetName,
 } from "./mcp-server/kit.js";
 import { registerConversationTools } from "./mcp-server/conversation.js";
-import { registerAgentTools, registerApprovalTools, registerArtifactTools, registerDataTools, registerFileTools } from "./mcp-server/core-tools.js";
+import { registerAgentTools, registerApprovalTools, registerArtifactTools, registerFileTools } from "./mcp-server/core-tools.js";
+import { registerDataTools } from "./mcp-server/data.js";
 import { registerTaskTools } from "./mcp-server/tasks.js";
 import { registerMissionTools } from "./mcp-server/missions.js";
+import { registerWorkCards } from "./mcp-server/cards.js";
 import { registerAdminTools } from "./mcp-server/admin.js";
 import { registerConfigTools } from "./mcp-server/config.js";
 import { registerTeamTools } from "./mcp-server/team.js";
@@ -31,6 +33,10 @@ import { registerConnectorTools } from "./mcp-server/connectors.js";
 import { registerChannelTools, registerVaultTools } from "./mcp-server/channels.js";
 import { registerAppTools } from "./mcp-server/apps.js";
 import { registerComputerTools } from "./mcp-server/computers.js";
+import { registerHarnessTools } from "./mcp-server/harnesses.js";
+import { registerSettingsTools } from "./mcp-server/settings.js";
+import { registerChannelSetupTools } from "./mcp-server/channel-setup.js";
+import { registerSetupTools } from "./mcp-server/setup.js";
 
 export type { ApiResponse, McpDeps, McpPrincipal, PolpoScope, ToolScope, ToolsetName } from "./mcp-server/kit.js";
 export {
@@ -38,6 +44,7 @@ export {
   SCOPES, ALL_SCOPES, DEFAULT_SCOPES, AREA_SCOPES, UMBRELLA_SCOPE, normalizeScopes,
 } from "./mcp-server/kit.js";
 export { MAX_INLINE_FILE_BYTES, AGENT_CARD_URI } from "./mcp-server/core-tools.js";
+export { WORK_CARD_URI } from "./mcp-server/cards.js";
 export { matchesOperationPath, isBlockedGet } from "./mcp-server/admin.js";
 
 const INSTRUCTIONS = "Polpo orchestrates a team of AI agents (tasks, missions, artifacts, data, approvals, files, rooms, chats, "
@@ -45,7 +52,9 @@ const INSTRUCTIONS = "Polpo orchestrates a team of AI agents (tasks, missions, a
   + "like the dashboard. For anything open-ended, polpo_ask delegates to Polpo itself, "
   + "which can do everything the instance can; when a turn returns status needs_input (a question or a preview to approve), "
   + "show it to the person and reply with polpo_answer. Long work runs in the background: create it, then follow it with the "
-  + "wait and get tools. Destructive actions need confirm: true, given only after the person agreed.";
+  + "wait and get tools. Destructive actions need confirm: true, given only after the person agreed. "
+  + "Secrets (tokens, API keys) never pass through here: when a tool returns setup_url and setup_id, show the person the link "
+  + "(next_step says what to paste), call polpo_setup_wait with the setup_id right away, then verify with the area's test tool and continue.";
 
 /** The MCP server for one request (stateless). `catalog` collects every tool of the enabled toolsets with its scope. */
 export function createPolpoMcpServer(deps: McpDeps, catalog?: ToolScope[]): McpServer {
@@ -59,11 +68,15 @@ export function createPolpoMcpServer(deps: McpDeps, catalog?: ToolScope[]): McpS
   registerApprovalTools(tool, deps);
   registerTaskTools(tool, deps);
   registerMissionTools(tool, deps);
+  registerWorkCards(server, deps, enabled, principal, catalog);
   registerArtifactTools(tool, deps);
   registerDataTools(tool, deps);
   registerFileTools(tool, deps);
   registerTeamTools(tool, deps);
   registerConfigTools(tool, deps);
+  registerSettingsTools(tool, deps);
+  registerChannelSetupTools(tool, deps);
+  registerSetupTools(tool, deps);
   registerRoomTools(tool, deps);
   registerChatTools(tool, deps);
   registerMemoryTools(tool, deps);
@@ -77,6 +90,7 @@ export function createPolpoMcpServer(deps: McpDeps, catalog?: ToolScope[]): McpS
   registerVaultTools(tool, deps);
   registerAppTools(tool, deps);
   registerComputerTools(tool, deps);
+  registerHarnessTools(tool, deps);
   registerAdminTools(tool, deps);
   return server;
 }

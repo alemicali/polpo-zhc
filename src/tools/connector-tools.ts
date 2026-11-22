@@ -1,17 +1,19 @@
 /**
- * Polpo's connector management tools: list the connectors (status, tools, who can use them), add
- * one from the catalog or a custom URL (OAuth: returns the link the person opens), change who may
- * use it, connect it again, remove it (only after the person confirms). Local (stdio) connectors
+ * Polpo's connector management tools: list the connectors (status, tools, who can use them), change
+ * who may use one, connect it again, remove it (only after the person confirms). Adding one is
+ * connector_add, the MCP server's own tool run in process (src/llm/polpo-mcp-bridge.ts): secrets
+ * (tokens, OAuth app secrets) never pass through the chat, the person enters them from a setup link. Local (stdio) connectors
  * are not available here: they run a command on the server, so only an admin adds them via the API.
  */
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { Tool } from "@earendil-works/pi-ai";
 import type { ConnectorConfig } from "@polpo-ai/core";
-import { CONNECTOR_CATALOG, catalogEntry } from "../mcp/catalog.js";
+import { CONNECTOR_CATALOG } from "../mcp/catalog.js";
 import type { ConnectorManager } from "../mcp/manager.js";
 import { allowPrivateNetwork } from "../mcp/net.js";
-import { applyConnectorPatch, buildConnector, type ConnectorInput } from "../mcp/validate.js";
+import { applyConnectorPatch } from "../mcp/validate.js";
 import { mcpToolName } from "../mcp/tools.js";
+import { connectorLabel } from "../mcp/view.js";
 
 const Agents = Type.Union([Type.Array(Type.String()), Type.Literal("*")], { description: "Agent names, or \"*\" for every agent" });
 
@@ -19,28 +21,12 @@ export const CONNECTOR_TOOLS: Tool[] = [
   {
     name: "connectors_list",
     description: "List the connectors (external apps over MCP: Linear, Notion, Gmail, GitHub, custom servers): status (connected, needs (re)authorization, error), "
-      + "tool count, who may use them (agents, Polpo). With catalog: true, also the catalog of apps that can be added with connector_add.",
+      + "tool count, who may use them (agents, Polpo). Several accounts of one app have their own ids (gmail, gmail-2…) and names. "
+      + "With catalog: true, also the catalog of apps that can be added with connector_add (again, with a name, for another account).",
     parameters: Type.Object({
       catalog: Type.Optional(Type.Boolean({ description: "Also list the catalog of well-known apps (ids and names)" })),
       search: Type.Optional(Type.String({ description: "Search the catalog (e.g. \"crm\", \"google\", \"jira\"), with descriptions" })),
       tools: Type.Optional(Type.String({ description: "A connector id: list its tools" })),
-    }),
-  },
-  {
-    name: "connector_add",
-    description: "Add a connector: from the catalog (catalogId, e.g. \"linear\", \"notion\", \"gmail\") or a custom remote MCP server (url). "
-      + "For OAuth apps it returns a link the person must open to authorize; give them the link. For token-based ones pass the token "
-      + "(stored in the vault, never shown again). Agents get its tools only when granted (agents), Polpo when polpo is true (default).",
-    parameters: Type.Object({
-      catalogId: Type.Optional(Type.String({ description: "Catalog id (connectors_list with catalog: true)" })),
-      url: Type.Optional(Type.String({ description: "Custom MCP server URL (https), or the per-account URL for catalog entries that need one" })),
-      name: Type.Optional(Type.String({ description: "Display name (default: the catalog name)" })),
-      id: Type.Optional(Type.String({ description: "Slug used in tool names mcp__<id>__<tool> (default: from the name)" })),
-      transport: Type.Optional(Type.Union([Type.Literal("http"), Type.Literal("sse")], { description: "Default http (streamable HTTP, falls back to SSE)" })),
-      auth: Type.Optional(Type.Union([Type.Literal("none"), Type.Literal("bearer"), Type.Literal("oauth")], { description: "Default: the catalog's, else none" })),
-      token: Type.Optional(Type.String({ description: "auth bearer: the API token" })),
-      agents: Type.Optional(Agents),
-      polpo: Type.Optional(Type.Boolean({ description: "Polpo may use its tools (default true)" })),
     }),
   },
   {
@@ -84,8 +70,8 @@ function describe(c: ConnectorConfig): string {
   const who = [c.access.agents === "*" ? "every agent" : c.access.agents.length ? `agents: ${c.access.agents.join(", ")}` : "no agent", c.access.polpo ? "Polpo" : ""].filter(Boolean).join(" + ");
   const where = c.transport.type === "stdio" ? `local command ${c.transport.command}` : c.transport.url;
   const status = c.enabled ? (c.status ?? "not connected yet") : "disabled";
-  return `- ${c.name} [${c.id}] ${status}${c.toolCount !== undefined ? `, ${c.toolCount} tools` : ""}${c.lastError ? ` (${c.lastError.slice(0, 160)})` : ""}; `
-    + `auth ${c.auth.type}; used by ${who}; ${where}; tools mcp__${c.id}__*`;
+  return `- ${connectorLabel(c)} [${c.id}${c.catalogId && c.catalogId !== c.id ? `, another ${c.catalogId} account` : ""}] ${status}${c.toolCount !== undefined ? `, ${c.toolCount} tools` : ""}${c.lastError ? ` (${c.lastError.slice(0, 160)})` : ""}; `
+    + `auth ${c.auth.type}; used by ${who}; ${where}; tools mcp__${c.id}__*${c.iconAsset ? `; icon: ${c.iconAsset.pinned ? "set by the person" : `found (${c.iconAsset.source})`}` : ""}`;
 }
 
 async function oauthLink(ctx: ConnectorToolContext, id: string): Promise<string> {
@@ -119,53 +105,12 @@ export async function executeConnectorTool(name: string, args: Record<string, un
         if (args.catalog || typeof args.search === "string") {
           const words = typeof args.search === "string" ? args.search.toLowerCase().split(/\s+/).filter(Boolean) : [];
           const entries = CONNECTOR_CATALOG.filter((e) => words.every((w) => `${e.id} ${e.name} ${e.category} ${e.description}`.toLowerCase().includes(w)));
-          lines.push(`Catalog (connector_add with catalogId; ${entries.length} of ${CONNECTOR_CATALOG.length}):`, ...entries.map((e) =>
+          lines.push(`Catalog (connector_add with catalog_id; ${entries.length} of ${CONNECTOR_CATALOG.length}):`, ...entries.map((e) =>
             `- ${e.id}: ${e.name} (${e.category})${words.length ? ` — ${e.description}` : ""}`
             + `${e.auth === "oauth_preregistered" ? ` [needs the "${e.oauth?.app}" OAuth app set up once]` : e.auth === "bearer" ? " [needs a token]" : ""}`
             + `${e.urlTemplate ? ` [needs your URL: ${e.urlTemplate}]` : ""}${e.variants ? ` [regions: ${e.variants.map((v) => `${v.label} ${v.url}`).join(", ")}]` : ""}`));
         }
         return lines.join("\n");
-      }
-      case "connector_add": {
-        const entry = typeof args.catalogId === "string" ? catalogEntry(args.catalogId) : undefined;
-        if (args.catalogId && !entry) return `Unknown catalog id "${args.catalogId}". connectors_list with catalog: true lists them.`;
-        const input: ConnectorInput = {
-          ...(entry ? { catalogId: entry.id } : {}),
-          ...(typeof args.name === "string" ? { name: args.name } : {}),
-          ...(typeof args.id === "string" ? { id: args.id } : {}),
-          ...(typeof args.url === "string" ? { url: args.url } : {}),
-          ...(args.transport ? { transport: { type: args.transport as "http" | "sse" } } : {}),
-          ...(args.auth ? { auth: { type: args.auth as "none" | "bearer" | "oauth" } } : {}),
-          ...(typeof args.token === "string" ? { secrets: { bearerToken: args.token } } : {}),
-          access: {
-            ...(args.agents !== undefined ? { agents: args.agents as string[] | "*" } : {}),
-            ...(args.polpo !== undefined ? { polpo: args.polpo === true } : {}),
-          },
-        };
-        if (!entry && !input.url) return "Give a catalogId or the url of a remote MCP server.";
-        if (!input.name && !entry) input.name = new URL(input.url!).hostname.replace(/^(www|mcp|api)\./, "");
-        const { connector, secrets } = await buildConnector(input, {
-          allowStdio: false,
-          existingIds: manager.store.list().map((c) => c.id),
-          allowPrivateNetwork: allowPrivateNetwork(ctx.settings),
-        });
-        const known = new Set(await ctx.agentNames());
-        const unknown = connector.access.agents === "*" ? [] : connector.access.agents.filter((a) => !known.has(a));
-        if (unknown.length) return `Unknown agents: ${unknown.join(", ")}.`;
-        if (Object.values(secrets).some(Boolean) && !manager.secrets.available) return "The vault is not available: cannot store the token.";
-        manager.store.create(connector);
-        if (Object.keys(secrets).length) await manager.secrets.patch(connector.id, secrets);
-        manager.announce(connector.id, "created");
-        const head = `Added ${connector.name} [${connector.id}] (tools mcp__${connector.id}__*).`;
-        if (connector.auth.type === "oauth") {
-          const app = connector.auth.oauth?.app;
-          if (app && !manager.store.getOAuthApp(app)) {
-            return `${head} It needs the "${app}" OAuth app set up once before it can be authorized:\n${entry?.setup ?? ""}\nThen call connector_connect.`;
-          }
-          return `${head}\n${await oauthLink(ctx, connector.id)}`;
-        }
-        const test = await manager.test(connector.id);
-        return test.ok ? `${head} Connected: ${test.tools?.length ?? 0} tools.` : `${head} The first connection failed: ${test.error}`;
       }
       case "connector_connect": {
         const connector = manager.store.get(String(args.id ?? ""));

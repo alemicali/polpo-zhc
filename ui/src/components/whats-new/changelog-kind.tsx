@@ -9,8 +9,8 @@ const KIND_ICON = { new: Sparkles, improved: Zap, fixed: Wrench } as const;
 
 const KIND_BADGE: Record<ChangelogKind, string> = {
   new: "border-primary/30 bg-primary/10 text-primary",
-  improved: "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  fixed: "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  improved: "border-success/30 bg-success/10 text-success",
+  fixed: "border-warning/30 bg-warning/10 text-warning",
 };
 
 export function ChangelogKindIcon({ kind, className }: { kind: ChangelogKind; className?: string }) {
@@ -22,7 +22,7 @@ export function ChangelogKindBadge({ kind, className }: { kind: ChangelogKind; c
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
+        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-label",
         KIND_BADGE[kind],
         className,
       )}
@@ -31,4 +31,15 @@ export function ChangelogKindBadge({ kind, className }: { kind: ChangelogKind; c
       {CHANGELOG_KIND_LABEL[kind]}
     </span>
   );
+}
+
+const KIND_DOT: Record<ChangelogKind, string> = {
+  new: "bg-primary",
+  improved: "bg-success",
+  fixed: "bg-warning",
+};
+
+/** The entry's dot on the timeline rail, coloured by kind. */
+export function ChangelogKindDot({ kind, className }: { kind: ChangelogKind; className?: string }) {
+  return <span aria-hidden className={cn("block h-2.5 w-2.5 rounded-full ring-[3px] ring-background", KIND_DOT[kind], className)} />;
 }

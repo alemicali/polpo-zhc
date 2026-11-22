@@ -3,9 +3,10 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve, join } from "node:path";
 import type { PolpoFileConfig, PolpoFileConfigRaw, PolpoSettings, PolpoConfig, ProviderConfig, ModelConfig, Team } from "./types.js";
 import { getPolpoDir } from "./constants.js";
+import { normalizeOrchestratorName, ORCHESTRATOR_NAME_MAX_LENGTH } from "./orchestrator-name.js";
 import { normalizeVaultRef } from "@polpo-ai/core/vault-ref";
 import { parseStoredProvider } from "@polpo-ai/core/provider-config";
-import { parseEgressProxies, parseComputers, parseTailscaleSettings, computerEgressProblem, isRemoteComputer, COMPUTER_ID_PATTERN, HOST_COMPUTER_ID } from "@polpo-ai/core";
+import { sanitizeAppearanceSettings, isEmptyAppearance, parseEgressProxies, parseComputers, parseTailscaleSettings, computerEgressProblem, isRemoteComputer, COMPUTER_ID_PATTERN, HOST_COMPUTER_ID, parseHarnessesSettings, parseAgentEngine, connectorToolsProblems, normalizeConnectorTools, normalizeDependencyResultsSettings } from "@polpo-ai/core";
 
 const DEFAULT_SETTINGS: PolpoSettings = {
   maxRetries: 3,
@@ -155,6 +156,18 @@ export function validateAgents(agents: any[]): void {
     }
     if (agent.defaultComputer !== undefined && (typeof agent.defaultComputer !== "string" || (agent.defaultComputer !== HOST_COMPUTER_ID && !COMPUTER_ID_PATTERN.test(agent.defaultComputer)))) {
       throw new Error(`Agent "${agent.name}": defaultComputer must be "host" or a computer id (settings.computers)`);
+    }
+    // engine: "polpo" (default) or { harness, model?, ... } (the settings check is agentEngineProblem)
+    if (agent.engine !== undefined) {
+      const engine = parseAgentEngine(agent.engine, `Agent "${agent.name}": engine`);
+      if (engine) agent.engine = engine; else delete agent.engine;
+    }
+    // connectorTools: { <connector id>: "*" | [tool names] } (unknown tool names are kept: the connector may be disconnected)
+    if (agent.connectorTools !== undefined) {
+      const problems = connectorToolsProblems(agent.connectorTools);
+      if (problems.length) throw new Error(`Agent "${agent.name}": ${problems[0]}`);
+      const normalized = normalizeConnectorTools(agent.connectorTools);
+      if (normalized) agent.connectorTools = normalized; else delete agent.connectorTools;
     }
     // Vault credentials are now stored in .polpo/vault.enc (encrypted) — no longer inline.
     // Silently strip any leftover vault field from old configs.
@@ -400,10 +413,24 @@ function parseSettings(raw: any): PolpoSettings {
       productName: typeof branding.productName === "string" ? branding.productName.trim().slice(0, 80) : undefined,
       tagline: typeof branding.tagline === "string" ? branding.tagline.trim().slice(0, 120) : undefined,
       logoUrl: typeof branding.logoUrl === "string" ? branding.logoUrl.trim() : undefined,
+      logoDarkUrl: typeof branding.logoDarkUrl === "string" ? branding.logoDarkUrl.trim() : undefined,
+      logoFrame: branding.logoFrame === "box" || branding.logoFrame === "none" ? branding.logoFrame : undefined,
     };
+  }
+  if (raw?.appearance !== undefined && raw?.appearance !== null) {
+    // a cosmetic mistake never stops the instance: the invalid part is left out, with a warning
+    const { value: appearance, problems } = sanitizeAppearanceSettings(raw.appearance);
+    if (problems.length) console.warn(`[polpo] Ignoring invalid appearance settings in polpo.json (defaults apply): ${problems.join("; ")}`);
+    if (!isEmptyAppearance(appearance)) settings.appearance = appearance;
   }
   if (raw?.staleThreshold != null) settings.staleThreshold = raw.staleThreshold;
   if (raw?.orchestratorModel) settings.orchestratorModel = parseOrchestratorModel(raw.orchestratorModel);
+  if (raw?.orchestratorName !== undefined && raw?.orchestratorName !== null) {
+    // a display name: an invalid one is left out (the default "Polpo" applies), with a warning
+    const name = normalizeOrchestratorName(raw.orchestratorName);
+    if (name) settings.orchestratorName = name;
+    else console.warn(`[polpo] Ignoring invalid settings.orchestratorName in polpo.json (1–${ORCHESTRATOR_NAME_MAX_LENGTH} characters): the default "Polpo" applies`);
+  }
   if (raw?.imageModel && typeof raw.imageModel === "string") settings.imageModel = raw.imageModel;
   if (raw?.modelAllowlist && typeof raw.modelAllowlist === "object") settings.modelAllowlist = raw.modelAllowlist;
   if (raw?.enableVolatileTeams != null) settings.enableVolatileTeams = raw.enableVolatileTeams;
@@ -418,6 +445,10 @@ function parseSettings(raw: any): PolpoSettings {
   if (typeof raw?.logRetentionDays === "number" && raw.logRetentionDays >= 0) settings.logRetentionDays = raw.logRetentionDays;
   const compaction = normalizeCompactionSettings(raw?.compaction);
   if (compaction) settings.compaction = compaction;
+  const tools = normalizeToolsSettings(raw?.tools);
+  if (tools) settings.tools = tools;
+  const dependencyResults = normalizeDependencyResultsSettings(raw?.dependencyResults);
+  if (dependencyResults) settings.dependencyResults = dependencyResults;
   // Daytona's API version and its options (v2 takes no API URL): refused with a clear message
   const daytonaErrors = daytonaProviderErrors(raw?.sandbox?.providers?.daytona);
   if (daytonaErrors.length) throw new Error(daytonaErrors.join("; "));
@@ -432,6 +463,7 @@ function parseSettings(raw: any): PolpoSettings {
   if (raw?.enableScheduler != null) settings.enableScheduler = raw.enableScheduler;
   if (raw?.defaultQualityThreshold != null) settings.defaultQualityThreshold = raw.defaultQualityThreshold;
   if (raw?.reasoning) settings.reasoning = raw.reasoning;
+  if (raw?.voiceReplies === "off" || raw?.voiceReplies === "voice" || raw?.voiceReplies === "always") settings.voiceReplies = raw.voiceReplies;
   if (raw?.orchestratorSkills) settings.orchestratorSkills = raw.orchestratorSkills;
   if (raw?.emailAllowedDomains) settings.emailAllowedDomains = raw.emailAllowedDomains;
   if (raw?.egressProxies && typeof raw.egressProxies === "object") {
@@ -439,6 +471,9 @@ function parseSettings(raw: any): PolpoSettings {
   }
   if (raw?.tailscale !== undefined && raw?.tailscale !== null) {
     settings.tailscale = parseTailscaleSettings(raw.tailscale);
+  }
+  if (raw?.harnesses !== undefined && raw?.harnesses !== null) {
+    settings.harnesses = parseHarnessesSettings(raw.harnesses);
   }
   if (raw?.computers !== undefined && raw?.computers !== null) {
     const computers = parseComputers(raw.computers);
@@ -578,6 +613,18 @@ export function generatePolpoConfigDefault(
     config.providers = options.providers;
   }
   return config;
+}
+
+/** Keep only well-formed progressive tool settings (`settings.tools`). */
+export function normalizeToolsSettings(raw: unknown): import("@polpo-ai/core").ToolsSettings | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, unknown>;
+  const out: import("@polpo-ai/core").ToolsSettings = {};
+  if (typeof r.progressiveThreshold === "number" && Number.isFinite(r.progressiveThreshold) && r.progressiveThreshold >= 0) {
+    out.progressiveThreshold = Math.floor(r.progressiveThreshold);
+  }
+  if (r.progressive === "auto" || r.progressive === "always" || r.progressive === "never") out.progressive = r.progressive;
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /** Keep only well-formed compaction settings (unknown keys and wrong types are dropped). */

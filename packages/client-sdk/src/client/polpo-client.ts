@@ -1,6 +1,10 @@
 import { PolpoApiError } from "./errors.js";
 import type {
+  Connector,
+  ConnectorTool,
   AuthStatusResponse,
+  MemberPreferencesPatch,
+  MemberPreferencesResponse,
   VaultEntryMeta,
   Task,
   Mission,
@@ -644,10 +648,38 @@ export class PolpoClient {
     return this.get<AuthStatusResponse>("/auth/status");
   }
 
+  // ── Member preferences ────────────────────────────────────
+
+  /** The signed-in member's dashboard preferences (chat navigation: open chat, tabs, panels). */
+  getPreferences(): Promise<MemberPreferencesResponse> {
+    return this.get<MemberPreferencesResponse>("/preferences");
+  }
+
+  /** Merge fields into the signed-in member's preferences; returns the stored result. */
+  updatePreferences(patch: MemberPreferencesPatch): Promise<MemberPreferencesResponse> {
+    return this.patch<MemberPreferencesResponse>("/preferences", patch);
+  }
+
   // ── Schedules ─────────────────────────────────────────────
 
   getSchedules(): Promise<ScheduleEntry[]> {
     return this.get<ScheduleEntry[]>("/schedules");
+  }
+
+  // ── Connectors ───────────────────────────────────────────
+
+  /** The connectors (external apps over MCP), with their status, account and who may use them. */
+  getConnectors(): Promise<Connector[]> {
+    return this.get<{ connectors: Connector[] }>("/connectors").then((d) => d.connectors);
+  }
+
+  getConnector(id: string): Promise<Connector> {
+    return this.get<Connector>(`/connectors/${encodeURIComponent(id)}`);
+  }
+
+  /** A connector's tools (names as agent.connectorTools lists them) and their policy. */
+  getConnectorTools(id: string): Promise<ConnectorTool[]> {
+    return this.get<{ tools: ConnectorTool[] }>(`/connectors/${encodeURIComponent(id)}/tools`).then((d) => d.tools);
   }
 
   // ── Agents ───────────────────────────────────────────────

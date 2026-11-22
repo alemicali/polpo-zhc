@@ -125,8 +125,141 @@ export interface Task {
   notifications?: ScopedNotificationRules;
   /** Whether this task produces irreversible side effects. Blocks automatic retry/fix. */
   sideEffects?: boolean;
+  /** Where and with what each run executed (engine, model, computer, egress, session, cost), newest last. */
+  runs?: TaskRunContext[];
+  /** Why it failed, in a line (GET /tasks/:id and slim lists; failed tasks only). */
+  failure?: TaskFailure;
+  /** Optional narrowing of the run's tools; absent: everything the agent has. */
+  toolScope?: TaskToolScope;
+  /** GET /tasks/:id: what of the tool scope the agent no longer has (connector removed, access revoked…). */
+  toolScopeStale?: string[];
+  /**
+   * What every run cost in all (first run, retries, continuations, directions): the breakdown on
+   * GET /tasks/:id, the compact total in slim lists. Absent on records from events (compute it from `runs`).
+   */
+  cost?: TaskCost | TaskCostSummary;
   createdAt: string;
   updatedAt: string;
+}
+
+/** model_access: the model is not enabled for the account; auth: credentials refused; budget: a spend limit; killed: stopped or timed out. */
+export type TaskFailureKind = "model_access" | "auth" | "budget" | "killed" | "assessment" | "error";
+
+/** Why a task failed: the labelled reason of its last run, whether a retry could help, a kind for badges. */
+export interface TaskFailure {
+  /** The reason in a line (a harness error says what to change). */
+  reason: string;
+  /** false: not retried automatically (a re-run of the same agent fails the same way). */
+  retryable: boolean;
+  kind: TaskFailureKind;
+}
+
+/**
+ * Optional narrowing of the tools a task's runs may use. It only narrows what the agent has
+ * (never grants); absent fields inherit from the agent.
+ */
+export interface TaskToolScope {
+  /** Connector ids (each account of an app is its own connector), or "none". */
+  connectors?: string[] | "none";
+  /** Per connector id: "*" or the server's raw tool names. */
+  connectorTools?: Record<string, "*" | string[]>;
+  /** Built-in tools or patterns (read, bash, browser_*); not connector tools. */
+  allowedTools?: string[];
+}
+
+/** The engine a run used: Polpo's own, or an agent harness. */
+export type TaskRunEngine = "polpo" | "claude-code" | "codex";
+
+/** Where and with what a task run executed (no secrets). */
+export interface TaskRunContext {
+  runId: string;
+  startedAt: string;
+  endedAt?: string;
+  status: "running" | "completed" | "failed" | "killed";
+  /** The run continued the previous one (a "continue" direction). */
+  continuation?: boolean;
+  /** The agent that ran it. */
+  agent?: string;
+  engine: TaskRunEngine;
+  model?: string;
+  /** The harness authentication kind (never the credential). */
+  auth?: { kind: "api-key" | "bedrock" | "vertex"; region?: string };
+  permissionMode?: string;
+  effort?: string;
+  computer: {
+    /** "host", a computer id, or "ephemeral". */
+    id: string;
+    name?: string;
+    kind: "host" | "daytona" | "e2b" | "ephemeral";
+    provider?: "daytona" | "e2b";
+    daytonaApi?: "v0" | "v2";
+    remoteId?: string;
+  };
+  sandbox?: { provider: string; ephemeral: boolean; fallbackFrom?: string };
+  egress: { mode: "direct" | "proxy"; proxy?: string; tailscale?: boolean };
+  session?: { resumed: boolean; bootstrapMs?: number; sessionId?: string };
+  cost?: {
+    harnessUsd?: number;
+    modelUsd?: number;
+    tokens?: number;
+    /** Where harnessUsd comes from (gateway, the runtime's estimate, tokens only). */
+    costSource?: "gateway" | "runtime" | "runtime-estimate" | "tokens-only";
+  };
+  budgetUsd?: number;
+  durationMs?: number;
+  exitCode?: number;
+}
+
+/** One run in a task's cost breakdown (oldest first). */
+export interface TaskCostRun {
+  runId: string;
+  startedAt: string;
+  endedAt?: string;
+  status: TaskRunContext["status"];
+  continuation?: boolean;
+  agent?: string;
+  engine: TaskRunEngine;
+  model?: string;
+  durationMs?: number;
+  /** USD; absent when the run recorded none (yet). */
+  usd?: number;
+  tokens?: number;
+  costSource?: NonNullable<TaskRunContext["cost"]>["costSource"];
+}
+
+/** What a task cost: every recorded run of it (GET /tasks/:id → cost). A mission's cost adds these up. */
+export interface TaskCost extends MissionCostBucket {
+  currency: "USD";
+  unpricedRuns: number;
+  runsActive: number;
+  byEngine: Array<MissionCostBucket & { engine: TaskRunEngine }>;
+  perRun: TaskCostRun[];
+  /** The latest run's cost, USD. */
+  lastRunUsd?: number;
+  /** Older runs were dropped (20 kept per task) and not recovered: the total may be higher. */
+  partial: boolean;
+  /** Harness cost of dropped runs, taken from the token-usage records. */
+  recoveredUsd?: number;
+  recovered?: { usd: number; tokens: number; agent: string; engine: TaskRunEngine };
+}
+
+/** The compact task cost in slim lists. */
+export interface TaskCostSummary {
+  usd: number;
+  tokens: number;
+  runs: number;
+  partial?: boolean;
+}
+
+/** The latest run in a slim task row (list badges). */
+export interface TaskRunSummary {
+  engine: TaskRunEngine;
+  model?: string;
+  computerId: string;
+  computerName?: string;
+  computerKind: TaskRunContext["computer"]["kind"];
+  provider?: string;
+  status: TaskRunContext["status"];
 }
 
 /**
@@ -155,6 +288,14 @@ export interface TaskSlim {
       checksCount?: number;
     };
   };
+  /** Where and with what the latest run executed. */
+  lastRun?: TaskRunSummary;
+  /** What every run cost in all (not just the latest). */
+  cost?: TaskCostSummary;
+  /** Why it failed, in a line (failed tasks only). */
+  failure?: TaskFailure;
+  /** Its runs get only part of the agent's tools. */
+  toolScope?: TaskToolScope;
 }
 
 export interface TaskResult {
@@ -162,6 +303,11 @@ export interface TaskResult {
   stdout: string;
   stderr: string;
   duration: number;
+  /**
+   * false: the run failed for a reason a re-run of the same agent cannot fix (the model is not
+   * enabled for the account, the credentials are refused): no automatic retry. Omitted: retryable.
+   */
+  retryable?: boolean;
   assessment?: AssessmentResult;
   /** All previous assessments (oldest first). Current assessment is always in `assessment`. */
   assessmentHistory?: AssessmentResult[];
@@ -288,6 +434,8 @@ export interface AgentConfig {
   maxTurns?: number;
   /** Max concurrent tasks for this agent. Default: unlimited. */
   maxConcurrency?: number;
+  /** Which tools of each granted connector it gets, keyed by connector id: "*" (or no key) = all, a list = only those raw MCP tool names. */
+  connectorTools?: Record<string, "*" | string[]>;
   /** Reasoning / deep thinking level for this agent's LLM calls. */
   reasoning?: ReasoningLevel;
   /** Runtime profile used by deterministic loop execution. */
@@ -445,8 +593,56 @@ export interface Mission {
   notifications?: ScopedNotificationRules;
   /** How many times this mission has been executed. */
   executionCount?: number;
+  /** Spending limit in USD for the whole mission: at it, no new task starts and it pauses. */
+  budgetUsd?: number;
+  /** Why the orchestrator paused it on its own: "budget". */
+  pauseReason?: "budget";
+  /** What it cost so far: full on GET /missions/:id, compact (MissionCostSummary) in lists. */
+  cost?: MissionCost | MissionCostSummary;
   createdAt: string;
   updatedAt: string;
+}
+
+/** USD, tokens and runs of a slice of a mission's cost. */
+export interface MissionCostBucket {
+  usd: number;
+  /** The harness runtimes' own estimate (Claude Code, Codex). */
+  harnessUsd: number;
+  /** The model cost the provider reported (Polpo's engine). */
+  modelUsd: number;
+  tokens: number;
+  runs: number;
+}
+
+/** What a mission cost: every recorded run of its tasks (retries and continuations included). */
+export interface MissionCost extends MissionCostBucket {
+  currency: "USD";
+  tasks: number;
+  unpricedRuns: number;
+  runsActive: number;
+  byAgent: Array<MissionCostBucket & { agent: string }>;
+  byEngine: Array<MissionCostBucket & { engine: TaskRunEngine }>;
+  /** Older runs of some task were dropped (20 kept per task): the total may be higher. */
+  partial: boolean;
+  partialTaskIds?: string[];
+  recoveredUsd?: number;
+  budgetUsd?: number;
+  remainingUsd?: number;
+  /** usd / budgetUsd. */
+  budgetUsed?: number;
+  overBudget?: boolean;
+  /** No budget: the per-run harness budgets of the tasks' agents, summed (informational). */
+  agentBudgetCapUsd?: number;
+}
+
+/** The compact cost in mission lists. */
+export interface MissionCostSummary {
+  usd: number;
+  tokens: number;
+  runs: number;
+  partial?: boolean;
+  budgetUsd?: number;
+  overBudget?: boolean;
 }
 
 /**
@@ -463,6 +659,9 @@ export interface MissionSlim {
   deadline?: string;
   endDate?: string;
   qualityThreshold?: number;
+  budgetUsd?: number;
+  pauseReason?: "budget";
+  cost?: MissionCostSummary;
   createdAt: string;
   updatedAt: string;
   taskCount?: number;
@@ -825,6 +1024,29 @@ export interface BrandingConfig {
   productName?: string;
   tagline?: string;
   logoUrl?: string;
+  /** The logo in dark mode (falls back to logoUrl). */
+  logoDarkUrl?: string;
+  /** How the logo is shown: "box" (default) in a tile, "none" bare. */
+  logoFrame?: "box" | "none";
+}
+
+/** A mode's design tokens (any subset): colours, fonts, radii (px), shadows, buttonGradient { from, to, angle }. See docs/appearance.md. */
+export type AppearanceTokens = Record<string, string | number | { from: string; to: string; angle?: number }>;
+
+/** A web font the dashboard loads: Google Fonts by family (and weights), or an https stylesheet on an allowed font host. */
+export interface AppearanceWebFont {
+  family: string;
+  source: "google" | "url";
+  url?: string;
+  weights?: string;
+}
+
+/** The dashboard's default look for everyone (settings.appearance); a person may customize their own browser. */
+export interface AppearanceConfig {
+  theme?: "light" | "dark" | "system";
+  palette?: "tide" | "lovable" | "chatgpt" | "claude" | "brutal" | "editorial" | "redline" | "cyber" | "mono";
+  custom?: { enabled: boolean; derive?: boolean; light?: AppearanceTokens; dark?: AppearanceTokens };
+  fonts?: AppearanceWebFont[];
 }
 
 export interface PolpoSettings {
@@ -832,6 +1054,7 @@ export interface PolpoSettings {
   workDir: string;
   logLevel: "quiet" | "normal" | "verbose";
   branding?: BrandingConfig;
+  appearance?: AppearanceConfig;
   taskTimeout?: number;
   staleThreshold?: number;
   defaultRetryPolicy?: RetryPolicy;
@@ -845,6 +1068,8 @@ export interface PolpoSettings {
   orchestratorSkills?: string[];
   /** Model for orchestrator LLM calls. Can be a string or a ModelConfig with fallbacks. */
   orchestratorModel?: string | ModelConfig;
+  /** The orchestrator's display name (default "Polpo"). */
+  orchestratorName?: string;
   imageModel?: string;
   modelAllowlist?: Record<string, ModelAllowlistEntry>;
   /** Global reasoning / deep thinking level. */
@@ -970,6 +1195,9 @@ export interface CreateTaskRequest {
   maxDuration?: number;
   retryPolicy?: RetryPolicy;
   notifications?: ScopedNotificationRules;
+  sideEffects?: boolean;
+  /** Narrow the run's tools (rejected with INVALID_TOOL_SCOPE if it asks for more than the agent has). */
+  toolScope?: TaskToolScope;
 }
 
 export interface UpdateTaskRequest {
@@ -977,6 +1205,9 @@ export interface UpdateTaskRequest {
   assignTo?: string;
   status?: TaskStatus;
   expectations?: TaskExpectation[];
+  sideEffects?: boolean;
+  /** Narrow the run's tools; null clears it (everything the agent has). */
+  toolScope?: TaskToolScope | null;
 }
 
 export type TaskDirectionMode = "steer" | "follow_up" | "continue";
@@ -1012,12 +1243,17 @@ export interface CreateMissionRequest {
   name?: string;
   status?: MissionStatus;
   notifications?: ScopedNotificationRules;
+  /** Spending limit in USD for the whole mission. */
+  budgetUsd?: number;
 }
 
 export interface UpdateMissionRequest {
   data?: string;
   status?: MissionStatus;
   name?: string;
+  endDate?: string | null;
+  /** Spending limit in USD; null clears it. */
+  budgetUsd?: number | null;
 }
 
 // === Atomic Mission Data Request DTOs ===
@@ -1032,6 +1268,8 @@ export interface AddMissionTaskRequest {
   maxDuration?: number;
   retryPolicy?: RetryPolicy;
   notifications?: ScopedNotificationRules;
+  sideEffects?: boolean;
+  toolScope?: TaskToolScope;
 }
 
 export interface UpdateMissionTaskRequest {
@@ -1044,6 +1282,8 @@ export interface UpdateMissionTaskRequest {
   maxDuration?: number;
   retryPolicy?: RetryPolicy;
   notifications?: ScopedNotificationRules;
+  sideEffects?: boolean;
+  toolScope?: TaskToolScope | null;
 }
 
 export interface ReorderMissionTasksRequest {
@@ -1186,9 +1426,13 @@ export interface UpdateSettingsRequest {
   /** Context compaction settings; null removes them. */
   compaction?: Record<string, unknown> | null;
   orchestratorModel?: string | ModelConfig;
+  /** The orchestrator's display name (default "Polpo"); in an update, null or "" restores the default. */
+  orchestratorName?: string | null;
   imageModel?: string | null;
   reasoning?: ReasoningLevel;
   branding?: BrandingConfig;
+  /** The dashboard's default look; null removes it. */
+  appearance?: AppearanceConfig | null;
 }
 
 // === SSE ===
@@ -1295,6 +1539,19 @@ export interface RunActivityEntry {
   content?: string;
   /** Whether the tool call errored (present on tool_result entries) */
   isError?: boolean;
+
+  /** Lifecycle / harness log line (type "log"; errors of type "error"). */
+  message?: string;
+  /** An agent harness's Polpo tool (it runs on the Polpo server, not in the runtime). */
+  host?: boolean;
+  /** Usage entries (type "usage"): the harness that reported them and the turn's tokens and cost. */
+  harness?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  totalTokens?: number;
+  costUsd?: number;
 
   /** Present on the header line only */
   _run?: boolean;
@@ -1685,6 +1942,40 @@ export interface AuthStatusResponse {
   providers: Record<string, ProviderAuthInfo>;
 }
 
+// === Member preferences (per signed-in member, follow the person across devices) ===
+
+/** Where the person was in the chat: the open chat, tabs and panels. */
+export interface ChatNavigationPreferences {
+  /** Thread open in the chat; null = a new, unsaved chat. */
+  lastSessionId?: string | null;
+  /** Group open in the chat (wins over lastSessionId), or null. */
+  lastRoomId?: string | null;
+  /** Agent picked for the new chat when lastSessionId is null. */
+  lastAgent?: string | null;
+  /** Thread ids open as tabs, left to right. */
+  openTabs?: string[];
+  /** Right-hand chat panel shown on other pages. */
+  sidePanelOpen?: boolean;
+  /** Thread list (session sidebar) shown next to the chat. */
+  threadsOpen?: boolean;
+  /** When the preferences were last written (set by the server). */
+  updatedAt?: string;
+}
+
+export interface MemberPreferences {
+  chatNavigation?: ChatNavigationPreferences;
+}
+
+export interface MemberPreferencesPatch {
+  chatNavigation?: Omit<ChatNavigationPreferences, "updatedAt">;
+}
+
+export interface MemberPreferencesResponse {
+  /** Signed-in member the preferences belong to; null when shared (no instance auth). */
+  member: string | null;
+  preferences: MemberPreferences;
+}
+
 // === Vault Preview (interactive credential review before saving) ===
 
 export interface VaultPreviewPayload {
@@ -1822,4 +2113,47 @@ export interface EmailPreviewPayload {
   reply_to?: string;
   /** File attachments — paths sandboxed by allowedPaths at send time. */
   attachments?: Array<{ path: string; filename?: string }>;
+}
+
+// === Connectors (external apps over MCP; GET /connectors) ===
+
+export type ConnectorStatus = "disconnected" | "connecting" | "connected" | "needs_auth" | "needs_reauth" | "error" | "disabled";
+export type ConnectorToolPolicy = "allow" | "ask" | "off";
+
+/**
+ * A connector as the API shows it (secrets only say whether they are set). Several accounts of
+ * the same catalog app have their own ids (gmail, gmail-2…), names and `account`.
+ */
+export interface Connector {
+  /** Slug used in tool names (mcp__<id>__<tool>). */
+  id: string;
+  /** Display name; another account of an app says which ("Gmail – info@acme.com"). */
+  name: string;
+  /** The signed-in account (e.g. an email), when the sign-in revealed it. */
+  account?: string;
+  kind: "mcp";
+  description?: string;
+  transport: { type: "http" | "sse" | "stdio"; url?: string; command?: string };
+  auth: { type: "none" | "bearer" | "headers" | "oauth"; headerNames?: string[]; oauth?: { app?: string; scopes?: string[] } };
+  /** Who may use it: agent names or "*", and Polpo itself. */
+  access: { agents: string[] | "*"; polpo: boolean };
+  enabled: boolean;
+  /** The catalog entry it came from (another account of the same app shares it). */
+  catalogId?: string;
+  toolPolicy?: Record<string, ConnectorToolPolicy>;
+  createdAt: string;
+  updatedAt?: string;
+  status?: ConnectorStatus;
+  lastError?: string;
+  toolCount?: number;
+  lastConnectedAt?: string;
+  secrets?: { bearerToken: boolean; headers: string[]; clientSecret: boolean; values: string[]; oauth: { authorized: boolean; clientRegistered?: boolean; pending?: boolean } };
+}
+
+export interface ConnectorTool {
+  /** The server's tool name (as agent.connectorTools lists it), not mcp__… */
+  name: string;
+  title?: string;
+  description?: string;
+  policy: ConnectorToolPolicy;
 }

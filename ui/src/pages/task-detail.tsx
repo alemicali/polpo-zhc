@@ -27,8 +27,6 @@ import {
   GitBranch,
   FileText,
   Wrench,
-  HelpCircle,
-  Hammer,
   Timer,
   ArrowUpCircle,
   Terminal,
@@ -80,9 +78,14 @@ import { useAsyncAction, useConfig } from "@/hooks/use-polpo";
 import { AppliedRulesPanel } from "@/components/shared/applied-rules-panel";
 import type { AnyRule, ScopedRules } from "@/lib/applied-rules";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
+import { RunContextCard, TaskCostBadge } from "@/components/shared/run-context";
+import { taskCostOf } from "@/lib/task-cost";
+import { TaskToolScopeCard } from "@/components/tasks/task-tool-scope";
+import { useComputers } from "@/hooks/use-computers";
 import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { taskStatusStyles, taskPhaseStyles, tones, scoreTone } from "@/lib/status-tokens";
 
 // ── Heavy-content helpers ──
 //
@@ -139,7 +142,7 @@ const LargeTextBlock = memo(function LargeTextBlock({
   }, [content, isLarge]);
 
   const preCls = tone === "error"
-    ? "text-xs bg-red-500/5 px-4 py-3 whitespace-pre-wrap font-mono text-red-400/80 leading-relaxed"
+    ? "text-xs bg-destructive/5 px-4 py-3 whitespace-pre-wrap font-mono text-destructive/80 leading-relaxed"
     : "text-xs bg-muted/30 px-4 py-3 whitespace-pre-wrap font-mono text-foreground/90 leading-relaxed";
 
   if (!isLarge) {
@@ -155,27 +158,27 @@ const LargeTextBlock = memo(function LargeTextBlock({
 
   return (
     <div className="rounded-md border border-border/30 overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-1.5 bg-muted/30 border-b border-border/30 text-[10px]">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-muted/30 border-b border-border/30 text-micro">
         <span className="text-muted-foreground">
           Showing last {Math.min(LARGE_TEXT_PREVIEW_LINES, lineCount)} of {lineCount.toLocaleString()} lines
           ({(content.length / 1024).toFixed(1)} KB)
         </span>
         <Dialog>
           <DialogTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-6 px-2 text-[10px] gap-1">
+            <Button variant="ghost" size="sm" className="h-6 px-2 text-micro gap-1">
               <Eye className="h-3 w-3" /> Open full
             </Button>
           </DialogTrigger>
           <DialogContent className="!max-w-none w-[96vw] h-[92dvh] p-0 flex flex-col gap-0">
             <DialogTitle className="px-5 pt-4 pb-2 text-sm font-semibold flex items-center gap-2">
               <Terminal className="h-4 w-4" /> {label}
-              <span className="ml-auto text-[10px] text-muted-foreground font-normal">
+              <span className="ml-auto text-micro text-muted-foreground font-normal">
                 {lineCount.toLocaleString()} lines · {(content.length / 1024).toFixed(1)} KB
               </span>
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-7 text-[10px] gap-1 mr-7"
+                className="h-7 text-micro gap-1 mr-7"
                 onClick={() => { navigator.clipboard.writeText(content); toast.success(`${label} copied`); }}
               >
                 <Copy className="h-3 w-3" /> Copy all
@@ -194,34 +197,16 @@ const LargeTextBlock = memo(function LargeTextBlock({
 
 // ── Status config ──
 
-const statusConfig: Record<
-  TaskStatus,
-  { icon: React.ElementType; color: string; bg: string; label: string }
-> = {
-  draft: { icon: FileEdit, color: "text-zinc-500", bg: "bg-zinc-500/10", label: "Draft" },
-  pending: { icon: Clock, color: "text-zinc-400", bg: "bg-zinc-500/10", label: "Queued" },
-  awaiting_approval: { icon: Clock, color: "text-amber-400", bg: "bg-amber-500/10", label: "Awaiting Approval" },
-  assigned: { icon: Clock, color: "text-violet-400", bg: "bg-violet-500/10", label: "Assigned" },
-  in_progress: { icon: Loader2, color: "text-blue-400", bg: "bg-blue-500/10", label: "Running" },
-  review: { icon: Eye, color: "text-amber-400", bg: "bg-amber-500/10", label: "Review" },
-  done: { icon: CheckCircle2, color: "text-emerald-400", bg: "bg-emerald-500/10", label: "Done" },
-  failed: { icon: AlertTriangle, color: "text-red-400", bg: "bg-red-500/10", label: "Failed" },
-};
-
-const phaseConfig: Record<string, { icon: React.ElementType; label: string; color: string }> = {
-  execution: { icon: Loader2, label: "Executing", color: "text-blue-400" },
-  review: { icon: Eye, label: "Reviewing", color: "text-amber-400" },
-  fix: { icon: Hammer, label: "Fixing", color: "text-orange-400" },
-  clarification: { icon: HelpCircle, label: "Clarifying", color: "text-purple-400" },
-};
+const statusConfig = taskStatusStyles;
+const phaseConfig = taskPhaseStyles;
 
 const triggerLabels: Record<AssessmentTrigger, { label: string; color: string }> = {
-  initial: { label: "Initial", color: "text-blue-400" },
-  reassess: { label: "Re-assessed", color: "text-amber-400" },
-  fix: { label: "After Fix", color: "text-orange-400" },
-  retry: { label: "After Retry", color: "text-violet-400" },
-  "auto-correct": { label: "Auto-corrected", color: "text-emerald-400" },
-  judge: { label: "Judge Review", color: "text-sky-400" },
+  initial: { label: "Initial", color: "text-info" },
+  reassess: { label: "Re-assessed", color: "text-warning" },
+  fix: { label: "After Fix", color: taskPhaseStyles.fix.color },
+  retry: { label: "After Retry", color: "text-status-assigned" },
+  "auto-correct": { label: "Auto-corrected", color: "text-success" },
+  judge: { label: "Judge Review", color: "text-chart-1" },
 };
 
 function filesLinkForPath(filePath: string): string | null {
@@ -239,7 +224,7 @@ function TriggerBadge({ trigger }: { trigger?: AssessmentTrigger }) {
   if (!trigger) return null;
   const cfg = triggerLabels[trigger];
   return (
-    <Badge variant="outline" className={cn("text-[9px]", cfg.color)}>
+    <Badge variant="outline" className={cn("text-micro", cfg.color)}>
       {cfg.label}
     </Badge>
   );
@@ -256,10 +241,10 @@ function CopyableId({ id, label }: { id: string; label?: string }) {
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
       }}
-      className="inline-flex items-center gap-1 text-[10px] font-mono text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+      className="inline-flex items-center gap-1 text-micro font-mono text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
       title={`Copy ${label ?? "ID"}: ${id}`}
     >
-      {copied ? <Check className="h-2.5 w-2.5 text-emerald-500" /> : <Copy className="h-2.5 w-2.5" />}
+      {copied ? <Check className="h-2.5 w-2.5 text-success" /> : <Copy className="h-2.5 w-2.5" />}
       {id.slice(0, 12)}...
     </button>
   );
@@ -267,14 +252,14 @@ function CopyableId({ id, label }: { id: string; label?: string }) {
 
 function ScoreBar({ score, label }: { score: number; label: string }) {
   const pct = Math.round(score * 100);
-  const color = pct >= 80 ? "bg-emerald-500" : pct >= 60 ? "bg-amber-500" : "bg-red-500";
+  const color = pct >= 80 ? "bg-success" : pct >= 60 ? "bg-warning" : "bg-destructive";
   return (
     <div className="flex items-center gap-2">
-      <span className="text-[10px] text-muted-foreground w-24 truncate capitalize">{label}</span>
+      <span className="text-micro text-muted-foreground w-24 truncate capitalize">{label}</span>
       <div className="flex-1 h-1.5 rounded-full bg-muted/40 overflow-hidden">
         <div className={cn("h-full rounded-full transition-all", color)} style={{ width: `${pct}%` }} />
       </div>
-      <span className="text-[10px] font-mono w-8 text-right">{pct}%</span>
+      <span className="text-micro font-mono w-8 text-right">{pct}%</span>
     </div>
   );
 }
@@ -286,19 +271,19 @@ function DimensionScores({ scores }: { scores: DimensionScore[] }) {
         <div key={s.dimension}>
           <div className="flex items-center gap-2">
             <ScoreBar score={s.score / 5} label={s.dimension} />
-            <span className="text-[9px] text-muted-foreground shrink-0">
+            <span className="text-micro text-muted-foreground shrink-0">
               <Scale className="h-2.5 w-2.5 inline mr-0.5" />w:{s.weight}
             </span>
           </div>
           {s.reasoning && (
-            <p className="text-[11px] text-muted-foreground ml-[104px] mt-0.5">
+            <p className="text-caption text-muted-foreground ml-[104px] mt-0.5">
               {s.reasoning}
             </p>
           )}
           {s.evidence && s.evidence.length > 0 && (
             <div className="ml-[104px] mt-1 space-y-0.5">
               {s.evidence.map((e, i) => (
-                <div key={i} className="flex items-center gap-2 text-[10px]">
+                <div key={i} className="flex items-center gap-2 text-micro">
                   <FileCode className="h-3 w-3 text-muted-foreground shrink-0" />
                   <code className="font-mono text-muted-foreground">{e.file}:{e.line}</code>
                   <span className="text-muted-foreground truncate">{e.note}</span>
@@ -328,13 +313,13 @@ function LiveActivityStrip({ process }: { process: AgentProcess }) {
     <div className="flex items-center gap-3 px-4 py-2 bg-primary/5 rounded-lg border border-primary/10">
       <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse shrink-0" />
       {activity.lastTool && (
-        <Badge variant="outline" className="text-[10px] font-mono px-1.5 py-0 text-primary border-primary/30">
+        <Badge variant="outline" className="text-micro font-mono px-1.5 py-0 text-primary border-primary/30">
           <Wrench className="h-2.5 w-2.5 mr-0.5" />
           {activity.lastTool}
         </Badge>
       )}
       {activity.lastFile && (
-        <span className="text-[11px] font-mono text-muted-foreground truncate">
+        <span className="text-caption font-mono text-muted-foreground truncate">
           {activity.lastFile.split("/").pop()}
         </span>
       )}
@@ -343,17 +328,17 @@ function LiveActivityStrip({ process }: { process: AgentProcess }) {
       )}
       <div className="flex items-center gap-3 ml-auto shrink-0">
         {activity.toolCalls > 0 && (
-          <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+          <span className="text-caption text-muted-foreground flex items-center gap-1">
             <Zap className="h-3 w-3" /> {activity.toolCalls} calls
           </span>
         )}
         {(activity.filesCreated.length + activity.filesEdited.length) > 0 && (
-          <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+          <span className="text-caption text-muted-foreground flex items-center gap-1">
             <FileEdit className="h-3 w-3" /> {activity.filesCreated.length + activity.filesEdited.length} files
           </span>
         )}
         {(activity.totalTokens ?? 0) > 0 && (
-          <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+          <span className="text-caption text-muted-foreground flex items-center gap-1">
             {((activity.totalTokens ?? 0) / 1000).toFixed(1)}k tokens
           </span>
         )}
@@ -372,6 +357,10 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
   const isToolUse = entry.type === "tool_use";
   const isToolResult = entry.type === "tool_result";
   const isAssistant = entry.type === "assistant";
+  // agent harness runs (Claude Code, Codex) also log lines, reasoning and per-turn usage
+  const isLog = entry.type === "log";
+  const isUsage = entry.type === "usage";
+  const isError = entry.type === "error";
 
   const eventLabel = entry.event ?? entry.type ?? "unknown";
 
@@ -383,6 +372,13 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
     expandContent = entry.content ?? entry.text;
   } else if (isAssistant) {
     expandContent = entry.text;
+  } else if (isUsage) {
+    expandContent = JSON.stringify({
+      inputTokens: entry.inputTokens, outputTokens: entry.outputTokens, cacheReadTokens: entry.cacheReadTokens,
+      cacheWriteTokens: entry.cacheWriteTokens, totalTokens: entry.totalTokens, ...(entry.costUsd !== undefined ? { costUsd: entry.costUsd } : {}),
+    }, null, 2);
+  } else if ((isLog || isError) && entry.message) {
+    expandContent = entry.message;
   } else if (entry.data != null) {
     expandContent = JSON.stringify(entry.data, null, 2);
   } else if (entry.text) {
@@ -394,19 +390,21 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
   const hasPayload = expandContent != null && expandContent.length > 0;
 
   const getStyle = () => {
-    if (entry.event === "direction:applied") return { icon: MessageSquare, color: "text-sky-400", dot: "bg-sky-500" };
-    if (entry.event === "checkpoint") return { icon: History, color: "text-emerald-400", dot: "bg-emerald-500" };
-    if (entry.event === "activity") return { icon: Activity, color: "text-blue-400", dot: "bg-blue-500" };
-    if (entry.event === "spawning" || entry.event === "spawned") return { icon: Loader2, color: "text-emerald-400", dot: "bg-emerald-500" };
-    if (entry.event === "done") return { icon: CheckCircle2, color: "text-zinc-400", dot: "bg-zinc-500" };
-    if (entry.event === "error") return { icon: XCircle, color: "text-red-400", dot: "bg-red-500" };
-    if (entry.event === "sigterm") return { icon: XCircle, color: "text-amber-400", dot: "bg-amber-500" };
-    if (entry.type === "stdout") return { icon: Terminal, color: "text-emerald-400", dot: "bg-emerald-500" };
-    if (isToolUse) return { icon: Wrench, color: "text-violet-400", dot: "bg-violet-500" };
-    if (isToolResult && entry.isError) return { icon: XCircle, color: "text-red-400", dot: "bg-red-500" };
-    if (isToolResult) return { icon: CheckCircle2, color: "text-emerald-400", dot: "bg-emerald-500" };
-    if (isAssistant) return { icon: Bot, color: "text-sky-400", dot: "bg-sky-500" };
-    return { icon: FileText, color: "text-zinc-400", dot: "bg-zinc-500" };
+    if (entry.event === "direction:applied") return { icon: MessageSquare, color: "text-info", dot: "bg-info" };
+    if (entry.event === "checkpoint") return { icon: History, color: "text-success", dot: "bg-success" };
+    if (entry.event === "activity") return { icon: Activity, color: "text-info", dot: "bg-info" };
+    if (entry.event === "spawning" || entry.event === "spawned") return { icon: Loader2, color: "text-success", dot: "bg-success" };
+    if (entry.event === "done") return { icon: CheckCircle2, color: "text-muted-foreground", dot: "bg-muted-foreground" };
+    if (entry.event === "error") return { icon: XCircle, color: "text-destructive", dot: "bg-destructive" };
+    if (entry.event === "sigterm") return { icon: XCircle, color: "text-warning", dot: "bg-warning" };
+    if (entry.type === "stdout") return { icon: Terminal, color: "text-success", dot: "bg-success" };
+    if (isError) return { icon: XCircle, color: "text-destructive", dot: "bg-destructive" };
+    if (isUsage) return { icon: Activity, color: "text-muted-foreground", dot: "bg-muted-foreground" };
+    if (isToolUse) return { icon: Wrench, color: "text-primary", dot: "bg-primary" };
+    if (isToolResult && entry.isError) return { icon: XCircle, color: "text-destructive", dot: "bg-destructive" };
+    if (isToolResult) return { icon: CheckCircle2, color: "text-success", dot: "bg-success" };
+    if (isAssistant) return { icon: Bot, color: "text-info", dot: "bg-info" };
+    return { icon: FileText, color: "text-muted-foreground", dot: "bg-muted-foreground" };
   };
 
   const style = getStyle();
@@ -430,6 +428,13 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
     inlineSummary = preview || undefined;
   } else if (isAssistant && entry.text) {
     inlineSummary = entry.text.slice(0, 100).replace(/\n/g, " ");
+  } else if ((isLog || isError) && entry.message) {
+    inlineSummary = entry.message.slice(0, 120).replace(/\n/g, " ");
+  } else if (entry.type === "reasoning" && entry.text) {
+    inlineSummary = entry.text.slice(0, 100).replace(/\n/g, " ");
+  } else if (isUsage) {
+    const tokens = entry.totalTokens ?? ((entry.inputTokens ?? 0) + (entry.outputTokens ?? 0));
+    inlineSummary = `${(tokens / 1000).toFixed(1)}k tokens${entry.costUsd !== undefined ? ` · $${entry.costUsd.toFixed(4)}` : ""}${entry.harness ? ` · ${entry.harness}` : ""}`;
   }
 
   return (
@@ -447,10 +452,16 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
           {/* Tool name badge for tool_use / tool_result */}
           {entry.tool && (
             <Badge variant="secondary" className={cn(
-              "text-[10px] font-mono px-1.5 py-0 shrink-0",
-              isToolResult && entry.isError && "text-red-400 border-red-400/30"
+              "text-micro font-mono px-1.5 py-0 shrink-0",
+              isToolResult && entry.isError && "text-destructive border-destructive/30"
             )}>
               {entry.tool}
+            </Badge>
+          )}
+          {/* a harness's Polpo tool runs on the Polpo server, not in the runtime */}
+          {entry.host && (
+            <Badge variant="outline" className="text-micro px-1.5 py-0 shrink-0 text-primary border-primary/30" title="Polpo tool: it ran on the Polpo server" data-testid="activity-host-tool">
+              Polpo
             </Badge>
           )}
           {/* Inline summary */}
@@ -473,7 +484,7 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
             <pre className={cn(
               "text-sm rounded px-3 py-2 whitespace-pre-wrap font-mono overflow-x-auto max-h-56 overflow-y-auto leading-normal border",
               isToolResult && entry.isError
-                ? "bg-red-500/5 text-red-400/80 border-red-500/20"
+                ? "bg-destructive/5 text-destructive/80 border-destructive/20"
                 : "bg-muted/20 text-muted-foreground border-border/30"
             )}>
               {expandContent}
@@ -518,12 +529,12 @@ function activityMatchesFilter(entry: RunActivityEntry, filter: ActivityFilter):
   if (entry.event === "activity") return false;
   if (filter === "all") return true;
   if (filter === "conversation") {
-    return entry.type === "assistant" || entry.type === "tool_use" || entry.type === "tool_result"
+    return entry.type === "assistant" || entry.type === "tool_use" || entry.type === "tool_result" || entry.type === "reasoning"
       || entry.type === "error" || entry.type === "result" || entry.event === "error" || entry.event === "direction:applied";
   }
   if (filter === "tools") return entry.type === "tool_use" || entry.type === "tool_result";
   return entry.event === "spawning" || entry.event === "spawned" || entry.event === "done"
-    || entry.event === "sigterm" || entry.event === "error" || entry.event === "checkpoint";
+    || entry.event === "sigterm" || entry.event === "error" || entry.event === "checkpoint" || entry.type === "log" || entry.type === "usage";
 }
 
 function ActivityRunHeader({
@@ -548,20 +559,20 @@ function ActivityRunHeader({
       <GitBranch className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       <span className="text-xs font-semibold text-foreground">Run {run.attempt}</span>
       {isLatest && totalRuns > 1 && (
-        <span className="text-[10px] font-medium uppercase text-primary">Latest</span>
+        <span className="text-micro font-medium uppercase text-primary">Latest</span>
       )}
       {status && (
-        <span className="flex items-center gap-1 text-[10px] capitalize text-muted-foreground">
+        <span className="flex items-center gap-1 text-micro capitalize text-muted-foreground">
           <span className={cn(
             "h-1.5 w-1.5 rounded-full",
-            status === "running" ? "bg-emerald-500 animate-pulse"
-              : status === "completed" ? "bg-emerald-500"
-                : status === "failed" || status === "killed" ? "bg-red-500" : "bg-muted-foreground",
+            status === "running" ? "bg-success animate-pulse"
+              : status === "completed" ? "bg-success"
+                : status === "failed" || status === "killed" ? "bg-destructive" : "bg-muted-foreground",
           )} />
           {status}
         </span>
       )}
-      <span className="ml-auto truncate text-[10px] text-muted-foreground">
+      <span className="ml-auto truncate text-micro text-muted-foreground">
         {run.header?.agentName && <span className="mr-2">{run.header.agentName}</span>}
         {startedAt ? format(new Date(startedAt), "MMM d, yyyy HH:mm:ss") : run.header?.runId?.slice(0, 8)}
       </span>
@@ -633,11 +644,11 @@ function ActivityPanel({ taskId, isActive }: { taskId: string; isActive?: boolea
             >
               <FIcon className="h-3 w-3" />
               {label}
-              <span className="text-[10px] text-muted-foreground">{count}</span>
+              <span className="text-micro text-muted-foreground">{count}</span>
             </Button>
           ))}
           {stats.errors > 0 && (
-            <span className="text-xs text-red-400 flex items-center gap-1 ml-2">
+            <span className="text-xs text-destructive flex items-center gap-1 ml-2">
               <XCircle className="h-3.5 w-3.5" /> {stats.errors} errors
             </span>
           )}
@@ -678,17 +689,17 @@ function AssessmentHistoryRow({ assessment, index }: { assessment: AssessmentRes
           "flex items-center gap-2 px-3 py-2 rounded-md cursor-pointer transition-colors",
           open ? "bg-accent/10" : "hover:bg-accent/20"
         )}>
-          <span className="text-[10px] text-muted-foreground w-5 text-center shrink-0">#{index + 1}</span>
+          <span className="text-micro text-muted-foreground w-5 text-center shrink-0">#{index + 1}</span>
           {assessment.passed ? (
-            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+            <CheckCircle2 className="h-3.5 w-3.5 text-success shrink-0" />
           ) : (
-            <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0" />
+            <XCircle className="h-3.5 w-3.5 text-destructive shrink-0" />
           )}
           <TriggerBadge trigger={assessment.trigger} />
           {assessment.globalScore != null && (
             <span className="text-xs font-mono">{assessment.globalScore.toFixed(1)}/5</span>
           )}
-          <span className="text-[11px] text-muted-foreground ml-auto shrink-0">
+          <span className="text-caption text-muted-foreground ml-auto shrink-0">
             {assessment.timestamp ? formatDistanceToNow(new Date(assessment.timestamp), { addSuffix: true }) : ""}
           </span>
           <ChevronDown className={cn("h-3 w-3 text-muted-foreground transition-transform shrink-0", open && "rotate-180")} />
@@ -702,17 +713,17 @@ function AssessmentHistoryRow({ assessment, index }: { assessment: AssessmentRes
                 <div key={i} className="space-y-1">
                   <div className="flex items-center gap-2 text-xs">
                     {c.passed ? (
-                      <CheckCircle2 className="h-3 w-3 text-emerald-500 shrink-0" />
+                      <CheckCircle2 className="h-3 w-3 text-success shrink-0" />
                     ) : (
-                      <XCircle className="h-3 w-3 text-red-500 shrink-0" />
+                      <XCircle className="h-3 w-3 text-destructive shrink-0" />
                     )}
-                    <Badge variant="outline" className="text-[8px] font-mono px-1 py-0">{c.type}</Badge>
+                    <Badge variant="outline" className="text-micro font-mono px-1 py-0">{c.type}</Badge>
                     <span className="text-muted-foreground">{c.message}</span>
                     {c.globalScore != null && (
-                      <span className="text-[10px] font-mono text-muted-foreground ml-auto">{c.globalScore.toFixed(2)}/5</span>
+                      <span className="text-micro font-mono text-muted-foreground ml-auto">{c.globalScore.toFixed(2)}/5</span>
                     )}
                   </div>
-                  {c.details && <p className="text-[10px] text-muted-foreground ml-5">{c.details}</p>}
+                  {c.details && <p className="text-micro text-muted-foreground ml-5">{c.details}</p>}
                   {c.scores && c.scores.length > 0 && (
                     <div className="ml-5">
                       <DimensionScores scores={c.scores} />
@@ -735,10 +746,10 @@ function AssessmentHistoryRow({ assessment, index }: { assessment: AssessmentRes
 }
 
 const directionStatusStyle: Record<TaskDirection["status"], string> = {
-  queued: "bg-amber-400",
-  delivered: "bg-sky-400",
-  applied: "bg-emerald-400",
-  failed: "bg-red-400",
+  queued: "bg-warning",
+  delivered: "bg-info",
+  applied: "bg-success",
+  failed: "bg-destructive",
 };
 
 function TaskDirectionComposer({ task, process }: { task: Task; process?: AgentProcess }) {
@@ -803,12 +814,12 @@ function TaskDirectionComposer({ task, process }: { task: Task; process?: AgentP
           />
           <div className="mt-2 flex min-h-7 flex-wrap items-center gap-x-3 gap-y-2">
             {needsConfirmation && (
-              <label className="flex items-center gap-2 text-xs text-amber-500">
+              <label className="flex items-center gap-2 text-xs text-warning">
                 <input
                   type="checkbox"
                   checked={confirmSideEffects}
                   onChange={(event) => setConfirmSideEffects(event.target.checked)}
-                  className="h-3.5 w-3.5 accent-amber-500"
+                  className="h-3.5 w-3.5 accent-warning"
                 />
                 External actions may repeat
               </label>
@@ -831,7 +842,7 @@ function TaskDirectionComposer({ task, process }: { task: Task; process?: AgentP
       {recentDirections.length > 0 && (
         <div className="mt-2 ml-7 flex flex-col gap-1 border-t border-border/40 pt-2">
           {recentDirections.map((direction) => (
-            <div key={direction.id} className="flex min-w-0 items-center gap-2 text-[11px] text-muted-foreground">
+            <div key={direction.id} className="flex min-w-0 items-center gap-2 text-caption text-muted-foreground">
               <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", directionStatusStyle[direction.status])} />
               <span className="shrink-0 font-medium uppercase text-foreground/60">{direction.mode.replace("_", " ")}</span>
               <span className="truncate">{direction.message}</span>
@@ -883,6 +894,8 @@ export function TaskDetailPage() {
 
   // ── File preview state ──
   const { previewState, openPreview, closePreview } = useFilePreview();
+  // the run card shows the computer's live status (cached state: no provider call)
+  const { computers } = useComputers({ live: false });
 
   if (isLoading) {
     return (
@@ -909,6 +922,8 @@ export function TaskDetailPage() {
   const StatusIcon = cfg.icon;
   const assessment = task.result?.assessment;
   const phase = task.phase && task.phase !== "execution" ? phaseConfig[task.phase] : null;
+  // what every run cost in all (retries, continuations, directions), not just the latest
+  const totalCost = taskCostOf(task);
 
   // Show dedicated Assessment tab when we have rich review data (exploration traces)
   // OR when an assessment is actively running (review state / live progress)
@@ -931,8 +946,9 @@ export function TaskDetailPage() {
           </div>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="w-full truncate text-base font-semibold sm:w-auto sm:text-lg">{task.title}</h1>
+              <h1 className="font-heading w-full truncate text-h3 sm:w-auto sm:text-h2">{task.title}</h1>
               <Badge variant="outline" className={cn("text-xs shrink-0 border-border/40", cfg.color)}>{cfg.label}</Badge>
+              <TaskCostBadge cost={totalCost} size="md" />
               {phase && (
                 <Badge variant="outline" className={cn("text-xs gap-1 shrink-0", phase.color)}>
                   <phase.icon className="h-3 w-3" />
@@ -957,7 +973,7 @@ export function TaskDetailPage() {
                 </Link>
               )}
               {task.sessionId && (
-                <span className="hidden items-center gap-1 font-mono text-[10px] lg:flex">
+                <span className="hidden items-center gap-1 font-mono text-micro lg:flex">
                   session: {task.sessionId.slice(0, 8)}
                 </span>
               )}
@@ -999,7 +1015,7 @@ export function TaskDetailPage() {
             </DropdownMenuContent>
           </DropdownMenu>
           {(task.status === "in_progress" || task.status === "assigned") && (
-            <Button variant="outline" size="sm" className="text-red-400 hover:text-red-500" disabled={!!actionPending} onClick={() => handleAction(killTask, "Killed")}>
+            <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" disabled={!!actionPending} onClick={() => handleAction(killTask, "Killed")}>
               {actionPending === "Killed" ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <XCircle className="h-3.5 w-3.5 mr-1.5" />} Kill
             </Button>
           )}
@@ -1011,6 +1027,17 @@ export function TaskDetailPage() {
         </div>
       </div>
 
+      {/* Where and with what it runs: engine, computer, egress, session, cost (and earlier runs) */}
+      <RunContextCard runs={task.runs} cost={totalCost} computers={computers} />
+
+      {/* Tools for this task: inherit from the agent (default) or a narrower scope */}
+      <TaskToolScopeCard
+        scope={task.toolScope}
+        stale={task.toolScopeStale}
+        agent={agentConfig}
+        onSave={(toolScope) => updateTask({ toolScope })}
+      />
+
       {/* Live activity for running tasks */}
       {process && <LiveActivityStrip process={process} />}
 
@@ -1019,10 +1046,10 @@ export function TaskDetailPage() {
       {/* Content — tabs: Assessment (conditional) | Detail | Activity */}
       <Tabs defaultValue={showAssessmentTab ? "assessment" : "detail"} className="flex flex-col flex-1 min-h-0">
         <TabsList className="shrink-0 w-fit">
-          {showAssessmentTab && <TabsTrigger value="assessment" className="gap-1.5"><Scale className="h-3 w-3" /> Assessment</TabsTrigger>}
-          <TabsTrigger value="detail" className="gap-1.5"><FileText className="h-3 w-3" /> Detail</TabsTrigger>
-          <TabsTrigger value="activity" className="gap-1.5"><Activity className="h-3 w-3" /> Execution</TabsTrigger>
-          <TabsTrigger value="rules" className="gap-1.5"><Bell className="h-3 w-3" /> Rules</TabsTrigger>
+          {showAssessmentTab && <TabsTrigger value="assessment"><Scale className="h-3 w-3" /> Assessment</TabsTrigger>}
+          <TabsTrigger value="detail"><FileText className="h-3 w-3" /> Detail</TabsTrigger>
+          <TabsTrigger value="activity"><Activity className="h-3 w-3" /> Execution</TabsTrigger>
+          <TabsTrigger value="rules"><Bell className="h-3 w-3" /> Rules</TabsTrigger>
         </TabsList>
 
         {/* ── Assessment tab (conditional) ── */}
@@ -1032,12 +1059,12 @@ export function TaskDetailPage() {
 
               {/* Live assessment progress feed (shown while reviewing) */}
               {isReviewing && assessmentProgress.length > 0 && (
-                <Card className="bg-card/80 backdrop-blur-sm border-border/40 border-l-2 border-l-sky-500 py-0 gap-0 mb-4">
+                <Card className="border-l-2 border-l-info py-0 gap-0 mb-4">
                   <CardContent className="pt-4 pb-4 space-y-3">
                     <div className="flex items-center gap-2">
-                      <Loader2 className="h-4 w-4 animate-spin text-sky-400" />
-                      <p className="text-xs font-medium text-sky-400">Assessment in progress...</p>
-                      <span className="text-[10px] text-muted-foreground ml-auto">{assessmentProgress.length} steps</span>
+                      <Loader2 className="h-4 w-4 animate-spin text-info" />
+                      <p className="text-xs font-medium text-info">Assessment in progress...</p>
+                      <span className="text-micro text-muted-foreground ml-auto">{assessmentProgress.length} steps</span>
                     </div>
                     <div className="space-y-0.5 max-h-64 overflow-y-auto pr-1">
                       {assessmentProgress.map((entry, i) => {
@@ -1050,10 +1077,10 @@ export function TaskDetailPage() {
                         const isFailed = entry.message.includes("failed") || entry.message.includes("Failed");
                         const isGeneration = entry.message.includes("Generating") || entry.message.includes("Generated");
 
-                        const dotColor = isFailed ? "bg-red-500" : isComplete ? "bg-emerald-500" : isScoring ? "bg-violet-500" : isExploration ? "bg-sky-500" : isPhase ? "bg-amber-500" : isGeneration ? "bg-indigo-500" : "bg-zinc-500";
-                        const textColor = isFailed ? "text-red-400" : isComplete ? "text-emerald-400" : isLatest ? "text-foreground" : "text-muted-foreground/70";
+                        const dotColor = isFailed ? "bg-destructive" : isComplete ? "bg-success" : isScoring ? "bg-chart-5" : isExploration ? "bg-info" : isPhase ? "bg-warning" : isGeneration ? "bg-status-assigned" : "bg-muted-foreground";
+                        const textColor = isFailed ? "text-destructive" : isComplete ? "text-success" : isLatest ? "text-foreground" : "text-muted-foreground/70";
                         const MsgIcon = isFailed ? XCircle : isComplete ? CheckCircle2 : isScoring ? Scale : isExploration ? Search : isPhase ? Zap : isGeneration ? Star : Activity;
-                        const iconColor = isFailed ? "text-red-400" : isComplete ? "text-emerald-400" : isScoring ? "text-violet-400" : isExploration ? "text-sky-400" : isPhase ? "text-amber-400" : isGeneration ? "text-indigo-400" : "text-zinc-400";
+                        const iconColor = isFailed ? "text-destructive" : isComplete ? "text-success" : isScoring ? "text-chart-5" : isExploration ? "text-info" : isPhase ? "text-warning" : isGeneration ? "text-status-assigned" : "text-muted-foreground";
 
                         return (
                           <div key={i} className={cn(
@@ -1062,10 +1089,10 @@ export function TaskDetailPage() {
                           )}>
                             <div className={cn("h-1.5 w-1.5 rounded-full shrink-0", dotColor, isLatest && "animate-pulse")} />
                             <MsgIcon className={cn("h-3 w-3 shrink-0", iconColor)} />
-                            <span className={cn("text-[11px] truncate min-w-0", textColor, isLatest && "font-medium")}>
+                            <span className={cn("text-caption truncate min-w-0", textColor, isLatest && "font-medium")}>
                               {entry.message}
                             </span>
-                            <span className="text-[9px] text-muted-foreground/40 ml-auto shrink-0 tabular-nums font-mono">
+                            <span className="text-micro text-muted-foreground/40 ml-auto shrink-0 tabular-nums font-mono">
                               {new Date(entry.timestamp).toLocaleTimeString()}
                             </span>
                           </div>
@@ -1078,9 +1105,9 @@ export function TaskDetailPage() {
 
               {/* Review in progress but no progress events yet */}
               {isReviewing && assessmentProgress.length === 0 && (
-                <Card className="bg-card/80 backdrop-blur-sm border-border/40 border-l-2 border-l-sky-500 py-0 gap-0 mb-4">
+                <Card className="border-l-2 border-l-info py-0 gap-0 mb-4">
                   <CardContent className="flex items-center gap-3 py-6 justify-center">
-                    <Loader2 className="h-5 w-5 animate-spin text-sky-400" />
+                    <Loader2 className="h-5 w-5 animate-spin text-info" />
                     <p className="text-sm text-muted-foreground">Waiting for assessment to start...</p>
                   </CardContent>
                 </Card>
@@ -1096,21 +1123,21 @@ export function TaskDetailPage() {
                   {/* Score hero card */}
                   <Card className={cn(
                     "bg-card/80 backdrop-blur-sm border-border/40 overflow-hidden py-0 gap-0",
-                    assessment.passed ? "border-l-2 border-l-emerald-500" : "border-l-2 border-l-red-500"
+                    assessment.passed ? "border-l-2 border-l-success" : "border-l-2 border-l-destructive"
                   )}>
                     <CardContent className="pt-4 pb-4 space-y-3">
                       <div className="flex items-center gap-4">
                         {assessment.globalScore != null ? (
                           <div className={cn(
                             "flex items-center justify-center h-14 w-14 rounded-xl text-xl font-bold shrink-0",
-                            assessment.passed ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"
+                            assessment.passed ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"
                           )}>
                             {assessment.globalScore.toFixed(1)}
                           </div>
                         ) : (
                           <div className={cn(
                             "flex items-center justify-center h-14 w-14 rounded-xl shrink-0",
-                            assessment.passed ? "bg-emerald-500/10 text-emerald-500" : "bg-red-500/10 text-red-500"
+                            assessment.passed ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"
                           )}>
                             {assessment.passed ? <CheckCircle2 className="h-6 w-6" /> : <XCircle className="h-6 w-6" />}
                           </div>
@@ -1122,7 +1149,7 @@ export function TaskDetailPage() {
                             </span>
                             <TriggerBadge trigger={assessment.trigger} />
                             {assessment.timestamp && (
-                              <span className="text-[10px] text-muted-foreground ml-auto shrink-0">
+                              <span className="text-micro text-muted-foreground ml-auto shrink-0">
                                 {formatDistanceToNow(new Date(assessment.timestamp), { addSuffix: true })}
                               </span>
                             )}
@@ -1141,17 +1168,17 @@ export function TaskDetailPage() {
 
                   {/* Score Breakdown — dimension tiles */}
                   {assessment.scores && assessment.scores.some(s => s.reasoning || (s.evidence && s.evidence.length > 0)) && (
-                    <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+                    <Card className="py-0 gap-0">
                       <CardContent className="pt-4 pb-4 space-y-3">
-                        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+                        <p className="text-label text-muted-foreground flex items-center gap-1.5">
                           <Scale className="h-3 w-3" /> Score Breakdown
                         </p>
                         <div className="grid grid-cols-1 gap-2">
                           {assessment.scores.filter(s => s.reasoning || (s.evidence && s.evidence.length > 0)).map((s) => {
                             const pct = Math.round((s.score / 5) * 100);
-                            const scoreColor = pct >= 80 ? "text-emerald-400" : pct >= 60 ? "text-amber-400" : "text-red-400";
-                            const barColor = pct >= 80 ? "bg-emerald-500" : pct >= 60 ? "bg-amber-500" : "bg-red-500";
-                            const bgGlow = pct >= 80 ? "from-emerald-500/[0.03]" : pct >= 60 ? "from-amber-500/[0.03]" : "from-red-500/[0.03]";
+                            const scoreColor = pct >= 80 ? "text-success" : pct >= 60 ? "text-warning" : "text-destructive";
+                            const barColor = pct >= 80 ? "bg-success" : pct >= 60 ? "bg-warning" : "bg-destructive";
+                            const bgGlow = pct >= 80 ? "from-success/[0.03]" : pct >= 60 ? "from-warning/[0.03]" : "from-destructive/[0.03]";
                             return (
                               <div key={s.dimension} className={cn(
                                 "relative rounded-lg border border-border/30 overflow-hidden",
@@ -1162,24 +1189,24 @@ export function TaskDetailPage() {
                                   <div className="shrink-0 flex flex-col items-center gap-0.5">
                                     <div
                                       className="relative h-10 w-10 rounded-full flex items-center justify-center"
-                                      style={{ background: `conic-gradient(${pct >= 80 ? 'rgb(52 211 153)' : pct >= 60 ? 'rgb(251 191 36)' : 'rgb(248 113 113)'} ${pct * 3.6}deg, rgba(128,128,128,0.1) 0deg)` }}
+                                      style={{ background: `conic-gradient(${tones[scoreTone(pct)].css} ${pct * 3.6}deg, color-mix(in oklch, var(--muted-foreground) 10%, transparent) 0deg)` }}
                                     >
                                       <div className="h-7 w-7 rounded-full bg-card flex items-center justify-center">
-                                        <span className={cn("text-[11px] font-bold font-mono tabular-nums", scoreColor)}>{s.score.toFixed(1)}</span>
+                                        <span className={cn("text-caption font-bold font-mono tabular-nums", scoreColor)}>{s.score.toFixed(1)}</span>
                                       </div>
                                     </div>
-                                    <span className="text-[8px] text-muted-foreground/50 font-mono">w:{s.weight}</span>
+                                    <span className="text-micro text-muted-foreground/50 font-mono">w:{s.weight}</span>
                                   </div>
                                   <div className="flex-1 min-w-0 space-y-1.5">
                                     <div className="flex items-center gap-2">
                                       <span className="text-xs font-semibold capitalize tracking-tight">{s.dimension}</span>
-                                      <span className={cn("text-[10px] font-mono font-bold", scoreColor)}>{pct}%</span>
+                                      <span className={cn("text-micro font-mono font-bold", scoreColor)}>{pct}%</span>
                                     </div>
-                                    {s.reasoning && <p className="text-[11px] text-muted-foreground/80 leading-relaxed">{s.reasoning}</p>}
+                                    {s.reasoning && <p className="text-caption text-muted-foreground/80 leading-relaxed">{s.reasoning}</p>}
                                     {s.evidence && s.evidence.length > 0 && (
                                       <div className="flex flex-wrap gap-1 pt-0.5">
                                         {s.evidence.map((e, i) => (
-                                          <span key={i} className="inline-flex items-center gap-1 rounded-md bg-muted/40 px-1.5 py-0.5 text-[9px] font-mono text-muted-foreground hover:bg-muted/60 transition-colors" title={e.note}>
+                                          <span key={i} className="inline-flex items-center gap-1 rounded-md bg-muted/40 px-1.5 py-0.5 text-micro font-mono text-muted-foreground hover:bg-muted/60 transition-colors" title={e.note}>
                                             <FileCode className="h-2.5 w-2.5 shrink-0 opacity-60" />
                                             {e.file.split('/').pop()}:{e.line}
                                           </span>
@@ -1208,16 +1235,16 @@ export function TaskDetailPage() {
                     if (!reviewers || reviewers.length === 0) return null;
                     const medianScore = llmCheck?.globalScore ?? 3;
                     return (
-                      <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+                      <Card className="py-0 gap-0">
                         <CardContent className="pt-4 pb-4 space-y-3">
-                          <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+                          <p className="text-label text-muted-foreground flex items-center gap-1.5">
                             <Star className="h-3 w-3" /> Judge Votes ({reviewers.length})
                           </p>
                           <div className="space-y-2">
                             {reviewers.map((r) => {
                               const isAboveMedian = r.globalScore >= medianScore;
                               const rPct = Math.round((r.globalScore / 5) * 100);
-                              const rColor = rPct >= 80 ? "text-emerald-400" : rPct >= 60 ? "text-amber-400" : "text-red-400";
+                              const rColor = rPct >= 80 ? "text-success" : rPct >= 60 ? "text-warning" : "text-destructive";
                               const hasExploration = !!r.exploration;
                               const hasFiles = hasExploration && r.exploration!.filesRead.length > 0;
                               const hasMessages = hasExploration && r.exploration!.messages.length > 0;
@@ -1227,10 +1254,10 @@ export function TaskDetailPage() {
                                   <div className="rounded-lg border border-border/30 overflow-hidden">
                                     <CollapsibleTrigger className="flex items-center gap-2.5 w-full px-3 py-2 hover:bg-muted/20 transition-colors cursor-pointer group/rv">
                                       <div className={cn(
-                                        "flex h-7 items-center justify-center rounded-md text-[10px] font-bold font-mono shrink-0 px-2",
+                                        "flex h-7 items-center justify-center rounded-md text-micro font-bold font-mono shrink-0 px-2",
                                         isAboveMedian
-                                          ? "bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/20"
-                                          : "bg-amber-500/10 text-amber-400 ring-1 ring-amber-500/20"
+                                          ? "bg-success/10 text-success ring-1 ring-success/20"
+                                          : "bg-warning/10 text-warning ring-1 ring-warning/20"
                                       )}>
                                         Judge {r.index}
                                       </div>
@@ -1240,7 +1267,7 @@ export function TaskDetailPage() {
                                       <div className="flex-1 flex items-center gap-px h-2 rounded-sm overflow-hidden bg-muted/30">
                                         {r.scores.map((s, si) => {
                                           const sPct = (s.score / 5) * 100;
-                                          const sColor = sPct >= 80 ? "bg-emerald-500" : sPct >= 60 ? "bg-amber-500" : "bg-red-500";
+                                          const sColor = sPct >= 80 ? "bg-success" : sPct >= 60 ? "bg-warning" : "bg-destructive";
                                           return (
                                             <div key={si} className="flex-1 h-full relative" title={`${s.dimension}: ${s.score.toFixed(1)}/5`}>
                                               <div className={cn("absolute inset-y-0 left-0 rounded-[1px]", sColor)} style={{ width: `${sPct}%` }} />
@@ -1252,16 +1279,16 @@ export function TaskDetailPage() {
                                     </CollapsibleTrigger>
                                     <CollapsibleContent>
                                       <div className="px-3 pb-3 pt-1 space-y-3 border-t border-border/20">
-                                        <p className="text-[11px] text-muted-foreground/80 leading-relaxed">{r.summary}</p>
+                                        <p className="text-caption text-muted-foreground/80 leading-relaxed">{r.summary}</p>
                                         <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
                                           {r.scores.map((s) => {
                                             const dimPct = Math.round((s.score / 5) * 100);
-                                            const dimColor = dimPct >= 80 ? "text-emerald-400" : dimPct >= 60 ? "text-amber-400" : "text-red-400";
-                                            const dimBg = dimPct >= 80 ? "bg-emerald-500/5" : dimPct >= 60 ? "bg-amber-500/5" : "bg-red-500/5";
+                                            const dimColor = dimPct >= 80 ? "text-success" : dimPct >= 60 ? "text-warning" : "text-destructive";
+                                            const dimBg = dimPct >= 80 ? "bg-success/5" : dimPct >= 60 ? "bg-warning/5" : "bg-destructive/5";
                                             return (
                                               <div key={s.dimension} className={cn("rounded-md px-2.5 py-2 border border-border/15", dimBg)}>
                                                 <div className="flex items-center justify-between gap-1.5">
-                                                  <span className="text-[10px] text-muted-foreground/70 capitalize truncate">{s.dimension}</span>
+                                                  <span className="text-micro text-muted-foreground/70 capitalize truncate">{s.dimension}</span>
                                                   <span className={cn("text-sm font-mono font-bold tabular-nums shrink-0", dimColor)}>{s.score.toFixed(1)}</span>
                                                 </div>
                                               </div>
@@ -1272,28 +1299,28 @@ export function TaskDetailPage() {
                                         {/* Exploration tabs */}
                                         {(hasExploration || hasRetries) && (
                                           <Tabs defaultValue={hasExploration ? "analysis" : "retries"} className="w-full">
-                                            <TabsList className="h-7 w-full justify-start bg-muted/30 p-0.5 gap-0">
+                                            <TabsList className="w-full justify-start">
                                               {hasExploration && (
-                                                <TabsTrigger value="analysis" className="text-[9px] h-6 px-2 gap-1 data-[state=active]:bg-background">
+                                                <TabsTrigger value="analysis" className="flex-none text-small">
                                                   <Search className="h-3 w-3" /> Analysis
                                                 </TabsTrigger>
                                               )}
                                               {hasMessages && (
-                                                <TabsTrigger value="conversation" className="text-[9px] h-6 px-2 gap-1 data-[state=active]:bg-background">
+                                                <TabsTrigger value="conversation" className="flex-none text-small">
                                                   <MessageSquare className="h-3 w-3" /> Conversation
-                                                  <span className="text-[8px] text-muted-foreground">({r.exploration!.messages.length})</span>
+                                                  <span className="text-micro text-muted-foreground">({r.exploration!.messages.length})</span>
                                                 </TabsTrigger>
                                               )}
                                               {hasFiles && (
-                                                <TabsTrigger value="files" className="text-[9px] h-6 px-2 gap-1 data-[state=active]:bg-background">
+                                                <TabsTrigger value="files" className="flex-none text-small">
                                                   <FolderOpen className="h-3 w-3" /> Files
-                                                  <span className="text-[8px] text-muted-foreground">({r.exploration!.filesRead.length})</span>
+                                                  <span className="text-micro text-muted-foreground">({r.exploration!.filesRead.length})</span>
                                                 </TabsTrigger>
                                               )}
                                               {hasRetries && (
-                                                <TabsTrigger value="retries" className="text-[9px] h-6 px-2 gap-1 text-amber-400/70 data-[state=active]:bg-background data-[state=active]:text-amber-400">
+                                                <TabsTrigger value="retries" className="flex-none text-small text-warning/70 data-[state=active]:text-warning">
                                                   <AlertCircle className="h-3 w-3" /> Retries
-                                                  <span className="text-[8px]">({r.scoringAttemptErrors!.length})</span>
+                                                  <span className="text-micro">({r.scoringAttemptErrors!.length})</span>
                                                 </TabsTrigger>
                                               )}
                                             </TabsList>
@@ -1301,8 +1328,8 @@ export function TaskDetailPage() {
                                             {/* Analysis tab */}
                                             {hasExploration && (
                                               <TabsContent value="analysis" className="mt-2">
-                                                <div className="rounded-md bg-muted/10 border-l-2 border-sky-500/30 pl-3 pr-2.5 py-2.5 max-h-72 overflow-y-auto">
-                                                  <MessageResponse mode="static" className="text-[11px] leading-[1.7] text-muted-foreground/90 [&_p]:mb-1.5 [&_ul]:mb-1.5 [&_ol]:mb-1.5 [&_li]:text-[11px] [&_code]:text-[10px] [&_h1]:text-xs [&_h2]:text-xs [&_h3]:text-[11px]">
+                                                <div className="rounded-md bg-muted/10 border-l-2 border-info/30 pl-3 pr-2.5 py-2.5 max-h-72 overflow-y-auto">
+                                                  <MessageResponse mode="static" className="text-caption leading-[1.7] text-muted-foreground/90 [&_p]:mb-1.5 [&_ul]:mb-1.5 [&_ol]:mb-1.5 [&_li]:text-caption [&_code]:text-micro [&_h1]:text-xs [&_h2]:text-xs [&_h3]:text-caption">
                                                     {r.exploration!.analysis}
                                                   </MessageResponse>
                                                 </div>
@@ -1317,9 +1344,9 @@ export function TaskDetailPage() {
                                                     const isAssistantMsg = msg.role === "assistant";
                                                     const isTResult = msg.role === "toolResult";
                                                     const isError = msg.isError;
-                                                    const msgDot = isError ? "bg-red-500" : isAssistantMsg ? "bg-sky-500" : isTResult ? "bg-emerald-500" : "bg-zinc-500";
+                                                    const msgDot = isError ? "bg-destructive" : isAssistantMsg ? "bg-info" : isTResult ? "bg-success" : "bg-muted-foreground";
                                                     const MsgIcon = isError ? XCircle : isAssistantMsg ? Bot : isTResult ? CheckCircle2 : FileText;
-                                                    const msgIconColor = isError ? "text-red-400" : isAssistantMsg ? "text-sky-400" : isTResult ? "text-emerald-400" : "text-zinc-400";
+                                                    const msgIconColor = isError ? "text-destructive" : isAssistantMsg ? "text-info" : isTResult ? "text-success" : "text-muted-foreground";
                                                     const roleLabel = isTResult ? (msg.toolName ?? "tool") : msg.role;
                                                     let inlineSummary: string | undefined;
                                                     if (isAssistantMsg && msg.toolCalls && msg.toolCalls.length > 0) {
@@ -1336,26 +1363,26 @@ export function TaskDetailPage() {
                                                           <div className="flex items-center gap-2 px-2.5 py-2 rounded-md cursor-pointer transition-colors hover:bg-accent/20">
                                                             <div className={cn("h-1.5 w-1.5 rounded-full shrink-0", msgDot)} />
                                                             <MsgIcon className={cn("h-3.5 w-3.5 shrink-0", msgIconColor)} />
-                                                            <Badge variant="outline" className="text-[9px] font-mono px-1.5 py-0 shrink-0">
+                                                            <Badge variant="outline" className="text-micro font-mono px-1.5 py-0 shrink-0">
                                                               {roleLabel}
                                                             </Badge>
                                                             {msg.toolCalls && msg.toolCalls.length > 0 && (
                                                               <>
                                                                 {msg.toolCalls.slice(0, 2).map((tc, tci) => (
-                                                                  <Badge key={tci} variant="secondary" className="text-[9px] font-mono px-1.5 py-0 shrink-0">
+                                                                  <Badge key={tci} variant="secondary" className="text-micro font-mono px-1.5 py-0 shrink-0">
                                                                     {tc.name}
                                                                   </Badge>
                                                                 ))}
                                                                 {msg.toolCalls.length > 2 && (
-                                                                  <span className="text-[9px] text-muted-foreground">+{msg.toolCalls.length - 2}</span>
+                                                                  <span className="text-micro text-muted-foreground">+{msg.toolCalls.length - 2}</span>
                                                                 )}
                                                               </>
                                                             )}
                                                             {isError && (
-                                                              <Badge variant="destructive" className="text-[8px] px-1 py-0 shrink-0">error</Badge>
+                                                              <Badge variant="destructive" className="text-micro px-1 py-0 shrink-0">error</Badge>
                                                             )}
                                                             {inlineSummary && !msg.toolCalls?.length && (
-                                                              <span className="text-[10px] text-muted-foreground truncate min-w-0">
+                                                              <span className="text-micro text-muted-foreground truncate min-w-0">
                                                                 {inlineSummary}
                                                               </span>
                                                             )}
@@ -1371,8 +1398,8 @@ export function TaskDetailPage() {
                                                                 <div className="space-y-1 mb-1.5">
                                                                   {msg.toolCalls.map((tc, tci) => (
                                                                     <div key={tci} className="rounded border border-border/30 bg-muted/20 px-2.5 py-1.5">
-                                                                      <span className="text-[10px] font-mono font-semibold text-amber-400/90">{tc.name}</span>
-                                                                      <pre className="text-[9px] text-muted-foreground/60 font-mono whitespace-pre-wrap break-words mt-0.5 max-h-24 overflow-y-auto">
+                                                                      <span className="text-micro font-mono font-semibold text-warning/90">{tc.name}</span>
+                                                                      <pre className="text-micro text-muted-foreground/60 font-mono whitespace-pre-wrap break-words mt-0.5 max-h-24 overflow-y-auto">
                                                                         {JSON.stringify(tc.arguments, null, 2)}
                                                                       </pre>
                                                                     </div>
@@ -1382,11 +1409,11 @@ export function TaskDetailPage() {
                                                               {msg.content && (
                                                                 <div className={cn(
                                                                   "rounded px-2.5 py-2 max-h-56 overflow-y-auto border",
-                                                                  isError ? "bg-red-500/5 border-red-500/20" : "bg-muted/20 border-border/30"
+                                                                  isError ? "bg-destructive/5 border-destructive/20" : "bg-muted/20 border-border/30"
                                                                 )}>
                                                                   <MessageResponse mode="static" className={cn(
-                                                                    "text-[11px] leading-[1.6] [&_p]:mb-1.5 [&_ul]:mb-1.5 [&_ol]:mb-1.5 [&_li]:text-[11px] [&_code]:text-[10px] [&_pre]:text-[10px] [&_pre]:max-h-32 [&_pre]:overflow-y-auto [&_h1]:text-xs [&_h2]:text-xs [&_h3]:text-[11px]",
-                                                                    isError ? "text-red-400/80" : "text-muted-foreground"
+                                                                    "text-caption leading-[1.6] [&_p]:mb-1.5 [&_ul]:mb-1.5 [&_ol]:mb-1.5 [&_li]:text-caption [&_code]:text-micro [&_pre]:text-micro [&_pre]:max-h-32 [&_pre]:overflow-y-auto [&_h1]:text-xs [&_h2]:text-xs [&_h3]:text-caption",
+                                                                    isError ? "text-destructive/80" : "text-muted-foreground"
                                                                   )}>
                                                                     {msg.content.length > 2000 ? msg.content.slice(0, 2000) + "\n...truncated" : msg.content}
                                                                   </MessageResponse>
@@ -1412,9 +1439,9 @@ export function TaskDetailPage() {
                                                     const dirPath = parts.length > 0 ? parts.join("/") + "/" : "";
                                                     return (
                                                       <div key={fi} className="flex items-center gap-2 px-2.5 py-1.5 hover:bg-muted/20 transition-colors">
-                                                        <FileText className="h-3 w-3 shrink-0 text-sky-400/60" />
-                                                        <span className="text-[10px] font-mono truncate text-muted-foreground/50">{dirPath}</span>
-                                                        <span className="text-[10px] font-mono font-semibold text-foreground/80 shrink-0">{fileName}</span>
+                                                        <FileText className="h-3 w-3 shrink-0 text-info/60" />
+                                                        <span className="text-micro font-mono truncate text-muted-foreground/50">{dirPath}</span>
+                                                        <span className="text-micro font-mono font-semibold text-foreground/80 shrink-0">{fileName}</span>
                                                       </div>
                                                     );
                                                   })}
@@ -1427,8 +1454,8 @@ export function TaskDetailPage() {
                                               <TabsContent value="retries" className="mt-2">
                                                 <div className="space-y-1.5">
                                                   {r.scoringAttemptErrors!.map((err, ei) => (
-                                                    <div key={ei} className="rounded-md bg-amber-500/5 border border-amber-500/15 px-3 py-2">
-                                                      <p className="text-[10px] font-mono text-amber-400/70 leading-[1.6] break-words">{err}</p>
+                                                    <div key={ei} className="rounded-md bg-warning/5 border border-warning/15 px-3 py-2">
+                                                      <p className="text-micro font-mono text-warning/70 leading-[1.6] break-words">{err}</p>
                                                     </div>
                                                   ))}
                                                 </div>
@@ -1450,20 +1477,20 @@ export function TaskDetailPage() {
 
                   {/* Metrics */}
                   {assessment.metrics && assessment.metrics.length > 0 && (
-                    <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+                    <Card className="py-0 gap-0">
                       <CardContent className="pt-4 pb-4 space-y-3">
-                        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+                        <p className="text-label text-muted-foreground flex items-center gap-1.5">
                           <Activity className="h-3 w-3" /> Metrics ({assessment.metrics.length})
                         </p>
                         <div className="space-y-1.5">
                           {assessment.metrics.map((m, i) => (
                             <div key={i} className={cn(
                               "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs",
-                              m.passed ? "bg-emerald-500/8 text-emerald-600 dark:text-emerald-400" : "bg-red-500/8 text-red-600 dark:text-red-400"
+                              m.passed ? "bg-success/8 text-success dark:text-success" : "bg-destructive/8 text-destructive dark:text-destructive"
                             )}>
                               {m.passed ? <CheckCircle2 className="h-3 w-3 shrink-0" /> : <XCircle className="h-3 w-3 shrink-0" />}
                               <span className="font-medium">{m.name}</span>
-                              <span className="font-mono text-[10px] opacity-60 ml-auto">{m.value}/{m.threshold}</span>
+                              <span className="font-mono text-micro opacity-60 ml-auto">{m.value}/{m.threshold}</span>
                             </div>
                           ))}
                         </div>
@@ -1473,9 +1500,9 @@ export function TaskDetailPage() {
 
                   {/* Assessment History */}
                   {task.result?.assessmentHistory && task.result.assessmentHistory.length > 0 && (
-                    <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+                    <Card className="py-0 gap-0">
                       <CardContent className="pt-4 pb-4 space-y-3">
-                        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+                        <p className="text-label text-muted-foreground flex items-center gap-1.5">
                           <Clock className="h-3 w-3" /> Previous Assessments ({task.result.assessmentHistory.length})
                         </p>
                         <div className="rounded-lg border border-border/50 divide-y divide-border/30">
@@ -1505,18 +1532,18 @@ export function TaskDetailPage() {
               {assessment && !showAssessmentTab && (
                 <Card className={cn(
                   "bg-card/80 backdrop-blur-sm border-border/40 overflow-hidden py-0 gap-0",
-                  assessment.passed ? "border-l-2 border-l-emerald-500" : "border-l-2 border-l-red-500"
+                  assessment.passed ? "border-l-2 border-l-success" : "border-l-2 border-l-destructive"
                 )}>
                   <CardContent className="pt-3 pb-3">
                     <div className="flex items-center gap-3">
-                      {assessment.passed ? <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" /> : <XCircle className="h-4 w-4 text-red-500 shrink-0" />}
+                      {assessment.passed ? <CheckCircle2 className="h-4 w-4 text-success shrink-0" /> : <XCircle className="h-4 w-4 text-destructive shrink-0" />}
                       <span className="text-xs font-medium">
                         Assessment {assessment.passed ? "Passed" : "Failed"}
                       </span>
                       {assessment.globalScore != null && (
                         <span className={cn(
                           "text-sm font-bold font-mono tabular-nums",
-                          assessment.passed ? "text-emerald-400" : "text-red-400"
+                          assessment.passed ? "text-success" : "text-destructive"
                         )}>
                           {assessment.globalScore.toFixed(1)}/5
                         </span>
@@ -1536,12 +1563,12 @@ export function TaskDetailPage() {
                 const hasLarge = stdoutLen > LARGE_TEXT_THRESHOLD || stderrLen > LARGE_TEXT_THRESHOLD;
                 return (
                 <Collapsible defaultOpen={!hasLarge}>
-                  <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+                  <Card className="py-0 gap-0">
                     <CardContent className="pt-4 space-y-3">
-                      <CollapsibleTrigger className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-widest hover:text-foreground transition-colors cursor-pointer group w-full">
+                      <CollapsibleTrigger className="flex items-center gap-1.5 text-label text-muted-foreground hover:text-foreground transition-colors cursor-pointer group w-full">
                         <Terminal className="h-3 w-3" /> Output
                         {hasLarge && (
-                          <span className="text-[9px] text-amber-400/80 font-normal normal-case tracking-normal">
+                          <span className="text-micro text-warning/80 font-normal normal-case tracking-normal">
                             (large — click to expand)
                           </span>
                         )}
@@ -1552,9 +1579,9 @@ export function TaskDetailPage() {
                           {task.result.stdout && (
                             <div>
                               <div className="flex items-center justify-between mb-1.5">
-                                <span className="text-[10px] text-muted-foreground font-medium">stdout</span>
+                                <span className="text-micro text-muted-foreground font-medium">stdout</span>
                                 <div className="flex items-center gap-2">
-                                  <span className="text-[10px] font-mono text-muted-foreground/50">{task.result.stdout.split("\n").length} lines</span>
+                                  <span className="text-micro font-mono text-muted-foreground/50">{task.result.stdout.split("\n").length} lines</span>
                                   <Button
                                     variant="ghost" size="icon" className="h-5 w-5"
                                     onClick={() => { navigator.clipboard.writeText(task.result!.stdout!); toast.success("stdout copied"); }}
@@ -1569,9 +1596,9 @@ export function TaskDetailPage() {
                           {task.result.stderr && (
                             <div>
                               <div className="flex items-center justify-between mb-1.5">
-                                <span className="text-[10px] text-red-400 font-medium">stderr</span>
+                                <span className="text-micro text-destructive font-medium">stderr</span>
                                 <div className="flex items-center gap-2">
-                                  <span className="text-[10px] font-mono text-muted-foreground/50">{task.result.stderr.split("\n").length} lines</span>
+                                  <span className="text-micro font-mono text-muted-foreground/50">{task.result.stderr.split("\n").length} lines</span>
                                   <Button
                                     variant="ghost" size="icon" className="h-5 w-5"
                                     onClick={() => { navigator.clipboard.writeText(task.result!.stderr!); toast.success("stderr copied"); }}
@@ -1593,9 +1620,9 @@ export function TaskDetailPage() {
 
               {/* ── Description (collapsible, open by default) ── */}
               <Collapsible defaultOpen>
-              <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+              <Card className="py-0 gap-0">
                 <CardContent className="pt-4 space-y-4">
-                  <CollapsibleTrigger className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-widest hover:text-foreground transition-colors cursor-pointer group w-full">
+                  <CollapsibleTrigger className="flex items-center gap-1.5 text-label text-muted-foreground hover:text-foreground transition-colors cursor-pointer group w-full">
                     <FileText className="h-3 w-3" /> Description
                     <ChevronDown className="h-3 w-3 ml-auto transition-transform group-data-[state=open]:rotate-180" />
                   </CollapsibleTrigger>
@@ -1630,9 +1657,9 @@ export function TaskDetailPage() {
 
               {/* ── Expectations ── */}
               {task.expectations.length > 0 && (
-                <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0 ">
+                <Card className="py-0 gap-0">
                   <CardContent className="pt-4 pb-4">
-                    <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-1">
+                    <p className="text-label text-muted-foreground mb-3 flex items-center gap-1">
                       <Wrench className="h-3 w-3" /> Expectations ({task.expectations.length})
                     </p>
                     <div className="space-y-2">
@@ -1647,33 +1674,33 @@ export function TaskDetailPage() {
                         return (
                         <div key={i} className={cn(
                           "rounded-md border p-3 space-y-2 transition-colors",
-                          isRunning ? "border-sky-500/60 bg-sky-500/5" : isDone ? (checkPassed ? "border-emerald-500/40 bg-emerald-500/5" : "border-red-500/40 bg-red-500/5") : "border-border",
+                          isRunning ? "border-info/60 bg-info/5" : isDone ? (checkPassed ? "border-success/40 bg-success/5" : "border-destructive/40 bg-destructive/5") : "border-border",
                         )}>
                           <div className="flex items-center gap-2 flex-wrap">
-                            <Badge variant="outline" className="text-[10px] shrink-0">{exp.type}</Badge>
+                            <Badge variant="outline" className="text-micro shrink-0">{exp.type}</Badge>
                             {exp.confidence && (
-                              <Badge variant="secondary" className="text-[9px] shrink-0">{exp.confidence}</Badge>
+                              <Badge variant="secondary" className="text-micro shrink-0">{exp.confidence}</Badge>
                             )}
                             {/* Live status indicator */}
                             {isRunning && (
-                              <span className="flex items-center gap-1 text-[10px] text-sky-400">
+                              <span className="flex items-center gap-1 text-micro text-info">
                                 <Loader2 className="h-3 w-3 animate-spin" /> Running...
                               </span>
                             )}
                             {isDone && (
-                              <span className={cn("flex items-center gap-1 text-[10px]", checkPassed ? "text-emerald-400" : "text-red-400")}>
+                              <span className={cn("flex items-center gap-1 text-micro", checkPassed ? "text-success" : "text-destructive")}>
                                 {checkPassed ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
                                 {checkPassed ? "Passed" : "Failed"}
                               </span>
                             )}
                             {exp.threshold != null && (
-                              <span className="text-[11px] text-muted-foreground ml-auto shrink-0">
+                              <span className="text-caption text-muted-foreground ml-auto shrink-0">
                                 Threshold: {exp.threshold}
                               </span>
                             )}
                           </div>
                           {exp.command && (
-                            <MemoMarkdown className="text-[11px] [&_pre]:my-0 [&_code]:text-[11px]">
+                            <MemoMarkdown className="text-caption [&_pre]:my-0 [&_code]:text-caption">
                               {`\`\`\`bash\n${exp.command}\n\`\`\``}
                             </MemoMarkdown>
                           )}
@@ -1686,7 +1713,7 @@ export function TaskDetailPage() {
                                     <Link
                                       key={j}
                                       to={fileTarget}
-                                      className="text-[11px] bg-muted/40 rounded px-2 py-0.5 font-mono text-primary/90 break-all hover:bg-muted/70 hover:text-primary transition-colors"
+                                      className="text-caption bg-muted/40 rounded px-2 py-0.5 font-mono text-primary/90 break-all hover:bg-muted/70 hover:text-primary transition-colors"
                                       title="Open in file editor"
                                     >
                                       {p}
@@ -1694,7 +1721,7 @@ export function TaskDetailPage() {
                                   );
                                 }
                                 return (
-                                  <code key={j} className="text-[11px] bg-muted/40 rounded px-2 py-0.5 font-mono text-muted-foreground break-all">{p}</code>
+                                  <code key={j} className="text-caption bg-muted/40 rounded px-2 py-0.5 font-mono text-muted-foreground break-all">{p}</code>
                                 );
                               })}
                             </div>
@@ -1704,7 +1731,7 @@ export function TaskDetailPage() {
                           )}
                           {exp.dimensions && exp.dimensions.length > 0 && (
                             <Collapsible>
-                              <CollapsibleTrigger className="flex items-center gap-1.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer group">
+                              <CollapsibleTrigger className="flex items-center gap-1.5 text-micro text-muted-foreground hover:text-foreground transition-colors cursor-pointer group">
                                 <ChevronDown className="h-2.5 w-2.5 transition-transform group-data-[state=open]:rotate-180" />
                                 {exp.dimensions.length} dimensions
                               </CollapsibleTrigger>
@@ -1716,14 +1743,14 @@ export function TaskDetailPage() {
                                         <span className="font-medium capitalize shrink-0">{d.name}</span>
                                         <span className="text-muted-foreground shrink-0">(w: {d.weight})</span>
                                       </div>
-                                      <p className="text-[11px] text-muted-foreground/80 leading-relaxed pl-0.5">{d.description}</p>
+                                      <p className="text-caption text-muted-foreground/80 leading-relaxed pl-0.5">{d.description}</p>
                                       {d.rubric && Object.keys(d.rubric).length > 0 && (
                                         <div className="ml-2 mt-1 space-y-1">
                                           {Object.entries(d.rubric)
                                             .sort(([a], [b]) => Number(a) - Number(b))
                                             .map(([level, desc]) => (
-                                              <div key={level} className="flex items-start gap-2 text-[10px]">
-                                                <Badge variant="outline" className="text-[8px] px-1 py-0 shrink-0 mt-0.5">{level}</Badge>
+                                              <div key={level} className="flex items-start gap-2 text-micro">
+                                                <Badge variant="outline" className="text-micro px-1 py-0 shrink-0 mt-0.5">{level}</Badge>
                                                 <span className="text-muted-foreground leading-relaxed">{String(desc)}</span>
                                               </div>
                                             ))}
@@ -1746,9 +1773,9 @@ export function TaskDetailPage() {
               {/* ── Outcomes (produced artifacts — collapsible, open by default) ── */}
               {(task.outcomes?.length ?? 0) > 0 && (
                 <Collapsible defaultOpen>
-                <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+                <Card className="py-0 gap-0">
                   <CardContent className="pt-4 pb-4">
-                    <CollapsibleTrigger className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground uppercase tracking-widest hover:text-foreground transition-colors cursor-pointer group w-full mb-3">
+                    <CollapsibleTrigger className="flex items-center gap-1.5 text-label text-muted-foreground hover:text-foreground transition-colors cursor-pointer group w-full mb-3">
                       <Package className="h-3 w-3" /> Outcomes ({task.outcomes!.length})
                       <ChevronDown className="h-3 w-3 ml-auto transition-transform group-data-[state=open]:rotate-180" />
                     </CollapsibleTrigger>
@@ -1794,13 +1821,13 @@ export function TaskDetailPage() {
                               ) : (
                                 <span className="text-sm font-medium min-w-0 break-words">{o.label}</span>
                               )}
-                              <Badge variant="outline" className="text-[9px] shrink-0">{o.type}</Badge>
+                              <Badge variant="outline" className="text-micro shrink-0">{o.type}</Badge>
                               {o.mimeType && (
-                                <span className="text-[10px] text-muted-foreground font-mono">{o.mimeType}</span>
+                                <span className="text-micro text-muted-foreground font-mono">{o.mimeType}</span>
                               )}
                               <div className="flex items-center gap-1 ml-auto shrink-0">
                                 {o.size != null && (
-                                  <span className="text-[10px] text-muted-foreground mr-1">
+                                  <span className="text-micro text-muted-foreground mr-1">
                                     {o.size > 1024 * 1024
                                       ? `${(o.size / 1024 / 1024).toFixed(1)} MB`
                                       : `${(o.size / 1024).toFixed(1)} KB`}
@@ -1844,7 +1871,7 @@ export function TaskDetailPage() {
                             {/* Path display */}
                             {o.path && (
                               <div className="px-3 py-1.5 border-t border-border/30 bg-muted/10">
-                                <span className="text-[11px] font-mono text-muted-foreground break-all">
+                                <span className="text-caption font-mono text-muted-foreground break-all">
                                   {o.path}
                                 </span>
                               </div>
@@ -1853,7 +1880,7 @@ export function TaskDetailPage() {
                             {/* URL */}
                             {o.url && (
                               <div className="px-3 py-1.5 border-t border-border/30 bg-muted/10">
-                                <a href={o.url} target="_blank" rel="noopener noreferrer" className="text-[11px] text-primary hover:underline break-all">
+                                <a href={o.url} target="_blank" rel="noopener noreferrer" className="text-caption text-primary hover:underline break-all">
                                   {o.url}
                                 </a>
                               </div>
@@ -1907,7 +1934,7 @@ export function TaskDetailPage() {
                             {(o.producedBy || (o.tags && o.tags.length > 0)) && (
                               <div className="flex items-center gap-2 px-3 py-1.5 border-t border-border/30 bg-muted/10">
                                 {o.producedBy && (
-                                  <span className="text-[10px] text-muted-foreground">
+                                  <span className="text-micro text-muted-foreground">
                                     via <code className="font-mono">{o.producedBy}</code>
                                     {o.producedAt && <> at {new Date(o.producedAt).toLocaleTimeString()}</>}
                                   </span>
@@ -1915,7 +1942,7 @@ export function TaskDetailPage() {
                                 {o.tags && o.tags.length > 0 && (
                                   <div className="flex gap-1 ml-auto">
                                     {o.tags.map(t => (
-                                      <Badge key={t} variant="secondary" className="text-[8px]">{t}</Badge>
+                                      <Badge key={t} variant="secondary" className="text-micro">{t}</Badge>
                                     ))}
                                   </div>
                                 )}
@@ -1933,21 +1960,21 @@ export function TaskDetailPage() {
 
               {/* ── Expected Outcomes (declared, not yet produced) ── */}
               {(task.expectedOutcomes?.length ?? 0) > 0 && !(task.outcomes?.length) && (
-                <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+                <Card className="py-0 gap-0">
                   <CardContent className="pt-4 pb-4">
-                    <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-1">
+                    <p className="text-label text-muted-foreground mb-3 flex items-center gap-1">
                       <Package className="h-3 w-3" /> Expected Outcomes ({task.expectedOutcomes!.length})
                     </p>
                     <div className="space-y-2">
                       {task.expectedOutcomes!.map((o, i) => (
                         <div key={i} className="rounded-md border border-dashed border-border/50 p-2.5 space-y-1.5">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <Badge variant="outline" className="text-[9px] shrink-0">{o.type}</Badge>
+                            <Badge variant="outline" className="text-micro shrink-0">{o.type}</Badge>
                             <span className="text-xs font-medium">{o.label}</span>
-                            {o.required && <Badge variant="secondary" className="text-[8px] shrink-0">required</Badge>}
+                            {o.required && <Badge variant="secondary" className="text-micro shrink-0">required</Badge>}
                           </div>
-                          {o.description && <p className="text-[10px] text-muted-foreground leading-relaxed">{o.description}</p>}
-                          {o.path && <code className="block text-[10px] font-mono text-muted-foreground break-all">{o.path}</code>}
+                          {o.description && <p className="text-micro text-muted-foreground leading-relaxed">{o.description}</p>}
+                          {o.path && <code className="block text-micro font-mono text-muted-foreground break-all">{o.path}</code>}
                         </div>
                       ))}
                     </div>
@@ -1957,9 +1984,9 @@ export function TaskDetailPage() {
 
               {/* ── Metrics ── */}
               {task.metrics.length > 0 && (
-                <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+                <Card className="py-0 gap-0">
                   <CardContent className="pt-4 pb-4">
-                    <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-3">
+                    <p className="text-label text-muted-foreground mb-3">
                       Metrics ({task.metrics.length})
                     </p>
                     <div className="space-y-2">
@@ -1976,9 +2003,9 @@ export function TaskDetailPage() {
               )}
 
               {/* ── Details / metadata ── */}
-              <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
+              <Card className="py-0 gap-0">
                 <CardContent className="pt-4 pb-4">
-                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-3">
+                  <p className="text-label text-muted-foreground mb-3">
                     Details
                   </p>
                   <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
@@ -2029,7 +2056,7 @@ export function TaskDetailPage() {
                         </div>
                         <div>
                           <span className="text-xs text-muted-foreground block mb-0.5">Exit Code</span>
-                          <span className={task.result.exitCode !== 0 ? "text-red-400" : ""}>{task.result.exitCode}</span>
+                          <span className={task.result.exitCode !== 0 ? "text-destructive" : ""}>{task.result.exitCode}</span>
                         </div>
                       </>
                     )}
@@ -2055,7 +2082,7 @@ export function TaskDetailPage() {
                                 <GitBranch className="h-3 w-3 text-muted-foreground shrink-0" />
                                 <span className="min-w-0 break-words">{depTitle || dep}</span>
                                 {depTask && (
-                                  <Badge variant="outline" className="text-[9px] px-1 py-0 shrink-0">
+                                  <Badge variant="outline" className="text-micro px-1 py-0 shrink-0">
                                     {depTask.status}
                                   </Badge>
                                 )}
@@ -2096,7 +2123,7 @@ export function TaskDetailPage() {
             <div className="pr-4 space-y-3 max-w-3xl">
               <p className="text-xs text-muted-foreground leading-relaxed">
                 These are the notification rules that would fire for this task, resolved by scope.
-                Task-scoped rules replace mission and global rules unless <code className="font-mono text-[11px]">inherit: true</code> is set.
+                Task-scoped rules replace mission and global rules unless <code className="font-mono text-caption">inherit: true</code> is set.
               </p>
               <TaskAppliedRules task={task} missionGroup={task.group} />
             </div>

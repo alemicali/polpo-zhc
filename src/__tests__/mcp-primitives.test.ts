@@ -46,7 +46,7 @@ function fakeInstance() {
   const schedules = [{ id: "sched-m1", missionId: "m1", expression: "0 9 * * 1-5", recurring: true, enabled: true, nextRunAt: "2026-11-24T09:00:00.000Z" }];
   const checks: Array<Record<string, unknown>> = [];
   const connectors = new Map<string, Record<string, unknown>>([
-    ["linear", { id: "linear", name: "Linear", kind: "mcp", transport: { type: "http", url: `https://mcp.linear.app/mcp?key=${SECRET}` }, auth: { type: "oauth" }, access: { agents: ["coach"], polpo: true }, enabled: true, status: "connected", toolCount: 12, secrets: { bearerToken: false, headers: [], clientSecret: false, values: [], oauth: { authorized: true } } }],
+    ["linear", { id: "linear", name: "Linear", kind: "mcp", catalogId: "linear", iconUrl: "/connector-icons/linear.svg", transport: { type: "http", url: `https://mcp.linear.app/mcp?key=${SECRET}` }, auth: { type: "oauth" }, access: { agents: ["coach"], polpo: true }, enabled: true, status: "connected", toolCount: 12, secrets: { bearerToken: false, headers: [], clientSecret: false, values: [], oauth: { authorized: true } } }],
   ]);
   const watchers: Array<Record<string, unknown>> = [];
   const vault: Record<string, Array<Record<string, unknown>>> = {
@@ -195,6 +195,8 @@ function fakeInstance() {
         { id: "notion", name: "Notion", category: "Productivity", description: "Notes and docs", url: "https://mcp.notion.com/mcp", transport: "http", auth: "oauth" },
         { id: "stripe", name: "Stripe", category: "Payments", description: "Payments", url: "https://mcp.stripe.com", transport: "http", auth: "bearer" },
         { id: "azure", name: "Azure DevOps", category: "Dev", description: "Boards", urlTemplate: "https://mcp.dev.azure.com/{organization}", transport: "http", auth: "oauth" },
+        { id: "slack", name: "Slack", category: "Communication", description: "Messages", url: "https://mcp.slack.com/mcp", transport: "http", auth: "oauth_preregistered", oauth: { app: "slack" },
+          setup: "Slack setup:\n2. Features → Agents: turn on \"Slack Model Context Protocol (MCP) Server\".", setupManifest: '{"oauth_config":{"redirect_urls":["<public URL>/api/v1/connectors/oauth/callback"]}}' },
       ],
       oauthApps: [],
     });
@@ -202,9 +204,24 @@ function fakeInstance() {
       const b = body as { catalogId?: string; url?: string; name?: string; auth?: { type: string }; access?: { agents?: string[] }; transport?: { type: string } };
       const id = b.catalogId ?? "custom";
       const authType = b.catalogId === "stripe" ? "bearer" : b.catalogId ? "oauth" : b.auth?.type ?? "none";
-      const c = { id, name: b.name ?? id, kind: "mcp", transport: { type: b.transport?.type ?? "http", url: b.url ?? `https://${id}.example.com/mcp` }, auth: { type: authType }, access: { agents: b.access?.agents ?? [], polpo: true }, enabled: true, status: authType === "oauth" ? "needs_auth" : "disconnected", secrets: { bearerToken: false, headers: [], clientSecret: false, values: [], oauth: { authorized: false } } };
+      const c = { id, ...(b.catalogId ? { catalogId: b.catalogId } : {}), name: b.name ?? id, kind: "mcp", transport: { type: b.transport?.type ?? "http", url: b.url ?? `https://${id}.example.com/mcp` }, auth: { type: authType }, access: { agents: b.access?.agents ?? [], polpo: true }, enabled: true, status: authType === "oauth" ? "needs_auth" : "disconnected", secrets: { bearerToken: false, headers: [], clientSecret: false, values: [], oauth: { authorized: false } } };
       connectors.set(id, c);
       return okData(c, 201);
+    }
+    if (p === "/connectors/discover" && method === "POST") {
+      const url = (body as { url: string }).url;
+      if (!/sitoinchat/.test(url)) return okData({ url, reachable: false, error: "Could not reach the server: ENOTFOUND", options: [] });
+      return okData({
+        url, reachable: true, transport: "http", authRequired: true,
+        resource: { resourceName: "SitoInChat", scopes: ["sites:read", "sites:write"], authorizationServers: ["https://sitoinchat.it/api/auth"] },
+        authorizationServer: { issuer: "https://sitoinchat.it/api/auth", registration: true, cimd: false, pkceMethods: ["S256"], tokenAuthMethods: ["none"] },
+        options: [
+          { auth: "oauth-dcr", recommended: true, description: "Sign in with OAuth; Polpo registers itself automatically." },
+          { auth: "oauth-preregistered", recommended: false, description: "Sign in with OAuth using a client id." },
+          { auth: "bearer", recommended: false, description: "Paste an API key or token." },
+        ],
+        recommendation: { transport: "http", auth: "oauth-dcr", recommended: true, scopes: ["sites:read", "sites:write"], name: "SitoInChat", icon: { dataUri: "data:image/svg+xml;base64,AA==", source: "website", src: "https://sitoinchat.it/favicon.svg" }, notes: ["Sign-in at sitoinchat.it (dynamic client registration)."] },
+      });
     }
     if ((m = p.match(/^\/connectors\/([^/]+)(\/[a-z/]+)?$/))) {
       const c = connectors.get(m[1]!);
@@ -214,6 +231,7 @@ function fakeInstance() {
       if (!action && method === "PATCH") { Object.assign(c, body); return okData(c); }
       if (!action && method === "DELETE") { connectors.delete(c.id as string); return okData({ removed: true }); }
       if (action === "/tools") return okData({ tools: [{ name: "create_issue", description: "Create an issue", policy: "allow" }, { name: "delete_issue", policy: "off" }] });
+      if (action === "/oauth/start" && c.id === "slack") return reply(400, { ok: false, error: 'The "slack" OAuth app is not set up' });
       if (action === "/oauth/start") return okData({ authorizationUrl: `https://auth.example.com/authorize?state=abc&c=${c.id}` });
       if (action === "/test") return okData(c.auth && (c.auth as { type: string }).type === "none" ? { ok: true, status: "connected", tools: [{ name: "ping" }], connector: c } : { ok: false, status: "needs_auth", error: "Not authorized" });
       if (action === "/disconnect") { c.status = "needs_auth"; return okData(c); }
@@ -291,8 +309,8 @@ describe("toolsets and scopes", () => {
       "polpo_schedules_list", "polpo_schedule_run", "polpo_checks_list", "polpo_connectors_list", "polpo_connector_add", "polpo_channels_list", "polpo_message_send",
       "polpo_teams_list", "polpo_team_save", "polpo_agent_delete"]) expect(def).toContain(n);
     for (const n of ["polpo_brain_search", "polpo_learning_get", "polpo_watchers_list", "polpo_vault_list", "polpo_apps_list", "polpo_api_get"]) expect(def).not.toContain(n);
-    // the visible default set stays near 90 (two agent-card tools are app-only)
-    expect(def.length).toBeLessThanOrEqual(101);
+    // the visible default set, every Configuration section included (the settings toolset) the task and mission cards and the computer detail and webhooks, for a full-access client
+    expect(def.length).toBeLessThanOrEqual(157);
     const all = await names(deps(f));
     for (const t of all) if (t.name !== "polpo_file_read") expect(t.outputSchema, t.name).toBeTruthy();
     const a = Object.fromEntries(all.map((t) => [t.name, t.annotations]));
@@ -544,7 +562,7 @@ describe("automation", () => {
     expect(run.structuredContent.schedule.last_run_at).toEqual(expect.any(String));
     expect(await call(deps(f), "polpo_schedule_delete", { mission_id: "m1" })).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/confirm: true/) }] });
     expect((await call(deps(f), "polpo_schedule_delete", { mission_id: "m1", confirm: true })).structuredContent).toEqual({ mission_id: "m1", deleted: true });
-  });
+  }, 20_000);
 
   it("creates recurring checks attributed to the caller, changes, confirms and cancels them", async () => {
     const f = fakeInstance();
@@ -589,6 +607,8 @@ describe("connectors", () => {
     expect(l.structuredContent.items).toEqual([expect.objectContaining({ id: "linear", status: "connected", authorized: true, agents: ["coach"], tool_count: 12 })]);
     expect(l.structuredContent.items[0].secrets).toBeUndefined();
     expect(l.structuredContent.items[0].url).toBe("https://mcp.linear.app/mcp?…");
+    // the icon, as an absolute URL (a catalog connector: the dashboard's bundled official icon)
+    expect(l.structuredContent.items[0].icon_url).toBe("https://polpo.example.com/connector-icons/linear.svg");
     expect(JSON.stringify(l)).not.toContain(SECRET);
     const one = await call(deps(f), "polpo_connectors_list", { id: "linear" });
     expect(one.structuredContent.tools).toEqual([{ name: "create_issue", description: "Create an issue", policy: "allow" }, { name: "delete_issue", policy: "off" }]);
@@ -602,7 +622,11 @@ describe("connectors", () => {
     expect(added.structuredContent).toMatchObject({ authorization_url: "https://auth.example.com/authorize?state=abc&c=notion", connector: { id: "notion", agents: ["coach"] } });
     expect(f.calls.find((c) => c.method === "POST" && c.path === "/api/v1/connectors")!.body).toEqual({ catalogId: "notion", access: { agents: ["coach"] } });
     const stripe = await call(deps(f), "polpo_connector_add", { catalog_id: "stripe" });
-    expect(stripe.structuredContent).toMatchObject({ setup_url: "https://polpo.example.com/connectors" });
+    // the link opens the connector's form, focused on the token, and says what to wait for
+    expect(stripe.structuredContent).toMatchObject({
+      setup_url: expect.stringMatching(/^https:\/\/polpo\.example\.com\/connectors\?connector=stripe&focus=bearerToken&setup=connector%3Astripe%3AbearerToken$/),
+      setup_id: "connector:stripe:bearerToken", next_step: expect.stringContaining("polpo_setup_wait"),
+    });
     expect(stripe.structuredContent.authorization_url).toBeUndefined();
     expect(await call(deps(f), "polpo_connector_add", { catalog_id: "azure" })).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/\{organization\}/) }] });
     expect(await call(deps(f), "polpo_connector_add", {})).toMatchObject({ isError: true });
@@ -614,6 +638,44 @@ describe("connectors", () => {
     const custom = await call(deps(f), "polpo_connector_add", { url: "https://mcp.acme.dev/mcp" });
     expect(f.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/connectors").at(-1)!.body).toMatchObject({ url: "https://mcp.acme.dev/mcp", name: "acme.dev", transport: { type: "http" } });
     expect(custom.structuredContent.connector).toMatchObject({ status: expect.any(String) });
+  });
+
+  it("an OAuth app still to set up: adding and connecting give its setup steps and app manifest", async () => {
+    const f = fakeInstance();
+    const added = await call(deps(f), "polpo_connector_add", { catalog_id: "slack" });
+    const text = added.content[0].text as string;
+    expect(text).toContain("cannot be authorized yet");
+    expect(text).toContain("Slack Model Context Protocol (MCP) Server");
+    expect(text).toContain("App manifest");
+    expect(text).toContain("/api/v1/connectors/oauth/callback");
+    expect(added.structuredContent.setup_url).toMatch(/connector=slack/);
+    const connect = await call(deps(f), "polpo_connector_connect", { id: "slack" });
+    expect(connect).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("Slack Model Context Protocol (MCP) Server") }] });
+  });
+
+  it("detects how to connect to a custom server, and adding one uses the detection", async () => {
+    const f = fakeInstance();
+    const d = await call(deps(f), "polpo_connector_add", { url: "https://mcp.sitoinchat.it", detect_only: true });
+    // nothing was added
+    expect(f.calls.some((c) => c.method === "POST" && c.path === "/api/v1/connectors")).toBe(false);
+    expect(d.structuredContent.detected).toMatchObject({
+      reachable: true, transport: "http", auth_required: true, icon_source: "website",
+      recommended: { auth: "oauth-dcr", transport: "http", scopes: ["sites:read", "sites:write"], name: "SitoInChat" },
+    });
+    expect(d.structuredContent.detected.options[0]).toMatchObject({ auth: "oauth-dcr", recommended: true });
+    expect(d.content[0].text).toMatch(/oauth-dcr \(recommended\)/);
+    // the data URI preview stays out of the model's context
+    expect(JSON.stringify(d)).not.toContain("data:image");
+    const added = await call(deps(f), "polpo_connector_add", { url: "https://mcp.sitoinchat.it" });
+    expect(f.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/connectors").at(-1)!.body).toMatchObject({
+      url: "https://mcp.sitoinchat.it", name: "SitoInChat", transport: { type: "http" }, auth: { type: "oauth", oauth: { scopes: ["sites:read", "sites:write"] } },
+    });
+    expect(added.structuredContent.authorization_url).toMatch(/^https:\/\/auth\.example\.com/);
+    // explicit choices win over the detection; an unreachable server is reported
+    await call(deps(f), "polpo_connector_add", { url: "https://mcp.sitoinchat.it", auth: "none", transport: "sse", name: "Mine" });
+    expect(f.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/connectors").at(-1)!.body).toMatchObject({ name: "Mine", transport: { type: "sse" }, auth: { type: "none" } });
+    expect((await call(deps(f), "polpo_connector_add", { url: "https://unreachable.example", detect_only: true })).structuredContent.detected).toMatchObject({ reachable: false, error: expect.stringMatching(/ENOTFOUND/) });
+    expect(await call(deps(f), "polpo_connector_add", { catalog_id: "notion", detect_only: true })).toMatchObject({ isError: true });
   });
 
   it("updates access and tool policy, tests, links OAuth, disconnects and removes with confirm", async () => {

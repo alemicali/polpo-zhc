@@ -53,32 +53,36 @@ import type { NotificationRecord, NotificationSeverity } from "@polpo-ai/react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { StatValue } from "@/components/shared/stat-value";
 
 // ── Severity styling ──
 
 const severityConfig: Record<
   NotificationSeverity,
-  { icon: React.ElementType; color: string; bg: string; ring: string; label: string }
+  { icon: React.ElementType; color: string; bg: string; dot: string; ring: string; label: string }
 > = {
   info: {
     icon: Info,
-    color: "text-sky-400",
-    bg: "bg-sky-500/10",
-    ring: "ring-sky-500/20",
+    color: "text-info",
+    bg: "bg-info/10",
+    dot: "bg-info",
+    ring: "ring-info/20",
     label: "Info",
   },
   warning: {
     icon: AlertTriangle,
-    color: "text-amber-400",
-    bg: "bg-amber-500/10",
-    ring: "ring-amber-500/20",
+    color: "text-warning",
+    bg: "bg-warning/10",
+    dot: "bg-warning",
+    ring: "ring-warning/20",
     label: "Warning",
   },
   critical: {
     icon: Zap,
-    color: "text-rose-400",
-    bg: "bg-rose-500/10",
-    ring: "ring-rose-500/20",
+    color: "text-destructive",
+    bg: "bg-destructive/10",
+    dot: "bg-destructive",
+    ring: "ring-destructive/20",
     label: "Critical",
   },
 };
@@ -89,14 +93,14 @@ const statusConfig: Record<
 > = {
   sent: {
     icon: CheckCircle2,
-    color: "text-emerald-400",
-    bg: "bg-emerald-500/10",
+    color: "text-success",
+    bg: "bg-success/10",
     label: "Sent",
   },
   failed: {
     icon: XCircle,
-    color: "text-red-400",
-    bg: "bg-red-500/10",
+    color: "text-destructive",
+    bg: "bg-destructive/10",
     label: "Failed",
   },
 };
@@ -104,10 +108,9 @@ const statusConfig: Record<
 // ── Stat card ──
 
 const statGradients: Record<string, string> = {
-  "text-sky-400": "from-sky-500/60 to-sky-400/20",
-  "text-emerald-400": "from-emerald-500/60 to-emerald-400/20",
-  "text-red-400": "from-red-500/60 to-red-400/20",
-  "text-rose-400": "from-rose-500/60 to-rose-400/20",
+  "text-info": "from-info/60 to-info/20",
+  "text-success": "from-success/60 to-success/20",
+  "text-destructive": "from-destructive/60 to-destructive/20",
 };
 
 function StatCard({
@@ -126,18 +129,10 @@ function StatCard({
   subtitle?: string;
 }) {
   return (
-    <Card className="relative overflow-hidden bg-card/80 backdrop-blur-sm border-border/40">
+    <Card className="relative overflow-hidden">
       <CardContent className="p-4">
         <div className="flex items-start justify-between">
-          <div>
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-              {label}
-            </p>
-            <p className="text-2xl font-bold font-mono tracking-tight mt-1">{value}</p>
-            {subtitle && (
-              <p className="text-[10px] text-muted-foreground mt-0.5">{subtitle}</p>
-            )}
-          </div>
+          <StatValue label={label} value={value} hint={subtitle} />
           <div className={cn("flex h-9 w-9 items-center justify-center rounded-lg", bg)}>
             <Icon className={cn("h-4 w-4", color)} />
           </div>
@@ -172,7 +167,7 @@ function NotificationRow({ record }: { record: NotificationRecord }) {
           </span>
           <Badge
             variant="outline"
-            className={cn("text-[9px] px-1.5 py-0 shrink-0", sev.color)}
+            className={cn("text-micro px-1.5 py-0 shrink-0", sev.color)}
           >
             {sev.label}
           </Badge>
@@ -181,22 +176,22 @@ function NotificationRow({ record }: { record: NotificationRecord }) {
           {record.body}
         </p>
         <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-          <Badge variant="secondary" className="text-[9px] gap-1 px-1.5 py-0">
+          <Badge variant="secondary" className="text-micro gap-1 px-1.5 py-0">
             <Hash className="h-2 w-2" />
             {record.channelType}
           </Badge>
-          <span className="text-[10px] text-muted-foreground font-mono">
+          <span className="text-micro text-muted-foreground font-mono">
             {record.channel}
           </span>
           {record.sourceEvent && (
-            <Badge variant="outline" className="text-[8px] font-mono px-1 py-0">
+            <Badge variant="outline" className="text-micro font-mono px-1 py-0">
               {record.sourceEvent}
             </Badge>
           )}
           {record.attachmentCount > 0 && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <Badge variant="secondary" className="text-[9px] gap-0.5 px-1.5 py-0 cursor-help">
+                <Badge variant="secondary" className="text-micro gap-0.5 px-1.5 py-0 cursor-help">
                   <ArrowUpRight className="h-2 w-2" />
                   {record.attachmentCount} file{record.attachmentCount > 1 ? "s" : ""}
                 </Badge>
@@ -215,16 +210,16 @@ function NotificationRow({ record }: { record: NotificationRecord }) {
           <TooltipTrigger asChild>
             <div className={cn("flex items-center gap-1 rounded-md px-1.5 py-0.5", stat.bg)}>
               <StatIcon className={cn("h-3 w-3", stat.color)} />
-              <span className={cn("text-[10px] font-medium", stat.color)}>{stat.label}</span>
+              <span className={cn("text-micro font-medium", stat.color)}>{stat.label}</span>
             </div>
           </TooltipTrigger>
           {record.error && (
-            <TooltipContent className="text-xs max-w-xs text-red-400">
+            <TooltipContent className="text-xs max-w-xs text-destructive">
               {record.error}
             </TooltipContent>
           )}
         </Tooltip>
-        <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+        <span className="text-micro text-muted-foreground flex items-center gap-1">
           <Clock className="h-2.5 w-2.5" />
           {formatDistanceToNow(new Date(record.timestamp), { addSuffix: true })}
         </span>
@@ -282,33 +277,33 @@ function SendDirectDialog({
         </DialogHeader>
         <div className="space-y-3 pt-2">
           <div>
-            <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+            <label className="text-label text-muted-foreground">
               Channel ID
             </label>
             <Input
-              className="mt-1 h-8 text-sm font-mono bg-input/50"
+              className="mt-1 h-8 text-sm font-mono"
               placeholder="e.g. telegram, slack-general"
               value={channel}
               onChange={(e) => setChannel(e.target.value)}
             />
           </div>
           <div>
-            <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+            <label className="text-label text-muted-foreground">
               Title
             </label>
             <Input
-              className="mt-1 h-8 text-sm bg-input/50"
+              className="mt-1 h-8 text-sm"
               placeholder="Notification title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
             />
           </div>
           <div>
-            <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+            <label className="text-label text-muted-foreground">
               Body
             </label>
             <Textarea
-              className="mt-1 text-sm min-h-[80px] resize-none bg-input/50"
+              className="mt-1 text-sm min-h-[80px] resize-none"
               placeholder="Notification body (HTML supported)"
               value={body}
               onChange={(e) => setBody(e.target.value)}
@@ -316,7 +311,7 @@ function SendDirectDialog({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+              <label className="text-label text-muted-foreground">
                 Severity
               </label>
               <Select value={severity} onValueChange={(v) => setSeverity(v as NotificationSeverity)}>
@@ -331,11 +326,11 @@ function SendDirectDialog({
               </Select>
             </div>
             <div>
-              <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+              <label className="text-label text-muted-foreground">
                 Delay (seconds)
               </label>
               <Input
-                className="mt-1 h-8 text-sm bg-input/50"
+                className="mt-1 h-8 text-sm"
                 type="number"
                 min="0"
                 placeholder="0"
@@ -441,31 +436,31 @@ export function NotificationsPage() {
           label="Total"
           value={stats?.total ?? 0}
           icon={Bell}
-          color="text-sky-400"
-          bg="bg-sky-500/10"
+          color="text-info"
+          bg="bg-info/10"
         />
         <StatCard
           label="Sent"
           value={stats?.sent ?? 0}
           icon={MailCheck}
-          color="text-emerald-400"
-          bg="bg-emerald-500/10"
+          color="text-success"
+          bg="bg-success/10"
           subtitle={stats && stats.total > 0 ? `${Math.round((stats.sent / stats.total) * 100)}% success` : undefined}
         />
         <StatCard
           label="Failed"
           value={stats?.failed ?? 0}
           icon={MailX}
-          color="text-red-400"
-          bg="bg-red-500/10"
+          color="text-destructive"
+          bg="bg-destructive/10"
           subtitle={stats && stats.failed > 0 ? "Check channel config" : undefined}
         />
         <StatCard
           label="Critical"
           value={severityCounts.critical}
           icon={Zap}
-          color="text-rose-400"
-          bg="bg-rose-500/10"
+          color="text-destructive"
+          bg="bg-destructive/10"
           subtitle={severityCounts.warning > 0 ? `+ ${severityCounts.warning} warnings` : undefined}
         />
       </div>
@@ -476,7 +471,7 @@ export function NotificationsPage() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             placeholder="Search notifications..."
-            className="pl-9 h-8 text-sm bg-input/50 border-border/40"
+            className="pl-9 h-8 text-sm"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -485,7 +480,7 @@ export function NotificationsPage() {
         {/* Status filter */}
         <div className="flex max-w-full items-center gap-2 overflow-x-auto scrollbar-none pb-0.5 lg:ml-auto lg:overflow-visible lg:pb-0">
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="h-8 w-28 shrink-0 text-xs bg-input/50 border-border/40">
+            <SelectTrigger className="h-8 w-28 shrink-0 text-sm">
               <Filter className="h-3 w-3 mr-1.5 text-muted-foreground" />
               <SelectValue />
             </SelectTrigger>
@@ -498,7 +493,7 @@ export function NotificationsPage() {
 
           {/* Severity filter */}
           <Select value={severityFilter} onValueChange={setSeverityFilter}>
-            <SelectTrigger className="h-8 w-28 shrink-0 text-xs bg-input/50 border-border/40">
+            <SelectTrigger className="h-8 w-28 shrink-0 text-sm">
               <AlertTriangle className="h-3 w-3 mr-1.5 text-muted-foreground" />
               <SelectValue />
             </SelectTrigger>
@@ -523,7 +518,7 @@ export function NotificationsPage() {
       </div>
 
       {/* ── Notification list ── */}
-      <Card className="flex-1 flex flex-col overflow-hidden bg-card/80 backdrop-blur-sm border-border/40">
+      <Card className="flex-1 flex flex-col overflow-hidden">
         <CardHeader className="pb-0 pt-3 px-4 shrink-0">
           <div className="flex items-center gap-2">
             <Bell className="h-4 w-4 text-muted-foreground" />
@@ -538,8 +533,8 @@ export function NotificationsPage() {
                   <Tooltip key={sev}>
                     <TooltipTrigger asChild>
                       <div className="flex items-center gap-1 cursor-help">
-                        <div className={cn("h-1.5 w-1.5 rounded-full", cfg.bg.replace("/10", ""))} style={{ backgroundColor: `var(--${sev === "info" ? "sky" : sev === "warning" ? "amber" : "rose"}-400, currentColor)` }} />
-                        <span className="text-[10px] text-muted-foreground">{count}</span>
+                        <div className={cn("h-1.5 w-1.5 rounded-full", cfg.dot)} />
+                        <span className="text-micro text-muted-foreground">{count}</span>
                       </div>
                     </TooltipTrigger>
                     <TooltipContent className="text-xs">{cfg.label}: {count}</TooltipContent>

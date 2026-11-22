@@ -56,7 +56,17 @@ import type {
 import { resolveModel, resolveModelSpec, buildStreamOpts, streamSimpleWithAuth, completeSimpleWithAuth, resolveSummaryModel } from "../llm/pi-client.js";
 import { createSessionCompaction } from "@polpo-ai/server";
 import { isContextOverflowError } from "@polpo-ai/core";
+import {
+  POLPO_TOOL_GROUPS,
+  ProgressiveToolSet,
+  TOOLS_LOAD,
+  loadedToolsFromHistory,
+  progressiveModeFor,
+  restoreToolAnnouncements,
+} from "@polpo-ai/core/progressive-tools";
+import type { ToolCallInfo } from "@polpo-ai/core/session-store";
 import { buildChatSystemPrompt } from "../llm/prompts.js";
+import { orchestratorName } from "../core/orchestrator-name.js";
 import type { Message } from "@earendil-works/pi-ai";
 import {
   ALL_ORCHESTRATOR_TOOLS,
@@ -570,7 +580,7 @@ export class ChannelGateway {
     if (!name) {
       return {
         key: this.key,
-        name: "Polpo",
+        name: this.polpoName(),
         role: "the orchestrator: plans and coordinates the company's work, assigns tasks to the agents, answers about tasks, missions and agents",
         responsibilities: [],
       };
@@ -644,8 +654,13 @@ export class ChannelGateway {
     return this.peerStore.isAllowed(peerId, { ...this.gatewayConfig, dmPolicy: "allowlist" });
   }
 
+  /** The orchestrator's display name (settings.orchestratorName, "Polpo" by default). */
+  private polpoName(): string {
+    return orchestratorName(this.orchestrator.getConfig()?.settings);
+  }
+
   private interlocutorName(): string {
-    return this.gatewayConfig.agent ?? "Polpo";
+    return this.gatewayConfig.agent ?? this.polpoName();
   }
 
   /**
@@ -744,7 +759,7 @@ export class ChannelGateway {
   /** This bot in a room: the agent it speaks as (the orchestrator is "polpo"). */
   private async speaker(conversation: string): Promise<{ id: string; name: string }> {
     const agent = await this.getActiveAgent(conversation).catch(() => undefined);
-    if (!agent) return { id: "polpo", name: "Polpo" };
+    if (!agent) return { id: "polpo", name: this.polpoName() };
     const def = (await this.orchestrator.getAgents()).find(a => a.name === agent);
     return { id: agent, name: def?.identity?.displayName ?? agent };
   }
@@ -976,7 +991,7 @@ export class ChannelGateway {
     const dedicated = this.gatewayConfig.agent;
     return dedicated
       ? `Connected${msg.displayName ? `, ${msg.displayName}` : ""}! You can now talk to ${dedicated} here.`
-      : `Connected${msg.displayName ? `, ${msg.displayName}` : ""}! You can now talk to Polpo here.\n\nSend /help to see the commands, or /agent NAME to talk to a specific agent.`;
+      : `Connected${msg.displayName ? `, ${msg.displayName}` : ""}! You can now talk to ${this.polpoName()} here.\n\nSend /help to see the commands, or /agent NAME to talk to a specific agent.`;
   }
 
   private pruneInvites(): void {
@@ -1208,14 +1223,14 @@ export class ChannelGateway {
     await this.peerStore.clearSession(key);
     this.forceNewSession.add(key);
     this.groupContext.delete(conversation);
-    return { text: `Session reset. ${inGroup ? "The next message here" : "Your next message"} starts a new conversation with ${agent ?? "Polpo"}.` };
+    return { text: `Session reset. ${inGroup ? "The next message here" : "Your next message"} starts a new conversation with ${agent ?? this.polpoName()}.` };
   }
 
   /** /compact [focus]: summarize this conversation's earlier messages now (agent conversations). */
   private async cmdCompact(focus: string, conversation: string): Promise<CommandResult> {
     const agent = await this.getActiveAgent(conversation);
     if (!agent) {
-      return { text: "The conversation with Polpo here keeps only its recent messages, so there is nothing to compact. /compact works in conversations with an agent." };
+      return { text: `The conversation with ${this.polpoName()} here keeps only its recent messages, so there is nothing to compact. /compact works in conversations with an agent.` };
     }
     const compact = this.orchestrator.getChannelCompactRunner?.();
     if (!compact) return { text: "Compaction is not available on this instance." };
@@ -1234,7 +1249,7 @@ export class ChannelGateway {
   }
 
   private dedicatedMessage(): CommandResult {
-    return { text: `This bot is dedicated to ${this.gatewayConfig.agent}. Use the main bot to talk to Polpo or other agents.` };
+    return { text: `This bot is dedicated to ${this.gatewayConfig.agent}. Use the main bot to talk to ${this.polpoName()} or other agents.` };
   }
 
   private async cmdAgent(args: string[], conversation: string, inGroup = false): Promise<CommandResult> {
@@ -1244,13 +1259,13 @@ export class ChannelGateway {
       const current = await this.getActiveAgent(conversation);
       const names = agents.map(a => a.name).join(", ") || "none";
       const choices: ReplyButton[] = [
-        { text: `🐙 Polpo${current ? "" : " ✓"}`, data: `agent:${ORCHESTRATOR_CHOICE}` },
+        { text: `🐙 ${this.polpoName()}${current ? "" : " ✓"}`, data: `agent:${ORCHESTRATOR_CHOICE}` },
         ...agents.map(a => ({ text: `${a.name}${a.name === current ? " ✓" : ""}`, data: `agent:${a.name}`.slice(0, 64) })),
       ];
       const buttons: ReplyButton[][] = [];
       for (let i = 0; i < choices.length; i += 2) buttons.push(choices.slice(i, i + 2));
       return {
-        text: `${inGroup ? "This group is" : "You are"} talking to ${current ?? "Polpo (orchestrator)"}.\nPick who to talk to, or send /agent NAME.\n\nAgents: ${names}`,
+        text: `${inGroup ? "This group is" : "You are"} talking to ${current ?? `${this.polpoName()} (orchestrator)`}.\nPick who to talk to, or send /agent NAME.\n\nAgents: ${names}`,
         buttons,
       };
     }
@@ -1271,7 +1286,7 @@ export class ChannelGateway {
   private async cmdPolpo(conversation: string): Promise<CommandResult> {
     if (this.gatewayConfig.agent) return this.dedicatedMessage();
     await this.peerStore.clearSession(await this.activeAgentKey(conversation));
-    return { text: "Now talking to Polpo (orchestrator)." };
+    return { text: `Now talking to ${this.polpoName()} (orchestrator).` };
   }
 
   /** Inline-button selection ("agent:<name>"); same rules as /agent and /polpo. */
@@ -1489,17 +1504,34 @@ export class ChannelGateway {
       const m = resolveModel(modelSpec);
       const streamOpts = buildStreamOpts(undefined, settings?.reasoning, m.maxTokens);
 
+      // Progressive tool discovery, as in the web chat: optional areas load on demand
+      // (tools_search / tools_load); what earlier turns loaded or used starts loaded.
+      const progressive = new ProgressiveToolSet({
+        tools: ALL_ORCHESTRATOR_TOOLS,
+        mode: progressiveModeFor(undefined, settings?.tools),
+        threshold: settings?.tools?.progressiveThreshold,
+        groups: POLPO_TOOL_GROUPS,
+        loaded: loadedToolsFromHistory(recentMessages),
+      });
+      const turnTools = progressive.initialTools({ plainMeta: true }) as typeof ALL_ORCHESTRATOR_TOOLS;
+      const progressiveSection = progressive.promptSection();
+      const turnPrompt = systemPrompt + peerContext + channelContext + (progressiveSection ? `\n\n${progressiveSection}` : "");
+      /** Calls that keep tools loaded next turn (names only; tools_load with its names). */
+      const loadCalls: ToolCallInfo[] = [];
+
       // Same compaction as the web chat: checkpoint kept per session, model summaries, events
       const session = await this.sessionStore.getSession(sessionId).catch(() => undefined);
       const compactionSettings = settings?.compaction ?? {};
       const compaction = await createSessionCompaction({
         model: m,
         settings: compactionSettings,
-        systemPrompt: () => systemPrompt + peerContext + channelContext,
-        tools: () => ALL_ORCHESTRATOR_TOOLS,
+        systemPrompt: () => turnPrompt,
+        tools: () => turnTools,
         original: piMessages,
         sessionId,
-        scope: JSON.stringify([session?.createdAt, "polpo:channel", m?.provider, m?.id]),
+        // the same scope as the completions route (agent: null), which runs this session's turns
+        // with media and from the web: one checkpoint for the conversation, whichever path answers
+        scope: JSON.stringify([session?.createdAt, null, m?.provider, m?.id]),
         store: this.orchestrator.getContextCheckpointStore?.(),
         completeLLM: completeSimpleWithAuth as any,
         summaryModel: (promptTokens) => resolveSummaryModel(m, compactionSettings.model, promptTokens),
@@ -1522,9 +1554,9 @@ export class ChannelGateway {
         this.log("verbose", `Turn ${turn + 1}: sending ${messages.length} messages`);
         const prepared = await compaction.prepare(messages);
         const piStream = await streamSimpleWithAuth(m, {
-          systemPrompt: systemPrompt + peerContext + channelContext,
-          messages: prepared.messages as Message[],
-          tools: ALL_ORCHESTRATOR_TOOLS,
+          systemPrompt: turnPrompt,
+          messages: restoreToolAnnouncements(messages, prepared.messages) as Message[],
+          tools: turnTools,
         }, { ...streamOpts, sessionId });
 
         let turnText = "";
@@ -1587,17 +1619,30 @@ export class ChannelGateway {
         if (this.onTyping) await this.onTyping(msg.chatId, this.sendTarget(msg));
 
         for (const call of toolCalls) {
-
-          const result = await executeOrchestratorTool(call.name, call.arguments, this.orchestrator, { sessionId, origin: this.checkTarget(msg) });
+          let result: string;
+          if (progressive.isMetaTool(call.name)) {
+            result = progressive.run(call.name, call.arguments);
+          } else {
+            // a deferred tool called by name without tools_load: it is Polpo's, so it is loaded and run
+            if (!progressive.isActive(call.name)) progressive.load([call.name]);
+            result = await executeOrchestratorTool(call.name, call.arguments, this.orchestrator, { sessionId, origin: this.checkTarget(msg) });
+          }
+          const isError = result.startsWith("Error:");
+          if (!isError && (call.name === TOOLS_LOAD || progressive.isDeferred(call.name))) {
+            loadCalls.push({ id: call.id, name: call.name, state: "completed", ...(call.name === TOOLS_LOAD ? { arguments: call.arguments } : {}) });
+          }
           messages.push({
             role: "toolResult",
             toolCallId: call.id,
             toolName: call.name,
             content: [{ type: "text", text: result }],
-            isError: result.startsWith("Error:"),
+            isError,
             timestamp: Date.now(),
           });
         }
+        // tools loaded in this round are declared to the model before its next response
+        const announcement = progressive.takeAnnouncement();
+        if (announcement) messages.push(announcement as unknown as Message);
       }
 
       // Store assistant response
@@ -1605,8 +1650,9 @@ export class ChannelGateway {
         // the step limit: one last answer without tools rather than nothing
         const prepared = await compaction.prepare([...messages, { role: "user", content: STEP_LIMIT_NUDGE, timestamp: Date.now() }]);
         const closing = await streamSimpleWithAuth(m, {
-          systemPrompt: systemPrompt + peerContext + channelContext,
-          messages: prepared.messages as Message[],
+          systemPrompt: turnPrompt,
+          // no tools at all, loaded ones included
+          messages: (prepared.messages as Array<Message & { toolsAdded?: unknown }>).filter((message) => !(message.role === "system" && message.toolsAdded)) as Message[],
           tools: [],
         }, { ...streamOpts, sessionId });
         let closingText = "";
@@ -1617,7 +1663,7 @@ export class ChannelGateway {
       }
 
       if (finalText) {
-        await this.sessionStore.addMessage(sessionId, "assistant", finalText);
+        await this.sessionStore.addMessage(sessionId, "assistant", finalText, loadCalls.length > 0 ? loadCalls : undefined);
       }
 
       // Channels split long replies into several messages; cap runaway output.
@@ -1628,7 +1674,7 @@ export class ChannelGateway {
       // If all text was already sent as partials, nothing left to return
       if (!finalText && sentPartials) return undefined;
       if (!finalText.trim()) this.log("warn", `Polpo ended a turn without a reply (session ${sessionId}, ${finished ? "after a nudge" : "step limit"})`);
-      return finalText || NO_REPLY_FALLBACK("Polpo");
+      return finalText || NO_REPLY_FALLBACK(this.polpoName());
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
       return `Sorry, I encountered an error: ${errMsg}`;
@@ -1673,7 +1719,7 @@ export class ChannelGateway {
    * agent is undefined). The pipeline persists both messages and attachments.
    */
   private async handleRunnerChat(msg: InboundMessage, agent: string | undefined, sessionId: string): Promise<string | GatewayReply> {
-    const who = agent ?? "Polpo";
+    const who = agent ?? this.polpoName();
     const runner = this.getChatRunner();
     if (!runner) {
       return agent

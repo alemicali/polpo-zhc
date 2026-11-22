@@ -17,6 +17,8 @@ function fakeInstance() {
   const calls: Array<{ method: string; path: string; body?: unknown }> = [];
   const tasks = new Map<string, Task>();
   const missions = new Map<string, Mission>();
+  /** Other tasks' run logs (as GET /agents/processes/:id/activity returns them). */
+  const logs = new Map<string, Array<Record<string, unknown>>>();
   const schedules = new Map<string, { missionId: string; expression: string; recurring: boolean; enabled: boolean; nextRunAt?: string }>();
   const activity: Array<Record<string, unknown>> = Array.from({ length: 45 }, (_, i) => ({ type: "assistant", ts: `2026-11-21T10:00:${String(i).padStart(2, "0")}Z`, text: `step ${i + 1}` }));
   let settings: Record<string, unknown> = { orchestratorModel: "anthropic:claude-opus-5-5", reasoning: "medium", maxRetries: 2, notifications: { channels: { ops: { type: "telegram", botToken: "[REDACTED]" } }, rules: [{ id: "r1", name: "Failures", events: ["task:failed"], channels: ["ops"] }] }, approvalGates: [{ id: "g1", name: "Deploy", hook: "task:complete", handler: "human" }] };
@@ -48,7 +50,7 @@ function fakeInstance() {
       const patched = calls.filter((c) => c.method === "PATCH" && c.path === `/api/v1/agents/${name}`).reduce((a, c) => ({ ...a, ...(c.body as object) }), {});
       return okData({ name, role: name === "coach" ? "Health coach" : "x", model: "anthropic:claude-opus-5-5", ...patched });
     }
-    if ((m = p.match(/^\/agents\/processes\/([^/]+)\/activity$/))) return okData(m[1] === "t2" ? activity : []);
+    if ((m = p.match(/^\/agents\/processes\/([^/]+)\/activity$/))) return okData(m[1] === "t2" ? activity : (logs.get(m[1]!) ?? []));
     if (p === "/tasks" && method === "GET") {
       let all = [...tasks.values()];
       if (q.get("status")) all = all.filter((t) => t.status === q.get("status"));
@@ -65,6 +67,8 @@ function fakeInstance() {
       const missingDeps = (b.dependsOn ?? []).filter((id) => !tasks.has(id));
       if (missingDeps.length) return reply(400, { ok: false, error: `dependsOn: there is no task "${missingDeps[0]}"`, code: "UNKNOWN_DEPENDENCY" });
       if ([...tasks.values()].some((t) => t.title === b.title && t.status !== "done")) return reply(409, { ok: false, error: "A task with this title already exists", code: "CONFLICT" });
+      const scope = (b as { toolScope?: { connectors?: unknown } }).toolScope;
+      if (Array.isArray(scope?.connectors) && scope.connectors.includes("notion")) return reply(400, { ok: false, error: 'Invalid toolScope: connectors: agent "writer" has no access to Notion (notion)', code: "INVALID_TOOL_SCOPE" });
       const t = { ...b, id: `t${tasks.size + 1}`, status: "pending", updatedAt: now() };
       tasks.set(t.id, t);
       return okData(t, 201);
@@ -86,7 +90,7 @@ function fakeInstance() {
     if (p === "/missions" && method === "GET") return okData([...missions.values()].map(({ data: _d, ...x }) => x));
     if (p === "/missions" && method === "POST") {
       const b = body as Mission;
-      const mi = { id: `m${missions.size + 1}`, name: b.name, status: b.status ?? "draft", data: b.data, prompt: b.prompt, updatedAt: now() };
+      const mi = { id: `m${missions.size + 1}`, name: b.name, status: b.status ?? "draft", data: b.data, prompt: b.prompt, updatedAt: now(), ...(b.budgetUsd !== undefined ? { budgetUsd: b.budgetUsd } : {}) };
       missions.set(mi.id, mi);
       return okData(mi, 201);
     }
@@ -139,9 +143,16 @@ function fakeInstance() {
       const s = schedules.get(decodeURIComponent(m[1]!));
       return s ? okData(s) : notFound("Schedule");
     }
+    const lin = { id: "lin", name: "Lin", transport: { type: "http", url: "https://mcp.lin.example/mcp" }, auth: { type: "none" }, access: { agents: ["coach"], polpo: false }, enabled: true, status: "connected", toolCount: 3, toolPolicy: { delete_issue: "off" } };
+    const notion = { ...lin, id: "notion", name: "Notion", access: { agents: ["writer"], polpo: true } };
+    if (p === "/connectors" && method === "GET") return okData({ connectors: [lin, notion] });
+    if (p === "/connectors/lin" && method === "GET") return okData(lin);
+    if (p === "/connectors/lin/tools" && method === "GET") return okData({ tools: [
+      { name: "create_issue", description: "Create an issue", policy: "allow" }, { name: "list_issues", policy: "allow" }, { name: "delete_issue", policy: "off" },
+    ] });
     return reply(404, { ok: false, error: `No route ${method} ${p}` });
   });
-  return { api, calls, tasks, missions, schedules, logo: () => logo };
+  return { api, calls, tasks, missions, schedules, logs, logo: () => logo };
 }
 
 type Fake = ReturnType<typeof fakeInstance>;
@@ -182,7 +193,8 @@ describe("the tools offered", () => {
     expect(a.polpo_mission_run).toMatchObject({ openWorldHint: true });
     for (const t of tools) if (t.name !== "polpo_file_read") expect(t.outputSchema, t.name).toBeTruthy();
     for (const n of ["polpo_task_delete", "polpo_mission_delete"]) expect(a[n]).toMatchObject({ destructiveHint: true, readOnlyHint: false });
-    expect(tools.length).toBeLessThanOrEqual(101);
+    // every Configuration section is on by default (the settings toolset), the task and mission cards, computer_get and computer_webhooks: 154 tools for a full-access client
+    expect(tools.length).toBeLessThanOrEqual(157);
   });
 
   it("config and team changes need the admin scope; reads do not", async () => {
@@ -234,6 +246,32 @@ describe("tasks", () => {
     expect(await call(deps(f), "polpo_task_update", { id: "t2", start: true })).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/not a draft/) }] });
   });
 
+  it("maps connectors / connector_tools / allowed_tools to the task's toolScope, and inherit_tools clears it", async () => {
+    const f = fakeInstance();
+    const made = await call(deps(f), "polpo_task_create", {
+      title: "Send recap", description: "Email the recap", assignTo: "writer",
+      connectors: ["gmail-2"], connector_tools: { "gmail-2": ["send_email"] }, allowed_tools: ["read"],
+    });
+    expect(made.isError).toBeFalsy();
+    expect(f.calls.find((c) => c.method === "POST" && c.path === "/api/v1/tasks")!.body).toMatchObject({
+      toolScope: { connectors: ["gmail-2"], connectorTools: { "gmail-2": ["send_email"] }, allowedTools: ["read"] },
+    });
+    expect(made.content[0].text).toMatch(/tools restricted: gmail-2 \(1 tool\); built-in: read/);
+    // no scope arguments: no toolScope sent (the task inherits the agent's tools)
+    await call(deps(f), "polpo_task_create", { title: "Plain", description: "d", assignTo: "writer" });
+    expect(f.calls.filter((c) => c.method === "POST" && c.path === "/api/v1/tasks").at(-1)!.body).not.toHaveProperty("toolScope");
+    // a grant is refused by the server with a way out
+    const bad = await call(deps(f), "polpo_task_create", { title: "Notion", description: "d", assignTo: "writer", connectors: ["notion"] });
+    expect(bad).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/no access to Notion[\s\S]*polpo_connectors_list \{ agent \}/) }] });
+    // update: replace, then clear
+    const id = made.structuredContent.task.id;
+    let r = await call(deps(f), "polpo_task_update", { id, connectors: "none" });
+    expect(r.structuredContent.changed).toEqual(["toolScope"]);
+    expect(f.calls.at(-1)!.body).toEqual({ toolScope: { connectors: "none" } });
+    r = await call(deps(f), "polpo_task_update", { id, inherit_tools: true });
+    expect(f.calls.at(-1)!.body).toEqual({ toolScope: null });
+  });
+
   it("retries only failed tasks", async () => {
     const f = fakeInstance();
     expect(await call(deps(f), "polpo_task_retry", { id: "t2" })).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/only failed tasks/) }] });
@@ -279,6 +317,67 @@ describe("tasks", () => {
     expect(events.at(-1).result.structuredContent).toMatchObject({ reached: true, task: { status: "done" } });
   });
 
+  it("a harness run (Claude Code): its transcript, Polpo tools (host) and usage in the logs; where and with what it ran in get and logs", async () => {
+    const f = fakeInstance();
+    const run = {
+      runId: "r1", startedAt: "2026-11-22T14:55:55.499Z", endedAt: "2026-11-22T14:56:22.828Z", status: "completed", engine: "claude-code",
+      model: "us.anthropic.claude-haiku-4-5-20251001-v1:0", auth: { kind: "bedrock", region: "us-east-1" }, permissionMode: "allow-all",
+      computer: { id: "coder-box", kind: "daytona", provider: "daytona", daytonaApi: "v2", remoteId: "vm-1" },
+      sandbox: { provider: "daytona", ephemeral: false }, egress: { mode: "proxy", proxy: "home", tailscale: true },
+      session: { resumed: false, bootstrapMs: 14800 }, cost: { harnessUsd: 0.0723, tokens: 144585 }, budgetUsd: 2, durationMs: 26626, exitCode: 0,
+    };
+    f.tasks.set("t9", { id: "t9", title: "Verify Claude Code", status: "done", assignTo: "coder", description: "Write hello.txt", updatedAt: "2026-11-22T14:56:23Z", runs: [run] } as any);
+    // the run log as the runner writes it for a harness run (lumea, task M5hgPb1B0ORvFKD7lgJgg)
+    f.logs.set("t9", [
+      { _run: true, runId: "r1", taskId: "t9", agentName: "coder", startedAt: "2026-11-22T14:55:55.499Z" },
+      { ts: "2026-11-22T14:55:55.534Z", event: "spawned" },
+      { ts: "2026-11-22T14:56:13.597Z", type: "log", message: "Claude Code session started in 14.8 s on coder-box" },
+      { ts: "2026-11-22T14:56:18.724Z", type: "assistant", text: "Creo il file hello.txt" },
+      { ts: "2026-11-22T14:56:18.830Z", type: "tool_use", tool: "write", toolId: "c1", input: { file_path: "hello.txt", content: "ciao" } },
+      { ts: "2026-11-22T14:56:18.840Z", type: "tool_result", toolId: "c1", tool: "write", content: "{\"type\":\"create\"}" },
+      { ts: "2026-11-22T14:56:21.000Z", type: "tool_use", tool: "register_outcome", toolId: "c2", input: { type: "text", label: "hello" }, host: true },
+      { ts: "2026-11-22T14:56:22.156Z", type: "usage", harness: "claude-code", inputTokens: 144154, outputTokens: 431, cacheReadTokens: 95726, cacheWriteTokens: 48411, totalTokens: 144585, costUsd: 0.07225835 },
+      { ts: "2026-11-22T14:56:22.828Z", event: "done", data: { status: "completed", exitCode: 0, duration: 26626 } },
+    ]);
+    const logs = await call(deps(f), "polpo_task_logs", { id: "t9" });
+    expectValidOutput(logs);
+    expect(logs.structuredContent.total).toBe(9);
+    expect(logs.structuredContent.items.find((e: any) => e.tool === "register_outcome")).toMatchObject({ host: true });
+    const text = logs.content[0].text as string;
+    expect(text).toMatch(/tool_use: write \{"file_path":"hello\.txt"/);
+    expect(text).toMatch(/tool_use: register_outcome \(Polpo tool\)/);
+    expect(text).toMatch(/usage: 144154 in, 431 out, 95726 cache read, \$0\.0723 \(claude-code\)/);
+    expect(text).toMatch(/log: Claude Code session started in 14\.8 s/);
+    expect(text).toMatch(/runs:\n- r1 \[completed\] Claude Code us\.anthropic\.claude-haiku[^\n]* via Bedrock \(us-east-1\) · on computer coder-box \(daytona v2\) · egress home via Tailscale · new session \(14\.8 s\) · \$0\.0723 of \$2/);
+    expect(logs.structuredContent.runs).toEqual([expect.objectContaining({ engine: "claude-code", computer: expect.objectContaining({ id: "coder-box" }) })]);
+
+    const got = await call(deps(f), "polpo_task_get", { id: "t9", activity: 0 });
+    expectValidOutput(got);
+    expect(got.structuredContent.runs).toEqual([expect.objectContaining({ engine: "claude-code", auth: { kind: "bedrock", region: "us-east-1" }, session: { resumed: false, bootstrapMs: 14800 } })]);
+    expect(got.content[0].text).toMatch(/runs \(where and with what\):\n- r1 \[completed\] Claude Code/);
+    // a task on Polpo's engine without runs recorded yet: an empty list
+    expect((await call(deps(f), "polpo_task_get", { id: "t1", activity: 0 })).structuredContent.runs).toEqual([]);
+  });
+
+  it("what every run of a task cost in all (not the latest): polpo_task_get text and structured, polpo_tasks_list rows", async () => {
+    const f = fakeInstance();
+    const base = { computer: { id: "host", kind: "host" }, egress: { mode: "direct" } };
+    const runs = [
+      { ...base, runId: "k1", startedAt: "2026-11-22T10:00:00Z", status: "failed", engine: "claude-code", cost: { harnessUsd: 1.2, tokens: 9000 } },
+      { ...base, runId: "k2", startedAt: "2026-11-22T10:05:00Z", status: "completed", engine: "claude-code", continuation: true, cost: { harnessUsd: 0.3, tokens: 1000 } },
+    ];
+    f.tasks.set("t7", { id: "t7", title: "Costly task", status: "done", assignTo: "coder", description: "x", updatedAt: "2026-11-22T10:06:00Z", runs } as any);
+    const got = await call(deps(f), "polpo_task_get", { id: "t7", activity: 0 });
+    expectValidOutput(got);
+    expect(got.structuredContent.cost).toMatchObject({ usd: 1.5, harnessUsd: 1.5, tokens: 10000, runs: 2, lastRunUsd: 0.3, partial: false });
+    expect(got.structuredContent.cost.perRun.map((r: any) => [r.runId, r.usd])).toEqual([["k1", 1.2], ["k2", 0.3]]);
+    expect(got.content[0].text).toMatch(/cost: \$1\.50 in all · 2 runs · latest \$0\.30 · 10,000 tokens/);
+    const list = await call(deps(f), "polpo_tasks_list", {});
+    expectValidOutput(list);
+    expect(list.structuredContent.items.find((t: any) => t.id === "t7").cost).toEqual({ usd: 1.5, tokens: 10000, runs: 2 });
+    expect(list.content[0].text).toMatch(/t7 \[done\] Costly task → coder · \$1\.50 over 2 runs/);
+  });
+
   it("pages the activity backwards from the newest", async () => {
     const f = fakeInstance();
     const last = await call(deps(f), "polpo_task_logs", { id: "t2", limit: 20 });
@@ -311,6 +410,43 @@ describe("missions", () => {
     expect(f.missions.size).toBe(0);
   });
 
+  it("sets a mission's budget, and shows what it cost (text and structured) in the list and in the mission", async () => {
+    const f = fakeInstance();
+    const made = await call(deps(f), "polpo_mission_create", { name: "Report", ...plan, budget_usd: 5 });
+    expect(f.calls.find((c) => c.method === "POST" && c.path.endsWith("/missions"))!.body).toMatchObject({ budgetUsd: 5 });
+    expect(made.structuredContent.mission).toMatchObject({ budgetUsd: 5 });
+
+    const cost = {
+      currency: "USD", usd: 6.2, harnessUsd: 6, modelUsd: 0.2, tokens: 12000, runs: 4, tasks: 2, unpricedRuns: 0, runsActive: 0,
+      byAgent: [{ agent: "coach", usd: 6, harnessUsd: 6, modelUsd: 0, tokens: 2000, runs: 3 }, { agent: "writer", usd: 0.2, harnessUsd: 0, modelUsd: 0.2, tokens: 10000, runs: 1 }],
+      byEngine: [{ engine: "claude-code", usd: 6, harnessUsd: 6, modelUsd: 0, tokens: 2000, runs: 3 }, { engine: "polpo", usd: 0.2, harnessUsd: 0, modelUsd: 0.2, tokens: 10000, runs: 1 }],
+      partial: false, budgetUsd: 5, remainingUsd: -1.2, budgetUsed: 1.24, overBudget: true,
+    };
+    Object.assign(f.missions.get("m1")!, { status: "paused", pauseReason: "budget", cost });
+    const got = await call(deps(f), "polpo_mission_get", { id: "m1" });
+    expect(got.structuredContent.cost).toMatchObject({ usd: 6.2, overBudget: true });
+    expect(got.structuredContent.mission.cost).toBeUndefined();
+    expect(got.content[0].text).toMatch(/\[paused: over budget\]/);
+    expect(got.content[0].text).toMatch(/cost: \$6\.20 · 12,000 tokens · 4 runs over 2 tasks/);
+    expect(got.content[0].text).toMatch(/budget: \$5\.00 · 124% used · OVER BUDGET/);
+    expect(got.content[0].text).toMatch(/by engine: Claude Code \$6\.00 \(3\), Polpo \$0\.20 \(1\)/);
+
+    f.missions.get("m1")!.cost = { usd: 6.2, tokens: 12000, runs: 4, budgetUsd: 5, overBudget: true } as never;
+    const listed = await call(deps(f), "polpo_missions_list", {});
+    expect(listed.structuredContent.items[0]).toMatchObject({ id: "m1", cost_usd: 6.2, budget_usd: 5, over_budget: true });
+    expect(listed.content[0].text).toMatch(/- m1 \[paused: budget\] Report · \$6\.20 of \$5\.00 \(over budget\)/);
+
+    // raising it: the update says the mission goes on by itself
+    const raised = await call(deps(f), "polpo_mission_update", { id: "m1", budget_usd: 10 });
+    expect(raised.structuredContent.changed).toEqual(["budget"]);
+    expect(raised.content[0].text).toMatch(/goes on by itself/);
+    expect(f.calls.at(-1)).toMatchObject({ method: "PATCH", body: { budgetUsd: 10 } });
+    // clearing it
+    await call(deps(f), "polpo_mission_update", { id: "m1", budget_usd: null });
+    expect(f.calls.at(-1)).toMatchObject({ method: "PATCH", body: { budgetUsd: null } });
+    expect(await call(deps(f), "polpo_mission_create", { name: "Bad", ...plan, budget_usd: -3 })).toMatchObject({ isError: true });
+  });
+
   it("creates a draft, reads it with its tasks, updates and runs it, waits and aborts with confirm", async () => {
     const f = fakeInstance();
     const made = await call(deps(f), "polpo_mission_create", { name: "Report", goal: "A weekly report", ...plan });
@@ -340,7 +476,7 @@ describe("missions", () => {
     expect(f.missions.get("m1")!.status).toBe("active");
     expect((await call(deps(f), "polpo_mission_abort", { id: "m1", confirm: true })).structuredContent).toEqual({ id: "m1", aborted_tasks: 3 });
     expect((await call(deps(f), "polpo_mission_wait", { id: "m1" })).structuredContent).toMatchObject({ reached: true, mission: { status: "cancelled" } });
-  });
+  }, 20_000); // runs a mission and waits for it: slow on CI runners
 
   it("polpo_mission_wait returns for a recurring mission once its run finished, with the run's outcome (live: it never settled)", async () => {
     const f = fakeInstance();
@@ -370,7 +506,7 @@ describe("missions", () => {
     f.schedules.set("mn", { missionId: "mn", expression: "0 3 1 1 *", recurring: true, enabled: false, nextRunAt: "2027-01-01T03:00:00.000Z" });
     const neverPaused = await call(deps(f), "polpo_mission_wait", { id: "mn", timeout_seconds: 1 });
     expect(neverPaused.content[0].text).toMatch(/not run yet, and its schedule is paused/);
-  });
+  }, 20_000); // waits on a real scheduled run: slow on CI runners
 
   it("polpo_mission_delete and polpo_task_delete: confirm, not while running, then gone", async () => {
     const f = fakeInstance();
@@ -406,6 +542,21 @@ describe("missions", () => {
     }
   });
 
+  it("a plan task's connectors / connector_tools / allowed_tools become its toolScope", async () => {
+    const f = fakeInstance();
+    const r = await call(deps(f), "polpo_mission_create", { name: "Scoped", tasks: [
+      { title: "Send", description: "send it", assignTo: "writer", connectors: ["gmail-2"], connector_tools: { "gmail-2": ["send_email"] } },
+      { title: "Plain", description: "no scope", assignTo: "writer" },
+    ] });
+    expect(r.isError).toBeFalsy();
+    const data = JSON.parse((f.calls.find((c) => c.method === "POST" && c.path === "/api/v1/missions")!.body as { data: string }).data);
+    expect(data.tasks[0]).toMatchObject({ title: "Send", toolScope: { connectors: ["gmail-2"], connectorTools: { "gmail-2": ["send_email"] } } });
+    expect(data.tasks[0]).not.toHaveProperty("connectors");
+    expect(data.tasks[1]).not.toHaveProperty("toolScope");
+    const bad = await call(deps(f), "polpo_mission_create", { name: "Bad", tasks: [{ title: "A", description: "a", connectors: "all" }] });
+    expect(bad).toMatchObject({ isError: true });
+  });
+
   it("creates and starts at once with run: true; lists missions", async () => {
     const f = fakeInstance();
     expect((await call(deps(f), "polpo_mission_create", { name: "Now", ...plan, run: true })).structuredContent).toMatchObject({ started: true });
@@ -431,6 +582,47 @@ describe("the team", () => {
     const upd = await call(deps(f), "polpo_agent_update", { name: "coach", role: "Nutrition coach" });
     expect(upd.structuredContent.changed).toEqual(["role"]);
     expect((await call(deps(f), "polpo_agent_get", { name: "coach" })).structuredContent.agent.role).toBe("Nutrition coach");
+  });
+});
+
+describe("connector tools per agent", () => {
+  it("polpo_agent_create / polpo_agent_update take connector_tools and send connectorTools; null clears it", async () => {
+    const f = fakeInstance();
+    expect((await call(deps(f), "polpo_agent_create", { name: "analyst", connector_tools: { lin: ["create_issue"], notion: "*" } })).isError).toBeFalsy();
+    expect(f.calls.find((c) => c.method === "POST" && c.path === "/api/v1/agents")!.body).toEqual({ name: "analyst", connectorTools: { lin: ["create_issue"], notion: "*" } });
+    const upd = await call(deps(f), "polpo_agent_update", { name: "coach", connector_tools: { lin: ["create_issue", "gone_tool"] } });
+    expect(upd.isError).toBeFalsy();
+    expect(upd.structuredContent.changed).toEqual(["connectorTools"]);
+    expect(f.calls.filter((c) => c.method === "PATCH").at(-1)!.body).toEqual({ connectorTools: { lin: ["create_issue", "gone_tool"] } });
+    expect((await call(deps(f), "polpo_agent_update", { name: "writer", connector_tools: null })).isError).toBeFalsy();
+    expect(f.calls.filter((c) => c.method === "PATCH").at(-1)!.body).toEqual({ connectorTools: null });
+    expect((await call(deps(f), "polpo_agent_update", { name: "coach", connector_tools: { "Bad Id": "*" } })).isError).toBe(true);
+  });
+
+  it("polpo_agent_get returns the selection and reports stale tool names", async () => {
+    const f = fakeInstance();
+    await call(deps(f), "polpo_agent_update", { name: "coach", connector_tools: { lin: ["create_issue", "gone_tool"] } });
+    const r = await call(deps(f), "polpo_agent_get", { name: "coach" });
+    expect(r.structuredContent.agent.connectorTools).toEqual({ lin: ["create_issue", "gone_tool"] });
+    expect(r.structuredContent.stale_connector_tools).toEqual({ lin: ["gone_tool"] });
+    expect(r.content[0].text).toContain("connector tools: lin: create_issue, gone_tool (stale: gone_tool)");
+  });
+
+  it("polpo_connectors_list with agent: only its connectors, and the tools it gets", async () => {
+    const f = fakeInstance();
+    await call(deps(f), "polpo_agent_update", { name: "coach", connector_tools: { lin: ["create_issue", "delete_issue", "gone_tool"] } });
+    const list = await call(deps(f), "polpo_connectors_list", { agent: "coach" });
+    expect(list.structuredContent.items.map((c: { id: string }) => c.id)).toEqual(["lin"]);
+    expect(list.structuredContent.items[0].agent_tools).toEqual(["create_issue", "delete_issue", "gone_tool"]);
+    expect((await call(deps(f), "polpo_connectors_list", { agent: "writer" })).structuredContent.items[0]).toMatchObject({ id: "notion", agent_tools: "*" });
+    const one = await call(deps(f), "polpo_connectors_list", { id: "lin", agent: "coach" });
+    expect(one.structuredContent.tools).toEqual([
+      { name: "create_issue", description: "Create an issue", policy: "allow", agent_gets: true },
+      { name: "list_issues", policy: "allow", agent_gets: false },
+      { name: "delete_issue", policy: "off", agent_gets: false },
+    ]);
+    expect(one.structuredContent.stale_tools).toEqual(["gone_tool"]);
+    expect((await call(deps(f), "polpo_connectors_list", { id: "lin", agent: "writer" })).isError).toBe(true);
   });
 });
 
@@ -466,7 +658,7 @@ describe("configuration", () => {
     expect((await call(deps(f), "polpo_branding_update", { logo: { path: "assets/logo.png" } })).structuredContent.changed).toEqual(["logo"]);
     expect(await call(deps(f), "polpo_branding_update", { logo: { path: "missing.png" } })).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/polpo_files_search/) }] });
     expect((await call(deps(f), "polpo_branding_update", { remove_logo: true })).structuredContent.branding.logoUrl).toBeUndefined();
-    expect((await call(deps(f), "polpo_branding_get")).structuredContent).toEqual({ productName: "Acme Ops", tagline: "Agents at work" });
+    expect((await call(deps(f), "polpo_branding_get")).structuredContent).toMatchObject({ productName: "Acme Ops", tagline: "Agents at work" });
   });
 
   it("lists providers with the dashboard link for keys, and models with filters", async () => {

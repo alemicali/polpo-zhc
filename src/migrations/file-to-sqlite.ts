@@ -255,6 +255,8 @@ function taskToRow(task: any): Record<string, unknown> {
     priority: task.priority != null ? String(task.priority) : null,
     sideEffects: task.sideEffects === true ? 1 : task.sideEffects === false ? 0 : null,
     revisionCount: task.revisionCount ?? null,
+    runs: task.runs ? JSON.stringify(task.runs) : null,
+    toolScope: task.toolScope ? JSON.stringify(task.toolScope) : null,
     createdAt: task.createdAt ?? new Date().toISOString(),
     updatedAt: task.updatedAt ?? new Date().toISOString(),
   };
@@ -273,6 +275,8 @@ function missionToRow(m: any): Record<string, unknown> {
     deadline: m.deadline ?? null,
     notifications: m.notifications ? JSON.stringify(m.notifications) : null,
     executionCount: m.executionCount ?? 0,
+    budgetUsd: m.budgetUsd != null ? String(m.budgetUsd) : null,
+    pauseReason: m.pauseReason ?? null,
     createdAt: m.createdAt ?? new Date().toISOString(),
     updatedAt: m.updatedAt ?? new Date().toISOString(),
   };

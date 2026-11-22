@@ -32,9 +32,11 @@ import { ConnectorsPage } from "../src/pages/connectors";
 import { AgentConnectorsSection } from "../src/components/connectors/agent-connectors-section";
 import { ConnectorDetailSheet } from "../src/components/connectors/connector-detail-sheet";
 import { CustomConnectorDialog } from "../src/components/connectors/custom-connector-dialog";
+import { DEFAULT_PRODUCT_NAME } from "../src/lib/branding";
 import {
   EMPTY_CUSTOM_FORM, OAUTH_MESSAGE_TYPE, allowedToolsCoverConnector, catalogCardState, catalogCategories, customConnectorInput,
   filterCatalog, splitArgs, toggleAgentAccess, validateCustomConnector,
+  accountLabel, groupConnectors, nextAccountName, suggestedAccountName,
   type CatalogEntry, type Connector,
 } from "../src/lib/connectors-api";
 
@@ -79,6 +81,11 @@ function installFetch() {
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), "http://localhost");
     const method = init?.method ?? "GET";
+    if (url.pathname.startsWith("/api/v1/agents/")) {
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      server.calls.push({ method: init?.method ?? "GET", path: url.pathname, body });
+      return ok({ name: decodeURIComponent(url.pathname.split("/").pop()!), ...(body?.connectorTools ? { connectorTools: body.connectorTools } : {}) });
+    }
     const path = url.pathname.replace("/api/v1/connectors", "") || "/";
     const catalog = server.catalog ?? CATALOG;
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
@@ -93,7 +100,12 @@ function installFetch() {
     }
     if (path === "/" && method === "POST") {
       const fromCatalog = catalog.find((e) => e.id === body.catalogId);
-      const created = connector(body.catalogId ?? "custom", fromCatalog ? {
+      // like the server: another account of an app gets the next free id (linear-2…)
+      const baseId = body.catalogId ?? "custom";
+      let newId = baseId;
+      for (let n = 2; server.connectors.some((c) => c.id === newId); n++) newId = `${baseId}-${n}`;
+      const created = connector(newId, fromCatalog ? {
+        catalogId: fromCatalog.id, name: body.name ?? fromCatalog.name,
         ...(fromCatalog.auth === "bearer" ? { auth: { type: "bearer" as const }, status: "disconnected" as const } : {}),
         ...(fromCatalog.oauth ? { auth: { type: "oauth" as const, oauth: fromCatalog.oauth } } : {}),
         ...(body.url ? { transport: { type: "http" as const, url: body.url } } : {}),
@@ -106,6 +118,10 @@ function installFetch() {
     if (!current) return Promise.resolve(new Response(JSON.stringify({ ok: false, error: "Connector not found" }), { status: 404 }));
     const save = (next: Connector) => { server.connectors = server.connectors.map((c) => (c.id === id ? next : c)); return next; };
     if (!action && method === "GET") return ok(current);
+    if (!action && method === "DELETE") {
+      server.connectors = server.connectors.filter((c) => c.id !== id);
+      return ok({ removed: true });
+    }
     if (!action && method === "PATCH") return ok(save({ ...current, ...body, access: body.access ? { ...current.access, ...body.access } : current.access }));
     if (action === "oauth" && method === "POST") {
       if (server.registrationFailure && !current.auth.oauth?.app) {
@@ -414,8 +430,58 @@ test("connected tab lists connectors; needs re-auth offers Reconnect", async () 
   await renderPage();
   expect(byText(/^Connected/, '[role="tab"]')?.getAttribute("aria-selected")).toBe("true");
   const row = container.querySelector('[data-testid="connector-row-linear"]')!;
-  expect(row.textContent).toContain("Polpo lost access to Linear");
+  expect(row.textContent).toContain(`${DEFAULT_PRODUCT_NAME} lost access to Linear`);
   expect([...row.querySelectorAll("button")].some((b) => b.textContent === "Reconnect")).toBe(true);
+});
+
+test("a connector that never finished signing in can be managed (sign in or remove) from its card and its row", async () => {
+  installFetch();
+  server.connectors = [connector("linear")]; // needs_auth, never authorized
+  await renderPage();
+
+  const row = container.querySelector('[data-testid="connector-row-linear"]')!;
+  expect([...row.querySelectorAll("button")].some((b) => b.textContent === "Sign in")).toBe(true);
+  expect(row.querySelector('[aria-label="Manage Linear"]')).toBeTruthy();
+
+  await act(async () => {
+    byText(/^Browse/, '[role="tab"]')?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+  });
+  await flush();
+  const card = container.querySelector('[data-testid="catalog-card-linear"]')!;
+  expect(card.querySelector('[aria-label="Sign in Linear"]')).toBeTruthy();
+  // a catalog entry nobody added has only Connect
+  expect(container.querySelector('[data-testid="catalog-card-notion"] [aria-label="Manage Notion"]')).toBeNull();
+
+  await click(card.querySelector('[aria-label="Manage Linear"]'));
+  await flush();
+  const sheet = document.querySelector('[role="dialog"]')!;
+  const labels = [...sheet.querySelectorAll("button")].map((b) => b.textContent?.trim());
+  expect(labels).toContain("Sign in");
+  expect(labels).toContain("Remove");
+  expect(labels).not.toContain("Disconnect"); // only for an authorized connector
+
+  await click([...sheet.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Remove"));
+  await click([...document.querySelectorAll<HTMLElement>('[role="alertdialog"] button, [role="dialog"] button')].reverse().find((b) => b.textContent?.trim() === "Remove"));
+  await flush();
+  expect(server.calls.some((c) => c.method === "DELETE" && c.path === "/linear")).toBe(true);
+  expect(server.connectors).toEqual([]);
+});
+
+test("connect (OAuth): while waiting for sign-in, Cancel and remove deletes the new connector", async () => {
+  installFetch();
+  const popup = { closed: false, location: { href: "about:blank" }, close: vi.fn(() => { popup.closed = true; }) };
+  vi.spyOn(window, "open").mockImplementation(() => popup as unknown as Window);
+  await renderPage();
+  await click(container.querySelector('[aria-label="Connect Linear"]'));
+  await flush();
+  expect(document.body.textContent).toContain("Waiting for you to sign in to Linear");
+
+  await click(inDialog("Cancel and remove"));
+  await flush();
+  expect(server.calls.some((c) => c.method === "DELETE" && c.path === "/linear")).toBe(true);
+  expect(server.connectors).toEqual([]);
+  expect(popup.close).toHaveBeenCalled();
+  expect(document.body.textContent).not.toContain("Waiting for you to sign in");
 });
 
 // ── Detail sheet: access + tool policy ──────────────────────────────────────
@@ -479,6 +545,62 @@ test("agent page: connectors section grants and revokes this agent", async () =>
   expect(server.calls.filter((c) => c.method === "PATCH").at(-1)).toMatchObject({ path: "/notion", body: { access: { agents: ["dev"], polpo: false } } });
 });
 
+test("agent page: choose which of a connector's tools the agent gets", async () => {
+  installFetch();
+  server.connectors = [
+    connector("linear", { status: "connected", toolCount: 2, access: { agents: ["pm"], polpo: false }, toolPolicy: {} }),
+    connector("notion", { status: "connected", access: { agents: ["pm"], polpo: false } }),
+  ];
+  const onSaved = vi.fn();
+  await act(async () => root.render(
+    <MemoryRouter><AgentConnectorsSection agentName="pm" connectorTools={{ notion: ["search", "gone_tool"] }} onConnectorToolsSaved={onSaved} /></MemoryRouter>,
+  ));
+  await flush();
+  expect(container.querySelector('[data-testid="agent-connector-notion"]')?.textContent).toContain("2 selected tools");
+
+  // Linear: "All tools" by default; switch to "Only selected" (starts from every tool), uncheck one, save
+  await click(container.querySelector('[aria-label="Choose Linear tools for pm"]'));
+  await flush();
+  const panel = () => container.querySelector('[data-testid="agent-connector-tools-linear"]')!;
+  expect(panel().querySelector('[aria-label="All tools"]')?.getAttribute("aria-checked")).toBe("true");
+  expect((byText("Save", '[data-testid="agent-connector-tools-linear"] button') as HTMLButtonElement).disabled).toBe(true);
+  await click(panel().querySelector('[aria-label="Only selected"]'));
+  await flush();
+  const box = (label: string) => panel().querySelector<HTMLInputElement>(`input[type="checkbox"][aria-label="${label}"]`)!;
+  expect(box("Create issue").checked).toBe(true);
+  expect(box("list_issues").checked).toBe(true);
+  await click(box("list_issues"));
+  expect(box("list_issues").checked).toBe(false);
+
+  // search filters the list; select none / all act on the visible tools
+  await type(panel().querySelector('input[aria-label="Search Linear tools"]') as HTMLInputElement, "create");
+  expect(panel().querySelectorAll('input[type="checkbox"]')).toHaveLength(1);
+  await click(byText("Select none", '[data-testid="agent-connector-tools-linear"] button'));
+  expect(box("Create issue").checked).toBe(false);
+  await click(byText("Select all", '[data-testid="agent-connector-tools-linear"] button'));
+  expect(box("Create issue").checked).toBe(true);
+  await type(panel().querySelector('input[aria-label="Search Linear tools"]') as HTMLInputElement, "");
+
+  await click(byText("Save", '[data-testid="agent-connector-tools-linear"] button'));
+  await flush();
+  // the whole selection is saved: Notion's list is kept
+  expect(server.calls.filter((c) => c.method === "PATCH").at(-1)).toEqual({
+    method: "PATCH", path: "/api/v1/agents/pm", body: { connectorTools: { notion: ["search", "gone_tool"], linear: ["create_issue"] } },
+  });
+  expect(onSaved).toHaveBeenCalled();
+  expect(container.querySelector('[data-testid="agent-connector-linear"]')?.textContent).toContain("1 selected tool");
+
+  // Notion: a name the connector does not list is shown as stale; back to "All tools" drops the key
+  await click(container.querySelector('[aria-label="Choose Notion tools for pm"]'));
+  await flush();
+  const notion = () => container.querySelector('[data-testid="agent-connector-tools-notion"]')!;
+  expect(notion().querySelector('[data-testid="stale-connector-tools"]')?.textContent).toContain("gone_tool");
+  await click(notion().querySelector('[aria-label="All tools"]'));
+  await click(byText("Save", '[data-testid="agent-connector-tools-notion"] button'));
+  await flush();
+  expect(server.calls.filter((c) => c.method === "PATCH").at(-1)?.body).toEqual({ connectorTools: { linear: ["create_issue"] } });
+});
+
 // ── Custom connector dialog ─────────────────────────────────────────────────
 
 test("custom connector dialog validates before submitting", async () => {
@@ -510,9 +632,182 @@ test("custom connector: stdio is behind Advanced with a warning", async () => {
   await act(async () => root.render(<CustomConnectorDialog open onOpenChange={() => {}} onSubmit={onSubmit} />));
   await click(byText("Advanced"));
   await click(document.querySelector('input[type="checkbox"]'));
-  expect(document.body.textContent).toContain("runs a command on the Polpo server");
+  expect(document.body.textContent).toContain(`runs a command on the ${DEFAULT_PRODUCT_NAME} server`);
   await type(inputByLabel("Name"), "Files");
   await type(inputByLabel("Command"), "npx -y @modelcontextprotocol/server-filesystem /data");
   await click(byText("Add"));
   expect(onSubmit).toHaveBeenCalledWith({ name: "Files", transport: { type: "stdio", command: "npx", args: ["-y", "@modelcontextprotocol/server-filesystem", "/data"] }, auth: { type: "none" } });
+});
+
+// ── Several accounts of the same app ────────────────────────────────────────
+
+const signedIn = { bearerToken: false, headers: [], clientSecret: false, values: [], oauth: { authorized: true, clientRegistered: true, pending: false } };
+const openBrowse = () => act(async () => {
+  byText(/^Browse/, '[role="tab"]')?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+});
+const popupStub = () => {
+  const popup = { closed: false, location: { href: "about:blank" }, close: vi.fn(() => { popup.closed = true; }) };
+  vi.spyOn(window, "open").mockImplementation(() => popup as unknown as Window);
+  return popup;
+};
+
+test("accounts helpers: next default name, what tells accounts apart, suggested name, grouping", () => {
+  const gmail = connector("gmail", { name: "Gmail" });
+  const gmail2 = connector("gmail-2", { name: "Gmail 2", catalogId: "gmail", account: "info@lumea.dev" });
+  const linear = connector("linear");
+  expect(nextAccountName({ id: "gmail", name: "Gmail" }, [gmail])).toBe("Gmail 2");
+  expect(nextAccountName({ id: "gmail", name: "Gmail" }, [gmail, gmail2])).toBe("Gmail 3");
+  expect(nextAccountName({ id: "gmail", name: "Gmail" }, [gmail, connector("gmail-3", { name: "Gmail 2", catalogId: "gmail" })])).toBe("Gmail 3");
+  expect(accountLabel(gmail2, [gmail, gmail2])).toBe("info@lumea.dev");
+  expect(accountLabel(gmail, [gmail, gmail2])).toBe("gmail"); // no account known: the id
+  expect(accountLabel(linear, [gmail, gmail2, linear])).toBeUndefined(); // the only one
+  expect(accountLabel({ ...gmail2, name: "Gmail – info@lumea.dev" }, [gmail2])).toBeUndefined();
+  expect(suggestedAccountName(gmail2, "Gmail")).toBe("Gmail – info@lumea.dev");
+  expect(suggestedAccountName(gmail2)).toBe("Gmail – info@lumea.dev");
+  expect(suggestedAccountName({ ...gmail2, name: "Gmail – info@lumea.dev" })).toBeUndefined();
+  expect(groupConnectors([gmail, linear, gmail2]).map((g) => g.connectors.map((c) => c.id))).toEqual([["gmail", "gmail-2"], ["linear"]]);
+});
+
+test("add another account: from a connected card it asks a name, creates linear-2 and signs it in", async () => {
+  server.connectors = [connector("linear", { status: "connected", toolCount: 3, secrets: signedIn })];
+  installFetch();
+  const popup = popupStub();
+  await renderPage();
+  await openBrowse();
+  const card = container.querySelector('[data-testid="catalog-card-linear"]')!;
+  expect(card.textContent).toContain("Connected");
+
+  await click(card.querySelector('[aria-label="Add another Linear account"]'));
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Add another Linear account");
+  const name = inputByLabel("Account name");
+  expect(name.value).toBe("Linear 2");
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain("e.g. Linear – info@lumea.dev");
+  expect(server.calls.some((c) => c.method === "POST")).toBe(false); // nothing created before the name
+
+  await type(name, "Linear – ops@acme.com");
+  await click(inDialog("Continue to sign-in"));
+  await flush();
+  expect(server.calls.find((c) => c.method === "POST" && c.path === "/")?.body).toEqual({ catalogId: "linear", name: "Linear – ops@acme.com" });
+  expect(server.calls.some((c) => c.path === "/linear-2/oauth/start")).toBe(true);
+  expect(server.calls.some((c) => c.path === "/linear/oauth/start")).toBe(false); // the first account is untouched
+  expect(popup.location.href).toBe("https://auth.linear-2.com/authorize?state=abc");
+
+  completeSignIn("linear-2", 4);
+  await act(async () => {
+    window.dispatchEvent(new MessageEvent("message", { data: { type: OAUTH_MESSAGE_TYPE, ok: true, id: "linear-2" } }));
+  });
+  await flush();
+  expect(document.body.textContent).toContain("Linear – ops@acme.com is connected.");
+  await click(inDialog("Done"));
+
+  // Connected: both accounts, kept together under the app
+  await act(async () => {
+    byText(/^Connected/, '[role="tab"]')?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+  });
+  const group = container.querySelector('[data-testid="connector-group-linear"]')!;
+  expect(group.textContent).toContain("Linear · 2 accounts");
+  expect(group.querySelector('[data-testid="connector-row-linear"]')).toBeTruthy();
+  expect(group.querySelector('[data-testid="connector-row-linear-2"]')?.textContent).toContain("Linear – ops@acme.com");
+  expect(container.querySelector('[data-testid="connector-account-linear"]')?.textContent).toBe("linear");
+});
+
+test("add another account: sign-in reveals the account, offered as the name; renamed again in the sheet", async () => {
+  server.connectors = [connector("linear", { status: "connected", secrets: signedIn })];
+  installFetch();
+  popupStub();
+  await renderPage();
+  await openBrowse();
+  await click(container.querySelector('[data-testid="catalog-card-linear"] [aria-label="Add another Linear account"]'));
+  await click(inDialog("Continue to sign-in")); // keeps "Linear 2"
+  await flush();
+  expect(server.calls.find((c) => c.method === "POST")?.body).toEqual({ catalogId: "linear", name: "Linear 2" });
+
+  completeSignIn("linear-2");
+  server.connectors = server.connectors.map((c) => (c.id === "linear-2" ? { ...c, account: "ops@acme.com" } : c));
+  await act(async () => {
+    window.dispatchEvent(new MessageEvent("message", { data: { type: OAUTH_MESSAGE_TYPE, ok: true, id: "linear-2" } }));
+  });
+  await flush();
+  expect(document.body.textContent).toContain("Signed in as ops@acme.com. Name it “Linear – ops@acme.com”?");
+  await click(inDialog("Use this name"));
+  await flush();
+  expect(server.calls.find((c) => c.method === "PATCH" && c.path === "/linear-2")?.body).toEqual({ name: "Linear – ops@acme.com" });
+  expect(inDialog("Use this name")).toBeUndefined();
+
+  // the sheet: who it is, its id, rename, and another account from here too
+  await click(inDialog("Manage access and tools"));
+  await flush();
+  const identity = document.querySelector('[data-testid="connector-identity"]')!;
+  expect(identity.textContent).toContain("Signed in asops@acme.com");
+  expect(identity.textContent).toContain("linear-2");
+  expect(identity.textContent).toContain("2 Linear accounts connected");
+  expect(document.body.textContent).toContain("Who can use this account");
+  expect(document.querySelector('[aria-label="Add another Linear account"]')).toBeTruthy();
+  await click(document.querySelector('[aria-label="Rename Linear – ops@acme.com"]'));
+  await type(document.querySelector('input[aria-label="Connector name"]') as HTMLInputElement, "Ops inbox");
+  await click(document.querySelector('[aria-label="Save name"]'));
+  await flush();
+  expect(server.calls.filter((c) => c.method === "PATCH" && c.path === "/linear-2").at(-1)?.body).toEqual({ name: "Ops inbox" });
+  expect(document.querySelector('[aria-label="Rename Ops inbox"]')).toBeTruthy();
+});
+
+test("add another account of a token app asks the name and the key together", async () => {
+  server.connectors = [connector("stripe", { auth: { type: "bearer" }, status: "connected", secrets: { ...signedIn, bearerToken: true } })];
+  installFetch();
+  await renderPage();
+  await openBrowse();
+  await click(container.querySelector('[aria-label="Add another Stripe account"]'));
+  expect(inputByLabel("Account name").value).toBe("Stripe 2");
+  await type(inputByLabel("Account name"), "Stripe – EU");
+  await type(inputByLabel("API key or token"), "sk_eu");
+  await click(inDialog("Connect"));
+  await flush();
+  expect(server.calls.find((c) => c.method === "POST")?.body).toEqual({ catalogId: "stripe", name: "Stripe – EU", secrets: { bearerToken: "sk_eu" } });
+  expect(server.calls.some((c) => c.path === "/stripe-2/test")).toBe(true);
+});
+
+test("agent page: each account of an app is its own row, named, with its own switch", async () => {
+  installFetch();
+  server.connectors = [
+    connector("gmail", { name: "Gmail", status: "connected", access: { agents: ["pm"], polpo: true } }),
+    connector("gmail-2", { name: "Gmail 2", catalogId: "gmail", account: "info@lumea.dev", status: "connected", access: { agents: [], polpo: true } }),
+  ];
+  await act(async () => root.render(<MemoryRouter><AgentConnectorsSection agentName="pm" /></MemoryRouter>));
+  await flush();
+  const row = (id: string) => container.querySelector(`[data-testid="agent-connector-${id}"]`)!;
+  expect(row("gmail").textContent).toContain("Gmail");
+  expect(row("gmail-2").textContent).toContain("Gmail 2info@lumea.dev");
+  expect(row("gmail").querySelector('[role="switch"]')?.getAttribute("aria-checked")).toBe("true");
+  expect(row("gmail-2").querySelector('[role="switch"]')?.getAttribute("aria-checked")).toBe("false");
+  await click(row("gmail-2").querySelector('[role="switch"]'));
+  await flush();
+  expect(server.calls.find((c) => c.method === "PATCH")).toMatchObject({ path: "/gmail-2", body: { access: { agents: ["pm"], polpo: true } } });
+});
+
+// ── Dialogs fit the viewport ────────────────────────────────────────────────
+
+test("connector dialogs fit the viewport: header, scrolling body, footer always in view", async () => {
+  server.catalog = [CATALOG[2]!];
+  installFetch();
+  await renderPage();
+  await click(container.querySelector('[aria-label="Set up Gmail"]'));
+  const content = document.querySelector('[data-slot="dialog-content"]')!;
+  expect(content.className).toContain("max-h-[calc(100dvh-2rem)]");
+  expect(content.className).toContain("overflow-hidden");
+  const body = content.querySelector('[data-slot="dialog-body"]')!;
+  expect(body.className).toContain("overflow-y-auto");
+  // the actions stay visible while the steps scroll
+  const footer = body.querySelector('[data-slot="dialog-footer"]')!;
+  expect(footer.className).toContain("sticky");
+  expect(footer.textContent).toContain("Save and continue");
+  // the long redirect URI truncates next to its copy button instead of widening the dialog
+  const uri = [...body.querySelectorAll("code")].find((c) => c.textContent === REDIRECT)!;
+  expect(uri.className).toContain("truncate");
+  expect(uri.className).toContain("min-w-0");
+  expect(body.querySelector('[aria-label="Copy Redirect URI to register"]')).toBeTruthy();
+  await click(byText(/^Close$/, '[role="dialog"] button') ?? document.querySelector('[data-slot="dialog-close"]'));
+
+  await click(byText(/OAuth apps/));
+  const apps = [...document.querySelectorAll('[data-slot="dialog-content"]')].at(-1)!;
+  expect(apps.querySelector('[data-slot="dialog-body"] [data-slot="dialog-footer"]')?.className).toContain("sticky");
 });

@@ -50,6 +50,30 @@
       "types": "./dist/run-store.d.ts",
       "import": "./dist/run-store.js"
     },
+    "./run-context": {
+      "types": "./dist/run-context.d.ts",
+      "import": "./dist/run-context.js"
+    },
+    "./task-tool-scope": {
+      "types": "./dist/task-tool-scope.d.ts",
+      "import": "./dist/task-tool-scope.js"
+    },
+    "./mission-cost": {
+      "types": "./dist/mission-cost.d.ts",
+      "import": "./dist/mission-cost.js"
+    },
+    "./error-action": {
+      "types": "./dist/error-action.d.ts",
+      "import": "./dist/error-action.js"
+    },
+    "./task-cost": {
+      "types": "./dist/task-cost.d.ts",
+      "import": "./dist/task-cost.js"
+    },
+    "./task-failure": {
+      "types": "./dist/task-failure.d.ts",
+      "import": "./dist/task-failure.js"
+    },
     "./task-control-store": {
       "types": "./dist/task-control-store.d.ts",
       "import": "./dist/task-control-store.js"
@@ -246,6 +270,10 @@
       "types": "./dist/context-checkpoint.d.ts",
       "import": "./dist/context-checkpoint.js"
     },
+    "./progressive-tools": {
+      "types": "./dist/progressive-tools.d.ts",
+      "import": "./dist/progressive-tools.js"
+    },
     "./whatsapp-store": {
       "types": "./dist/whatsapp-store.d.ts",
       "import": "./dist/whatsapp-store.js"
@@ -257,6 +285,10 @@
     "./secret-redaction": {
       "types": "./dist/secret-redaction.d.ts",
       "import": "./dist/secret-redaction.js"
+    },
+    "./harnesses": {
+      "types": "./dist/harnesses.d.ts",
+      "import": "./dist/harnesses.js"
     },
     "./sandbox": {
       "types": "./dist/sandbox.d.ts",

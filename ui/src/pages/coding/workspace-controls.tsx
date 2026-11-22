@@ -49,7 +49,7 @@ export function NewWorkspacePopover({
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+          className="h-7 gap-1.5 rounded-md px-2 text-caption text-muted-foreground hover:bg-muted/50 hover:text-foreground"
           title={label}
         >
           <Plus className="h-4 w-4" />
@@ -72,9 +72,9 @@ export function NewWorkspacePopover({
                     type="button"
                     onClick={() => setActiveRoot(r)}
                     className={cn(
-                      "rounded px-1.5 py-0.5 font-mono text-[10.5px] transition-colors",
+                      "rounded px-1.5 py-0.5 font-mono text-caption transition-colors",
                       activeRoot === r
-                        ? "bg-emerald-500/15 text-emerald-300"
+                        ? "bg-primary/15 text-primary"
                         : "bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground",
                     )}
                     title={r}
@@ -107,8 +107,8 @@ function ModePicker({ mode, onChange }: { mode: "browse" | "clone"; onChange: (m
     <div className="flex h-12 items-center border-b border-border/70 px-2">
       <Tabs value={mode} onValueChange={(value) => onChange(value as "browse" | "clone")}>
         <TabsList className="h-8">
-          <TabsTrigger value="browse" className="h-6 gap-1.5 text-[11px]"><FolderOpen className="h-3.5 w-3.5" />Browse folder</TabsTrigger>
-          <TabsTrigger value="clone" className="h-6 gap-1.5 text-[11px]"><CloudDownload className="h-3.5 w-3.5" />From repo URL</TabsTrigger>
+          <TabsTrigger value="browse" className="text-small"><FolderOpen className="h-3.5 w-3.5" />Browse folder</TabsTrigger>
+          <TabsTrigger value="clone" className="text-small"><CloudDownload className="h-3.5 w-3.5" />From repo URL</TabsTrigger>
         </TabsList>
       </Tabs>
     </div>
@@ -178,7 +178,7 @@ function CloneFromUrl({ onDone }: { onDone: (path: string, name: string) => void
   // Loading state
   if (reposLoading) {
     return (
-      <div className="flex items-center justify-center gap-2 p-6 text-[11px] text-muted-foreground">
+      <div className="flex items-center justify-center gap-2 p-6 text-caption text-muted-foreground">
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
         Loading your GitHub repos…
       </div>
@@ -195,12 +195,12 @@ function CloneFromUrl({ onDone }: { onDone: (path: string, name: string) => void
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={`Search ${repos.length} repos…`}
-            className="h-8 border-border bg-muted/20 text-[11.5px] text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+            className="h-8 border-border bg-muted/20 text-caption text-foreground focus-visible:ring-1 focus-visible:ring-ring"
           />
         </div>
         <div className="max-h-72 min-h-[8rem] overflow-y-auto py-1">
           {filtered.length === 0 && (
-            <div className="px-3 py-3 text-center text-[11px] text-muted-foreground/80">No matches.</div>
+            <div className="px-3 py-3 text-center text-caption text-muted-foreground/80">No matches.</div>
           )}
           {filtered.map((r) => (
             <button
@@ -213,18 +213,18 @@ function CloneFromUrl({ onDone }: { onDone: (path: string, name: string) => void
               <CloudDownload className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
-                  <span className="truncate font-mono text-[11.5px] text-foreground">{r.nameWithOwner}</span>
+                  <span className="truncate font-mono text-caption text-foreground">{r.nameWithOwner}</span>
                   {r.isPrivate && (
-                    <span className="shrink-0 rounded bg-muted/50 px-1 py-px text-[9px] uppercase tracking-wider text-muted-foreground">
+                    <span className="shrink-0 rounded bg-muted/50 px-1 py-px text-label text-muted-foreground">
                       private
                     </span>
                   )}
                 </div>
                 {r.description && (
-                  <div className="truncate text-[10.5px] text-muted-foreground">{r.description}</div>
+                  <div className="truncate text-caption text-muted-foreground">{r.description}</div>
                 )}
               </div>
-              {busy && <Loader2 className="mt-0.5 h-3 w-3 shrink-0 animate-spin text-emerald-300/80" />}
+              {busy && <Loader2 className="mt-0.5 h-3 w-3 shrink-0 animate-spin text-primary/80" />}
             </button>
           ))}
         </div>
@@ -238,15 +238,15 @@ function CloneFromUrl({ onDone }: { onDone: (path: string, name: string) => void
       onSubmit={(e) => { e.preventDefault(); void clone(url.trim()); }}
       className="flex flex-col gap-2 p-3"
     >
-      <label className="text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground">Repository URL</label>
+      <label className="text-label text-muted-foreground">Repository URL</label>
       <Input
         autoFocus
         value={url}
         onChange={(e) => setUrl(e.target.value)}
         placeholder="https://github.com/owner/repo.git"
-        className="h-8 border-border bg-muted/20 font-mono text-[11.5px] text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+        className="h-8 border-border bg-muted/20 font-mono text-caption text-foreground focus-visible:ring-1 focus-visible:ring-ring"
       />
-      <p className="text-[10.5px] leading-relaxed text-muted-foreground/80">
+      <p className="text-caption leading-relaxed text-muted-foreground/80">
         Sign in with <code className="font-mono">gh auth login</code> to browse your repos here.
       </p>
       <div className="flex justify-end gap-1.5">
@@ -254,7 +254,7 @@ function CloneFromUrl({ onDone }: { onDone: (path: string, name: string) => void
           type="submit"
           size="sm"
           disabled={busy || !url.trim()}
-          className="h-7 gap-1 px-3 text-[11px] font-medium"
+          className="h-7 gap-1 px-3 text-caption font-medium"
         >
           {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CloudDownload className="h-3.5 w-3.5" />}
           Clone
@@ -301,32 +301,32 @@ function PathBrowser({ root, onConfirm }: { root?: string; onConfirm: (path: str
         >
           <ChevronLeft className="h-4 w-4" />
         </button>
-        <code className="flex-1 truncate font-mono text-[11px] text-muted-foreground">{browse?.current || "…"}</code>
+        <code className="flex-1 truncate font-mono text-caption text-muted-foreground">{browse?.current || "…"}</code>
       </div>
       <div className="max-h-64 overflow-y-auto py-1">
         {browse && browse.dirs.length === 0 && (
-          <div className="px-3 py-2 text-[11px] text-muted-foreground/80">No subdirectories</div>
+          <div className="px-3 py-2 text-caption text-muted-foreground/80">No subdirectories</div>
         )}
         {browse?.dirs.map((d) => (
           <button
             key={d.path}
             type="button"
             onClick={() => navigate(d.path)}
-            className="flex w-full items-center gap-2 px-2 py-1 text-left text-[11.5px] text-foreground/80 hover:bg-muted/50"
+            className="flex w-full items-center gap-2 px-2 py-1 text-left text-caption text-foreground/80 hover:bg-muted/50"
           >
-            <FolderOpen className={cn("h-4 w-4", d.hasPolpoConfig ? "text-emerald-400/80" : "text-muted-foreground/80")} />
+            <FolderOpen className={cn("h-4 w-4", d.hasPolpoConfig ? "text-success/80" : "text-muted-foreground/80")} />
             <span className="truncate">{d.name}</span>
-            {d.hasPolpoConfig && <span className="ml-auto text-[9px] text-emerald-400/70">polpo</span>}
+            {d.hasPolpoConfig && <span className="ml-auto text-micro text-success/70">polpo</span>}
           </button>
         ))}
       </div>
       <div className="flex items-center justify-between gap-1 border-t border-border/70 px-2 py-1.5">
-        <span className="text-[10px] text-muted-foreground/80 truncate">{browse?.dirs.length ?? 0} folders</span>
+        <span className="text-micro text-muted-foreground/80 truncate">{browse?.dirs.length ?? 0} folders</span>
         <button
           type="button"
           onClick={() => browse?.current && onConfirm(browse.current)}
           disabled={!browse?.current}
-          className="inline-flex items-center gap-1 rounded bg-emerald-500/15 px-2 py-1 text-[11px] font-medium text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-40"
+          className="inline-flex items-center gap-1 rounded bg-primary/15 px-2 py-1 text-caption font-medium text-primary hover:bg-primary/25 disabled:opacity-40"
         >
           Use this folder
         </button>

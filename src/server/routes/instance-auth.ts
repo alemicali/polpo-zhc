@@ -1,5 +1,6 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
+import { isTrustedApiCall, TRUSTED_API_CALL_HEADER } from "@polpo-ai/server";
 import {
   AUTH_COOKIE_NAME,
   addAllowedEmail,
@@ -311,7 +312,7 @@ export function instanceAuthRoutes(polpoDir: PolpoDirRef): OpenAPIHono {
 
   app.openapi(membersRoute, (c) => {
     const dir = resolvePolpoDir(polpoDir);
-    const auth = requireMemberManagementAuth(dir, getCookie(c, AUTH_COOKIE_NAME));
+    const auth = requireMemberManagementAuth(dir, getCookie(c, AUTH_COOKIE_NAME), c.req.header(TRUSTED_API_CALL_HEADER));
     if (auth) return c.json(auth, 401);
     return c.json({
       ok: true,
@@ -324,7 +325,7 @@ export function instanceAuthRoutes(polpoDir: PolpoDirRef): OpenAPIHono {
 
   app.openapi(addMemberRoute, async (c) => {
     const dir = resolvePolpoDir(polpoDir);
-    const auth = requireMemberManagementAuth(dir, getCookie(c, AUTH_COOKIE_NAME));
+    const auth = requireMemberManagementAuth(dir, getCookie(c, AUTH_COOKIE_NAME), c.req.header(TRUSTED_API_CALL_HEADER));
     if (auth) return c.json(auth, 401);
     const { email, sendInvite } = c.req.valid("json");
     const config = addAllowedEmail(dir, email);
@@ -357,7 +358,7 @@ export function instanceAuthRoutes(polpoDir: PolpoDirRef): OpenAPIHono {
 
   app.openapi(removeMemberRoute, (c) => {
     const dir = resolvePolpoDir(polpoDir);
-    const auth = requireMemberManagementAuth(dir, getCookie(c, AUTH_COOKIE_NAME));
+    const auth = requireMemberManagementAuth(dir, getCookie(c, AUTH_COOKIE_NAME), c.req.header(TRUSTED_API_CALL_HEADER));
     if (auth) return c.json(auth, 401);
     const { email } = c.req.valid("param");
     const config = loadInstanceAuth(dir);
@@ -374,8 +375,13 @@ export function instanceAuthRoutes(polpoDir: PolpoDirRef): OpenAPIHono {
   return app;
 }
 
-function requireMemberManagementAuth(polpoDir: string, sessionToken: string | undefined): { ok: false; error: string } | null {
+/**
+ * Managing members needs a signed-in person, or the instance's own in-process call (MCP tools with
+ * the admin scope go through it: the scope was checked at /mcp).
+ */
+function requireMemberManagementAuth(polpoDir: string, sessionToken: string | undefined, trusted?: string): { ok: false; error: string } | null {
   if (!isInstanceAuthEnabled()) return null;
+  if (isTrustedApiCall(trusted)) return null;
   const session = validateSession(polpoDir, sessionToken);
   return session ? null : { ok: false, error: "Login required" };
 }

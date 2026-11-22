@@ -1,10 +1,12 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import tailwindcss from "@tailwindcss/vite";
 import { VitePWA } from "vite-plugin-pwa";
 import { visualizer } from "rollup-plugin-visualizer";
 import path from "path";
 import { fileURLToPath } from "url";
+import { bootScriptSource } from "./src/lib/appearance-kit";
+import { CHANGELOG } from "./src/lib/changelog";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -91,9 +93,50 @@ const pwaPlugin = VitePWA({
   },
 });
 
+/**
+ * The look before the first paint: index.html's <!-- polpo:appearance-boot --> becomes an inline
+ * script (lib/appearance-kit.ts) that puts the theme, palette and custom tokens on <html> from
+ * runtime-config.js and localStorage, before the stylesheet paints.
+ */
+function appearanceBootPlugin(): Plugin {
+  let buildBaseUrl = "";
+  let assetBase = "/";
+  return {
+    name: "polpo-appearance-boot",
+    configResolved(config) {
+      buildBaseUrl = String(config.env.VITE_POLPO_API_URL ?? "");
+      assetBase = config.base || "/";
+    },
+    transformIndexHtml(html) {
+      return html.replace("<!-- polpo:appearance-boot -->", `<script>${bootScriptSource(buildBaseUrl, assetBase)}</script>`);
+    },
+  };
+}
+
+/**
+ * dist/whats-new-ids.json: the ids of the What's new entries in this build. The UI server
+ * (server.mjs) records the time it first serves a build containing each id and inlines those
+ * times into runtime-config.js, so the changelog shows when each entry went online.
+ */
+function whatsNewIdsPlugin(): Plugin {
+  return {
+    name: "polpo-whats-new-ids",
+    apply: "build",
+    generateBundle() {
+      this.emitFile({
+        type: "asset",
+        fileName: "whats-new-ids.json",
+        source: `${JSON.stringify({ ids: CHANGELOG.map((entry) => entry.id) })}\n`,
+      });
+    },
+  };
+}
+
 export default defineConfig({
   base: isElectron ? "./" : "/",
   plugins: [
+    appearanceBootPlugin(),
+    whatsNewIdsPlugin(),
     react(),
     tailwindcss(),
     // Disable PWA in Electron builds — service workers break file:// protocol

@@ -85,6 +85,7 @@ const DEFAULT_SUGGESTED_EVENT_NAMES = new Set<string>([
   "task:timeout",
   "task:question",
   "mission:completed",
+  "mission:budget-exceeded",
   "schedule:triggered",
   "approval:requested",
   "sla:violated",
@@ -399,7 +400,7 @@ export function RuleFormDialog({
           <DialogTitle>{isEdit ? "Edit notification rule" : "New notification rule"}</DialogTitle>
           <DialogDescription>
             Trigger notifications when lifecycle events match. Saved to{" "}
-            <code className="text-[11px] font-mono">.polpo/polpo.json</code>.
+            <code className="text-caption font-mono">.polpo/polpo.json</code>.
           </DialogDescription>
         </DialogHeader>
 
@@ -407,7 +408,7 @@ export function RuleFormDialog({
           <div className="px-6 pb-2 space-y-5">
             {/* Live summary — always visible, top of the form */}
             <div className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-primary/80 mb-1">
+              <p className="text-label text-primary/80 mb-1">
                 Summary
               </p>
               <p className="text-xs leading-relaxed">{summarizeRule(draft as unknown as Parameters<typeof summarizeRule>[0])}</p>
@@ -468,27 +469,27 @@ export function RuleFormDialog({
                         "flex items-start gap-2 rounded-md border px-2.5 py-1.5",
                         canonical
                           ? "border-border/40 bg-muted/15"
-                          : "border-amber-500/40 bg-amber-500/5",
+                          : "border-warning/40 bg-warning/5",
                       )}
                     >
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <code className="text-[11px] font-mono font-medium">{e}</code>
-                          <span className="text-[10px] text-muted-foreground">·</span>
-                          <span className="text-[11px] font-medium">{label}</span>
+                          <code className="text-caption font-mono font-medium">{e}</code>
+                          <span className="text-micro text-muted-foreground">·</span>
+                          <span className="text-caption font-medium">{label}</span>
                           {glob && (
-                            <Badge variant="outline" className="text-[9px] h-4 px-1">glob</Badge>
+                            <Badge variant="outline" className="text-micro h-4 px-1">glob</Badge>
                           )}
                           {!canonical && (
                             <span
-                              className="inline-flex items-center gap-0.5 text-[10px] text-amber-600"
+                              className="inline-flex items-center gap-0.5 text-micro text-warning"
                               title="This event name is not in the canonical catalog. Save still works, but it may never fire."
                             >
                               <AlertTriangle className="h-2.5 w-2.5" /> unknown
                             </span>
                           )}
                         </div>
-                        <p className="text-[10.5px] text-muted-foreground leading-snug mt-0.5">{desc}</p>
+                        <p className="text-caption text-muted-foreground leading-snug mt-0.5">{desc}</p>
                       </div>
                       <button
                         type="button"
@@ -502,7 +503,7 @@ export function RuleFormDialog({
                   );
                 })}
                 {draft.events.length === 0 && (
-                  <span className="text-[11px] text-muted-foreground italic">No events yet — pick from suggestions below.</span>
+                  <span className="text-caption text-muted-foreground italic">No events yet — pick from suggestions below.</span>
                 )}
               </div>
 
@@ -541,14 +542,14 @@ export function RuleFormDialog({
                     >
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <code className="text-[11px] font-mono font-medium">{s.name}</code>
-                          <span className="text-[10px] text-muted-foreground">·</span>
-                          <span className="text-[11px] font-medium">{s.label}</span>
+                          <code className="text-caption font-mono font-medium">{s.name}</code>
+                          <span className="text-micro text-muted-foreground">·</span>
+                          <span className="text-caption font-medium">{s.label}</span>
                           {s.isGlob && (
-                            <Badge variant="outline" className="text-[9px] h-4 px-1">glob</Badge>
+                            <Badge variant="outline" className="text-micro h-4 px-1">glob</Badge>
                           )}
                         </div>
-                        <p className="text-[10.5px] text-muted-foreground leading-snug mt-0.5">{s.description}</p>
+                        <p className="text-caption text-muted-foreground leading-snug mt-0.5">{s.description}</p>
                       </div>
                     </button>
                   ))}
@@ -557,9 +558,9 @@ export function RuleFormDialog({
 
               {/* Non-blocking warnings */}
               {warnings.events.length > 0 && (
-                <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-2.5 py-1.5">
-                  <AlertTriangle className="h-3 w-3 text-amber-600 shrink-0 mt-0.5" />
-                  <p className="text-[11px] text-amber-700 leading-snug">
+                <div className="mt-2 flex items-start gap-2 rounded-md border border-warning/30 bg-warning/5 px-2.5 py-1.5">
+                  <AlertTriangle className="h-3 w-3 text-warning shrink-0 mt-0.5" />
+                  <p className="text-caption text-warning leading-snug">
                     {warnings.events.length === 1 ? "1 event is" : `${warnings.events.length} events are`}{" "}
                     not in the canonical catalog: {warnings.events.map(e => <code key={e} className="font-mono mr-1">{e}</code>)}.
                     The rule will save, but unknown events may never fire.
@@ -567,7 +568,7 @@ export function RuleFormDialog({
                 </div>
               )}
 
-              {errors.events && <p className="text-[11px] text-destructive mt-1">{errors.events}</p>}
+              {errors.events && <p className="text-caption text-destructive mt-1">{errors.events}</p>}
             </Section>
 
             {/* Section 3 — Channels */}
@@ -576,7 +577,7 @@ export function RuleFormDialog({
               description="Which configured channels receive this notification."
             >
               {channels.length === 0 ? (
-                <p className="text-[11px] text-muted-foreground italic">
+                <p className="text-caption text-muted-foreground italic">
                   No channels configured. Add one in the Channels tab first.
                 </p>
               ) : (
@@ -602,7 +603,7 @@ export function RuleFormDialog({
                           )}
                         >
                           {selected && (
-                            <span className="text-[8px] text-primary-foreground">✓</span>
+                            <span className="text-micro text-primary-foreground">✓</span>
                           )}
                         </div>
                         <span className="truncate font-mono">{c}</span>
@@ -612,7 +613,7 @@ export function RuleFormDialog({
                 </div>
               )}
               {errors.channels && (
-                <p className="text-[11px] text-destructive mt-1">{errors.channels}</p>
+                <p className="text-caption text-destructive mt-1">{errors.channels}</p>
               )}
             </Section>
 
@@ -688,7 +689,7 @@ export function RuleFormDialog({
                             key={t}
                             onClick={() => toggleOutcomeType(t)}
                             className={cn(
-                              "text-[10px] font-mono rounded-md border px-2 py-1 transition-colors cursor-pointer",
+                              "text-micro font-mono rounded-md border px-2 py-1 transition-colors cursor-pointer",
                               selected
                                 ? "bg-primary text-primary-foreground border-primary"
                                 : "border-border/40 hover:bg-muted",
@@ -703,7 +704,7 @@ export function RuleFormDialog({
                   <Field label="Tags">
                     <div className="flex flex-wrap gap-1.5 mb-2">
                       {(draft.outcomeFilter?.tags ?? []).map((t) => (
-                        <Badge key={t} variant="secondary" className="text-[10px] gap-1">
+                        <Badge key={t} variant="secondary" className="text-micro gap-1">
                           {t}
                           <button
                             type="button"
@@ -783,14 +784,14 @@ export function RuleFormDialog({
               </Field>
               {availablePlaceholderList.length > 0 && (
                 <div className="space-y-1">
-                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <p className="text-label text-muted-foreground">
                     Placeholders available for selected events
                   </p>
                   <div className="flex flex-wrap gap-1">
                     {availablePlaceholderList.map(p => (
                       <code
                         key={p}
-                        className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-muted/30 border border-border/30"
+                        className="text-micro font-mono px-1.5 py-0.5 rounded bg-muted/30 border border-border/30"
                       >
                         {`{{${p}}}`}
                       </code>
@@ -799,9 +800,9 @@ export function RuleFormDialog({
                 </div>
               )}
               {warnings.placeholders.length > 0 && (
-                <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-2.5 py-1.5">
-                  <AlertTriangle className="h-3 w-3 text-amber-600 shrink-0 mt-0.5" />
-                  <p className="text-[11px] text-amber-700 leading-snug">
+                <div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning/5 px-2.5 py-1.5">
+                  <AlertTriangle className="h-3 w-3 text-warning shrink-0 mt-0.5" />
+                  <p className="text-caption text-warning leading-snug">
                     Template references {warnings.placeholders.length === 1 ? "a placeholder" : "placeholders"} not emitted by the selected events:{" "}
                     {warnings.placeholders.map(p => <code key={p} className="font-mono mr-1">{`{{${p}}}`}</code>)}.
                     They will render as empty strings.
@@ -811,7 +812,7 @@ export function RuleFormDialog({
             </CollapsibleSection>
 
             {saveError && (
-              <div className="text-[11px] text-destructive bg-destructive/10 border border-destructive/30 rounded px-2 py-1.5">
+              <div className="text-caption text-destructive bg-destructive/10 border border-destructive/30 rounded px-2 py-1.5">
                 {saveError}
               </div>
             )}
@@ -850,11 +851,11 @@ function Section({
   return (
     <section className="space-y-2">
       <div>
-        <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <h4 className="text-label text-muted-foreground">
           {title}
         </h4>
         {description && (
-          <p className="text-[11px] text-muted-foreground mt-0.5">{description}</p>
+          <p className="text-caption text-muted-foreground mt-0.5">{description}</p>
         )}
       </div>
       <div className="space-y-2.5">{children}</div>
@@ -875,7 +876,7 @@ function CollapsibleSection({
 }) {
   return (
     <Collapsible open={open} onOpenChange={onOpenChange}>
-      <CollapsibleTrigger className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground cursor-pointer">
+      <CollapsibleTrigger className="flex items-center gap-1.5 text-label text-muted-foreground hover:text-foreground cursor-pointer">
         {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
         {title}
       </CollapsibleTrigger>
@@ -899,15 +900,15 @@ function Field({
 }) {
   return (
     <div className="space-y-1">
-      <label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
+      <label className="text-caption font-medium text-muted-foreground flex items-center gap-1">
         {label}
         {required && <span className="text-destructive">*</span>}
       </label>
       {children}
       {description && !error && (
-        <p className="text-[10px] text-muted-foreground">{description}</p>
+        <p className="text-micro text-muted-foreground">{description}</p>
       )}
-      {error && <p className="text-[11px] text-destructive">{error}</p>}
+      {error && <p className="text-caption text-destructive">{error}</p>}
     </div>
   );
 }

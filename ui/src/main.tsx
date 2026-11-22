@@ -5,9 +5,10 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { App } from "./app";
 import { config } from "./lib/config";
-import { bootstrapPalette } from "./lib/palette";
 import { bootstrapAppearance } from "./lib/appearance";
-import { bootstrapTheme } from "./hooks/use-theme";
+import { bootstrapBranding } from "./lib/branding";
+import { loadOrchestratorName } from "./lib/orchestrator-name";
+import { installStaleBuildRecovery } from "./lib/stale-build";
 // Iconify glyphs are generated as small, local subsets and registered by the
 // components that use them. No icon depends on the public Iconify API.
 import "./index.css";
@@ -45,14 +46,21 @@ window.fetch = (input, init) => {
   return nativeFetch(input, { ...init, credentials: "include" });
 };
 
-// Apply saved theme/palette before React mounts to avoid a flash of default colours
-bootstrapTheme();
-bootstrapPalette();
+// The look (theme, palette, custom tokens) is already on <html>: index.html's inline script applied
+// it before the first paint (lib/appearance-kit.ts). This applies it again with the app's config,
+// keeps it current (OS theme, other tabs) and fetches the instance's default.
 bootstrapAppearance();
+// The branding (name, tagline, logo, frame) the same way: the title and logo preload are already on
+// the page, the components read it synchronously on their first render; this fetches the latest.
+bootstrapBranding();
+// The orchestrator's display name (settings.orchestratorName): known from runtime-config.js or the cache; this fetches the latest.
+void loadOrchestratorName();
 
 // Use HashRouter for Electron (file:// protocol), BrowserRouter for web
 const isFileProtocol = window.location.protocol === "file:";
 const Router = isFileProtocol ? HashRouter : BrowserRouter;
+
+installStaleBuildRecovery();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

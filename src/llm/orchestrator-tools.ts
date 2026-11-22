@@ -8,7 +8,7 @@
  * /v1/chat/completions endpoint.
  */
 
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { nanoid } from "nanoid";
 import type { Tool } from "@earendil-works/pi-ai";
 import type { Orchestrator } from "../core/orchestrator.js";
@@ -40,6 +40,11 @@ import type { InkPackage, InkLockEntry } from "../core/ink.js";
 import { gitClone, gitPullFastForward, gitHeadCommit, sourceCacheKey } from "../core/git-source.js";
 import { isReservedVaultOwner } from "@polpo-ai/core/vault-store";
 import { redactSecrets } from "@polpo-ai/core/secret-redaction";
+import { describeMissionCost, isValidBudgetUsd, type MissionCostSummary } from "@polpo-ai/core/mission-cost";
+import { computeTaskCost, describeTaskCost, usdText } from "@polpo-ai/core/task-cost";
+import { describeTaskRun } from "@polpo-ai/core/run-context";
+import { describeTaskFailure, taskFailure } from "@polpo-ai/core/task-failure";
+import { resolveDependencies } from "@polpo-ai/core";
 import { createCliStores } from "../cli/stores.js";
 import { detectProviders } from "../setup/providers.js";
 import { listModels, resolveModelSpec } from "./pi-client.js";
@@ -58,9 +63,12 @@ import { getArtifactStore } from "../server/artifact-runtime.js";
 import { BRAIN_ORCHESTRATOR_TOOLS, executeCompanyBrainTool } from "../tools/company-brain-tools.js";
 import { STORAGE_ORCHESTRATOR_TOOLS, executeStorageTool } from "../tools/storage-tools.js";
 import { CONNECTOR_TOOLS, executeConnectorTool } from "../tools/connector-tools.js";
+import { bridgedReadOnly, bridgedTools, BRIDGED_TOOLS, executeBridgedTool, isBridgedTool } from "./polpo-mcp-bridge.js";
 import { connectorManagerFor, connectorRedirectUri } from "../mcp/runtime.js";
 import { isMcpToolName, toolResultText } from "../mcp/tools.js";
-import { computerContext, normalizeSandboxSettings, type EffectiveSandbox } from "@polpo-ai/core/sandbox";
+import { computerContext, normalizeSandboxSettings, unknownComputersProblem, type EffectiveSandbox } from "@polpo-ai/core/sandbox";
+import { normalizeConnectorTools, describeTaskToolScope } from "@polpo-ai/core";
+import { TaskToolScopeError } from "../core/task-tool-scope.js";
 import { loadPolpoConfig, savePolpoConfig } from "../core/config.js";
 import { inkApiUrl, inkRegistry } from "../core/ink-config.js";
 import { clearBrowserProfile, finishProfileLogin, listBrowserProfiles, startProfileLogin } from "../tools/browser-profiles.js";
@@ -244,7 +252,7 @@ const captureAppScreenshotTool: Tool = {
 
 const listTasksTool: Tool = {
   name: "list_tasks",
-  description: "List all tasks. Optionally filter by status, group, or assigned agent.",
+  description: "List all tasks, with what each cost in all (every run: retries and continuations included). Optionally filter by status, group, or assigned agent.",
   parameters: Type.Object({
     status: Type.Optional(Type.String({ description: "Filter by status: pending, assigned, in_progress, review, done, failed" })),
     group: Type.Optional(Type.String({ description: "Filter by mission group name" })),
@@ -254,7 +262,9 @@ const listTasksTool: Tool = {
 
 const getTaskTool: Tool = {
   name: "get_task",
-  description: "Get full details of a task by ID or title (partial match).",
+  description: "Get full details of a task by ID or title (partial match), then a summary: why it failed (the labelled reason, and whether it was retried), "
+    + "the tasks it depends on with their status, what it cost in all (every run: retries, continuations, directions; by engine; the latest run's), "
+    + "and where and with what each run executed (engine, model, auth, computer, egress, session, cost).",
   parameters: Type.Object({
     id: Type.Optional(Type.String({ description: "Task ID" })),
     title: Type.Optional(Type.String({ description: "Task title (partial match)" })),
@@ -263,7 +273,7 @@ const getTaskTool: Tool = {
 
 const listMissionsTool: Tool = {
   name: "list_missions",
-  description: "List all missions. Optionally filter by status.",
+  description: "List all missions, with what each cost so far and its budget. Optionally filter by status.",
   parameters: Type.Object({
     status: Type.Optional(Type.String({ description: "Filter by status: draft, scheduled, recurring, active, paused, completed, failed, cancelled" })),
   }),
@@ -271,7 +281,7 @@ const listMissionsTool: Tool = {
 
 const getMissionTool: Tool = {
   name: "get_mission",
-  description: "Get full details of a mission by ID or name (partial match).",
+  description: "Get full details of a mission by ID or name (partial match), with what it cost so far (every run of its tasks, retries included: USD, tokens, by agent and engine) against its budget.",
   parameters: Type.Object({
     id: Type.Optional(Type.String({ description: "Mission ID" })),
     name: Type.Optional(Type.String({ description: "Mission name (partial match)" })),
@@ -338,6 +348,13 @@ const getLogsTool: Tool = {
 //  TASK TOOLS (8)
 // ═══════════════════════════════════════════════════════
 
+/** A task's optional tool scope (create_task / update_task / mission tasks). */
+const toolScopeParam = Type.Object({
+  connectors: Type.Optional(Type.Union([Type.Literal("none"), Type.Array(Type.String())], { description: "Connector ids the run may use (each account is its own connector, e.g. gmail-2), or \"none\". Omit: every connector the agent has." })),
+  connectorTools: Type.Optional(Type.Record(Type.String(), Type.Union([Type.Literal("*"), Type.Array(Type.String())]), { description: "Per connector id: \"*\" or the raw tool names (connectors_list shows them). Narrows the agent's connectorTools." })),
+  allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Built-in tools or patterns (read, bash, browser_*), not connector tools. Narrows the agent's allowedTools." })),
+}, { description: "Optional: only for runs that must be deterministic (e.g. use only Gmail 2 to send, or only 2 Linear tools). It only narrows what the agent has (never grants); omit it to inherit everything from the agent." });
+
 const createTaskTool: Tool = {
   name: "create_task",
   description: "Create a new task and assign it to an agent. Task titles MUST be unique among active tasks.",
@@ -355,12 +372,13 @@ const createTaskTool: Tool = {
       threshold: Type.Optional(Type.Number()),
     }), { description: "Acceptance criteria for this task" })),
     sideEffects: Type.Optional(Type.Boolean({ description: "True if this task produces irreversible external effects (email sends, API calls, etc.). Blocks automatic retry — requires human approval." })),
+    toolScope: Type.Optional(toolScopeParam),
   }),
 };
 
 const updateTaskTool: Tool = {
   name: "update_task",
-  description: "Update a task's description, assignment, or expectations.",
+  description: "Update a task's description, assignment, expectations or tool scope.",
   parameters: Type.Object({
     taskId: Type.String({ description: "Task ID to update" }),
     description: Type.Optional(Type.String({ description: "New description" })),
@@ -373,6 +391,7 @@ const updateTaskTool: Tool = {
       threshold: Type.Optional(Type.Number()),
     }), { description: "New acceptance criteria" })),
     sideEffects: Type.Optional(Type.Boolean({ description: "True if this task produces irreversible external effects. Blocks automatic retry." })),
+    toolScope: Type.Optional(Type.Union([toolScopeParam, Type.Null()], { description: "Narrow the task's tools (see create_task); null goes back to everything the agent has." })),
   }),
 };
 
@@ -518,17 +537,19 @@ const createMissionTool: Tool = {
     name: Type.String({ description: "Mission name" }),
     data: MissionDataSchema,
     prompt: Type.Optional(Type.String({ description: "Original user request that generated this mission" })),
+    budgetUsd: Type.Optional(Type.Number({ exclusiveMinimum: 0, description: "Spending limit in USD for the whole mission (all its tasks' runs, retries included): when reached, no new task starts and the mission pauses until it is raised or cleared" })),
   }),
 };
 
 const updateMissionTool: Tool = {
   name: "update_mission",
-  description: "Update an existing mission's name, content, or status.",
+  description: "Update an existing mission's name, content, status or budget. Raising or clearing the budget lets a mission paused by it go on.",
   parameters: Type.Object({
     missionId: Type.String({ description: "Mission ID to update" }),
     name: Type.Optional(Type.String({ description: "New mission name" })),
     data: Type.Optional(Type.String({ description: "New JSON mission content" })),
     status: Type.Optional(Type.String({ description: "New status: draft, scheduled, recurring, active, paused, completed, failed, cancelled" })),
+    budgetUsd: Type.Optional(Type.Union([Type.Number({ exclusiveMinimum: 0 }), Type.Null()], { description: "Spending limit in USD for the whole mission; null clears it" })),
   }),
 };
 
@@ -582,6 +603,7 @@ const addMissionTaskTool: Tool = {
     expectations: Type.Optional(Type.Array(Type.Any(), { description: "Expectations array" })),
     expectedOutcomes: Type.Optional(Type.Array(Type.Any(), { description: "Expected outcome descriptors" })),
     maxDuration: Type.Optional(Type.Number({ description: "Max duration in seconds" })),
+    toolScope: Type.Optional(toolScopeParam),
   }),
 };
 
@@ -597,6 +619,7 @@ const updateMissionTaskTool: Tool = {
     dependsOn: Type.Optional(Type.Array(Type.String(), { description: "New dependency list" })),
     expectations: Type.Optional(Type.Array(Type.Any(), { description: "New expectations" })),
     expectedOutcomes: Type.Optional(Type.Array(Type.Any(), { description: "New expected outcomes" })),
+    toolScope: Type.Optional(Type.Union([toolScopeParam, Type.Null()], { description: "Narrow the task's tools; null goes back to everything the agent has." })),
   }),
 };
 
@@ -913,9 +936,38 @@ async function execAgentDrive(polpo: Orchestrator, toolName: string, args: Recor
   return lines.join("\n");
 }
 
+/** An agent's engine: Polpo's own, or an official harness running inside its computer. */
+const agentEngineParam = Type.Optional(Type.Union([
+  Type.Literal("polpo"),
+  Type.Object({
+    harness: Type.Union([Type.Literal("claude-code"), Type.Literal("codex")], { description: "The official agent runtime: Claude Code or Codex (it must be enabled: harnesses_get / harnesses_update)" }),
+    model: Type.Optional(Type.String({ description: "Model id for the runtime (Bedrock: an inference profile id); omit for the harness setting's" })),
+    permissionMode: Type.Optional(Type.Union([Type.Literal("allow-all"), Type.Literal("allow-edits"), Type.Literal("allow-reads")], { description: "What the runtime may do without asking (default allow-all: it works unattended in its computer)" })),
+    effort: Type.Optional(Type.Union([Type.Literal("low"), Type.Literal("medium"), Type.Literal("high"), Type.Literal("xhigh"), Type.Literal("max")], { description: "Reasoning effort" })),
+    maxBudgetUsd: Type.Optional(Type.Number({ description: "Stop a run when its estimated spend passes this (USD)" })),
+    credentialRef: Type.Optional(Type.Object({ owner: Type.String(), service: Type.String() }, {
+      description: "This agent's own key (cost separation): a vault entry (owner + service, never the key) that replaces the harness's API key or gateway key",
+    })),
+  }),
+], {
+  description: "Its engine: \"polpo\" (Polpo's own, the default) or { harness: \"claude-code\" | \"codex\", ... }: an official harness that runs the agent's TASKS "
+    + "inside its computer (a remote Daytona v2 computer set as defaultComputer, unless the harness settings allow this server). Credentials come from the "
+    + "harness settings (harnesses_update: an API key, Bedrock or Vertex via a setup link; a Claude subscription is not allowed), never from here.",
+}));
+const agentComputersParam = Type.Optional(Type.Array(Type.String(), { description: "Computers it may use (ids from computers_list; \"host\", this server, always). Replaces the list; [] clears it." }));
+const agentDefaultComputerParam = Type.Optional(Type.String({ description: "The computer its chats and tasks run on (computers_list); \"host\" or \"\" for this server" }));
+const agentConnectorToolsParam = Type.Optional(Type.Record(Type.String(), Type.Union([Type.Literal("*"), Type.Array(Type.String())]), {
+  description: "Which tools of each connector granted to it the agent gets, keyed by connector id: \"*\" = all its tools (current and future); a list = only those "
+    + "(the server's tool names, as connectors_list with tools: <id> shows them, without the mcp__<id>__ prefix). Replaces the whole selection. It never grants a "
+    + "connector (connector_update_access / connector_update do).",
+}));
+const agentProgressiveToolsParam = Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("always"), Type.Literal("never")], {
+  description: "Progressive tool discovery for this agent: auto (default: on with many tools), always, never (every tool up front)",
+}));
+
 const addAgentTool: Tool = {
   name: "add_agent",
-  description: "Add a new agent to a team. If no team is specified, adds to the default (first) team. Use allowedTools to grant extended tool access (e.g. ['browser_*', 'email_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*', 'whatsapp_*', 'phone_*']). phone_* grants the agent the VAPI phone tools and requires VAPI credentials in that agent's vault or environment. Core tools (including vault_get/vault_list) are always available. Use allowedTools to restrict to specific tool names.",
+  description: "Add a new agent to a team. If no team is specified, adds to the default (first) team. It can get its engine (a Claude Code / Codex harness: engine + a remote computer as defaultComputer), computers, per-connector tools (connectorTools) and browser egress right here. Use allowedTools to grant extended tool access (e.g. ['browser_*', 'email_*', 'artifact_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*', 'whatsapp_*', 'phone_*']); artifact_* lets it make artifacts (docs, html dashboards, diagrams) people open in Polpo, also on a Claude Code / Codex harness (Polpo tools run on the Polpo server). phone_* grants the agent the VAPI phone tools and requires VAPI credentials in that agent's vault or environment. Core tools (including vault_get/vault_list) are always available. Use allowedTools to restrict to specific tool names.",
   parameters: Type.Object({
     name: Type.String({ description: "Agent name (unique identifier, must be globally unique across all teams)" }),
     role: Type.Optional(Type.String({ description: "Agent role description (e.g. 'Frontend developer')" })),
@@ -937,6 +989,11 @@ const addAgentTool: Tool = {
     browserProfile: Type.Optional(Type.String({ description: "Persistent browser profile name (shares cookies/state across tasks). Requires browser_* in allowedTools." })),
     browserEgress: Type.Optional(Type.String({ description: "Name of an egress proxy (settings.egressProxies, e.g. \"home\": a residential line) its browser goes out through, for sites that block datacenter IPs" })),
     emailAllowedDomains: Type.Optional(Type.Array(Type.String(), { description: "Restrict email sending to these domains only (e.g. ['company.com'])" })),
+    engine: agentEngineParam,
+    computers: agentComputersParam,
+    defaultComputer: agentDefaultComputerParam,
+    connectorTools: agentConnectorToolsParam,
+    progressiveTools: agentProgressiveToolsParam,
     learning: agentLearningParam,
     voiceReplies: agentVoiceRepliesParam,
     drive: agentDriveParam,
@@ -979,7 +1036,9 @@ const agentSandboxParam = Type.Optional(Type.Object({
 
 const updateAgentTool: Tool = {
   name: "update_agent",
-  description: "Update an existing agent's configuration or move it to another team. Changes are applied immediately; do not reload config. Only provided fields are changed; omitted fields keep their current value. Use empty string for reportsTo to remove hierarchy.",
+  description: "Update an existing agent's configuration or move it to another team: role, model, prompt, tools, skills, engine (polpo or a Claude Code / Codex harness), "
+    + "computers and defaultComputer, per-connector tool selection (connectorTools), browser egress proxy, progressive tools, sandbox, learning, drive. "
+    + "Changes are applied immediately; do not reload config. Only provided fields are changed; omitted fields keep their current value. Use empty string for reportsTo to remove hierarchy.",
   parameters: Type.Object({
     name: Type.String({ description: "Agent name to update" }),
     role: Type.Optional(Type.String({ description: "New role description" })),
@@ -1001,6 +1060,11 @@ const updateAgentTool: Tool = {
     browserProfile: Type.Optional(Type.String({ description: "Persistent browser profile name" })),
     browserEgress: Type.Optional(Type.String({ description: "Name of an egress proxy (settings.egressProxies, e.g. \"home\") its browser goes out through; empty string: directly" })),
     emailAllowedDomains: Type.Optional(Type.Array(Type.String(), { description: "Restrict email to these domains" })),
+    engine: agentEngineParam,
+    computers: agentComputersParam,
+    defaultComputer: agentDefaultComputerParam,
+    connectorTools: Type.Optional(Type.Union([agentConnectorToolsParam, Type.Null()], { description: "Per-connector tool selection (see add_agent), replacing the whole selection; null clears it (every tool of every granted connector)" })),
+    progressiveTools: agentProgressiveToolsParam,
     sandbox: agentSandboxParam,
     learning: agentLearningParam,
     voiceReplies: agentVoiceRepliesParam,
@@ -1256,7 +1320,7 @@ const browserProfileLoginTool: Tool = {
 const computersListTool: Tool = {
   name: "computers_list",
   description: "The computers (persistent machines agents work on: settings.computers) with their live status (running, stopped, paused, "
-    + "hibernated = Daytona v2 snapshot, wakes in a few seconds, archived, creating, error, missing = not created yet), provider, last use, uptime, "
+    + "hibernated = Daytona v2 snapshot, wakes in a few seconds, archived, creating, error, missing = not created yet, deleted = its machine was deleted at the provider: its next use or a reset makes a new one), provider, last use, uptime, "
     + "last snapshot and the agents using each. \"host\" is this server.",
   parameters: Type.Object({}),
 };
@@ -2344,8 +2408,11 @@ export const WRITE_TOOLS = new Set([
   // Storage (buckets)
   "storage_mount", "storage_unmount", "storage_write", "storage_delete",
   // Connectors
-  "connector_add", "connector_connect", "connector_update_access", "connector_remove",
+  "connector_connect", "connector_update_access", "connector_remove",
 ]);
+
+// Tools Polpo runs from the MCP server (polpo-mcp-bridge.ts): read or write as their MCP annotations say
+for (const { name } of BRIDGED_TOOLS) (bridgedReadOnly(name) ? READ_TOOLS : WRITE_TOOLS).add(name);
 
 /** Tools that pause the conversation to collect user input / show a preview. */
 // render_widget NON è interactive: è un tool "fire-and-display" che
@@ -2487,6 +2554,9 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   ...STORAGE_ORCHESTRATOR_TOOLS,
   // Connectors (MCP): managing them; their own tools are added per chat (access.polpo)
   ...CONNECTOR_TOOLS,
+  // What the MCP server (and the dashboard) can do, run in process: harnesses, computers, connectors, channels,
+  // appearance, settings, members and MCP access, sync, rooms, chats, setup links for secrets... (polpo-mcp-bridge.ts)
+  ...bridgedTools(),
   // WhatsApp (3)
   whatsappSendTool, whatsappSendFileTool, whatsappReadTool,
   // Interactive (2)
@@ -2747,6 +2817,8 @@ export async function executeOrchestratorTool(
   context: OrchestratorToolExecutionContext = {},
 ): Promise<string> {
   try {
+    // ── The MCP server's tools, in process (same REST routes, same rules) ──
+    if (isBridgedTool(toolName)) return await executeBridgedTool(toolName, args, context);
     switch (toolName) {
       // ── Read ──
       case "get_status":       return execGetStatus(polpo);
@@ -2822,7 +2894,7 @@ export async function executeOrchestratorTool(
         });
 
       // ── Connectors ──
-      case "connectors_list": case "connector_add": case "connector_connect": case "connector_update_access": case "connector_remove":
+      case "connectors_list": case "connector_connect": case "connector_update_access": case "connector_remove":
         return executeConnectorTool(toolName, args, {
           manager: connectorManagerFor(polpo),
           settings: polpo.getConfig()?.settings,
@@ -3151,6 +3223,7 @@ export async function formatToolDetails(
       break;
     case "create_mission":
       main.push(["Name", trunc(args.name)]);
+      if (args.budgetUsd !== undefined) main.push(["Budget", `$${args.budgetUsd}`]);
       if (args.data) extra.push(["Content", trunc(args.data, 300)]);
       break;
     case "add_agent":
@@ -3671,9 +3744,13 @@ async function execListTasks(polpo: Orchestrator, args: Record<string, unknown>)
   if (args.group) tasks = tasks.filter(t => t.group === args.group);
   if (args.assignTo) tasks = tasks.filter(t => t.assignTo === args.assignTo);
   if (tasks.length === 0) return "No tasks found.";
-  const lines = tasks.map(t =>
-    `[${t.id}] ${t.status.toUpperCase().padEnd(11)} ${t.title} → ${t.assignTo}${t.group ? ` (${t.group})` : ""}`
-  );
+  const lines = tasks.map(t => {
+    const failure = taskFailure(t);
+    const cost = t.runs?.length ? computeTaskCost(t) : undefined;
+    return `[${t.id}] ${t.status.toUpperCase().padEnd(11)} ${t.title} → ${t.assignTo}${t.group ? ` (${t.group})` : ""}`
+      + (cost && cost.usd > 0 ? ` · ${usdText(cost.usd)}${cost.partial ? "+" : ""}${cost.runs > 1 ? ` over ${cost.runs} runs` : ""}` : "")
+      + (failure ? ` — ${failure.reason.slice(0, 160)}${failure.retryable ? "" : " (not retried)"}` : "");
+  });
   return `${tasks.length} task(s):\n${lines.join("\n")}`;
 }
 
@@ -3686,16 +3763,36 @@ async function execGetTask(polpo: Orchestrator, args: Record<string, unknown>): 
     task = (await store.getAllTasks()).find(t => t.title.toLowerCase().includes(needle));
   }
   if (!task) return "Task not found.";
-  return JSON.stringify(task, null, 2);
+  const summary: string[] = [];
+  const failure = taskFailure(task);
+  if (failure) summary.push(`Failed: ${describeTaskFailure(failure)}`);
+  if (task.dependsOn?.length) {
+    const { tasks: deps, missing } = resolveDependencies(task, await store.getAllTasks());
+    summary.push(`Depends on: ${[...deps.map((d) => `${d.title} [${d.status}] (${d.id})`), ...missing.map((m) => `${m} [missing]`)].join(", ")}`);
+  }
+  if (task.toolScope) {
+    let connectors: Parameters<typeof describeTaskToolScope>[1] = [];
+    try { connectors = connectorManagerFor(polpo).store.list(); } catch { /* no connectors file */ }
+    summary.push(`Tools: ${describeTaskToolScope(task.toolScope, connectors)}`);
+  }
+  if (task.runs?.length) {
+    summary.push(describeTaskCost(computeTaskCost(task), { perRun: true }));
+    summary.push("Runs (where and with what, newest last):", ...task.runs.map((r) => `- ${describeTaskRun(r)}`));
+  }
+  return `${JSON.stringify(task, null, 2)}${summary.length ? `\n\n${summary.join("\n")}` : ""}`;
 }
 
 async function execListMissions(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   let missions = await polpo.getAllMissions();
   if (args.status) missions = missions.filter(p => p.status === args.status);
   if (missions.length === 0) return "No missions found.";
-  const lines = missions.map(p =>
-    `[${p.id}] ${p.status.toUpperCase().padEnd(10)} ${p.name}${p.prompt ? ` — "${p.prompt.slice(0, 60)}"` : ""}`
-  );
+  const costs = await polpo.getMissionCostSummaries(missions).catch(() => ({} as Record<string, MissionCostSummary>));
+  const money = (v: number) => (v === 0 ? "$0" : v < 0.01 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`);
+  const lines = missions.map(p => {
+    const c = costs[p.id];
+    const cost = c ? ` · ${money(c.usd)}${c.partial ? "+" : ""}${p.budgetUsd !== undefined ? ` of ${money(p.budgetUsd)}${c.usd >= p.budgetUsd ? " (over budget)" : ""}` : ""}` : "";
+    return `[${p.id}] ${p.status.toUpperCase().padEnd(10)} ${p.name}${p.pauseReason === "budget" ? " (paused: budget)" : ""}${cost}${p.prompt ? ` — "${p.prompt.slice(0, 60)}"` : ""}`;
+  });
   return `${missions.length} mission(s):\n${lines.join("\n")}`;
 }
 
@@ -3710,7 +3807,8 @@ async function execGetMission(polpo: Orchestrator, args: Record<string, unknown>
     }
   }
   if (!mission) return "Mission not found.";
-  return JSON.stringify(mission, null, 2);
+  const cost = await polpo.getMissionCost(mission.id).catch(() => undefined);
+  return `${JSON.stringify(cost ? { ...mission, cost } : mission, null, 2)}${cost ? `\n\n${describeMissionCost(cost)}` : ""}`;
 }
 
 async function execListAgents(polpo: Orchestrator): Promise<string> {
@@ -3834,8 +3932,11 @@ async function execCreateTask(polpo: Orchestrator, args: Record<string, unknown>
     group: args.group as string | undefined,
     expectations: args.expectations as any[] | undefined,
     sideEffects: args.sideEffects as boolean | undefined,
-  });
-  return `Task created: [${task.id}] "${task.title}" → ${task.assignTo}`;
+    ...(args.toolScope !== undefined && args.toolScope !== null ? { toolScope: args.toolScope } : {}),
+  }).catch((err: unknown) => err instanceof TaskToolScopeError ? err : Promise.reject(err));
+  if (task instanceof TaskToolScopeError) return `Error: ${task.message}. The scope may only narrow what ${agentName} has: check connectors_list({ agent: "${agentName}" }) and its allowedTools.`;
+  const scoped = task.toolScope ? ` (tools ${describeTaskToolScope(task.toolScope, connectorManagerFor(polpo).store.list())})` : "";
+  return `Task created: [${task.id}] "${task.title}" → ${task.assignTo}${scoped}`;
 }
 
 async function execUpdateTask(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
@@ -3862,6 +3963,15 @@ async function execUpdateTask(polpo: Orchestrator, args: Record<string, unknown>
   if (args.sideEffects !== undefined) {
     await polpo.getStore().updateTask(taskId, { sideEffects: args.sideEffects as boolean });
     changes.push(`sideEffects → ${args.sideEffects}`);
+  }
+  if (args.toolScope !== undefined) {
+    try {
+      const updated = await polpo.updateTaskToolScope(taskId, args.toolScope);
+      changes.push(`tools → ${describeTaskToolScope(updated.toolScope, connectorManagerFor(polpo).store.list())}`);
+    } catch (err) {
+      if (err instanceof TaskToolScopeError) return `Error: ${err.message}. The scope may only narrow what the agent has.${changes.length ? ` (Already changed: ${changes.join(", ")}.)` : ""}`;
+      throw err;
+    }
   }
   if (changes.length === 0) return "No changes specified.";
   return `Task ${taskId} updated: ${changes.join(", ")}`;
@@ -3939,13 +4049,16 @@ async function execCreateMission(polpo: Orchestrator, args: Record<string, unkno
     return `Error: ${e.message}`;
   }
 
+  const budget = args.budgetUsd;
+  if (budget !== undefined && !isValidBudgetUsd(budget)) return "Error: budgetUsd must be a positive number of USD.";
   const mission = await polpo.saveMission({
     data: dataStr,
     name: args.name as string,
     prompt: args.prompt as string | undefined,
     status: "draft",
+    ...(budget !== undefined ? { budgetUsd: budget } : {}),
   });
-  return `Mission created: [${mission.id}] "${mission.name}" (draft)`;
+  return `Mission created: [${mission.id}] "${mission.name}" (draft)${mission.budgetUsd !== undefined ? `, budget $${mission.budgetUsd}` : ""}`;
 }
 
 async function execUpdateMission(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
@@ -3956,8 +4069,15 @@ async function execUpdateMission(polpo: Orchestrator, args: Record<string, unkno
   if (args.name) updates.name = args.name;
   if (args.data) updates.data = args.data;
   if (args.status) updates.status = args.status;
+  if (args.budgetUsd !== undefined) {
+    if (args.budgetUsd !== null && !isValidBudgetUsd(args.budgetUsd)) return "Error: budgetUsd must be a positive number of USD (null clears it).";
+    updates.budgetUsd = args.budgetUsd ?? undefined;
+  }
   const updated = await polpo.updateMission(missionId, updates as any);
-  return `Mission "${updated.name}" updated.`;
+  const budgetNote = "budgetUsd" in updates
+    ? ` Budget ${updated.budgetUsd !== undefined ? `$${updated.budgetUsd}` : "cleared"}${mission.pauseReason === "budget" ? ": if it is now under its budget, it goes on by itself within seconds" : ""}.`
+    : "";
+  return `Mission "${updated.name}" updated.${budgetNote}`;
 }
 
 async function execExecuteMission(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
@@ -4007,6 +4127,7 @@ async function execAddMissionTask(polpo: Orchestrator, args: Record<string, unkn
       expectations: args.expectations as unknown[] | undefined,
       expectedOutcomes: args.expectedOutcomes as unknown[] | undefined,
       maxDuration: args.maxDuration as number | undefined,
+      ...(args.toolScope ? { toolScope: args.toolScope as import("@polpo-ai/core").TaskToolScope } : {}),
     });
     const parsed = m.data ? JSON.parse(m.data) : {};
     return `Task "${args.title}" added to mission "${m.name}" (${parsed.tasks?.length ?? "?"} tasks total).`;
@@ -4178,6 +4299,34 @@ function resolveAgentModelForConnectedProvider(polpo: Orchestrator, requested: s
   return fallbackModel ? `${fallbackProvider}:${fallbackModel.id}` : requested;
 }
 
+/**
+ * engine, computers, defaultComputer, connectorTools and progressiveTools of add_agent / update_agent,
+ * checked as the agents API checks them (unknown computers; the engine against the harness settings
+ * happens in polpo.addAgent / updateAgent). `clearing` (update): null / [] / "" clear a field.
+ */
+function agentPlatformFields(polpo: Orchestrator, args: Record<string, unknown>, clearing: boolean): { fields: Record<string, unknown> } | { error: string } {
+  const computers = Array.isArray(args.computers) ? (args.computers as string[]) : args.computers === null ? null : undefined;
+  const defaultComputer = typeof args.defaultComputer === "string" ? args.defaultComputer.trim() : undefined;
+  const known = computers?.length || defaultComputer ? (polpo.getConfig?.()?.settings?.computers ?? []).map((c) => c.id) : [];
+  const problem = unknownComputersProblem(known, { computers, defaultComputer: defaultComputer === "host" ? undefined : defaultComputer });
+  if (problem) return { error: `Error: ${problem} with computer_save (computers_list shows them).` };
+  const fields: Record<string, unknown> = {};
+  if (args.engine !== undefined) fields.engine = args.engine === "polpo" || args.engine === null ? undefined : args.engine;
+  if (computers !== undefined) fields.computers = computers?.length ? computers : undefined;
+  if (defaultComputer !== undefined) fields.defaultComputer = defaultComputer && defaultComputer !== "host" ? defaultComputer : undefined;
+  if (args.connectorTools !== undefined) fields.connectorTools = normalizeConnectorTools(args.connectorTools as AgentConfig["connectorTools"]);
+  if (args.progressiveTools !== undefined) fields.progressiveTools = args.progressiveTools ?? undefined;
+  if (!clearing) for (const k of Object.keys(fields)) if (fields[k] === undefined) delete fields[k];
+  return { fields };
+}
+
+/** An engine the settings refuse (harness not enabled, no computer that can run it) as an answer the model can act on. */
+function engineError(err: unknown): string | null {
+  if (!(err instanceof Error) || err.name !== "HarnessConfigError") return null;
+  return `Error: ${err.message}. Check the harness settings with harnesses_get (enable it / set its credential with harnesses_update), `
+    + "give the agent a remote computer (computer_save with kind daytona on Daytona v2, then defaultComputer), or keep engine \"polpo\".";
+}
+
 async function execAddAgent(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const existing = await polpo.getAgents();
   // For add_agent, check if agent already exists (by name or displayName)
@@ -4207,10 +4356,20 @@ async function execAddAgent(polpo: Orchestrator, args: Record<string, unknown>):
     voiceReplies: args.voiceReplies as AgentConfig["voiceReplies"] | undefined,
     drive: args.drive as AgentConfig["drive"] | undefined,
   };
+  const platform = agentPlatformFields(polpo, args, false);
+  if ("error" in platform) return platform.error;
   // Strip undefined values so addAgent only receives explicitly set fields
-  const cleaned = Object.fromEntries(Object.entries(config).filter(([, v]) => v !== undefined));
-  await polpo.addAgent(cleaned as any, teamName);
-  return `Agent "${args.name}" added to ${teamName ? `team "${teamName}"` : "the first team"}.`;
+  const cleaned = Object.fromEntries(Object.entries({ ...config, ...platform.fields }).filter(([, v]) => v !== undefined));
+  try {
+    await polpo.addAgent(cleaned as any, teamName);
+  } catch (err) {
+    const message = engineError(err);
+    if (message) return `${message} The agent was not added.`;
+    throw err;
+  }
+  const engine = (cleaned.engine as { harness?: string } | undefined)?.harness;
+  return `Agent "${args.name}" added to ${teamName ? `team "${teamName}"` : "the first team"}`
+    + `${engine ? `, engine ${engine}` : ""}${cleaned.defaultComputer ? `, on computer "${cleaned.defaultComputer}"` : ""}.`;
 }
 
 async function execRemoveAgent(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
@@ -4273,7 +4432,17 @@ async function execUpdateAgent(polpo: Orchestrator, args: Record<string, unknown
     }
   }
 
-  await polpo.updateAgent(name, updates as any);
+  const platform = agentPlatformFields(polpo, args, true);
+  if ("error" in platform) return platform.error;
+  Object.assign(updates, platform.fields);
+
+  try {
+    await polpo.updateAgent(name, updates as any);
+  } catch (err) {
+    const message = engineError(err);
+    if (message) return `${message} Nothing was changed.`;
+    throw err;
+  }
   const changes = Object.keys(args).filter(k => k !== "name").join(", ");
   return `Agent "${name}" updated: ${changes}${sandboxNote}`;
 }

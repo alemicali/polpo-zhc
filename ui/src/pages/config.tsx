@@ -1,7 +1,8 @@
-import { useEffect, useState, useCallback, type CSSProperties } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -79,8 +80,10 @@ import { useAgents, useAuthStatus, useOrchestratorSkills } from "@polpo-ai/react
 import type { CustomModelDef, ProviderConfig, AuthProfileMeta, ProviderAuthInfo, SkillInfo, PolpoSettings, AuthStatusResponse, ReasoningLevel, NotificationChannelType, NotificationChannelConfig, BrandingConfig } from "@polpo-ai/react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
+import { ORCHESTRATOR_NAME_MAX_LENGTH, getOrchestratorName, setOrchestratorName } from "@/lib/orchestrator-name";
 import { JsonBlock } from "@/components/json-block";
-import { config as appConfig, apiUrl } from "@/lib/config";
+import { config as appConfig, apiFetch, apiUrl } from "@/lib/config";
+import { focusSetupField, notifySetupSaved, readSetupParams } from "@/lib/setup-link";
 import {
   disablePushNotifications,
   enablePushNotifications,
@@ -96,11 +99,11 @@ import { RuleFormDialog, type NotificationRuleDraft } from "@/components/config/
 import { summarizeRule } from "@/lib/rule-summary";
 import { HOOK_EVENT_CATALOG, HOOK_EVENT_GLOBS } from "@polpo-ai/core/hook-events";
 import { GateFormDialog, type ApprovalGateDraft, type LifecycleHook as GateLifecycleHook } from "@/components/config/gate-form-dialog";
-import { useAppearance } from "@/lib/appearance";
-import { PALETTES, usePalette } from "@/lib/palette";
+import { followInstanceDefault, setInstanceAppearance, type InstanceAppearance } from "@/lib/appearance";
+import { AppearanceEditor } from "@/components/config/appearance-editor";
 import { toast } from "sonner";
 import { BrandMark } from "@/components/shared/brand-mark";
-import { DEFAULT_PRODUCT_NAME, DEFAULT_PRODUCT_TAGLINE } from "@/lib/branding";
+import { DEFAULT_PRODUCT_NAME, DEFAULT_PRODUCT_TAGLINE, productName, useInstanceBranding } from "@/lib/branding";
 import { ChannelAccessPanel, TelegramChatFinder, TelegramConnect, TelegramTokenCheck } from "@/components/config/telegram-connect";
 import { AgentSessionOverrides } from "@/components/config/agent-session-overrides";
 import { CustomProviderWizard, CustomProvidersSection } from "@/components/config/custom-providers";
@@ -111,6 +114,9 @@ import { useAgentNames } from "@/hooks/use-agent-names";
 import { useTelegramChannelInfo } from "@/hooks/use-telegram-channel-info";
 import { SandboxSettingsSection } from "@/components/sandbox/sandbox-settings";
 import { McpAccessSection } from "@/components/config/mcp-access-section";
+import { HarnessesSection } from "@/components/config/harnesses-section";
+import { ComputerWebhooksSection } from "@/components/config/computer-webhooks-section";
+import { SectionHeader } from "@/components/shared/section-header";
 
 // ── API helper (same pattern as setup.tsx) ──
 
@@ -215,6 +221,8 @@ const baseSections = [
   { id: "rules", label: "Rules", icon: Bell },
   { id: "policies", label: "Policies", icon: Shield },
   { id: "sandbox", label: "Sandbox", icon: SandboxIcon },
+  { id: "harnesses", label: "Harnesses", icon: Bot },
+  { id: "computers", label: "Computers", icon: Monitor },
   { id: "mcp", label: "MCP access", icon: Plug },
   { id: "appearance", label: "Appearance", icon: PaletteIcon },
   { id: "sync", label: "Cloud sync", icon: CloudIcon },
@@ -235,7 +243,7 @@ function Row({ label, value, mono, wrap }: { label: React.ReactNode; value: Reac
       <span className={cn(
         "text-xs text-foreground shrink-0 text-right max-w-[60%]",
         wrap ? "break-words [overflow-wrap:anywhere]" : "truncate",
-        mono && "font-mono text-[11px]",
+        mono && "font-mono text-caption",
       )}>{value}</span>
     </div>
   );
@@ -245,9 +253,9 @@ function Row({ label, value, mono, wrap }: { label: React.ReactNode; value: Reac
 function CapPill({ label, on }: { label: string; on: boolean }) {
   return (
     <span className={cn(
-      "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium border",
+      "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-caption font-medium border",
       on
-        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+        ? "bg-success/10 text-success border-success/20"
         : "bg-muted/30 text-muted-foreground/60 border-border/30 line-through decoration-muted-foreground/30",
     )}>
       {label}
@@ -264,7 +272,7 @@ function Empty({ text }: { text: string }) {
 function StatusDot({ ok, label }: { ok: boolean; label: string }) {
   return (
     <span className="flex items-center gap-1.5 text-xs">
-      <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", ok ? "bg-emerald-500" : "bg-zinc-500")} />
+      <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", ok ? "bg-success" : "bg-muted-foreground")} />
       <span className={ok ? "text-foreground" : "text-muted-foreground"}>{label}</span>
     </span>
   );
@@ -299,36 +307,36 @@ function ProviderCard({ name, prov, agentModels, authInfo, onConnect, onDisconne
       <div className="flex items-center gap-2.5">
         <div className={cn(
           "relative flex h-9 w-9 items-center justify-center rounded-lg shrink-0 border bg-card",
-          isAuthenticated ? "border-emerald-500/30" : "border-border",
+          isAuthenticated ? "border-success/30" : "border-border",
         )}>
           <ProviderIcon name={name} size={20} />
           {/* Auth-state pip overlapping the brand icon */}
           <span
             className={cn(
               "absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full flex items-center justify-center ring-2 ring-background",
-              isLocal ? "bg-emerald-500" : isAuthenticated ? "bg-emerald-500" : "bg-zinc-500",
+              isLocal || isAuthenticated ? "bg-success text-success-foreground" : "bg-muted-foreground text-background",
             )}
           >
-            {isLocal ? <Server className="h-2 w-2 text-white" /> :
-             isAuthenticated ? <Lock className="h-2 w-2 text-white" /> :
-                      <Unlock className="h-2 w-2 text-white" />}
+            {isLocal ? <Server className="h-2 w-2" /> :
+             isAuthenticated ? <Lock className="h-2 w-2" /> :
+                      <Unlock className="h-2 w-2" />}
           </span>
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold">{providerLabel(name)}</span>
-            <code className="text-[10px] font-mono text-muted-foreground">{name}</code>
+            <code className="text-micro font-mono text-muted-foreground">{name}</code>
           </div>
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
             <StatusDot ok={isAuthenticated} label={statusLabel} />
             {prov.api && (
-              <Badge variant="outline" className="text-[9px] font-mono h-4">{apiModeLabel(prov.api)}</Badge>
+              <Badge variant="outline" className="text-micro font-mono h-4">{apiModeLabel(prov.api)}</Badge>
             )}
             {authInfo?.oauthAvailable && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span>
-                    <Badge variant="outline" className="text-[9px] h-4 gap-0.5">
+                    <Badge variant="outline" className="text-micro h-4 gap-0.5">
                       <Key className="h-2.5 w-2.5" /> OAuth
                     </Badge>
                   </span>
@@ -346,7 +354,7 @@ function ProviderCard({ name, prov, agentModels, authInfo, onConnect, onDisconne
             size="sm"
             onClick={() => onDisconnect?.(name)}
             disabled={disconnecting}
-            className="text-[11px] text-muted-foreground hover:text-destructive hover:bg-destructive/10 h-7 px-2 shrink-0"
+            className="text-caption text-muted-foreground hover:text-destructive hover:bg-destructive/10 h-7 px-2 shrink-0"
           >
             {disconnecting ? <Loader2 className="h-3 w-3 animate-spin" /> : "Disconnect"}
           </Button>
@@ -356,7 +364,7 @@ function ProviderCard({ name, prov, agentModels, authInfo, onConnect, onDisconne
             variant="outline"
             size="sm"
             onClick={() => onConnect?.(name)}
-            className="text-[11px] h-7 px-2.5 shrink-0"
+            className="text-caption h-7 px-2.5 shrink-0"
           >
             Connect
           </Button>
@@ -368,16 +376,16 @@ function ProviderCard({ name, prov, agentModels, authInfo, onConnect, onDisconne
         <div className="space-y-1.5">
           {profiles.map((profile: AuthProfileMeta) => {
             const dotColor: Record<string, string> = {
-              active: "bg-emerald-500", cooldown: "bg-amber-500",
-              billing_disabled: "bg-red-500", expired: "bg-zinc-500",
+              active: "bg-success", cooldown: "bg-warning",
+              billing_disabled: "bg-destructive", expired: "bg-muted-foreground",
             };
             return (
-              <div key={profile.id} className="flex items-center gap-2 text-[11px] min-w-0">
-                <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", dotColor[profile.status] ?? "bg-zinc-500")} />
+              <div key={profile.id} className="flex items-center gap-2 text-caption min-w-0">
+                <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", dotColor[profile.status] ?? "bg-muted-foreground")} />
                 <span className="truncate text-muted-foreground">{profile.email ?? profile.id}</span>
-                <Badge variant={profile.type === "oauth" ? "secondary" : "outline"} className="text-[9px] h-4 shrink-0">{profile.type}</Badge>
+                <Badge variant={profile.type === "oauth" ? "secondary" : "outline"} className="text-micro h-4 shrink-0">{profile.type}</Badge>
                 {profile.status !== "active" && (
-                  <span className="text-[10px] text-muted-foreground/60 shrink-0">{profile.status.replace("_", " ")}</span>
+                  <span className="text-micro text-muted-foreground/60 shrink-0">{profile.status.replace("_", " ")}</span>
                 )}
               </div>
             );
@@ -389,42 +397,42 @@ function ProviderCard({ name, prov, agentModels, authInfo, onConnect, onDisconne
       {prov.baseUrl && (
         <div className="flex items-center gap-1.5 bg-muted/20 rounded-md px-2.5 py-1.5">
           <Globe className="h-3 w-3 text-muted-foreground shrink-0" />
-          <code className="text-[11px] font-mono text-muted-foreground truncate">{prov.baseUrl}</code>
+          <code className="text-caption font-mono text-muted-foreground truncate">{prov.baseUrl}</code>
         </div>
       )}
 
       {/* Custom Models */}
       {prov.models && prov.models.length > 0 && (
         <div className="space-y-2">
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+          <span className="text-label text-muted-foreground">
             Custom Models
           </span>
           {prov.models.map((m: CustomModelDef) => (
             <div key={m.id} className="rounded-md bg-muted/15 border border-border/20 px-3 py-2">
               <div className="flex items-center gap-2 flex-wrap">
-                <code className="text-[11px] font-mono font-medium">{m.name}</code>
+                <code className="text-caption font-mono font-medium">{m.name}</code>
                 {m.reasoning && (
                   <Tooltip>
                     <TooltipTrigger>
-                      <Badge variant="secondary" className="text-[9px] h-4 gap-0.5"><Brain className="h-2.5 w-2.5" /> Reasoning</Badge>
+                      <Badge variant="secondary" className="text-micro h-4 gap-0.5"><Brain className="h-2.5 w-2.5" /> Reasoning</Badge>
                     </TooltipTrigger>
                     <TooltipContent className="text-xs">Supports extended thinking</TooltipContent>
                   </Tooltip>
                 )}
                 {m.contextWindow && (
-                  <Badge variant="outline" className="text-[9px] h-4">{formatCtx(m.contextWindow)} ctx</Badge>
+                  <Badge variant="outline" className="text-micro h-4">{formatCtx(m.contextWindow)} ctx</Badge>
                 )}
                 {m.maxTokens && (
-                  <Badge variant="outline" className="text-[9px] h-4">{formatCtx(m.maxTokens)} out</Badge>
+                  <Badge variant="outline" className="text-micro h-4">{formatCtx(m.maxTokens)} out</Badge>
                 )}
                 {m.input && m.input.includes("image") && (
-                  <Badge variant="outline" className="text-[9px] h-4">Vision</Badge>
+                  <Badge variant="outline" className="text-micro h-4">Vision</Badge>
                 )}
               </div>
               <div className="flex items-center gap-3 mt-1">
-                <code className="text-[10px] font-mono text-muted-foreground">{m.id}</code>
+                <code className="text-micro font-mono text-muted-foreground">{m.id}</code>
                 {m.cost && (
-                  <span className="text-[10px] text-muted-foreground">{formatCost(m.cost)}</span>
+                  <span className="text-micro text-muted-foreground">{formatCost(m.cost)}</span>
                 )}
               </div>
             </div>
@@ -435,7 +443,7 @@ function ProviderCard({ name, prov, agentModels, authInfo, onConnect, onDisconne
       {/* Agent usage */}
       {agentModels.length > 0 && (
         <div className="pt-2 border-t border-border/20">
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-micro text-muted-foreground">
             Used by {agentModels.length} agent{agentModels.length > 1 ? "s" : ""}
           </span>
         </div>
@@ -443,7 +451,7 @@ function ProviderCard({ name, prov, agentModels, authInfo, onConnect, onDisconne
 
       {/* Hint to login */}
       {!isAuthenticated && authInfo?.oauthAvailable && (
-        <p className="text-[10px] text-muted-foreground/60 italic">
+        <p className="text-micro text-muted-foreground/60 italic">
           Run <code className="font-mono text-primary">polpo auth login {name}</code>
         </p>
       )}
@@ -454,24 +462,25 @@ function ProviderCard({ name, prov, agentModels, authInfo, onConnect, onDisconne
 // ── Channel helpers ──
 
 const CHANNEL_META: Record<string, { label: string; icon: LucideIcon; color: string; hue: string; description: string }> = {
-  telegram: { label: "Telegram", icon: Send,            color: "border-l-sky-500",     hue: "sky",     description: "Send notifications to a Telegram chat via bot" },
-  slack:    { label: "Slack",    icon: MessageSquare,   color: "border-l-green-500",   hue: "green",   description: "Post to a Slack channel via webhook" },
-  whatsapp: { label: "WhatsApp", icon: MessageSquare,   color: "border-l-emerald-500", hue: "emerald", description: "Send notifications to a WhatsApp chat (unofficial)" },
-  email:    { label: "Email",    icon: Mail,            color: "border-l-amber-500",   hue: "amber",   description: "Send email via Resend, SendGrid, or SMTP" },
-  webhook:  { label: "Webhook",  icon: Link2,           color: "border-l-violet-500",  hue: "violet",  description: "HTTP in and out: talk to Polpo from Shortcuts or scripts, POST notifications to any endpoint" },
-  push:     { label: "Push",     icon: Monitor,         color: "border-l-fuchsia-500", hue: "fuchsia", description: "Send PWA push notifications to subscribed browsers" },
+  telegram: { label: "Telegram", icon: Send,            color: "border-l-chart-1",     hue: "chart-1",     description: "Send notifications to a Telegram chat via bot" },
+  slack:    { label: "Slack",    icon: MessageSquare,   color: "border-l-chart-3",   hue: "chart-3",   description: "Post to a Slack channel via webhook" },
+  whatsapp: { label: "WhatsApp", icon: MessageSquare,   color: "border-l-chart-2", hue: "chart-2", description: "Send notifications to a WhatsApp chat (unofficial)" },
+  email:    { label: "Email",    icon: Mail,            color: "border-l-chart-4",   hue: "chart-4",   description: "Send email via Resend, SendGrid, or SMTP" },
+  webhook:  { label: "Webhook",  icon: Link2,           color: "border-l-chart-5",  hue: "chart-5",  description: "HTTP in and out: talk to Polpo from Shortcuts or scripts, POST notifications to any endpoint" },
+  push:     { label: "Push",     icon: Monitor,         color: "border-l-primary", hue: "primary", description: "Send PWA push notifications to subscribed browsers" },
 };
 
 const ALL_CHANNEL_TYPES: NotificationChannelType[] = ["telegram", "whatsapp", "slack", "email", "webhook", "push"];
 
+/** Each channel type's colour: a categorical chart token (Configuration → Appearance), muted for unknown types. */
 const HUE_STYLES: Record<string, { iconBg: string; iconRing: string; gradient: string; pip: string; text: string; glow: string; hoverBorder: string; line: string; chip: string }> = {
-  sky: { iconBg: "bg-sky-500/12", iconRing: "ring-sky-500/30", gradient: "from-sky-500/15", pip: "bg-sky-500", text: "text-sky-400", glow: "bg-sky-500/25", hoverBorder: "hover:border-sky-500/40", line: "via-sky-400/70", chip: "border-sky-500/25 bg-sky-500/10 text-sky-300" },
-  green: { iconBg: "bg-green-500/12", iconRing: "ring-green-500/30", gradient: "from-green-500/15", pip: "bg-green-500", text: "text-green-400", glow: "bg-green-500/25", hoverBorder: "hover:border-green-500/40", line: "via-green-400/70", chip: "border-green-500/25 bg-green-500/10 text-green-300" },
-  amber: { iconBg: "bg-amber-500/12", iconRing: "ring-amber-500/30", gradient: "from-amber-500/15", pip: "bg-amber-500", text: "text-amber-400", glow: "bg-amber-500/25", hoverBorder: "hover:border-amber-500/40", line: "via-amber-400/70", chip: "border-amber-500/25 bg-amber-500/10 text-amber-300" },
-  violet: { iconBg: "bg-violet-500/12", iconRing: "ring-violet-500/30", gradient: "from-violet-500/15", pip: "bg-violet-500", text: "text-violet-400", glow: "bg-violet-500/25", hoverBorder: "hover:border-violet-500/40", line: "via-violet-400/70", chip: "border-violet-500/25 bg-violet-500/10 text-violet-300" },
-  fuchsia: { iconBg: "bg-fuchsia-500/12", iconRing: "ring-fuchsia-500/30", gradient: "from-fuchsia-500/15", pip: "bg-fuchsia-500", text: "text-fuchsia-400", glow: "bg-fuchsia-500/25", hoverBorder: "hover:border-fuchsia-500/40", line: "via-fuchsia-400/70", chip: "border-fuchsia-500/25 bg-fuchsia-500/10 text-fuchsia-300" },
-  emerald: { iconBg: "bg-emerald-500/12", iconRing: "ring-emerald-500/30", gradient: "from-emerald-500/15", pip: "bg-emerald-500", text: "text-emerald-400", glow: "bg-emerald-500/25", hoverBorder: "hover:border-emerald-500/40", line: "via-emerald-400/70", chip: "border-emerald-500/25 bg-emerald-500/10 text-emerald-300" },
-  zinc: { iconBg: "bg-zinc-500/12", iconRing: "ring-zinc-500/30", gradient: "from-zinc-500/15", pip: "bg-zinc-500", text: "text-zinc-400", glow: "bg-zinc-500/25", hoverBorder: "hover:border-zinc-500/40", line: "via-zinc-400/70", chip: "border-zinc-500/25 bg-zinc-500/10 text-zinc-300" },
+  "chart-1": { iconBg: "bg-chart-1/12", iconRing: "ring-chart-1/30", gradient: "from-chart-1/15", pip: "bg-chart-1", text: "text-chart-1", glow: "bg-chart-1/25", hoverBorder: "hover:border-chart-1/40", line: "via-chart-1/70", chip: "border-chart-1/25 bg-chart-1/10 text-chart-1" },
+  "chart-2": { iconBg: "bg-chart-2/12", iconRing: "ring-chart-2/30", gradient: "from-chart-2/15", pip: "bg-chart-2", text: "text-chart-2", glow: "bg-chart-2/25", hoverBorder: "hover:border-chart-2/40", line: "via-chart-2/70", chip: "border-chart-2/25 bg-chart-2/10 text-chart-2" },
+  "chart-3": { iconBg: "bg-chart-3/12", iconRing: "ring-chart-3/30", gradient: "from-chart-3/15", pip: "bg-chart-3", text: "text-chart-3", glow: "bg-chart-3/25", hoverBorder: "hover:border-chart-3/40", line: "via-chart-3/70", chip: "border-chart-3/25 bg-chart-3/10 text-chart-3" },
+  "chart-4": { iconBg: "bg-chart-4/12", iconRing: "ring-chart-4/30", gradient: "from-chart-4/15", pip: "bg-chart-4", text: "text-chart-4", glow: "bg-chart-4/25", hoverBorder: "hover:border-chart-4/40", line: "via-chart-4/70", chip: "border-chart-4/25 bg-chart-4/10 text-chart-4" },
+  "chart-5": { iconBg: "bg-chart-5/12", iconRing: "ring-chart-5/30", gradient: "from-chart-5/15", pip: "bg-chart-5", text: "text-chart-5", glow: "bg-chart-5/25", hoverBorder: "hover:border-chart-5/40", line: "via-chart-5/70", chip: "border-chart-5/25 bg-chart-5/10 text-chart-5" },
+  "primary": { iconBg: "bg-primary/12", iconRing: "ring-primary/30", gradient: "from-primary/15", pip: "bg-primary", text: "text-primary", glow: "bg-primary/25", hoverBorder: "hover:border-primary/40", line: "via-primary/70", chip: "border-primary/25 bg-primary/10 text-primary" },
+  "muted-foreground": { iconBg: "bg-muted-foreground/12", iconRing: "ring-muted-foreground/30", gradient: "from-muted-foreground/15", pip: "bg-muted-foreground", text: "text-muted-foreground", glow: "bg-muted-foreground/25", hoverBorder: "hover:border-muted-foreground/40", line: "via-muted-foreground/70", chip: "border-muted-foreground/25 bg-muted-foreground/10 text-muted-foreground" },
 };
 
 /** Default empty config per channel type */
@@ -493,7 +502,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
     <div className="space-y-1">
       <label className="text-xs font-medium text-foreground">{label}</label>
       {children}
-      {hint && <p className="text-[10px] text-muted-foreground leading-tight">{hint}</p>}
+      {hint && <p className="text-micro text-muted-foreground leading-tight">{hint}</p>}
     </div>
   );
 }
@@ -598,12 +607,12 @@ function WebhookInboundSetup({ config, onChange, channelName }: {
   const example = `curl -X POST '${url || "<url>"}' \\\n  -H 'Authorization: Bearer ${secret ? "<secret>" : "<generate a secret>"}' \\\n  -H 'Content-Type: application/json' \\\n  -d '{"sender":"my-iphone","text":"Hi!"}'`;
 
   return (
-    <div className="space-y-2 rounded-md border border-violet-500/20 bg-violet-500/5 px-2.5 py-2.5">
+    <div className="space-y-2 rounded-md border border-chart-5/20 bg-chart-5/5 px-2.5 py-2.5">
       <Field label="Endpoint" hint={channelName ? "POST messages here. The reply comes back in the response." : "Save the channel to get its URL."}>
         <div className="flex gap-1.5">
           <Input readOnly className="h-8 text-xs font-mono" value={url || "available after saving"} />
           {url && (
-            <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 gap-1 text-[11px]" onClick={() => copy("url", url)}>
+            <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 gap-1 text-caption" onClick={() => copy("url", url)}>
               <Copy className="h-3 w-3" /> {copied === "url" ? "Copied" : "Copy"}
             </Button>
           )}
@@ -616,24 +625,24 @@ function WebhookInboundSetup({ config, onChange, channelName }: {
           <Input className="h-8 text-xs font-mono" placeholder="Generate one" value={secret}
             onChange={(e) => onChange({ ...config, inboundSecret: e.target.value || undefined })} />
           {secret && !secretHidden && (
-            <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 gap-1 text-[11px]" onClick={() => copy("secret", secret)}>
+            <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 gap-1 text-caption" onClick={() => copy("secret", secret)}>
               <Copy className="h-3 w-3" /> {copied === "secret" ? "Copied" : "Copy"}
             </Button>
           )}
-          <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 gap-1 text-[11px]"
+          <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 gap-1 text-caption"
             onClick={() => onChange({ ...config, inboundSecret: generateInboundSecret() })}>
             <RefreshCw className="h-3 w-3" /> {secret ? "New" : "Generate"}
           </Button>
         </div>
       </Field>
-      <div className="grid gap-1 text-[10.5px] leading-relaxed text-muted-foreground">
+      <div className="grid gap-1 text-caption leading-relaxed text-muted-foreground">
         <span className="font-medium text-foreground">iOS Shortcuts</span>
         <span>1. Ask for Input (text or dictation).</span>
         <span>2. Get Contents of URL: the endpoint above with <code>?format=text</code>, method POST, header <code>Authorization</code> = <code>Bearer &lt;secret&gt;</code>, request body JSON with <code>text</code> = the input and <code>sender</code> = a name for your device. Use Form with a file field to send photos or documents.</span>
         <span>3. Show Result or Speak Text — or set <b>Replies go to</b> below (or <code>replyTo</code> in the body) to get the answer on Telegram instead: the request returns at once and the reply arrives there.</span>
         <span>Commands work as on Telegram: /agent NAME, /polpo, /new, /help and the agent's suggestions. Without <code>?format=text</code> the response is JSON with messages, buttons and files (base64).</span>
       </div>
-      <pre className="overflow-x-auto rounded bg-muted/40 px-2 py-1.5 text-[10px] font-mono leading-relaxed">{example}</pre>
+      <pre className="overflow-x-auto rounded bg-muted/40 px-2 py-1.5 text-micro font-mono leading-relaxed">{example}</pre>
     </div>
   );
 }
@@ -643,6 +652,7 @@ function splitList(value: string): string[] {
 }
 
 function ChannelConceptPanel({ type }: { type: NotificationChannelType }) {
+  const product = productName(useInstanceBranding());
   const meta = CHANNEL_META[type];
   const inbound = channelSupportsInbound(type);
 
@@ -652,8 +662,8 @@ function ChannelConceptPanel({ type }: { type: NotificationChannelType }) {
         <Bell className="mt-0.5 h-3.5 w-3.5 text-muted-foreground shrink-0" />
         <div className="min-w-0">
           <p className="text-xs font-medium">Notification delivery</p>
-          <p className="text-[10.5px] leading-relaxed text-muted-foreground">
-            Outbound path: Polpo sends alerts, task updates, approvals, or rule events through this {meta?.label ?? type} channel.
+          <p className="text-caption leading-relaxed text-muted-foreground">
+            Outbound path: {product} sends alerts, task updates, approvals, or rule events through this {meta?.label ?? type} channel.
           </p>
         </div>
       </div>
@@ -661,9 +671,9 @@ function ChannelConceptPanel({ type }: { type: NotificationChannelType }) {
         <MessageSquare className="mt-0.5 h-3.5 w-3.5 text-muted-foreground shrink-0" />
         <div className="min-w-0">
           <p className="text-xs font-medium">Inbound gateway</p>
-          <p className="text-[10.5px] leading-relaxed text-muted-foreground">
+          <p className="text-caption leading-relaxed text-muted-foreground">
             {inbound
-              ? "Inbound path: people can message Polpo from this channel and the gateway routes the text into a Polpo session."
+              ? `Inbound path: people can message ${product} from this channel and the gateway routes the text into a ${product} session.`
               : "This channel is delivery-only here. It can receive notifications, but it does not expose a chat gateway."}
           </p>
         </div>
@@ -673,14 +683,15 @@ function ChannelConceptPanel({ type }: { type: NotificationChannelType }) {
 }
 
 function ChannelSetupGuide({ type }: { type: NotificationChannelType }) {
+  const product = productName(useInstanceBranding());
   if (type === "telegram") {
     return (
-      <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 px-3 py-2.5">
+      <div className="rounded-lg border border-info/20 bg-info/5 px-3 py-2.5">
         <p className="text-xs font-medium">Telegram setup</p>
-        <div className="mt-1 grid gap-1 text-[10.5px] leading-relaxed text-muted-foreground">
-          <span>1. In Telegram, open <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" className="text-sky-600 hover:underline">@BotFather</a>, send /newbot and paste the token below.</span>
+        <div className="mt-1 grid gap-1 text-caption leading-relaxed text-muted-foreground">
+          <span>1. In Telegram, open <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" className="text-info hover:underline">@BotFather</a>, send /newbot and paste the token below.</span>
           <span>2. Press <b>Find my chat</b> and send any message to your bot — the chat ID fills in after you confirm.</span>
-          <span>3. To talk to Polpo from Telegram, turn on the inbound gateway. Save.</span>
+          <span>3. To talk to {product} from Telegram, turn on the inbound gateway. Save.</span>
         </div>
       </div>
     );
@@ -688,9 +699,9 @@ function ChannelSetupGuide({ type }: { type: NotificationChannelType }) {
 
   if (type === "whatsapp") {
     return (
-      <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2.5">
+      <div className="rounded-lg border border-success/20 bg-success/5 px-3 py-2.5">
         <p className="text-xs font-medium">WhatsApp setup</p>
-        <div className="mt-1 grid gap-1 text-[10.5px] leading-relaxed text-muted-foreground">
+        <div className="mt-1 grid gap-1 text-caption leading-relaxed text-muted-foreground">
           <span>1. Pair this server as a linked device with the Connect WhatsApp button below.</span>
           <span>2. Use the same profile directory here, then set the destination phone/chat ID.</span>
           <span>3. Enable inbound only for a dedicated or trusted number. This uses WhatsApp Web connectivity.</span>
@@ -718,7 +729,7 @@ function WhatsAppProfileSetup({ config, onChange }: {
 
   const loadProfiles = useCallback(async () => {
     try {
-      const res = await fetch(`${appConfig.baseUrl}/api/v1/whatsapp/profiles`, { credentials: "include" });
+      const res = await apiFetch(`${appConfig.baseUrl}/api/v1/whatsapp/profiles`, { credentials: "include" });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error ?? "Could not load WhatsApp profiles");
       setProfiles(data.data?.profiles ?? []);
@@ -750,7 +761,7 @@ function WhatsAppProfileSetup({ config, onChange }: {
     if (!session || !["starting", "qr"].includes(session.status)) return;
     const timer = window.setInterval(async () => {
       try {
-        const res = await fetch(`${appConfig.baseUrl}/api/v1/whatsapp/login/${session.id}`, { credentials: "include" });
+        const res = await apiFetch(`${appConfig.baseUrl}/api/v1/whatsapp/login/${session.id}`, { credentials: "include" });
         const data = await res.json();
         if (!data.ok) throw new Error(data.error ?? "Could not read WhatsApp login status");
         const next = data.data?.session as WhatsAppLoginSessionInfo;
@@ -770,7 +781,7 @@ function WhatsAppProfileSetup({ config, onChange }: {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`${appConfig.baseUrl}/api/v1/whatsapp/login/start`, {
+      const res = await apiFetch(`${appConfig.baseUrl}/api/v1/whatsapp/login/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -791,7 +802,7 @@ function WhatsAppProfileSetup({ config, onChange }: {
   const cancelLogin = async () => {
     if (!session || !["starting", "qr"].includes(session.status)) return;
     try {
-      await fetch(`${appConfig.baseUrl}/api/v1/whatsapp/login/${session.id}/cancel`, {
+      await apiFetch(`${appConfig.baseUrl}/api/v1/whatsapp/login/${session.id}/cancel`, {
         method: "POST",
         credentials: "include",
       });
@@ -806,7 +817,7 @@ function WhatsAppProfileSetup({ config, onChange }: {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`${appConfig.baseUrl}/api/v1/whatsapp/logout`, {
+      const res = await apiFetch(`${appConfig.baseUrl}/api/v1/whatsapp/logout`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -834,15 +845,15 @@ function WhatsAppProfileSetup({ config, onChange }: {
           <div className="flex items-center gap-2">
             <LogIn className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="text-xs font-semibold">WhatsApp profile</span>
-            <Badge variant={authenticated ? "secondary" : "outline"} className={cn("h-4 text-[9px] px-1.5", authenticated && "text-emerald-600")}>
+            <Badge variant={authenticated ? "secondary" : "outline"} className={cn("h-4 text-micro px-1.5", authenticated && "text-success")}>
               {authenticated ? "Connected" : session?.status === "qr" ? "Scan QR" : "Not linked"}
             </Badge>
           </div>
-          <p className="mt-1 text-[10.5px] leading-relaxed text-muted-foreground">
+          <p className="mt-1 text-caption leading-relaxed text-muted-foreground">
             Pair this server as a WhatsApp linked device. The profile powers tool access; notifications and inbound stay optional.
           </p>
         </div>
-        <Button type="button" variant="outline" size="sm" className="h-7 shrink-0 text-[11px] gap-1.5" onClick={() => void loadProfiles()}>
+        <Button type="button" variant="outline" size="sm" className="h-7 shrink-0 text-caption gap-1.5" onClick={() => void loadProfiles()}>
           <RefreshCw className="h-3 w-3" /> Refresh
         </Button>
       </div>
@@ -880,15 +891,15 @@ function WhatsAppProfileSetup({ config, onChange }: {
       </div>
 
       {session?.status === "starting" && (
-        <div className="rounded-md border border-border/30 bg-muted/15 px-2.5 py-2 text-[10.5px] text-muted-foreground flex items-center gap-2">
+        <div className="rounded-md border border-border/30 bg-muted/15 px-2.5 py-2 text-caption text-muted-foreground flex items-center gap-2">
           <Loader2 className="h-3.5 w-3.5 animate-spin" /> Waiting for WhatsApp QR code...
         </div>
       )}
 
       {session?.status === "qr" && (
-        <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3 space-y-2">
+        <div className="rounded-lg border border-success/20 bg-success/5 p-3 space-y-2">
           <p className="text-xs font-medium">Scan with WhatsApp</p>
-          <p className="text-[10.5px] leading-relaxed text-muted-foreground">
+          <p className="text-caption leading-relaxed text-muted-foreground">
             Open WhatsApp, go to Linked Devices, then scan this QR code.
           </p>
           {qrDataUrl ? (
@@ -903,9 +914,9 @@ function WhatsAppProfileSetup({ config, onChange }: {
 
       {session && ["connected", "error", "expired", "cancelled"].includes(session.status) && (
         <div className={cn(
-          "rounded-md border px-2.5 py-2 text-[10.5px] leading-relaxed",
+          "rounded-md border px-2.5 py-2 text-caption leading-relaxed",
           session.status === "connected"
-            ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-600"
+            ? "border-success/25 bg-success/10 text-success"
             : "border-destructive/25 bg-destructive/10 text-destructive",
         )}>
           {session.status === "connected"
@@ -915,7 +926,7 @@ function WhatsAppProfileSetup({ config, onChange }: {
       )}
 
       {error && (
-        <div className="rounded-md border border-destructive/25 bg-destructive/10 px-2.5 py-2 text-[10.5px] leading-relaxed text-destructive">
+        <div className="rounded-md border border-destructive/25 bg-destructive/10 px-2.5 py-2 text-caption leading-relaxed text-destructive">
           {error}
         </div>
       )}
@@ -931,6 +942,7 @@ function DeliveryFields({ config, onChange, gatewayRunning, channelName, savedBo
   /** Bot token of the saved channel; while it is unchanged the bot is already polled by the server. */
   savedBotToken?: string;
 }) {
+  const product = productName(useInstanceBranding());
   const botActive = !!savedBotToken && savedBotToken.trim() === (config.botToken ?? "").trim();
   const set = onChange;
 
@@ -944,7 +956,7 @@ function DeliveryFields({ config, onChange, gatewayRunning, channelName, savedBo
       {config.type === "telegram" && (
         <>
           <Field label="Bot Token" hint="From @BotFather on Telegram">
-            <Input className="h-8 text-xs font-mono" placeholder="123456:ABC-DEF..." value={config.botToken ?? ""} onChange={(e) => set({ botToken: e.target.value })} />
+            <Input data-setup-field="botToken" className="h-8 text-xs font-mono" placeholder="123456:ABC-DEF..." value={config.botToken ?? ""} onChange={(e) => set({ botToken: e.target.value })} />
           </Field>
           <TelegramTokenCheck api={api} botToken={config.botToken} channel={gatewayRunning || isMaskedSecret(config.botToken) ? channelName : undefined} />
           <Field label="Chat ID" hint="Where notifications are sent. Use Find my chat (new bot) or Connect my Telegram (saved bot) to fill it in.">
@@ -981,10 +993,10 @@ function DeliveryFields({ config, onChange, gatewayRunning, channelName, savedBo
       {config.type === "slack" && (
         <>
           <Field label="Webhook URL" hint="Slack Incoming Webhook URL">
-            <Input className="h-8 text-xs font-mono" placeholder="https://hooks.slack.com/services/..." value={config.webhookUrl ?? ""} onChange={(e) => set({ webhookUrl: e.target.value })} />
+            <Input data-setup-field="webhookUrl" className="h-8 text-xs font-mono" placeholder="https://hooks.slack.com/services/..." value={config.webhookUrl ?? ""} onChange={(e) => set({ webhookUrl: e.target.value })} />
           </Field>
           <Field label="API Key" hint="Optional - enables file uploads">
-            <Input className="h-8 text-xs font-mono" placeholder="xoxb-..." value={config.apiKey ?? ""} onChange={(e) => set({ apiKey: e.target.value || undefined })} />
+            <Input data-setup-field="apiKey" className="h-8 text-xs font-mono" placeholder="xoxb-..." value={config.apiKey ?? ""} onChange={(e) => set({ apiKey: e.target.value || undefined })} />
           </Field>
         </>
       )}
@@ -1005,7 +1017,7 @@ function DeliveryFields({ config, onChange, gatewayRunning, channelName, savedBo
           </Field>
           {config.provider !== "smtp" && (
             <Field label="API Key">
-              <Input className="h-8 text-xs font-mono" placeholder="re_..." value={config.apiKey ?? ""} onChange={(e) => set({ apiKey: e.target.value })} />
+              <Input data-setup-field="apiKey" className="h-8 text-xs font-mono" placeholder="re_..." value={config.apiKey ?? ""} onChange={(e) => set({ apiKey: e.target.value })} />
             </Field>
           )}
           {config.provider === "smtp" && (
@@ -1032,8 +1044,8 @@ function DeliveryFields({ config, onChange, gatewayRunning, channelName, savedBo
 
       {config.type === "webhook" && (
         <>
-          <Field label="Notification URL" hint="Optional: Polpo POSTs notifications here as JSON. Leave empty for an inbound-only webhook.">
-            <Input className="h-8 text-xs font-mono" placeholder="https://example.com/webhook" value={config.url ?? ""} onChange={(e) => set({ url: e.target.value || undefined })} />
+          <Field label="Notification URL" hint={`Optional: ${product} POSTs notifications here as JSON. Leave empty for an inbound-only webhook.`}>
+            <Input data-setup-field="url" className="h-8 text-xs font-mono" placeholder="https://example.com/webhook" value={config.url ?? ""} onChange={(e) => set({ url: e.target.value || undefined })} />
           </Field>
           <Field label="Headers" hint="key:value pairs, one per line">
             <textarea
@@ -1076,7 +1088,7 @@ function DeliveryFields({ config, onChange, gatewayRunning, channelName, savedBo
               </Select>
             </Field>
           </div>
-          <p className="text-[10px] text-muted-foreground leading-tight">
+          <p className="text-micro text-muted-foreground leading-tight">
             VAPID keys are generated once and stored in .polpo/push.json. Override them with config values or env references only when you need stable keys across deployments.
           </p>
         </>
@@ -1091,6 +1103,7 @@ function InboundGatewayForm({ config, onChange, channelName, otherChannels = [] 
   channelName?: string;
   otherChannels?: { name: string; type: NotificationChannelType }[];
 }) {
+  const product = productName(useInstanceBranding());
   const agentNames = useAgentNames(api);
   const gateway = config.gateway ?? {};
   const enabled = gateway.enableInbound === true;
@@ -1119,18 +1132,18 @@ function InboundGatewayForm({ config, onChange, channelName, otherChannels = [] 
             <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="text-xs font-semibold">Inbound gateway</span>
           </div>
-          <p className="mt-1 text-[10.5px] leading-relaxed text-muted-foreground">
-            Let people send messages to Polpo from {CHANNEL_META[config.type]?.label ?? config.type}. This is separate from outbound notifications.
+          <p className="mt-1 text-caption leading-relaxed text-muted-foreground">
+            Let people send messages to {product} from {CHANNEL_META[config.type]?.label ?? config.type}. This is separate from outbound notifications.
           </p>
         </div>
         <Button
           type="button"
           variant={enabled ? "secondary" : "outline"}
           size="sm"
-          className="h-7 shrink-0 text-[11px] gap-1.5"
+          className="h-7 shrink-0 text-caption gap-1.5"
           onClick={() => updateGateway({ enableInbound: !enabled })}
         >
-          <ToggleRight className={cn("h-3.5 w-3.5", enabled && "text-emerald-500")} />
+          <ToggleRight className={cn("h-3.5 w-3.5", enabled && "text-success")} />
           {enabled ? "Enabled" : "Off"}
         </Button>
       </div>
@@ -1139,7 +1152,7 @@ function InboundGatewayForm({ config, onChange, channelName, otherChannels = [] 
         <>
           {isWebhook && <WebhookInboundSetup config={config} onChange={onChange} channelName={channelName} />}
           <div className="grid grid-cols-2 gap-2">
-            <Field label="DM Policy" hint="Controls who can start a Polpo session.">
+            <Field label="DM Policy" hint={`Controls who can start a ${product} session.`}>
               <Select value={policy} onValueChange={(v) => updateGateway({ dmPolicy: v as GatewayPolicy })}>
                 <SelectTrigger className="h-8 text-xs w-full">
                   <SelectValue />
@@ -1231,7 +1244,7 @@ function InboundGatewayForm({ config, onChange, channelName, otherChannels = [] 
               </SelectContent>
             </Select>
           </Field>
-          <p className="-mt-1.5 text-[10px] leading-relaxed text-muted-foreground">
+          <p className="-mt-1.5 text-micro leading-relaxed text-muted-foreground">
             {(gateway.sessionMode ?? "per-peer") === "shared"
               ? "Messages continue the latest conversation with the same interlocutor (Polpo or the agent chosen with /agent), the one the web chat resumes."
               : "Each person gets their own conversations here, one per interlocutor. They appear in the web chat list but are not resumed automatically."}
@@ -1259,7 +1272,7 @@ function InboundGatewayForm({ config, onChange, channelName, otherChannels = [] 
               }}
             />
           </Field>
-          <div className="rounded-md border border-border/30 bg-muted/15 px-2.5 py-2 text-[10.5px] leading-relaxed text-muted-foreground">
+          <div className="rounded-md border border-border/30 bg-muted/15 px-2.5 py-2 text-caption leading-relaxed text-muted-foreground">
             {policy === "pairing" && "Unknown people receive a pairing code. Approve them from the channel card, or send them an invite link that pairs them automatically."}
             {policy === "allowlist" && "Allowlist accepts only configured IDs. Use this for production channels with known operators."}
             {policy === "open" && (isWebhook
@@ -1269,8 +1282,8 @@ function InboundGatewayForm({ config, onChange, channelName, otherChannels = [] 
           </div>
         </>
       ) : (
-        <p className="rounded-md border border-border/30 bg-muted/15 px-2.5 py-2 text-[10.5px] leading-relaxed text-muted-foreground">
-          Inbound is off. This channel can still send notifications; messages from users will not become Polpo conversations.
+        <p className="rounded-md border border-border/30 bg-muted/15 px-2.5 py-2 text-caption leading-relaxed text-muted-foreground">
+          Inbound is off. This channel can still send notifications; messages from users will not become {product} conversations.
         </p>
       )}
     </div>
@@ -1326,7 +1339,7 @@ function channelFacts(ch: NotificationChannelConfig): Array<{ label: string; val
   switch (ch.type) {
     case "telegram": return [
       { label: "Chat", value: ch.chatId || "—", mono: true },
-      { label: "Talks to", value: gateway?.enableInbound ? (gateway.agent ?? "Polpo") : "—" },
+      { label: "Talks to", value: gateway?.enableInbound ? (gateway.agent ?? getOrchestratorName()) : "—" },
     ];
     case "slack": return [
       { label: "Webhook", value: ch.webhookUrl ? "configured" : "—" },
@@ -1343,7 +1356,7 @@ function channelFacts(ch: NotificationChannelConfig): Array<{ label: string; val
     ];
     case "webhook": return [
       { label: "Outbound", value: ch.url ? "on" : "off" },
-      { label: "Talks to", value: gateway?.enableInbound ? (gateway.agent ?? "Polpo") : "—" },
+      { label: "Talks to", value: gateway?.enableInbound ? (gateway.agent ?? getOrchestratorName()) : "—" },
     ];
     case "push": return [
       { label: "Urgency", value: ch.urgency ?? "normal" },
@@ -1363,8 +1376,8 @@ function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, te
   testing?: boolean;
   testResult?: ChannelTestResult | null;
 }) {
-  const meta = CHANNEL_META[ch.type] ?? { label: ch.type, icon: Bell, color: "border-l-zinc-500", hue: "zinc" };
-  const hue = HUE_STYLES[meta.hue] ?? HUE_STYLES.zinc;
+  const meta = CHANNEL_META[ch.type] ?? { label: ch.type, icon: Bell, color: "border-l-muted-foreground", hue: "muted-foreground" };
+  const hue = HUE_STYLES[meta.hue] ?? HUE_STYLES["muted-foreground"];
   const gateway = ch.gateway;
   const ready = channelReadiness(ch);
   const facts = channelFacts(ch);
@@ -1373,7 +1386,7 @@ function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, te
   return (
     <Card className={cn(
       "group relative overflow-hidden border border-border/40 bg-card py-0 gap-0",
-      "transition-all duration-300 hover:-translate-y-0.5 hover:shadow-xl hover:shadow-black/20",
+      "transition-all duration-300 hover:-translate-y-0.5 hover:shadow-raised",
       hue.hoverBorder,
     )}>
       {/* Brand light: a hairline across the top and a soft glow behind the mark */}
@@ -1392,20 +1405,20 @@ function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, te
           </div>
           <div className="flex-1 min-w-0 pt-0.5">
             <div className="flex items-center gap-2 min-w-0">
-              <span className="text-[15px] font-semibold tracking-tight truncate">{name}</span>
+              <span className="text-h3 font-semibold tracking-tight truncate">{name}</span>
             </div>
-            <p className={cn("text-[11px] mt-0.5 font-medium", hue.text)}>{meta.label}</p>
+            <p className={cn("text-caption mt-0.5 font-medium", hue.text)}>{meta.label}</p>
           </div>
           <div className="flex items-center gap-1 shrink-0">
             <span className={cn(
-              "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10.5px] font-medium",
+              "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-caption font-medium",
               failed ? "border-destructive/30 bg-destructive/10 text-destructive"
-                : ready.ok ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-400"
-                : "border-amber-500/25 bg-amber-500/10 text-amber-400",
+                : ready.ok ? "border-success/25 bg-success/10 text-success"
+                : "border-warning/25 bg-warning/10 text-warning",
             )}>
               <span className="relative flex h-1.5 w-1.5">
-                {ready.ok && !failed && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />}
-                <span className={cn("relative inline-flex h-1.5 w-1.5 rounded-full", failed ? "bg-destructive" : ready.ok ? "bg-emerald-400" : "bg-amber-400")} />
+                {ready.ok && !failed && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-60" />}
+                <span className={cn("relative inline-flex h-1.5 w-1.5 rounded-full", failed ? "bg-destructive" : ready.ok ? "bg-success" : "bg-warning")} />
               </span>
               {failed ? "Test failed" : ready.label}
             </span>
@@ -1424,21 +1437,21 @@ function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, te
 
         {/* Capabilities */}
         <div className="flex flex-wrap items-center gap-1.5 px-4 pt-3">
-          <span className={cn("inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px]", hue.chip)}>
+          <span className={cn("inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-micro", hue.chip)}>
             <Send className="h-2.5 w-2.5" /> Notifications
           </span>
           {gateway?.enableInbound && (
-            <span className={cn("inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px]", hue.chip)}>
+            <span className={cn("inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-micro", hue.chip)}>
               <Zap className="h-2.5 w-2.5" /> Inbound chat
             </span>
           )}
           {gateway?.enableInbound && (
-            <span className="inline-flex items-center rounded-md border border-border/40 bg-muted/30 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+            <span className="inline-flex items-center rounded-md border border-border/40 bg-muted/30 px-1.5 py-0.5 text-micro text-muted-foreground">
               DM · {gateway.dmPolicy ?? "allowlist"}
             </span>
           )}
           {gateway?.agent && (
-            <span className="inline-flex items-center rounded-md border border-border/40 bg-muted/30 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+            <span className="inline-flex items-center rounded-md border border-border/40 bg-muted/30 px-1.5 py-0.5 text-micro text-muted-foreground">
               → {gateway.agent}
             </span>
           )}
@@ -1449,8 +1462,8 @@ function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, te
           <div className={cn("grid gap-px mx-4 mt-3 overflow-hidden rounded-xl border border-border/30 bg-border/30", facts.length >= 3 ? "grid-cols-3" : "grid-cols-2")}>
             {facts.map((fact) => (
               <div key={fact.label} className="bg-card/90 px-3 py-2 min-w-0">
-                <div className="text-[9.5px] uppercase tracking-wider text-muted-foreground/70">{fact.label}</div>
-                <div className={cn("mt-0.5 text-[12px] font-medium truncate", fact.mono && "font-mono text-[11px]")}>{fact.value}</div>
+                <div className="text-label text-muted-foreground/70">{fact.label}</div>
+                <div className={cn("mt-0.5 text-small font-medium truncate", fact.mono && "font-mono text-caption")}>{fact.value}</div>
               </div>
             ))}
           </div>
@@ -1458,7 +1471,7 @@ function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, te
 
         {/* Everything else, one click away */}
         <Collapsible>
-          <CollapsibleTrigger className="group/details flex w-full items-center gap-1 px-4 pt-3 text-[10.5px] text-muted-foreground hover:text-foreground transition-colors">
+          <CollapsibleTrigger className="group/details flex w-full items-center gap-1 px-4 pt-3 text-caption text-muted-foreground hover:text-foreground transition-colors">
             <ChevronRight className="h-3 w-3 transition-transform group-data-[state=open]/details:rotate-90" />
             Details
           </CollapsibleTrigger>
@@ -1510,22 +1523,22 @@ function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, te
         )}
 
         {failed && testResult?.error && (
-          <div className="mx-4 mt-3 rounded-lg border border-destructive/25 bg-destructive/10 px-2.5 py-1.5 text-[10.5px] leading-relaxed text-destructive">
+          <div className="mx-4 mt-3 rounded-lg border border-destructive/25 bg-destructive/10 px-2.5 py-1.5 text-caption leading-relaxed text-destructive">
             {testResult.error}
           </div>
         )}
 
         {/* Actions */}
         <div className="mt-3 flex items-center gap-1.5 border-t border-border/30 bg-muted/10 px-3 py-2">
-          <Button variant="ghost" size="sm" className="h-7 rounded-full text-[11px] gap-1 px-3" onClick={onEdit}>
+          <Button variant="ghost" size="sm" className="h-7 rounded-full text-caption gap-1 px-3" onClick={onEdit}>
             <Pencil className="h-3 w-3" /> Edit
           </Button>
           <Button
             variant="ghost"
             size="sm"
             className={cn(
-              "h-7 rounded-full text-[11px] gap-1 px-3 transition-colors",
-              testResult?.success === true && "text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/15",
+              "h-7 rounded-full text-caption gap-1 px-3 transition-colors",
+              testResult?.success === true && "text-success bg-success/10 hover:bg-success/15",
               failed && "text-destructive hover:bg-destructive/10",
             )}
             onClick={onTest}
@@ -1534,7 +1547,7 @@ function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, te
             {testing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Activity className="h-3 w-3" />}
             {testing ? "Testing…" : testResult?.success === true ? "Reachable" : failed ? "Retry test" : "Send test"}
           </Button>
-          <span className="ml-auto font-mono text-[10px] text-muted-foreground/50">{ch.type}</span>
+          <span className="ml-auto font-mono text-micro text-muted-foreground/50">{ch.type}</span>
         </div>
       </CardContent>
     </Card>
@@ -1593,18 +1606,18 @@ function PushBrowserControls({ hasPushChannel }: { hasPushChannel: boolean }) {
   };
 
   return (
-    <Card className="bg-card/70 border-border/40 py-0">
+    <Card className="py-0">
       <CardContent className="p-3 space-y-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0 space-y-1">
             <div className="flex items-center gap-2">
               <Monitor className="h-3.5 w-3.5 text-muted-foreground" />
               <span className="text-sm font-semibold">This browser</span>
-              <Badge variant={state.subscribed ? "default" : "outline"} className="text-[10px]">
+              <Badge variant={state.subscribed ? "default" : "outline"} className="text-micro">
                 {state.subscribed ? "Subscribed" : state.permission === "denied" ? "Blocked" : "Not subscribed"}
               </Badge>
             </div>
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-caption text-muted-foreground">
               {state.supported
                 ? `${state.subscriptionCount} saved browser subscription${state.subscriptionCount === 1 ? "" : "s"}`
                 : "Requires HTTPS or localhost, Service Worker, Notification API, and PushManager"}
@@ -1623,7 +1636,7 @@ function PushBrowserControls({ hasPushChannel }: { hasPushChannel: boolean }) {
           </div>
         </div>
         {error && (
-          <div className="rounded-md border border-destructive/25 bg-destructive/10 px-2 py-1.5 text-[10px] leading-relaxed text-destructive">
+          <div className="rounded-md border border-destructive/25 bg-destructive/10 px-2 py-1.5 text-micro leading-relaxed text-destructive">
             {error}
           </div>
         )}
@@ -1644,14 +1657,19 @@ function ChannelsTab({ settings, onUpdateConfig }: {
   settings: PolpoSettings;
   onUpdateConfig: (action: ChannelApiAction) => Promise<void>;
 }) {
+  const product = productName(useInstanceBranding());
   const channels = objectOrEmpty<NotificationChannelConfig>(
     objectOrEmpty(settings.notifications).channels,
   );
 
-  // Dialog state
-  const [editOpen, setEditOpen] = useState(false);
-  const [editName, setEditName] = useState("");
-  const [editConfig, setEditConfig] = useState<NotificationChannelConfig>(defaultChannelConfig("telegram"));
+  // Dialog state (a link from an assistant, ?channel=<name>, opens that channel's form)
+  const [linked] = useState(() => {
+    const name = readSetupParams().channel;
+    return name && channels[name] ? name : undefined;
+  });
+  const [editOpen, setEditOpen] = useState(!!linked);
+  const [editName, setEditName] = useState(linked ?? "");
+  const [editConfig, setEditConfig] = useState<NotificationChannelConfig>(() => (linked ? { ...channels[linked] } : defaultChannelConfig("telegram")));
   const [isNew, setIsNew] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -1693,6 +1711,7 @@ function ChannelsTab({ settings, onUpdateConfig }: {
     try {
       await onUpdateConfig({ path: `/${encodeURIComponent(name)}`, method: "PUT", body: editConfig });
       setEditOpen(false);
+      notifySetupSaved();
     } catch (e) {
       setSaveError((e as Error).message);
     } finally {
@@ -1716,7 +1735,7 @@ function ChannelsTab({ settings, onUpdateConfig }: {
     setTesting(name);
     setTestResults((prev) => ({ ...prev, [name]: null }));
     try {
-      const res = await fetch(`${appConfig.baseUrl}/api/v1/config/channels/${encodeURIComponent(name)}/test`, { method: "POST" });
+      const res = await apiFetch(`${appConfig.baseUrl}/api/v1/config/channels/${encodeURIComponent(name)}/test`, { method: "POST" });
       const data = await res.json();
       setTestResults((prev) => ({
         ...prev,
@@ -1745,7 +1764,7 @@ function ChannelsTab({ settings, onUpdateConfig }: {
             </div>
             <div className="min-w-0">
               <p className="text-xs font-semibold">Notifications</p>
-              <p className="mt-0.5 text-[10.5px] leading-relaxed text-muted-foreground">
+              <p className="mt-0.5 text-caption leading-relaxed text-muted-foreground">
                 Outbound alerts generated by rules, tasks, approvals, and lifecycle events.
               </p>
             </div>
@@ -1756,8 +1775,8 @@ function ChannelsTab({ settings, onUpdateConfig }: {
             </div>
             <div className="min-w-0">
               <p className="text-xs font-semibold">Inbound gateway</p>
-              <p className="mt-0.5 text-[10.5px] leading-relaxed text-muted-foreground">
-                Optional chat entrypoint where Telegram or WhatsApp messages become Polpo sessions.
+              <p className="mt-0.5 text-caption leading-relaxed text-muted-foreground">
+                Optional chat entrypoint where Telegram or WhatsApp messages become {product} sessions.
               </p>
             </div>
           </div>
@@ -1767,7 +1786,7 @@ function ChannelsTab({ settings, onUpdateConfig }: {
             </div>
             <div className="min-w-0">
               <p className="text-xs font-semibold">Agent tools</p>
-              <p className="mt-0.5 text-[10.5px] leading-relaxed text-muted-foreground">
+              <p className="mt-0.5 text-caption leading-relaxed text-muted-foreground">
                 Separate capabilities an agent may use to read or send through a service.
               </p>
             </div>
@@ -1777,13 +1796,11 @@ function ChannelsTab({ settings, onUpdateConfig }: {
 
       <section>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-            <Monitor className="h-3.5 w-3.5" /> PWA Push
-          </h3>
+          <SectionHeader icon={Monitor} title="PWA Push" className="mb-0" />
         </div>
         <PushBrowserControls hasPushChannel={hasPushChannel} />
         {!hasPushChannel && (
-          <p className="mt-2 text-[11px] text-muted-foreground">
+          <p className="mt-2 text-caption text-muted-foreground">
             Add a Push channel first, then enable notifications for this browser.
           </p>
         )}
@@ -1792,9 +1809,7 @@ function ChannelsTab({ settings, onUpdateConfig }: {
       {/* Configured channels */}
       <section>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-            <Bell className="h-3.5 w-3.5" /> Channels
-          </h3>
+          <SectionHeader icon={Bell} title="Channels" className="mb-0" />
           <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => setTypePickerOpen(true)}>
             <Plus className="h-3 w-3" /> Add channel
           </Button>
@@ -1824,9 +1839,7 @@ function ChannelsTab({ settings, onUpdateConfig }: {
       {/* Unconfigured types — quick add */}
       {unconfiguredTypes.length > 0 && (
         <section>
-          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
-            <Zap className="h-3.5 w-3.5" /> Quick Add
-          </h3>
+          <SectionHeader icon={Zap} title="Quick Add" className="mb-2" />
           <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2">
             {unconfiguredTypes.map((type) => {
               const meta = CHANNEL_META[type];
@@ -1840,7 +1853,7 @@ function ChannelsTab({ settings, onUpdateConfig }: {
                   <ChannelLogo type={type} size={16} />
                   <div>
                     <span className="text-xs text-muted-foreground/70">{meta.label}</span>
-                    <p className="text-[10px] text-muted-foreground/40">Click to add</p>
+                    <p className="text-micro text-muted-foreground/40">Click to add</p>
                   </div>
                 </button>
               );
@@ -1866,14 +1879,14 @@ function ChannelsTab({ settings, onUpdateConfig }: {
                   onClick={() => openAdd(type)}
                   className="w-full flex items-center gap-4 p-3 rounded-lg border border-border hover:border-primary/30 hover:bg-accent/50 text-left transition-all cursor-pointer"
                 >
-                  <div className={cn("h-10 w-10 rounded-lg flex items-center justify-center shrink-0 bg-muted/40", meta.color.replace("border-l-", "ring-1 ring-").replace("500", "500/30"))}>
+                  <div className={cn("h-10 w-10 rounded-lg flex items-center justify-center shrink-0 bg-muted/40 ring-1", HUE_STYLES[meta.hue]?.iconRing)}>
                     <ChannelLogo type={type} size={22} />
                   </div>
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-medium">{meta.label}</p>
                       {channelSupportsInbound(type) && (
-                        <Badge variant="secondary" className="text-[9px] h-4 px-1.5">Inbound capable</Badge>
+                        <Badge variant="secondary" className="text-micro h-4 px-1.5">Inbound capable</Badge>
                       )}
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">{meta.description}</p>
@@ -1983,7 +1996,7 @@ function SettingRow({ icon: Icon, label, description, value, placeholder, onClic
         <div className="flex-1 min-w-0">
           <span className="text-xs font-medium text-foreground">{label}</span>
           {description && (
-            <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight">{description}</p>
+            <p className="text-micro text-muted-foreground mt-0.5 leading-tight">{description}</p>
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -2001,7 +2014,7 @@ function SettingRow({ icon: Icon, label, description, value, placeholder, onClic
             type="button"
             onClick={(e) => { e.stopPropagation(); onClear(); }}
             disabled={saving}
-            className="flex items-center gap-1 text-[10px] text-muted-foreground/60 hover:text-destructive transition-colors cursor-pointer"
+            className="flex items-center gap-1 text-micro text-muted-foreground/60 hover:text-destructive transition-colors cursor-pointer"
           >
             <X className="h-2.5 w-2.5" /> Clear
           </button>
@@ -2011,90 +2024,80 @@ function SettingRow({ icon: Icon, label, description, value, placeholder, onClic
   );
 }
 
-function AppearanceTab({ branding, onUpdateBranding, onUploadLogo, onRemoveLogo }: {
+function LogoPicker({ label, hint, value, busy, onChange, onUpload, onRemove, uploadedUrl }: {
+  label: string;
+  hint: string;
+  value: string;
+  busy: boolean;
+  onChange: (value: string) => void;
+  onUpload: (file: File) => Promise<void>;
+  onRemove?: () => void;
+  uploadedUrl: string;
+}) {
+  return (
+    <label className="grid gap-1.5 sm:col-span-2">
+      <span className="text-xs font-medium">{label}</span>
+      <div className="flex min-w-0 gap-2">
+        <Input value={value} onChange={(event) => onChange(event.target.value)} placeholder="https://example.com/logo.png" className="min-w-0" />
+        <Button
+          variant="outline"
+          disabled={busy}
+          onClick={() => {
+            const input = document.createElement("input");
+            input.type = "file";
+            input.accept = "image/png,image/jpeg,image/webp,image/gif";
+            input.onchange = () => {
+              const file = input.files?.[0];
+              if (!file) return;
+              void onUpload(file).then(() => onChange(uploadedUrl)).catch((error) => toast.error(error instanceof Error ? error.message : "Logo upload failed"));
+            };
+            input.click();
+          }}
+        >
+          <Upload className="h-3.5 w-3.5" /> Upload
+        </Button>
+        {onRemove && (
+          <Button variant="ghost" disabled={busy} onClick={onRemove} title={`Remove the ${label.toLowerCase()}`}>
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        )}
+      </div>
+      <span className="text-micro text-muted-foreground">{hint}</span>
+    </label>
+  );
+}
+
+function AppearanceTab({ branding, onUpdateBranding, onUploadLogo, onRemoveLogo, onSaveInstanceAppearance }: {
   branding?: BrandingConfig;
   onUpdateBranding: (branding: BrandingConfig) => Promise<void>;
-  onUploadLogo: (file: File) => Promise<void>;
-  onRemoveLogo: () => Promise<void>;
+  onUploadLogo: (file: File, variant: "light" | "dark") => Promise<void>;
+  onRemoveLogo: (variant: "light" | "dark") => Promise<void>;
+  onSaveInstanceAppearance: (appearance: InstanceAppearance | null) => Promise<void>;
 }) {
-  const { palette, setPalette } = usePalette();
-  const { appearance, setAppearance, resetAppearance } = useAppearance();
   const [productName, setProductName] = useState(branding?.productName ?? "");
   const [tagline, setTagline] = useState(branding?.tagline ?? "");
   const [logoUrl, setLogoUrl] = useState(branding?.logoUrl ?? "");
+  const [logoDarkUrl, setLogoDarkUrl] = useState(branding?.logoDarkUrl ?? "");
+  const [logoBoxed, setLogoBoxed] = useState(branding?.logoFrame !== "none");
   const [brandingBusy, setBrandingBusy] = useState(false);
-  const [mode, setMode] = useState<"light" | "dark">("light");
-  const activeTheme = appearance[mode];
-  const [primaryDraft, setPrimaryDraft] = useState(activeTheme.primary);
-  const [secondaryDraft, setSecondaryDraft] = useState(activeTheme.secondary);
-  const [textDraft, setTextDraft] = useState(activeTheme.text);
-  const [fontDraft, setFontDraft] = useState(activeTheme.fontFamily);
-
-  const updateAppearance = (patch: Partial<typeof appearance> | { enabled: boolean }) => {
-    setAppearance({ ...appearance, ...patch });
+  const draft = { productName, tagline, logoUrl, logoDarkUrl, logoFrame: logoBoxed ? "box" as const : "none" as const };
+  /** Busy while it runs; errors go on to the caller. */
+  const busyRun = (work: Promise<void>) => {
+    setBrandingBusy(true);
+    return work.finally(() => setBrandingBusy(false));
   };
-
-  const updateTheme = (patch: Partial<typeof activeTheme>) => {
-    setAppearance({
-      ...appearance,
-      [mode]: {
-        ...activeTheme,
-        ...patch,
-      },
-    });
-  };
-
-  // Re-seed the drafts when the underlying theme values change (mode switch,
-  // reset, external update) — adjusted during render, not in an effect.
-  const [draftSource, setDraftSource] = useState(activeTheme);
-  if (
-    draftSource.primary !== activeTheme.primary ||
-    draftSource.secondary !== activeTheme.secondary ||
-    draftSource.text !== activeTheme.text ||
-    draftSource.fontFamily !== activeTheme.fontFamily
-  ) {
-    setDraftSource(activeTheme);
-    setPrimaryDraft(activeTheme.primary);
-    setSecondaryDraft(activeTheme.secondary);
-    setTextDraft(activeTheme.text);
-    setFontDraft(activeTheme.fontFamily);
-  }
-
-  const updateHexDraft = (
-    value: string,
-    setDraft: (value: string) => void,
-    key: "primary" | "secondary" | "text",
-  ) => {
-    setDraft(value);
-    if (/^#[0-9a-f]{6}$/i.test(value)) {
-      updateTheme({ [key]: value });
-    }
-  };
-
-  const fontPresets = [
-    { label: "Satoshi", value: "\"Satoshi\", ui-sans-serif, system-ui, sans-serif" },
-    { label: "System", value: "ui-sans-serif, system-ui, sans-serif" },
-    { label: "Inter", value: "\"Inter\", ui-sans-serif, system-ui, sans-serif" },
-    { label: "Serif", value: "ui-serif, Georgia, Cambria, \"Times New Roman\", Times, serif" },
-    { label: "Mono", value: "\"JetBrains Mono\", ui-monospace, \"Cascadia Code\", monospace" },
-  ];
-
-  const previewStyle = {
-    "--preview-primary": activeTheme.primary,
-    "--preview-secondary": activeTheme.secondary,
-    "--preview-text": activeTheme.text,
-    "--preview-radius": `${activeTheme.radius}px`,
-    "--preview-font": activeTheme.fontFamily,
-  } as CSSProperties;
+  /** Busy while it runs; an error becomes a toast. */
+  const busyWhile = (work: Promise<void>, failure: string) => busyRun(work)
+    .catch((error) => { toast.error(error instanceof Error ? error.message : failure); });
 
   return (
     <div className="space-y-6">
       <section>
         <div className="mb-2 flex items-center justify-between gap-3">
-          <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase text-muted-foreground">
+          <h3 className="flex items-center gap-1.5 text-label text-muted-foreground">
             <ImageIcon className="h-3.5 w-3.5" /> Instance branding
           </h3>
-          <span className="text-[10px] text-muted-foreground">Shared with every user</span>
+          <span className="text-micro text-muted-foreground">Shared with every user</span>
         </div>
         <div className="grid gap-3 border-y border-border/60 py-4 lg:grid-cols-[minmax(0,1fr)_17rem]">
           <div className="grid gap-3 sm:grid-cols-2">
@@ -2106,358 +2109,70 @@ function AppearanceTab({ branding, onUpdateBranding, onUploadLogo, onRemoveLogo 
               <span className="text-xs font-medium">Tagline</span>
               <Input value={tagline} maxLength={120} onChange={(event) => setTagline(event.target.value)} placeholder={DEFAULT_PRODUCT_TAGLINE} />
             </label>
-            <label className="grid gap-1.5 sm:col-span-2">
-              <span className="text-xs font-medium">Logo URL</span>
-              <div className="flex min-w-0 gap-2">
-                <Input value={logoUrl} onChange={(event) => setLogoUrl(event.target.value)} placeholder="https://example.com/logo.png" className="min-w-0" />
-                <Button
-                  variant="outline"
-                  disabled={brandingBusy}
-                  onClick={() => {
-                    const input = document.createElement("input");
-                    input.type = "file";
-                    input.accept = "image/png,image/jpeg,image/webp,image/gif";
-                    input.onchange = () => {
-                      const file = input.files?.[0];
-                      if (!file) return;
-                      setBrandingBusy(true);
-                      void onUploadLogo(file)
-                        .then(() => setLogoUrl("/api/v1/config/branding/logo"))
-                        .catch((error) => toast.error(error instanceof Error ? error.message : "Logo upload failed"))
-                        .finally(() => setBrandingBusy(false));
-                    };
-                    input.click();
-                  }}
-                >
-                  <Upload className="h-3.5 w-3.5" /> Upload
-                </Button>
+            <LogoPicker
+              label="Logo"
+              hint="Use an HTTPS URL or upload PNG, JPEG, WebP, or GIF up to 4 MB."
+              value={logoUrl}
+              busy={brandingBusy}
+              onChange={setLogoUrl}
+              uploadedUrl="/api/v1/config/branding/logo"
+              onUpload={(file) => busyRun(onUploadLogo(file, "light"))}
+              onRemove={branding?.logoUrl ? () => void busyWhile(onRemoveLogo("light").then(() => setLogoUrl("")), "Failed to remove logo") : undefined}
+            />
+            <LogoPicker
+              label="Logo for dark mode"
+              hint="Optional: shown in dark mode instead of the logo (which is used when this is empty)."
+              value={logoDarkUrl}
+              busy={brandingBusy}
+              onChange={setLogoDarkUrl}
+              uploadedUrl="/api/v1/config/branding/logo-dark"
+              onUpload={(file) => busyRun(onUploadLogo(file, "dark"))}
+              onRemove={branding?.logoDarkUrl ? () => void busyWhile(onRemoveLogo("dark").then(() => setLogoDarkUrl("")), "Failed to remove logo") : undefined}
+            />
+            <div className="flex items-center gap-3 sm:col-span-2">
+              <Switch
+                checked={logoBoxed}
+                onCheckedChange={setLogoBoxed}
+                aria-label="Show logo in a box"
+                disabled={brandingBusy}
+              />
+              <div className="min-w-0">
+                <div className="text-xs font-medium">Show logo in a box</div>
+                <div className="text-caption text-muted-foreground">Off: the logo is shown bare, at the same height, without the tile behind it.</div>
               </div>
-              <span className="text-[10px] text-muted-foreground">Use an HTTPS URL or upload PNG, JPEG, WebP, or GIF up to 4 MB.</span>
-            </label>
+            </div>
             <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
               <Button
                 disabled={brandingBusy}
-                onClick={() => {
-                  setBrandingBusy(true);
-                  void onUpdateBranding({
-                    productName: productName.trim() || undefined,
-                    tagline: tagline.trim() || undefined,
-                    logoUrl: logoUrl.trim() || undefined,
-                  }).catch((error) => toast.error(error instanceof Error ? error.message : "Failed to update branding"))
-                    .finally(() => setBrandingBusy(false));
-                }}
+                onClick={() => void busyWhile(onUpdateBranding({
+                  productName: productName.trim() || undefined,
+                  tagline: tagline.trim() || undefined,
+                  logoUrl: logoUrl.trim() || undefined,
+                  logoDarkUrl: logoDarkUrl.trim() || undefined,
+                  logoFrame: logoBoxed ? "box" : "none",
+                }), "Failed to update branding")}
               >
                 {brandingBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save branding
               </Button>
-              {branding?.logoUrl && (
-                <Button
-                  variant="ghost"
-                  disabled={brandingBusy}
-                  onClick={() => {
-                    setBrandingBusy(true);
-                    void onRemoveLogo().then(() => setLogoUrl(""))
-                      .catch((error) => toast.error(error instanceof Error ? error.message : "Failed to remove logo"))
-                      .finally(() => setBrandingBusy(false));
-                  }}
-                >
-                  <Trash2 className="h-3.5 w-3.5" /> Remove logo
-                </Button>
-              )}
             </div>
           </div>
-          <div className="flex min-h-36 items-center justify-center border border-border/50 bg-muted/15 p-5">
-            <div className="flex min-w-0 items-center gap-3">
-              <BrandMark branding={{ productName, tagline, logoUrl }} className="h-12 w-12 rounded-lg text-xl" />
-              <div className="min-w-0">
-                <div className="max-w-40 truncate text-sm font-bold">{productName.trim() || DEFAULT_PRODUCT_NAME}</div>
-                <div className="max-w-40 truncate text-[10px] uppercase text-muted-foreground">{tagline.trim() || DEFAULT_PRODUCT_TAGLINE}</div>
+          <div className="grid gap-2">
+            {(["light", "dark"] as const).map((variant) => (
+              <div key={variant} className={cn("flex min-h-24 items-center justify-center border border-border/50 p-4", variant === "dark" ? "bg-neutral-950 text-neutral-100" : "bg-white text-neutral-900")}>
+                <div className="flex min-w-0 items-center gap-3">
+                  <BrandMark branding={draft} variant={variant} className="h-10 w-10 rounded-lg text-xl" />
+                  <div className="min-w-0">
+                    <div className="max-w-36 truncate text-sm font-bold">{productName.trim() || DEFAULT_PRODUCT_NAME}</div>
+                    <div className="max-w-36 truncate text-micro uppercase opacity-60">{tagline.trim() || DEFAULT_PRODUCT_TAGLINE} · {variant}</div>
+                  </div>
+                </div>
               </div>
-            </div>
+            ))}
           </div>
         </div>
       </section>
 
-      <section>
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
-          <PaletteIcon className="h-3.5 w-3.5" /> Palette
-        </h3>
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-          {PALETTES.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              onClick={() => setPalette(option.id)}
-              className={cn(
-                "rounded-lg border p-3 text-left transition-colors",
-                palette === option.id
-                  ? "border-primary/60 bg-primary/5"
-                  : "border-border/40 bg-card/60 hover:border-border/70 hover:bg-accent/25",
-              )}
-            >
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <span className="text-sm font-semibold">{option.name}</span>
-                {palette === option.id && <Check className="h-3.5 w-3.5 text-primary" />}
-              </div>
-              <div className="mb-2 flex h-5 overflow-hidden rounded-md border border-border/30">
-                {option.swatchLight.map((color, index) => (
-                  <span key={index} className="flex-1" style={{ background: color }} />
-                ))}
-              </div>
-              <p className="text-[11px] leading-snug text-muted-foreground">{option.blurb}</p>
-            </button>
-          ))}
-        </div>
-        <p className="mt-2 text-[10px] text-muted-foreground">Theme, palette, and overrides are saved in this browser and scoped to this Polpo instance.</p>
-      </section>
-
-      <section>
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-            <Settings2 className="h-3.5 w-3.5" /> Overrides
-          </h3>
-          <div className="flex items-center gap-2">
-            <div className="inline-flex rounded-lg border border-border/40 bg-muted/20 p-0.5">
-              {[
-                { label: "No", value: false },
-                { label: "Yes", value: true },
-              ].map((option) => (
-                <button
-                  key={option.label}
-                  type="button"
-                  onClick={() => updateAppearance({ enabled: option.value })}
-                  className={cn(
-                    "h-7 rounded-md px-3 text-xs font-medium transition-colors",
-                    appearance.enabled === option.value
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={resetAppearance}>
-              Reset
-            </Button>
-          </div>
-        </div>
-        <div className={cn(
-          "grid gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]",
-          !appearance.enabled && "opacity-60",
-        )}>
-          <div className="space-y-3">
-            <div className="rounded-lg border border-border/40 bg-card/60 p-3">
-              <label className="mb-2 block text-xs font-medium">Theme target</label>
-              <div className="inline-flex rounded-lg border border-border/40 bg-muted/20 p-0.5">
-                {[
-                  { label: "Light", value: "light" as const },
-                  { label: "Dark", value: "dark" as const },
-                ].map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => setMode(option.value)}
-                    className={cn(
-                      "h-7 rounded-md px-3 text-xs font-medium transition-colors",
-                      mode === option.value
-                        ? "bg-background text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-border/40 bg-card/60 p-3">
-              <label className="mb-2 flex items-center justify-between gap-3 text-xs font-medium">
-                Primary
-                <code className="text-[11px] text-muted-foreground">{activeTheme.primary}</code>
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="color"
-                  value={activeTheme.primary}
-                  onChange={(event) => {
-                    setPrimaryDraft(event.target.value);
-                    updateTheme({ primary: event.target.value });
-                  }}
-                  disabled={!appearance.enabled}
-                  className="h-9 w-12 shrink-0 cursor-pointer rounded-md border border-border bg-transparent p-1"
-                />
-                <Input
-                  value={primaryDraft}
-                  onChange={(event) => updateHexDraft(event.target.value, setPrimaryDraft, "primary")}
-                  disabled={!appearance.enabled}
-                  className="h-9 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-border/40 bg-card/60 p-3">
-              <label className="mb-2 flex items-center justify-between gap-3 text-xs font-medium">
-                Secondary
-                <code className="text-[11px] text-muted-foreground">{activeTheme.secondary}</code>
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="color"
-                  value={activeTheme.secondary}
-                  onChange={(event) => {
-                    setSecondaryDraft(event.target.value);
-                    updateTheme({ secondary: event.target.value });
-                  }}
-                  disabled={!appearance.enabled}
-                  className="h-9 w-12 shrink-0 cursor-pointer rounded-md border border-border bg-transparent p-1"
-                />
-                <Input
-                  value={secondaryDraft}
-                  onChange={(event) => updateHexDraft(event.target.value, setSecondaryDraft, "secondary")}
-                  disabled={!appearance.enabled}
-                  className="h-9 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-border/40 bg-card/60 p-3">
-              <label className="mb-2 flex items-center justify-between gap-3 text-xs font-medium">
-                Text
-                <code className="text-[11px] text-muted-foreground">{activeTheme.text}</code>
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="color"
-                  value={activeTheme.text}
-                  onChange={(event) => {
-                    setTextDraft(event.target.value);
-                    updateTheme({ text: event.target.value });
-                  }}
-                  disabled={!appearance.enabled}
-                  className="h-9 w-12 shrink-0 cursor-pointer rounded-md border border-border bg-transparent p-1"
-                />
-                <Input
-                  value={textDraft}
-                  onChange={(event) => updateHexDraft(event.target.value, setTextDraft, "text")}
-                  disabled={!appearance.enabled}
-                  className="h-9 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-border/40 bg-card/60 p-3">
-              <label className="mb-2 flex items-center justify-between gap-3 text-xs font-medium">
-                Font
-                <span className="text-[11px] text-muted-foreground">any CSS font stack</span>
-              </label>
-              <div className="grid gap-2 sm:grid-cols-[12rem_minmax(0,1fr)]">
-                <Select
-                  value={fontPresets.some((font) => font.value === activeTheme.fontFamily) ? activeTheme.fontFamily : "custom"}
-                  onValueChange={(value) => {
-                    if (value === "custom") return;
-                    setFontDraft(value);
-                    updateTheme({ fontFamily: value });
-                  }}
-                  disabled={!appearance.enabled}
-                >
-                  <SelectTrigger className="h-9 text-xs">
-                    <SelectValue placeholder="Preset" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {fontPresets.map((font) => (
-                      <SelectItem key={font.label} value={font.value}>
-                        {font.label}
-                      </SelectItem>
-                    ))}
-                    <SelectItem value="custom">Custom</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Input
-                  value={fontDraft}
-                  onChange={(event) => {
-                    setFontDraft(event.target.value);
-                    updateTheme({ fontFamily: event.target.value });
-                  }}
-                  disabled={!appearance.enabled}
-                  className="h-9 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-border/40 bg-card/60 p-3">
-              <label className="mb-2 flex items-center justify-between gap-3 text-xs font-medium">
-                Rounded
-                <code className="text-[11px] text-muted-foreground">{activeTheme.radius}px</code>
-              </label>
-              <input
-                type="range"
-                min={0}
-                max={24}
-                step={1}
-                value={activeTheme.radius}
-                onChange={(event) => updateTheme({ radius: Number(event.target.value) })}
-                disabled={!appearance.enabled}
-                className="w-full accent-primary"
-              />
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-border/40 bg-card/60 p-4" style={previewStyle}>
-            <div className="mb-3 flex items-center justify-between">
-              <span className="text-xs font-semibold">Preview</span>
-              <Badge variant="outline" className="text-[10px]">{mode}</Badge>
-            </div>
-            <div
-              className="space-y-3 rounded-[var(--preview-radius)] border p-3"
-              style={{
-                borderColor: "color-mix(in srgb, var(--preview-primary) 28%, transparent)",
-                color: "var(--preview-text)",
-                fontFamily: "var(--preview-font)",
-              }}
-            >
-              <button
-                type="button"
-                className="h-9 w-full rounded-[var(--preview-radius)] px-3 text-sm font-medium"
-                style={{
-                  background: "var(--preview-primary)",
-                  color: "#fff",
-                }}
-              >
-                Primary action
-              </button>
-              <div
-                className="rounded-[var(--preview-radius)] p-3 text-xs"
-                style={{
-                  background: "var(--preview-secondary)",
-                  color: "var(--preview-text)",
-                }}
-              >
-                Secondary surface
-              </div>
-              <p className="text-sm" style={{ color: "var(--preview-text)" }}>
-                Text color and font preview
-              </p>
-              <div className="flex gap-2">
-                <span
-                  className="inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
-                  style={{ background: "var(--preview-primary)", color: "#fff" }}
-                >
-                  Badge
-                </span>
-                <span
-                  className="inline-flex rounded-full border px-2 py-0.5 text-xs font-medium"
-                  style={{
-                    borderColor: "var(--preview-primary)",
-                    color: "var(--preview-text)",
-                  }}
-                >
-                  Secondary
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
+      <AppearanceEditor onSaveInstanceDefault={onSaveInstanceAppearance} />
     </div>
   );
 }
@@ -2467,6 +2182,7 @@ interface InstanceMember {
 }
 
 function MembersTab() {
+  const product = productName(useInstanceBranding());
   const [members, setMembers] = useState<InstanceMember[]>([]);
   const [enabled, setEnabled] = useState(false);
   const [email, setEmail] = useState("");
@@ -2536,11 +2252,9 @@ function MembersTab() {
   return (
     <div className="space-y-4 max-w-2xl">
       <section>
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
-          <Users className="h-3.5 w-3.5" /> Tenant Members
-        </h3>
+        <SectionHeader icon={Users} title="Tenant Members" className="mb-1.5" />
         <p className="text-xs text-muted-foreground">
-          These emails can request a magic link and access this Polpo instance.
+          These emails can request a magic link and access this {product} instance.
         </p>
       </section>
 
@@ -2558,7 +2272,7 @@ function MembersTab() {
         </Card>
       )}
 
-      <Card className="bg-card/80 border-border/40 py-0 gap-0">
+      <Card className="py-0 gap-0">
         <CardContent className="py-3 px-4 space-y-3">
           <div className="flex flex-col sm:flex-row gap-2">
             <div className="relative flex-1">
@@ -2636,10 +2350,35 @@ function AgentTab({ settings, primaryModel, fallbackModels, authStatus, onUpdate
   primaryModel: string | undefined;
   fallbackModels: string[];
   authStatus: AuthStatusResponse | null | undefined;
-  onUpdateSettings: (patch: { orchestratorModel?: string; imageModel?: string | null; reasoning?: ReasoningLevel }) => Promise<void>;
+  onUpdateSettings: (patch: { orchestratorModel?: string; orchestratorName?: string | null; imageModel?: string | null; reasoning?: ReasoningLevel }) => Promise<void>;
 }) {
   const { skills, isLoading: skillsLoading } = useOrchestratorSkills();
   const [reasoningSaving, setReasoningSaving] = useState(false);
+
+  // The orchestrator's display name (default "Polpo"), saved on blur / Enter; empty restores the default
+  const savedName = (settings as { orchestratorName?: string }).orchestratorName ?? "";
+  const [nameDraft, setNameDraft] = useState(savedName);
+  const [nameSaving, setNameSaving] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
+  useEffect(() => { setNameDraft(savedName); }, [savedName]);
+  const saveName = async () => {
+    const next = nameDraft.trim();
+    if (next === savedName) { setNameDraft(next); setNameError(null); return; }
+    if (next.length > ORCHESTRATOR_NAME_MAX_LENGTH) {
+      setNameError(`At most ${ORCHESTRATOR_NAME_MAX_LENGTH} characters`);
+      return;
+    }
+    setNameSaving(true);
+    setNameError(null);
+    try {
+      await onUpdateSettings({ orchestratorName: next || null });
+      setOrchestratorName(next);
+    } catch (err) {
+      setNameError(err instanceof Error ? err.message : "Could not save the name");
+    } finally {
+      setNameSaving(false);
+    }
+  };
 
   // Model picker dialogs
   const [orchestratorPickerOpen, setOrchestratorPickerOpen] = useState(false);
@@ -2701,14 +2440,14 @@ function AgentTab({ settings, primaryModel, fallbackModels, authStatus, onUpdate
   const orchestratorDisplay = primaryModel ? (
     <span className="flex items-center gap-1.5">
       <span>{parseModelSpec(primaryModel).model}</span>
-      <Badge variant="outline" className="text-[9px] h-4 font-normal">{providerLabel(parseModelSpec(primaryModel).provider)}</Badge>
+      <Badge variant="outline" className="text-micro h-4 font-normal">{providerLabel(parseModelSpec(primaryModel).provider)}</Badge>
     </span>
   ) : undefined;
 
   const imageDisplay = settings.imageModel ? (
     <span className="flex items-center gap-1.5">
       <span>{parseModelSpec(settings.imageModel).model}</span>
-      <Badge variant="outline" className="text-[9px] h-4 font-normal">{providerLabel(parseModelSpec(settings.imageModel).provider)}</Badge>
+      <Badge variant="outline" className="text-micro h-4 font-normal">{providerLabel(parseModelSpec(settings.imageModel).provider)}</Badge>
     </span>
   ) : undefined;
 
@@ -2716,10 +2455,41 @@ function AgentTab({ settings, primaryModel, fallbackModels, authStatus, onUpdate
     <div className="space-y-6">
       {/* ── Models & Reasoning ── */}
       <section>
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-1.5">
-          <Settings2 className="h-3.5 w-3.5" /> Orchestrator Settings
-        </h3>
+        <SectionHeader icon={Settings2} title="Orchestrator Settings" className="mb-3" />
         <div className="space-y-2 max-w-xl">
+          {/* Name: how the orchestrator is called in chats, groups, channels and its own prompt */}
+          <div className="rounded-lg border border-border/40 bg-card/60 px-4 py-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted/40 shrink-0">
+                {nameSaving
+                  ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                  : <Pencil className="h-4 w-4 text-muted-foreground" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <label htmlFor="orchestrator-name" className="text-xs font-medium text-foreground">Name</label>
+                <p className="text-micro text-muted-foreground mt-0.5 leading-tight">
+                  What people call the orchestrator in chats, groups and channels
+                </p>
+              </div>
+              <Input
+                id="orchestrator-name"
+                aria-label="Orchestrator name"
+                className="h-8 w-40 text-xs"
+                placeholder="Polpo"
+                maxLength={ORCHESTRATOR_NAME_MAX_LENGTH}
+                value={nameDraft}
+                disabled={nameSaving}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onBlur={() => { void saveName(); }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); void saveName(); }
+                  if (e.key === "Escape") { setNameDraft(savedName); setNameError(null); }
+                }}
+              />
+            </div>
+            {nameError && <p className="text-micro text-destructive mt-1.5 ml-11">{nameError}</p>}
+          </div>
+
           {/* Orchestrator Model */}
           <SettingRow
             icon={Brain}
@@ -2734,9 +2504,9 @@ function AgentTab({ settings, primaryModel, fallbackModels, authStatus, onUpdate
           {/* Fallbacks */}
           {fallbackModels.length > 0 && (
             <div className="ml-11 flex flex-wrap gap-1 py-1">
-              <span className="text-[10px] text-muted-foreground mr-1">Fallbacks:</span>
+              <span className="text-micro text-muted-foreground mr-1">Fallbacks:</span>
               {fallbackModels.map((fb) => (
-                <Badge key={fb} variant="outline" className="text-[10px] font-mono">{fb}</Badge>
+                <Badge key={fb} variant="outline" className="text-micro font-mono">{fb}</Badge>
               ))}
             </div>
           )}
@@ -2763,7 +2533,7 @@ function AgentTab({ settings, primaryModel, fallbackModels, authStatus, onUpdate
               </div>
               <div className="flex-1 min-w-0">
                 <span className="text-xs font-medium text-foreground">Reasoning Level</span>
-                <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight">
+                <p className="text-micro text-muted-foreground mt-0.5 leading-tight">
                   {REASONING_LEVELS.find((l) => l.value === (settings.reasoning ?? "off"))?.description}
                 </p>
               </div>
@@ -2780,7 +2550,7 @@ function AgentTab({ settings, primaryModel, fallbackModels, authStatus, onUpdate
                     <SelectItem key={level.value} value={level.value} className="text-xs">
                       <span className={cn(
                         "font-medium",
-                        level.value !== "off" ? "text-emerald-500" : "text-muted-foreground",
+                        level.value !== "off" ? "text-success" : "text-muted-foreground",
                       )}>
                         {level.label}
                       </span>
@@ -2795,9 +2565,7 @@ function AgentTab({ settings, primaryModel, fallbackModels, authStatus, onUpdate
 
       {/* ── Orchestrator Skills ── */}
       <section>
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-1.5">
-          <Bookmark className="h-3.5 w-3.5" /> Skills
-        </h3>
+        <SectionHeader icon={Bookmark} title="Skills" className="mb-3" />
         {skillsLoading ? (
           <div className="flex items-center gap-2 py-3">
             <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
@@ -2813,16 +2581,16 @@ function AgentTab({ settings, primaryModel, fallbackModels, authStatus, onUpdate
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-medium">{skill.name}</span>
-                    <Badge variant="outline" className="text-[9px] h-4">{skill.source}</Badge>
+                    <Badge variant="outline" className="text-micro h-4">{skill.source}</Badge>
                   </div>
                   {skill.description && (
-                    <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2 leading-tight">{skill.description}</p>
+                    <p className="text-micro text-muted-foreground mt-0.5 line-clamp-2 leading-tight">{skill.description}</p>
                   )}
                 </div>
               </div>
             ))}
             {settings.orchestratorSkills && settings.orchestratorSkills.length > 0 && (
-              <p className="text-[10px] text-muted-foreground mt-1 ml-11">
+              <p className="text-micro text-muted-foreground mt-1 ml-11">
                 Filter: <code className="font-mono text-primary">{settings.orchestratorSkills.join(", ")}</code>
               </p>
             )}
@@ -2830,7 +2598,7 @@ function AgentTab({ settings, primaryModel, fallbackModels, authStatus, onUpdate
         ) : (
           <Empty text="No orchestrator skills installed" />
         )}
-        <p className="text-[10px] text-muted-foreground mt-2">
+        <p className="text-micro text-muted-foreground mt-2">
           Skill pool: <code className="font-mono text-primary">.polpo/.agent/skills/</code>
         </p>
       </section>
@@ -2922,8 +2690,12 @@ function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsag
   const [authProvidersLoaded, setAuthProvidersLoaded] = useState(false);
 
   // ── "Connect specific provider" dialog (direct flow) ──
-  const [connectTarget, setConnectTarget] = useState<string | null>(null);
-  const [connectMode, setConnectMode] = useState<"choose" | "oauth" | "apikey">("choose");
+  // a link from an assistant (?section=providers&provider=openai&focus=apiKey) opens that provider's key form
+  const [connectTarget, setConnectTarget] = useState<string | null>(() => {
+    const p = readSetupParams();
+    return p.section === "providers" && p.provider && p.focus === "apiKey" ? p.provider : null;
+  });
+  const [connectMode, setConnectMode] = useState<"choose" | "oauth" | "apikey">(() => (connectTarget ? "apikey" : "choose"));
   const [oauthProviders, setOauthProviders] = useState<OAuthProvider[]>([]);
 
   // ── Disconnect ──
@@ -2999,6 +2771,7 @@ function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsag
     });
     if (result.ok) {
       await refreshProviderList();
+      notifySetupSaved();
       return true;
     }
     return false;
@@ -3025,9 +2798,7 @@ function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsag
       {/* ── Provider Cards ── */}
       <section>
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-            <Key className="h-3.5 w-3.5" /> Providers
-          </h3>
+          <SectionHeader icon={Key} title="Providers" className="mb-0" />
           <Button
             variant="outline"
             size="sm"
@@ -3076,16 +2847,14 @@ function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsag
       {/* ── Model Allowlist ── */}
       {settings.modelAllowlist && Object.keys(settings.modelAllowlist).length > 0 && (
         <section>
-          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
-            <Shield className="h-3.5 w-3.5" /> Model Allowlist
-          </h3>
+          <SectionHeader icon={Shield} title="Model Allowlist" className="mb-2" />
           <div className="space-y-1.5 max-w-lg">
             {Object.entries(settings.modelAllowlist).map(([model, opts]) => (
               <div key={model} className="flex items-center gap-2 rounded-md bg-muted/20 px-2.5 py-1.5 min-w-0">
-                <code className="text-[11px] font-mono truncate flex-1">{model}</code>
-                {opts.alias && <Badge variant="outline" className="text-[10px] shrink-0">{opts.alias}</Badge>}
+                <code className="text-caption font-mono truncate flex-1">{model}</code>
+                {opts.alias && <Badge variant="outline" className="text-micro shrink-0">{opts.alias}</Badge>}
                 {opts.params && Object.entries(opts.params).map(([k, v]) => (
-                  <Badge key={k} variant="secondary" className="text-[10px] shrink-0">{k}: {String(v)}</Badge>
+                  <Badge key={k} variant="secondary" className="text-micro shrink-0">{k}: {String(v)}</Badge>
                 ))}
               </div>
             ))}
@@ -3188,8 +2957,8 @@ function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsag
           <div className="px-6 py-5">
             <Tabs value={addTab} onValueChange={(v) => setAddTab(v as "builtin" | "custom")}>
               <TabsList className="mb-3">
-                <TabsTrigger value="builtin" className="text-xs">Built-in</TabsTrigger>
-                <TabsTrigger value="custom" className="text-xs">Custom endpoint / gateway</TabsTrigger>
+                <TabsTrigger value="builtin" className="text-small">Built-in</TabsTrigger>
+                <TabsTrigger value="custom" className="text-small">Custom endpoint / gateway</TabsTrigger>
               </TabsList>
               <TabsContent value="builtin">
                 {authProviders.length > 0 ? (
@@ -3243,9 +3012,11 @@ export function ConfigPage() {
   const { agents } = useAgents();
   const { authStatus, refetch: refetchAuth } = useAuthStatus();
   const [activeSection, setActiveSection] = useState<SectionId>(() => {
-    const requested = new URLSearchParams(window.location.search).get("section");
+    const requested = readSetupParams().section;
     return baseSections.find((section) => section.id === requested)?.id ?? "general";
   });
+  // a link from an assistant (setup_url): scroll to the field to fill and focus it
+  useEffect(() => focusSetupField(readSetupParams()), [activeSection]);
 
   // ── Rule dialog state ──
   const [ruleDialogOpen, setRuleDialogOpen] = useState(false);
@@ -3421,7 +3192,7 @@ export function ConfigPage() {
               className={cn(
                 "flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer",
                 activeSection === id
-                  ? "bg-accent text-accent-foreground shadow-sm"
+                  ? "bg-accent text-accent-foreground shadow-card"
                   : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
               )}
             >
@@ -3443,9 +3214,7 @@ export function ConfigPage() {
           <div className="space-y-6">
             {/* ── Project ── */}
             <section>
-              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
-                <Hash className="h-3.5 w-3.5" /> Project
-              </h3>
+              <SectionHeader icon={Hash} title="Project" className="mb-1.5" />
               <div className="max-w-md">
                 <Row label="Name" value={config.project} mono />
               </div>
@@ -3453,24 +3222,20 @@ export function ConfigPage() {
 
             {/* ── Runtime ── */}
             <section>
-              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
-                <Settings2 className="h-3.5 w-3.5" /> Runtime
-              </h3>
+              <SectionHeader icon={Settings2} title="Runtime" className="mb-1.5" />
               <div className="max-w-md">
                 <Row label="Storage" value={settings.storage ?? "file"} mono />
                 <Row label="Log Level" value={settings.logLevel} mono />
                 <Row label="Work Directory" value={settings.workDir} mono />
               </div>
-              <p className="text-[10px] text-muted-foreground mt-2">
+              <p className="text-micro text-muted-foreground mt-2">
                 Source: <code className="font-mono text-primary">.polpo/polpo.json</code>
               </p>
             </section>
 
             {/* ── Execution ── */}
             <section>
-              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
-                <Activity className="h-3.5 w-3.5" /> Execution
-              </h3>
+              <SectionHeader icon={Activity} title="Execution" className="mb-1.5" />
               <div className="max-w-md">
                 <Row label="Max Retries" value={settings.maxRetries} />
                 <Row label="Max Concurrency" value={settings.maxConcurrency ?? "unlimited"} />
@@ -3484,9 +3249,7 @@ export function ConfigPage() {
 
             {/* ── Quality ── */}
             <section>
-              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
-                <Gauge className="h-3.5 w-3.5" /> Quality
-              </h3>
+              <SectionHeader icon={Gauge} title="Quality" className="mb-1.5" />
               <div className="max-w-md">
                 <Row label="Quality Threshold" value={settings.defaultQualityThreshold != null ? `${settings.defaultQualityThreshold}/5` : "none"} />
                 <Row label="Auto-correct" value={settings.autoCorrectExpectations !== false ? "Yes" : "No"} />
@@ -3496,9 +3259,7 @@ export function ConfigPage() {
 
             {/* ── Features ── */}
             <section>
-              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
-                <ToggleRight className="h-3.5 w-3.5" /> Features
-              </h3>
+              <SectionHeader icon={ToggleRight} title="Features" className="mb-1.5" />
               <div className="max-w-md">
                 <div className="flex items-center justify-between py-1.5">
                   <span className="text-xs text-muted-foreground">Scheduler</span>
@@ -3515,9 +3276,7 @@ export function ConfigPage() {
             {/* ── Retry Policy ── */}
             {settings.defaultRetryPolicy && (
               <section>
-                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
-                  <RefreshCw className="h-3.5 w-3.5" /> Default Retry Policy
-                </h3>
+                <SectionHeader icon={RefreshCw} title="Default Retry Policy" className="mb-1.5" />
                 <div className="max-w-md">
                   {settings.defaultRetryPolicy.escalateAfter != null && <Row label="Escalate After" value={`${settings.defaultRetryPolicy.escalateAfter} failures`} />}
                   {settings.defaultRetryPolicy.fallbackAgent && <Row label="Fallback Agent" value={settings.defaultRetryPolicy.fallbackAgent} mono />}
@@ -3529,12 +3288,10 @@ export function ConfigPage() {
             {/* ── Email Domains ── */}
             {settings.emailAllowedDomains && settings.emailAllowedDomains.length > 0 && (
               <section>
-                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
-                  <Mail className="h-3.5 w-3.5" /> Email Allowed Domains
-                </h3>
+                <SectionHeader icon={Mail} title="Email Allowed Domains" className="mb-1.5" />
                 <div className="flex flex-wrap gap-1.5">
                   {settings.emailAllowedDomains.map((d) => (
-                    <Badge key={d} variant="secondary" className="text-[10px] font-mono">{d}</Badge>
+                    <Badge key={d} variant="secondary" className="text-micro font-mono">{d}</Badge>
                   ))}
                 </div>
               </section>
@@ -3544,6 +3301,10 @@ export function ConfigPage() {
 
         {/* ═══ SANDBOX ═══ */}
         {activeSection === "sandbox" && <SandboxSettingsSection onSaved={() => void refetch()} />}
+
+        {/* ═══ HARNESSES ═══ */}
+        {activeSection === "harnesses" && <HarnessesSection />}
+        {activeSection === "computers" && <ComputerWebhooksSection />}
 
         {/* ═══ MCP ACCESS ═══ */}
         {activeSection === "mcp" && <McpAccessSection />}
@@ -3562,8 +3323,8 @@ export function ConfigPage() {
               notifyBrandingChanged();
               toast.success("Branding updated");
             }}
-            onUploadLogo={async (file) => {
-              const response = await fetch(`${appConfig.baseUrl}/api/v1/config/instance-logo`, {
+            onUploadLogo={async (file, variant) => {
+              const response = await apiFetch(`${appConfig.baseUrl}/api/v1/config/instance-logo${variant === "dark" ? "?variant=dark" : ""}`, {
                 method: "POST",
                 headers: {
                   "Content-Type": file.type,
@@ -3578,12 +3339,24 @@ export function ConfigPage() {
               notifyBrandingChanged();
               toast.success("Logo uploaded");
             }}
-            onRemoveLogo={async () => {
-              const result = await api("/config/instance-logo", { method: "DELETE" });
+            onRemoveLogo={async (variant) => {
+              const result = await api(`/config/instance-logo${variant === "dark" ? "?variant=dark" : ""}`, { method: "DELETE" });
               if (!result.ok) throw new Error(result.error ?? "Failed to remove logo");
               if (result.data) setOptimistic(result.data); else await refetch();
               notifyBrandingChanged();
               toast.success("Logo removed");
+            }}
+            onSaveInstanceAppearance={async (appearance) => {
+              const result = await api("/config/settings", {
+                method: "PATCH",
+                body: JSON.stringify({ appearance }),
+              });
+              if (!result.ok) throw new Error(result.error ?? "Failed to save the instance appearance");
+              if (result.data) setOptimistic(result.data); else await refetch();
+              setInstanceAppearance((result.data?.settings?.appearance as InstanceAppearance | undefined) ?? {});
+              // this browser follows the new default (nothing of its own left over)
+              followInstanceDefault();
+              toast.success(appearance ? "Saved as the instance default: everyone sees it now" : "Instance default cleared");
             }}
           />
         )}
@@ -3647,7 +3420,7 @@ export function ConfigPage() {
         {activeSection === "rules" && (
           <>
             <div className="flex items-center justify-between mb-3">
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-caption text-muted-foreground">
                 Trigger notifications when lifecycle events match. Persisted to <code className="font-mono text-primary">.polpo/polpo.json</code>.
               </p>
               <Button
@@ -3662,10 +3435,10 @@ export function ConfigPage() {
 
             {/* Event glossary — collapsible reference grouped by category */}
             <details className="mb-3 rounded-md border border-border/30 bg-muted/10 group">
-              <summary className="cursor-pointer px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground select-none flex items-center gap-2">
+              <summary className="cursor-pointer px-3 py-2 text-label text-muted-foreground hover:text-foreground select-none flex items-center gap-2">
                 <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
                 Event glossary
-                <span className="ml-2 text-[10px] font-normal normal-case tracking-normal text-muted-foreground/70">
+                <span className="ml-2 text-micro font-normal normal-case tracking-normal text-muted-foreground/70">
                   ({HOOK_EVENT_CATALOG.length} events, {HOOK_EVENT_GLOBS.length} glob shortcuts)
                 </span>
               </summary>
@@ -3679,12 +3452,12 @@ export function ConfigPage() {
                   }
                   return [...byCategory.entries()].map(([cat, evs]) => (
                     <div key={cat}>
-                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">
+                      <p className="text-label text-muted-foreground mb-1">
                         {cat} ({evs.length})
                       </p>
                       <ul className="space-y-0.5 pl-1">
                         {evs.map(ev => (
-                          <li key={ev.name} className="text-[10.5px] leading-snug">
+                          <li key={ev.name} className="text-caption leading-snug">
                             <code className="font-mono text-foreground">{ev.name}</code>
                             <span className="text-muted-foreground"> — {ev.description}</span>
                           </li>
@@ -3694,12 +3467,12 @@ export function ConfigPage() {
                   ));
                 })()}
                 <div>
-                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">
+                  <p className="text-label text-muted-foreground mb-1">
                     Glob shortcuts ({HOOK_EVENT_GLOBS.length})
                   </p>
                   <ul className="space-y-0.5 pl-1">
                     {HOOK_EVENT_GLOBS.map(g => (
-                      <li key={g.pattern} className="text-[10.5px] leading-snug">
+                      <li key={g.pattern} className="text-caption leading-snug">
                         <code className="font-mono text-foreground">{g.pattern}</code>
                         <span className="text-muted-foreground"> — {g.description}</span>
                       </li>
@@ -3712,16 +3485,16 @@ export function ConfigPage() {
             {rules.length > 0 ? (
               <div className="space-y-2">
                 {rules.map((rule) => (
-                  <Card key={rule.id} className="bg-card/80 border-border/40 py-0 gap-0">
+                  <Card key={rule.id} className="py-0 gap-0">
                     <CardContent className="pt-3 pb-3">
-                      <p className="text-[11px] leading-relaxed text-muted-foreground mb-2.5">
+                      <p className="text-caption leading-relaxed text-muted-foreground mb-2.5">
                         {summarizeRule(rule)}
                       </p>
                       <div className="flex items-center gap-2 mb-2">
                         <Eye className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                         <span className="text-sm font-semibold">{rule.name ?? rule.id}</span>
                         {rule.severity && (
-                          <Badge variant={rule.severity === "critical" ? "destructive" : rule.severity === "warning" ? "secondary" : "outline"} className="text-[10px]">
+                          <Badge variant={rule.severity === "critical" ? "destructive" : rule.severity === "warning" ? "secondary" : "outline"} className="text-micro">
                             {rule.severity}
                           </Badge>
                         )}
@@ -3767,28 +3540,28 @@ export function ConfigPage() {
                       {/* Events → Channels flow */}
                       <div className="flex flex-wrap items-center gap-1.5 mb-2">
                         {rule.events.map((e) => (
-                          <Badge key={e} variant="secondary" className="text-[10px] font-mono">{e}</Badge>
+                          <Badge key={e} variant="secondary" className="text-micro font-mono">{e}</Badge>
                         ))}
                         <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
                         {rule.channels.map((c) => (
-                          <Badge key={c} variant="outline" className="text-[10px]">{c}</Badge>
+                          <Badge key={c} variant="outline" className="text-micro">{c}</Badge>
                         ))}
                       </div>
                       {/* Condition */}
                       {rule.condition && Object.keys(rule.condition).length > 0 && (
                         <div className="flex items-center gap-1.5 mb-2">
                           <Gauge className="h-3 w-3 text-muted-foreground shrink-0" />
-                          <span className="text-[10px] text-muted-foreground">Condition filter active</span>
+                          <span className="text-micro text-muted-foreground">Condition filter active</span>
                         </div>
                       )}
                       {rule.template && (
-                        <code className="text-[11px] text-muted-foreground block truncate bg-muted/20 rounded px-2 py-1 mb-2">{rule.template}</code>
+                        <code className="text-caption text-muted-foreground block truncate bg-muted/20 rounded px-2 py-1 mb-2">{rule.template}</code>
                       )}
                       {/* Meta row */}
                       {(rule.cooldownMs || rule.includeOutcomes || rule.actions?.length) && (
                         <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-border/20">
                           {rule.cooldownMs != null && rule.cooldownMs > 0 && (
-                            <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                            <span className="flex items-center gap-1 text-caption text-muted-foreground">
                               <Timer className="h-3 w-3" />
                               {rule.cooldownMs >= 60000 ? `${(rule.cooldownMs / 60000).toFixed(0)}min` : `${(rule.cooldownMs / 1000).toFixed(0)}s`} cooldown
                             </span>
@@ -3798,7 +3571,7 @@ export function ConfigPage() {
                               ? rule.outcomeFilter
                               : rule.outcomeFilter?.types ?? [];
                             return (
-                              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                              <span className="flex items-center gap-1 text-caption text-muted-foreground">
                                 <Paperclip className="h-3 w-3" />
                                 Outcomes{types.length ? ` (${types.join(", ")})` : ""}
                                 {rule.maxAttachmentSize ? ` max ${(rule.maxAttachmentSize / 1048576).toFixed(0)}MB` : ""}
@@ -3806,7 +3579,7 @@ export function ConfigPage() {
                             );
                           })()}
                           {rule.actions && rule.actions.length > 0 && (
-                            <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                            <span className="flex items-center gap-1 text-caption text-muted-foreground">
                               <Zap className="h-3 w-3" />
                               {rule.actions.length} action{rule.actions.length > 1 ? "s" : ""} ({rule.actions.map(a => a.type).join(", ")})
                             </span>
@@ -3823,12 +3596,12 @@ export function ConfigPage() {
 
             {rules.length > 0 && (
               <details className="mt-4 group">
-                <summary className="text-[11px] text-muted-foreground cursor-pointer hover:text-foreground select-none">
+                <summary className="text-caption text-muted-foreground cursor-pointer hover:text-foreground select-none">
                   Show raw JSON
                 </summary>
                 <JsonBlock
                   data={rules}
-                  className="mt-2 text-[11px] leading-relaxed font-mono bg-muted/20 rounded-lg px-4 py-3 whitespace-pre-wrap max-h-64 overflow-auto border border-border/20"
+                  className="mt-2 text-caption leading-relaxed font-mono bg-muted/20 rounded-lg px-4 py-3 whitespace-pre-wrap max-h-64 overflow-auto border border-border/20"
                 />
               </details>
             )}
@@ -3841,9 +3614,7 @@ export function ConfigPage() {
                 {/* Escalation Policy — structured display */}
                 {escalation && (
                   <div>
-                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
-                      <AlertTriangle className="h-3.5 w-3.5" /> Escalation Policy
-                    </h3>
+                    <SectionHeader icon={AlertTriangle} title="Escalation Policy" className="mb-2" />
                     {escalation.name && (
                       <p className="text-xs text-muted-foreground mb-2">{escalation.name}</p>
                     )}
@@ -3855,9 +3626,9 @@ export function ConfigPage() {
                             <div className="flex flex-col items-center shrink-0">
                               <div className={cn(
                                 "flex h-8 w-8 items-center justify-center rounded-full border-2 text-xs font-bold",
-                                level.handler === "human" ? "border-red-500 text-red-500 bg-red-500/10" :
-                                level.handler === "orchestrator" ? "border-amber-500 text-amber-500 bg-amber-500/10" :
-                                "border-sky-500 text-sky-500 bg-sky-500/10",
+                                level.handler === "human" ? "border-destructive text-destructive bg-destructive/10" :
+                                level.handler === "orchestrator" ? "border-warning text-warning bg-warning/10" :
+                                "border-info text-info bg-info/10",
                               )}>
                                 L{level.level}
                               </div>
@@ -3866,20 +3637,20 @@ export function ConfigPage() {
                               )}
                             </div>
                             {/* Level details */}
-                            <Card className="flex-1 bg-card/60 border-border/30 py-0 gap-0">
+                            <Card className="flex-1 py-0 gap-0">
                               <CardContent className="py-2.5 px-3">
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <Badge variant={
                                     level.handler === "human" ? "destructive" :
                                     level.handler === "orchestrator" ? "secondary" : "outline"
-                                  } className="text-[10px]">
+                                  } className="text-micro">
                                     {level.handler}
                                   </Badge>
                                   {level.target && (
-                                    <code className="text-[11px] font-mono text-muted-foreground">{level.target}</code>
+                                    <code className="text-caption font-mono text-muted-foreground">{level.target}</code>
                                   )}
                                   {level.timeoutMs && (
-                                    <span className="flex items-center gap-1 text-[10px] text-muted-foreground ml-auto">
+                                    <span className="flex items-center gap-1 text-micro text-muted-foreground ml-auto">
                                       <Clock className="h-2.5 w-2.5" />
                                       {level.timeoutMs >= 60000 ? `${(level.timeoutMs / 60000).toFixed(0)}min` : `${(level.timeoutMs / 1000).toFixed(0)}s`}
                                     </span>
@@ -3889,7 +3660,7 @@ export function ConfigPage() {
                                   <div className="flex items-center gap-1 mt-1.5">
                                     <Bell className="h-2.5 w-2.5 text-muted-foreground shrink-0" />
                                     {level.notifyChannels.map((ch) => (
-                                      <Badge key={ch} variant="outline" className="text-[9px]">{ch}</Badge>
+                                      <Badge key={ch} variant="outline" className="text-micro">{ch}</Badge>
                                     ))}
                                   </div>
                                 )}
@@ -3899,7 +3670,7 @@ export function ConfigPage() {
                         ))}
                       </div>
                     ) : (
-                      <JsonBlock data={escalation} className="text-[11px] leading-relaxed font-mono bg-muted/20 rounded-lg px-4 py-3 whitespace-pre-wrap max-h-64 overflow-auto border border-border/20" />
+                      <JsonBlock data={escalation} className="text-caption leading-relaxed font-mono bg-muted/20 rounded-lg px-4 py-3 whitespace-pre-wrap max-h-64 overflow-auto border border-border/20" />
                     )}
                   </div>
                 )}
@@ -3907,30 +3678,28 @@ export function ConfigPage() {
                 {/* SLA — structured display */}
                 {sla && (
                   <section>
-                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
-                      <Timer className="h-3.5 w-3.5" /> SLA Configuration
-                    </h3>
+                    <SectionHeader icon={Timer} title="SLA Configuration" className="mb-1.5" />
                     <div className="max-w-md">
                       <Row label="Warning Threshold" value={sla.warningThreshold != null ? `${(sla.warningThreshold * 100).toFixed(0)}%` : "80% (default)"} />
                       <Row label="Check Interval" value={sla.checkIntervalMs ? `${(sla.checkIntervalMs / 1000).toFixed(0)}s` : "30s (default)"} />
                       <Row label="Violation Action" value={
-                        <Badge variant={sla.violationAction === "fail" ? "destructive" : "outline"} className="text-[10px]">
+                        <Badge variant={sla.violationAction === "fail" ? "destructive" : "outline"} className="text-micro">
                           {sla.violationAction ?? "notify"}
                         </Badge>
                       } />
                       {sla.warningChannels && sla.warningChannels.length > 0 && (
                         <div className="pt-1.5">
-                          <span className="text-[10px] text-muted-foreground">Warning channels: </span>
+                          <span className="text-micro text-muted-foreground">Warning channels: </span>
                           {sla.warningChannels.map((ch) => (
-                            <Badge key={ch} variant="secondary" className="text-[10px] mr-1">{ch}</Badge>
+                            <Badge key={ch} variant="secondary" className="text-micro mr-1">{ch}</Badge>
                           ))}
                         </div>
                       )}
                       {sla.violationChannels && sla.violationChannels.length > 0 && (
                         <div className="pt-1">
-                          <span className="text-[10px] text-muted-foreground">Violation channels: </span>
+                          <span className="text-micro text-muted-foreground">Violation channels: </span>
                           {sla.violationChannels.map((ch) => (
-                            <Badge key={ch} variant="destructive" className="text-[10px] mr-1">{ch}</Badge>
+                            <Badge key={ch} variant="destructive" className="text-micro mr-1">{ch}</Badge>
                           ))}
                         </div>
                       )}
@@ -3941,10 +3710,10 @@ export function ConfigPage() {
                 {/* Approval Gates — structured display */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <h3 className="text-label text-muted-foreground flex items-center gap-1.5">
                       <Shield className="h-3.5 w-3.5" /> Approval Gates
                       {gates && gates.length > 0 && (
-                        <Badge variant="secondary" className="text-[9px] h-4 px-1.5">{gates.length}</Badge>
+                        <Badge variant="secondary" className="text-micro h-4 px-1.5">{gates.length}</Badge>
                       )}
                     </h3>
                     <Button
@@ -3959,17 +3728,17 @@ export function ConfigPage() {
                   {gates && gates.length > 0 ? (
                     <div className="space-y-2">
                       {gates.map((gate) => (
-                        <Card key={gate.id} className="bg-card/60 border-border/30 py-0 gap-0">
+                        <Card key={gate.id} className="py-0 gap-0">
                           <CardContent className="py-3 px-4">
                             <div className="flex items-center gap-2 mb-2 flex-wrap">
                               <span className="text-sm font-semibold">{gate.name}</span>
-                              <Badge variant={gate.handler === "human" ? "destructive" : "secondary"} className="text-[10px]">
+                              <Badge variant={gate.handler === "human" ? "destructive" : "secondary"} className="text-micro">
                                 {gate.handler === "human" ? <Users className="h-2.5 w-2.5 mr-0.5" /> : <Bot className="h-2.5 w-2.5 mr-0.5" />}
                                 {gate.handler}
                               </Badge>
-                              <code className="text-[10px] font-mono text-muted-foreground">{gate.hook}</code>
+                              <code className="text-micro font-mono text-muted-foreground">{gate.hook}</code>
                               {gate.priority && gate.priority !== 100 && (
-                                <Badge variant="outline" className="text-[9px]">priority: {gate.priority}</Badge>
+                                <Badge variant="outline" className="text-micro">priority: {gate.priority}</Badge>
                               )}
                               <div className="ml-auto flex items-center gap-1">
                                 <Button
@@ -4009,17 +3778,17 @@ export function ConfigPage() {
                                 </Button>
                               </div>
                             </div>
-                            <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
+                            <div className="flex flex-wrap items-center gap-3 text-caption text-muted-foreground">
                               {gate.timeoutMs && (
                                 <span className="flex items-center gap-1">
                                   <Clock className="h-2.5 w-2.5" />
                                   {gate.timeoutMs >= 60000 ? `${(gate.timeoutMs / 60000).toFixed(0)}min` : `${(gate.timeoutMs / 1000).toFixed(0)}s`}
                                   {gate.timeoutAction && (
-                                    <span className="text-[10px]">
+                                    <span className="text-micro">
                                       {" "}then {gate.timeoutAction === "approve" ? (
-                                        <span className="text-emerald-500">auto-approve</span>
+                                        <span className="text-success">auto-approve</span>
                                       ) : (
-                                        <span className="text-red-500">auto-reject</span>
+                                        <span className="text-destructive">auto-reject</span>
                                       )}
                                     </span>
                                   )}
@@ -4034,14 +3803,14 @@ export function ConfigPage() {
                                 </span>
                               )}
                               {gate.condition?.expression && (
-                                <code className="text-[10px] font-mono bg-muted/30 rounded px-1.5 py-0.5">{gate.condition.expression}</code>
+                                <code className="text-micro font-mono bg-muted/30 rounded px-1.5 py-0.5">{gate.condition.expression}</code>
                               )}
                             </div>
                             {gate.notifyChannels && gate.notifyChannels.length > 0 && (
                               <div className="flex items-center gap-1 mt-2">
                                 <Bell className="h-2.5 w-2.5 text-muted-foreground shrink-0" />
                                 {gate.notifyChannels.map((ch) => (
-                                  <Badge key={ch} variant="outline" className="text-[9px]">{ch}</Badge>
+                                  <Badge key={ch} variant="outline" className="text-micro">{ch}</Badge>
                                 ))}
                               </div>
                             )}
@@ -4193,7 +3962,7 @@ function CloudSyncPanel() {
   const fetchCfg = async () => {
     setLoading(true);
     try {
-      const res = await fetch(apiUrl("/api/v1/sync/config"), { credentials: "include" });
+      const res = await apiFetch(apiUrl("/api/v1/sync/config"), { credentials: "include" });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.ok) throw new Error("config");
       setCfg(body.data as SyncCfg);
@@ -4213,7 +3982,7 @@ function CloudSyncPanel() {
 
   const fetchHistory = async () => {
     try {
-      const res = await fetch(apiUrl("/api/v1/sync/history?limit=50"), { credentials: "include" });
+      const res = await apiFetch(apiUrl("/api/v1/sync/history?limit=50"), { credentials: "include" });
       const body = await res.json().catch(() => null);
       if (res.ok && body?.ok) setHistory(body.data as SyncHistoryEntry[]);
     } catch { /* ignore */ }
@@ -4224,7 +3993,7 @@ function CloudSyncPanel() {
    * server-side process completes (active comes back null). */
   const fetchActive = async () => {
     try {
-      const res = await fetch(apiUrl("/api/v1/sync/active"), { credentials: "include" });
+      const res = await apiFetch(apiUrl("/api/v1/sync/active"), { credentials: "include" });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.ok) return null;
       return body.data as ActiveSync | null;
@@ -4272,7 +4041,7 @@ function CloudSyncPanel() {
   const save = async () => {
     setSaving(true);
     try {
-      const res = await fetch(apiUrl("/api/v1/sync/config"), {
+      const res = await apiFetch(apiUrl("/api/v1/sync/config"), {
         method: "PUT",
         credentials: "include",
         headers: { "content-type": "application/json" },
@@ -4281,6 +4050,7 @@ function CloudSyncPanel() {
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.ok) throw new Error(body?.error || "save failed");
       toast.success("Sync config saved");
+      notifySetupSaved();
       setCfg(body.data as SyncCfg);
       setSecretDirty(false);
     } catch (err) {
@@ -4293,7 +4063,7 @@ function CloudSyncPanel() {
   const clearConfig = async () => {
     setSaving(true);
     try {
-      const res = await fetch(apiUrl("/api/v1/sync/config"), {
+      const res = await apiFetch(apiUrl("/api/v1/sync/config"), {
         method: "PUT",
         credentials: "include",
         headers: { "content-type": "application/json" },
@@ -4314,7 +4084,7 @@ function CloudSyncPanel() {
   const test = async () => {
     setSaving(true);
     try {
-      const res = await fetch(apiUrl("/api/v1/sync/test"), { method: "POST", credentials: "include" });
+      const res = await apiFetch(apiUrl("/api/v1/sync/test"), { method: "POST", credentials: "include" });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.ok) throw new Error(body?.error || "test failed");
       toast.success("R2 connection OK");
@@ -4327,7 +4097,7 @@ function CloudSyncPanel() {
 
   const cancelSync = async () => {
     try {
-      const res = await fetch(apiUrl("/api/v1/sync/cancel"), { method: "POST", credentials: "include" });
+      const res = await apiFetch(apiUrl("/api/v1/sync/cancel"), { method: "POST", credentials: "include" });
       if (res.ok) toast.message("Cancelling…");
     } catch { /* ignore */ }
   };
@@ -4341,7 +4111,7 @@ function CloudSyncPanel() {
     let summary = { files: 0, bytes: 0 };
     let result: { ok: boolean; error?: string } = { ok: false };
     try {
-      const res = await fetch(apiUrl(`/api/v1/sync/${kind}`), {
+      const res = await apiFetch(apiUrl(`/api/v1/sync/${kind}`), {
         method: "POST",
         credentials: "include",
         headers: { "content-type": "application/json" },
@@ -4411,16 +4181,14 @@ function CloudSyncPanel() {
   return (
     <div className="space-y-6 max-w-2xl">
       <section>
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
-          <CloudIcon className="h-3.5 w-3.5" /> R2 / S3-compatible target
-        </h3>
-        <p className="text-[11px] text-muted-foreground/80 mb-3">
+        <SectionHeader icon={CloudIcon} title="R2 / S3-compatible target" className="mb-1.5" />
+        <p className="text-caption text-muted-foreground/80 mb-3">
           Sync the entire <code className="font-mono">workDir</code> to a Cloudflare R2 bucket via <code className="font-mono">rclone copy --update</code>.
           Non-destructive: only newer files are transferred, nothing on the destination is deleted.
         </p>
 
         {loading ? (
-          <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
+          <div className="flex items-center gap-2 text-small text-muted-foreground">
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
             Loading config…
           </div>
@@ -4435,15 +4203,16 @@ function CloudSyncPanel() {
             <SyncField label="Access key ID" placeholder="AK..." value={draft.accessKeyId}
               onChange={(v) => setDraft({ ...draft, accessKeyId: v })} mono />
             <div>
-              <label className="block text-[11px] text-muted-foreground mb-1">Secret access key</label>
+              <label className="block text-caption text-muted-foreground mb-1">Secret access key</label>
               <div className="flex items-center gap-2">
                 <input
                   type={showSecret ? "text" : "password"}
+                  data-setup-field="secretAccessKey"
                   value={draft.secretAccessKey}
                   onChange={(e) => { setDraft({ ...draft, secretAccessKey: e.target.value }); setSecretDirty(true); }}
                   placeholder={configured && !secretDirty ? "(stored — click to replace)" : "raw secret"}
                   onFocus={() => { if (configured && !secretDirty) setDraft({ ...draft, secretAccessKey: "" }); }}
-                  className="flex-1 h-9 rounded-md border border-border bg-card px-3 font-mono text-[12px] focus:outline-none focus:ring-1 focus:ring-primary"
+                  className="flex-1 h-9 rounded-md border border-border bg-card px-3 font-mono text-small focus:outline-none focus:ring-1 focus:ring-primary"
                 />
                 <button
                   type="button"
@@ -4466,7 +4235,7 @@ function CloudSyncPanel() {
               </Button>
               {configured && (
                 <Button size="sm" variant="ghost" onClick={clearConfig} disabled={saving}
-                  className="text-rose-400 hover:text-rose-300 hover:bg-rose-500/10">
+                  className="text-destructive hover:text-destructive hover:bg-destructive/10">
                   Clear
                 </Button>
               )}
@@ -4476,10 +4245,8 @@ function CloudSyncPanel() {
       </section>
 
       <section>
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
-          <Activity className="h-3.5 w-3.5" /> Sync now
-        </h3>
-        <p className="text-[11px] text-muted-foreground/80 mb-3">
+        <SectionHeader icon={Activity} title="Sync now" className="mb-1.5" />
+        <p className="text-caption text-muted-foreground/80 mb-3">
           One-shot sync of the current workDir against the configured remote. Requires <code className="font-mono">rclone</code> on the server.
           The default <strong>copy/update</strong> mode is non-destructive (newer files only). The <strong>replace</strong> mode mirrors source → destination and <em>deletes</em> extras — used for first hydration or to promote a clean snapshot.
         </p>
@@ -4494,12 +4261,12 @@ function CloudSyncPanel() {
           </Button>
           <div className="mx-1 h-5 w-px bg-border" />
           <Button size="sm" variant="ghost" onClick={() => void trigger("push", "sync")} disabled={!configured || progress.active != null || preview != null}
-            className="text-rose-400 hover:text-rose-300 hover:bg-rose-500/10">
+            className="text-destructive hover:text-destructive hover:bg-destructive/10">
             {progress.active === "push" && progress.mode === "sync" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
             Replace remote
           </Button>
           <Button size="sm" variant="ghost" onClick={() => void trigger("pull", "sync")} disabled={!configured || progress.active != null || preview != null}
-            className="text-rose-400 hover:text-rose-300 hover:bg-rose-500/10">
+            className="text-destructive hover:text-destructive hover:bg-destructive/10">
             {progress.active === "pull" && progress.mode === "sync" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
             Replace local
           </Button>
@@ -4507,10 +4274,10 @@ function CloudSyncPanel() {
 
         {progress.active && (
           <div className="mt-4 rounded-md border border-border bg-card/40 p-3 space-y-2">
-            <div className="flex items-center justify-between text-[11px]">
+            <div className="flex items-center justify-between text-caption">
               <span className="font-medium">
                 {progress.active === "push" ? "Pushing" : "Pulling"}
-                {progress.mode === "sync" && <span className="ml-1 text-rose-400">(replace)</span>}
+                {progress.mode === "sync" && <span className="ml-1 text-destructive">(replace)</span>}
               </span>
               <div className="flex items-center gap-2">
                 <span className="font-mono tabular-nums text-muted-foreground">
@@ -4519,7 +4286,7 @@ function CloudSyncPanel() {
                 <button
                   type="button"
                   onClick={() => void cancelSync()}
-                  className="inline-flex items-center gap-1 rounded bg-rose-500/15 px-2 py-0.5 text-[10.5px] font-medium text-rose-300 hover:bg-rose-500/25"
+                  className="inline-flex items-center gap-1 rounded bg-destructive/15 px-2 py-0.5 text-caption font-medium text-destructive hover:bg-destructive/25"
                 >
                   <X className="h-3 w-3" />
                   Cancel
@@ -4527,20 +4294,20 @@ function CloudSyncPanel() {
               </div>
             </div>
             <SyncProgressBar progress={progress} />
-            <div className="grid grid-cols-3 gap-2 font-mono text-[10.5px] tabular-nums text-muted-foreground">
+            <div className="grid grid-cols-3 gap-2 font-mono text-caption tabular-nums text-muted-foreground">
               <div>{formatBytes(progress.bytes)} / {formatBytes(progress.totalBytes)}</div>
               <div>{progress.speed != null ? `${formatBytes(progress.speed)}/s` : "—"}</div>
               <div className="text-right">ETA {formatEta(progress.eta)}</div>
             </div>
             {progress.current && (
-              <div className="truncate font-mono text-[11px] text-foreground/80" title={progress.current}>
+              <div className="truncate font-mono text-caption text-foreground/80" title={progress.current}>
                 ⮕ {progress.current}
               </div>
             )}
             {progress.recent.length > 0 && (
               <details className="mt-1">
-                <summary className="cursor-pointer text-[10.5px] text-muted-foreground hover:text-foreground/80">Recent files ({progress.recent.length})</summary>
-                <div className="mt-1 max-h-32 overflow-y-auto font-mono text-[10.5px] text-muted-foreground space-y-0.5">
+                <summary className="cursor-pointer text-caption text-muted-foreground hover:text-foreground/80">Recent files ({progress.recent.length})</summary>
+                <div className="mt-1 max-h-32 overflow-y-auto font-mono text-caption text-muted-foreground space-y-0.5">
                   {progress.recent.map((line, i) => <div key={i} className="truncate">{line}</div>)}
                 </div>
               </details>
@@ -4548,15 +4315,15 @@ function CloudSyncPanel() {
           </div>
         )}
         {progress.done && !progress.active && (
-          <div className={cn("mt-4 rounded-md border p-3 text-[11.5px]",
-            progress.done.ok ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-rose-500/30 bg-rose-500/10 text-rose-300")}>
+          <div className={cn("mt-4 rounded-md border p-3 text-caption",
+            progress.done.ok ? "border-success/30 bg-success/10 text-success" : "border-destructive/30 bg-destructive/10 text-destructive")}>
             {progress.done.ok
               ? `Done — ${progress.transfers ?? 0} files transferred.`
               : (progress.error ?? `rclone exited with code ${progress.done.code}`)}
           </div>
         )}
 
-        <div className="mt-3 grid grid-cols-2 gap-2 max-w-md text-[11px] text-muted-foreground">
+        <div className="mt-3 grid grid-cols-2 gap-2 max-w-md text-caption text-muted-foreground">
           <div>Last push: <span className="font-mono text-foreground/80">{cfg?.lastPushedAt ? formatTime(cfg.lastPushedAt) : "—"}</span></div>
           <div>Last pull: <span className="font-mono text-foreground/80">{cfg?.lastPulledAt ? formatTime(cfg.lastPulledAt) : "—"}</span></div>
         </div>
@@ -4568,13 +4335,11 @@ function CloudSyncPanel() {
 
       <section>
         <div className="flex items-center justify-between mb-1.5">
-          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-            <Activity className="h-3.5 w-3.5" /> History
-          </h3>
+          <SectionHeader icon={Activity} title="History" className="mb-0" />
           <button
             type="button"
             onClick={() => void fetchHistory()}
-            className="text-[10.5px] text-muted-foreground hover:text-foreground/80"
+            className="text-caption text-muted-foreground hover:text-foreground/80"
           >
             Refresh
           </button>
@@ -4616,6 +4381,7 @@ const COMMON_EXCLUDES = [
 ];
 
 function ExcludesSection({ cfg, reload }: { cfg: SyncCfg | null; reload: () => Promise<void> }) {
+  const product = productName(useInstanceBranding());
   const initial = (cfg?.excludes ?? []).join("\n");
   const [text, setText] = useState(initial);
   const [saving, setSaving] = useState(false);
@@ -4635,7 +4401,7 @@ function ExcludesSection({ cfg, reload }: { cfg: SyncCfg | null; reload: () => P
   const save = async () => {
     setSaving(true);
     try {
-      const res = await fetch(apiUrl("/api/v1/sync/config"), {
+      const res = await apiFetch(apiUrl("/api/v1/sync/config"), {
         method: "PUT",
         credentials: "include",
         headers: { "content-type": "application/json" },
@@ -4656,22 +4422,20 @@ function ExcludesSection({ cfg, reload }: { cfg: SyncCfg | null; reload: () => P
 
   return (
     <section>
-      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
-        <X className="h-3.5 w-3.5" /> Excludes
-      </h3>
-      <p className="text-[11px] text-muted-foreground/80 mb-3">
+      <SectionHeader icon={X} title="Excludes" className="mb-1.5" />
+      <p className="text-caption text-muted-foreground/80 mb-3">
         rclone-style filter patterns — applied to every push and pull, and to the auto-sync scheduler. <code className="font-mono">node_modules/**</code> matches a <code className="font-mono">node_modules</code> folder at any depth. Lines starting with <code className="font-mono">#</code> are comments. Empty list means no filtering.
       </p>
       <div className="space-y-2 max-w-2xl">
         {cfg?.internalExcludes && cfg.internalExcludes.length > 0 && (
-          <div className="rounded-md border border-border bg-card/40 p-2 text-[11px]">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mb-1">
-              Always excluded by Polpo
+          <div className="rounded-md border border-border bg-card/40 p-2 text-caption">
+            <div className="text-label text-muted-foreground/70 mb-1">
+              Always excluded by {product}
             </div>
-            <ul className="space-y-0.5 font-mono text-[11px] text-foreground/70">
+            <ul className="space-y-0.5 font-mono text-caption text-foreground/70">
               {cfg.internalExcludes.map((p) => <li key={p}>· {p}</li>)}
             </ul>
-            <div className="mt-1 text-[10px] text-muted-foreground/60">
+            <div className="mt-1 text-micro text-muted-foreground/60">
               These hold the R2 secret + the local sync log — sending them to R2 would defeat their purpose.
             </div>
           </div>
@@ -4681,7 +4445,7 @@ function ExcludesSection({ cfg, reload }: { cfg: SyncCfg | null; reload: () => P
           onChange={(e) => setText(e.target.value)}
           placeholder="node_modules/**&#10;.git/**&#10;*.log"
           rows={8}
-          className="w-full rounded-md border border-border bg-card px-3 py-2 font-mono text-[12px] focus:outline-none focus:ring-1 focus:ring-primary"
+          className="w-full rounded-md border border-border bg-card px-3 py-2 font-mono text-small focus:outline-none focus:ring-1 focus:ring-primary"
           spellCheck={false}
         />
         <div className="flex flex-wrap gap-1.5">
@@ -4694,7 +4458,7 @@ function ExcludesSection({ cfg, reload }: { cfg: SyncCfg | null; reload: () => P
                 disabled={already}
                 onClick={() => addPreset(p)}
                 className={cn(
-                  "rounded-md px-2 py-0.5 font-mono text-[10.5px] border transition-colors",
+                  "rounded-md px-2 py-0.5 font-mono text-caption border transition-colors",
                   already
                     ? "border-border bg-card/40 text-muted-foreground cursor-default"
                     : "border-border bg-card hover:bg-accent",
@@ -4711,7 +4475,7 @@ function ExcludesSection({ cfg, reload }: { cfg: SyncCfg | null; reload: () => P
             {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
             Save
           </Button>
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-caption text-muted-foreground">
             {patterns.length} pattern{patterns.length === 1 ? "" : "s"} active
           </span>
         </div>
@@ -4758,7 +4522,7 @@ function ScheduleSection({ cfg, configured, reload }: { cfg: SyncCfg | null; con
   const save = async (nextEnabled?: boolean) => {
     setSaving(true);
     try {
-      const res = await fetch(apiUrl("/api/v1/sync/config"), {
+      const res = await apiFetch(apiUrl("/api/v1/sync/config"), {
         method: "PUT",
         credentials: "include",
         headers: { "content-type": "application/json" },
@@ -4779,39 +4543,28 @@ function ScheduleSection({ cfg, configured, reload }: { cfg: SyncCfg | null; con
 
   return (
     <section>
-      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
-        <Activity className="h-3.5 w-3.5" /> Auto-sync (push)
-      </h3>
-      <p className="text-[11px] text-muted-foreground/80 mb-3">
+      <SectionHeader icon={Activity} title="Auto-sync (push)" className="mb-1.5" />
+      <p className="text-caption text-muted-foreground/80 mb-3">
         Schedule a recurring <strong>copy --update</strong> push from this host to R2. Replace mode is intentionally not exposed here — auto-runs are non-destructive only.
         Schedule survives server restarts.
       </p>
       <div className="space-y-3 max-w-xl">
         <div className="flex items-center gap-3">
-          <button
-            type="button"
-            role="switch"
-            aria-checked={enabled}
+          <Switch
+            checked={enabled}
+            aria-label="Auto-sync"
             disabled={!configured || saving}
-            onClick={() => { const next = !enabled; setEnabled(next); void save(next); }}
-            className={cn(
-              "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors",
-              enabled ? "bg-emerald-500/70" : "bg-white/[0.12]",
-              (!configured || saving) && "opacity-40 cursor-not-allowed",
-            )}
-          >
-            <span className={cn("inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform",
-              enabled ? "translate-x-[1.125rem]" : "translate-x-0.5")} />
-          </button>
-          <span className="text-[12px] text-foreground/80">{enabled ? "Enabled" : "Disabled"}</span>
+            onCheckedChange={(next) => { setEnabled(next); void save(next); }}
+          />
+          <span className="text-small text-foreground/80">{enabled ? "Enabled" : "Disabled"}</span>
         </div>
 
         <div>
-          <label className="block text-[11px] text-muted-foreground mb-1">Preset</label>
+          <label className="block text-caption text-muted-foreground mb-1">Preset</label>
           <select
             value={preset}
             onChange={(e) => onPresetChange(e.target.value)}
-            className="w-full h-9 rounded-md border border-border bg-card px-3 text-[12px] focus:outline-none focus:ring-1 focus:ring-primary"
+            className="w-full h-9 rounded-md border border-border bg-card px-3 text-small focus:outline-none focus:ring-1 focus:ring-primary"
           >
             {SCHEDULE_PRESETS.map((p) => (
               <option key={p.label} value={p.cron}>{p.label}</option>
@@ -4820,15 +4573,15 @@ function ScheduleSection({ cfg, configured, reload }: { cfg: SyncCfg | null; con
         </div>
 
         <div>
-          <label className="block text-[11px] text-muted-foreground mb-1">
+          <label className="block text-caption text-muted-foreground mb-1">
             Cron expression
-            <span className="ml-2 text-[10px] text-muted-foreground/70">(5 fields: minute hour dom month dow)</span>
+            <span className="ml-2 text-micro text-muted-foreground/70">(5 fields: minute hour dom month dow)</span>
           </label>
           <input
             type="text"
             value={cron}
             onChange={(e) => { setCron(e.target.value); setPreset(""); }}
-            className="w-full h-9 rounded-md border border-border bg-card px-3 font-mono text-[12px] focus:outline-none focus:ring-1 focus:ring-primary"
+            className="w-full h-9 rounded-md border border-border bg-card px-3 font-mono text-small focus:outline-none focus:ring-1 focus:ring-primary"
             placeholder="*/15 * * * *"
           />
         </div>
@@ -4838,12 +4591,12 @@ function ScheduleSection({ cfg, configured, reload }: { cfg: SyncCfg | null; con
             {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
             Save
           </Button>
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-caption text-muted-foreground">
             Next run: <span className="font-mono text-foreground/80">{cfg?.nextRunAt ? formatTime(cfg.nextRunAt) : "—"}</span>
           </span>
         </div>
         {!configured && (
-          <p className="text-[10.5px] text-amber-300/80">
+          <p className="text-caption text-warning/80">
             Configure R2 above before enabling the schedule.
           </p>
         )}
@@ -4855,15 +4608,15 @@ function ScheduleSection({ cfg, configured, reload }: { cfg: SyncCfg | null; con
 function SyncHistoryTable({ entries }: { entries: SyncHistoryEntry[] }) {
   if (entries.length === 0) {
     return (
-      <div className="rounded-md border border-border bg-card/40 px-3 py-4 text-center text-[11px] text-muted-foreground">
+      <div className="rounded-md border border-border bg-card/40 px-3 py-4 text-center text-caption text-muted-foreground">
         No syncs yet — push or pull to start the history.
       </div>
     );
   }
   return (
     <div className="overflow-x-auto rounded-md border border-border">
-      <table className="w-full text-[11px]">
-        <thead className="bg-card/60 text-[10px] uppercase tracking-wider text-muted-foreground">
+      <table className="w-full text-caption">
+        <thead className="bg-card/60 text-label text-muted-foreground">
           <tr>
             <th className="px-2 py-1.5 text-left font-medium">When</th>
             <th className="px-2 py-1.5 text-left font-medium">Type</th>
@@ -4885,9 +4638,9 @@ function SyncHistoryTable({ entries }: { entries: SyncHistoryEntry[] }) {
               <td className="px-2 py-1.5 text-right font-mono tabular-nums">{formatDuration(e.durationMs)}</td>
               <td className="px-2 py-1.5">
                 {e.ok ? (
-                  <span className="inline-flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 py-px text-[10px] font-medium text-emerald-300">ok</span>
+                  <span className="inline-flex items-center gap-1 rounded bg-success/15 px-1.5 py-px text-micro font-medium text-success">ok</span>
                 ) : (
-                  <span title={e.error} className="inline-flex items-center gap-1 rounded bg-rose-500/15 px-1.5 py-px text-[10px] font-medium text-rose-300">
+                  <span title={e.error} className="inline-flex items-center gap-1 rounded bg-destructive/15 px-1.5 py-px text-micro font-medium text-destructive">
                     failed
                   </span>
                 )}
@@ -4908,12 +4661,12 @@ function SyncTypeBadge({ direction, mode }: { direction: "push" | "pull"; mode: 
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded px-1.5 py-px font-mono text-[10px]",
+        "inline-flex items-center gap-1 rounded px-1.5 py-px font-mono text-micro",
         replace
-          ? "bg-rose-500/10 text-rose-300/90"
+          ? "bg-destructive/10 text-destructive/90"
           : isPush
-            ? "bg-sky-500/10 text-sky-300/90"
-            : "bg-emerald-500/10 text-emerald-300/90",
+            ? "bg-info/10 text-info/90"
+            : "bg-success/10 text-success/90",
       )}
     >
       {label}
@@ -4952,30 +4705,30 @@ function SyncPreviewDialog({
         : `Confirm ${preview?.kind} (${preview?.mode === "sync" ? "replace" : "update"})`}
       description={
         preview?.status === "running" ? (
-          <span className="flex items-center gap-2 text-[12px]">
+          <span className="flex items-center gap-2 text-small">
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
             Running rclone in dry-run mode against {dirLabel}…
           </span>
         ) : preview?.error ? (
-          <span className="text-rose-300">{preview.error}</span>
+          <span className="text-destructive">{preview.error}</span>
         ) : (
-          <div className="space-y-2 text-[12px]">
+          <div className="space-y-2 text-small">
             <div>
               About to <strong>{preview?.kind === "push" ? "push" : "pull"}</strong> ({dirLabel})
               in <strong>{isReplace ? "replace" : "update"}</strong> mode.
             </div>
-            <div className="rounded-md border border-border bg-card/40 p-2 font-mono text-[11.5px]">
+            <div className="rounded-md border border-border bg-card/40 p-2 font-mono text-caption">
               <div><strong>{preview?.files ?? 0}</strong> file{preview?.files === 1 ? "" : "s"} to transfer</div>
               <div><strong>{formatBytes(preview?.bytes)}</strong> total size</div>
             </div>
             {isReplace && (
-              <div className="text-rose-300/90 text-[11.5px]">
+              <div className="text-destructive/90 text-caption">
                 ⚠ Replace mode also DELETES files on the destination that aren't on the source.
                 The dry-run preview shows transfers but the count of deletes isn't summarized — proceed with care.
               </div>
             )}
             {preview?.files === 0 && !preview?.error && (
-              <div className="text-emerald-300/85 text-[11.5px]">
+              <div className="text-success/85 text-caption">
                 Nothing to do — source and destination already match.
               </div>
             )}
@@ -4995,14 +4748,14 @@ function SyncProgressBar({ progress }: { progress: SyncProgress }) {
     ? Math.min(100, Math.round((progress.bytes ?? 0) / progress.totalBytes * 100))
     : null;
   return (
-    <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-white/[0.05]">
+    <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
       {pct != null ? (
         <div
-          className="h-full rounded-full bg-emerald-400/80 transition-[width]"
+          className="h-full rounded-full bg-success/80 transition-[width]"
           style={{ width: `${pct}%` }}
         />
       ) : (
-        <div className="absolute inset-y-0 left-0 h-full w-1/3 animate-pulse rounded-full bg-emerald-400/40" />
+        <div className="absolute inset-y-0 left-0 h-full w-1/3 animate-pulse rounded-full bg-success/40" />
       )}
     </div>
   );
@@ -5091,14 +4844,14 @@ function SyncField({
 }) {
   return (
     <div>
-      <label className="block text-[11px] text-muted-foreground mb-1">{label}</label>
+      <label className="block text-caption text-muted-foreground mb-1">{label}</label>
       <input
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         className={cn(
-          "w-full h-9 rounded-md border border-border bg-card px-3 text-[12px] focus:outline-none focus:ring-1 focus:ring-primary",
+          "w-full h-9 rounded-md border border-border bg-card px-3 text-small focus:outline-none focus:ring-1 focus:ring-primary",
           mono && "font-mono",
         )}
       />

@@ -6,7 +6,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createHash, randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
@@ -14,7 +14,11 @@ import { getRequestListener } from "@hono/node-server";
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { CONNECTORS_VAULT_OWNER } from "@polpo-ai/core";
+import { CONNECTORS_VAULT_OWNER, type AgentConfig, type Task, type TaskToolScope } from "@polpo-ai/core";
+import { buildAgentToolset } from "../adapters/engine.js";
+import { toHarnessHostTools } from "../harness/host-tools.js";
+import { scopedAgentForRun } from "../core/task-tool-scope.js";
+import { ProgressiveToolSet } from "@polpo-ai/core/progressive-tools";
 import { EncryptedVaultStore } from "../vault/encrypted-store.js";
 import { ConnectorManager } from "../mcp/manager.js";
 import { buildConnector, ConnectorInputError } from "../mcp/validate.js";
@@ -23,6 +27,8 @@ import { connectorToolAllowed, convertToolResult, mcpToolName, MAX_RESULT_TEXT, 
 import { connectorRoutes, connectorOAuthCallback, CONNECTOR_OAUTH_CALLBACK_PATH } from "../server/routes/connectors.js";
 import { CONNECTOR_CATALOG } from "../mcp/catalog.js";
 import { clientMetadataDocument, clientMetadataUrlFor } from "../mcp/paths.js";
+import { connectorDashboardBase, connectorPublicBase, connectorsPromptSection } from "../mcp/runtime.js";
+import { accountFromIdToken, connectorLabel } from "../mcp/view.js";
 import { executeConnectorTool } from "../tools/connector-tools.js";
 
 // ── a fake MCP server + authorization server ──
@@ -36,6 +42,8 @@ interface FakeAuth {
   lastAuthorize?: URLSearchParams;
   n: number;
   cimd?: boolean;
+  /** Return an OpenID id_token naming this email with the tokens. */
+  idTokenEmail?: string;
   oauthFailure?: { path: string; status: number; body: string | Record<string, string> };
 }
 
@@ -135,7 +143,10 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
       const refresh_token = `rt-${++fake.n}`;
       fake.access.add(access_token);
       fake.refresh.add(refresh_token);
-      return json(res, 200, { access_token, refresh_token, token_type: "Bearer", expires_in: 3600 });
+      const id_token = fake.idTokenEmail
+        ? `${Buffer.from('{"alg":"none"}').toString("base64url")}.${Buffer.from(JSON.stringify({ sub: "1", email: fake.idTokenEmail })).toString("base64url")}.`
+        : undefined;
+      return json(res, 200, { access_token, refresh_token, token_type: "Bearer", expires_in: 3600, ...(id_token ? { id_token } : {}) });
     };
     if (form.get("grant_type") === "authorization_code") {
       const entry = fake.codes.get(form.get("code") ?? "");
@@ -192,6 +203,7 @@ afterAll(async () => {
 
 afterEach(async () => {
   fake.oauthFailure = undefined;
+  fake.idTokenEmail = undefined;
   await Promise.all(managers.splice(0).map((m) => m.closeAll()));
   dirs.splice(0).forEach((d) => rmSync(d, { recursive: true, force: true }));
 });
@@ -343,6 +355,82 @@ describe("connection manager", () => {
     expect((await manager.toolsFor("alice", ["mcp__everyone__echo"])).tools.map((t) => t.name)).toEqual(["mcp__everyone__echo"]);
     expect((await manager.toolsFor("alice", ["mcp__*"])).tools.length).toBe(10);
     expect((await manager.toolsFor("alice", ["read", "bash"])).tools).toEqual([]);
+  });
+
+  it("intersects connector access, toolPolicy, the agent's connectorTools selection and allowedTools", async () => {
+    const { manager } = setup();
+    await add(manager, { id: "lin", name: "Lin", url: `${base}/mcp`, access: { agents: "*", polpo: true }, toolPolicy: { image: "off" } });
+    await add(manager, { id: "other", name: "Other", url: `${base}/mcp`, access: { agents: ["alice"], polpo: false } });
+    const names = async (agent: string | undefined, allowed?: string[], selection?: Record<string, "*" | string[]>) =>
+      (await manager.toolsFor(agent, allowed, selection)).tools.map((t) => t.name).sort();
+    // no selection / "*": every tool the policy allows (today's behaviour)
+    expect((await names("alice")).filter((n) => n.startsWith("mcp__lin__"))).toEqual(["mcp__lin__big", "mcp__lin__echo", "mcp__lin__fail", "mcp__lin__weird_name"]);
+    expect(await names("alice", undefined, { lin: "*" })).toEqual(await names("alice"));
+    // a list: only those tools of that connector; other connectors untouched; unknown names ignored
+    expect(await names("alice", undefined, { lin: ["echo", "gone-tool"] })).toEqual([
+      "mcp__lin__echo", "mcp__other__big", "mcp__other__echo", "mcp__other__fail", "mcp__other__image", "mcp__other__weird_name",
+    ]);
+    // an empty list: none of that connector's tools
+    expect((await names("alice", undefined, { lin: [], other: ["fail"] }))).toEqual(["mcp__other__fail"]);
+    // toolPolicy "off" wins over a selection
+    expect(await names("bob", undefined, { lin: ["image", "echo"] })).toEqual(["mcp__lin__echo"]);
+    // allowedTools still applies on top
+    expect(await names("alice", ["mcp__lin__*"], { lin: ["echo", "big"] })).toEqual(["mcp__lin__big", "mcp__lin__echo"]);
+    expect(await names("alice", ["mcp__lin__fail"], { lin: ["echo"] })).toEqual([]);
+    // a selection never grants: bob has no access to "other"
+    expect(await names("bob", undefined, { other: ["echo"] })).toEqual(["mcp__lin__big", "mcp__lin__echo", "mcp__lin__fail", "mcp__lin__weird_name"]);
+    // Polpo has no agent selection
+    expect((await names(undefined, undefined, { lin: ["echo"] })).length).toBe(4);
+  });
+
+  it("progressive tools_search / tools_load only see the agent's selected connector tools", async () => {
+    const { manager } = setup();
+    await add(manager, { id: "lin", name: "Lin", url: `${base}/mcp`, access: { agents: "*", polpo: false } });
+    const { tools } = await manager.toolsFor("alice", undefined, { lin: ["echo"] });
+    const set = new ProgressiveToolSet({ tools, mode: "always", connectorNames: { lin: "Lin" } });
+    expect(set.search("lin").map((h) => h.name)).toEqual(["mcp__lin__echo"]);
+    expect(set.search("very large text").map((h) => h.name)).not.toContain("mcp__lin__big");
+    expect(set.load(["mcp__lin__big", "mcp__lin"])).toEqual({ loaded: ["mcp__lin__echo"], already: [], unknown: ["mcp__lin__big"] });
+  });
+
+  it("a task's tool scope narrows the run's tools: Polpo's engine, progressive discovery and harness host tools", async () => {
+    const { manager, polpoDir } = setup();
+    await add(manager, { id: "lin", name: "Lin", url: `${base}/mcp`, access: { agents: "*", polpo: false } });
+    await add(manager, { id: "other", name: "Other", url: `${base}/mcp`, access: { agents: ["alice"], polpo: false } });
+    writeFileSync(join(polpoDir, "polpo.json"), JSON.stringify({ project: "t", team: { name: "t", agents: [{ name: "alice" }] }, settings: { connectors: { allowPrivateNetwork: true } } }));
+    const agent = { name: "alice" } as AgentConfig;
+    const run = async (toolScope?: TaskToolScope) => {
+      const task = { id: "t2", title: "T", description: "d", assignTo: "alice", dependsOn: ["t1"], status: "pending", expectations: [], metrics: [], retries: 0, maxRetries: 1, createdAt: "", updatedAt: "", ...(toolScope ? { toolScope } : {}) } as Task;
+      const agentConfig = scopedAgentForRun({ agent, task, polpoDir });
+      const toolset = await buildAgentToolset({ agentConfig, cwd: polpoDir, ctx: { polpoDir }, sandboxProvider: "local", browserProfileDir: join(polpoDir, "bp"), hasExtendedTools: false, task });
+      await toolset.connectorManager?.closeAll();
+      return { names: toolset.tools.map((t) => t.name), tools: toolset.tools, note: toolset.connectorNote };
+    };
+    // no scope: everything the agent has (unchanged behaviour)
+    const all = await run();
+    expect(all.names.filter((n) => n.startsWith("mcp__")).length).toBe(10);
+    expect(all.names).toEqual(expect.arrayContaining(["read", "bash", "write", "task_result", "register_outcome"]));
+    // scoped: one connector, one tool of it, one built-in tool
+    const scoped = await run({ connectors: ["lin"], connectorTools: { lin: ["echo"] }, allowedTools: ["read"] });
+    expect(scoped.names.filter((n) => n.startsWith("mcp__"))).toEqual(["mcp__lin__echo"]);
+    expect(scoped.names).toContain("read");
+    expect(scoped.names).not.toContain("bash");
+    expect(scoped.names).not.toContain("write");
+    // the dependency results and outcome tools are not affected
+    expect(scoped.names).toEqual(expect.arrayContaining(["task_result", "dependency_results", "register_outcome"]));
+    // the prompt's Connectors section leaves out the connector the scope excludes
+    expect(scoped.note).toContain("mcp__lin__*");
+    expect(scoped.note).not.toContain("mcp__other__*");
+    // progressive tools_search / tools_load see only the scoped set
+    const set = new ProgressiveToolSet({ tools: scoped.tools, mode: "always", connectorNames: { lin: "Lin", other: "Other" } });
+    expect(set.search("echo").map((h) => h.name)).toEqual(["mcp__lin__echo"]);
+    expect(set.load(["mcp__other__echo", "mcp__lin__big"]).unknown).toEqual(["mcp__other__echo", "mcp__lin__big"]);
+    // harness host tools (Claude Code, Codex) get the same set
+    const host = toHarnessHostTools(scoped.tools).map((t) => t.name);
+    expect(host.filter((n) => n.startsWith("mcp__"))).toEqual(["mcp__lin__echo"]);
+    expect(host).toContain("task_result");
+    // "none": no connector tool at all
+    expect((await run({ connectors: "none" })).names.some((n) => n.startsWith("mcp__"))).toBe(false);
   });
 
   it("skips a connector that cannot connect, with a note, without failing", async () => {
@@ -623,28 +711,95 @@ describe("OAuth connectors through the API", () => {
 });
 
 describe("Polpo's connector tools", () => {
-  it("adds from a custom URL, lists, changes access, and removes only when confirmed", async () => {
+  // Adding one is connector_add, the MCP server's tool run in process (polpo-mcp-bridge.ts; see mcp-primitives
+  // and polpo-tools-alignment tests): it never takes a token in chat.
+  it("lists, changes access, and removes only when confirmed", async () => {
     const { manager } = setup();
     const ctx = { manager, settings: allowLocal(), redirectUri: "http://127.0.0.1:3890/cb", agentNames: async () => ["alice", "bob"] };
-    const added = await executeConnectorTool("connector_add", { url: `${base}/mcp`, name: "Fake", agents: ["alice"] }, ctx);
-    expect(added).toMatch(/Added Fake \[fake\].*Connected: 5 tools/s);
-    expect(await executeConnectorTool("connector_add", { url: `${base}/mcp`, name: "X", agents: ["ghost"] }, ctx)).toMatch(/Unknown agents: ghost/);
+    await add(manager, { url: `${base}/mcp`, name: "Fake", access: { agents: ["alice"] } });
+    expect(await executeConnectorTool("connector_connect", { id: "fake" }, ctx)).toMatch(/Fake is connected: 5 tools/);
     expect(await executeConnectorTool("connectors_list", {}, ctx)).toMatch(/Fake \[fake\] connected, 5 tools; auth none; used by agents: alice \+ Polpo/);
+    expect(await executeConnectorTool("connector_update_access", { id: "fake", addAgents: ["ghost"] }, ctx)).toMatch(/Unknown agents: ghost/);
     expect(await executeConnectorTool("connector_update_access", { id: "fake", addAgents: ["bob"], polpo: false }, ctx)).toMatch(/agents: alice, bob;/);
     expect(manager.store.get("fake")?.access).toEqual({ agents: ["alice", "bob"], polpo: false });
     expect(await executeConnectorTool("connector_remove", { id: "fake" }, ctx)).toMatch(/confirm/);
     expect(manager.store.get("fake")).toBeDefined();
     expect(await executeConnectorTool("connector_remove", { id: "fake", confirm: true }, ctx)).toBe("Removed Fake.");
     expect(manager.store.get("fake")).toBeUndefined();
+    expect(await executeConnectorTool("connector_add", { url: `${base}/mcp` }, ctx)).toMatch(/Unknown tool/);
   });
 
   it("returns the OAuth link for an OAuth connector", async () => {
     const { manager } = setup();
     const ctx = { manager, settings: allowLocal(), redirectUri: "http://127.0.0.1:3890/cb", agentNames: async () => [] };
-    const out = await executeConnectorTool("connector_add", { url: `${base}/oauth-mcp`, name: "OA", auth: "oauth" }, ctx);
+    await add(manager, { url: `${base}/oauth-mcp`, name: "OA", auth: { type: "oauth" } });
+    const out = await executeConnectorTool("connector_connect", { id: "oa" }, ctx);
     expect(out).toMatch(/must open this link/);
     expect(out).toContain(`${base}/authorize?`);
-    expect(await executeConnectorTool("connector_add", { url: "http://127.0.0.1:9/x", transport: "http", name: "S" }, { ...ctx, settings: {} })).toMatch(/https/);
+  });
+});
+
+describe("several accounts of the same app", () => {
+  it("a catalog id added again gets gmail-2, gmail-3… and a name of its own", async () => {
+    const ctx = { allowStdio: false, existingIds: ["gmail"], resolve: async () => ["142.250.1.1"] };
+    const second = (await buildConnector({ catalogId: "gmail" }, ctx)).connector;
+    expect(second).toMatchObject({ id: "gmail-2", name: "Gmail 2", catalogId: "gmail", status: "needs_auth" });
+    const named = (await buildConnector({ catalogId: "gmail", name: "Gmail – info@acme.com" }, { ...ctx, existingIds: ["gmail", "gmail-2"] })).connector;
+    expect(named).toMatchObject({ id: "gmail-3", name: "Gmail – info@acme.com", catalogId: "gmail" });
+    // the first one keeps the catalog's id and name
+    expect((await buildConnector({ catalogId: "gmail" }, { ...ctx, existingIds: [] })).connector).toMatchObject({ id: "gmail", name: "Gmail" });
+  });
+
+  it("names each account to the model: tool descriptions, connector names and the prompt section", async () => {
+    const { manager } = setup();
+    await add(manager, { id: "mail", name: "Mail", url: `${base}/mcp`, access: { agents: ["alice"], polpo: true } });
+    await add(manager, { id: "mail-2", name: "Mail 2", url: `${base}/mcp`, access: { agents: ["alice"], polpo: false } });
+    manager.store.update("mail", { catalogId: "mail" });
+    manager.store.update("mail-2", { catalogId: "mail", account: "info@acme.com" });
+    const { tools } = await manager.toolsFor("alice");
+    expect(tools.find((t) => t.name === "mcp__mail__echo")!.description).toMatch(/^\[Mail\] Echo/);
+    expect(tools.find((t) => t.name === "mcp__mail-2__echo")!.description).toMatch(/^\[Mail 2 – info@acme\.com\] Echo/);
+    expect(tools.find((t) => t.name === "mcp__mail-2__echo")!.label).toBe("Mail 2 – info@acme.com: echo");
+    const section = connectorsPromptSection(manager.store.list(), "alice");
+    expect(section).toContain("- Mail 2 – info@acme.com (mcp__mail-2__*)");
+    expect(section).toContain("2 accounts of the same app: mail = Mail; mail-2 = Mail 2 – info@acme.com");
+    // Polpo has one of them only: no "accounts" line
+    expect(connectorsPromptSection(manager.store.list(), undefined)).not.toContain("accounts of the same app");
+    const ctx = { manager, settings: allowLocal(), agentNames: async () => ["alice"] };
+    expect(await executeConnectorTool("connectors_list", {}, ctx)).toMatch(/- Mail 2 – info@acme\.com \[mail-2, another mail account\]/);
+  });
+
+  it("labels: the account joins the name unless the name already says it; id_token email", () => {
+    expect(connectorLabel({ name: "Gmail 2", account: "info@acme.com" })).toBe("Gmail 2 – info@acme.com");
+    expect(connectorLabel({ name: "Gmail – info@acme.com", account: "info@acme.com" })).toBe("Gmail – info@acme.com");
+    expect(connectorLabel({ name: "Gmail" })).toBe("Gmail");
+    const jwt = (claims: object) => `e30.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.sig`;
+    expect(accountFromIdToken(jwt({ email: "a@b.co", preferred_username: "x" }))).toBe("a@b.co");
+    expect(accountFromIdToken(jwt({ preferred_username: "marco" }))).toBe("marco");
+    expect(accountFromIdToken(jwt({ sub: "1" }))).toBeUndefined();
+    expect(accountFromIdToken("not-a-jwt")).toBeUndefined();
+    expect(accountFromIdToken(undefined)).toBeUndefined();
+  });
+
+  it("learns the signed-in account from an OpenID id_token at sign-in, and forgets it on disconnect", async () => {
+    const { manager } = setup();
+    const app = routesApp(manager);
+    fake.idTokenEmail = "info@acme.com";
+    await add(manager, { id: "who", name: "Who", url: `${base}/oauth-mcp`, auth: { type: "oauth" } });
+    const start = await (await app.request("/api/v1/connectors/who/oauth/start", { method: "POST" })).json();
+    const redirect = await fetch(new URL(start.data.authorizationUrl), { redirect: "manual" });
+    const back = new URL(redirect.headers.get("location")!);
+    expect((await app.request(`${CONNECTOR_OAUTH_CALLBACK_PATH}${back.search}`)).status).toBe(200);
+    expect(manager.store.get("who")).toMatchObject({ account: "info@acme.com", status: "connected" });
+    expect((await (await app.request("/api/v1/connectors/who")).json()).data.account).toBe("info@acme.com");
+    // renaming keeps it; the label then does not repeat it
+    const renamed = await app.request("/api/v1/connectors/who", {
+      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Who – info@acme.com" }),
+    });
+    expect((await renamed.json()).data).toMatchObject({ name: "Who – info@acme.com", account: "info@acme.com" });
+    expect(connectorLabel(manager.store.get("who")!)).toBe("Who – info@acme.com");
+    await manager.disconnect("who");
+    expect(manager.store.get("who")!.account).toBeUndefined();
   });
 });
 
@@ -659,6 +814,14 @@ describe("catalog and Client ID Metadata Documents", () => {
     expect(byId("bigquery").oauth).toMatchObject({ app: "google", scopes: ["https://www.googleapis.com/auth/bigquery"] });
     expect(byId("slack").oauth).toEqual({ app: "slack" });
     expect(byId("slack").setup).toContain('"slack" OAuth app');
+    // Slack: the MCP server feature must be turned on in the app, created from a manifest with the user scopes
+    expect(byId("slack").setup).toContain("Features → Agents");
+    expect(byId("slack").setup).toContain("Slack Model Context Protocol (MCP) Server");
+    const manifest = JSON.parse(byId("slack").setupManifest!);
+    expect(manifest.oauth_config.redirect_urls).toEqual(["<public URL>/api/v1/connectors/oauth/callback"]);
+    expect(manifest.oauth_config.scopes.user).toEqual(expect.arrayContaining(["search:read.public", "chat:write", "canvases:write", "lists:write", "users:read.email"]));
+    expect(manifest.oauth_config.scopes.user).toHaveLength(29);
+    expect(byId("figma").setupManifest).toBeUndefined();
     for (const id of ["figma", "square"]) {
       expect(byId(id)).toMatchObject({ auth: "oauth_preregistered", oauth: { app: id } });
     }
@@ -702,5 +865,95 @@ describe("catalog and Client ID Metadata Documents", () => {
     await manager.secrets.unset("cimd", ["oauth_client_info", "oauth_discovery"]);
     const { authorizationUrl } = await manager.startOAuth("cimd", `http://127.0.0.1:3890${CONNECTOR_OAUTH_CALLBACK_PATH}`);
     expect(new URL(authorizationUrl!).searchParams.get("client_id")).toMatch(/^client-/);
+  });
+});
+
+describe("public URLs for OAuth providers (POLPO_PUBLIC_URL)", () => {
+  const PUBLIC = "https://lumea-dev.example.ts.net/lumea";
+  const PRIVATE = "https://lumea-dev.example.ts.net:3001";
+  const previous = process.env.POLPO_PUBLIC_URL;
+  beforeAll(() => { process.env.POLPO_PUBLIC_URL = PUBLIC; });
+  afterAll(() => {
+    if (previous === undefined) delete process.env.POLPO_PUBLIC_URL;
+    else process.env.POLPO_PUBLIC_URL = previous;
+  });
+
+  /** Wired like the server: the redirect URI from POLPO_PUBLIC_URL, whatever host the request came in on. */
+  function publicApp(manager: ConnectorManager) {
+    const app = new Hono();
+    app.route("/api/v1/connectors", connectorRoutes({
+      manager: () => manager,
+      settings: allowLocal,
+      redirectUri: (c) => `${connectorPublicBase(new URL(c.req.url).origin)}${CONNECTOR_OAUTH_CALLBACK_PATH}`,
+    }));
+    return app;
+  }
+
+  it("builds the redirect URI from POLPO_PUBLIC_URL, else the request origin; the dashboard from POLPO_DASHBOARD_URL", () => {
+    expect(connectorPublicBase(PRIVATE)).toBe(PUBLIC);
+    delete process.env.POLPO_PUBLIC_URL;
+    try {
+      expect(connectorPublicBase(`${PRIVATE}/`)).toBe(PRIVATE);
+    } finally {
+      process.env.POLPO_PUBLIC_URL = PUBLIC;
+    }
+    const dashboard = process.env.POLPO_DASHBOARD_URL;
+    process.env.POLPO_DASHBOARD_URL = "https://lumea-dev.example.ts.net:5174/";
+    try {
+      expect(connectorDashboardBase(PUBLIC)).toBe("https://lumea-dev.example.ts.net:5174");
+    } finally {
+      if (dashboard === undefined) delete process.env.POLPO_DASHBOARD_URL;
+      else process.env.POLPO_DASHBOARD_URL = dashboard;
+    }
+  });
+
+  it("oauth/start through another port: public client_id (CIMD) and redirect_uri, consistent with the metadata document; a stale client is dropped", async () => {
+    const { manager } = setup();
+    const app = publicApp(manager);
+    await add(manager, { id: "linear", name: "Linear", url: `${base}/oauth-mcp`, auth: { type: "oauth" } });
+    // stored by an earlier attempt made through the private port
+    await manager.secrets.patch("linear", { oauth_client_info: JSON.stringify({ client_id: `${PRIVATE}/api/v1/connectors/oauth/client-metadata.json` }) });
+    fake.cimd = true;
+    try {
+      const res = await app.request(`${PRIVATE}/api/v1/connectors/linear/oauth/start`, { method: "POST" });
+      expect(res.status).toBe(200);
+      const { data } = await res.json();
+      const url = new URL(data.authorizationUrl);
+      const doc = clientMetadataDocument(connectorPublicBase(PRIVATE));
+      expect(url.searchParams.get("client_id")).toBe(`${PUBLIC}/api/v1/connectors/oauth/client-metadata.json`);
+      expect(url.searchParams.get("redirect_uri")).toBe(`${PUBLIC}${CONNECTOR_OAUTH_CALLBACK_PATH}`);
+      expect(data.redirectUri).toBe(`${PUBLIC}${CONNECTOR_OAUTH_CALLBACK_PATH}`);
+      expect(doc.client_id).toBe(url.searchParams.get("client_id"));
+      expect(doc.redirect_uris).toEqual([url.searchParams.get("redirect_uri")]);
+      expect(JSON.parse((await manager.secrets.get("linear")).oauth_client_info!)).toMatchObject({ client_id: doc.client_id });
+    } finally {
+      fake.cimd = false;
+    }
+  });
+
+  it("registers again when the dynamically registered client has another redirect URI", async () => {
+    const { manager } = setup();
+    const app = publicApp(manager);
+    await add(manager, { id: "dcr", name: "Dcr", url: `${base}/oauth-mcp`, auth: { type: "oauth" } });
+    await manager.secrets.patch("dcr", { oauth_client_info: JSON.stringify({ client_id: "client-old", redirect_uris: [`${PRIVATE}${CONNECTOR_OAUTH_CALLBACK_PATH}`] }) });
+    const { data } = await (await app.request(`${PRIVATE}/api/v1/connectors/dcr/oauth/start`, { method: "POST" })).json();
+    const url = new URL(data.authorizationUrl);
+    expect(url.searchParams.get("client_id")).not.toBe("client-old");
+    expect(fake.clients.get(url.searchParams.get("client_id")!)?.redirect_uris).toEqual([`${PUBLIC}${CONNECTOR_OAUTH_CALLBACK_PATH}`]);
+    // the browser gets through with the new client
+    expect((await fetch(url, { redirect: "manual" })).status).toBe(302);
+  });
+
+  it("the provider's error on the callback becomes the connector's lastError", async () => {
+    const { manager } = setup();
+    const app = routesApp(manager);
+    await add(manager, { id: "denied", name: "Denied", url: `${base}/oauth-mcp`, auth: { type: "oauth" } });
+    const start = await (await app.request("/api/v1/connectors/denied/oauth/start", { method: "POST" })).json();
+    const state = new URL(start.data.authorizationUrl).searchParams.get("state")!;
+    const res = await app.request(`${CONNECTOR_OAUTH_CALLBACK_PATH}?state=${state}&error=invalid_client&error_description=Client+metadata+unreachable`);
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain("https://polpo.example.com/connectors");
+    expect(manager.store.get("denied")).toMatchObject({ status: "error", lastError: expect.stringContaining("invalid_client: Client metadata unreachable") });
+    expect((await manager.secrets.get("denied")).oauth_state).toBeUndefined();
   });
 });

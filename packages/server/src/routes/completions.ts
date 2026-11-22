@@ -23,6 +23,17 @@ import {
   isContextOverflowError,
   type CompactionSettings,
 } from "@polpo-ai/core";
+import {
+  AGENT_TOOL_GROUPS,
+  POLPO_TOOL_GROUPS,
+  ProgressiveToolSet,
+  loadedToolsFromHistory,
+  progressiveModeFor,
+  restoreToolAnnouncements,
+  type ProgressiveToolsMode,
+  type ToolGroupRule,
+  type ToolsSettings,
+} from "@polpo-ai/core/progressive-tools";
 import { streamRegistry, type PendingSteer } from "../stream-registry.js";
 import type { TurnOutcome, TurnScheduler } from "../turn-scheduler.js";
 import { sessionLeases } from "../session-lease.js";
@@ -488,6 +499,10 @@ export interface CompletionRouteDeps {
   resolveSummaryModel?: (conversationModel: any, configuredSpec: string | undefined, promptTokens: number) => any;
   /** Persist provider-reported token usage for dashboard aggregation. */
   recordTokenUsage?: (usage: TokenUsageRecord) => void | Promise<void>;
+  /** Display names of connectors by id: progressive tool discovery lists them in the prompt. */
+  connectorNames?: () => Record<string, string> | Promise<Record<string, string>>;
+  /** Catalog app of connectors by id (gmail-2 → gmail): tools_search / tools_load by app cover all its accounts. */
+  connectorApps?: () => Record<string, string> | Promise<Record<string, string>>;
   /**
    * Decides what the session says next when a turn is over (undelivered steers, queued prompts).
    * Optional: without it steers that miss the turn are returned instead of carried over.
@@ -632,6 +647,10 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
     let isInteractiveFn: ((name: string) => boolean) | undefined;
     /** The agent's own compaction settings (agent-direct chats), applied over the instance ones. */
     let agentCompactionSettings: Record<string, unknown> | undefined;
+    /** Progressive tool discovery: the mode (agent's own or the instance default) and what can be deferred. */
+    const toolsSettings = deps.getConfig()?.settings?.tools as ToolsSettings | undefined;
+    let progressiveMode: ProgressiveToolsMode = progressiveModeFor(undefined, toolsSettings);
+    let deferrableGroups: ToolGroupRule[] = POLPO_TOOL_GROUPS;
 
     const { piMessages, extraSystemParts } = convertMessages(body.messages);
 
@@ -644,6 +663,8 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
       }
 
       agentCompactionSettings = agentConfig.compaction;
+      progressiveMode = progressiveModeFor(agentConfig, toolsSettings);
+      deferrableGroups = AGENT_TOOL_GROUPS;
       // Per-agent maxTurns override
       if (typeof agentConfig.maxTurns === "number" && agentConfig.maxTurns > 0) {
         maxTurns = Math.floor(agentConfig.maxTurns);
@@ -835,6 +856,47 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
       c.header("x-session-id", sessionId);
     }
 
+    // ── Progressive tool discovery ──
+    // Above the threshold, the turn starts with the essential tools plus tools_search/tools_load;
+    // connector tools and optional groups are loaded on demand (announced mid-conversation, see
+    // announceLoadedTools). Tools loaded in earlier turns of the session start loaded.
+    let progressive: ProgressiveToolSet<any> | undefined;
+    /** Every tool of the turn, deferred ones included: argument checks and execution. */
+    let runTools: any[] = effectiveTools;
+    {
+      let connectorNames: Record<string, string> | undefined;
+      try { connectorNames = await deps.connectorNames?.(); } catch { /* ids instead of names */ }
+      let connectorApps: Record<string, string> | undefined;
+      try { connectorApps = await deps.connectorApps?.(); } catch { /* app names unknown: ids and names still work */ }
+      const options = { tools: effectiveTools, mode: progressiveMode, threshold: toolsSettings?.progressiveThreshold, groups: deferrableGroups, connectorNames, connectorApps };
+      const probe = new ProgressiveToolSet(options);
+      if (probe.enabled) {
+        let loaded: string[] = [];
+        if (sessionStore && sessionId && !isFirstTurn) {
+          try { loaded = loadedToolsFromHistory(await sessionStore.getMessages(sessionId)); } catch { /* start with none loaded */ }
+        }
+        progressive = loaded.length > 0 ? new ProgressiveToolSet({ ...options, loaded }) : probe;
+        const set = progressive;
+        // the meta tools are answered here (set.run), so the model gets their declarations only
+        runTools = set.all({ plainMeta: true });
+        effectiveTools = set.initialTools({ plainMeta: true });
+        const runTool = effectiveToolExecutor;
+        effectiveToolExecutor = async (name, args, context) => {
+          if (set.isMetaTool(name)) return set.run(name, args);
+          // a deferred tool called by name without tools_load: it is allowed, so it is loaded and run
+          if (!set.isActive(name)) set.load([name]);
+          return runTool(name, args, context);
+        };
+        const section = set.promptSection();
+        if (section) fullSystemPrompt = `${fullSystemPrompt}\n\n${section}`;
+      }
+    }
+    /** After a round of tool calls: tools loaded in it are declared to the model (pi-ai toolsAdded). */
+    const announceLoadedTools = (conversation: any[]) => {
+      const announcement = progressive?.takeAnnouncement();
+      if (announcement) conversation.push(announcement);
+    };
+
     // ── Context compaction (packages/core/src/context-compactor.ts) ──
     // The full conversation (caller history + this turn's loop) stays intact in `messages`;
     // the model gets a projection: checkpoint summary + recent messages, stable between calls.
@@ -865,8 +927,11 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         scope: "chat", ...(sessionId ? { sessionId } : {}), ...(body.agent ? { agentName: body.agent } : {}), ...info,
       }),
     });
-    const prepareContext = (current: any[], force?: "overflow" | "manual", focus?: string) =>
-      compaction.prepare(current, force, focus);
+    // Compaction drops old system messages: tools loaded mid-conversation are declared again.
+    const prepareContext = async (current: any[], force?: "overflow" | "manual", focus?: string) => {
+      const prepared = await compaction.prepare(current, force, focus);
+      return progressive ? { ...prepared, messages: restoreToolAnnouncements(current, prepared.messages) } : prepared;
+    };
 
     const recordResponseUsage = async (response: any): Promise<void> => {
       const usage = response?.usage;
@@ -1143,7 +1208,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
               ensureToolSegment(segmentsAccum, call.id);
             }
             // Arguments that do not match the tool's schema: the call is neither run nor previewed.
-            const invalidCalls = checkToolCalls(effectiveTools, toolCalls, deps.validateToolArguments);
+            const invalidCalls = checkToolCalls(runTools, toolCalls, deps.validateToolArguments);
 
             if (toolCalls.length === 0) {
               // The model is done — unless the user steered meanwhile: then the turn goes on.
@@ -1441,6 +1506,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
                 timestamp: Date.now(),
               });
             }
+            announceLoadedTools(messages);
 
             // Safe point: this round's tool results are in. Steers join the conversation here,
             // before the model's next response (as long as one more round is allowed).
@@ -1577,7 +1643,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
             ensureToolSegment(segmentsAccum, call.id);
           }
           // Arguments that do not match the tool's schema: the call is neither run nor previewed.
-          const invalidCalls = checkToolCalls(effectiveTools, toolCalls, deps.validateToolArguments);
+          const invalidCalls = checkToolCalls(runTools, toolCalls, deps.validateToolArguments);
 
           if (toolCalls.length === 0) {
             // ended without a word (often right after tools): ask once for the answer
@@ -1884,12 +1950,15 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
               timestamp: Date.now(),
             });
           }
+          announceLoadedTools(messages);
         }
 
         if (!finished) {
           // the step limit: one last answer without tools rather than nothing
           const prepared = await prepareContext([...messages, { role: "user", content: STEP_LIMIT_NUDGE, timestamp: Date.now() }]);
-          const closingResult = deps.streamLLM(m, { systemPrompt: fullSystemPrompt, messages: prepared.messages, tools: [] },
+          // no tools at all, loaded ones included
+          const noTools = prepared.messages.filter((message: any) => !(message.role === "system" && message.toolsAdded));
+          const closingResult = deps.streamLLM(m, { systemPrompt: fullSystemPrompt, messages: noTools, tools: [] },
             { ...streamOpts, ...(sessionId ? { sessionId } : {}) });
           const closing = typeof closingResult?.[Symbol.asyncIterator] === "function" ? closingResult : await closingResult;
           let closingText = "";

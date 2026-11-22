@@ -5,6 +5,7 @@ import type { AttachmentStore, ChatQueueStore } from "@polpo-ai/core";
 import { streamRegistry } from "../stream-registry.js";
 import { withAttachmentLock } from "../attachment-lock.js";
 import type { TurnScheduler } from "../turn-scheduler.js";
+import { carryContextCheckpoint, type ContextCheckpointStore } from "../context-checkpoint.js";
 
 /* ── Route definitions ─────────────────────────────────────────────── */
 
@@ -131,6 +132,8 @@ export interface ChatRouteDeps {
   turnScheduler?: TurnScheduler;
   /** Delete an attachment file (project-relative path) once no message references it. */
   removeAttachmentFile?: (path: string) => Promise<void>;
+  /** Context checkpoints of chat sessions: a branch starts with its parent's when it still applies. */
+  contextCheckpoints?: ContextCheckpointStore;
 }
 
 /** Longest queued prompt accepted (characters). */
@@ -464,7 +467,7 @@ export function chatRoutes(getDeps: () => ChatRouteDeps): OpenAPIHono {
   //                               delete anyway).
 
   app.post("/sessions/:id/fork", async (c) => {
-    const { sessionStore, attachmentStore, turnScheduler, emit } = getDeps();
+    const { sessionStore, attachmentStore, turnScheduler, emit, contextCheckpoints } = getDeps();
     if (!sessionStore?.forkSession) {
       return c.json({ ok: false, error: "Branching is not available", code: "NOT_AVAILABLE" }, 501);
     }
@@ -505,6 +508,25 @@ export function chatRoutes(getDeps: () => ChatRouteDeps): OpenAPIHono {
       }
     }
     emit?.("session:created", { sessionId: forkId, title: fork.session.title });
+
+    // The parent's context checkpoint, when it covers only copied messages: the branch's first
+    // long turn starts from it instead of summarizing the whole history again.
+    if (contextCheckpoints) {
+      try {
+        const copied = messages.slice(0, messages.indexOf(target) + 1);
+        const carry = await carryContextCheckpoint(contextCheckpoints, parent, fork.session, copied);
+        if (carry.carried) {
+          console.info(`[chat] branch ${forkId} of ${id}: context checkpoint carried over (${carry.covers} messages summarized)`);
+          emit?.("context:checkpoint-carried", {
+            sessionId: forkId, parentSessionId: id, coveredMessages: carry.covers, compactionCount: carry.count,
+            ...(fork.session.agent ? { agentName: fork.session.agent } : {}),
+          });
+        }
+      } catch (error) {
+        // Without it the branch compacts again on its first long turn: slower, not wrong.
+        console.warn(`[chat] branch ${forkId}: context checkpoint not carried over:`, error instanceof Error ? error.message : error);
+      }
+    }
 
     // The assistant answers the copied user message again, in the branch.
     let turnId: string | null = null;

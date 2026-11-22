@@ -6,7 +6,7 @@
  *
  * The schema comes from the real migrations, so the tests also prove they build a working database.
  */
-import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from "vitest";
 import { randomBytes } from "node:crypto";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
@@ -85,6 +85,35 @@ describe.each(DIALECTS)("%s", (dialect) => {
       expect(fetched).toBeDefined();
       expect(fetched!.title).toBe("Fix bug");
       expect(fetched!.expectations).toEqual([{ type: "llm_review", criteria: "Login works" }]);
+    });
+
+    it("keeps a task's runs (where and with what each run executed)", async () => {
+      const task = await stores.taskStore.addTask({
+        title: "Runs", description: "x", assignTo: "claude", dependsOn: [], maxRetries: 2, expectations: [], metrics: [],
+      });
+      expect(task.runs).toBeUndefined();
+      const runs = [{
+        runId: "r1", startedAt: "2026-11-22T10:00:00.000Z", status: "completed" as const, engine: "claude-code" as const,
+        computer: { id: "box", kind: "daytona" as const, provider: "daytona" as const, daytonaApi: "v2" as const },
+        egress: { mode: "proxy" as const, proxy: "home", tailscale: true }, session: { resumed: true, bootstrapMs: 1300 }, cost: { harnessUsd: 0.02 },
+      }];
+      await stores.taskStore.updateTask(task.id, { runs });
+      expect((await stores.taskStore.getTask(task.id))!.runs).toEqual(runs);
+      expect((await stores.taskStore.getAllTasks()).find((t) => t.id === task.id)!.runs).toEqual(runs);
+    });
+
+    it("keeps a task's tool scope, and clears it (back to the agent's tools)", async () => {
+      const toolScope = { connectors: ["gmail-2"], connectorTools: { "gmail-2": ["send_email"] }, allowedTools: ["read"] };
+      const task = await stores.taskStore.addTask({
+        title: "Scoped", description: "x", assignTo: "claude", dependsOn: [], maxRetries: 2, expectations: [], metrics: [], toolScope,
+      });
+      expect((await stores.taskStore.getTask(task.id))!.toolScope).toEqual(toolScope);
+      await stores.taskStore.updateTask(task.id, { toolScope: { connectors: "none" } });
+      expect((await stores.taskStore.getAllTasks()).find((t) => t.id === task.id)!.toolScope).toEqual({ connectors: "none" });
+      await stores.taskStore.updateTask(task.id, { title: "Scoped 2" });
+      expect((await stores.taskStore.getTask(task.id))!.toolScope).toEqual({ connectors: "none" });
+      await stores.taskStore.updateTask(task.id, { toolScope: undefined });
+      expect((await stores.taskStore.getTask(task.id))!.toolScope).toBeUndefined();
     });
 
     it("getAllTasks returns ordered by createdAt", async () => {
@@ -207,6 +236,20 @@ describe.each(DIALECTS)("%s", (dialect) => {
       const updated = await stores.taskStore.updateMission!(m.id, { status: "active" });
       expect(updated.status).toBe("active");
       expect(updated.name).toBe("m-1");
+    });
+
+    it("keeps a mission's budget and why it paused; a key given as undefined clears them", async () => {
+      const m = await stores.taskStore.saveMission!({ name: "m-budget", data: "{}", status: "active", budgetUsd: 12.5 });
+      expect((await stores.taskStore.getMission!(m.id))!.budgetUsd).toBe(12.5);
+      await stores.taskStore.updateMission!(m.id, { status: "paused", pauseReason: "budget", budgetUsd: 20 });
+      expect(await stores.taskStore.getMission!(m.id)).toMatchObject({ status: "paused", pauseReason: "budget", budgetUsd: 20 });
+      await stores.taskStore.updateMission!(m.id, { status: "active" });
+      expect((await stores.taskStore.getMission!(m.id))!.pauseReason).toBe("budget");
+      await stores.taskStore.updateMission!(m.id, { pauseReason: undefined, budgetUsd: undefined });
+      const cleared = await stores.taskStore.getMission!(m.id);
+      expect(cleared!.pauseReason).toBeUndefined();
+      expect(cleared!.budgetUsd).toBeUndefined();
+      expect((await stores.taskStore.getAllMissions!()).find((x) => x.id === m.id)!.budgetUsd).toBeUndefined();
     });
 
     it("deleteMission removes", async () => {
@@ -530,6 +573,46 @@ describe.each(DIALECTS)("%s", (dialect) => {
       expect(msgs).toHaveLength(2);
       expect(msgs[0].role).toBe("user");
       expect(msgs[1].content).toBe("Hi there");
+    });
+
+    it("messages added in the same millisecond keep the order they were added in", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        vi.setSystemTime(new Date("2026-05-09T01:25:45.278Z"));
+        const sid = await stores.sessionStore.create();
+        for (const [role, text] of [["user", "one"], ["assistant", "two"], ["user", "three"], ["assistant", "four"]] as const) {
+          await stores.sessionStore.addMessage(sid, role, text);
+        }
+        const all = await stores.sessionStore.getMessages(sid);
+        expect(all.map((m) => m.content)).toEqual(["one", "two", "three", "four"]);
+        expect(new Set(all.map((m) => m.ts)).size).toBe(4);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("messages already stored with the same timestamp come back in one stable order, the question first", async () => {
+      // rows saved before timestamps were made distinct can share a millisecond (seen in live data)
+      const spy = vi.spyOn(stores.sessionStore as any, "nextMessageTs").mockResolvedValue("2026-05-09T01:25:45.278Z");
+      try {
+        const sid = await stores.sessionStore.create();
+        // stored answer first, question second, all in the same millisecond
+        await stores.sessionStore.addMessage(sid, "assistant", "a1");
+        await stores.sessionStore.addMessage(sid, "user", "q1");
+        await stores.sessionStore.addMessage(sid, "assistant", "a2");
+        await stores.sessionStore.addMessage(sid, "assistant", "a3");
+        const all = await stores.sessionStore.getMessages(sid);
+        expect(all.map((m) => m.content).slice(0, 1)).toEqual(["q1"]);
+        // same order on every read, in every reader
+        for (let i = 0; i < 3; i += 1) expect(await stores.sessionStore.getMessages(sid)).toEqual(all);
+        expect((await stores.sessionStore.getRecentMessages(sid, 2)).map((m) => m.id)).toEqual(all.slice(-2).map((m) => m.id));
+        expect((await stores.sessionStore.getMessagesAfter!(sid, all[1]!.id))!.map((m) => m.id)).toEqual(all.slice(2).map((m) => m.id));
+        // a branch keeps the order, ties included
+        const fork = await stores.sessionStore.forkSession!(sid, all[3]!.id);
+        expect((await stores.sessionStore.getMessages(fork!.session.id)).map((m) => m.content)).toEqual(all.map((m) => m.content));
+      } finally {
+        spy.mockRestore();
+      }
     });
 
     it("getRecentMessages returns last N", async () => {

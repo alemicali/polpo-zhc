@@ -599,6 +599,24 @@ describe("AssessmentOrchestrator", () => {
       expect(maxRetryEvents[0].taskId).toBe(task.id);
     });
 
+    it("a non-retryable failure (model not enabled) fails at once, retries left or not, with its error", async () => {
+      const h = createHarness();
+      const task = await addReviewTask(h, { maxRetries: 3 });
+      const retryEvents: any[] = [];
+      h.emitter.on("task:retry", (e) => retryEvents.push(e));
+      const stderr = 'Bedrock: model "us.anthropic.claude-sonnet-5-5" not enabled for this account';
+
+      h.ao.handleResult(task.id, { ...createFailResult(), stderr, retryable: false });
+
+      await vi.waitFor(async () => {
+        expect((await h.store.getTask(task.id))!.status).toBe("failed");
+      });
+      const t = (await h.store.getTask(task.id))!;
+      expect(retryEvents).toHaveLength(0);
+      expect(t.retries).toBe(0);
+      expect(t.result).toMatchObject({ exitCode: 1, stderr, retryable: false });
+    });
+
     it("preserves originalDescription on first retry", async () => {
       const h = createHarness();
       const task = await addReviewTask(h, {

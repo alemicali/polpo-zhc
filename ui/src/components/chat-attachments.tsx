@@ -39,6 +39,6 @@ function AttachmentCard({ attachment: a }: { attachment: Attachment }) {
         </a>}
         <a href={url} download={a.filename} className="block text-xs underline py-2 break-all">{a.filename}</a>
       </>}
-    <div className="text-[10px] opacity-80">{a.previewUrl ? "Pending server confirmation" : "Saved to conversation"}</div>
+    <div className="text-micro opacity-80">{a.previewUrl ? "Pending server confirmation" : "Saved to conversation"}</div>
   </div>;
 }

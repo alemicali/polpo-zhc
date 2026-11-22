@@ -192,6 +192,35 @@ describe("Checkpoints", () => {
       expect(result!.reachedAt).toBeTruthy();
     });
 
+    it("{ name, afterTasks: 20 writers, blocksTasks: [final] } pauses the mission and holds the final task until resumed", async () => {
+      // the shape of the live spike20 mission: it did pause (checkpoint:reached), and was resumed
+      // by a chat request to Polpo (checkpoint:resumed, source polpo) before the final task ran
+      const writers = Array.from({ length: 20 }, (_, i) => `frase-${String(i + 1).padStart(2, "0")}`);
+      const missionData = JSON.stringify({
+        tasks: [
+          ...writers.map((title) => ({ title, description: `Write ${title}` })),
+          { title: "frase-finale", description: "Weave them", dependsOn: writers },
+        ],
+        checkpoints: [{ name: "collect", afterTasks: writers, blocksTasks: ["frase-finale"], message: "collect" }],
+      });
+      const mission = await missionExec.saveMission({ data: missionData, name: "spike20" });
+      const { tasks: created } = await missionExec.executeMission(mission.id);
+      const finale = created.find((t) => t.title === "frase-finale")!;
+      expect(finale.dependsOn).toHaveLength(20);
+
+      const almost = [...writers.slice(0, 19).map((w) => createDoneTask(w, { group: "spike20" })), createPendingTask(writers[19], { group: "spike20" }), finale];
+      expect(await missionExec.getBlockingCheckpoint("spike20", "frase-finale", finale.id, almost)).toBeUndefined();
+
+      const all = [...writers.map((w) => createDoneTask(w, { group: "spike20", missionId: mission.id })), finale];
+      const blocking = await missionExec.getBlockingCheckpoint("spike20", "frase-finale", finale.id, all);
+      expect(blocking?.checkpoint.name).toBe("collect");
+      expect((await ctx.registry.getMission!(mission.id))?.status).toBe("paused");
+
+      expect(await missionExec.resumeCheckpoint("spike20", "collect")).toBe(true);
+      expect(await missionExec.getBlockingCheckpoint("spike20", "frase-finale", finale.id, all)).toBeUndefined();
+      expect((await ctx.registry.getMission!(mission.id))?.status).toBe("active");
+    });
+
     it("does not block tasks not listed in blocksTasks", async () => {
       const missionData = JSON.stringify({
         tasks: [

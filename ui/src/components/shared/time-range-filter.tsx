@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Calendar, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   Popover,
   PopoverContent,
@@ -54,19 +55,19 @@ export function TimeRangeFilter({
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-56 p-2" align="start">
-        <div className="mb-2 flex items-center gap-1">
+        <SegmentedControl
+          size="sm"
+          aria-label="Time field"
+          className="mb-2 w-full"
+          value={field}
+          onValueChange={selectField}
+        >
           {timeFieldOptions.map((option) => (
-            <Button
-              key={option.value}
-              variant={field === option.value ? "default" : "ghost"}
-              size="sm"
-              className="h-6 flex-1 text-[10px]"
-              onClick={() => selectField(option.value)}
-            >
+            <ToggleGroupItem key={option.value} value={option.value}>
               {option.label}
-            </Button>
+            </ToggleGroupItem>
           ))}
-        </div>
+        </SegmentedControl>
 
         <div className="space-y-0.5">
           {timeRangePresets.map((preset) => {
@@ -74,9 +75,10 @@ export function TimeRangeFilter({
             return (
               <button
                 key={preset.value}
+                type="button"
                 className={cn(
-                  "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
-                  selected ? "bg-accent text-accent-foreground" : "hover:bg-muted",
+                  "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors",
+                  selected ? "bg-accent text-accent-foreground" : "hover:bg-accent hover:text-accent-foreground",
                 )}
                 onClick={() => onChange({
                   field,
@@ -97,7 +99,7 @@ export function TimeRangeFilter({
         </div>
 
         {value && (
-          <Button variant="ghost" size="sm" className="mt-1 w-full text-xs" onClick={onClear}>
+          <Button variant="ghost" size="sm" className="mt-1 w-full" onClick={onClear}>
             Show all time
           </Button>
         )}

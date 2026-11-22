@@ -14,6 +14,11 @@ export interface ChangelogEntry {
   id: string;
   /** ISO date (YYYY-MM-DD). */
   date: string;
+  /**
+   * Optional ISO datetime the entry went online, used only when this instance's UI server did not
+   * record one (dev and local builds). Deployed instances get the real time from runtime-config.js.
+   */
+  publishedAt?: string;
   kind: ChangelogKind;
   title: string;
   /** One line, shown in the banner. */
@@ -26,6 +31,255 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "2026-11-22-whats-new-accordion",
+    date: "2026-11-22",
+    kind: "improved",
+    title: "Novità più facili da scorrere",
+    summary: "Le novità sono raggruppate per giorno su una linea del tempo: vedi solo i titoli e apri quelle che ti interessano.",
+    body: [
+      "- **Un giorno alla volta**: ogni giorno è un gruppo che puoi aprire o chiudere; mentre scorri, la data resta in alto con quante novità ci sono e quante non hai ancora letto. Il giorno più recente è aperto, quelli precedenti sono chiusi.",
+      "- **Solo i titoli**: ogni novità è una riga con tipo, titolo e ora; premendola (o con Invio / Spazio) si apre il dettaglio, con il pulsante per provarla. Le novità non lette sono evidenziate.",
+      "- **Espandi tutto / Comprimi tutto** in cima, e le frecce ↑ ↓ per spostarti tra le righe.",
+      "- Quello che apri e chiudi viene ricordato su questo dispositivo, e un link a una novità (`/changelog#…`) la apre direttamente.",
+      "- Il pannello delle novità è un po' più largo.",
+    ].join("\n"),
+    highlight: false,
+  },
+  {
+    id: "2026-11-22-task-total-cost",
+    date: "2026-11-22",
+    kind: "improved",
+    title: "Il costo totale di un task, non solo dell'ultima esecuzione",
+    summary: "Quando un task gira più volte (tentativi, continuazioni, indicazioni), la sua pagina mostra quanto è costato in tutto e quanto l'ultima esecuzione, con il dettaglio di ogni esecuzione.",
+    body: [
+      "- **Totale accanto allo stato**: nell'intestazione del task il costo di tutte le sue esecuzioni e quante sono.",
+      "- **Scheda Esecuzione**: «Totale, N esecuzioni: $X · Ultima: $Y», i token e, se ha girato su più motori, quanto su ciascuno (Claude Code, Codex, Polpo).",
+      "- **Ogni esecuzione**: nella lista delle esecuzioni data e ora, motore, modello, durata, stato e costo di ciascuna.",
+      "- **Liste e bacheca**: righe e card dei task (e i task nella pagina della missione) mostrano il totale, non l'ultima esecuzione; si può nascondere da «Campi».",
+      "- **Stessi conti ovunque**: il totale del task e quello della missione usano lo stesso calcolo; lo vedono anche l'API, l'MCP (anche nella scheda del task) e Polpo. Un task tiene le ultime 20 esecuzioni: se le più vecchie sono state scartate, il costo dei harness viene recuperato dai consumi registrati, altrimenti il totale è segnato con «+».",
+    ].join("\n"),
+    highlight: false,
+  },
+  {
+    id: "2026-11-22-chat-navigation",
+    date: "2026-11-22",
+    kind: "fixed",
+    title: "La chat riparte da dove eri",
+    summary: "Ricaricando la pagina o riaprendo la Chat ritrovi la conversazione che avevi aperto, le schede, i pannelli e i messaggi non ancora inviati.",
+    body: [
+      "Prima, ricaricando la pagina si finiva sulla conversazione più recente invece che su quella aperta, e le preferenze di navigazione si perdevano. Ora:",
+      "",
+      "- **La conversazione è nell'indirizzo** (`/chat?session=…`): ricarica, indietro e avanti ti riportano esattamente lì, e puoi condividere il link. Vale per le chat con Polpo, con gli agenti, i gruppi e le chat arrivate da Telegram o WhatsApp.",
+      "- **Riaprendo Chat** ritrovi l'ultima conversazione che avevi aperto tu (anche una nuova chat con l'agente scelto, o un gruppo), non la più recente.",
+      "- **Le tue preferenze ti seguono** su ogni dispositivo: schede aperte, pannello della chat a destra aperto o chiuso, elenco delle conversazioni.",
+      "- **I messaggi non inviati** restano nel campo di testo di ogni conversazione anche dopo aver ricaricato, insieme al punto in cui eri arrivato a leggere (su questo dispositivo).",
+      "",
+      "Se una conversazione nel link è stata eliminata, un avviso te lo dice e si apre la tua ultima chat.",
+    ].join("\n"),
+  },
+  {
+    id: "2026-11-22-connector-icons",
+    date: "2026-11-22",
+    kind: "improved",
+    title: "Icone dei connettori personalizzati e configurazione automatica",
+    summary: "I connettori aggiunti con un URL ora mostrano la loro icona, e quando ne aggiungi uno Polpo capisce da solo come collegarlo.",
+    body: [
+      "- **Icone anche per i connettori personalizzati**: Polpo cerca l'icona come fa un buon client MCP: prima quella che il server MCP dichiara (anche la variante per il tema scuro), poi i dati di accesso OAuth, poi il sito del servizio (es. mcp.sitoinchat.it → sitoinchat.it: icona SVG, icone del manifest, favicon). Se non trova nulla resta l'iniziale colorata. I connettori del catalogo mantengono le loro icone ufficiali.",
+      "- Le icone sono scaricate dal server (mai caricate da siti esterni nel browser), solo in https, con limiti di dimensione e controlli di sicurezza; gli SVG vengono ripuliti.",
+      "- I connettori già aggiunti ricevono l'icona da soli alla prima apertura dell'elenco.",
+      "- Nelle impostazioni di un connettore personalizzato: **Refresh icon**, oppure carica un'immagine o indica un URL; **Automatic** torna all'icona trovata.",
+      "- **Aggiungi un connettore personalizzato**: appena inserisci l'URL, Polpo verifica il server e propone come collegarlo (nessun accesso, OAuth con registrazione automatica o con un tuo client, token) con l'opzione **Recommended** già selezionata, nome, ambiti (scopes) e icona precompilati. Puoi sempre cambiare scelta.",
+      "- Le icone compaiono ovunque ci sono i connettori: elenco, impostazioni, strumenti dell'agente e strumenti del task; via MCP (`icon_url`) e nelle risposte di Polpo. La rilevazione è disponibile anche dall'API (`POST /api/v1/connectors/discover`), da MCP (`polpo_connector_add` con `detect_only`) e chiedendolo a Polpo.",
+    ].join("\n"),
+    highlight: false,
+    cta: { label: "Apri i connettori", to: "/connectors" },
+  },
+  {
+    id: "2026-11-22-harness-gateways",
+    date: "2026-11-22",
+    kind: "new",
+    title: "Claude Code e Codex senza chiavi nel computer, e con i gateway dei modelli",
+    summary: "La chiave del modello resta sul server di Polpo: nel computer arriva solo un segnaposto. E ora puoi usare Vercel AI Gateway, Cloudflare, OpenRouter, LiteLLM, Portkey o un tuo gateway, con un test della connessione.",
+    body: [
+      "- **Chiavi fuori dal computer**: con una chiave API o un gateway, Claude Code e Codex nel computer ricevono un segnaposto; Polpo aggiunge la chiave vera fuori dalla VM, sulle richieste al modello. Vale per ogni tipo di computer (Daytona, E2B e i prossimi). Serve l'indirizzo pubblico dell'istanza (`POLPO_PUBLIC_URL`): senza, la chiave va nella VM come prima e Impostazioni → Harness lo segnala.",
+      "- **Gateway dei modelli**: in Impostazioni → Harness scegli Vercel AI Gateway, oppure un gateway con i preset per Cloudflare AI Gateway, OpenRouter, LiteLLM, Portkey e Kong. Chiavi e header segreti vengono sempre dal vault.",
+      "- **Altri modelli**: con «modelli non Claude» Claude Code lavora anche con modelli di altri fornitori serviti in formato Anthropic.",
+      "- **Prova la connessione**: un pulsante (e ogni salvataggio) manda una piccola richiesta dal server e ti dice se funziona, quanto ci mette e, se no, cosa cambiare.",
+      "- **Chiave per agente**: un agente può usare una sua chiave, per tenere separati i costi.",
+      "",
+      "Bedrock e Vertex firmano le richieste dentro il computer, quindi le loro credenziali restano lì: per tenerle fuori, mettici davanti un gateway.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri le impostazioni", to: "/config?section=harnesses" },
+  },
+  {
+    id: "2026-11-22-computers-list",
+    date: "2026-11-22",
+    kind: "improved",
+    title: "Computer in lista, e quelli eliminati dal provider si vedono",
+    summary: "La pagina Computer è una tabella come le altre, ogni computer ha la sua pagina con sessioni, task e costi, e uno la cui macchina è stata eliminata da Daytona o E2B ora risulta «Deleted at provider».",
+    body: [
+      "- **Lista invece delle card**: una riga per computer con provider (Daytona v2, Daytona, E2B), stato in tempo reale, agenti che lo usano, sessioni harness, egress, ultimo uso e snapshot. Ricerca, filtri per stato e provider, ordinamento; su telefono le righe sono compatte.",
+      "- **Una pagina per ogni computer**: la riga apre la sua pagina con stato e azioni (avvia, ferma o iberna, riavvia, reset, elimina), quando si iberna da solo, quanto è costato, le sessioni harness e i task che ci sono girati (con link), l'attività recente, gli agenti, gli snapshot, la macchina e la rete con l'egress. Modifica imposta anche rete e risorse.",
+      "- **Eliminato dal provider**: se la macchina (e, su Daytona v2, i suoi snapshot) viene eliminata dalla dashboard del provider, Polpo se ne accorge da solo entro pochi minuti, o subito con Aggiorna, e lo mostra invece di continuare a dirlo acceso o ibernato. Puoi **Ricrearlo** (una macchina nuova dall'immagine, senza i file di prima) o **Rimuoverlo da Polpo**.",
+      "- **Niente errori misteriosi**: se un agente usa un computer la cui macchina è sparita, Polpo ne crea una nuova e lo avvisa, invece di fallire.",
+      "- **Avvisi immediati dal provider**: in Impostazioni → Computers colleghi i webhook di Daytona (incolli l'URL nella sua dashboard e il segreto di firma in Polpo) ed E2B (Polpo lo registra da solo): ogni cambio di stato arriva subito, e il controllo periodico diventa una rete di sicurezza.",
+    ].join("\n"),
+    cta: { label: "Apri i computer", to: "/computers" },
+  },
+  {
+    id: "2026-11-22-whats-new-time",
+    date: "2026-11-22",
+    kind: "improved",
+    title: "Le novità con l'ora in cui sono arrivate",
+    summary: "Ogni novità mostra anche l'ora in cui è andata online su questa istanza, e quelle arrivate dopo la tua ultima visita sono segnate.",
+    body: [
+      "- **Data e ora**: accanto a ogni novità vedi quando è andata online qui (es. \"22 nov 2026 · 18:52\", nel tuo fuso orario); nello stesso giorno le più recenti stanno in alto.",
+      "- **Nella barra in alto**: \"online alle 18:52\" accanto alla novità più recente.",
+      "- **Non lette**: le novità arrivate dopo la tua ultima visita hanno l'etichetta **Non letta**, così non ti perdi nulla.",
+      "",
+      "L'ora viene registrata dal primo aggiornamento successivo a questo: per le novità già presenti si vede solo il giorno.",
+    ].join("\n"),
+  },
+  {
+    id: "2026-11-22-task-tool-scope",
+    date: "2026-11-22",
+    kind: "new",
+    title: "Strumenti per singolo task",
+    summary: "Un task può usare solo alcuni connettori, account e strumenti del suo agente: utile quando un'esecuzione deve essere prevedibile. Di base eredita tutto dall'agente.",
+    body: [
+      "Nella pagina di un task, la sezione **Tools for this task** ha due scelte:",
+      "",
+      "- **Inherit from agent** (predefinito): il task usa tutti i connettori e gli strumenti che l'agente ha, come prima.",
+      "- **Restrict**: scegli quali connettori (e quali account, per esempio Gmail – info@…) può usare, eventualmente solo alcuni loro strumenti (con ricerca, seleziona tutti / nessuno) e solo alcuni strumenti integrati.",
+      "",
+      "Si può solo restringere: quello che l'agente non ha non si può aggiungere, e viene rifiutato con un messaggio chiaro. Se l'agente perde qualcosa (connettore rimosso, accesso revocato) la pagina lo segnala. Il badge mostra cosa è limitato (\"Restricted: Linear (3 tools), Gmail – info@…\") e ogni esecuzione registra i limiti che aveva.",
+      "",
+      "Vale con Polpo, Claude Code e Codex, anche per la ricerca degli strumenti su richiesta; si imposta anche dai task delle missioni (pure programmate e ricorrenti), dall'API, da MCP (`connectors`, `connector_tools`, `allowed_tools`) e chiedendolo a Polpo.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i task", to: "/tasks" },
+  },
+  {
+    id: "2026-11-22-connector-accounts",
+    date: "2026-11-22",
+    kind: "new",
+    title: "Più account dello stesso servizio nei connettori",
+    summary: "Collega due caselle Gmail, o una per agente: ogni account ha il suo nome, il suo accesso e i suoi strumenti, e gli agenti sanno quale usare.",
+    body: [
+      "- **Aggiungi un altro account**: su un connettore già collegato (la scheda nel catalogo o le sue impostazioni) premi **Account** / **Aggiungi un altro account**, dai un nome (es. \"Gmail – info@lumea.dev\") e accedi come al solito.",
+      "- **Sempre distinguibili**: nell'elenco gli account dello stesso servizio stanno insieme (\"Gmail · 2 account\") e ognuno mostra il suo nome e l'account; nella pagina dell'agente ognuno ha il suo interruttore.",
+      "- **Chi può usarlo, per account**: una casella per l'agente commerciale, un'altra per il supporto.",
+      "- **Rinomina** un connettore dalle sue impostazioni (matita accanto al nome). Se l'accesso rivela l'account (es. l'email), Polpo propone di usarlo come nome.",
+      "- **Gli agenti non si confondono**: gli strumenti di ogni account portano il suo nome (`mcp__gmail-2__…` = \"Gmail – info@lumea.dev\") e il prompt dice quale account è quale.",
+      "- Le finestre dei connettori ora stanno sempre nello schermo: i pulsanti restano visibili e si scorre solo il contenuto.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i connettori", to: "/connectors" },
+  },
+  {
+    id: "2026-11-22-compaction-fix",
+    date: "2026-11-22",
+    kind: "fixed",
+    title: "Le chat lunghe non si compattano più a ogni messaggio",
+    summary: "Una chat lunga usata dal web e da Telegram riassumeva di nuovo tutta la conversazione quasi a ogni messaggio: ora riusa il riassunto e risponde subito.",
+    body: [
+      "Quando una chat diventa troppo lunga, Polpo ne riassume l'inizio e riusa quel riassunto nei messaggi successivi, controllando che la conversazione sia ancora la stessa.",
+      "",
+      "Il controllo era troppo rigido: bastava che due messaggi salvati nello stesso istante tornassero in ordine diverso, o che il web e Telegram mostrassero la conversazione in modo leggermente diverso (risposte vuote, allegati), per scartare il riassunto e rifarlo da capo, con attese lunghe e molti token a ogni giro.",
+      "",
+      "Ora i messaggi hanno sempre lo stesso ordine (prima la domanda, poi la risposta) e il riassunto vale per la conversazione qualunque sia la strada da cui arriva il messaggio. Alla prossima compattazione il vecchio riassunto viene sostituito, poi viene riusato.",
+    ].join("\n"),
+  },
+  {
+    id: "2026-11-22-dependency-results",
+    date: "2026-11-22",
+    kind: "new",
+    title: "I task ricevono i risultati dei task da cui dipendono",
+    summary: "Un task che dipende da altri trova nel suo prompt i loro risultati, output ed eventuali errori, e può leggerli per intero con lo strumento task_result.",
+    body: [
+      "- **Risultati nel prompt**: per ogni task da cui dipende vede titolo, agente, stato, la risposta finale, gli output registrati (testi per intero, file come riferimento) e l'errore se è fallito. Vale al primo avvio, nei nuovi tentativi e nelle continuazioni, con Polpo, Claude Code e Codex.",
+      "- **Nessun copia e incolla**: in una missione basta `dependsOn`; non serve un checkpoint né uno script per passare i risultati al task finale.",
+      "- **Lettura completa**: se un risultato è lungo viene accorciato, e l'agente lo legge tutto con `task_result` (solo i task da cui dipende e quelli della sua missione).",
+      "- **Spazio regolabile**: quanti caratteri per task e in totale, da `dependencyResults` nelle impostazioni (predefiniti 2000 e 20000).",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri le missioni", to: "/missions" },
+  },
+  {
+    id: "2026-11-22-mission-cost",
+    date: "2026-11-22",
+    kind: "new",
+    title: "Quanto costa una missione, e un budget per tenerla a bada",
+    summary: "Ogni missione mostra il costo complessivo di tutti i suoi task (tentativi e continuazioni compresi), per agente e per motore; con un budget si ferma da sola quando lo raggiunge.",
+    body: [
+      "- **Costo complessivo**: nell'intestazione della missione la somma di tutte le esecuzioni dei suoi task, in dollari e token, con il dettaglio per motore (Claude Code, Codex, Polpo) e per agente, e quanto è stima del harness e quanto costo del modello.",
+      "- **Budget opzionale**: impostalo dalla missione (o da Polpo e dall'MCP); la barra diventa gialla vicino al limite e rossa oltre.",
+      "- **Si ferma da sola**: raggiunto il budget non parte nessun nuovo task (quelli in corso finiscono), la missione va in pausa e ricevi la notifica tramite le tue regole. Alza o togli il budget e riparte da sola.",
+      "- **Lista missioni**: il costo di ogni missione accanto allo stato.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri le missioni", to: "/missions" },
+  },
+  {
+    id: "2026-11-22-run-context",
+    date: "2026-11-22",
+    kind: "new",
+    title: "Dove e con cosa ha lavorato ogni task",
+    summary: "Nel dettaglio del task vedi motore (Claude Code, Codex o Polpo), modello, computer, uscita di rete, sessione e costo di ogni esecuzione, con i loghi veri.",
+    body: [
+      "- **Scheda Esecuzione nel task**: motore e modello (es. Haiku 4.5 via Bedrock), il computer su cui ha girato (Daytona v2, E2B o host) con il suo stato, l'uscita di rete, se la sessione è nuova o ripresa e il costo rispetto al budget.",
+      "- **Storico delle esecuzioni**: le ultime esecuzioni di ogni task restano consultabili.",
+      "- **Loghi ovunque**: lista task, board, missioni, agenti, organigramma, computer e impostazioni mostrano il motore di ogni agente a colpo d'occhio.",
+      "- **Log completi** anche per i task eseguiti con Claude Code, con token e costo.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i task", to: "/tasks" },
+  },
+  {
+    id: "2026-11-22-polpo-does-it-all",
+    date: "2026-11-22",
+    kind: "improved",
+    title: "Polpo sa fare tutto quello che fa l'MCP",
+    summary: "In chat Polpo ora configura agenti con Claude Code e computer, connettori, canali, aspetto e impostazioni, senza mai chiederti chiavi in chat.",
+    body: [
+      "- **Agenti completi dalla chat**: motore (Claude Code o Codex), computer, tool dei connettori e uscita di rete.",
+      "- **Connettori, canali, aspetto, impostazioni, membri e accessi MCP** gestibili chiedendolo a Polpo.",
+      "- **Chiavi al sicuro**: per ogni segreto Polpo ti dà il link al campo giusto, aspetta che lo compili e prosegue da solo.",
+    ].join("\n"),
+    highlight: true,
+  },
+  {
+    id: "2026-11-22-theme-everywhere",
+    date: "2026-11-22",
+    kind: "improved",
+    title: "Il tuo tema su ogni schermata",
+    summary: "Colori, font, dimensioni dei titoli, sidebar e ombre del tuo aspetto ora valgono su tutte le pagine; il nome del brand è anche nel titolo della scheda.",
+    body: [
+      "- **Ogni schermata segue il tema**: chat, task, missioni, agenti, file, configurazione, terminale e grafici usano i colori e i font dell'istanza, anche la sidebar.",
+      "- **Colori di stato configurabili**: successo, attenzione, info ed errore hanno i loro colori nel tema.",
+      "- **Tipografia**: una scala di titoli e testi (display, titoli, corpo, didascalie, etichette) che si regola dall'aspetto; aggiunto **Inter Tight**.",
+      "- **Nome e logo subito**: niente più lampo di Polpo al caricamento; il titolo della scheda mostra il nome del brand. Il riquadro del logo si può togliere.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri l'aspetto", to: "/config?section=appearance" },
+  },
+  {
+    id: "2026-11-22-appearance-config-mcp",
+    date: "2026-11-22",
+    kind: "new",
+    title: "Il tuo brand ovunque, e tutta la configurazione da Claude",
+    summary: "Colori, font, sidebar e logo scuro per tutta l'istanza, senza più il lampo al caricamento; e ogni impostazione si configura anche da MCP.",
+    body: [
+      "- **Aspetto dell'istanza**: tema, palette e tutti i colori (brand, superfici, testo, bordi, sidebar, grafici), font e arrotondamenti valgono per tutti; ognuno può comunque personalizzare il proprio browser.",
+      "- **Niente lampo al caricamento**: il tema si applica prima che la pagina appaia.",
+      "- **Logo per il tema scuro**.",
+      "- **Tutta la Configuration da Claude o ChatGPT**: sandbox, policy, membri, accessi MCP, canali (anche abbinamenti Telegram e login WhatsApp con QR), sync. Le chiavi non passano mai dalla chat: l'assistente ti dà il link al campo giusto, aspetta che lo compili e continua da solo.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri l'aspetto", to: "/config?section=appearance" },
+  },
   {
     id: "2026-11-22-mcp-permissions",
     date: "2026-11-22",
@@ -746,13 +1000,89 @@ export function formatChangelogDate(iso: string): string {
   return Number.isNaN(date.getTime()) ? iso : DATE_FORMAT.format(date);
 }
 
-/** Entries grouped by date, newest date first (keeps the order inside a day). */
-export function groupChangelogByDate(entries: ChangelogEntry[]): { date: string; entries: ChangelogEntry[] }[] {
+const LONG_DAY_FORMAT = new Intl.DateTimeFormat("it-IT", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+
+/** "Sabato 22 novembre 2026": the day headers of the timeline. */
+export function formatChangelogDayLong(iso: string): string {
+  const date = changelogDate(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const text = LONG_DAY_FORMAT.format(date);
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** id → ISO datetime the entry went online on this instance (recorded by the UI server). */
+export type ChangelogPublishedAt = Readonly<Record<string, string>>;
+
+/**
+ * When the entry went online: the time this instance's UI server recorded, else the entry's own
+ * `publishedAt`, else undefined (entries deployed before times were recorded show the day only).
+ */
+export function changelogPublishedAt(entry: ChangelogEntry, recorded: ChangelogPublishedAt = {}): Date | undefined {
+  for (const value of [recorded[entry.id], entry.publishedAt]) {
+    if (typeof value !== "string" || !value) continue;
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) return date;
+  }
+  return undefined;
+}
+
+const SHORT_DATE_FORMAT = new Intl.DateTimeFormat("it-IT", { day: "numeric", month: "short", year: "numeric" });
+const SHORT_DAY_FORMAT = new Intl.DateTimeFormat("it-IT", { day: "numeric", month: "short" });
+const TIME_FORMAT = new Intl.DateTimeFormat("it-IT", { hour: "2-digit", minute: "2-digit" });
+
+/** "22 nov 2026 · 18:52" (local time zone). */
+export function formatChangelogDateTime(date: Date): string {
+  return `${SHORT_DATE_FORMAT.format(date).replace(/\./g, "")} · ${TIME_FORMAT.format(date)}`;
+}
+
+/** "18:52" (local time zone). */
+export function formatChangelogTime(date: Date): string {
+  return TIME_FORMAT.format(date);
+}
+
+/** "online alle 18:52" today, else "online il 21 nov alle 18:52". */
+export function formatChangelogOnline(date: Date, now: Date = new Date()): string {
+  const sameDay = date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
+  const time = TIME_FORMAT.format(date);
+  if (sameDay) return `online alle ${time}`;
+  const day = date.getFullYear() === now.getFullYear()
+    ? SHORT_DAY_FORMAT.format(date)
+    : SHORT_DATE_FORMAT.format(date);
+  return `online il ${day.replace(/\./g, "")} alle ${time}`;
+}
+
+/**
+ * Entries grouped by date, newest date first. Inside a day, entries with a known online time come
+ * first, newest first; the others keep their order (newest first, as written).
+ */
+export function groupChangelogByDate(
+  entries: ChangelogEntry[],
+  recorded: ChangelogPublishedAt = {},
+): { date: string; entries: ChangelogEntry[] }[] {
+  const order = new Map(entries.map((entry, index) => [entry.id, index]));
+  const time = (entry: ChangelogEntry) => changelogPublishedAt(entry, recorded)?.getTime();
+  const sorted = [...entries].sort((a, b) => {
+    if (a.date !== b.date) return b.date.localeCompare(a.date);
+    const ta = time(a);
+    const tb = time(b);
+    if (ta !== undefined && tb !== undefined && ta !== tb) return tb - ta;
+    if (ta !== undefined && tb === undefined) return -1;
+    if (ta === undefined && tb !== undefined) return 1;
+    return order.get(a.id)! - order.get(b.id)!;
+  });
   const groups: { date: string; entries: ChangelogEntry[] }[] = [];
-  for (const entry of [...entries].sort((a, b) => b.date.localeCompare(a.date))) {
+  for (const entry of sorted) {
     const last = groups.at(-1);
     if (last?.date === entry.date) last.entries.push(entry);
     else groups.push({ date: entry.date, entries: [entry] });
   }
   return groups;
+}
+
+/**
+ * Entries newest first by when they went online: by day, then by recorded time inside a day (the
+ * order the timeline shows). For the bar, so "the newest" is the one that arrived last.
+ */
+export function sortChangelogByOnline(entries: ChangelogEntry[], recorded: ChangelogPublishedAt = {}): ChangelogEntry[] {
+  return groupChangelogByDate(entries, recorded).flatMap((day) => day.entries);
 }

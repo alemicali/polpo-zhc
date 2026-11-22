@@ -22,7 +22,7 @@
 import { readFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { resolve, relative } from "node:path";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { TaskExpectation, EvalDimension, DimensionScore, CheckResult, ReviewContext, ReviewerMessage } from "../core/types.js";
 import { DEFAULT_DIMENSIONS, buildRubricSection, computeWeightedScore, computeMedianScores } from "./scoring.js";
 import { validateReviewPayload, REVIEW_JSON_SCHEMA, type ValidatedReviewPayload } from "./schemas.js";

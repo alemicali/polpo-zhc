@@ -89,6 +89,10 @@ export function defaultTitle(ctx: TemplateContext): string {
       return `${emoji} Mission Resumed`;
     case "mission:deleted":
       return `${emoji} Mission Deleted`;
+    case "mission:budget-exceeded":
+      return `${emoji} Mission Over Budget: ${str(data, "name")} ($${numFixed(data, "spentUsd", 2)} of $${numFixed(data, "budgetUsd", 2)})`;
+    case "mission:budget-resumed":
+      return `${emoji} Mission Budget Raised: ${str(data, "name")} goes on`;
 
     case "approval:requested":
       return `${emoji} Approval Required: ${str(data, "gateName")}`;
@@ -167,6 +171,10 @@ export function defaultBody(ctx: TemplateContext): string {
       }
       break;
     }
+    case "mission:budget-exceeded":
+      lines.push(`Mission **${str(data, "name")}** ${str(data, "reason")}.`);
+      lines.push("Running tasks finish; raise or clear its budget to let it go on.");
+      break;
     case "approval:requested":
       lines.push(`Gate **${str(data, "gateName")}** requires approval.`);
       if (str(data, "taskId")) lines.push(`Task: ${str(data, "taskId")}`);

@@ -31,6 +31,14 @@ export type {
 // ── Store Interfaces ─────────────────────────────────────────────────────
 export type { TaskStore } from "./task-store.js";
 export type { RunStore, RunRecord, RunStatus } from "./run-store.js";
+// Where and with what a task run executed (engine, computer, egress, session, cost)
+export * from "./run-context.js";
+export * from "./mission-cost.js";
+export * from "./task-cost.js";
+export * from "./error-action.js";
+export * from "./dependency-results.js";
+export * from "./task-failure.js";
+export * from "./task-tool-scope.js";
 export type { ConfigStore } from "./config-store.js";
 export type { MemoryStore } from "./memory-store.js";
 export { agentMemoryScope } from "./memory-store.js";
@@ -120,6 +128,39 @@ export type {
   ContextCompactorOptions,
 } from "./context-compactor.js";
 
+// ── Progressive tool discovery ──────────────────────────────────────────
+export {
+  ProgressiveToolSet,
+  AGENT_TOOL_GROUPS,
+  POLPO_TOOL_GROUPS,
+  DEFAULT_PROGRESSIVE_THRESHOLD,
+  TOOLS_SEARCH,
+  TOOLS_LOAD,
+  META_TOOL_NAMES,
+  connectorIdOf,
+  declaredTools,
+  loadedToolsFromHistory,
+  progressiveEnabled,
+  progressiveModeFor,
+  restoreToolAnnouncements,
+} from "./progressive-tools.js";
+export type {
+  ProgressiveToolsMode,
+  ToolsSettings,
+  ToolLike,
+  ToolDeclaration,
+  ToolAnnouncement,
+  ToolGroupRule,
+  ToolGroup,
+  SearchHit,
+  ToolSearchRequest,
+  ToolSearchResult,
+  ToolSearchGroupCount,
+  ToolLoadResult,
+  ProgressiveMetaTool,
+  ProgressiveToolSetOptions,
+} from "./progressive-tools.js";
+
 // ── EventBus Interface ──────────────────────────────────────────────────
 export type { EventBus } from "./event-bus.js";
 
@@ -200,6 +241,8 @@ export type {
 } from "./sandbox.js";
 // Computers: a persistent machine per agent (settings.computers)
 export * from "./computers.js";
+// Agent harnesses: official agent runtimes (Claude Code, Codex) as an agent's engine
+export * from "./harnesses.js";
 export { computerSelection } from "./sandbox.js";
 // open Polpo's sandbox ports and runtime policy (copied as is from lumea-labs/polpo)
 export { resolveRuntimeSandboxOptions } from "./runtime-sandbox.js";
@@ -240,9 +283,22 @@ export type {
 // Connectors: external tools over MCP (Linear, Notion, Google Workspace, custom servers)
 export {
   CONNECTOR_ID_PATTERN, CONNECTORS_VAULT_OWNER, DEFAULT_CONNECTOR_TOOL_TIMEOUT_MS, connectorGrants, connectorSlug,
+  connectorToolSelected, connectorToolsProblems, normalizeConnectorTools,
 } from "./connectors.js";
 export type {
-  ConnectorConfig, ConnectorIcon, ConnectorTransport, ConnectorAuth, ConnectorAuthType, ConnectorOAuthSettings, ConnectorAccess,
-  ConnectorToolPolicy, ConnectorStatus, ConnectorOAuthApp, ConnectorsFile, ConnectorCatalogEntry, ConnectorChangedEvent,
+  ConnectorConfig, ConnectorIcon, ConnectorIconAsset, ConnectorIconImage, ConnectorIconSource, ConnectorTransport, ConnectorAuth, ConnectorAuthType, ConnectorOAuthSettings, ConnectorAccess,
+  ConnectorToolPolicy, ConnectorStatus, ConnectorOAuthApp, AgentConnectorTools, ConnectorsFile, ConnectorCatalogEntry, ConnectorChangedEvent,
 } from "./connectors.js";
 export { EGRESS_PROXY_NAME, EGRESS_PROXY_URL, parseEgressProxies } from "./egress-proxies.js";
+export {
+  APPEARANCE_THEMES, APPEARANCE_PALETTES, APPEARANCE_TOKENS, APPEARANCE_TOKEN_NAMES, APPEARANCE_TOKEN_GROUPS, APPEARANCE_COLOR, APPEARANCE_HEX,
+  APPEARANCE_FONT, APPEARANCE_SHADOW, APPEARANCE_FONT_PRESETS, APPEARANCE_RADIUS_MIN, APPEARANCE_RADIUS_MAX,
+  APPEARANCE_SIZE, APPEARANCE_SIZE_RANGE, APPEARANCE_TRACKING, APPEARANCE_TRACKING_RANGE, APPEARANCE_WEIGHT_MIN, APPEARANCE_WEIGHT_MAX, APPEARANCE_CASES,
+  parseAppearanceSettings, parseAppearanceTokens, sanitizeAppearanceSettings, parseAppearanceToken, isEmptyAppearance,
+  APPEARANCE_NUMBER_RANGES, APPEARANCE_GRADIENT_ANGLE, APPEARANCE_FONT_HOSTS, APPEARANCE_MAX_WEB_FONTS, APPEARANCE_FONT_FAMILY, APPEARANCE_BUNDLED_FONTS,
+  APPEARANCE_PRELOADED_FONTS, normalizeFontWeights, normalizeFontUrl, webFontHref, parseWebFont, parseWebFonts, unloadedFontFamilies, parseAppearanceGradient,
+} from "./appearance.js";
+export type {
+  AppearanceTheme, AppearancePalette, AppearanceColors, AppearanceCustom, AppearanceSettings, AppearanceTokens, AppearanceTokenName,
+  AppearanceTokenGroup, AppearanceTokenKind, AppearanceWebFont, AppearanceGradient,
+} from "./appearance.js";

@@ -14,6 +14,10 @@ export { useTask } from "./hooks/use-task.js";
 export { useMissions } from "./hooks/use-missions.js";
 export type { UseMissionsReturn } from "./hooks/use-missions.js";
 export { useMission } from "./hooks/use-mission.js";
+export { useMissionCost } from "./hooks/use-mission-cost.js";
+export type { UseMissionCostReturn } from "./hooks/use-mission-cost.js";
+export { useConnectors, connectorLabel } from "./hooks/use-connectors.js";
+export type { UseConnectorsReturn } from "./hooks/use-connectors.js";
 export { useAgents } from "./hooks/use-agents.js";
 export type { UseAgentsReturn } from "./hooks/use-agents.js";
 export { useAgent } from "./hooks/use-agent.js";
@@ -38,6 +42,8 @@ export { useSchedules } from "./hooks/use-schedules.js";
 export { useVaultEntries } from "./hooks/use-vault-entries.js";
 export type { UseVaultEntriesReturn } from "./hooks/use-vault-entries.js";
 export { useAuthStatus } from "./hooks/use-auth-status.js";
+export { usePreferences } from "./hooks/use-preferences.js";
+export type { UsePreferencesReturn } from "./hooks/use-preferences.js";
 export { useAssessmentProgress } from "./hooks/use-assessment-progress.js";
 
 // Re-export client SDK for convenience (backward compat — consumers can also use @polpo-ai/sdk directly)
@@ -98,6 +104,8 @@ export type {
   PolpoConfig,
   PolpoSettings,
   BrandingConfig,
+  AppearanceConfig,
+  AppearanceTokens,
   ReasoningLevel,
   ModelConfig,
   ModelAllowlistEntry,
@@ -141,6 +149,22 @@ export type {
   LogSession,
   LogEntry,
   RunActivityEntry,
+  TaskRunContext,
+  TaskToolScope,
+  TaskRunEngine,
+  TaskRunSummary,
+  TaskFailure,
+  TaskFailureKind,
+  Connector,
+  ConnectorStatus,
+  ConnectorTool,
+  ConnectorToolPolicy,
+  MissionCost,
+  MissionCostBucket,
+  MissionCostSummary,
+  TaskCost,
+  TaskCostRun,
+  TaskCostSummary,
   ChatSession,
   ChatQueueItem,
   ChatQueueState,
@@ -171,6 +195,10 @@ export type {
   AuthProfileMeta,
   ProviderAuthInfo,
   AuthStatusResponse,
+  ChatNavigationPreferences,
+  MemberPreferences,
+  MemberPreferencesPatch,
+  MemberPreferencesResponse,
   SkillInfo,
   LoadedSkill,
   SkillWithAssignment,

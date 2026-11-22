@@ -73,12 +73,12 @@ export function DataViewRenderer({ view, sessionId }: { view: DataView; sessionI
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <Database className="h-4 w-4 text-primary" />
-            <h2 className="truncate text-sm font-semibold">{view.name}</h2>
-            <span className="border border-border px-1.5 py-0.5 text-[9px] uppercase text-muted-foreground">{view.persistence}</span>
-            {hasLiveData && <span className="inline-flex items-center gap-1 border border-border bg-muted/30 px-1.5 py-0.5 text-[9px] text-muted-foreground"><Database className="h-2.5 w-2.5" />Live source</span>}
-            {hasInlineData && <span className="inline-flex items-center gap-1 border border-border bg-muted/30 px-1.5 py-0.5 text-[9px] text-muted-foreground"><Braces className="h-2.5 w-2.5" />Inline data</span>}
+            <h2 className="truncate font-heading text-h3">{view.name}</h2>
+            <span className="border border-border px-1.5 py-0.5 text-micro uppercase text-muted-foreground">{view.persistence}</span>
+            {hasLiveData && <span className="inline-flex items-center gap-1 border border-border bg-muted/30 px-1.5 py-0.5 text-micro text-muted-foreground"><Database className="h-2.5 w-2.5" />Live source</span>}
+            {hasInlineData && <span className="inline-flex items-center gap-1 border border-border bg-muted/30 px-1.5 py-0.5 text-micro text-muted-foreground"><Braces className="h-2.5 w-2.5" />Inline data</span>}
           </div>
-          {view.description && <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{view.description}</p>}
+          {view.description && <p className="mt-0.5 truncate text-caption text-muted-foreground">{view.description}</p>}
         </div>
         <div className="relative w-44 max-w-full">
           <Filter className="pointer-events-none absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground" />
@@ -120,7 +120,7 @@ function WidgetShell({ widget, className, children }: { widget: DataWidget; clas
       {(widget.title || widget.description) && (
         <header className="border-b border-border/70 px-3 py-2.5">
           {widget.title && <h3 className="text-xs font-semibold">{widget.title}</h3>}
-          {widget.description && <p className="mt-0.5 text-[10px] text-muted-foreground">{widget.description}</p>}
+          {widget.description && <p className="mt-0.5 text-micro text-muted-foreground">{widget.description}</p>}
         </header>
       )}
       <div className={cn("min-h-28", widget.height === "compact" && "min-h-20", widget.height === "tall" && "min-h-80")}>{children}</div>
@@ -150,7 +150,7 @@ function WidgetContent({ widget, frame, search, view, sessionId }: { widget: Dat
 function MetricWidget({ widget, rows }: { widget: DataWidget; rows: Record<string, unknown>[] }) {
   const aggregate = widget.aggregate ?? (widget.field ? "sum" : "count");
   const value = aggregateValue(widget, rows);
-  return <div className="flex min-h-28 flex-col justify-end p-4"><div className="font-mono text-3xl font-semibold tabular-nums">{formatMetric(value, widget)}</div><div className="mt-1 text-[10px] uppercase text-muted-foreground">{aggregate}{widget.field ? ` · ${widget.field}` : ""}</div></div>;
+  return <div className="flex min-h-28 flex-col justify-end p-4"><div className="font-mono text-display font-semibold tabular-nums">{formatMetric(value, widget)}</div><div className="mt-1 text-label text-muted-foreground">{aggregate}{widget.field ? ` · ${widget.field}` : ""}</div></div>;
 }
 
 function TableWidget({ frame, view, sessionId }: { frame: DataFrame; view: DataView; sessionId: string | null }) {
@@ -161,7 +161,7 @@ function TableWidget({ frame, view, sessionId }: { frame: DataFrame; view: DataV
   return (
     <div className="max-h-[420px] overflow-auto">
       <Table>
-        <TableHeader className="sticky top-0 z-10 bg-card"><TableRow>{frame.columns.map((column) => <TableHead key={column.name} className="h-8 text-[10px]">{column.name}</TableHead>)}<TableHead className="w-8" /></TableRow></TableHeader>
+        <TableHeader className="sticky top-0 z-10 bg-card"><TableRow>{frame.columns.map((column) => <TableHead key={column.name} className="h-8 text-micro">{column.name}</TableHead>)}<TableHead className="w-8" /></TableRow></TableHeader>
         <TableBody>{frame.rows.map((row, index) => (
           <TableRow key={index} className="group cursor-default">
             {frame.columns.map((column) => <TableCell key={column.name} className="max-w-64 truncate py-1.5 text-xs">{displayValue(row[column.name])}</TableCell>)}
@@ -177,14 +177,14 @@ function TableWidget({ frame, view, sessionId }: { frame: DataFrame; view: DataV
 function RecordWidget({ frame, view, sessionId }: { frame: DataFrame; view: DataView; sessionId: string | null }) {
   const row = frame.rows[0];
   if (!row) return <div className="p-8 text-center text-xs text-muted-foreground">No record</div>;
-  return <div className="p-3"><dl className="grid grid-cols-[minmax(90px,0.35fr)_1fr] gap-x-3 gap-y-2">{frame.columns.map((column) => <div className="contents" key={column.name}><dt className="truncate text-[10px] text-muted-foreground">{column.name}</dt><dd className="min-w-0 break-words text-xs">{displayValue(row[column.name])}</dd></div>)}</dl><Button variant="ghost" size="sm" className="mt-3 h-7 px-2 text-[10px]" onClick={() => { addDataPromptItem(sessionId, { sourceId: frame.meta.sourceId, dataset: frame.meta.dataset, queryId: frame.meta.queryId, viewId: view.id, row, label: recordLabel(row) }); sidebarActions.setSidebarOpen(true); }}><MessageSquarePlus className="h-3 w-3" /> Add to prompt</Button></div>;
+  return <div className="p-3"><dl className="grid grid-cols-[minmax(90px,0.35fr)_1fr] gap-x-3 gap-y-2">{frame.columns.map((column) => <div className="contents" key={column.name}><dt className="truncate text-micro text-muted-foreground">{column.name}</dt><dd className="min-w-0 break-words text-xs">{displayValue(row[column.name])}</dd></div>)}</dl><Button variant="ghost" size="sm" className="mt-3 h-7 px-2 text-micro" onClick={() => { addDataPromptItem(sessionId, { sourceId: frame.meta.sourceId, dataset: frame.meta.dataset, queryId: frame.meta.queryId, viewId: view.id, row, label: recordLabel(row) }); sidebarActions.setSidebarOpen(true); }}><MessageSquarePlus className="h-3 w-3" /> Add to prompt</Button></div>;
 }
 
 function ListWidget({ widget, rows }: { widget: DataWidget; rows: Record<string, unknown>[] }) {
   const label = widget.category ?? widget.field ?? Object.keys(rows[0] ?? {})[0];
   const detail = widget.value ?? widget.y ?? Object.keys(rows[0] ?? {}).find((field) => field !== label);
   if (!label) return <WidgetError error="List needs a label field" />;
-  return <div className="max-h-80 divide-y divide-border/70 overflow-auto">{rows.slice(0, 100).map((row, index) => <div key={index} className="flex items-center gap-3 px-3 py-2.5"><span className="flex h-5 w-5 shrink-0 items-center justify-center border border-border font-mono text-[9px] text-muted-foreground">{index + 1}</span><span className="min-w-0 flex-1 truncate text-xs font-medium">{displayValue(row[label])}</span>{detail && <span className="max-w-[45%] truncate text-[11px] text-muted-foreground">{displayValue(row[detail])}</span>}</div>)}</div>;
+  return <div className="max-h-80 divide-y divide-border/70 overflow-auto">{rows.slice(0, 100).map((row, index) => <div key={index} className="flex items-center gap-3 px-3 py-2.5"><span className="flex h-5 w-5 shrink-0 items-center justify-center border border-border font-mono text-micro text-muted-foreground">{index + 1}</span><span className="min-w-0 flex-1 truncate text-xs font-medium">{displayValue(row[label])}</span>{detail && <span className="max-w-[45%] truncate text-caption text-muted-foreground">{displayValue(row[detail])}</span>}</div>)}</div>;
 }
 
 function ProgressWidget({ widget, rows }: { widget: DataWidget; rows: Record<string, unknown>[] }) {
@@ -192,7 +192,7 @@ function ProgressWidget({ widget, rows }: { widget: DataWidget; rows: Record<str
   const min = widget.min ?? 0;
   const max = widget.target ?? widget.max ?? 100;
   const progress = Math.max(0, Math.min(100, ((value - min) / Math.max(max - min, 1)) * 100));
-  return <div className="flex min-h-28 flex-col justify-center p-4"><div className="flex items-end justify-between gap-3"><span className="font-mono text-2xl font-semibold tabular-nums">{formatMetric(value, widget)}</span><span className="text-[10px] text-muted-foreground">of {formatMetric(max, widget)}</span></div><div className="mt-3 h-2 overflow-hidden bg-muted"><div className="h-full bg-primary transition-[width] duration-500" style={{ width: `${progress}%` }} /></div><div className="mt-1.5 text-right font-mono text-[10px] text-muted-foreground">{Math.round(progress)}%</div></div>;
+  return <div className="flex min-h-28 flex-col justify-center p-4"><div className="flex items-end justify-between gap-3"><span className="font-mono text-h1 font-semibold tabular-nums">{formatMetric(value, widget)}</span><span className="text-micro text-muted-foreground">of {formatMetric(max, widget)}</span></div><div className="mt-3 h-2 overflow-hidden bg-muted"><div className="h-full bg-primary transition-[width] duration-500" style={{ width: `${progress}%` }} /></div><div className="mt-1.5 text-right font-mono text-micro text-muted-foreground">{Math.round(progress)}%</div></div>;
 }
 
 function GaugeWidget({ widget, rows }: { widget: DataWidget; rows: Record<string, unknown>[] }) {
@@ -201,7 +201,7 @@ function GaugeWidget({ widget, rows }: { widget: DataWidget; rows: Record<string
   const max = widget.target ?? widget.max ?? 100;
   const progress = Math.max(0, Math.min(100, ((value - min) / Math.max(max - min, 1)) * 100));
   const data = [{ name: "value", value: progress, fill: "var(--chart-1)" }];
-  return <div className="relative h-52"><ResponsiveContainer><RadialBarChart innerRadius="68%" outerRadius="88%" data={data} startAngle={210} endAngle={-30}><RadialBar dataKey="value" background={{ fill: "var(--muted)" }} cornerRadius={2} /></RadialBarChart></ResponsiveContainer><div className="pointer-events-none absolute inset-x-0 bottom-10 text-center"><div className="font-mono text-2xl font-semibold">{formatMetric(value, widget)}</div><div className="text-[10px] text-muted-foreground">{Math.round(progress)}% of target</div></div></div>;
+  return <div className="relative h-52"><ResponsiveContainer><RadialBarChart innerRadius="68%" outerRadius="88%" data={data} startAngle={210} endAngle={-30}><RadialBar dataKey="value" background={{ fill: "var(--muted)" }} cornerRadius={2} /></RadialBarChart></ResponsiveContainer><div className="pointer-events-none absolute inset-x-0 bottom-10 text-center"><div className="font-mono text-h1 font-semibold">{formatMetric(value, widget)}</div><div className="text-micro text-muted-foreground">{Math.round(progress)}% of target</div></div></div>;
 }
 
 function ComparisonWidget({ widget, rows }: { widget: DataWidget; rows: Record<string, unknown>[] }) {
@@ -211,7 +211,7 @@ function ComparisonWidget({ widget, rows }: { widget: DataWidget; rows: Record<s
   const previous = Number(rows[1]?.[field] ?? 0);
   const delta = current - previous;
   const percent = previous === 0 ? 0 : (delta / Math.abs(previous)) * 100;
-  return <div className="flex min-h-28 items-end gap-5 p-4"><div className="min-w-0 flex-1"><div className="text-[10px] text-muted-foreground">Current</div><div className="mt-1 truncate font-mono text-2xl font-semibold">{formatMetric(current, widget)}</div></div><div className={cn("pb-1 text-right", delta > 0 ? "text-emerald-500" : delta < 0 ? "text-destructive" : "text-muted-foreground")}><div className="font-mono text-sm font-semibold">{delta > 0 ? "+" : ""}{formatMetric(delta, widget)}</div><div className="text-[10px]">{percent > 0 ? "+" : ""}{percent.toFixed(1)}%</div></div></div>;
+  return <div className="flex min-h-28 items-end gap-5 p-4"><div className="min-w-0 flex-1"><div className="text-micro text-muted-foreground">Current</div><div className="mt-1 truncate font-mono text-h1 font-semibold">{formatMetric(current, widget)}</div></div><div className={cn("pb-1 text-right", delta > 0 ? "text-success" : delta < 0 ? "text-destructive" : "text-muted-foreground")}><div className="font-mono text-sm font-semibold">{delta > 0 ? "+" : ""}{formatMetric(delta, widget)}</div><div className="text-micro">{percent > 0 ? "+" : ""}{percent.toFixed(1)}%</div></div></div>;
 }
 
 function RankingWidget({ widget, rows }: { widget: DataWidget; rows: Record<string, unknown>[] }) {
@@ -220,7 +220,7 @@ function RankingWidget({ widget, rows }: { widget: DataWidget; rows: Record<stri
   if (!label || !value) return <WidgetError error="Ranking needs category and value fields" />;
   const ranked = rows.map((row) => ({ label: displayValue(row[label]), value: Number(row[value] ?? 0) })).filter((row) => Number.isFinite(row.value)).sort((a, b) => b.value - a.value).slice(0, 10);
   const max = Math.max(...ranked.map((row) => row.value), 1);
-  return <div className="space-y-2.5 p-3">{ranked.map((row, index) => <div key={`${row.label}:${index}`} className="grid grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-2"><span className="font-mono text-[10px] text-muted-foreground">{index + 1}</span><div className="min-w-0"><div className="truncate text-xs">{row.label}</div><div className="mt-1 h-1 bg-muted"><div className="h-full bg-primary" style={{ width: `${Math.max(2, row.value / max * 100)}%` }} /></div></div><span className="font-mono text-[11px] font-semibold">{formatMetric(row.value, widget)}</span></div>)}</div>;
+  return <div className="space-y-2.5 p-3">{ranked.map((row, index) => <div key={`${row.label}:${index}`} className="grid grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-2"><span className="font-mono text-micro text-muted-foreground">{index + 1}</span><div className="min-w-0"><div className="truncate text-xs">{row.label}</div><div className="mt-1 h-1 bg-muted"><div className="h-full bg-primary" style={{ width: `${Math.max(2, row.value / max * 100)}%` }} /></div></div><span className="font-mono text-caption font-semibold">{formatMetric(row.value, widget)}</span></div>)}</div>;
 }
 
 function HeatmapWidget({ widget, rows }: { widget: DataWidget; rows: Record<string, unknown>[] }) {
@@ -233,7 +233,7 @@ function HeatmapWidget({ widget, rows }: { widget: DataWidget; rows: Record<stri
   const lookup = new Map(rows.map((row) => [`${displayValue(row[x])}\u0000${displayValue(row[y])}`, Number(row[value] ?? 0)]));
   const values = [...lookup.values()].filter(Number.isFinite);
   const min = Math.min(...values, 0); const max = Math.max(...values, 1);
-  return <div className="overflow-auto p-3"><div className="grid min-w-[360px] gap-1" style={{ gridTemplateColumns: `80px repeat(${xs.length}, minmax(28px, 1fr))` }}><span />{xs.map((item) => <span key={item} className="truncate text-center text-[9px] text-muted-foreground">{item}</span>)}{ys.flatMap((rowLabel) => [<span key={`y:${rowLabel}`} className="truncate py-2 text-[9px] text-muted-foreground">{rowLabel}</span>, ...xs.map((columnLabel) => { const current = lookup.get(`${columnLabel}\u0000${rowLabel}`) ?? 0; const strength = Math.round(8 + ((current - min) / Math.max(max - min, 1)) * 72); return <Tooltip key={`${rowLabel}:${columnLabel}`}><TooltipTrigger asChild><span className="min-h-8" style={{ background: `color-mix(in srgb, var(--chart-1) ${strength}%, var(--background))` }} /></TooltipTrigger><TooltipContent>{columnLabel} · {rowLabel}: {formatMetric(current, widget)}</TooltipContent></Tooltip>; })])}</div></div>;
+  return <div className="overflow-auto p-3"><div className="grid min-w-[360px] gap-1" style={{ gridTemplateColumns: `80px repeat(${xs.length}, minmax(28px, 1fr))` }}><span />{xs.map((item) => <span key={item} className="truncate text-center text-micro text-muted-foreground">{item}</span>)}{ys.flatMap((rowLabel) => [<span key={`y:${rowLabel}`} className="truncate py-2 text-micro text-muted-foreground">{rowLabel}</span>, ...xs.map((columnLabel) => { const current = lookup.get(`${columnLabel}\u0000${rowLabel}`) ?? 0; const strength = Math.round(8 + ((current - min) / Math.max(max - min, 1)) * 72); return <Tooltip key={`${rowLabel}:${columnLabel}`}><TooltipTrigger asChild><span className="min-h-8" style={{ background: `color-mix(in srgb, var(--chart-1) ${strength}%, var(--background))` }} /></TooltipTrigger><TooltipContent>{columnLabel} · {rowLabel}: {formatMetric(current, widget)}</TooltipContent></Tooltip>; })])}</div></div>;
 }
 
 function HistogramWidget({ widget, rows }: { widget: DataWidget; rows: Record<string, unknown>[] }) {
@@ -275,7 +275,7 @@ function TimelineWidget({ widget, rows }: { widget: DataWidget; rows: Record<str
   const date = widget.x ?? Object.keys(rows[0] ?? {}).find((field) => /date|time|at$/i.test(field));
   const label = widget.y ?? widget.field ?? Object.keys(rows[0] ?? {}).find((field) => field !== date);
   if (!date || !label) return <WidgetError error="Timeline needs date and label fields" />;
-  return <div className="max-h-80 overflow-auto p-3">{rows.slice(0, 100).map((row, index) => <div key={index} className="relative border-l border-border pb-4 pl-4 last:pb-0"><span className="absolute -left-1 top-1 h-2 w-2 bg-primary" /><div className="text-[10px] text-muted-foreground">{displayValue(row[date])}</div><div className="mt-0.5 text-xs">{displayValue(row[label])}</div></div>)}</div>;
+  return <div className="max-h-80 overflow-auto p-3">{rows.slice(0, 100).map((row, index) => <div key={index} className="relative border-l border-border pb-4 pl-4 last:pb-0"><span className="absolute -left-1 top-1 h-2 w-2 bg-primary" /><div className="text-micro text-muted-foreground">{displayValue(row[date])}</div><div className="mt-0.5 text-xs">{displayValue(row[label])}</div></div>)}</div>;
 }
 
 function WidgetLoading() { return <div className="flex min-h-28 items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>; }

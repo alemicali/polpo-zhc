@@ -61,42 +61,42 @@ const TYPE_META: Record<VaultType, {
     description: "Outgoing email server",
     example: "e.g. smtp.gmail.com — send notifications, reports",
     icon: Mail,
-    color: "text-blue-500 bg-blue-500/10 border-blue-500/20",
+    color: "text-chart-1 bg-chart-1/10 border-chart-1/20",
   },
   imap: {
     label: "IMAP",
     description: "Incoming email server",
     example: "e.g. imap.gmail.com — read inbox, watch for replies",
     icon: Inbox,
-    color: "text-indigo-500 bg-indigo-500/10 border-indigo-500/20",
+    color: "text-chart-2 bg-chart-2/10 border-chart-2/20",
   },
   oauth: {
     label: "OAuth",
     description: "OAuth tokens",
     example: "Access + refresh tokens for third-party APIs",
     icon: Fingerprint,
-    color: "text-violet-500 bg-violet-500/10 border-violet-500/20",
+    color: "text-chart-5 bg-chart-5/10 border-chart-5/20",
   },
   api_key: {
     label: "API Key",
     description: "Single API key / token",
     example: "e.g. OpenAI key, Stripe secret, GitHub PAT",
     icon: Key,
-    color: "text-amber-500 bg-amber-500/10 border-amber-500/20",
+    color: "text-chart-4 bg-chart-4/10 border-chart-4/20",
   },
   login: {
     label: "Login",
     description: "Username & password",
     example: "Web service login (with optional URL)",
     icon: LogIn,
-    color: "text-emerald-500 bg-emerald-500/10 border-emerald-500/20",
+    color: "text-chart-3 bg-chart-3/10 border-chart-3/20",
   },
   custom: {
     label: "Custom",
     description: "Arbitrary key/value fields",
     example: "Anything that doesn't fit the other types",
     icon: Settings2,
-    color: "text-gray-400 bg-gray-400/10 border-gray-400/20",
+    color: "text-muted-foreground bg-muted-foreground/10 border-muted-foreground/20",
   },
 };
 
@@ -317,9 +317,9 @@ function Field({
       </label>
       {children}
       {error ? (
-        <p className="text-[10px] text-destructive leading-tight">{error}</p>
+        <p className="text-micro text-destructive leading-tight">{error}</p>
       ) : hint ? (
-        <p className="text-[10px] text-muted-foreground leading-tight">{hint}</p>
+        <p className="text-micro text-muted-foreground leading-tight">{hint}</p>
       ) : null}
     </div>
   );
@@ -348,7 +348,7 @@ function Toggle({
     >
       <div className="min-w-0">
         <p className="text-xs font-medium">{label}</p>
-        {hint && <p className="text-[10px] text-muted-foreground mt-0.5">{hint}</p>}
+        {hint && <p className="text-micro text-muted-foreground mt-0.5">{hint}</p>}
       </div>
       <span
         className={cn(
@@ -393,7 +393,7 @@ function VaultEntryCard({
             {entry.account && (entry.type === "smtp" || entry.type === "imap") && (
               <Badge
                 variant="outline"
-                className="text-[9px] py-0 px-1.5 h-4 border-border/50 text-muted-foreground"
+                className="text-micro py-0 px-1.5 h-4 border-border/50 text-muted-foreground"
                 title={`Mailbox account: ${entry.account}`}
               >
                 @{entry.account}
@@ -402,7 +402,7 @@ function VaultEntryCard({
             {entry.sharedFrom && (
               <Badge
                 variant="outline"
-                className="text-[9px] py-0 px-1.5 h-4 border-amber-500/40 text-amber-500"
+                className="text-micro py-0 px-1.5 h-4 border-warning/40 text-warning"
                 title={`Inherited from agent "${entry.sharedFrom}". Edit there if you need to change it.`}
               >
                 shared from {entry.sharedFrom}
@@ -411,7 +411,7 @@ function VaultEntryCard({
             {!entry.sharedFrom && entry.allowedAgents && entry.allowedAgents.length > 0 && (
               <Badge
                 variant="outline"
-                className="text-[9px] py-0 px-1.5 h-4 border-sky-500/40 text-sky-500"
+                className="text-micro py-0 px-1.5 h-4 border-info/40 text-info"
                 title={`Shared with: ${entry.allowedAgents.join(", ")}`}
               >
                 shared ({entry.allowedAgents.length})
@@ -419,16 +419,16 @@ function VaultEntryCard({
             )}
           </div>
           {entry.label && (
-            <p className="text-[11px] text-muted-foreground truncate">{entry.label}</p>
+            <p className="text-caption text-muted-foreground truncate">{entry.label}</p>
           )}
         </div>
-        <Badge variant="outline" className={cn("text-[10px] shrink-0 gap-1 border", meta.color)}>
+        <Badge variant="outline" className={cn("text-micro shrink-0 gap-1 border", meta.color)}>
           {meta.label}
         </Badge>
         <div className="flex items-center gap-1 ml-1 opacity-0 group-hover:opacity-100 transition-opacity">
           {entry.readOnly ? (
             <span
-              className="text-[10px] text-muted-foreground italic px-1.5"
+              className="text-micro text-muted-foreground italic px-1.5"
               title="Inherited entry — edit from the owner agent's vault."
             >
               read-only
@@ -461,9 +461,9 @@ function VaultEntryCard({
         {entry.keys.map((k: string) => (
           <span
             key={k}
-            className="inline-flex items-center gap-1 rounded bg-muted/50 border border-border/30 px-2 py-0.5 text-[11px] font-mono text-muted-foreground"
+            className="inline-flex items-center gap-1 rounded bg-muted/50 border border-border/30 px-2 py-0.5 text-caption font-mono text-muted-foreground"
           >
-            {k}: <span className="text-[10px] opacity-60">***</span>
+            {k}: <span className="text-micro opacity-60">***</span>
           </span>
         ))}
       </div>
@@ -487,8 +487,8 @@ function TypeCard({ type, onClick }: { type: VaultType; onClick: () => void }) {
       </div>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium">{meta.label}</p>
-        <p className="text-[11px] text-muted-foreground mt-0.5">{meta.description}</p>
-        <p className="text-[10px] text-muted-foreground/60 mt-1 italic">{meta.example}</p>
+        <p className="text-caption text-muted-foreground mt-0.5">{meta.description}</p>
+        <p className="text-micro text-muted-foreground/60 mt-1 italic">{meta.example}</p>
       </div>
     </button>
   );
@@ -510,8 +510,8 @@ function TypePill({ type, onClick }: { type: VaultType; onClick: () => void }) {
     >
       <Icon className="h-3.5 w-3.5" />
       <div>
-        <p className="text-[11px] font-medium leading-none">{meta.label}</p>
-        <p className="text-[10px] opacity-60 mt-0.5">{meta.description}</p>
+        <p className="text-caption font-medium leading-none">{meta.label}</p>
+        <p className="text-micro opacity-60 mt-0.5">{meta.description}</p>
       </div>
     </button>
   );
@@ -768,7 +768,7 @@ function CustomForm({
           </div>
         ))}
         {errors.customFields && (
-          <p className="text-[10px] text-destructive leading-tight">{errors.customFields}</p>
+          <p className="text-micro text-destructive leading-tight">{errors.customFields}</p>
         )}
         <Button
           type="button"
@@ -812,7 +812,7 @@ function ShareWithSelector({
       hint="Other agents that can read and use this credential. Owner agent is always implicit. Owner-private if no one is selected."
     >
       {others.length === 0 ? (
-        <p className="text-[11px] text-muted-foreground italic">No other agents available to share with.</p>
+        <p className="text-caption text-muted-foreground italic">No other agents available to share with.</p>
       ) : (
         <div className="flex flex-wrap gap-1.5">
           {others.map((a) => {
@@ -823,7 +823,7 @@ function ShareWithSelector({
                 type="button"
                 onClick={() => toggle(a.name)}
                 className={cn(
-                  "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium border transition-colors",
+                  "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-caption font-medium border transition-colors",
                   active
                     ? "bg-primary/15 border-primary/40 text-primary"
                     : "bg-card border-border/40 text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -1202,7 +1202,7 @@ export function AgentCredentialsTab() {
                   onDelete={() => setDeleteTarget(entry)}
                 />
               ))}
-              <p className="text-[10px] text-muted-foreground/60 mt-1">
+              <p className="text-micro text-muted-foreground/60 mt-1">
                 Encrypted with AES-256-GCM in <code className="font-mono">.polpo/vault.enc</code>.
               </p>
             </div>
@@ -1227,7 +1227,7 @@ export function AgentCredentialsTab() {
               >
                 <Plus className="h-3.5 w-3.5" /> Add credential
               </Button>
-              <p className="text-[10px] text-muted-foreground/40 mt-4">
+              <p className="text-micro text-muted-foreground/40 mt-4">
                 Entries are encrypted with AES-256-GCM in{" "}
                 <code className="font-mono">.polpo/vault.enc</code>.
                 Provider-level auth is managed in Configuration.

@@ -25,9 +25,9 @@ export function AgentInstructionsTab() {
     <ScrollArea className="h-full">
       <div className="space-y-4 pr-4 pb-bottom-nav lg:pb-4">
         {agent.systemPrompt ? (
-          <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0 overflow-hidden">
+          <Card className="py-0 gap-0 overflow-hidden">
             <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30">
-              <span className="text-[10px] text-muted-foreground font-mono">
+              <span className="text-micro text-muted-foreground font-mono">
                 {agent.systemPrompt.length.toLocaleString()} chars
               </span>
               <div className="flex items-center gap-1">
@@ -70,14 +70,14 @@ export function AgentInstructionsTab() {
             <Terminal className="h-10 w-10 mb-3 opacity-40" />
             <p className="text-sm font-medium">No additional instructions</p>
             <p className="text-xs text-muted-foreground/60 mt-2 leading-relaxed">
-              The <code className="font-mono text-[10px]">systemPrompt</code> field lets you add custom instructions that are appended to the agent's built-in prompt.
+              The <code className="font-mono text-micro">systemPrompt</code> field lets you add custom instructions that are appended to the agent's built-in prompt.
             </p>
             <p className="text-xs text-muted-foreground/60 mt-2 leading-relaxed">
               The following are injected dynamically from the agent's identity and config — no need to repeat them here:
             </p>
             <div className="flex flex-wrap justify-center gap-1.5 mt-2">
               {["role", "tone", "personality", "bio", "displayName", "title", "responsibilities", "timezone", "language", "model", "allowedTools", "skills"].map(f => (
-                <span key={f} className="rounded bg-muted/50 border border-border/30 px-2 py-0.5 text-[10px] font-mono text-muted-foreground">
+                <span key={f} className="rounded bg-muted/50 border border-border/30 px-2 py-0.5 text-micro font-mono text-muted-foreground">
                   {f}
                 </span>
               ))}

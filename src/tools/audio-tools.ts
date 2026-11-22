@@ -32,7 +32,7 @@ import { readFile } from "node:fs/promises";
 import { resolve, extname, join } from "node:path";
 import type { FileSystem } from "@polpo-ai/core/filesystem";
 import { execFile, execFileSync } from "node:child_process";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 
 // Re-export with concrete generic to avoid "requires 1 type argument" errors

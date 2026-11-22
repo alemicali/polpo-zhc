@@ -28,6 +28,7 @@ import type { SessionStore } from "./session-store.js";
 import type { TeamStore } from "./team-store.js";
 import type { AgentStore } from "./agent-store.js";
 import { agentMemoryScope } from "./memory-store.js";
+import { isValidBudgetUsd, missionSpentUsd, tasksOfMission } from "./mission-cost.js";
 import type {
   PolpoConfig,
   AgentConfig,
@@ -79,7 +80,7 @@ export interface AssessmentOrchestratorPort {
  */
 export interface MissionExecutorPort {
   readonly ready: Promise<void>;
-  saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules }): Promise<Mission>;
+  saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules; budgetUsd?: number }): Promise<Mission>;
   getMission(missionId: string): Promise<Mission | undefined>;
   getMissionByName(name: string): Promise<Mission | undefined>;
   getAllMissions(): Promise<Mission[]>;
@@ -100,8 +101,8 @@ export interface MissionExecutorPort {
   getActiveDelays(): Array<{ group: string; delayName: string; delay: MissionDelay; startedAt: string; expiresAt: string }>;
   resumeCheckpoint(group: string, checkpointName: string): Promise<boolean>;
   // Atomic mission data operations
-  addMissionTask(missionId: string, task: { title: string; description: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown }): Promise<Mission>;
-  updateMissionTask(missionId: string, taskTitle: string, updates: { title?: string; description?: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown }): Promise<Mission>;
+  addMissionTask(missionId: string, task: { title: string; description: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown; sideEffects?: boolean; toolScope?: import("./task-tool-scope.js").TaskToolScope | null }): Promise<Mission>;
+  updateMissionTask(missionId: string, taskTitle: string, updates: { title?: string; description?: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown; sideEffects?: boolean; toolScope?: import("./task-tool-scope.js").TaskToolScope | null }): Promise<Mission>;
   removeMissionTask(missionId: string, taskTitle: string): Promise<Mission>;
   reorderMissionTasks(missionId: string, titles: string[]): Promise<Mission>;
   addMissionCheckpoint(missionId: string, cp: { name: string; afterTasks: string[]; blocksTasks: string[]; notifyChannels?: string[]; message?: string }): Promise<Mission>;
@@ -350,12 +351,22 @@ export class OrchestratorEngine {
       if (!list) { list = tasks.filter(t => t.group === group); tasksByGroup.set(group, list); }
       return list;
     };
-    // A paused mission waits for a person (checkpoint), it is not a deadlock.
+    // A paused mission waits for a person (checkpoint, budget), it is not a deadlock.
     let waitingOnPausedMission = false;
+    // Mission budgets: what each mission spent (its tasks' recorded runs), once per tick
+    const budgetSettled = new Set<string>();
+    const settleBudget = async (task: Task & { group: string }, mission: Mission): Promise<Mission> => {
+      if (budgetSettled.has(mission.id)) return mission;
+      budgetSettled.add(mission.id);
+      const next = await this.settleMissionBudget(mission, tasks);
+      if (next !== mission) missionLookups.set(task.missionId ? `id:${task.missionId}` : `name:${task.group}`, Promise.resolve(next));
+      return next;
+    };
     for (const task of pending) {
       let isReady = true;
       if (task.group) {
-        const mission = await lookupMission(task as Task & { group: string });
+        let mission = await lookupMission(task as Task & { group: string });
+        if (mission) mission = await settleBudget(task as Task & { group: string }, mission);
         if (mission && (mission.status === "cancelled" || mission.status === "completed" || mission.status === "paused")) { isReady = false; }
         const missionPaused = mission?.status === "paused";
         if (missionPaused) waitingOnPausedMission = true;
@@ -561,6 +572,7 @@ export class OrchestratorEngine {
     expectations?: TaskExpectation[]; expectedOutcomes?: ExpectedOutcome[];
     dependsOn?: string[]; group?: string; maxDuration?: number; retryPolicy?: RetryPolicy;
     notifications?: ScopedNotificationRules; sideEffects?: boolean; draft?: boolean; maxRetries?: number;
+    toolScope?: import("./task-tool-scope.js").TaskToolScope;
   }): Promise<Task> { return this.taskMgr.addTask(opts); }
 
   async updateTaskDescription(taskId: string, description: string): Promise<void> { return this.taskMgr.updateTaskDescription(taskId, description); }
@@ -642,7 +654,7 @@ export class OrchestratorEngine {
 
   // ── Mission Management (delegates to MissionExecutor) ───────────────
 
-  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules }): Promise<Mission> { return this.missionExec.saveMission(opts); }
+  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules; budgetUsd?: number }): Promise<Mission> { return this.missionExec.saveMission(opts); }
   async getMission(missionId: string): Promise<Mission | undefined> { return this.missionExec.getMission(missionId); }
   async getMissionByName(name: string): Promise<Mission | undefined> { return this.missionExec.getMissionByName(name); }
   async getAllMissions(): Promise<Mission[]> { return this.missionExec.getAllMissions(); }
@@ -655,10 +667,10 @@ export class OrchestratorEngine {
 
   // ── Atomic Mission Data Operations (delegates to MissionExecutor) ───
 
-  async addMissionTask(missionId: string, task: { title: string; description: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown }): Promise<Mission> {
+  async addMissionTask(missionId: string, task: { title: string; description: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown; sideEffects?: boolean; toolScope?: import("./task-tool-scope.js").TaskToolScope | null }): Promise<Mission> {
     return this.missionExec.addMissionTask(missionId, task);
   }
-  async updateMissionTask(missionId: string, taskTitle: string, updates: { title?: string; description?: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown }): Promise<Mission> {
+  async updateMissionTask(missionId: string, taskTitle: string, updates: { title?: string; description?: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown; sideEffects?: boolean; toolScope?: import("./task-tool-scope.js").TaskToolScope | null }): Promise<Mission> {
     return this.missionExec.updateMissionTask(missionId, taskTitle, updates);
   }
   async removeMissionTask(missionId: string, taskTitle: string): Promise<Mission> {
@@ -757,6 +769,37 @@ export class OrchestratorEngine {
 
   async getResumableMissions(): Promise<Mission[]> { return this.missionExec.getResumableMissions(); }
   async resumeMission(missionId: string, opts?: { retryFailed?: boolean }): Promise<{ retried: number; pending: number }> { return this.missionExec.resumeMission(missionId, opts); }
+
+  /**
+   * A mission's budget against what its tasks spent (Task.runs): an active mission at or over its
+   * budget pauses (pauseReason "budget": no new task starts, running ones finish) and says so
+   * (mission:budget-exceeded, which notification rules can route); a mission the budget paused
+   * goes on once the budget is raised or cleared (mission:budget-resumed). Returns the mission as
+   * it is now.
+   */
+  private async settleMissionBudget(mission: Mission, allTasks: Task[]): Promise<Mission> {
+    const budget = mission.budgetUsd;
+    const hasBudget = isValidBudgetUsd(budget);
+    const pausedByBudget = mission.status === "paused" && mission.pauseReason === "budget";
+    if (!hasBudget && !pausedByBudget) return mission;
+    if (mission.status !== "active" && !pausedByBudget) return mission;
+    const spent = missionSpentUsd(tasksOfMission(mission, allTasks));
+    const over = hasBudget && spent >= budget;
+    if (over && mission.status === "active") {
+      const reason = `spent $${spent.toFixed(2)} of its $${budget.toFixed(2)} budget: no new task starts until the budget is raised or cleared`;
+      const updated = await this.missionExec.updateMission(mission.id, { status: "paused", pauseReason: "budget" });
+      this.ctx.emitter.emit("mission:budget-exceeded", { missionId: mission.id, name: mission.name, spentUsd: spent, budgetUsd: budget, reason });
+      this.ctx.emitter.emit("log", { level: "warn", message: `Mission "${mission.name}" paused: it ${reason}` });
+      return updated;
+    }
+    if (!over && pausedByBudget) {
+      const updated = await this.missionExec.updateMission(mission.id, { status: "active", pauseReason: undefined });
+      this.ctx.emitter.emit("mission:budget-resumed", { missionId: mission.id, name: mission.name, spentUsd: spent, ...(hasBudget ? { budgetUsd: budget } : {}) });
+      this.ctx.emitter.emit("log", { level: "info", message: `Mission "${mission.name}" goes on: ${hasBudget ? `budget raised to $${budget.toFixed(2)}` : "budget cleared"} (spent $${spent.toFixed(2)})` });
+      return updated;
+    }
+    return mission;
+  }
   async executeMission(missionId: string): Promise<{ tasks: Task[]; group: string }> { return this.missionExec.executeMission(missionId); }
 
   // ── Checkpoints ────────────────────────────────────────────────────

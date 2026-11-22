@@ -16,11 +16,20 @@ const identity = z.object({
   company: z.string().optional().describe("The company it works for"),
 }).passthrough();
 
+/** Per-connector tool selection: { <connector id>: "*" | [raw MCP tool names] }. */
+const connectorToolsParam = z.record(
+  z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/, "a connector id"),
+  z.union([z.literal("*"), z.array(z.string().min(1).max(200)).max(1000)]),
+);
+const CONNECTOR_TOOLS_HELP = "Which tools of each connector granted to it the agent gets, keyed by connector id: \"*\" (or no key) = all its tools, current and future; "
+  + "a list = only those tools (the server's tool names as polpo_connectors_list with id shows them, not mcp__…). It never grants a connector (polpo_connector_update_access does).";
+
 const agentFields = {
   role: z.string().optional().describe("What it does, in a line (shown everywhere)"),
   model: z.string().optional().describe("provider:model (polpo_models_list); omit for the default"),
   systemPrompt: z.string().optional().describe("Its instructions: how it works, what it must and must not do"),
-  allowedTools: z.array(z.string()).optional().describe("Tools it may use (patterns allowed, e.g. browser_*, mcp__linear__*); omit for the defaults"),
+  allowedTools: z.array(z.string()).optional().describe("Tools it may use (patterns allowed, e.g. browser_*, artifact_* to make artifacts people open in Polpo, "
+    + "mcp__linear__*); omit for the defaults. An agent on a harness engine (Claude Code, Codex) gets the Polpo tools listed here too (artifacts, email, data…), run on the Polpo server"),
   skills: z.array(z.string()).optional().describe("Names of skills it uses"),
   identity: identity.optional().describe("How it presents itself"),
   reportsTo: z.string().optional().describe("The agent it reports to"),
@@ -31,6 +40,19 @@ const agentFields = {
     .describe("Computers it may use (ids from polpo_computers_list); \"host\" (this server) always"),
   defaultComputer: z.string().regex(/^([a-z0-9][a-z0-9-]{0,39})?$/).optional()
     .describe("The computer its chats and tasks run on (polpo_computers_list); \"host\" or '' for this server"),
+  engine: z.union([
+    z.literal("polpo"),
+    z.object({
+      harness: z.enum(["claude-code", "codex"]).describe("The official agent runtime (it must be enabled: polpo_harnesses_get)"),
+      model: z.string().max(200).optional().describe("Model id for the runtime (Bedrock: an inference profile id); omit for the harness setting's"),
+      permissionMode: z.enum(["allow-all", "allow-edits", "allow-reads"]).optional().describe("What the runtime may do without asking (default allow-all: it works unattended in its computer)"),
+      effort: z.enum(["low", "medium", "high", "xhigh", "max"]).optional().describe("Reasoning effort"),
+      maxBudgetUsd: z.number().positive().max(10000).optional().describe("Stop a run when its estimated spend passes this (USD)"),
+      credentialRef: z.object({ owner: z.string().min(1), service: z.string().min(1) }).optional()
+        .describe("This agent's own key (cost separation): a vault entry (owner + service, never the key) that replaces the harness's API key or gateway key"),
+    }),
+  ]).optional().describe("Its engine: \"polpo\" (Polpo's own, the default) or an official harness (Claude Code, Codex) running inside its computer "
+    + "(a Daytona v2 computer, set with defaultComputer). Credentials come from the harness settings (polpo_harnesses_update), never from here."),
 };
 
 /** An error when browserEgress names a proxy the settings do not have, else null. */
@@ -43,7 +65,31 @@ async function unknownEgress(deps: McpDeps, name: string | undefined): Promise<s
     : `There is no egress proxy "${name}". ${proxies.length ? `Proxies: ${proxies.join(", ")}.` : "None is set:"} Add it with polpo_config_update egress_proxies.`;
 }
 
-type Agent = { name: string; role?: string; model?: string; systemPrompt?: string; allowedTools?: string[]; skills?: string[]; identity?: { displayName?: string; title?: string }; reportsTo?: string };
+type Agent = {
+  name: string; role?: string; model?: string; systemPrompt?: string; allowedTools?: string[]; skills?: string[]; identity?: { displayName?: string; title?: string };
+  reportsTo?: string; engine?: unknown; connectorTools?: Record<string, "*" | string[]>;
+};
+
+/** Selected tool names the connector no longer lists (it may be disconnected: then nothing is reported). */
+async function staleConnectorTools(deps: McpDeps, selection: Agent["connectorTools"]): Promise<Record<string, string[]>> {
+  const stale: Record<string, string[]> = {};
+  for (const [id, entry] of Object.entries(selection ?? {})) {
+    if (!Array.isArray(entry) || entry.length === 0) continue;
+    const t = await apiGet(deps, `/connectors/${enc(id)}/tools`);
+    if (!t.ok) continue;
+    const known = new Set(((t.data as { tools?: Array<{ name: string }> })?.tools ?? []).map((x) => x.name));
+    const missing = entry.filter((name) => !known.has(name));
+    if (missing.length) stale[id] = missing;
+  }
+  return stale;
+}
+
+/** "lin: echo, search · notion: all" */
+function connectorToolsLine(selection: Agent["connectorTools"], stale: Record<string, string[]> = {}): string | undefined {
+  const entries = Object.entries(selection ?? {});
+  if (!entries.length) return undefined;
+  return `connector tools: ${entries.map(([id, entry]) => `${id}: ${entry === "*" ? "all" : entry.length ? entry.join(", ") : "none"}${stale[id]?.length ? ` (stale: ${stale[id]!.join(", ")})` : ""}`).join(" · ")}`;
+}
 
 async function loadAgent(deps: McpDeps, name: string): Promise<{ ok: true; agent: Agent } | { ok: false; status: number; error: string }> {
   const r = await apiGet(deps, `/agents/${enc(name)}`);
@@ -56,19 +102,23 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
     description: "One agent's configuration: role, model, instructions, tools, skills, identity and who it reports to. "
       + "polpo_agent_show shows how it is doing instead.",
     inputSchema: { name: z.string().min(1).describe("The agent's name (polpo_agents_list)") },
-    outputSchema: { agent: looseObject },
+    outputSchema: { agent: looseObject, stale_connector_tools: z.record(z.string(), z.array(z.string())).optional() },
     annotations: READ,
   }, async ({ name }) => {
     const r = await loadAgent(deps, name);
     if (!r.ok) return r.status === 404 ? fail(`There is no agent "${name}". Find the name with polpo_agents_list.`) : apiError(r, `Reading agent ${name}`);
     const a = r.agent;
+    const stale = await staleConnectorTools(deps, a.connectorTools);
+    const connectorLine = connectorToolsLine(a.connectorTools, stale);
     const text = [
       `${a.name}${a.identity?.displayName ? ` (${a.identity.displayName}${a.identity.title ? `, ${a.identity.title}` : ""})` : ""}: ${a.role ?? "no role"}`,
       `model: ${a.model ?? "default"}${a.reportsTo ? ` · reports to ${a.reportsTo}` : ""}`,
       `tools: ${a.allowedTools?.join(", ") ?? "defaults"} · skills: ${a.skills?.join(", ") || "none"}`,
+      ...(connectorLine ? [connectorLine] : []),
+      ...(a.engine && typeof a.engine === "object" ? [`engine: ${(a.engine as { harness?: string }).harness} harness${(a.engine as { model?: string }).model ? ` (${(a.engine as { model?: string }).model})` : ""}`] : []),
       ...(a.systemPrompt ? ["", short(a.systemPrompt, 3000)] : []),
     ].join("\n");
-    return ok(text, { agent: a as Record<string, unknown> });
+    return ok(text, { agent: a as Record<string, unknown>, ...(Object.keys(stale).length ? { stale_connector_tools: stale } : {}) });
   });
 
   tool("team", "polpo_agent_create", {
@@ -78,11 +128,13 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
     inputSchema: {
       name: z.string().min(1).max(60).regex(/^[a-z0-9][a-z0-9_-]*$/i, "letters, digits, - and _").describe("A short unique name, e.g. growth-analyst"),
       ...agentFields,
+      connector_tools: connectorToolsParam.optional().describe(CONNECTOR_TOOLS_HELP),
       team: z.string().optional().describe("The team to add it to (default the main team)"),
     },
     outputSchema: { agent: looseObject },
     annotations: WRITE,
-  }, async ({ team, ...body }) => {
+  }, async ({ team, connector_tools, ...fields }) => {
+    const body = { ...fields, ...(connector_tools ? { connectorTools: connector_tools } : {}) };
     const exists = await loadAgent(deps, body.name);
     if (exists.ok) return fail(`There is already an agent "${body.name}": choose another name, or change it with polpo_agent_update.`);
     const egress = await unknownEgress(deps, body.browserEgress);
@@ -95,22 +147,25 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
 
   tool("team", "polpo_agent_update", {
     title: "Update an agent",
-    description: "Change an agent's role, model, instructions, tools, skills, identity, manager, browser egress proxy or computer (defaultComputer). Only the fields given change "
+    description: "Change an agent's role, model, instructions, tools (and which tools of each connector: connector_tools), skills, identity, manager, browser egress proxy, computer (defaultComputer) or engine (polpo, or a Claude Code / Codex harness). Only the fields given change "
       + "(a list given replaces the old one); the result lists what changed. It applies to its next runs.",
     inputSchema: {
       name: z.string().min(1).describe("The agent's name"),
       ...agentFields,
       computers: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/)).nullable().optional()
         .describe("Computers it may use (ids from polpo_computers_list), replacing the list; null or [] clears it (\"host\", this server, is always allowed)"),
+      connector_tools: connectorToolsParam.nullable().optional()
+        .describe(`${CONNECTOR_TOOLS_HELP} Replaces the whole selection; null clears it (every tool of every granted connector).`),
     },
     outputSchema: { agent: looseObject, changed: z.array(z.string()) },
     annotations: UPDATE,
-  }, async ({ name, ...patch }) => {
+  }, async ({ name, connector_tools, ...fields }) => {
+    const patch: Record<string, unknown> = { ...fields, ...(connector_tools !== undefined ? { connectorTools: connector_tools } : {}) };
     const before = await loadAgent(deps, name);
     if (!before.ok) return before.status === 404 ? fail(`There is no agent "${name}". Find the name with polpo_agents_list.`) : apiError(before, `Reading agent ${name}`);
     const body = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
-    if (Object.keys(body).length === 0) return fail("Nothing to change: give at least one field (role, model, systemPrompt, allowedTools, skills, identity, reportsTo, maxTurns, browserEgress).");
-    const egress = await unknownEgress(deps, patch.browserEgress);
+    if (Object.keys(body).length === 0) return fail("Nothing to change: give at least one field (role, model, systemPrompt, allowedTools, connector_tools, skills, identity, reportsTo, maxTurns, browserEgress, defaultComputer, engine).");
+    const egress = await unknownEgress(deps, patch.browserEgress as string | undefined);
     if (egress) return fail(egress);
     const r = await apiSend(deps, "PATCH", `/agents/${enc(name)}`, body);
     if (!r.ok) return apiError(r, `Updating agent ${name}`);

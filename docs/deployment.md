@@ -150,6 +150,15 @@ POLPO_CORS_ORIGINS=https://app.example.com
 
 The split-domain setup works for normal UI API calls, but the Docker UI proxy is still the best PWA setup because the service worker can keep using same-origin `/api` routes for subscription refreshes.
 
+## Node UI server (`ui/server.mjs`)
+
+Instead of nginx, the built UI can be served by `node ui/server.mjs --root ui/dist --port 4173` (`pnpm --filter ui serve`). It serves `ui/dist` from disk on every request and generates `/runtime-config.js` (API URL, the instance's appearance, branding and orchestrator name; see [appearance.md](appearance.md)).
+
+**When What's new entries went online.** `pnpm --filter ui build` writes `ui/dist/whats-new-ids.json` (the ids of the entries in `ui/src/lib/changelog.ts`). The first time the server serves a build containing an id (at startup, or as soon as a rebuild replaces the file), it records the time in `whats-new.json` inside its state directory and never changes it afterwards; `/runtime-config.js` carries the recorded times as `whatsNewPublishedAt` (`{ id: ISO time }`), and the Novità page and the What's new bar show them ("22 nov 2026 · 18:52", "online alle 18:52"). The very first time (no state file yet) the ids already in the build are recorded without a time: they went online before times were kept and show their day only. A state file that cannot be read is never overwritten (no times are shown); if it cannot be written, new entries are shown without a time rather than with one that would change at the next restart. Entries may also carry a `publishedAt` ISO datetime, used only when the server recorded nothing (dev and local builds).
+
+- `POLPO_UI_STATE_DIR`: where `whats-new.json` is kept. Default: `.polpo-ui-state` next to the static root (`ui/.polpo-ui-state`, ignored by version control), which survives rebuilds because the build only empties `ui/dist`. It holds only entry ids and times, no secrets. Several UI servers serving the same `ui/dist` can share it: the first one to see a new entry records its time and the others keep it.
+- A deploy needs nothing more than build, then restart: keep the state directory between deploys (do not delete ignored files in the checkout, or point `POLPO_UI_STATE_DIR` somewhere persistent); if it is lost, the entries already deployed are recorded again without a time.
+
 ## Image Build Matrix
 
 Release tags publish:

@@ -6,7 +6,8 @@
  * session stays in the database. Tabs are an "active workspace aggregator",
  * not a deletion control.
  *
- * Persistence: tab list is stored in localStorage under `polpo:chat:tabs`.
+ * Persistence: the tab list is part of the person's chat navigation
+ * preferences (server-side per member, local copy per instance + member).
  * Bounds: max 12 tabs. When exceeded, the least-recently-used non-active
  * tab is dropped.
  *
@@ -15,11 +16,12 @@
  *  - chat-first layout: below ChatPanelHeader in the left chat panel
  */
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Plus, X, Star, StarOff, Pencil, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useChatActions, useChatSessionState } from "@/hooks/chat-context";
 import { setActiveChatRoom, useActiveChatRoom } from "@/hooks/use-chat-room";
+import { getChatNavigation, updateChatNavigation, useChatNavigation } from "@/lib/chat-navigation";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -37,71 +39,36 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
-const STORAGE_KEY = "polpo:chat:tabs";
 const MAX_TABS = 12;
 const TITLE_MAX_LEN = 22;
 
-// ─── External store (useSyncExternalStore) ────────────────────────────
+// ─── Store: the person's chat navigation preferences (`openTabs`) ─────
 
-function readInitial(): string[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((v): v is string => typeof v === "string");
-  } catch {
-    return [];
-  }
-}
+const EMPTY_TABS: string[] = [];
 
-let _tabs: string[] = readInitial();
-const listeners = new Set<() => void>();
-
-function persist() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(_tabs));
-  } catch {
-    /* quota or disabled — ignore */
-  }
-}
-
-function subscribe(cb: () => void) {
-  listeners.add(cb);
-  return () => {
-    listeners.delete(cb);
-  };
-}
-
-function getSnapshot(): string[] {
-  return _tabs;
+function getTabs(): string[] {
+  return getChatNavigation().openTabs ?? EMPTY_TABS;
 }
 
 function setTabs(next: string[]) {
-  // identity comparison — ok because we always replace the array
-  if (next === _tabs) return;
-  // shallow equality check to skip no-op updates
-  if (next.length === _tabs.length && next.every((id, i) => id === _tabs[i])) return;
-  _tabs = next;
-  persist();
-  listeners.forEach((cb) => cb());
+  updateChatNavigation({ openTabs: next });
 }
 
 /** Hook: read current open-tab ids. Re-renders only when the list changes. */
 function useOpenTabs(): string[] {
-  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  return useChatNavigation().openTabs ?? EMPTY_TABS;
 }
 
-// ─── Tab actions (pure, work on _tabs) ────────────────────────────────
+// ─── Tab actions (pure, work on the stored list) ──────────────────────
 
 /**
  * Insert `id` if missing. If size would exceed MAX_TABS, drop the
  * least-recently-used (= leftmost) tab that isn't `activeId`.
  */
 function openTab(id: string, activeId: string | null) {
-  if (_tabs.includes(id)) return;
-  let next = [..._tabs, id];
+  const tabs = getTabs();
+  if (tabs.includes(id)) return;
+  let next = [...tabs, id];
   if (next.length > MAX_TABS) {
     const dropIdx = next.findIndex((t) => t !== activeId);
     if (dropIdx >= 0) next.splice(dropIdx, 1);
@@ -111,17 +78,19 @@ function openTab(id: string, activeId: string | null) {
 }
 
 function closeTab(id: string): { next: string[]; wasLast: boolean } {
-  const idx = _tabs.indexOf(id);
-  if (idx < 0) return { next: _tabs, wasLast: _tabs.length === 0 };
-  const next = _tabs.filter((t) => t !== id);
+  const tabs = getTabs();
+  const idx = tabs.indexOf(id);
+  if (idx < 0) return { next: tabs, wasLast: tabs.length === 0 };
+  const next = tabs.filter((t) => t !== id);
   setTabs(next);
   return { next, wasLast: next.length === 0 };
 }
 
-function pruneOrphans(validIds: Set<string>) {
-  if (_tabs.length === 0) return;
-  const next = _tabs.filter((id) => validIds.has(id));
-  if (next.length !== _tabs.length) setTabs(next);
+function pruneOrphans(removedIds: Set<string>) {
+  const tabs = getTabs();
+  if (tabs.length === 0) return;
+  const next = tabs.filter((id) => !removedIds.has(id));
+  if (next.length !== tabs.length) setTabs(next);
 }
 
 // ─── Components ───────────────────────────────────────────────────────
@@ -192,7 +161,7 @@ function TabItem({ id, title, active, streaming, starred, onSelect, onClose, onR
           {starred && (
             <Star
               aria-label="Starred"
-              className="h-3 w-3 shrink-0 fill-amber-400 text-amber-400"
+              className="h-3 w-3 shrink-0 fill-warning text-warning"
             />
           )}
           <span className="max-w-[140px] truncate leading-none">{truncated}</span>
@@ -266,11 +235,19 @@ export function ChatTabs() {
     openTab(sessionId, sessionId);
   }, [sessionId]);
 
-  // Orphan prune: drop tabs whose session no longer exists in the list.
-  // Only run once sessions have loaded (>0) to avoid wiping on cold-start.
+  // Orphan prune: drop tabs whose session disappeared from the list (deleted).
+  // Only ids this list has shown before are pruned: tabs restored from the
+  // person's preferences may point at threads a stale cached list doesn't
+  // know yet (opened on another device) — those are hidden, not dropped.
+  const seenIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (sessions.length === 0) return;
-    pruneOrphans(new Set(sessions.map((s) => s.id)));
+    const current = new Set(sessions.map((s) => s.id));
+    const gone = new Set([...seenIdsRef.current].filter((id) => !current.has(id)));
+    for (const id of current) seenIdsRef.current.add(id);
+    if (gone.size === 0) return;
+    for (const id of gone) seenIdsRef.current.delete(id);
+    pruneOrphans(gone);
   }, [sessions]);
 
   const handleClose = useCallback(
@@ -278,21 +255,22 @@ export function ChatTabs() {
       const wasActive = id === sessionId;
       const { next } = closeTab(id);
       if (!wasActive || inGroup) return;
-      if (next.length === 0) {
-        newSession();
-      } else {
-        // fall back to the last (rightmost) remaining tab
-        const fallback = next[next.length - 1];
-        void loadSession(fallback);
-      }
+      // fall back to the last (rightmost) remaining tab the list knows
+      const fallback = next.filter((t) => sessionMap.has(t)).at(-1);
+      if (fallback) void loadSession(fallback);
+      else newSession();
     },
-    [sessionId, inGroup, loadSession, newSession],
+    [sessionId, inGroup, loadSession, newSession, sessionMap],
   );
+
+  // Tabs of threads the list doesn't know (yet) stay hidden; the open thread
+  // always shows (a brand-new chat may not be listed for a moment).
+  const visibleTabIds = tabIds.filter((id) => sessionMap.has(id) || id === sessionId);
 
   // Hide the strip entirely when there are no tabs to show — the [+] button
   // lives in the headers (existing UI); a phantom strip would just add
   // vertical noise. Show it as soon as one tab is open.
-  if (tabIds.length === 0) return null;
+  if (visibleTabIds.length === 0) return null;
 
   return (
     <div
@@ -301,10 +279,8 @@ export function ChatTabs() {
       className="flex shrink-0 items-center gap-1 border-b border-border/50 bg-background px-2 py-1"
     >
       <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-        {tabIds.map((id) => {
+        {visibleTabIds.map((id) => {
           const session = sessionMap.get(id);
-          // Orphan tabs (not yet pruned) render with placeholder; the prune
-          // effect will sweep them on the next sessions update.
           const title = session?.title || "New session";
           const starred = !!session?.starred;
           return (

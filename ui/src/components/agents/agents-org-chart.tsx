@@ -29,6 +29,8 @@ import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { useAgentsPage } from "./agents-page-context";
 import { getTeamColor } from "./agents-team-colors";
 import { cn } from "@/lib/utils";
+import { EngineBadge } from "@/components/shared/run-context";
+import { agentEngineId } from "@/lib/run-context";
 
 // ─── Custom node data types ─────────────────────────────
 
@@ -63,7 +65,7 @@ function TeamHeaderNode({ data }: NodeProps<Node<TeamHeaderNodeData>>) {
     >
       <Users className={cn("h-4 w-4 shrink-0", tc.text)} />
       <span className={cn("text-sm font-bold whitespace-nowrap", tc.text)}>{data.label}</span>
-      <Badge variant="outline" className={cn("text-[10px] shrink-0 font-bold border-0", tc.badgeBg, tc.text)}>
+      <Badge variant="outline" className={cn("text-micro shrink-0 font-bold border-0", tc.badgeBg, tc.text)}>
         {data.agentCount}
       </Badge>
       <Handle type="target" position={Position.Top} className="!bg-primary/60 !w-2 !h-2 !border-0" />
@@ -83,9 +85,9 @@ function AgentNode({ data, selected }: NodeProps<Node<AgentNodeData>>) {
       className={cn(
         "rounded-xl border bg-card shadow-md cursor-pointer transition-all hover:shadow-lg select-none",
         selected
-          ? `border-primary shadow-[0_0_24px_oklch(0.7_0.15_200_/_18%)] ring-2 ring-primary/30`
+          ? `border-primary shadow-[0_0_24px_color-mix(in_oklch,var(--primary)_18%,transparent)] ring-2 ring-primary/30`
           : isActive
-            ? `${tc.border} shadow-[0_0_24px_oklch(0.7_0.15_200_/_12%)]`
+            ? `${tc.border} shadow-[0_0_24px_color-mix(in_oklch,var(--primary)_12%,transparent)]`
             : "border-border/50 hover:border-primary/40",
       )}
       style={{ minWidth: 180, maxWidth: 240 }}
@@ -102,21 +104,22 @@ function AgentNode({ data, selected }: NodeProps<Node<AgentNodeData>>) {
               {isActive && <div className={cn("h-2 w-2 rounded-full animate-pulse shrink-0", tc.dot)} />}
             </div>
             {agent.identity?.displayName && agent.identity.displayName !== agent.name && (
-              <span className="text-[10px] font-mono text-muted-foreground block truncate">@{agent.name}</span>
+              <span className="text-micro font-mono text-muted-foreground block truncate">@{agent.name}</span>
             )}
           </div>
         </div>
         {(agent.identity?.title || agent.role) && (
-          <p className="text-[11px] text-muted-foreground line-clamp-2 leading-snug">{agent.identity?.title ?? agent.role}</p>
+          <p className="text-caption text-muted-foreground line-clamp-2 leading-snug">{agent.identity?.title ?? agent.role}</p>
         )}
         <div className="flex items-center gap-1.5 flex-wrap">
-          {agent.model && <Badge variant="secondary" className="text-[9px] px-1.5 py-0 font-mono">{agent.model}</Badge>}
+          <EngineBadge engine={agentEngineId((agent as { engine?: unknown }).engine)} model={((agent as { engine?: { model?: string } }).engine?.model)} withLabel size={12} className="text-micro" />
+          {agent.model && <Badge variant="secondary" className="text-micro px-1.5 py-0 font-mono">{agent.model}</Badge>}
           {!!agent.volatile && (
-            <Badge variant="outline" className="text-[9px] px-1.5 py-0 text-amber-400 border-amber-500/30">
+            <Badge variant="outline" className="text-micro px-1.5 py-0 text-warning border-warning/30">
               <Zap className="h-2 w-2 mr-0.5" /> mission
             </Badge>
           )}
-          {subordinateCount > 0 && <Badge variant="outline" className="text-[9px] px-1.5 py-0">{subordinateCount} report{subordinateCount !== 1 ? "s" : ""}</Badge>}
+          {subordinateCount > 0 && <Badge variant="outline" className="text-micro px-1.5 py-0">{subordinateCount} report{subordinateCount !== 1 ? "s" : ""}</Badge>}
         </div>
       </div>
       {/* Navigate button — only visible when selected */}
@@ -125,7 +128,7 @@ function AgentNode({ data, selected }: NodeProps<Node<AgentNodeData>>) {
           <Button
             variant="ghost"
             size="sm"
-            className={cn("h-6 w-full text-[11px] font-medium gap-1", tc.text)}
+            className={cn("h-6 w-full text-caption font-medium gap-1", tc.text)}
             onClick={(e) => { e.stopPropagation(); navigate(`/agents/${encodeURIComponent(agent.name)}`); }}
           >
             View details
@@ -155,7 +158,7 @@ const EDGE_MARKER = {
   type: MarkerType.ArrowClosed,
   width: 14,
   height: 14,
-  color: "oklch(0.7 0.12 250 / 60%)",
+  color: "color-mix(in oklch, var(--info) 60%, transparent)",
 };
 
 function makeEdge(id: string, source: string, target: string, animated: boolean): Edge {
@@ -164,7 +167,7 @@ function makeEdge(id: string, source: string, target: string, animated: boolean)
     source,
     target,
     type: "smoothstep",
-    style: { stroke: "oklch(0.7 0.12 250 / 40%)", strokeWidth: 2 },
+    style: { stroke: "color-mix(in oklch, var(--info) 40%, transparent)", strokeWidth: 2 },
     markerEnd: EDGE_MARKER,
     animated,
   };
@@ -349,7 +352,7 @@ function buildClusterLayout(
           source: `team-header-${managerTeam}`,
           target: `team-header-${team.name}`,
           type: "smoothstep",
-          style: { stroke: "oklch(0.7 0.15 300 / 50%)", strokeWidth: 2, strokeDasharray: "6 4" },
+          style: { stroke: "color-mix(in oklch, var(--chart-5) 50%, transparent)", strokeWidth: 2, strokeDasharray: "6 4" },
           markerEnd: EDGE_MARKER,
           animated: true,
         });
@@ -507,8 +510,8 @@ function buildShowAllLayout(
           source: agent.reportsTo,
           target: agent.name,
           type: "smoothstep",
-          style: { stroke: "oklch(0.7 0.15 300 / 50%)", strokeWidth: 2, strokeDasharray: "6 4" },
-          markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: "oklch(0.7 0.15 300 / 60%)" },
+          style: { stroke: "color-mix(in oklch, var(--chart-5) 50%, transparent)", strokeWidth: 2, strokeDasharray: "6 4" },
+          markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: "color-mix(in oklch, var(--chart-5) 60%, transparent)" },
           animated: true,
         });
       }
@@ -598,7 +601,7 @@ function OrgChartInner() {
           </Button>
         )}
         {mode === "detail" && focusedTeamObj && (
-          <Badge variant="secondary" className="text-[10px]">
+          <Badge variant="secondary" className="text-micro">
             {focusedTeamObj.name} — {focusedTeamObj.agents.length} agents
           </Badge>
         )}
@@ -630,7 +633,7 @@ function OrgChartInner() {
         proOptions={{ hideAttribution: true }}
         className="[&_.react-flow__background]:!bg-transparent"
       >
-        <Background gap={20} size={1} className="!text-zinc-800/40" />
+        <Background gap={20} size={1} className="!text-border" />
         <Controls
           showInteractive={false}
           className="!bg-card !border-border/40 !shadow-md [&>button]:!bg-card [&>button]:!border-border/30 [&>button]:!text-muted-foreground [&>button:hover]:!bg-muted/50"

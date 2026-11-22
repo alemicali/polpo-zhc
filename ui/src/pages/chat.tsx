@@ -1,5 +1,6 @@
 import { ChatAttachments } from "@/components/chat-attachments";
 import {
+  Fragment,
   lazy,
   Suspense,
   useState,
@@ -73,6 +74,7 @@ import {
   MessagesSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -150,10 +152,11 @@ import { useAgents, useEvents, useSkills, usePolpo } from "@polpo-ai/react";
 import type { AgentConfig, Mission, PlaybookInfo, SkillWithAssignment, Task } from "@polpo-ai/react";
 import { cn } from "@/lib/utils";
 import { config } from "@/lib/config";
+import { useOrchestratorName } from "@/lib/orchestrator-name";
 import { useChatFirstSessionsOpen, setChatFirstSessionsOpen } from "@/hooks/use-layout-mode";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
-import { useAppearance, type AppearanceSettings, type AppearanceThemeSettings } from "@/lib/appearance";
+import { kit, useAppearance, type AppearanceSettings, type AppearanceThemeSettings } from "@/lib/appearance";
 import {
   clearAppPreviewContext,
   formatAppPreviewContext,
@@ -176,6 +179,7 @@ import {
   useNewGroupRequest,
 } from "@/hooks/use-chat-room";
 import { ORCHESTRATOR_MEMBER_ID, type RoomInput } from "@/lib/rooms-api";
+import { createLocalCache } from "@/lib/chat-navigation";
 
 const MissionPreviewDialog = lazy(() =>
   import("@/components/mission-preview-dialog").then((module) => ({ default: module.MissionPreviewDialog })),
@@ -202,12 +206,11 @@ function chatTimeAgo(date: Date): string {
 //      and the surrounding form auto-resets after submit, so we snapshot
 //      the live `value` per session id and rehydrate after each switch.
 //
-// Module-level Maps are intentional: they survive React strict-mode double
-// renders and any local re-mounts of the consuming components, but they
-// are lost on a hard refresh — which is the desired "browser tab" semantic
-// (a closed-and-reopened browser doesn't restore unsubmitted drafts).
-const chatScrollStates: Map<string, StateSnapshot> = new Map();
-const chatInputDrafts: Map<string, string> = new Map();
+// Both survive a reload too: they are kept in localStorage for this device,
+// scoped to the instance and the signed-in person (see createLocalCache),
+// bounded to the most recent chats.
+const chatScrollStates = createLocalCache<StateSnapshot>("scroll", { maxEntries: 30, maxBytes: 200_000 });
+const chatInputDrafts = createLocalCache<string>("drafts", { maxEntries: 50, maxBytes: 500_000 });
 /** Sentinel session-id used for the unsaved "new session" placeholder. */
 const NEW_SESSION_DRAFT_KEY = "__new__";
 
@@ -349,7 +352,7 @@ function MicButton({
           className={cn(
             "h-8 w-8 rounded-[calc(var(--radius)+999px)] transition-all",
             isListening
-              ? "bg-red-500/15 text-red-400 hover:bg-red-500/25 ring-2 ring-red-500/30 animate-pulse"
+              ? "bg-destructive/15 text-destructive hover:bg-destructive/25 ring-2 ring-destructive/30 animate-pulse"
               : "text-muted-foreground hover:text-foreground hover:bg-accent",
           )}
           onClick={toggle}
@@ -388,7 +391,7 @@ function AttachmentPreview({ onCount }: { onCount?: (count: number) => void }) {
             />
           ) : (
             <div className="h-14 w-14 rounded-lg border border-border/50 bg-muted flex items-center justify-center">
-              <span className="text-[9px] text-muted-foreground font-mono truncate px-1">
+              <span className="text-micro text-muted-foreground font-mono truncate px-1">
                 {file.filename?.split(".").pop()?.toUpperCase() ?? "FILE"}
               </span>
             </div>
@@ -434,8 +437,8 @@ function AttachButton({ disabled }: { disabled?: boolean }) {
 
 function ChatInputHint({ trigger, label }: { trigger: "@" | "/"; label: string }) {
   return (
-    <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-      <span className="font-mono text-[10px] font-semibold text-foreground">
+    <span className="inline-flex items-center gap-1 text-caption text-muted-foreground">
+      <span className="font-mono text-micro font-semibold text-foreground">
         {trigger}
       </span>
       <span className="hidden sm:inline">for {label}</span>
@@ -569,7 +572,7 @@ function MissionPreviewCard({
         <Target className="h-3.5 w-3.5 shrink-0 text-primary sm:h-4 sm:w-4" />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold truncate">{preview.name || mission?.name || "Mission"}</p>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-caption text-muted-foreground">
             {tasks.length} task{tasks.length !== 1 ? "s" : ""}
             {mission?.team && mission.team.length > 0 && (
               <> &middot; {mission.team.length} agent{mission.team.length !== 1 ? "s" : ""}</>
@@ -591,7 +594,7 @@ function MissionPreviewCard({
           </TooltipTrigger>
           <TooltipContent side="bottom" className="text-xs">Open full view</TooltipContent>
         </Tooltip>
-        <Badge variant="outline" className="hidden shrink-0 text-[10px] sm:inline-flex">
+        <Badge variant="outline" className="hidden shrink-0 text-micro sm:inline-flex">
           Preview
         </Badge>
       </div>
@@ -668,16 +671,16 @@ function MissionPreviewCard({
             if (item.kind === "checkpoint") {
               const cp = item.data;
               return (
-                <div key={key} className="ml-0 flex items-start gap-2 rounded-lg border border-amber-500/15 bg-amber-500/[0.03] px-2.5 py-1.5 sm:ml-6 sm:px-3 sm:py-2">
-                  <PauseCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+                <div key={key} className="ml-0 flex items-start gap-2 rounded-lg border border-warning/15 bg-warning/[0.03] px-2.5 py-1.5 sm:ml-6 sm:px-3 sm:py-2">
+                  <PauseCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
                   <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                       <p className="min-w-0 text-sm font-medium leading-snug">{cp.name}</p>
-                      <span className="text-[9px] font-medium uppercase tracking-wider text-amber-500">Checkpoint</span>
+                      <span className="text-micro font-medium uppercase tracking-label text-warning">Checkpoint</span>
                     </div>
-                    {cp.message && <p className="text-[11px] text-muted-foreground mt-0.5">{cp.message}</p>}
+                    {cp.message && <p className="text-caption text-muted-foreground mt-0.5">{cp.message}</p>}
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
-                      <span className="text-[10px] text-muted-foreground">
+                      <span className="text-micro text-muted-foreground">
                         Blocks: <span className="font-medium text-foreground/70">{cp.blocksTasks.join(", ")}</span>
                       </span>
                     </div>
@@ -688,16 +691,16 @@ function MissionPreviewCard({
             if (item.kind === "delay") {
               const dl = item.data;
               return (
-                <div key={key} className="ml-0 flex items-start gap-2 rounded-lg border border-blue-500/15 bg-blue-500/[0.03] px-2.5 py-1.5 sm:ml-6 sm:px-3 sm:py-2">
-                  <Timer className="h-3.5 w-3.5 text-blue-500 mt-0.5 shrink-0" />
+                <div key={key} className="ml-0 flex items-start gap-2 rounded-lg border border-info/15 bg-info/[0.03] px-2.5 py-1.5 sm:ml-6 sm:px-3 sm:py-2">
+                  <Timer className="h-3.5 w-3.5 text-info mt-0.5 shrink-0" />
                   <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                       <p className="min-w-0 text-sm font-medium leading-snug">{dl.name}</p>
-                      <span className="text-[9px] font-medium uppercase tracking-wider text-blue-500">Delay</span>
+                      <span className="text-micro font-medium uppercase tracking-label text-info">Delay</span>
                     </div>
-                    {dl.message && <p className="text-[11px] text-muted-foreground mt-0.5">{dl.message}</p>}
+                    {dl.message && <p className="text-caption text-muted-foreground mt-0.5">{dl.message}</p>}
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
-                      <span className="text-[10px] text-muted-foreground">
+                      <span className="text-micro text-muted-foreground">
                         Blocks: <span className="font-medium text-foreground/70">{dl.blocksTasks.join(", ")}</span>
                       </span>
                     </div>
@@ -708,27 +711,27 @@ function MissionPreviewCard({
             // gate
             const qg = item.data as MissionQualityGateShape;
             return (
-              <div key={key} className="ml-0 flex items-start gap-2 rounded-lg border border-violet-500/15 bg-violet-500/[0.03] px-2.5 py-1.5 sm:ml-6 sm:px-3 sm:py-2">
-                <BarChart3 className="h-3.5 w-3.5 text-violet-500 mt-0.5 shrink-0" />
+              <div key={key} className="ml-0 flex items-start gap-2 rounded-lg border border-chart-5/15 bg-chart-5/[0.03] px-2.5 py-1.5 sm:ml-6 sm:px-3 sm:py-2">
+                <BarChart3 className="h-3.5 w-3.5 text-chart-5 mt-0.5 shrink-0" />
                 <div className="flex-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                     <p className="min-w-0 text-sm font-medium leading-snug">{qg.name}</p>
-                    <span className="text-[9px] font-medium uppercase tracking-wider text-violet-500">Quality Gate</span>
+                    <span className="text-micro font-medium uppercase tracking-label text-chart-5">Quality Gate</span>
                   </div>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
-                    <span className="text-[10px] text-muted-foreground">
+                    <span className="text-micro text-muted-foreground">
                       Blocks: <span className="font-medium text-foreground/70">{qg.blocksTasks.join(", ")}</span>
                     </span>
                   </div>
                   <div className="flex flex-wrap gap-1.5 mt-1.5">
                     {qg.minScore != null && (
-                      <Badge variant="secondary" className="text-[10px] gap-1">
+                      <Badge variant="secondary" className="text-micro gap-1">
                         <BarChart3 className="h-2.5 w-2.5" />
                         Min score: {qg.minScore}/5
                       </Badge>
                     )}
                     {qg.requireAllPassed && (
-                      <Badge variant="secondary" className="text-[10px] gap-1">
+                      <Badge variant="secondary" className="text-micro gap-1">
                         <ShieldCheck className="h-2.5 w-2.5" />
                         All must pass
                       </Badge>
@@ -736,7 +739,7 @@ function MissionPreviewCard({
                     {qg.condition && (
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <Badge variant="secondary" className="text-[10px] gap-1 cursor-default">
+                          <Badge variant="secondary" className="text-micro gap-1 cursor-default">
                             <FileCode className="h-2.5 w-2.5" />
                             Custom condition
                           </Badge>
@@ -764,18 +767,18 @@ function MissionPreviewCard({
                   className="flex w-full items-start gap-2 px-1 py-1.5 text-left sm:px-1.5 sm:py-2"
                   onClick={() => toggleTask(idx)}
                 >
-                  <span className="text-[11px] font-mono text-muted-foreground mt-0.5 w-5 text-right shrink-0">
+                  <span className="text-caption font-mono text-muted-foreground mt-0.5 w-5 text-right shrink-0">
                     {idx + 1}.
                   </span>
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-sm leading-snug">{task.title}</p>
                     <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5">
-                      <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                      <span className="inline-flex items-center gap-1 text-caption text-muted-foreground">
                         <User className="h-3 w-3" />
                         {task.assignTo}
                       </span>
                       {task.dependsOn && task.dependsOn.length > 0 && (
-                        <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                        <span className="inline-flex items-center gap-1 text-caption text-muted-foreground">
                           <GitBranch className="h-3 w-3" />
                           {task.dependsOn.join(", ")}
                         </span>
@@ -791,7 +794,7 @@ function MissionPreviewCard({
                 {isExpanded && (
                   <div className="pl-9 pr-2 pb-2.5 space-y-2">
                     {task.description && (
-                      <div className="text-xs text-muted-foreground leading-relaxed [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0 [&_code]:text-[11px] [&_pre]:text-[11px]">
+                      <div className="text-xs text-muted-foreground leading-relaxed [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0 [&_code]:text-caption [&_pre]:text-caption">
                         <MessageResponse>{task.description}</MessageResponse>
                       </div>
                     )}
@@ -800,7 +803,7 @@ function MissionPreviewCard({
                         {task.expectations.map((exp, ei) => (
                           <Tooltip key={ei}>
                             <TooltipTrigger asChild>
-                              <Badge variant="secondary" className="text-[10px] gap-1 cursor-default">
+                              <Badge variant="secondary" className="text-micro gap-1 cursor-default">
                                 {expectationIcon(exp.type)}
                                 {expectationLabel(exp.type)}
                               </Badge>
@@ -820,7 +823,7 @@ function MissionPreviewCard({
                       </div>
                     )}
                     {task.maxRetries != null && task.maxRetries > 0 && (
-                      <p className="text-[11px] text-muted-foreground">
+                      <p className="text-caption text-muted-foreground">
                         Max retries: {task.maxRetries}
                       </p>
                     )}
@@ -998,19 +1001,19 @@ function VaultPreviewCard({
 
   return (
     <div className="mt-3 space-y-3">
-      <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.03] overflow-hidden">
+      <div className="rounded-xl border border-warning/20 bg-warning/[0.03] overflow-hidden">
         {/* Header */}
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-amber-500/10 bg-amber-500/[0.02]">
-          <KeyRound className="h-4 w-4 text-amber-500 shrink-0" />
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-warning/10 bg-warning/[0.02]">
+          <KeyRound className="h-4 w-4 text-warning shrink-0" />
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold truncate">
               {preview.label ?? preview.service}
             </p>
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-caption text-muted-foreground">
               {vaultTypeLabel[preview.type] ?? preview.type} credential for <span className="font-medium">{preview.agent}</span>
             </p>
           </div>
-          <Badge variant="outline" className="text-[10px] shrink-0 border-amber-500/30 text-amber-600">
+          <Badge variant="outline" className="text-micro shrink-0 border-warning/30 text-warning">
             <ShieldCheck className="h-3 w-3 mr-1" />
             Vault
           </Badge>
@@ -1092,10 +1095,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isHexColor(value: string): boolean {
-  return /^#[0-9a-f]{6}$/i.test(value);
-}
-
 function themePatchFromPreview(preview: SetDesignData, mode: DesignMode) {
   const nested = preview[mode];
   if (nested && isRecord(nested)) return nested;
@@ -1107,38 +1106,24 @@ function themePatchFromPreview(preview: SetDesignData, mode: DesignMode) {
   return Object.keys(patch).length > 0 ? patch : null;
 }
 
+/** Apply a proposed patch to a mode's tokens: any design token (kit.TOKENS; the old `text` is foreground), each checked. */
 function applyThemePatch(
   base: AppearanceThemeSettings,
   patch: Record<string, unknown> | null,
   label: string,
 ): { theme: AppearanceThemeSettings; changed: string[]; error?: string } {
-  const next = { ...base };
+  const next: AppearanceThemeSettings = { ...base };
   const changed: string[] = [];
   if (!patch) return { theme: next, changed };
 
-  for (const key of ["primary", "secondary", "text"] as const) {
-    if (patch[key] === undefined) continue;
-    if (typeof patch[key] !== "string" || !isHexColor(patch[key])) {
-      return { theme: next, changed, error: `${label} ${key} must be a 6-digit hex color` };
-    }
-    next[key] = patch[key];
-    changed.push(`${label} ${key} ${patch[key]}`);
-  }
-
-  if (patch.radius !== undefined) {
-    if (typeof patch.radius !== "number" || !Number.isFinite(patch.radius)) {
-      return { theme: next, changed, error: `${label} radius must be a number` };
-    }
-    next.radius = Math.min(24, Math.max(0, patch.radius));
-    changed.push(`${label} radius ${next.radius}px`);
-  }
-
-  if (patch.fontFamily !== undefined) {
-    if (typeof patch.fontFamily !== "string" || !patch.fontFamily.trim()) {
-      return { theme: next, changed, error: `${label} fontFamily cannot be empty` };
-    }
-    next.fontFamily = patch.fontFamily.trim();
-    changed.push(`${label} font`);
+  for (const [raw, value] of Object.entries(patch)) {
+    if (value === undefined) continue;
+    const key = raw === "text" ? "foreground" : raw;
+    if (!kit.TOKENS[key]) return { theme: next, changed, error: `${label} ${raw} is not a design token` };
+    const valid = kit.tokenValue(key, value);
+    if (valid === undefined) return { theme: next, changed, error: `${label} ${raw}: ${String(value)} is not valid` };
+    next[key] = valid;
+    changed.push(`${label} ${key} ${key === "radius" ? `${valid}px` : valid}`);
   }
 
   return { theme: next, changed };
@@ -1176,26 +1161,27 @@ function hasAppearancePreview(
 }
 
 function ThemeSwatch({ label, theme }: { label: string; theme: AppearanceThemeSettings }) {
+  const color = (name: string) => (typeof theme[name] === "string" ? String(theme[name]) : undefined);
+  const rows = Object.entries(theme).slice(0, 8);
   return (
     <div className="rounded-lg border border-border/40 bg-background/70 p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
         <p className="text-xs font-semibold">{label}</p>
-        <span className="text-[10px] text-muted-foreground">{theme.radius}px radius</span>
+        <span className="text-micro text-muted-foreground">{typeof theme.radius === "number" ? `${theme.radius}px radius` : "palette radius"}</span>
       </div>
       <div className="mb-2 flex h-8 overflow-hidden rounded-md border border-border/30">
-        <span className="flex-1" style={{ background: theme.primary }} />
-        <span className="flex-1" style={{ background: theme.secondary }} />
-        <span className="flex-1" style={{ background: theme.text }} />
+        <span className="flex-1" style={{ background: color("primary") ?? "var(--primary)" }} />
+        <span className="flex-1" style={{ background: color("secondary") ?? "var(--secondary)" }} />
+        <span className="flex-1" style={{ background: color("foreground") ?? "var(--foreground)" }} />
       </div>
-      <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-[11px]">
-        <span className="text-muted-foreground">Primary</span>
-        <code className="truncate">{theme.primary}</code>
-        <span className="text-muted-foreground">Secondary</span>
-        <code className="truncate">{theme.secondary}</code>
-        <span className="text-muted-foreground">Text</span>
-        <code className="truncate">{theme.text}</code>
-        <span className="text-muted-foreground">Font</span>
-        <code className="truncate">{theme.fontFamily}</code>
+      <div className="grid grid-cols-[6rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-caption">
+        {rows.length === 0 && <span className="col-span-2 text-muted-foreground">The palette's own values</span>}
+        {rows.map(([name, value]) => (
+          <Fragment key={name}>
+            <span className="truncate text-muted-foreground">{name}</span>
+            <code className="truncate">{String(value)}</code>
+          </Fragment>
+        ))}
       </div>
     </div>
   );
@@ -1238,11 +1224,11 @@ function DesignPreviewCard({
         <Palette className="h-4 w-4 shrink-0 text-primary" />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold">Design preview</p>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-caption text-muted-foreground">
             {preview.enabled === false ? "Appearance overrides will be disabled" : "Review the proposed light and dark theme before applying"}
           </p>
         </div>
-        <Badge variant="outline" className="shrink-0 text-[10px]">Preview</Badge>
+        <Badge variant="outline" className="shrink-0 text-micro">Preview</Badge>
       </div>
 
       <div className="space-y-3 px-4 py-3">
@@ -1307,7 +1293,7 @@ function CopyAction({ text }: { text: string }) {
   return (
     <MessageAction tooltip={copied ? "Copied!" : "Copy"} onClick={copy}>
       {copied ? (
-        <Check className="h-3.5 w-3.5 text-emerald-500" />
+        <Check className="h-3.5 w-3.5 text-success" />
       ) : (
         <Copy className="h-3.5 w-3.5" />
       )}
@@ -1409,7 +1395,7 @@ function SpeakAction({ text }: { text: string }) {
       {state === "loading" ? (
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
       ) : state === "playing" ? (
-        <Pause className="h-3.5 w-3.5 text-emerald-500" />
+        <Pause className="h-3.5 w-3.5 text-success" />
       ) : (
         <Volume2 className="h-3.5 w-3.5" />
       )}
@@ -1450,14 +1436,14 @@ function QuestionCard({
         <MessageCircleQuestion className="h-4 w-4 text-primary mt-0.5 shrink-0" />
         <div className="flex-1 min-w-0">
           {q.header && (
-            <p className="text-xs font-semibold text-primary/80 uppercase tracking-wider mb-0.5">
+            <p className="text-label text-primary/80 mb-0.5">
               {q.header}
             </p>
           )}
           <p className="text-sm font-medium">{q.question}</p>
         </div>
         {isMultiple && (
-          <Badge variant="outline" className="text-[9px] shrink-0">
+          <Badge variant="outline" className="text-micro shrink-0">
             Multi-select
           </Badge>
         )}
@@ -1478,7 +1464,7 @@ function QuestionCard({
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
                   "disabled:opacity-50 disabled:cursor-not-allowed",
                   isSelected
-                    ? "border-primary bg-primary/10 text-primary font-medium shadow-sm"
+                    ? "border-primary bg-primary/10 text-primary font-medium shadow-card"
                     : "border-border/50 bg-card/60 text-muted-foreground hover:border-primary/30 hover:bg-primary/[0.04] hover:text-foreground"
                 )}
                 onClick={() => onToggle(opt.label, isMultiple)}
@@ -1508,7 +1494,7 @@ function QuestionCard({
           {q.options
             .filter((o) => sel.has(o.label) && o.description)
             .map((o) => (
-              <p key={o.label} className="text-[11px] text-muted-foreground leading-snug">
+              <p key={o.label} className="text-caption text-muted-foreground leading-snug">
                 <span className="font-medium text-foreground/80">{o.label}:</span> {o.description}
               </p>
             ))}
@@ -1700,7 +1686,7 @@ function AskUserCards({
               type="button"
               onClick={() => setStep(idx)}
               className={cn(
-                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-all whitespace-nowrap shrink-0",
+                "flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-caption font-medium transition-all whitespace-nowrap shrink-0",
                 isActive
                   ? "bg-primary/10 text-primary border border-primary/30"
                   : "text-muted-foreground hover:bg-muted/50 border border-transparent",
@@ -1708,7 +1694,7 @@ function AskUserCards({
             >
               <span className={cn(
                 "h-2 w-2 rounded-full shrink-0",
-                status === "answered" ? "bg-emerald-500"
+                status === "answered" ? "bg-success"
                   : isActive ? "bg-primary" : "bg-border",
               )} />
               {q.header || `Q${idx + 1}`}
@@ -1720,7 +1706,7 @@ function AskUserCards({
           type="button"
           onClick={() => setStep(questions.length)}
           className={cn(
-            "flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-all whitespace-nowrap shrink-0",
+            "flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-caption font-medium transition-all whitespace-nowrap shrink-0",
             isSummaryStep
               ? "bg-primary/10 text-primary border border-primary/30"
               : "text-muted-foreground hover:bg-muted/50 border border-transparent",
@@ -1738,7 +1724,7 @@ function AskUserCards({
             <div className="flex items-center gap-2 mb-1">
               <ListChecks className="h-4 w-4 text-primary" />
               <p className="text-sm font-semibold">Summary</p>
-              <Badge variant="secondary" className="text-[9px] ml-auto">
+              <Badge variant="secondary" className="text-micro ml-auto">
                 {answeredCount}/{questions.length} answered
               </Badge>
             </div>
@@ -1761,15 +1747,15 @@ function AskUserCards({
                   >
                     <span className={cn(
                       "h-2 w-2 rounded-full shrink-0 mt-1.5",
-                      status === "answered" ? "bg-emerald-500" : "bg-border",
+                      status === "answered" ? "bg-success" : "bg-border",
                     )} />
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-medium">{q.question}</p>
                       {status === "answered" && answer && (
-                        <p className="text-[11px] text-muted-foreground truncate">{answer}</p>
+                        <p className="text-caption text-muted-foreground truncate">{answer}</p>
                       )}
                       {status === "empty" && (
-                        <p className="text-[11px] text-muted-foreground/50 italic">Not answered yet</p>
+                        <p className="text-caption text-muted-foreground/50 italic">Not answered yet</p>
                       )}
                     </div>
                     <ChevronRight className="h-3 w-3 text-muted-foreground mt-1 shrink-0" />
@@ -1781,13 +1767,13 @@ function AskUserCards({
 
           {/* Partial warning */}
           {partialWarning && (
-            <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-600 dark:text-amber-400">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-warning/10 border border-warning/20 text-caption text-warning">
               <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
               <span>{emptyCount} question{emptyCount > 1 ? "s" : ""} not answered. Press send again to confirm.</span>
             </div>
           )}
           {skipWarning && (
-            <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-600 dark:text-amber-400">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-warning/10 border border-warning/20 text-caption text-warning">
               <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
               <span>Skip all questions without answering? Press skip again to confirm.</span>
             </div>
@@ -1860,7 +1846,7 @@ function AskUserCards({
 
           {/* Skip warning */}
           {skipWarning && (
-            <div className="flex items-center gap-2 mt-3 px-3 py-2 rounded-md bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-600 dark:text-amber-400">
+            <div className="flex items-center gap-2 mt-3 px-3 py-2 rounded-md bg-warning/10 border border-warning/20 text-caption text-warning">
               <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
               <span>Skip all questions without answering? Press skip again to confirm.</span>
             </div>
@@ -1994,6 +1980,7 @@ function isFileAllowedForAgent(file: MentionFile, agent?: AgentConfig): boolean 
 
 /** Key used for orchestrator (non-agent) sessions in the group map */
 const ORCHESTRATOR_KEY = "__orchestrator__";
+
 const SIDEBAR_VIEW_KEY = "polpo-chat-sidebar-view";
 const SESSION_SIDEBAR_WIDTH_KEY = "polpo-chat-session-sidebar-width";
 const SESSION_SIDEBAR_DEFAULT_WIDTH = 360;
@@ -2068,7 +2055,7 @@ function SessionRow({
             <div className="flex items-center gap-1.5 min-w-0">
               {isStarred && (
                 <Star
-                  className="h-3 w-3 shrink-0 fill-amber-400 text-amber-400"
+                  className="h-3 w-3 shrink-0 fill-warning text-warning"
                   aria-label="Starred"
                 />
               )}
@@ -2076,13 +2063,13 @@ function SessionRow({
                 <GitBranch className="h-3 w-3 shrink-0 text-muted-foreground" aria-label="Branch" />
               )}
               <p className={cn(
-                "whitespace-normal break-words text-[13px] font-medium leading-snug min-w-0",
+                "whitespace-normal break-words text-small font-medium leading-snug min-w-0",
                 isActive ? "text-accent-foreground" : "text-foreground"
               )}>
                 {title}
               </p>
             </div>
-            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground/70">
+            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-micro text-muted-foreground/70">
               {isStreaming ? (
                 <span className="flex items-center gap-1 font-medium text-primary/70">
                   <span className="relative flex h-2 w-2 shrink-0">
@@ -2215,6 +2202,7 @@ function SessionSidebar({
   /** "Groups" section rendered above the threads. */
   groupsSection?: ReactNode;
 }) {
+  const orchestratorName = useOrchestratorName();
   const { agents } = useAgents();
   const agentMap = agents ? Object.fromEntries(agents.map((a) => [a.name, a])) : {};
   const [sidebarWidth, setSidebarWidth] = useState(readStoredSessionSidebarWidth);
@@ -2347,7 +2335,7 @@ function SessionSidebar({
     // Drill-down mode with an active group → show back + agent name
     if (view === "drill" && activeGroup) {
       const agent = activeGroup !== ORCHESTRATOR_KEY ? agentMap[activeGroup] : undefined;
-      const name = agent ? (agent.identity?.displayName ?? agent.name) : "Polpo";
+      const name = agent ? (agent.identity?.displayName ?? agent.name) : orchestratorName;
       return (
         <div className="px-3 py-2.5 border-b border-border/40 flex items-start gap-2 shrink-0">
           <Button
@@ -2392,7 +2380,7 @@ function SessionSidebar({
     // and orchestrator new-session is reachable via that group's header.
     return (
       <div className="px-3 py-2.5 border-b border-border/40 flex items-center gap-2 shrink-0">
-        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex-1">
+        <span className="text-label text-muted-foreground flex-1">
           History
         </span>
         <NewChatMenu
@@ -2403,30 +2391,10 @@ function SessionSidebar({
           onNewGroup={() => onNewGroup()}
         />
         {/* View toggle — text labels, not icons */}
-        <div className="flex items-center bg-muted/60 rounded-md p-0.5 gap-0.5">
-          <button
-            className={cn(
-              "h-6 px-2 flex items-center justify-center rounded text-[10.5px] font-medium transition-colors",
-              view === "drill"
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-            onClick={() => setView("drill")}
-          >
-            By agent
-          </button>
-          <button
-            className={cn(
-              "h-6 px-2 flex items-center justify-center rounded text-[10.5px] font-medium transition-colors",
-              view === "flat"
-                ? "bg-background text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-            onClick={() => setView("flat")}
-          >
-            All
-          </button>
-        </div>
+        <SegmentedControl size="sm" aria-label="History view" value={view} onValueChange={setView}>
+          <ToggleGroupItem value="drill">By agent</ToggleGroupItem>
+          <ToggleGroupItem value="flat">All</ToggleGroupItem>
+        </SegmentedControl>
         {/* Sidebar close button — pure close (the open action lives elsewhere) */}
         {onBack && (
           <Tooltip>
@@ -2452,7 +2420,7 @@ function SessionSidebar({
   const renderSessionList = (groupSessions: SessionItem[]) => (
     <div className="p-1.5 space-y-0.5">
       <div className="px-3 pt-1.5 pb-1">
-        <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+        <span className="text-label text-muted-foreground">
           Sessions
         </span>
       </div>
@@ -2476,7 +2444,7 @@ function SessionSidebar({
     <div className="p-1.5 space-y-0.5">
       {groups.map(([key, groupSessions]: [string, SessionItem[]]) => {
         const agent = key !== ORCHESTRATOR_KEY ? agentMap[key] : undefined;
-        const displayName = agent ? (agent.identity?.displayName ?? agent.name) : "Polpo";
+        const displayName = agent ? (agent.identity?.displayName ?? agent.name) : orchestratorName;
         const latestSession = groupSessions[0];
         const count = groupSessions.length;
         const hasActive = groupSessions.some((s: SessionItem) => s.id === activeSessionId);
@@ -2509,12 +2477,12 @@ function SessionSidebar({
             </div>
             <div className="flex-1 min-w-0">
               <p className={cn(
-                "whitespace-normal break-words text-[13px] font-semibold leading-snug",
+                "whitespace-normal break-words text-small font-semibold leading-snug",
                 hasActive ? "text-accent-foreground" : "text-foreground"
               )}>
                 {displayName}
               </p>
-              <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground/70">
+              <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-micro text-muted-foreground/70">
                 <span>{count} chat{count !== 1 ? "s" : ""}</span>
                 <span>{formatDistanceToNow(new Date(latestSession.updatedAt), { addSuffix: false })}</span>
               </div>
@@ -2531,7 +2499,7 @@ function SessionSidebar({
     <div className="p-1.5 space-y-1">
       {groups.map(([key, groupSessions]: [string, SessionItem[]]) => {
         const agent = key !== ORCHESTRATOR_KEY ? agentMap[key] : undefined;
-        const displayName = agent ? (agent.identity?.displayName ?? agent.name) : "Polpo";
+        const displayName = agent ? (agent.identity?.displayName ?? agent.name) : orchestratorName;
         const count = groupSessions.length;
         const isExpanded = expandedGroups.has(key);
         const hasActive = groupSessions.some((s: SessionItem) => s.id === activeSessionId);
@@ -2565,14 +2533,14 @@ function SessionSidebar({
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
-                  <span className="whitespace-normal break-words text-[12.5px] font-bold tracking-tight text-foreground leading-tight">
+                  <span className="whitespace-normal break-words text-small font-bold tracking-tight text-foreground leading-tight">
                     {displayName}
                   </span>
-                  <span className="shrink-0 text-[8px] font-bold tracking-[0.12em] uppercase text-muted-foreground/55 border border-border/60 rounded-sm px-1 py-px leading-none">
+                  <span className="shrink-0 text-micro font-bold tracking-[0.12em] uppercase text-muted-foreground/55 border border-border/60 rounded-sm px-1 py-px leading-none">
                     {agent ? "Agent" : "Orchestrator"}
                   </span>
                 </div>
-                <span className="text-[10px] text-muted-foreground/60">
+                <span className="text-micro text-muted-foreground/60">
                   {count} chat{count !== 1 ? "s" : ""}
                 </span>
               </div>
@@ -2624,7 +2592,7 @@ function SessionSidebar({
                     <button
                       type="button"
                       onClick={() => toggleShowAll(key)}
-                      className="w-full text-left text-[10.5px] font-medium text-muted-foreground hover:text-foreground px-2 py-1 rounded-md hover:bg-accent/30 transition-colors"
+                      className="w-full text-left text-caption font-medium text-muted-foreground hover:text-foreground px-2 py-1 rounded-md hover:bg-accent/30 transition-colors"
                     >
                       {showAll
                         ? "Show less"
@@ -2663,8 +2631,8 @@ function SessionSidebar({
     return (
       <div className="p-1.5 pb-2 border-b border-border/30">
         <div className="px-3 pt-1.5 pb-1 flex items-center gap-1.5">
-          <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
-          <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+          <Star className="h-3 w-3 fill-warning text-warning" />
+          <span className="text-label text-muted-foreground">
             Starred
           </span>
         </div>
@@ -2721,7 +2689,7 @@ function SessionSidebar({
         {sessions.length === 0 ? (
           <div className="flex flex-col items-center text-center py-8 px-3 text-muted-foreground">
             <p className="text-xs font-medium">No sessions yet</p>
-            <p className="text-[10px] mt-1">
+            <p className="text-micro mt-1">
               Start a new session or use the CLI — sessions are shared
               between both interfaces.
             </p>
@@ -2790,6 +2758,7 @@ function ChatToolbar({
   onToggleSidebar: () => void;
   compact?: boolean;
 }) {
+  const orchestratorName = useOrchestratorName();
   const { messages, isLoading, sessionId, sessions, selectedAgent } = useChatState();
   const { newSession, clear } = useChatActions();
   const { agents } = useAgents();
@@ -2854,7 +2823,7 @@ function ChatToolbar({
             ) : (
               <>
                 <span className="shrink-0 text-sm leading-none">🐙</span>
-                <span className="truncate text-sm font-semibold leading-5 text-foreground">Polpo</span>
+                <span className="truncate text-sm font-semibold leading-5 text-foreground">{orchestratorName}</span>
               </>
             )}
           </div>
@@ -2865,7 +2834,7 @@ function ChatToolbar({
 
         <div className="flex shrink-0 items-center justify-end gap-1">
           {messages.length > 0 && (
-            <span className="hidden rounded-full bg-muted/70 px-2 py-0.5 text-[10px] font-medium leading-4 text-muted-foreground min-[430px]:inline-flex">
+            <span className="hidden rounded-full bg-muted/70 px-2 py-0.5 text-micro font-medium leading-4 text-muted-foreground min-[430px]:inline-flex">
               {messages.length}
             </span>
           )}
@@ -2947,7 +2916,7 @@ function ChatToolbar({
           ) : (
             <>
               <span className="shrink-0 text-sm leading-none">🐙</span>
-              <span className="truncate text-sm font-semibold leading-5 text-foreground">Polpo</span>
+              <span className="truncate text-sm font-semibold leading-5 text-foreground">{orchestratorName}</span>
             </>
           )}
         </div>
@@ -2958,7 +2927,7 @@ function ChatToolbar({
 
       <div className="flex shrink-0 items-center justify-end gap-1">
         {messages.length > 0 && (
-          <Badge variant="secondary" className="hidden shrink-0 text-[10px] md:inline-flex">
+          <Badge variant="secondary" className="hidden shrink-0 text-micro md:inline-flex">
             {messages.length} messages
           </Badge>
         )}
@@ -2988,12 +2957,13 @@ function ChatToolbar({
 // ── ChatEmptyState — shown when no messages ──
 
 function ChatEmptyState() {
+  const orchestratorName = useOrchestratorName();
   const { send, setSelectedAgent } = useChatActions();
   const { selectedAgent } = useChatState();
   const { agents } = useAgents();
   const { skills } = useSkills();
   const agentConfig = selectedAgent && agents ? agents.find((a) => a.name === selectedAgent) : undefined;
-  const name = agentConfig?.identity?.displayName ?? agentConfig?.name ?? "Polpo";
+  const name = agentConfig?.identity?.displayName ?? agentConfig?.name ?? orchestratorName;
   const agentSuggestions = useMemo(() => {
     if (!agentConfig) return [];
 
@@ -3058,8 +3028,8 @@ function ChatEmptyState() {
             >
               <span className="text-xs leading-none">🐙</span>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium">Polpo</p>
-                <p className="text-[11px] text-muted-foreground">Orchestrator</p>
+                <p className="text-sm font-medium">{orchestratorName}</p>
+                <p className="text-caption text-muted-foreground">Orchestrator</p>
               </div>
               {!selectedAgent && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
             </DropdownMenuItem>
@@ -3077,7 +3047,7 @@ function ChatEmptyState() {
                 />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{a.identity?.displayName ?? a.name}</p>
-                  {a.role && <p className="text-[11px] text-muted-foreground truncate">{a.role}</p>}
+                  {a.role && <p className="text-caption text-muted-foreground truncate">{a.role}</p>}
                 </div>
                 {selectedAgent === a.name && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
               </DropdownMenuItem>
@@ -3090,7 +3060,7 @@ function ChatEmptyState() {
               <UsersRound className="h-3.5 w-3.5 shrink-0 text-primary" />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium">Group chat…</p>
-                <p className="text-[11px] text-muted-foreground truncate">Talk with several agents at once</p>
+                <p className="text-caption text-muted-foreground truncate">Talk with several agents at once</p>
               </div>
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -3134,7 +3104,7 @@ function ChatEmptyState() {
             <div>
               <p className="text-xs font-medium">Create a mission</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Polpo will ask what to build
+                {orchestratorName} will ask what to build
               </p>
             </div>
           </button>
@@ -3236,6 +3206,7 @@ function useChatSandboxInfo(agentName: string | null): ChatSandboxInfo | null {
 }
 
 function ChatMessages() {
+  const orchestratorName = useOrchestratorName();
   const { messages, isLoading, messagesLoading, pendingQuestions, pendingMission, pendingVault, pendingWhatsApp, pendingEmail, pendingSetDesign, selectedAgent, sessions, sessionId } = useChatState();
   const chatSandbox = useChatSandboxInfo(selectedAgent ?? sessions.find((s) => s.id === sessionId)?.agent ?? null);
   const { answerQuestions, respondToMission, respondToVault, respondToWhatsApp, respondToEmail, consumeSetDesign, forkSession, loadSession } = useChatActions();
@@ -3270,7 +3241,7 @@ function ChatMessages() {
   // Derive current agent: from selectedAgent (for new sessions) or from the active session's agent field
   const currentAgentName = selectedAgent ?? sessions.find((s) => s.id === sessionId)?.agent ?? null;
   const currentAgent = currentAgentName ? agentMap[currentAgentName] : undefined;
-  const assistantName = currentAgent?.identity?.displayName ?? currentAgent?.name ?? "Polpo";
+  const assistantName = currentAgent?.identity?.displayName ?? currentAgent?.name ?? orchestratorName;
   const assistantAvatar = currentAgent?.identity?.avatar;
 
   const [atBottom, setAtBottom] = useState(true);
@@ -3378,7 +3349,7 @@ function ChatMessages() {
                       </div>
                       <div className="flex items-center justify-end gap-1.5 mt-1">
                         {msg.ts && (
-                          <span className="text-[10px] text-muted-foreground">
+                          <span className="text-micro text-muted-foreground">
                             {chatTimeAgo(new Date(msg.ts))}
                           </span>
                         )}
@@ -3409,7 +3380,7 @@ function ChatMessages() {
                           key={fork.id}
                           type="button"
                           onClick={() => { void loadSession(fork.id); }}
-                          className="mt-1 ml-auto flex max-w-full items-center gap-1 rounded px-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                          className="mt-1 ml-auto flex max-w-full items-center gap-1 rounded px-1 text-caption text-muted-foreground hover:bg-accent hover:text-foreground"
                           title="Open the branch started here"
                         >
                           <GitBranch className="h-3 w-3 shrink-0" />
@@ -3438,7 +3409,7 @@ function ChatMessages() {
                         <div className="flex items-center gap-2 mb-1">
                           <p className="text-xs font-semibold">{assistantName}</p>
                           {msg.ts && (
-                            <span className="text-[10px] text-muted-foreground">
+                            <span className="text-micro text-muted-foreground">
                               {chatTimeAgo(new Date(msg.ts))}
                             </span>
                           )}
@@ -3594,7 +3565,7 @@ function ChatMessages() {
                             key={fork.id}
                             type="button"
                             onClick={() => { void loadSession(fork.id); }}
-                            className="mt-1 flex max-w-full items-center gap-1 rounded px-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                            className="mt-1 flex max-w-full items-center gap-1 rounded px-1 text-caption text-muted-foreground hover:bg-accent hover:text-foreground"
                             title="Open the thread started from this reply"
                           >
                             <GitBranch className="h-3 w-3 shrink-0" />
@@ -3650,7 +3621,7 @@ function ChatMessages() {
                           <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors" onClick={() => { const p = msg.openFile!.path; openPreview({ label: p.split("/").pop() ?? p, path: p, mimeType: mimeFromPath(p) }); }}>
                             <Eye className="h-3.5 w-3.5" />
                             <span>Opened: <code className="font-mono text-foreground">{msg.openFile.path}</code></span>
-                            <span className="text-[10px]">(click to reopen)</span>
+                            <span className="text-micro">(click to reopen)</span>
                           </div>
                         )}
                         {msg.navigateTo && (
@@ -3674,7 +3645,7 @@ function ChatMessages() {
       {/* Scroll to bottom button */}
       {!atBottom && !isEmpty && (
         <Button
-          className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full shadow-md"
+          className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full shadow-raised"
           size="icon"
           variant="outline"
           onClick={() => virtuosoRef.current?.scrollToIndex({ index: messages.length - 1, align: "end", behavior: "smooth" })}
@@ -3693,6 +3664,7 @@ function ChatMessages() {
 // ── ChatInput — prompt input area with mentions, attachments, mic ──
 
 function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
+  const orchestratorName = useOrchestratorName();
   const { messages, isLoading, pendingQuestions, pendingMission, pendingVault, pendingWhatsApp, pendingEmail, pendingSetDesign, sessionId, selectedAgent, sessions, activeSessionKey } = useChatState();
   const { send, stop, steer, cancelSteer } = useChatActions();
   const steersPending = usePendingSteers(activeSessionKey);
@@ -3986,46 +3958,60 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
   // (b) hydrate the textarea with the INCOMING session id's draft (if any).
   // PromptInput clears only the acknowledged draft, before new-session
   // migration; handleSubmit keeps the cached draft aligned. Cleanup saves on
-  // unmount (e.g. compact-mode sidebar takeover).
+  // unmount (e.g. compact-mode sidebar takeover). Typing saves too (onInput),
+  // so a reload finds the draft; the first mount hydrates it back.
   const draftKey = sessionId ?? NEW_SESSION_DRAFT_KEY;
   const prevDraftKeyRef = useRef<string>(draftKey);
+  /** What the composer was showing for a key when it was loaded or last saved. */
+  const shownDraftRef = useRef<{ key: string; value: string } | null>(null);
+  const saveDraft = useCallback((key: string, value: string) => {
+    // Untouched since it was loaded: the stored draft is already right (and an
+    // empty composer during the first restore must not erase a saved draft).
+    const shown = shownDraftRef.current;
+    if (shown && shown.key === key && shown.value === value) return;
+    if (value) chatInputDrafts.set(key, value);
+    else chatInputDrafts.delete(key);
+    shownDraftRef.current = { key, value };
+  }, []);
   useEffect(() => {
     const prevKey = prevDraftKeyRef.current;
     historyIndexRef.current = null;
     historyDraftRef.current = "";
     const textarea = inputWrapperRef.current?.querySelector<HTMLTextAreaElement>("textarea[name='message']");
-    if (textarea && prevKey !== draftKey) {
+    const firstRun = shownDraftRef.current === null;
+    if (textarea && (prevKey !== draftKey || (firstRun && !textarea.value))) {
       // Save outgoing draft (only if non-empty — keeps the map small)
-      const outgoing = textarea.value;
-      if (outgoing) chatInputDrafts.set(prevKey, outgoing);
-      else chatInputDrafts.delete(prevKey);
+      if (prevKey !== draftKey) saveDraft(prevKey, textarea.value);
       // Hydrate incoming draft. Use the native setter so React's synthetic
       // event tracking is bypassed — same trick as the speech-to-text path.
       const incoming = chatInputDrafts.get(draftKey) ?? "";
-      const nativeSetter = Object.getOwnPropertyDescriptor(
-        HTMLTextAreaElement.prototype,
-        "value",
-      )?.set;
-      nativeSetter?.call(textarea, incoming);
-      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      shownDraftRef.current = { key: draftKey, value: incoming };
+      if (incoming || textarea.value) {
+        const nativeSetter = Object.getOwnPropertyDescriptor(
+          HTMLTextAreaElement.prototype,
+          "value",
+        )?.set;
+        nativeSetter?.call(textarea, incoming);
+        textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      }
       setHasDraft(incoming.trim().length > 0);
+    } else if (firstRun) {
+      shownDraftRef.current = { key: draftKey, value: textarea?.value ?? "" };
     }
     prevDraftKeyRef.current = draftKey;
     return () => {
       const ta = inputWrapperRef.current?.querySelector<HTMLTextAreaElement>("textarea[name='message']");
       if (!ta) return;
-      const v = ta.value;
-      if (v) chatInputDrafts.set(draftKey, v);
-      else chatInputDrafts.delete(draftKey);
+      saveDraft(draftKey, ta.value);
     };
-  }, [draftKey]);
+  }, [draftKey, saveDraft]);
 
   // Resolve selected agent config for display
   const currentAgentName =
     selectedAgent ?? sessions.find((s: { id: string; agent?: string }) => s.id === sessionId)?.agent ?? null;
   const isOrchestratorChat = !currentAgentName || currentAgentName === "orchestrator";
   const selectedAgentConfig = currentAgentName && agents ? agents.find((a) => a.name === currentAgentName) : undefined;
-  const recipientName = selectedAgentConfig?.identity?.displayName ?? selectedAgentConfig?.name ?? "Polpo";
+  const recipientName = selectedAgentConfig?.identity?.displayName ?? selectedAgentConfig?.name ?? orchestratorName;
 
   const mentionAgents = useMemo(
     () => (isOrchestratorChat ? agents : []),
@@ -4132,8 +4118,8 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
             <div className="flex h-8 min-w-0 items-center gap-2 border-b border-border/50 px-2">
               <AppWindow className="h-3.5 w-3.5 shrink-0 text-primary" />
               <span className="shrink-0 font-medium">App Preview</span>
-              <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground">{activePreviewContext.url}</span>
-              <span className="hidden shrink-0 text-[10px] text-muted-foreground sm:inline">
+              <span className="min-w-0 flex-1 truncate font-mono text-micro text-muted-foreground">{activePreviewContext.url}</span>
+              <span className="hidden shrink-0 text-micro text-muted-foreground sm:inline">
                 {activePreviewContext.viewport.width} × {activePreviewContext.viewport.height}
               </span>
               <Button type="button" variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={clearAppPreviewContext} aria-label="Remove all App Preview context" title="Remove all">
@@ -4155,17 +4141,17 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                           <img src={selection.screenshotDataUrl} alt="Selected DOM element" className="h-full w-full object-cover" />
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent side="top" align="start" sideOffset={8} className="w-[420px] max-w-[calc(100vw-24px)] border-border bg-popover p-1.5 shadow-xl">
+                      <TooltipContent side="top" align="start" sideOffset={8} className="w-[420px] max-w-[calc(100vw-24px)] border-border bg-popover p-1.5 shadow-raised">
                         <div className="flex min-h-24 items-center overflow-auto border border-border/50 bg-muted/40 p-2">
                           <img src={selection.screenshotDataUrl} alt="Selected DOM element preview" className="mx-auto max-h-72 max-w-none object-contain" />
                         </div>
-                        <p className="mt-1.5 truncate px-1 font-mono text-[10px] text-muted-foreground">{selection.node.selector}</p>
+                        <p className="mt-1.5 truncate px-1 font-mono text-micro text-muted-foreground">{selection.node.selector}</p>
                       </TooltipContent>
                     </Tooltip>
                   ) : (
                     <div className="h-7 w-9 shrink-0 animate-pulse bg-muted" />
                   )}
-                  <span className="min-w-0 flex-1 truncate font-mono text-[10px]" title={selection.node.selector}>{selection.node.selector}</span>
+                  <span className="min-w-0 flex-1 truncate font-mono text-micro" title={selection.node.selector}>{selection.node.selector}</span>
                   <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => removePreviewSelection(index)} aria-label={`Remove ${selection.node.selector}`}>
                     <X className="h-3 w-3" />
                   </Button>
@@ -4184,13 +4170,13 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                         <img src={activePreviewContext.screenshotDataUrl} alt="App Preview screenshot" className="h-full w-full object-cover" />
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent side="top" align="start" sideOffset={8} className="w-[520px] max-w-[calc(100vw-24px)] border-border bg-popover p-1.5 shadow-xl">
+                    <TooltipContent side="top" align="start" sideOffset={8} className="w-[520px] max-w-[calc(100vw-24px)] border-border bg-popover p-1.5 shadow-raised">
                       <div className="flex min-h-32 items-center justify-center border border-border/50 bg-muted/40 p-2">
                         <img src={activePreviewContext.screenshotDataUrl} alt="App Preview screenshot preview" className="max-h-80 max-w-full object-contain" />
                       </div>
                     </TooltipContent>
                   </Tooltip>
-                  <span className="min-w-0 flex-1 truncate text-[10px]">Screenshot</span>
+                  <span className="min-w-0 flex-1 truncate text-micro">Screenshot</span>
                   <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={removePreviewScreenshot} aria-label="Remove App Preview screenshot">
                     <X className="h-3 w-3" />
                   </Button>
@@ -4204,14 +4190,14 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
             <div className="flex h-8 min-w-0 items-center gap-2 border-b border-border/50 px-2">
               <Database className="h-3.5 w-3.5 shrink-0 text-primary" />
               <span className="shrink-0 font-medium">Data context</span>
-              <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground">{activeDataContext.items.length} selected reference{activeDataContext.items.length === 1 ? "" : "s"}</span>
+              <span className="min-w-0 flex-1 truncate text-micro text-muted-foreground">{activeDataContext.items.length} selected reference{activeDataContext.items.length === 1 ? "" : "s"}</span>
               <Button type="button" variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={clearDataPromptContext} aria-label="Remove all data context"><X className="h-3 w-3" /></Button>
             </div>
             <div className="flex max-h-24 flex-wrap gap-1 overflow-y-auto p-1.5">
               {activeDataContext.items.map((item, index) => (
                 <div key={`${item.sourceId}-${item.dataset}-${index}`} className="flex h-8 min-w-0 max-w-[280px] items-center gap-1.5 border border-border/60 bg-background pl-2">
                   <Table2 className="h-3 w-3 shrink-0 text-primary" />
-                  <span className="min-w-0 flex-1 truncate text-[10px]" title={`${item.sourceId}/${item.dataset}`}>{item.label}</span>
+                  <span className="min-w-0 flex-1 truncate text-micro" title={`${item.sourceId}/${item.dataset}`}>{item.label}</span>
                   <Button type="button" variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => removeDataPromptItem(index)} aria-label={`Remove ${item.label}`}><X className="h-3 w-3" /></Button>
                 </div>
               ))}
@@ -4225,7 +4211,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
             </div>
             <div className="min-h-0 flex-1 bg-muted/40 p-4">
               {expandedPreviewImage && (
-                <img src={expandedPreviewImage.url} alt="Enlarged App Preview context" className="h-full w-full bg-background object-contain shadow-lg" />
+                <img src={expandedPreviewImage.url} alt="Enlarged App Preview context" className="h-full w-full bg-background object-contain shadow-raised" />
               )}
             </div>
           </DialogContent>
@@ -4280,6 +4266,8 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                 if (!applyingHistoryRef.current) {
                   historyIndexRef.current = null;
                   historyDraftRef.current = "";
+                  // Keep the draft across reloads (a recalled history entry is not a draft).
+                  saveDraft(draftKey, e.currentTarget.value);
                 }
                 setHasDraft(e.currentTarget.value.trim().length > 0);
               }}
@@ -4327,7 +4315,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                     >
                       <ClockArrowUp className="h-4 w-4" />
                       {backgroundWaits.activeCount > 0 && (
-                        <span className="pointer-events-none absolute -right-0.5 -top-0.5 inline-flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-semibold leading-none text-white">
+                        <span className="pointer-events-none absolute -right-0.5 -top-0.5 inline-flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-warning px-1 text-micro font-semibold leading-none text-warning-foreground">
                           {backgroundWaits.activeCount}
                         </span>
                       )}
@@ -4342,10 +4330,10 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                     the tight gap-1 of the parent container. */}
                 <div className="ml-2 flex items-center">
                   {isRecording ? (
-                    <div className="inline-flex h-8 items-center gap-2 rounded-[calc(var(--radius)+999px)] border border-red-500/30 bg-red-500/10 px-3 text-xs font-medium text-red-500">
+                    <div className="inline-flex h-8 items-center gap-2 rounded-[calc(var(--radius)+999px)] border border-destructive/30 bg-destructive/10 px-3 text-xs font-medium text-destructive">
                       <span className="relative flex h-2 w-2">
-                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75" />
-                        <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-destructive opacity-75" />
+                        <span className="relative inline-flex h-2 w-2 rounded-full bg-destructive" />
                       </span>
                       Recording
                     </div>
@@ -4403,7 +4391,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
         </MentionPopover>
         {/* Hint row — desktop only. On mobile the @/ buttons inside the
             footer take over and the session id is hidden as not actionable. */}
-        <div className="mt-1 hidden lg:flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground">
+        <div className="mt-1 hidden lg:flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-micro text-muted-foreground">
           <ChatInputHint trigger="@" label="mentions" />
           <span aria-hidden="true">·</span>
           <ChatInputHint trigger="/" label="skills" />
@@ -4413,7 +4401,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
               <button
                 type="button"
                 onClick={copySessionId}
-                className="inline-flex min-w-0 items-center gap-1 rounded px-1 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                className="inline-flex min-w-0 items-center gap-1 rounded px-1 py-0.5 font-mono text-micro text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                 title="Copy session ID"
               >
                 <span className="truncate">session:{sessionId.slice(0, 8)}</span>
@@ -4430,6 +4418,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
 // ── ChatLoadingSkeleton — full-page skeleton while sessions are loading ──
 
 function ChatLoadingSkeleton() {
+  const orchestratorName = useOrchestratorName();
   return (
     <div className="flex flex-1 min-h-0">
       <div className="flex-1 flex flex-col min-w-0 h-full">
@@ -4451,13 +4440,13 @@ function ChatLoadingSkeleton() {
         <div className="bg-background/80 backdrop-blur-md px-4 pt-2 pb-1.5 shrink-0">
           <div className="mx-auto max-w-3xl">
             <PromptInput onSubmit={() => {}} className="[&_[data-slot=input-group]]:rounded-[calc(var(--radius)+8px)]">
-              <PromptInputTextarea placeholder="Message Polpo..." disabled />
+              <PromptInputTextarea placeholder={`Message ${orchestratorName}...`} disabled />
               <PromptInputFooter>
                 <div className="flex items-center gap-1" />
                 <PromptInputSubmit disabled />
               </PromptInputFooter>
             </PromptInput>
-            <div className="mt-1 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground">
+            <div className="mt-1 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-micro text-muted-foreground">
               <ChatInputHint trigger="@" label="mentions" />
               <span aria-hidden="true">·</span>
               <ChatInputHint trigger="/" label="skills" />
@@ -4826,7 +4815,7 @@ function AgentReplyCard({ reply, ts }: { reply: { agent: string; kind: "question
               <span className="font-medium text-foreground">{reply.agent}</span>
               {reply.kind === "question" ? " answered" : " replied to the handoff"}
             </span>
-            {ts && <span className="ml-auto text-[10px]">{chatTimeAgo(new Date(ts))}</span>}
+            {ts && <span className="ml-auto text-micro">{chatTimeAgo(new Date(ts))}</span>}
           </div>
           <div className="text-sm">
             <MessageResponse mode="static">{reply.text}</MessageResponse>
@@ -4845,7 +4834,7 @@ function ChatWorkingFooter({ context }: { context?: { isLoading: boolean; waitin
         <div className="w-full px-4 pt-1" data-testid="agent-waiting">
           <div className="mx-auto max-w-3xl space-y-1 pl-10">
             {waiting.map((w) => (
-              <div key={w.id} className="flex items-center gap-2 text-[11px] text-muted-foreground">
+              <div key={w.id} className="flex items-center gap-2 text-caption text-muted-foreground">
                 <Loader2 className="h-3 w-3 animate-spin" />
                 <span>
                   <span className="font-medium text-foreground">{w.to}</span>
@@ -4871,7 +4860,7 @@ function ChatWorkingIndicator({ isLoading }: { isLoading: boolean }) {
             <span className="absolute h-4 w-4 animate-spin rounded-full border-2 border-transparent border-r-primary/70 border-t-primary" />
             <span className="h-1.5 w-1.5 rounded-full bg-primary/70" />
           </span>
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-caption text-muted-foreground">
             Agent is working
           </span>
         </div>

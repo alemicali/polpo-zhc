@@ -30,10 +30,13 @@ export const COMPUTER_KINDS: readonly ComputerKind[] = ["host", "daytona", "e2b"
  * (memory kept). Daytona v2 computers hibernate: their VM is saved as a memory and disk snapshot
  * and deleted ("hibernated"); the next use makes a VM from the snapshot (a few seconds).
  * "missing": not created yet (it is created on first use or on start).
+ * "deleted": it had a machine, but the provider has neither it nor (Daytona v2) a snapshot to wake
+ *   from: it was deleted outside Polpo (the provider's dashboard, API, or its own clean-up). Its
+ *   next use or start makes a new machine from the image (its files are lost); or remove it.
  * "unknown": the provider cannot be asked (no API key).
  */
 export type ComputerStatus =
-  | "running" | "stopped" | "paused" | "hibernated" | "archived" | "creating" | "starting" | "stopping" | "error" | "missing" | "unknown";
+  | "running" | "stopped" | "paused" | "hibernated" | "archived" | "creating" | "starting" | "stopping" | "error" | "missing" | "deleted" | "unknown";
 
 export interface ComputerLifecycle {
   /** Stop (Daytona v0 container), pause (E2B, Daytona v0 VM) or hibernate (Daytona v2: snapshot, VM deleted) after this many minutes without use. Default 15. */
@@ -106,7 +109,7 @@ export function parseComputer(raw: unknown, where = "computer"): ComputerConfig 
   const r = raw as Record<string, unknown>;
   const id = str(r.id);
   if (!id || !COMPUTER_ID_PATTERN.test(id)) throw new ComputerConfigError(`${where}.id must be a slug of lowercase letters, digits and - (up to 40), e.g. "nina"`);
-  if (id === HOST_COMPUTER_ID || id === EPHEMERAL_COMPUTER) throw new ComputerConfigError(`${where}.id "${id}" is reserved`);
+  if (id === HOST_COMPUTER_ID || id === EPHEMERAL_COMPUTER || id === "webhooks") throw new ComputerConfigError(`${where}.id "${id}" is reserved`);
   const kind = r.kind;
   if (typeof kind !== "string" || !(COMPUTER_KINDS as string[]).includes(kind)) throw new ComputerConfigError(`${where}.kind must be one of ${COMPUTER_KINDS.join(", ")}`);
   const out: ComputerConfig = { id, name: str(r.name) ?? id, kind: kind as ComputerKind };
@@ -260,6 +263,18 @@ export function agentEgressName(
   try { computers = parseComputers(settings?.computers); } catch { return undefined; }
   const c = computers.find((x) => x.id === agent.defaultComputer);
   return c?.kind === "host" ? c.egress : undefined;
+}
+
+/**
+ * An error for an agent's computers / defaultComputer naming computers the instance does not have
+ * (`known`: the settings' computer ids; "host" is always there), else null. Used by the agents API
+ * and by Polpo's add_agent / update_agent.
+ */
+export function unknownComputersProblem(known: readonly string[], body: { computers?: readonly string[] | null; defaultComputer?: string | null }): string | null {
+  if (!body.computers && !body.defaultComputer) return null;
+  const ids = new Set([HOST_COMPUTER_ID, ...known]);
+  const unknown = [...(body.computers ?? []), ...(body.defaultComputer ? [body.defaultComputer] : [])].filter((id) => !ids.has(id));
+  return unknown.length ? `Unknown computer${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")} (create ${unknown.length > 1 ? "them" : "it"} first)` : null;
 }
 
 /** The agents that use a computer (as default or in their list). */

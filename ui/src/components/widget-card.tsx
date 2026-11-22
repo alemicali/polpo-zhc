@@ -78,7 +78,61 @@ const RESIZE_SHIM = `<script>
 })();
 </script>`;
 
-function composeHtml(rawHtml: string, autoSize: boolean): string {
+/** postMessage channel the parent uses to push new token values (look change) to the widget. */
+const THEME_CHANNEL = "polpo:widget:theme";
+
+/**
+ * The dashboard tokens the widget document gets on its :root, so an LLM widget can use
+ * var(--foreground), var(--border)… and its default text follows the look (Configuration →
+ * Appearance). `--font-sans` is the dashboard's font family.
+ */
+const WIDGET_TOKENS: Array<[name: string, source: string]> = [
+  ["--foreground", "--foreground"],
+  ["--background", "--background"],
+  ["--muted-foreground", "--muted-foreground"],
+  ["--border", "--border"],
+  ["--radius", "--radius"],
+  ["--font-sans", "--app-font-family"],
+];
+
+type WidgetTheme = { scheme: "light" | "dark"; vars: Record<string, string> };
+
+/** The current values of WIDGET_TOKENS, read from the dashboard's <html>. */
+function readWidgetTheme(): WidgetTheme {
+  const vars: Record<string, string> = {};
+  if (typeof document === "undefined") return { scheme: "light", vars };
+  const root = document.documentElement;
+  const cs = getComputedStyle(root);
+  for (const [name, source] of WIDGET_TOKENS) {
+    const v = cs.getPropertyValue(source).trim();
+    if (v) vars[name] = v;
+  }
+  return { scheme: root.classList.contains("dark") ? "dark" : "light", vars };
+}
+
+/** The values as CSS declarations (`<>{}` dropped, so a value can never break out of the rule). */
+function themeDeclarations(theme: WidgetTheme): string {
+  return Object.entries(theme.vars)
+    .map(([k, v]) => `${k}: ${v.replace(/[<>{}]/g, "")};`)
+    .join(" ");
+}
+
+/** Applies the token values the parent posts when the dashboard's look changes. */
+const THEME_LISTENER = `<script>
+(function(){
+  var ch=${JSON.stringify(THEME_CHANNEL)};
+  window.addEventListener('message',function(e){
+    var m=e.data; if(!m||m.channel!==ch||e.source!==parent) return;
+    var r=document.documentElement;
+    try{
+      if(m.scheme) r.style.colorScheme=m.scheme;
+      var v=m.vars||{}; for(var k in v){ if(k.indexOf('--')===0) r.style.setProperty(k,String(v[k])); }
+    }catch(err){}
+  });
+})();
+</script>`;
+
+function composeHtml(rawHtml: string, autoSize: boolean, theme: WidgetTheme): string {
   // Wrap the LLM-supplied fragment in a full document with a strict CSP.
   // We keep `rawHtml` byte-for-byte (no regex stripping) — the CSP gates
   // anything risky (no fetch, no XHR, no remote img/link/script).
@@ -89,18 +143,19 @@ function composeHtml(rawHtml: string, autoSize: boolean): string {
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src data:;">
 <style>
-:root { color-scheme: light dark; }
+:root { color-scheme: ${theme.scheme}; ${themeDeclarations(theme)} }
 html, body { margin:0; padding:0; box-sizing:border-box; }
-body { font: 14px/1.45 -apple-system, BlinkMacSystemFont, 'Inter', system-ui, sans-serif; color: light-dark(#111, #eee); background: transparent; }
+body { font-size: 14px; line-height: 1.45; font-family: var(--font-sans, system-ui, sans-serif); color: var(--foreground, CanvasText); background: transparent; }
 *, *::before, *::after { box-sizing: inherit; }
 /* Scrollbar thin (di norma il widget non dovrebbe scrollare grazie all'auto-height,
    ma se sfora — overflow forzato dal modello — vogliamo che sia discreta). */
-* { scrollbar-width: thin; scrollbar-color: rgba(127,127,127,0.35) transparent; }
+* { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--muted-foreground, GrayText) 35%, transparent) transparent; }
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(127,127,127,0.35); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(127,127,127,0.55); }
+::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--muted-foreground, GrayText) 35%, transparent); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--muted-foreground, GrayText) 55%, transparent); }
 </style>
+${THEME_LISTENER}
 ${autoSize ? RESIZE_SHIM : ""}
 </head>
 <body>
@@ -134,8 +189,10 @@ function WidgetCardImpl({ widget }: { widget: WidgetRenderData }) {
   // (tag aperti, script non chiusi). Lo wrappiamo con un try/catch sui
   // SyntaxError dello script in modo che un'iframe rotta non blocchi
   // la pagina. CSP e sandbox ci proteggono comunque.
+  // The look's tokens are baked into the document when it is composed (a new srcDoc would reload
+  // the widget and lose its state); later look changes are pushed over postMessage (effect below).
   const composedHtml = useMemo(
-    () => (oversized ? null : composeHtml(widget.html ?? "", autoSize && !widget.streaming)),
+    () => (oversized ? null : composeHtml(widget.html ?? "", autoSize && !widget.streaming, readWidgetTheme())),
     [widget.html, oversized, autoSize, widget.streaming]
   );
 
@@ -163,6 +220,19 @@ function WidgetCardImpl({ widget }: { widget: WidgetRenderData }) {
     return () => window.removeEventListener("message", onMessage);
   }, [autoSize]);
 
+  // Follow the dashboard's look: the light/dark class, the palette and the overrides stylesheet.
+  useEffect(() => {
+    if (typeof MutationObserver === "undefined") return;
+    const push = () => {
+      const win = iframeRef.current?.contentWindow;
+      if (win) win.postMessage({ channel: THEME_CHANNEL, ...readWidgetTheme() }, "*");
+    };
+    const observer = new MutationObserver(push);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style", "data-palette", "data-theme"] });
+    observer.observe(document.head, { childList: true, subtree: true, characterData: true });
+    return () => observer.disconnect();
+  }, []);
+
   // Durante stream live, l'auto-resize via postMessage è disabilitato
   // (lo shim non viene iniettato): l'HTML cambia ad ogni batch e l'altezza
   // ballerebbe. Usiamo invece un'altezza fissa "comoda" che si stabilizza
@@ -178,7 +248,7 @@ function WidgetCardImpl({ widget }: { widget: WidgetRenderData }) {
           <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold truncate">Widget too large</p>
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-caption text-muted-foreground">
               The widget HTML exceeds {MAX_HTML_BYTES.toLocaleString()} bytes and was not rendered.
             </p>
           </div>
@@ -261,12 +331,12 @@ function WidgetCardImpl({ widget }: { widget: WidgetRenderData }) {
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold truncate">{title}</p>
           {widget.description && widget.description !== widget.title && (
-            <p className="text-[11px] text-muted-foreground truncate">{widget.description}</p>
+            <p className="text-caption text-muted-foreground truncate">{widget.description}</p>
           )}
         </div>
         <Badge
           variant="outline"
-          className={`hidden shrink-0 text-[10px] sm:inline-flex ${widget.streaming ? "animate-pulse border-primary/40 text-primary" : ""}`}
+          className={`hidden shrink-0 text-micro sm:inline-flex ${widget.streaming ? "animate-pulse border-primary/40 text-primary" : ""}`}
         >
           {widget.streaming ? "Live" : "Widget"}
         </Badge>
@@ -317,12 +387,12 @@ export function WidgetPendingCard({ argsBytes }: { argsBytes?: number }) {
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold truncate">Drafting widget…</p>
           {typeof argsBytes === "number" && argsBytes > 0 && (
-            <p className="text-[11px] text-muted-foreground tabular-nums">
+            <p className="text-caption text-muted-foreground tabular-nums">
               {argsBytes.toLocaleString()} chars
             </p>
           )}
         </div>
-        <Badge variant="outline" className="hidden shrink-0 text-[10px] sm:inline-flex animate-pulse border-primary/40 text-primary">
+        <Badge variant="outline" className="hidden shrink-0 text-micro sm:inline-flex animate-pulse border-primary/40 text-primary">
           Live
         </Badge>
       </div>

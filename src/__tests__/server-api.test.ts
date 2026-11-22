@@ -255,6 +255,87 @@ describe("Tasks API", () => {
     ]);
   });
 
+  test("GET task activity returns an agent harness run's transcript (Claude Code: tools, Polpo tools marked host, usage)", async () => {
+    const taskId = "harness-run-activity-task";
+    const logsDir = join(tmpDir, ".polpo", "logs");
+    await mkdir(logsDir, { recursive: true });
+    // as the runner writes it for a Claude Code run (the transcript of lumea's M5hgPb1B0ORvFKD7lgJgg)
+    const log = [
+      { _run: true, runId: "run-harness", taskId, agentName: "coder", startedAt: "2026-11-22T14:55:55.499Z", pid: 1 },
+      { ts: "2026-11-22T14:55:55.534Z", event: "spawned" },
+      { ts: "2026-11-22T14:56:13.597Z", type: "log", message: "Claude Code session started in 14.8 s on coder-box" },
+      { ts: "2026-11-22T14:56:18.724Z", type: "assistant", text: "Creo il file hello.txt" },
+      { ts: "2026-11-22T14:56:18.830Z", type: "tool_use", tool: "write", toolId: "c1", input: { file_path: "hello.txt", content: "ciao" } },
+      { ts: "2026-11-22T14:56:18.840Z", type: "tool_result", toolId: "c1", tool: "write", content: "{\"type\":\"create\"}" },
+      { ts: "2026-11-22T14:56:21.000Z", type: "tool_use", tool: "register_outcome", toolId: "c2", input: { type: "text", label: "hello" }, host: true },
+      { ts: "2026-11-22T14:56:22.156Z", type: "usage", harness: "claude-code", inputTokens: 144154, outputTokens: 431, totalTokens: 144585, costUsd: 0.0722 },
+      { ts: "2026-11-22T14:56:22.828Z", event: "done", data: { status: "completed", exitCode: 0, duration: 26626 } },
+    ];
+    await writeFile(join(logsDir, "run-run-harness.jsonl"), log.map((e) => JSON.stringify(e)).join("\n") + "\n");
+    const body = await (await app.request(api(`/agents/processes/${taskId}/activity`))).json();
+    expect(body.data).toHaveLength(log.length);
+    expect(body.data).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "tool_use", tool: "write" }),
+      expect.objectContaining({ type: "tool_use", tool: "register_outcome", host: true }),
+      expect.objectContaining({ type: "usage", harness: "claude-code", costUsd: 0.0722 }),
+      expect.objectContaining({ type: "log", message: expect.stringMatching(/session started/) }),
+    ]));
+  });
+
+  test("a task's runs (where and with what): in full on GET /tasks/:id, as lastRun in the slim list", async () => {
+    const created = await (await app.request(api("/tasks"), jsonReq("POST", { title: "Run context task", description: "x", assignTo: "agent-1" }))).json();
+    const id = created.data.id as string;
+    const run = {
+      runId: "r1", startedAt: "2026-11-22T10:00:00.000Z", status: "completed", engine: "claude-code", model: "us.anthropic.claude-haiku-4-5",
+      auth: { kind: "bedrock", region: "us-east-1" }, computer: { id: "coder-box", name: "Coder box", kind: "daytona", provider: "daytona", daytonaApi: "v2" },
+      sandbox: { provider: "daytona", ephemeral: false }, egress: { mode: "direct" }, session: { resumed: false, bootstrapMs: 14800 }, cost: { harnessUsd: 0.07 },
+    };
+    await orchestrator.getStore().updateTask(id, { runs: [run as any] });
+    const full = await (await app.request(api(`/tasks/${id}`))).json();
+    expect(full.data.runs).toEqual([run]);
+    const slim = await (await app.request(api("/tasks?slim=true"))).json();
+    const row = slim.data.find((t: any) => t.id === id);
+    expect(row.runs).toBeUndefined();
+    expect(row.lastRun).toEqual({ engine: "claude-code", model: "us.anthropic.claude-haiku-4-5", computerId: "coder-box", computerName: "Coder box", computerKind: "daytona", provider: "daytona", status: "completed" });
+    expect(row.failure).toBeUndefined();
+  });
+
+  test("what every run of a task cost in all (not the latest): the breakdown on GET /tasks/:id, the total in the slim list", async () => {
+    const created = await (await app.request(api("/tasks"), jsonReq("POST", { title: "Cost task", description: "x", assignTo: "agent-1" }))).json();
+    const id = created.data.id as string;
+    const base = { computer: { id: "host", kind: "host" }, egress: { mode: "direct" } };
+    await orchestrator.getStore().updateTask(id, { runs: [
+      { ...base, runId: "c1", startedAt: "2026-11-22T10:00:00.000Z", status: "failed", engine: "claude-code", cost: { harnessUsd: 0.5, tokens: 1000 }, durationMs: 1000 },
+      { ...base, runId: "c2", startedAt: "2026-11-22T10:05:00.000Z", status: "completed", engine: "claude-code", cost: { harnessUsd: 0.25, tokens: 500 } },
+      { ...base, runId: "c3", startedAt: "2026-11-22T10:09:00.000Z", status: "completed", engine: "polpo", continuation: true, cost: { modelUsd: 0.05, tokens: 300 } },
+    ] as any });
+    const full = (await (await app.request(api(`/tasks/${id}`))).json()).data;
+    expect(full.cost).toMatchObject({ currency: "USD", usd: 0.8, harnessUsd: 0.75, modelUsd: 0.05, tokens: 1800, runs: 3, lastRunUsd: 0.05, partial: false });
+    expect(full.cost.perRun.map((r: any) => [r.runId, r.usd])).toEqual([["c1", 0.5], ["c2", 0.25], ["c3", 0.05]]);
+    expect(full.cost.byEngine.map((e: any) => [e.engine, e.usd, e.runs])).toEqual([["claude-code", 0.75, 2], ["polpo", 0.05, 1]]);
+    const slim = await (await app.request(api("/tasks?slim=true"))).json();
+    expect(slim.data.find((t: any) => t.id === id).cost).toEqual({ usd: 0.8, tokens: 1800, runs: 3 });
+    const page = await (await app.request(api("/tasks?slim=true&limit=50"))).json();
+    expect(page.data.tasks.find((t: any) => t.id === id).cost).toEqual({ usd: 0.8, tokens: 1800, runs: 3 });
+    // a task never run: no cost in the slim row, an empty one in full
+    const other = (await (await app.request(api("/tasks"), jsonReq("POST", { title: "Never run", description: "x", assignTo: "agent-1" }))).json()).data.id;
+    expect(slim.data.find((t: any) => t.id === other)?.cost).toBeUndefined();
+    expect((await (await app.request(api(`/tasks/${other}`))).json()).data.cost).toMatchObject({ usd: 0, runs: 0, partial: false });
+  });
+
+  test("a failed task's reason (labelled, not retryable) as `failure`: on GET /tasks/:id and in the slim list", async () => {
+    const created = await (await app.request(api("/tasks"), jsonReq("POST", { title: "Failure task", description: "x", assignTo: "agent-1" }))).json();
+    const id = created.data.id as string;
+    const stderr = "Bedrock: model \"us.anthropic.claude-sonnet-4-5\" not enabled for this account — pick another model\nClaude Code: API Error: 403";
+    await orchestrator.getStore().updateTask(id, { status: "failed", result: { exitCode: 1, stdout: "", stderr, duration: 5, retryable: false } });
+    const failure = { reason: stderr.split("\n")[0], retryable: false, kind: "model_access" };
+    const full = await (await app.request(api(`/tasks/${id}`))).json();
+    expect(full.data.failure).toEqual(failure);
+    expect(full.data.result.retryable).toBe(false);
+    const slim = await (await app.request(api("/tasks?slim=true"))).json();
+    expect(slim.data.find((t: any) => t.id === id).failure).toEqual(failure);
+  });
+
   test("GET /tasks returns 200 with task array", async () => {
     const res = await app.request(api("/tasks"));
     expect(res.status).toBe(200);
@@ -513,6 +594,51 @@ describe("Missions API", () => {
       { title: "Build feature", description: "Implement the new feature", assignTo: "agent-1" },
       { title: "Write tests", description: "Write tests for the feature", assignTo: "agent-1", dependsOn: ["Build feature"] },
     ],
+  });
+
+  test("a mission's budget (set, raised, cleared) and its cost: every run of its tasks, full on GET /missions/:id, compact in the lists", async () => {
+    // its own client address: the file's other requests share one rate-limit window (200/min)
+    const req = (path: string, init: RequestInit = {}) => app.request(path, { ...init, headers: { ...(init.headers as Record<string, string> | undefined), "x-forwarded-for": "10.0.0.235" } });
+    const created = await (await req(api("/missions"), jsonReq("POST", { data: MISSION_DATA, name: "costed-mission", budgetUsd: 3 }))).json();
+    const id = created.data.id as string;
+    expect(created.data.budgetUsd).toBe(3);
+    expect((await req(api("/missions"), jsonReq("POST", { data: MISSION_DATA, name: "bad-budget", budgetUsd: -1 }))).status).toBe(400);
+
+    // two tasks of the mission, with runs as the orchestrator records them (a retry, two engines)
+    const store = orchestrator.getStore();
+    const t1 = await store.addTask({ title: "Build feature", description: "x", assignTo: "agent-1", dependsOn: [], expectations: [], metrics: [], maxRetries: 2, group: "costed-mission", missionId: id });
+    const t2 = await store.addTask({ title: "Write tests", description: "x", assignTo: "agent-1", dependsOn: [], expectations: [], metrics: [], maxRetries: 2, group: "costed-mission", missionId: id });
+    const base = { startedAt: "2026-11-22T10:00:00.000Z", computer: { id: "host", kind: "host" }, egress: { mode: "direct" } };
+    await store.updateTask(t1.id, { runs: [
+      { ...base, runId: "a", status: "failed", engine: "claude-code", agent: "agent-1", cost: { harnessUsd: 1, tokens: 100 } },
+      { ...base, runId: "b", status: "completed", engine: "claude-code", agent: "agent-1", cost: { harnessUsd: 0.5, tokens: 50 } },
+    ] as any });
+    await store.updateTask(t2.id, { runs: [{ ...base, runId: "c", status: "completed", engine: "polpo", cost: { modelUsd: 0.25, tokens: 1000 } }] as any });
+
+    const got = await (await req(api(`/missions/${id}`))).json();
+    expect(got.data.budgetUsd).toBe(3);
+    expect(got.data.cost).toMatchObject({
+      currency: "USD", usd: 1.75, harnessUsd: 1.5, modelUsd: 0.25, tokens: 1150, runs: 3, tasks: 2, partial: false,
+      budgetUsd: 3, remainingUsd: 1.25, overBudget: false,
+    });
+    expect(got.data.cost.byEngine.map((e: any) => [e.engine, e.usd, e.runs])).toEqual([["claude-code", 1.5, 2], ["polpo", 0.25, 1]]);
+    expect(got.data.cost.byAgent).toEqual([expect.objectContaining({ agent: "agent-1", usd: 1.75, runs: 3 })]);
+
+    const listed = (await (await req(api("/missions"))).json()).data.find((m: any) => m.id === id);
+    expect(listed.cost).toEqual({ usd: 1.75, tokens: 1150, runs: 3, budgetUsd: 3, overBudget: false });
+    const slim = (await (await req(api("/missions?slim=true"))).json()).data.find((m: any) => m.id === id);
+    expect(slim).toMatchObject({ budgetUsd: 3, cost: { usd: 1.75, overBudget: false } });
+
+    // lowered under what it spent, then cleared
+    const lowered = await (await req(api(`/missions/${id}`), jsonReq("PATCH", { budgetUsd: 1 }))).json();
+    expect(lowered.data.budgetUsd).toBe(1);
+    expect((await (await req(api(`/missions/${id}`))).json()).data.cost).toMatchObject({ overBudget: true, remainingUsd: -0.75 });
+    expect((await req(api(`/missions/${id}`), jsonReq("PATCH", { budgetUsd: 0 }))).status).toBe(400);
+    await req(api(`/missions/${id}`), jsonReq("PATCH", { budgetUsd: null }));
+    const cleared = (await (await req(api(`/missions/${id}`))).json()).data;
+    expect(cleared.budgetUsd).toBeUndefined();
+    expect(cleared.cost.budgetUsd).toBeUndefined();
+    expect(cleared.cost.usd).toBe(1.75);
   });
 
   test("GET /missions returns 200 with mission array", async () => {
@@ -1358,6 +1484,20 @@ describe("Update Agent API", () => {
 
     // Restore
     await app.request(api("/agents/agent-1"), jsonReq("PATCH", { role: "Test agent" }));
+  });
+
+  test("PATCH /agents/:name sets, validates and clears connectorTools", async () => {
+    const patch = (body: unknown) => app.request(api("/agents/agent-1"), jsonReq("PATCH", body as Record<string, unknown>));
+    let res = await patch({ connectorTools: { linear: ["create_issue", "create_issue", "list_issues"], notion: "*" } });
+    expect(res.status).toBe(200);
+    // deduplicated, "*" dropped (it is the default)
+    expect((await res.json()).data.connectorTools).toEqual({ linear: ["create_issue", "list_issues"] });
+    expect((await patch({ connectorTools: { "Not An Id": "*" } })).status).toBe(400);
+    expect((await patch({ connectorTools: { linear: "all" } })).status).toBe(400);
+    expect((await patch({ connectorTools: ["linear"] })).status).toBe(400);
+    res = await patch({ connectorTools: null });
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.connectorTools).toBeUndefined();
   });
 
   test("PATCH /agents/:name returns 404 for unknown agent", async () => {

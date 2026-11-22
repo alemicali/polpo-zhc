@@ -278,7 +278,7 @@ export function CodingPage() {
         </Button>
 
         {/* Center: repo · branch · PR · connection pill */}
-        <div className="flex flex-1 items-center justify-center gap-2 text-[12px] min-w-0">
+        <div className="flex flex-1 items-center justify-center gap-2 text-small min-w-0">
           <HeaderInfo workspace={activeWorkspace} state={(activeTerminal && connections[activeTerminal.id]) ?? "loading"} git={git} />
         </div>
 
@@ -287,7 +287,7 @@ export function CodingPage() {
             variant="ghost"
             size="sm"
             disabled={busy}
-            className="h-8 gap-1.5 border border-emerald-500/30 bg-emerald-500/10 px-2.5 text-xs font-medium text-emerald-600 hover:bg-emerald-500/15 dark:text-emerald-300"
+            className="h-8 gap-1.5 border border-success/30 bg-success/10 px-2.5 text-xs font-medium text-success hover:bg-success/15"
             onClick={mergePR}
           >
             <GitMerge className="h-3.5 w-3.5" /> Merge
@@ -342,7 +342,7 @@ export function CodingPage() {
           )}
 
           <ResizablePanel id="main">
-            <main className="relative flex h-full w-full flex-col overflow-hidden bg-code">
+            <main className="relative flex h-full w-full flex-col overflow-hidden bg-background">
               {activePendingKey ? (() => {
                 const pending = pendingWorkspaces.find((p) => p.key === activePendingKey);
                 return pending ? (
@@ -450,7 +450,7 @@ function EndpointBadge() {
       aria-label={local ? "Local endpoint" : "Remote endpoint"}
       className={cn(
         "inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center",
-        local ? "text-emerald-400/70" : "text-sky-400/80",
+        local ? "text-success/70" : "text-info/80",
       )}
     >
       {local ? <Laptop className="h-3 w-3" /> : <Cloud className="h-3 w-3" />}
@@ -480,11 +480,11 @@ function HeaderInfo({
           target="_blank"
           rel="noreferrer"
           title={`PR #${git.pr.number}: ${git.pr.title}`}
-          className="flex items-center gap-1 rounded-md border border-emerald-400/25 bg-emerald-400/[0.08] px-1.5 py-0.5 text-[11px] font-medium text-emerald-300 hover:bg-emerald-400/[0.12]"
+          className="flex items-center gap-1 rounded-md border border-success/25 bg-success/[0.08] px-1.5 py-0.5 text-caption font-medium text-success hover:bg-success/[0.12]"
         >
           <GitPullRequestIcon className="h-3 w-3" />
           <span className="tabular-nums">#{git.pr.number}</span>
-          <span className="hidden xl:inline max-w-[16rem] truncate text-emerald-200/80">{git.pr.title}</span>
+          <span className="hidden xl:inline max-w-[16rem] truncate text-success/80">{git.pr.title}</span>
         </a>
       )}
       <span className="flex items-center gap-1.5 truncate">
@@ -492,18 +492,18 @@ function HeaderInfo({
         <span className="max-w-[12rem] truncate font-medium text-foreground">{repoLabel}</span>
         <EndpointBadge />
         {git?.branch && (
-          <code className="hidden max-w-[14rem] truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground md:inline-block">
+          <code className="hidden max-w-[14rem] truncate rounded bg-muted px-1.5 py-0.5 font-mono text-caption text-muted-foreground md:inline-block">
             {git.branch}
           </code>
         )}
       </span>
-      <span className="flex items-center gap-1 rounded-md border border-border/70 bg-muted/50 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+      <span className="flex items-center gap-1 rounded-md border border-border/70 bg-muted/50 px-1.5 py-0.5 text-micro text-muted-foreground">
         <span className={cn(
           "inline-flex h-2 w-2 shrink-0 rounded-full",
-          state === "connected" ? "bg-emerald-400"
-          : state === "error" ? "bg-rose-400"
-          : state === "closed" ? "bg-zinc-500"
-          : "bg-amber-400",
+          state === "connected" ? "bg-success"
+          : state === "error" ? "bg-destructive"
+          : state === "closed" ? "bg-muted-foreground"
+          : "bg-warning",
         )} />
         <span className="capitalize">{state}</span>
       </span>
@@ -530,7 +530,7 @@ function CodingNotice({
           {icon}
         </span>
         <div>
-          <h2 className="text-sm font-semibold">{title}</h2>
+          <h2 className="font-heading text-h3">{title}</h2>
           <p className="mt-1 text-sm text-muted-foreground">{detail}</p>
         </div>
         {action}

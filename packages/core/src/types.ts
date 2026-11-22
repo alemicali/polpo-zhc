@@ -166,6 +166,16 @@ export interface Task {
    * Set by the orchestrator LLM when creating/planning tasks.
    */
   sideEffects?: boolean;
+  /**
+   * Where and with what each run of this task executed (engine, model, computer, egress, harness
+   * session, cost), newest last, at most MAX_TASK_RUNS. See run-context.ts.
+   */
+  runs?: import("./run-context.js").TaskRunContext[];
+  /**
+   * Optional narrowing of the tools this task's runs may use (connectors, their tools, built-in
+   * tools). Absent: everything the agent has. It never grants. See task-tool-scope.ts.
+   */
+  toolScope?: import("./task-tool-scope.js").TaskToolScope;
   createdAt: string;
   updatedAt: string;
 }
@@ -175,6 +185,12 @@ export interface TaskResult {
   stdout: string;
   stderr: string;
   duration: number;
+  /**
+   * false: the run failed for a reason a re-run of the same agent cannot fix (the model is not
+   * enabled for the account, the credentials are refused): no automatic retry; the task fails
+   * (escalation still applies). Omitted: retryable.
+   */
+  retryable?: boolean;
   assessment?: AssessmentResult;
   /** All previous assessments (oldest first). Current assessment is always in `assessment`. */
   assessmentHistory?: AssessmentResult[];
@@ -400,6 +416,18 @@ export interface AgentConfig {
   reasoning?: ReasoningLevel;
   /** Context compaction for this agent's runs and chats (overrides `settings.compaction`). */
   compaction?: import("./context-compactor.js").CompactionSettings;
+  /**
+   * Progressive tool discovery (overrides `settings.tools.progressive`): "auto" (default) defers
+   * connector tools and optional groups behind tools_search/tools_load when the run has more than
+   * `settings.tools.progressiveThreshold` tools; "always" always does; "never" gives every tool up front.
+   */
+  progressiveTools?: import("./progressive-tools.js").ProgressiveToolsMode;
+  /**
+   * Which tools of each granted connector this agent gets, keyed by connector id: "*" or a missing
+   * key = all (current and future), a list = only those raw MCP tool names. Narrows connector access;
+   * the connector's toolPolicy ("off") and allowedTools still apply.
+   */
+  connectorTools?: import("./connectors.js").AgentConnectorTools;
   /** Voice replies in chats (Telegram); default "off". The agent can change it (set_voice_replies). */
   voiceReplies?: VoiceReplyMode;
   /** Learning from its conversations (memory, own skills); off by default. The agent can change it (set_learning). */
@@ -412,6 +440,11 @@ export interface AgentConfig {
   computers?: string[];
   /** The machine its chats and tasks run on by default: a computer id, or "host" (unset: this server, with the sandbox cascade). */
   defaultComputer?: string;
+  /**
+   * The runtime that drives this agent: "polpo" (default, Polpo's own engine) or an official agent
+   * harness (Claude Code, Codex) running inside its computer (see harnesses.ts).
+   */
+  engine?: import("./harnesses.js").AgentEngine;
   /** Runtime profile used by deterministic loop execution. */
   runtime?: string;
   /** Named deterministic loops available to this agent. */
@@ -486,6 +519,8 @@ export interface AgentActivity {
   compactions?: number;
   /** The latest compaction, with the durable facts it found (saved to the agent's memory). */
   lastCompaction?: import("./context-compactor.js").CompactionInfo & { at: string; durableFacts?: string[] };
+  /** What the engine reports about where and with what it runs (merged into Task.runs). */
+  runContext?: import("./run-context.js").RunContextRuntime;
 }
 
 export interface AgentProcess {
@@ -669,6 +704,7 @@ export interface AskUserRequest {
 
 // === Mission ===
 
+export type MissionPauseReason = "budget";
 export type MissionStatus = "draft" | "scheduled" | "recurring" | "active" | "paused" | "completed" | "failed" | "cancelled";
 
 export interface Mission {
@@ -689,6 +725,15 @@ export interface Mission {
   notifications?: ScopedNotificationRules;
   /** How many times this mission has been executed. Incremented on each run (useful for recurring missions). */
   executionCount?: number;
+  /**
+   * Spending limit in USD for the whole mission (all its tasks' runs: retries, continuations and
+   * recurring runs included). When what it spent reaches it, no new task starts (running ones
+   * finish) and the mission pauses (pauseReason "budget"); raising or clearing it lets it go on.
+   * See mission-cost.ts.
+   */
+  budgetUsd?: number;
+  /** Why the mission is paused, when the orchestrator paused it on its own: "budget". */
+  pauseReason?: MissionPauseReason;
   createdAt: string;
   updatedAt: string;
 }
@@ -890,7 +935,14 @@ export interface BrandingConfig {
   tagline?: string;
   /** HTTPS image URL or the managed `/api/v1/config/branding/logo` asset. */
   logoUrl?: string;
+  /** The logo in dark mode (falls back to logoUrl): HTTPS image URL or the managed `/api/v1/config/branding/logo-dark` asset. */
+  logoDarkUrl?: string;
+  /** How the logo is shown: "box" (default) in a tile, "none" bare (no background, same height). */
+  logoFrame?: BrandingLogoFrame;
 }
+
+export const BRANDING_LOGO_FRAMES = ["box", "none"] as const;
+export type BrandingLogoFrame = (typeof BRANDING_LOGO_FRAMES)[number];
 
 export interface PolpoSettings {
   maxRetries: number;
@@ -898,6 +950,8 @@ export interface PolpoSettings {
   logLevel: "quiet" | "normal" | "verbose";
   /** Instance-wide UI branding. Unlike themes, this is shared by every user. */
   branding?: BrandingConfig;
+  /** The dashboard's default look for everyone (theme, palette, custom colours); a person may still customize their browser. */
+  appearance?: import("./appearance.js").AppearanceSettings;
   taskTimeout?: number;            // default timeout per task (ms). Default: 30min
   staleThreshold?: number;         // ms idle before agent considered stale. Default: 5min
   defaultRetryPolicy?: RetryPolicy;
@@ -920,6 +974,9 @@ export interface PolpoSettings {
   /** Model for orchestrator LLM calls (question detection, deadlock, missions).
    *  Can be a simple string ("anthropic:claude-opus-4-6") or a ModelConfig with fallbacks. */
   orchestratorModel?: string | ModelConfig;
+  /** The orchestrator's display name in chats, channels, MCP and its system prompt (1–40 chars).
+   *  Default "Polpo". Independent of branding.productName. */
+  orchestratorName?: string;
   /** Polpo's voice replies in chats (Telegram); default "off". Polpo can change it (set_voice_replies). */
   voiceReplies?: VoiceReplyMode;
   /** Image-capable model for tasks that need vision (falls back to orchestratorModel). */
@@ -942,6 +999,10 @@ export interface PolpoSettings {
   logRetentionDays?: number;
   /** How long conversations and task runs are compacted when they fill the model's window. */
   compaction?: import("./context-compactor.js").CompactionSettings;
+  /** Progressive tool discovery for agents and Polpo (tools_search / tools_load). */
+  tools?: import("./progressive-tools.js").ToolsSettings;
+  /** How much of their dependencies' results tasks receive in their prompt (characters per dependency, in total). */
+  dependencyResults?: import("./dependency-results.js").DependencyResultsSettings;
   /** Where agents' tools run: default sandbox and what lower levels may choose. */
   sandbox?: import("./sandbox.js").SandboxSettings;
   /** Persistent machines agents work on (agent.defaultComputer); "host" (this server) is implicit. */
@@ -968,6 +1029,8 @@ export interface PolpoSettings {
   egressProxies?: Record<string, string>;
   /** Tailscale inside remote computers, so their browser can reach a tailnet-only egress proxy (see tailnet.ts). */
   tailscale?: import("./tailnet.js").TailscaleSettings;
+  /** Official agent harnesses (Claude Code, Codex) agents may run on (agent.engine), with their credentials (vault references). */
+  harnesses?: import("./harnesses.js").HarnessesSettings;
   /** Connectors (MCP servers): network policy and defaults. */
   connectors?: {
     /** Allow remote connectors on private / local network addresses (and http:// on localhost). Default false. */

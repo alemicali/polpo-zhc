@@ -54,7 +54,7 @@ export function registerChannelTools(tool: Register, deps: McpDeps): void {
       `Telegram bots: ${telegram.bots.map((b) => `${b.key}${b.agent ? ` (as ${b.agent})` : " (as Polpo)"}`).join(", ") || "none"}`,
       ...(telegram.chats.length ? ["Telegram chats:", ...telegram.chats.slice(0, 50).map((c) => `- ${c.id} (${c.kind}) ${c.name}`)] : []),
       `WhatsApp: ${whatsapp.map((w) => `${w.profile} (${w.status})`).join(", ") || "not set up"}`,
-      `To add or change a channel or its tokens: ${setupUrl}`,
+      `To set up a channel: polpo_channel_save (its tokens and keys: ${setupUrl})`,
     ].join("\n");
     return ok(text, { channels, rules, telegram, whatsapp, setup_url: setupUrl });
   });
@@ -68,7 +68,7 @@ export function registerChannelTools(tool: Register, deps: McpDeps): void {
     scope: "polpo:messages",
   }, async ({ name }) => {
     const r = await apiSend(deps, "POST", `/config/channels/${enc(name)}/test`);
-    if (!r.ok) return r.status === 404 ? fail(`There is no channel "${name}" running. List them with polpo_channels_list; a new one is added in the dashboard (${setupUrl}).`) : apiError(r, `Testing channel ${name}`);
+    if (!r.ok) return r.status === 404 ? fail(`There is no channel "${name}" running. List them with polpo_channels_list; set one up with polpo_channel_save (its secrets: ${setupUrl}).`) : apiError(r, `Testing channel ${name}`);
     const d = r.data as { success?: boolean; error?: string };
     return ok(d.success ? `The test on ${name} was sent.` : `The test on ${name} failed: ${d.error ?? "unknown error"}. Check the channel in the dashboard (${setupUrl}).`,
       { name, success: !!d.success, ...(d.error ? { error: d.error } : {}) });
@@ -140,18 +140,29 @@ export function registerChannelTools(tool: Register, deps: McpDeps): void {
       severity: z.enum(["info", "warning", "critical"]).optional().describe("How important"),
       template: z.string().max(4000).optional().describe("The message, with {{placeholders}} of the event"),
       cooldown_minutes: z.number().min(0).max(24 * 60).optional().describe("At most one notification per this many minutes"),
+      condition: z.object({ expression: z.string().min(1).max(2000) }).passthrough().optional().describe("Only when this expression on the event holds"),
+      include_outcomes: z.boolean().optional().describe("Attach the task's outcomes (files, reports)"),
+      outcome_filter: z.object({ types: z.array(z.string()).optional(), tags: z.array(z.string()).optional() }).strict().optional().describe("Which outcomes to attach"),
+      max_attachment_size: z.number().int().min(0).optional().describe("Largest attachment in bytes"),
+      actions: z.array(z.object({}).passthrough()).optional().describe("Actions to run as well (as in the dashboard's rule editor)"),
     },
     outputSchema: { rule: ruleItem, created: z.boolean() },
     annotations: UPDATE,
-  }, async ({ id, name, events, channels, severity, template, cooldown_minutes }) => {
+  }, async ({ id, name, events, channels, severity, template, cooldown_minutes, condition, include_outcomes, outcome_filter, max_attachment_size, actions }) => {
     const cfg = await apiGet(deps, "/config");
     if (!cfg.ok) return apiError(cfg, "Reading the configuration");
     const n = (cfg.data as { settings?: { notifications?: { channels?: Record<string, unknown>; rules?: Rule[] } } })?.settings?.notifications;
     const known = Object.keys(n?.channels ?? {});
     const unknown = channels.filter((c) => !known.includes(c));
-    if (unknown.length) return fail(`No channel ${unknown.map((c) => `"${c}"`).join(", ")}. Channels: ${known.join(", ") || "none"} (a new one is added in the dashboard: ${setupUrl}).`);
+    if (unknown.length) return fail(`No channel ${unknown.map((c) => `"${c}"`).join(", ")}. Channels: ${known.join(", ") || "none"} (set one up with polpo_channel_save).`);
     const existed = (n?.rules ?? []).some((r) => r.id === id);
-    const rule = { id, ...(name ? { name } : {}), events, channels, ...(severity ? { severity } : {}), ...(template ? { template } : {}), ...(cooldown_minutes !== undefined ? { cooldownMs: Math.round(cooldown_minutes * 60_000) } : {}) };
+    const rule = {
+      id, ...(name ? { name } : {}), events, channels, ...(severity ? { severity } : {}), ...(template ? { template } : {}),
+      ...(cooldown_minutes !== undefined ? { cooldownMs: Math.round(cooldown_minutes * 60_000) } : {}),
+      ...(condition ? { condition } : {}), ...(include_outcomes !== undefined ? { includeOutcomes: include_outcomes } : {}),
+      ...(outcome_filter ? { outcomeFilter: outcome_filter } : {}), ...(max_attachment_size !== undefined ? { maxAttachmentSize: max_attachment_size } : {}),
+      ...(actions ? { actions } : {}),
+    };
     const r = await apiSend(deps, "PUT", `/config/rules/${enc(id)}`, rule);
     if (!r.ok) return apiError(r, `Saving rule ${id}`);
     return ok(`${existed ? "Replaced" : "Created"} rule ${id}: ${events.join(", ")} → ${channels.join(", ")}.`, { rule: { id, ...(name ? { name } : {}), events, channels, ...(severity ? { severity } : {}) }, created: !existed });

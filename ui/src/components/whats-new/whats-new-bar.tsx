@@ -3,8 +3,8 @@
  * not seen. A click opens the What's new drawer; the X sets it all as seen.
  */
 import { ChevronRight, Megaphone, X } from "lucide-react";
-import { CHANGELOG, type ChangelogEntry } from "@/lib/changelog";
-import { markAllChangelogSeen, useUnseenChangelog } from "@/hooks/use-whats-new";
+import { CHANGELOG, changelogPublishedAt, formatChangelogOnline, type ChangelogEntry } from "@/lib/changelog";
+import { changelogPublishedAtMap, markAllChangelogSeen, useUnseenChangelog } from "@/hooks/use-whats-new";
 import { openWhatsNew } from "@/hooks/use-whats-new-drawer";
 import { cn } from "@/lib/utils";
 
@@ -13,11 +13,13 @@ export function WhatsNewBar({ className, entries = CHANGELOG }: { className?: st
   if (unseen.length === 0) return null;
   const newest = unseen.find((e) => e.highlight) ?? unseen[0]!;
   const more = unseen.length - 1;
+  const onlineAt = changelogPublishedAt(newest, changelogPublishedAtMap());
+  const online = onlineAt ? formatChangelogOnline(onlineAt) : null;
 
   return (
     <div
       className={cn(
-        "relative isolate flex h-9 shrink-0 items-center gap-2 overflow-hidden border-b border-primary/20 px-3 text-[13px]",
+        "relative isolate flex h-9 shrink-0 items-center gap-2 overflow-hidden border-b border-primary/20 px-3 text-small",
         "bg-gradient-to-r from-primary/15 via-primary/[0.07] to-transparent",
         className,
       )}
@@ -27,19 +29,24 @@ export function WhatsNewBar({ className, entries = CHANGELOG }: { className?: st
         type="button"
         onClick={openWhatsNew}
         className="group flex min-w-0 flex-1 items-center gap-2.5 text-left focus-visible:outline-none"
-        aria-label={`Novità: ${newest.title}${more ? ` e altre ${more}` : ""}. Apri`}
+        aria-label={`Novità: ${newest.title}${online ? `, ${online}` : ""}${more ? ` e altre ${more}` : ""}. Apri`}
       >
         <span className="relative flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-primary/20 text-primary">
           <Megaphone className="h-3 w-3" />
           <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-primary motion-safe:animate-ping" />
         </span>
-        <span className="hidden shrink-0 rounded-full bg-primary px-1.5 py-px text-[10px] font-bold uppercase tracking-wider text-primary-foreground sm:inline">
+        <span className="hidden shrink-0 rounded-full bg-primary px-1.5 py-px text-micro font-bold uppercase tracking-wider text-primary-foreground sm:inline">
           Novità
         </span>
         <span className="truncate font-medium text-foreground">{newest.title}</span>
+        {online && onlineAt && (
+          <time dateTime={onlineAt.toISOString()} className="hidden shrink-0 tabular-nums text-caption text-muted-foreground sm:inline">
+            {online}
+          </time>
+        )}
         <span className="hidden truncate text-muted-foreground md:inline">· {newest.summary}</span>
         {more > 0 && (
-          <span className="shrink-0 rounded-full border border-primary/30 px-1.5 text-[11px] text-primary">+{more}</span>
+          <span className="shrink-0 rounded-full border border-primary/30 px-1.5 text-caption text-primary">+{more}</span>
         )}
         <span className="ml-auto flex shrink-0 items-center gap-0.5 text-xs font-medium text-primary group-hover:underline">
           Scopri

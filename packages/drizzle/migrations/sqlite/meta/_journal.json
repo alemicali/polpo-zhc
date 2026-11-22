@@ -85,6 +85,27 @@
       "when": 1795310849165,
       "tag": "0011_scheduling",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1795359845537,
+      "tag": "0012_task_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1795363098339,
+      "tag": "0013_mission_budget",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1795371810680,
+      "tag": "0014_task_tool_scope",
+      "breakpoints": true
     }
   ]
 }

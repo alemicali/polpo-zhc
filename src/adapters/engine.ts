@@ -20,6 +20,13 @@ import {
   parseSummary,
   type CompactionInfo,
 } from "@polpo-ai/core";
+import {
+  AGENT_TOOL_GROUPS,
+  ProgressiveToolSet,
+  declaredTools,
+  progressiveModeFor,
+  restoreToolAnnouncements,
+} from "@polpo-ai/core/progressive-tools";
 import { effectiveCompactionSettings, loadPolpoConfig } from "../core/config.js";
 import { createWorkspace, hostVolumeMounts, WorkspaceShell, isRemoteWorkspace } from "../sandbox/manager.js";
 import { RemoteWorkspace } from "../sandbox/remote.js";
@@ -38,7 +45,8 @@ export function createActivity(): AgentActivity {
   };
 }
 import { Agent } from "@earendil-works/pi-agent-core";
-import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
+import { cleanupSessionResources } from "@earendil-works/pi-ai";
+import type { AgentEvent, AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import { join, sep } from "node:path";
 import { resolveModel, resolveSummaryModel, streamSimpleWithAuth, completeSimpleWithAuth, enforceModelAllowlist } from "../llm/pi-client.js";
 import { createSystemTools, createAllTools, expandToolWildcards, ALL_EXTENDED_TOOL_NAMES } from "../tools/system-tools.js";
@@ -51,9 +59,13 @@ import { createArtifactAgentTools } from "../tools/artifact-tools.js";
 import { getArtifactStore } from "../server/artifact-runtime.js";
 import { createStorageAgentTools } from "../tools/storage-tools.js";
 import { createCompanyBrainAgentTools } from "../tools/company-brain-tools.js";
+import { createTaskResultTools, wantsTaskResultTools } from "../tools/task-result-tools.js";
+import { databaseStoresFor } from "../core/storage.js";
+import { FileTaskStore } from "../stores/file-task-store.js";
 import { inkRegistry } from "../core/ink-config.js";
 import { ConnectorManager } from "../mcp/manager.js";
 import { connectorsPromptSection } from "../mcp/runtime.js";
+import { connectorLabel } from "../mcp/view.js";
 
 /**
  * Build an "## Available Tools" section for the agent's system prompt.
@@ -90,11 +102,12 @@ export function describeToolsForAgent(agent: AgentConfig): string {
     ["ls", "- `ls` — list directory contents"],
     ["http_fetch", "- `http_fetch` — make HTTP requests (GET, POST, PUT, DELETE)"],
     ["http_download", "- `http_download` — download files from URLs"],
-    ["register_outcome", "- `register_outcome` — declare task deliverables (files, URLs, text, data)"],
   ];
   lines.push(
     "**Core:**",
     ...core.filter(([name]) => grantsTool(agent, name)).map(([, line]) => line),
+    // every agent gets register_outcome, whatever its allowedTools (createOutcomeTools)
+    "- `register_outcome` — declare task deliverables (files, URLs, text, data)",
     "- `vault_get` — retrieve stored credentials/secrets",
     "- `vault_list` — list available vault entries",
   );
@@ -616,11 +629,13 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
     transformContext: async (messages, signal) => {
       const force = forceNextCompaction;
       forceNextCompaction = undefined;
-      const { messages: projected, info } = await compactor.prepare(messages as any[], { force, signal });
+      const { messages: compacted, info } = await compactor.prepare(messages as any[], { force, signal });
       if (info) {
         recordCompaction(info, pendingFacts);
         pendingFacts = undefined;
       }
+      // tools loaded during the run are declared again when compaction dropped their announcement
+      const projected = restoreToolAnnouncements(messages as any[], compacted);
       lastProjectedCount = projected.length;
       return projected as unknown as AgentMessage[];
     },
@@ -723,8 +738,15 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
         if (msg && "content" in msg && msg.role === "assistant") {
           // Accumulate token usage
           if ("usage" in msg && msg.usage && typeof msg.usage === "object") {
-            const u = msg.usage as { totalTokens?: number; input?: number; cacheRead?: number; cacheWrite?: number };
+            const u = msg.usage as { totalTokens?: number; input?: number; cacheRead?: number; cacheWrite?: number; cost?: { total?: number } };
             if (u.totalTokens) activity.totalTokens += u.totalTokens;
+            // the run's model cost as the provider reports it (the task's run context)
+            const usd = typeof u.cost?.total === "number" && Number.isFinite(u.cost.total) ? u.cost.total : 0;
+            const prev = activity.runContext?.cost;
+            activity.runContext = {
+              ...activity.runContext,
+              cost: { ...prev, tokens: activity.totalTokens, ...(usd > 0 || prev?.modelUsd !== undefined ? { modelUsd: (prev?.modelUsd ?? 0) + usd } : {}) },
+            };
             // the real size of what was sent: next compaction decisions start from it
             compactor.noteUsage((u.input ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0), lastProjectedCount);
           }
@@ -796,67 +818,45 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   // Run the agent and capture result
   handle.done = (async (): Promise<TaskResult> => {
     try {
-      // Resolve vault credentials (async) — then rebuild tools with vault included
-      // Never hand system vault namespaces ("$data", ...) to an agent.
-      const vaultEntries = await loadAgentVaultEntries(ctx?.vaultStore, agentConfig.name);
-      const vault = resolveAgentVault(vaultEntries);
-
-      // Rebuild tools with vault resolved
-      let allTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, vault, remoteFs, shell, { sandboxProvider });
-      if (ctx?.polpoDir) {
-        allTools.push(...createInkToolsFn(ctx.polpoDir, agentConfig.allowedTools));
+      const toolset = await buildAgentToolset({
+        agentConfig, cwd, ctx, effectiveAllowedPaths, outputDir, remoteFs, shell, sandboxProvider,
+        browserProfileDir, hasExtendedTools, log: (line) => handle.onTranscript?.({ type: "log", message: line }), task,
+      });
+      const { vault, connectorNote } = toolset;
+      const allTools = toolset.tools;
+      browserNetwork = toolset.browserNetwork;
+      connectorManager = toolset.connectorManager;
+      // Progressive tool discovery: above the threshold the run starts with its essential tools plus
+      // tools_search/tools_load; connector tools and optional groups are added when loaded (before the
+      // next request, as a pi toolsAdded system message: inline where the provider supports it).
+      const progressive = new ProgressiveToolSet({
+        tools: allTools,
+        mode: progressiveModeFor(agentConfig, ctx?.polpoDir ? loadPolpoConfig(ctx.polpoDir)?.settings?.tools : undefined),
+        threshold: ctx?.polpoDir ? loadPolpoConfig(ctx.polpoDir)?.settings?.tools?.progressiveThreshold : undefined,
+        groups: AGENT_TOOL_GROUPS,
+        connectorNames: connectorManager
+          ? Object.fromEntries(connectorManager.store.list().map((connector) => [connector.id, connectorLabel(connector)]))
+          : undefined,
+        connectorApps: connectorManager
+          ? Object.fromEntries(connectorManager.store.list().flatMap((connector) => (connector.catalogId ? [[connector.id, connector.catalogId]] : [])))
+          : undefined,
+        // a resumed run keeps what its transcript already declares
+        loaded: declaredTools(ctx?.resumeMessages ?? []).keys(),
+      });
+      let progressiveNote = "";
+      if (progressive.enabled) {
+        agent.state.tools = progressive.initialTools() as typeof allTools;
+        progressiveNote = progressive.promptSection();
+        agent.prepareNextTurnWithContext = (turn) => {
+          const added = progressive.takeNewlyLoaded();
+          if (added.length === 0) return undefined;
+          const tools = [...(turn.context.tools ?? []), ...added];
+          agent.state.tools = tools;
+          return { context: { ...turn.context, tools } };
+        };
+      } else {
+        agent.state.tools = allTools;
       }
-
-      if (hasExtendedTools) {
-        // a browser on this machine follows the sandbox network rule; in a remote VM, the VM's network
-        browserNetwork = createBrowserNetworkGuard({ sandbox: ctx?.sandbox, session: agentConfig.name, onDenied: ctx?.onNetworkDenied });
-        allTools = await createAllTools({
-          cwd,
-          allowedTools: agentConfig.allowedTools,
-          allowedPaths: effectiveAllowedPaths,
-          browserSession: agentConfig.name,
-          browserProfileDir,
-          browserNetwork,
-          browserEgress: ctx?.browserEgress,
-          vault,
-          emailAllowedDomains: agentConfig.emailAllowedDomains ?? ctx?.emailAllowedDomains,
-          outputDir,
-          whatsappStore: ctx?.whatsappStore,
-          whatsappSendMessage: ctx?.whatsappSendMessage,
-          whatsappSendMedia: ctx?.whatsappSendMedia,
-          whatsappMarkRead: ctx?.whatsappMarkRead,
-          polpoDir: ctx?.polpoDir,
-          shell,
-          fs: remoteFs,
-          sandboxProvider,
-        });
-      }
-      if (ctx?.polpoDir) {
-        allTools.push(...createDataAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
-        const artifactPolpoDir = ctx.polpoDir;
-        allTools.push(...createArtifactAgentTools(agentConfig.allowedTools, () => ({ store: getArtifactStore(artifactPolpoDir), author: agentConfig.name })));
-        allTools.push(...createCompanyBrainAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
-        allTools.push(...createStorageAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, { vaultStore: ctx.vaultStore as any, cwd, allowedPaths: effectiveAllowedPaths, outputDir, fs: remoteFs }));
-      }
-      // Connectors granted to the agent (mcp__<connector>__<tool>): a connector that cannot connect is
-      // skipped with a note in the prompt, never failing the run.
-      let connectorNote = "";
-      if (ctx?.polpoDir) {
-        const polpoDir = ctx.polpoDir;
-        try {
-          connectorManager = new ConnectorManager({
-            polpoDir,
-            vaultStore: ctx.vaultStore,
-            settings: () => (loadPolpoConfig(polpoDir)?.settings ?? undefined) as any,
-            log: (line) => handle.onTranscript?.({ type: "log", message: line }),
-          });
-          const { tools: connectorTools, notes } = await connectorManager.toolsFor(agentConfig.name, agentConfig.allowedTools);
-          const taken = new Set(allTools.map((tool) => tool.name));
-          allTools.push(...connectorTools.filter((tool) => !taken.has(tool.name)));
-          connectorNote = connectorsPromptSection(connectorManager.store.list(), agentConfig.name, notes);
-        } catch { /* no connectors */ }
-      }
-      agent.state.tools = allTools;
 
       // Refresh system prompt with mailboxes info now that vault is resolved.
       // The initial prompt set in `new Agent(...)` had no mailbox section
@@ -873,9 +873,10 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
             ? [{ ...head, content: prompt }, ...rest]
             : [{ role: "system", content: prompt, timestamp: Date.now() } as AgentMessage, ...agent.state.messages];
       }
-      if (connectorNote) {
+      for (const note of [connectorNote, progressiveNote]) {
+        if (!note) continue;
         const [head, ...rest] = agent.state.messages;
-        if (head && head.role === "system" && typeof head.content === "string") agent.state.messages = [{ ...head, content: `${head.content}\n\n${connectorNote}` }, ...rest];
+        if (head && head.role === "system" && typeof head.content === "string") agent.state.messages = [{ ...head, content: `${head.content}\n\n${note}` }, ...rest];
       }
 
       if (ctx?.continuation) {
@@ -926,10 +927,120 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       await workspace?.dispose().catch(() => undefined);
       await browserNetwork?.close().catch(() => undefined);
       await connectorManager?.closeAll().catch(() => undefined);
+      // provider session state keyed by the task id (Anthropic message threads, Codex sockets)
+      cleanupSessionResources(task.id);
     }
   })();
 
   return handle;
+}
+
+/** What an agent's run gets to work with (the native engine's tools; a harness offers them as host tools). */
+export interface AgentToolset {
+  tools: AgentTool<any>[];
+  vault: ReturnType<typeof resolveAgentVault>;
+  /** The connectors section of the prompt ("" without connectors). */
+  connectorNote: string;
+  connectorManager?: ConnectorManager;
+  browserNetwork?: BrowserNetworkGuard;
+}
+
+/** The project's task store in this process: the database's, else the JSON files (read fresh each time). */
+function taskStoreFor(polpoDir: string): { getAllTasks(): Promise<Task[]> } {
+  return databaseStoresFor(polpoDir)?.taskStore ?? new FileTaskStore(polpoDir);
+}
+
+/**
+ * The agent's resolved tools for a run: system tools with its vault, extended tools named in
+ * allowedTools, Ink, data, artifacts, company brain, storage, and its connectors (a connector that
+ * cannot connect is skipped with a note in the prompt, never failing the run). The caller closes
+ * connectorManager and browserNetwork when the run ends.
+ */
+export async function buildAgentToolset(o: {
+  agentConfig: AgentConfig;
+  cwd: string;
+  ctx: SpawnContext;
+  effectiveAllowedPaths?: string[];
+  outputDir?: string;
+  remoteFs?: WorkspaceFileSystem;
+  shell?: WorkspaceShell;
+  sandboxProvider: string;
+  browserProfileDir: string;
+  hasExtendedTools: boolean;
+  log?: (line: string) => void;
+  /** The task of this run: with dependencies or a mission, it gets task_result / dependency_results. */
+  task?: Task;
+}): Promise<AgentToolset> {
+  const { agentConfig, cwd, ctx, effectiveAllowedPaths, outputDir, remoteFs, shell, browserProfileDir } = o;
+  const sandboxProvider = o.sandboxProvider as any;
+  let browserNetwork: BrowserNetworkGuard | undefined;
+  let connectorManager: ConnectorManager | undefined;
+  // Resolve vault credentials (async) — then rebuild tools with vault included
+  // Never hand system vault namespaces ("$data", ...) to an agent.
+  const vaultEntries = await loadAgentVaultEntries(ctx?.vaultStore, agentConfig.name);
+  const vault = resolveAgentVault(vaultEntries);
+
+  // Rebuild tools with vault resolved
+  let allTools = createSystemTools(cwd, agentConfig.allowedTools, effectiveAllowedPaths, outputDir, vault, remoteFs, shell, { sandboxProvider });
+  if (ctx?.polpoDir) {
+    allTools.push(...createInkToolsFn(ctx.polpoDir, agentConfig.allowedTools));
+  }
+
+  if (o.hasExtendedTools) {
+    // a browser on this machine follows the sandbox network rule; in a remote VM, the VM's network
+    browserNetwork = createBrowserNetworkGuard({ sandbox: ctx?.sandbox, session: agentConfig.name, onDenied: ctx?.onNetworkDenied });
+    allTools = await createAllTools({
+      cwd,
+      allowedTools: agentConfig.allowedTools,
+      allowedPaths: effectiveAllowedPaths,
+      browserSession: agentConfig.name,
+      browserProfileDir,
+      browserNetwork,
+      browserEgress: ctx?.browserEgress,
+      vault,
+      emailAllowedDomains: agentConfig.emailAllowedDomains ?? ctx?.emailAllowedDomains,
+      outputDir,
+      whatsappStore: ctx?.whatsappStore,
+      whatsappSendMessage: ctx?.whatsappSendMessage,
+      whatsappSendMedia: ctx?.whatsappSendMedia,
+      whatsappMarkRead: ctx?.whatsappMarkRead,
+      polpoDir: ctx?.polpoDir,
+      shell,
+      fs: remoteFs,
+      sandboxProvider,
+    });
+  }
+  if (ctx?.polpoDir) {
+    allTools.push(...createDataAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
+    const artifactPolpoDir = ctx.polpoDir;
+    allTools.push(...createArtifactAgentTools(agentConfig.allowedTools, () => ({ store: getArtifactStore(artifactPolpoDir), author: agentConfig.name })));
+    allTools.push(...createCompanyBrainAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
+    allTools.push(...createStorageAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, { vaultStore: ctx.vaultStore as any, cwd, allowedPaths: effectiveAllowedPaths, outputDir, fs: remoteFs }));
+    // the results of the tasks it depends on and of its mission's tasks (read fresh from the task store)
+    if (wantsTaskResultTools(o.task)) {
+      const taskPolpoDir = ctx.polpoDir;
+      allTools.push(...createTaskResultTools(o.task!, () => taskStoreFor(taskPolpoDir).getAllTasks()));
+    }
+  }
+  // Connectors granted to the agent (mcp__<connector>__<tool>): a connector that cannot connect is
+  // skipped with a note in the prompt, never failing the run.
+  let connectorNote = "";
+  if (ctx?.polpoDir) {
+    const polpoDir = ctx.polpoDir;
+    try {
+      connectorManager = new ConnectorManager({
+        polpoDir,
+        vaultStore: ctx.vaultStore,
+        settings: () => (loadPolpoConfig(polpoDir)?.settings ?? undefined) as any,
+        log: (line) => o.log?.(line),
+      });
+      const { tools: connectorTools, notes } = await connectorManager.toolsFor(agentConfig.name, agentConfig.allowedTools, agentConfig.connectorTools);
+      const taken = new Set(allTools.map((tool) => tool.name));
+      allTools.push(...connectorTools.filter((tool) => !taken.has(tool.name)));
+      connectorNote = connectorsPromptSection(connectorManager.store.list(), agentConfig.name, notes, agentConfig.connectorTools);
+    } catch { /* no connectors */ }
+  }
+  return { tools: allTools, vault, connectorNote, connectorManager, browserNetwork };
 }
 
 /**
@@ -990,7 +1101,7 @@ function guessMime(filePath: string): string | undefined {
  * Create a TaskOutcome from a `register_outcome` tool call.
  * Returns undefined for any other tool — outcome registration is explicit only.
  */
-function collectOutcome(toolName: string, details: Record<string, unknown>): TaskOutcome | undefined {
+export function collectOutcome(toolName: string, details: Record<string, unknown>): TaskOutcome | undefined {
   if (toolName !== "register_outcome" || !details.outcomeType || !details.outcomeLabel) {
     return undefined;
   }

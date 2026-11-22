@@ -7,7 +7,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { KeyRound, Loader2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { connectorsApi, type OAuthApp } from "@/lib/connectors-api";
@@ -31,7 +31,7 @@ function AppRow({ app, onChanged }: { app: OAuthApp; onChanged: () => Promise<vo
         <KeyRound className="h-4 w-4 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{app.name ?? app.id} <span className="font-mono text-xs font-normal text-muted-foreground">{app.id}</span></p>
-          <p className="truncate font-mono text-[11px] text-muted-foreground">{app.clientId}{app.hasSecret ? " · secret set" : " · no secret"}</p>
+          <p className="truncate font-mono text-caption text-muted-foreground">{app.clientId}{app.hasSecret ? " · secret set" : " · no secret"}</p>
         </div>
         <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setEditing((v) => !v)}>{editing ? "Cancel" : "Replace"}</Button>
         <Button
@@ -43,7 +43,7 @@ function AppRow({ app, onChanged }: { app: OAuthApp; onChanged: () => Promise<vo
       </div>
       {editing && (
         <form
-          className="grid gap-2 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
+          className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end"
           onSubmit={(e) => {
             e.preventDefault();
             if (!clientId.trim()) return;
@@ -74,20 +74,22 @@ export function OAuthAppsDialog({
 }: { open: boolean; onOpenChange: (open: boolean) => void; apps: OAuthApp[]; redirectUri: string; onChanged: () => Promise<void> | void }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-        <DialogHeader>
+      <DialogContent className="flex flex-col gap-0 overflow-hidden p-0 sm:max-w-lg">
+        <DialogHeader className="shrink-0 border-b px-6 pb-4 pt-6 pr-12">
           <DialogTitle>OAuth apps</DialogTitle>
           <DialogDescription>
             Clients registered once with a vendor (Google, Slack, GitHub…) and shared by its connectors. They are set up the first time you connect one of them.
           </DialogDescription>
         </DialogHeader>
+        <DialogBody className="space-y-4">
         {redirectUri && <CopyField label="Redirect URI to register" value={redirectUri} />}
         {apps.length === 0
           ? <p className="py-4 text-center text-sm text-muted-foreground">No OAuth apps yet.</p>
           : <ul className="divide-y rounded-lg border">{apps.map((app) => <AppRow key={app.id} app={app} onChanged={onChanged} />)}</ul>}
-        <DialogFooter>
+        <DialogFooter sticky>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
         </DialogFooter>
+        </DialogBody>
       </DialogContent>
     </Dialog>
   );

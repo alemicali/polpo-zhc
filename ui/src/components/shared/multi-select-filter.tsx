@@ -69,7 +69,7 @@ export function MultiSelectFilter({
           {icon ?? <Filter className="h-3.5 w-3.5" />}
           {label}
           {count > 0 && (
-            <Badge variant="secondary" className="text-[9px] ml-1">
+            <Badge variant="secondary" className="text-micro ml-1">
               {count}
             </Badge>
           )}
@@ -95,10 +95,10 @@ export function MultiSelectFilter({
                   <button
                     key={opt.value}
                     className={cn(
-                      "flex items-center gap-2 w-full rounded-md px-2 py-1.5 text-left text-sm transition-colors",
+                      "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors",
                       isSelected
                         ? "bg-accent text-accent-foreground"
-                        : "hover:bg-muted",
+                        : "hover:bg-accent hover:text-accent-foreground",
                     )}
                     onClick={() => onToggle(opt.value)}
                   >
@@ -128,7 +128,7 @@ export function MultiSelectFilter({
           <Button
             variant="ghost"
             size="sm"
-            className="w-full mt-1 text-xs"
+            className="mt-1 w-full"
             onClick={onClear}
           >
             Clear all

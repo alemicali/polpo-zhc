@@ -51,7 +51,7 @@ export function Queue({
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   if (items.length === 0) return null;
   return (
-    <div className={cn("rounded-xl border border-border/60 bg-card/60 text-sm shadow-sm backdrop-blur-sm", className)} data-testid="chat-queue">
+    <div className={cn("rounded-xl border border-border/60 bg-card/60 text-sm shadow-card backdrop-blur-sm", className)} data-testid="chat-queue">
       <div className="flex items-center gap-2 px-2.5 py-1">
         <button
           type="button"
@@ -69,7 +69,7 @@ export function Queue({
         <button
           type="button"
           onClick={onClear}
-          className="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+          className="rounded px-1.5 py-0.5 text-caption text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
         >
           Clear
         </button>
@@ -107,7 +107,7 @@ const HOLD_LABELS: Record<string, string> = {
 
 function AutoSendSwitch({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <label className="inline-flex cursor-pointer select-none items-center gap-1.5 text-[11px] text-muted-foreground">
+    <label className="inline-flex cursor-pointer select-none items-center gap-1.5 text-caption text-muted-foreground">
       <span>Auto-send</span>
       <button
         type="button"
@@ -232,7 +232,7 @@ function QueueItemRow({
           title="Click to edit"
         >
           {item.next && (
-            <span className="mr-1.5 rounded bg-primary/10 px-1 py-px text-[10px] font-medium uppercase tracking-wide text-primary">next</span>
+            <span className="mr-1.5 rounded bg-primary/10 px-1 py-px text-micro font-medium uppercase tracking-wide text-primary">next</span>
           )}
           <span className="line-clamp-2 whitespace-pre-wrap break-words">{item.text}</span>
         </button>
@@ -273,7 +273,7 @@ export function PendingSteers({ steers, onCancel, className }: { steers: Pending
           <CornerDownRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
           <span className="min-w-0 flex-1">
             <span className="line-clamp-2 whitespace-pre-wrap break-words text-foreground/90">{steer.content}</span>
-            <span className="text-[11px] text-muted-foreground">
+            <span className="text-caption text-muted-foreground">
               {steer.status === "sending" ? (
                 <span className="inline-flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" />Sending…</span>
               ) : "Joins the response at its next step"}

@@ -27,3 +27,85 @@ describe("task token usage history", () => {
     }
   });
 });
+
+describe("GET /token-usage: range and taskId", () => {
+  test("honors range (1h included), filters by task, and refuses an unknown range", async () => {
+    const { tokenUsageRoutes } = await import("../server/routes/token-usage.js");
+    const { FileTokenUsageStore } = await import("../stores/file-token-usage-store.js");
+    const root = await mkdtemp(join(tmpdir(), "polpo-token-route-"));
+    const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
+    const MIN = 60_000;
+    try {
+      const store = new FileTokenUsageStore(root);
+      const rec = (o: Record<string, unknown>) => ({ inputTokens: 10, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 10, cost: 0.01, ...o }) as any;
+      await store.record(rec({ timestamp: ago(10 * MIN), source: "agent_harness", sessionId: "task-a", cost: 0.05 }));
+      await store.record(rec({ timestamp: ago(3 * 60 * MIN), source: "agent_harness", sessionId: "task-a", cost: 0.02 }));
+      await store.record(rec({ timestamp: ago(5 * MIN), source: "agent_harness", sessionId: "task-b", cost: 0.1 }));
+      await store.record(rec({ timestamp: ago(5 * MIN), source: "agent_chat", sessionId: "chat-1", cost: 0.3 }));
+      const logs = join(root, "logs");
+      await mkdir(logs, { recursive: true });
+      const runLog = (taskId: string, at: number, total: number) => [
+        JSON.stringify({ _run: true, runId: `r-${taskId}`, taskId, agentName: "ada", startedAt: ago(at) }),
+        JSON.stringify({ ts: ago(at), event: "activity", data: { totalTokens: total } }), "",
+      ].join("\n");
+      await writeFile(join(logs, "run-r-task-a.jsonl"), runLog("task-a", 10 * MIN, 500));
+      await writeFile(join(logs, "run-r-task-b.jsonl"), runLog("task-b", 5 * MIN, 900));
+      const app = tokenUsageRoutes(() => root, () => ({ getActiveRuns: async () => [], getTerminalRuns: async () => [] }) as any);
+      const get = async (q: string) => { const r = await app.request(`/?${q}`); return { status: r.status, body: await r.json() as any }; };
+
+      const all7d = (await get("")).body.data;
+      expect(all7d).toMatchObject({ range: "7d", harnessCost: 0.17, taskTokens: 1400, calls: 4 });
+      expect(all7d.cost).toBeCloseTo(0.47);
+
+      const taskA = (await get("taskId=task-a")).body.data;
+      // the harness records' split counts (their total is in taskTokens, never twice)
+      expect(taskA).toMatchObject({ range: "7d", taskId: "task-a", taskTokens: 500, totalTokens: 500, calls: 2, inputTokens: 20 });
+      expect(taskA.harnessCost).toBeCloseTo(0.07);
+      expect(taskA.cost).toBeCloseTo(0.07);
+
+      const taskA1h = (await get("taskId=task-a&range=1h")).body.data;
+      expect(taskA1h).toMatchObject({ range: "1h", taskTokens: 500, calls: 1, harnessCost: 0.05 });
+
+      expect(all7d).toMatchObject({ inputTokens: 40, totalTokens: 1410 });
+
+      const bad = await get("range=1y");
+      expect(bad.status).toBe(400);
+      expect(bad.body.error).toMatch(/1h, today, 24h, 7d, 30d, all/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("a harness run's usage split (from the AI SDK finish usage) shows in the per-task view", async () => {
+    const { tokenUsageRoutes } = await import("../server/routes/token-usage.js");
+    const { FileTokenUsageStore } = await import("../stores/file-token-usage-store.js");
+    const { mapUsage } = await import("../harness/sdk.js");
+    const root = await mkdtemp(join(tmpdir(), "polpo-token-harness-"));
+    try {
+      // the finish part's totalUsage, as the AI SDK stream gives it (a live Claude Code turn on Bedrock)
+      const u = mapUsage({
+        inputTokens: 185_554, outputTokens: 335, totalTokens: 185_889,
+        inputTokenDetails: { noCacheTokens: 18, cacheReadTokens: 138_849, cacheWriteTokens: 46_687 },
+        outputTokenDetails: { textTokens: 335, reasoningTokens: 0 },
+      });
+      expect(u).toEqual({ inputTokens: 185_554, outputTokens: 335, cacheReadTokens: 138_849, cacheWriteTokens: 46_687, totalTokens: 185_889 });
+      // the provider-level shape maps to the same numbers
+      expect(mapUsage({
+        inputTokens: { total: 185_554, noCache: 18, cacheRead: 138_849, cacheWrite: 46_687 },
+        outputTokens: { total: 335, text: 335, reasoning: 0 },
+      })).toEqual(u);
+      await new FileTokenUsageStore(root).record({
+        timestamp: new Date().toISOString(), source: "agent_harness", provider: "claude-code", model: "haiku", sessionId: "task-x", ...u, cost: 0.0739,
+      } as any);
+      const app = tokenUsageRoutes(() => root, () => ({ getActiveRuns: async () => [], getTerminalRuns: async () => [{ taskId: "task-x", updatedAt: new Date().toISOString(), activity: { totalTokens: 185_889 } }] }) as any);
+      const data = ((await (await app.request("/?taskId=task-x&range=1h")).json()) as any).data;
+      expect(data).toMatchObject({
+        taskId: "task-x", inputTokens: 185_554, outputTokens: 335, cacheReadTokens: 138_849, cacheWriteTokens: 46_687,
+        totalTokens: 185_889, taskTokens: 185_889, calls: 1,
+      });
+      expect(data.cost).toBeCloseTo(0.0739);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});

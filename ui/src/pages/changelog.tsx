@@ -3,15 +3,20 @@
  * Opening the page marks everything as seen (clears the nav dot and banner).
  */
 import { useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Megaphone } from "lucide-react";
+import { PageHeader } from "@/components/shared/page-header";
 import { ChangelogTimeline } from "@/components/whats-new/changelog-timeline";
-import { markAllChangelogSeen } from "@/hooks/use-whats-new";
+import { markAllChangelogSeen, useChangelogUnreadSnapshot } from "@/hooks/use-whats-new";
 import { CHANGELOG } from "@/lib/changelog";
-
 
 export function ChangelogPage() {
   const navigate = useNavigate();
+  // /changelog#<entry-id>: open that entry and its day, and scroll to it
+  const { hash } = useLocation();
+  const focusId = hash.length > 1 ? safeDecode(hash.slice(1)) : undefined;
+  // what arrived since the last visit, read before opening the page marks it all as seen
+  const unreadIds = useChangelogUnreadSnapshot(true);
 
   useEffect(() => {
     markAllChangelogSeen(CHANGELOG);
@@ -28,15 +33,20 @@ export function ChangelogPage() {
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary ring-1 ring-inset ring-primary/25">
               <Megaphone className="h-5 w-5" />
             </div>
-            <div className="min-w-0">
-              <h1 className="text-xl font-bold tracking-tight sm:text-2xl">Novità</h1>
-              <p className="mt-0.5 text-sm text-muted-foreground">Cosa è cambiato di recente, in breve.</p>
-            </div>
+            <PageHeader className="min-w-0 flex-1" title="Novità" description="Cosa è cambiato di recente, in breve." />
           </div>
         </header>
 
-        <ChangelogTimeline entries={CHANGELOG} onAction={(to) => navigate(to)} />
+        <ChangelogTimeline entries={CHANGELOG} unreadIds={unreadIds} focusId={focusId} onAction={(to) => navigate(to)} />
       </div>
     </div>
   );
+}
+
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }

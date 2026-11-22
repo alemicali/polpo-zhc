@@ -78,7 +78,9 @@ describe("the scope model", () => {
     const by = Object.fromEntries(m.map((t) => [t.name, t.scope]));
     for (const t of m) {
       if (t.destructive) expect(t.scope, t.name).not.toBe("polpo:read");
-      if (t.readOnly && t.toolset !== "vault" && t.toolset !== "admin") expect(t.scope, t.name).toBe("polpo:read");
+      // reads need read, except the vault's, the REST fallback, and the lists that name people and their access (admin)
+      const adminReads = ["polpo_members_list", "polpo_mcp_access_list", "polpo_channel_peers", "polpo_whatsapp_login_wait"];
+      if (t.readOnly && t.toolset !== "vault" && t.toolset !== "admin") expect(t.scope, t.name).toBe(adminReads.includes(t.name) ? "polpo:admin" : "polpo:read");
     }
     expect(by).toMatchObject({
       polpo_file_read: "polpo:read", polpo_file_write: "polpo:files", polpo_file_manage: "polpo:files",
@@ -107,6 +109,12 @@ describe("tools/list per scope", () => {
     const work = await toolNames(["polpo:read", "polpo:work"]);
     expect(work).toContain("polpo_task_create");
     for (const n of ["polpo_file_write", "polpo_message_send", "polpo_connector_add", "polpo_computer_save", "polpo_vault_list", "polpo_agent_create"]) expect(work).not.toContain(n);
+
+    // Configuration sections: reads offered, changes and the lists of people only with admin
+    for (const n of ["polpo_sandbox_get", "polpo_policies_get", "polpo_sync_status", "polpo_custom_providers_list"]) expect(work).toContain(n);
+    for (const n of ["polpo_sandbox_update", "polpo_channel_save", "polpo_approval_gate_save", "polpo_sync_run", "polpo_members_list", "polpo_mcp_access_list", "polpo_mcp_grant_revoke"]) {
+      expect(work).not.toContain(n);
+    }
 
     const files = await toolNames(["polpo:read", "polpo:work", "polpo:files"]);
     expect(files).toEqual(expect.arrayContaining(["polpo_file_write", "polpo_file_manage", "polpo_task_create"]));
