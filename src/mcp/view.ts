@@ -28,3 +28,30 @@ export function publicConnector(connector: ConnectorConfig, secretKeys: string[]
     },
   };
 }
+
+/**
+ * How a connector is named to the model and in lists: its display name, plus the signed-in account
+ * when the name does not already say it ("Gmail 2 – info@acme.com"). Several accounts of the same
+ * app (gmail, gmail-2…) are told apart by this and by their id.
+ */
+export function connectorLabel(connector: Pick<ConnectorConfig, "name" | "account">): string {
+  const account = connector.account?.trim();
+  return account && !connector.name.toLowerCase().includes(account.toLowerCase()) ? `${connector.name} – ${account}` : connector.name;
+}
+
+/**
+ * The account an OpenID id_token names (email, else preferred_username), when the token endpoint
+ * returned one. Read without verifying the signature: it came straight from the token endpoint over
+ * TLS and only labels the connector, it never grants anything.
+ */
+export function accountFromIdToken(idToken: string | undefined): string | undefined {
+  const payload = idToken?.split(".")[1];
+  if (!payload) return undefined;
+  try {
+    const claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Record<string, unknown>;
+    const value = [claims.email, claims.preferred_username].find((v) => typeof v === "string" && v.trim());
+    return typeof value === "string" ? value.trim().slice(0, 200) : undefined;
+  } catch {
+    return undefined;
+  }
+}

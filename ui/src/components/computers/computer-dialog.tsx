@@ -6,7 +6,7 @@ import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { NETWORK_MODES } from "@/lib/sandbox-api";
@@ -69,14 +69,15 @@ export function ComputerDialog({
   const kind = form.kind;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-        <DialogHeader>
+      <DialogContent className="flex flex-col gap-0 overflow-hidden p-0 sm:max-w-lg">
+        <DialogHeader className="shrink-0 border-b px-6 pb-4 pt-6 pr-12">
           <DialogTitle>{editing ? `Edit ${editing.name}` : "New computer"}</DialogTitle>
           <DialogDescription>
             A machine an agent keeps between chats and tasks: its files, installed tools and browser profile stay. It stops by itself
             when nobody uses it and is never deleted automatically.
           </DialogDescription>
         </DialogHeader>
+        <DialogBody>
         <form className="space-y-4" noValidate onSubmit={(e) => { e.preventDefault(); void submit(); }}>
           {!editing && (
             <Field label="Id" hint="Lowercase letters, digits and -" error={visible.id}>
@@ -169,11 +170,12 @@ export function ComputerDialog({
             </label>
           )}
           {children}
-          <DialogFooter className="sticky -bottom-6 -mb-6 bg-background pb-6 pt-3">
+          <DialogFooter sticky>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button type="submit" disabled={saving}>{saving && <Loader2 className="h-4 w-4 animate-spin" />}{editing ? "Save" : "Create"}</Button>
           </DialogFooter>
         </form>
+        </DialogBody>
       </DialogContent>
     </Dialog>
   );

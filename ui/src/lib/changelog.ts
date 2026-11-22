@@ -41,6 +41,23 @@ export const CHANGELOG: ChangelogEntry[] = [
     cta: { label: "Apri i computer", to: "/computers" },
   },
   {
+    id: "2026-11-22-connector-accounts",
+    date: "2026-11-22",
+    kind: "new",
+    title: "Più account dello stesso servizio nei connettori",
+    summary: "Collega due caselle Gmail, o una per agente: ogni account ha il suo nome, il suo accesso e i suoi strumenti, e gli agenti sanno quale usare.",
+    body: [
+      "- **Aggiungi un altro account**: su un connettore già collegato (la scheda nel catalogo o le sue impostazioni) premi **Account** / **Aggiungi un altro account**, dai un nome (es. \"Gmail – info@lumea.dev\") e accedi come al solito.",
+      "- **Sempre distinguibili**: nell'elenco gli account dello stesso servizio stanno insieme (\"Gmail · 2 account\") e ognuno mostra il suo nome e l'account; nella pagina dell'agente ognuno ha il suo interruttore.",
+      "- **Chi può usarlo, per account**: una casella per l'agente commerciale, un'altra per il supporto.",
+      "- **Rinomina** un connettore dalle sue impostazioni (matita accanto al nome). Se l'accesso rivela l'account (es. l'email), Polpo propone di usarlo come nome.",
+      "- **Gli agenti non si confondono**: gli strumenti di ogni account portano il suo nome (`mcp__gmail-2__…` = \"Gmail – info@lumea.dev\") e il prompt dice quale account è quale.",
+      "- Le finestre dei connettori ora stanno sempre nello schermo: i pulsanti restano visibili e si scorre solo il contenuto.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i connettori", to: "/connectors" },
+  },
+  {
     id: "2026-11-22-compaction-fix",
     date: "2026-11-22",
     kind: "fixed",

@@ -36,6 +36,7 @@ import { DEFAULT_PRODUCT_NAME } from "../src/lib/branding";
 import {
   EMPTY_CUSTOM_FORM, OAUTH_MESSAGE_TYPE, allowedToolsCoverConnector, catalogCardState, catalogCategories, customConnectorInput,
   filterCatalog, splitArgs, toggleAgentAccess, validateCustomConnector,
+  accountLabel, groupConnectors, nextAccountName, suggestedAccountName,
   type CatalogEntry, type Connector,
 } from "../src/lib/connectors-api";
 
@@ -99,7 +100,12 @@ function installFetch() {
     }
     if (path === "/" && method === "POST") {
       const fromCatalog = catalog.find((e) => e.id === body.catalogId);
-      const created = connector(body.catalogId ?? "custom", fromCatalog ? {
+      // like the server: another account of an app gets the next free id (linear-2…)
+      const baseId = body.catalogId ?? "custom";
+      let newId = baseId;
+      for (let n = 2; server.connectors.some((c) => c.id === newId); n++) newId = `${baseId}-${n}`;
+      const created = connector(newId, fromCatalog ? {
+        catalogId: fromCatalog.id, name: body.name ?? fromCatalog.name,
         ...(fromCatalog.auth === "bearer" ? { auth: { type: "bearer" as const }, status: "disconnected" as const } : {}),
         ...(fromCatalog.oauth ? { auth: { type: "oauth" as const, oauth: fromCatalog.oauth } } : {}),
         ...(body.url ? { transport: { type: "http" as const, url: body.url } } : {}),
@@ -631,4 +637,177 @@ test("custom connector: stdio is behind Advanced with a warning", async () => {
   await type(inputByLabel("Command"), "npx -y @modelcontextprotocol/server-filesystem /data");
   await click(byText("Add"));
   expect(onSubmit).toHaveBeenCalledWith({ name: "Files", transport: { type: "stdio", command: "npx", args: ["-y", "@modelcontextprotocol/server-filesystem", "/data"] }, auth: { type: "none" } });
+});
+
+// ── Several accounts of the same app ────────────────────────────────────────
+
+const signedIn = { bearerToken: false, headers: [], clientSecret: false, values: [], oauth: { authorized: true, clientRegistered: true, pending: false } };
+const openBrowse = () => act(async () => {
+  byText(/^Browse/, '[role="tab"]')?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+});
+const popupStub = () => {
+  const popup = { closed: false, location: { href: "about:blank" }, close: vi.fn(() => { popup.closed = true; }) };
+  vi.spyOn(window, "open").mockImplementation(() => popup as unknown as Window);
+  return popup;
+};
+
+test("accounts helpers: next default name, what tells accounts apart, suggested name, grouping", () => {
+  const gmail = connector("gmail", { name: "Gmail" });
+  const gmail2 = connector("gmail-2", { name: "Gmail 2", catalogId: "gmail", account: "info@lumea.dev" });
+  const linear = connector("linear");
+  expect(nextAccountName({ id: "gmail", name: "Gmail" }, [gmail])).toBe("Gmail 2");
+  expect(nextAccountName({ id: "gmail", name: "Gmail" }, [gmail, gmail2])).toBe("Gmail 3");
+  expect(nextAccountName({ id: "gmail", name: "Gmail" }, [gmail, connector("gmail-3", { name: "Gmail 2", catalogId: "gmail" })])).toBe("Gmail 3");
+  expect(accountLabel(gmail2, [gmail, gmail2])).toBe("info@lumea.dev");
+  expect(accountLabel(gmail, [gmail, gmail2])).toBe("gmail"); // no account known: the id
+  expect(accountLabel(linear, [gmail, gmail2, linear])).toBeUndefined(); // the only one
+  expect(accountLabel({ ...gmail2, name: "Gmail – info@lumea.dev" }, [gmail2])).toBeUndefined();
+  expect(suggestedAccountName(gmail2, "Gmail")).toBe("Gmail – info@lumea.dev");
+  expect(suggestedAccountName(gmail2)).toBe("Gmail – info@lumea.dev");
+  expect(suggestedAccountName({ ...gmail2, name: "Gmail – info@lumea.dev" })).toBeUndefined();
+  expect(groupConnectors([gmail, linear, gmail2]).map((g) => g.connectors.map((c) => c.id))).toEqual([["gmail", "gmail-2"], ["linear"]]);
+});
+
+test("add another account: from a connected card it asks a name, creates linear-2 and signs it in", async () => {
+  server.connectors = [connector("linear", { status: "connected", toolCount: 3, secrets: signedIn })];
+  installFetch();
+  const popup = popupStub();
+  await renderPage();
+  await openBrowse();
+  const card = container.querySelector('[data-testid="catalog-card-linear"]')!;
+  expect(card.textContent).toContain("Connected");
+
+  await click(card.querySelector('[aria-label="Add another Linear account"]'));
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Add another Linear account");
+  const name = inputByLabel("Account name");
+  expect(name.value).toBe("Linear 2");
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain("e.g. Linear – info@lumea.dev");
+  expect(server.calls.some((c) => c.method === "POST")).toBe(false); // nothing created before the name
+
+  await type(name, "Linear – ops@acme.com");
+  await click(inDialog("Continue to sign-in"));
+  await flush();
+  expect(server.calls.find((c) => c.method === "POST" && c.path === "/")?.body).toEqual({ catalogId: "linear", name: "Linear – ops@acme.com" });
+  expect(server.calls.some((c) => c.path === "/linear-2/oauth/start")).toBe(true);
+  expect(server.calls.some((c) => c.path === "/linear/oauth/start")).toBe(false); // the first account is untouched
+  expect(popup.location.href).toBe("https://auth.linear-2.com/authorize?state=abc");
+
+  completeSignIn("linear-2", 4);
+  await act(async () => {
+    window.dispatchEvent(new MessageEvent("message", { data: { type: OAUTH_MESSAGE_TYPE, ok: true, id: "linear-2" } }));
+  });
+  await flush();
+  expect(document.body.textContent).toContain("Linear – ops@acme.com is connected.");
+  await click(inDialog("Done"));
+
+  // Connected: both accounts, kept together under the app
+  await act(async () => {
+    byText(/^Connected/, '[role="tab"]')?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+  });
+  const group = container.querySelector('[data-testid="connector-group-linear"]')!;
+  expect(group.textContent).toContain("Linear · 2 accounts");
+  expect(group.querySelector('[data-testid="connector-row-linear"]')).toBeTruthy();
+  expect(group.querySelector('[data-testid="connector-row-linear-2"]')?.textContent).toContain("Linear – ops@acme.com");
+  expect(container.querySelector('[data-testid="connector-account-linear"]')?.textContent).toBe("linear");
+});
+
+test("add another account: sign-in reveals the account, offered as the name; renamed again in the sheet", async () => {
+  server.connectors = [connector("linear", { status: "connected", secrets: signedIn })];
+  installFetch();
+  popupStub();
+  await renderPage();
+  await openBrowse();
+  await click(container.querySelector('[data-testid="catalog-card-linear"] [aria-label="Add another Linear account"]'));
+  await click(inDialog("Continue to sign-in")); // keeps "Linear 2"
+  await flush();
+  expect(server.calls.find((c) => c.method === "POST")?.body).toEqual({ catalogId: "linear", name: "Linear 2" });
+
+  completeSignIn("linear-2");
+  server.connectors = server.connectors.map((c) => (c.id === "linear-2" ? { ...c, account: "ops@acme.com" } : c));
+  await act(async () => {
+    window.dispatchEvent(new MessageEvent("message", { data: { type: OAUTH_MESSAGE_TYPE, ok: true, id: "linear-2" } }));
+  });
+  await flush();
+  expect(document.body.textContent).toContain("Signed in as ops@acme.com. Name it “Linear – ops@acme.com”?");
+  await click(inDialog("Use this name"));
+  await flush();
+  expect(server.calls.find((c) => c.method === "PATCH" && c.path === "/linear-2")?.body).toEqual({ name: "Linear – ops@acme.com" });
+  expect(inDialog("Use this name")).toBeUndefined();
+
+  // the sheet: who it is, its id, rename, and another account from here too
+  await click(inDialog("Manage access and tools"));
+  await flush();
+  const identity = document.querySelector('[data-testid="connector-identity"]')!;
+  expect(identity.textContent).toContain("Signed in asops@acme.com");
+  expect(identity.textContent).toContain("linear-2");
+  expect(identity.textContent).toContain("2 Linear accounts connected");
+  expect(document.body.textContent).toContain("Who can use this account");
+  expect(document.querySelector('[aria-label="Add another Linear account"]')).toBeTruthy();
+  await click(document.querySelector('[aria-label="Rename Linear – ops@acme.com"]'));
+  await type(document.querySelector('input[aria-label="Connector name"]') as HTMLInputElement, "Ops inbox");
+  await click(document.querySelector('[aria-label="Save name"]'));
+  await flush();
+  expect(server.calls.filter((c) => c.method === "PATCH" && c.path === "/linear-2").at(-1)?.body).toEqual({ name: "Ops inbox" });
+  expect(document.querySelector('[aria-label="Rename Ops inbox"]')).toBeTruthy();
+});
+
+test("add another account of a token app asks the name and the key together", async () => {
+  server.connectors = [connector("stripe", { auth: { type: "bearer" }, status: "connected", secrets: { ...signedIn, bearerToken: true } })];
+  installFetch();
+  await renderPage();
+  await openBrowse();
+  await click(container.querySelector('[aria-label="Add another Stripe account"]'));
+  expect(inputByLabel("Account name").value).toBe("Stripe 2");
+  await type(inputByLabel("Account name"), "Stripe – EU");
+  await type(inputByLabel("API key or token"), "sk_eu");
+  await click(inDialog("Connect"));
+  await flush();
+  expect(server.calls.find((c) => c.method === "POST")?.body).toEqual({ catalogId: "stripe", name: "Stripe – EU", secrets: { bearerToken: "sk_eu" } });
+  expect(server.calls.some((c) => c.path === "/stripe-2/test")).toBe(true);
+});
+
+test("agent page: each account of an app is its own row, named, with its own switch", async () => {
+  installFetch();
+  server.connectors = [
+    connector("gmail", { name: "Gmail", status: "connected", access: { agents: ["pm"], polpo: true } }),
+    connector("gmail-2", { name: "Gmail 2", catalogId: "gmail", account: "info@lumea.dev", status: "connected", access: { agents: [], polpo: true } }),
+  ];
+  await act(async () => root.render(<MemoryRouter><AgentConnectorsSection agentName="pm" /></MemoryRouter>));
+  await flush();
+  const row = (id: string) => container.querySelector(`[data-testid="agent-connector-${id}"]`)!;
+  expect(row("gmail").textContent).toContain("Gmail");
+  expect(row("gmail-2").textContent).toContain("Gmail 2info@lumea.dev");
+  expect(row("gmail").querySelector('[role="switch"]')?.getAttribute("aria-checked")).toBe("true");
+  expect(row("gmail-2").querySelector('[role="switch"]')?.getAttribute("aria-checked")).toBe("false");
+  await click(row("gmail-2").querySelector('[role="switch"]'));
+  await flush();
+  expect(server.calls.find((c) => c.method === "PATCH")).toMatchObject({ path: "/gmail-2", body: { access: { agents: ["pm"], polpo: true } } });
+});
+
+// ── Dialogs fit the viewport ────────────────────────────────────────────────
+
+test("connector dialogs fit the viewport: header, scrolling body, footer always in view", async () => {
+  server.catalog = [CATALOG[2]!];
+  installFetch();
+  await renderPage();
+  await click(container.querySelector('[aria-label="Set up Gmail"]'));
+  const content = document.querySelector('[data-slot="dialog-content"]')!;
+  expect(content.className).toContain("max-h-[calc(100dvh-2rem)]");
+  expect(content.className).toContain("overflow-hidden");
+  const body = content.querySelector('[data-slot="dialog-body"]')!;
+  expect(body.className).toContain("overflow-y-auto");
+  // the actions stay visible while the steps scroll
+  const footer = body.querySelector('[data-slot="dialog-footer"]')!;
+  expect(footer.className).toContain("sticky");
+  expect(footer.textContent).toContain("Save and continue");
+  // the long redirect URI truncates next to its copy button instead of widening the dialog
+  const uri = [...body.querySelectorAll("code")].find((c) => c.textContent === REDIRECT)!;
+  expect(uri.className).toContain("truncate");
+  expect(uri.className).toContain("min-w-0");
+  expect(body.querySelector('[aria-label="Copy Redirect URI to register"]')).toBeTruthy();
+  await click(byText(/^Close$/, '[role="dialog"] button') ?? document.querySelector('[data-slot="dialog-close"]'));
+
+  await click(byText(/OAuth apps/));
+  const apps = [...document.querySelectorAll('[data-slot="dialog-content"]')].at(-1)!;
+  expect(apps.querySelector('[data-slot="dialog-body"] [data-slot="dialog-footer"]')?.className).toContain("sticky");
 });
