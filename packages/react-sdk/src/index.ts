@@ -98,6 +98,8 @@ export type {
   PolpoConfig,
   PolpoSettings,
   BrandingConfig,
+  AppearanceConfig,
+  AppearanceTokens,
   ReasoningLevel,
   ModelConfig,
   ModelAllowlistEntry,

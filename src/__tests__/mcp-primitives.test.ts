@@ -291,8 +291,8 @@ describe("toolsets and scopes", () => {
       "polpo_schedules_list", "polpo_schedule_run", "polpo_checks_list", "polpo_connectors_list", "polpo_connector_add", "polpo_channels_list", "polpo_message_send",
       "polpo_teams_list", "polpo_team_save", "polpo_agent_delete"]) expect(def).toContain(n);
     for (const n of ["polpo_brain_search", "polpo_learning_get", "polpo_watchers_list", "polpo_vault_list", "polpo_apps_list", "polpo_api_get"]) expect(def).not.toContain(n);
-    // the visible default set stays near 90 (two agent-card tools are app-only)
-    expect(def.length).toBeLessThanOrEqual(101);
+    // the visible default set, every Configuration section included (the settings toolset), for a full-access client
+    expect(def.length).toBeLessThanOrEqual(135);
     const all = await names(deps(f));
     for (const t of all) if (t.name !== "polpo_file_read") expect(t.outputSchema, t.name).toBeTruthy();
     const a = Object.fromEntries(all.map((t) => [t.name, t.annotations]));
@@ -602,7 +602,11 @@ describe("connectors", () => {
     expect(added.structuredContent).toMatchObject({ authorization_url: "https://auth.example.com/authorize?state=abc&c=notion", connector: { id: "notion", agents: ["coach"] } });
     expect(f.calls.find((c) => c.method === "POST" && c.path === "/api/v1/connectors")!.body).toEqual({ catalogId: "notion", access: { agents: ["coach"] } });
     const stripe = await call(deps(f), "polpo_connector_add", { catalog_id: "stripe" });
-    expect(stripe.structuredContent).toMatchObject({ setup_url: "https://polpo.example.com/connectors" });
+    // the link opens the connector's form, focused on the token, and says what to wait for
+    expect(stripe.structuredContent).toMatchObject({
+      setup_url: expect.stringMatching(/^https:\/\/polpo\.example\.com\/connectors\?connector=stripe&focus=bearerToken&setup=connector%3Astripe%3AbearerToken$/),
+      setup_id: "connector:stripe:bearerToken", next_step: expect.stringContaining("polpo_setup_wait"),
+    });
     expect(stripe.structuredContent.authorization_url).toBeUndefined();
     expect(await call(deps(f), "polpo_connector_add", { catalog_id: "azure" })).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/\{organization\}/) }] });
     expect(await call(deps(f), "polpo_connector_add", {})).toMatchObject({ isError: true });

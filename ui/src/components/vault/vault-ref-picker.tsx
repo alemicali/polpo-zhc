@@ -47,6 +47,8 @@ export interface VaultRefPickerProps {
   suggestOwner?: string;
   className?: string;
   "aria-label"?: string;
+  /** For links that focus this field (lib/setup-link.ts). */
+  "data-setup-field"?: string;
 }
 
 export function VaultRefPicker({
@@ -79,6 +81,7 @@ export function VaultRefPicker({
             type="button"
             disabled={disabled}
             aria-label={rest["aria-label"] ?? placeholder}
+            data-setup-field={rest["data-setup-field"]}
             className={cn(
               "flex h-8 w-full min-w-0 items-center gap-2 rounded-md border border-input bg-transparent px-2.5 text-left text-xs shadow-xs transition-[color,box-shadow] outline-none",
               "focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30 dark:hover:bg-input/50",

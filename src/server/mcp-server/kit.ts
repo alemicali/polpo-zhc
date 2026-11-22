@@ -52,8 +52,13 @@ export interface McpDeps {
   principal?: McpPrincipal;
   /** The toolsets this instance offers (settings.mcp.toolsets / POLPO_MCP_TOOLSETS); default: every toolset that is on by default. */
   toolsets?: readonly string[];
-  /** The dashboard's public URL, for links (e.g. where to enter a secret). */
+  /** The instance's public URL (the API's origin), for links to its files and assets. */
   publicUrl?: string;
+  /**
+   * The dashboard's public URL (POLPO_DASHBOARD_URL, else POLPO_UI_PUBLIC_URL), for links where a
+   * person enters a secret; without it, publicUrl (the dashboard on the API's origin).
+   */
+  dashboardUrl?: string;
   /** How often wait tools look again (ms, default 1000). */
   pollIntervalMs?: number;
   /** For fetching remote files (logo URLs); default: global fetch. */
@@ -79,7 +84,7 @@ export const TOOLSETS = {
   data: { default: true, description: "Structured data sources and queries" },
   files: { default: true, description: "The instance's files: browse, search, read, write (writes need files scope)" },
   team: { default: true, description: "Agents and teams: read, create, update, delete, avatars (changes need admin scope)" },
-  config: { default: true, description: "Settings, branding, providers and models (changes need admin scope)" },
+  config: { default: true, description: "Settings (general ones too), branding and appearance, providers and models (changes need admin scope)" },
   rooms: { default: true, description: "Group chats of people and agents: rooms, their messages, posting and waiting for replies" },
   chat: { default: true, description: "Chat sessions with Polpo and agents: list, read, rename, star, delete" },
   memory: { default: true, description: "Shared and per-agent memory: read, write, clear" },
@@ -88,6 +93,7 @@ export const TOOLSETS = {
   connectors: { default: true, description: "Connectors (MCP servers agents use): catalog, add, access, test, OAuth link (changes need connectors scope)" },
   channels: { default: true, description: "Notification channels and rules; send a message on Telegram, WhatsApp or email (sending needs messages scope, rules admin scope)" },
   computers: { default: true, description: "Computers (persistent machines agents work on): live status, create, start, stop, reset, delete (changes need computers scope)" },
+  settings: { default: true, description: "The rest of Configuration: sandbox, policies (approval gates, escalation, SLA), members, MCP access, cloud sync, custom LLM providers, channels end to end (setup with write-only secrets, routes, Telegram invites, pairings and allowlist, WhatsApp sign-in) (changes need admin scope)" },
   brain: { default: false, description: "The company brain: search, read, save and delete entities, relations and claims" },
   learning: { default: false, description: "What agents learned: changes, review now, revert (needs admin scope)" },
   watchers: { default: false, description: "Watchers that act when a task reaches a status" },
@@ -163,7 +169,7 @@ export function normalizeScopes(input: string | readonly string[] | undefined | 
 }
 
 /** Toolsets whose writes change the instance itself: they need "polpo:admin". */
-const ADMIN_WRITES = new Set<string>(["admin", "config", "team", "skills", "channels", "learning"]);
+const ADMIN_WRITES = new Set<string>(["admin", "config", "settings", "team", "skills", "channels", "learning"]);
 /** Toolsets whose writes have a scope of their own (polpo:admin holds them too). */
 const AREA_WRITES: Partial<Record<ToolsetName, PolpoScope>> = {
   files: "polpo:files", connectors: "polpo:connectors", computers: "polpo:computers", vault: "polpo:vault",
@@ -325,7 +331,8 @@ export function pageBackwards<T>(items: T[], limit: number, cursor: string | und
 
 /** A link into the dashboard (absolute when the public URL is known). */
 export function dashboardLink(deps: McpDeps, path: string): string {
-  return deps.publicUrl ? `${deps.publicUrl.replace(/\/+$/, "")}${path}` : path;
+  const base = deps.dashboardUrl || deps.publicUrl;
+  return base ? `${base.replace(/\/+$/, "")}${path}` : path;
 }
 
 /** Output schema pieces. */

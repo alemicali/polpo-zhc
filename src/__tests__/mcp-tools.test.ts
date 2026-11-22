@@ -182,7 +182,8 @@ describe("the tools offered", () => {
     expect(a.polpo_mission_run).toMatchObject({ openWorldHint: true });
     for (const t of tools) if (t.name !== "polpo_file_read") expect(t.outputSchema, t.name).toBeTruthy();
     for (const n of ["polpo_task_delete", "polpo_mission_delete"]) expect(a[n]).toMatchObject({ destructiveHint: true, readOnlyHint: false });
-    expect(tools.length).toBeLessThanOrEqual(101);
+    // every Configuration section is on by default (the settings toolset): 124 tools for a full-access client
+    expect(tools.length).toBeLessThanOrEqual(135);
   });
 
   it("config and team changes need the admin scope; reads do not", async () => {
@@ -466,7 +467,7 @@ describe("configuration", () => {
     expect((await call(deps(f), "polpo_branding_update", { logo: { path: "assets/logo.png" } })).structuredContent.changed).toEqual(["logo"]);
     expect(await call(deps(f), "polpo_branding_update", { logo: { path: "missing.png" } })).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/polpo_files_search/) }] });
     expect((await call(deps(f), "polpo_branding_update", { remove_logo: true })).structuredContent.branding.logoUrl).toBeUndefined();
-    expect((await call(deps(f), "polpo_branding_get")).structuredContent).toEqual({ productName: "Acme Ops", tagline: "Agents at work" });
+    expect((await call(deps(f), "polpo_branding_get")).structuredContent).toMatchObject({ productName: "Acme Ops", tagline: "Agents at work" });
   });
 
   it("lists providers with the dashboard link for keys, and models with filters", async () => {

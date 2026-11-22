@@ -43,8 +43,51 @@ const MIME = new Map([
 const compressed = new Map();
 const compressible = /^(text\/|application\/(javascript|json|manifest\+json))/;
 
-function runtimeConfig() {
-  return `globalThis.__POLPO_RUNTIME_CONFIG__=${JSON.stringify({ baseUrl: apiUrl, apiKey, inkHubUrl })};`;
+// The instance's default look (settings.appearance), inlined into runtime-config.js so index.html's
+// inline script paints it on the first frame. Read from the API's public route, cached briefly.
+// POLPO_APPEARANCE_URL overrides where it is read (e.g. an internal address when POLPO_API_URL is
+// empty because the API is on the same origin behind a proxy).
+const appearanceUrl = process.env.POLPO_APPEARANCE_URL
+  ?? (apiUrl ? `${apiUrl.replace(/\/+$/, "")}/api/v1/config/appearance` : "");
+const APPEARANCE_TTL_MS = Number(process.env.POLPO_APPEARANCE_TTL_MS ?? 30_000);
+const APPEARANCE_TIMEOUT_MS = 1_500;
+const appearanceCache = { checkedAt: 0, value: undefined, pending: null };
+
+/**
+ * The instance appearance, asked at most every 30 s: on an error the last one known, else undefined
+ * (not inlined: the page uses its cached copy). A slow API never delays the page more than 1.5 s.
+ */
+async function instanceAppearance() {
+  if (!appearanceUrl) return undefined;
+  if (Date.now() - appearanceCache.checkedAt < APPEARANCE_TTL_MS) return appearanceCache.value;
+  appearanceCache.pending ??= (async () => {
+    try {
+      const res = await fetch(appearanceUrl, { signal: AbortSignal.timeout(APPEARANCE_TIMEOUT_MS), headers: { accept: "application/json" } });
+      if (!res.ok) {
+        // an API without the route (older): nothing to inline, ask again later
+        if (res.status === 404) appearanceCache.value = null;
+        return;
+      }
+      const body = await res.json();
+      if (body && body.ok && body.data && typeof body.data === "object" && !Array.isArray(body.data)) {
+        appearanceCache.value = body.data;
+      }
+    } catch {
+      // unreachable or slow: keep the last value (the page falls back to its cached copy)
+    } finally {
+      appearanceCache.checkedAt = Date.now();
+      appearanceCache.pending = null;
+    }
+  })();
+  await appearanceCache.pending;
+  return appearanceCache.value;
+}
+
+async function runtimeConfig() {
+  const appearance = await instanceAppearance();
+  const payload = { baseUrl: apiUrl, apiKey, inkHubUrl, ...(appearance !== undefined ? { appearance } : {}) };
+  // JSON in a script: never let a value close it
+  return `globalThis.__POLPO_RUNTIME_CONFIG__=${JSON.stringify(payload).replace(/</g, "\\u003c")};`;
 }
 
 function safePath(pathname) {
@@ -126,7 +169,7 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (url.pathname === "/runtime-config.js") {
-      const body = runtimeConfig();
+      const body = await runtimeConfig();
       res.writeHead(200, {
         "Cache-Control": "no-store",
         "Content-Type": "text/javascript; charset=utf-8",

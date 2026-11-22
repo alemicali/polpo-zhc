@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, type CSSProperties } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -80,7 +80,8 @@ import type { CustomModelDef, ProviderConfig, AuthProfileMeta, ProviderAuthInfo,
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { JsonBlock } from "@/components/json-block";
-import { config as appConfig, apiUrl } from "@/lib/config";
+import { config as appConfig, apiFetch, apiUrl } from "@/lib/config";
+import { focusSetupField, notifySetupSaved, readSetupParams } from "@/lib/setup-link";
 import {
   disablePushNotifications,
   enablePushNotifications,
@@ -96,8 +97,8 @@ import { RuleFormDialog, type NotificationRuleDraft } from "@/components/config/
 import { summarizeRule } from "@/lib/rule-summary";
 import { HOOK_EVENT_CATALOG, HOOK_EVENT_GLOBS } from "@polpo-ai/core/hook-events";
 import { GateFormDialog, type ApprovalGateDraft, type LifecycleHook as GateLifecycleHook } from "@/components/config/gate-form-dialog";
-import { useAppearance } from "@/lib/appearance";
-import { PALETTES, usePalette } from "@/lib/palette";
+import { followInstanceDefault, setInstanceAppearance, type InstanceAppearance } from "@/lib/appearance";
+import { AppearanceEditor } from "@/components/config/appearance-editor";
 import { toast } from "sonner";
 import { BrandMark } from "@/components/shared/brand-mark";
 import { DEFAULT_PRODUCT_NAME, DEFAULT_PRODUCT_TAGLINE } from "@/lib/branding";
@@ -718,7 +719,7 @@ function WhatsAppProfileSetup({ config, onChange }: {
 
   const loadProfiles = useCallback(async () => {
     try {
-      const res = await fetch(`${appConfig.baseUrl}/api/v1/whatsapp/profiles`, { credentials: "include" });
+      const res = await apiFetch(`${appConfig.baseUrl}/api/v1/whatsapp/profiles`, { credentials: "include" });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error ?? "Could not load WhatsApp profiles");
       setProfiles(data.data?.profiles ?? []);
@@ -750,7 +751,7 @@ function WhatsAppProfileSetup({ config, onChange }: {
     if (!session || !["starting", "qr"].includes(session.status)) return;
     const timer = window.setInterval(async () => {
       try {
-        const res = await fetch(`${appConfig.baseUrl}/api/v1/whatsapp/login/${session.id}`, { credentials: "include" });
+        const res = await apiFetch(`${appConfig.baseUrl}/api/v1/whatsapp/login/${session.id}`, { credentials: "include" });
         const data = await res.json();
         if (!data.ok) throw new Error(data.error ?? "Could not read WhatsApp login status");
         const next = data.data?.session as WhatsAppLoginSessionInfo;
@@ -770,7 +771,7 @@ function WhatsAppProfileSetup({ config, onChange }: {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`${appConfig.baseUrl}/api/v1/whatsapp/login/start`, {
+      const res = await apiFetch(`${appConfig.baseUrl}/api/v1/whatsapp/login/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -791,7 +792,7 @@ function WhatsAppProfileSetup({ config, onChange }: {
   const cancelLogin = async () => {
     if (!session || !["starting", "qr"].includes(session.status)) return;
     try {
-      await fetch(`${appConfig.baseUrl}/api/v1/whatsapp/login/${session.id}/cancel`, {
+      await apiFetch(`${appConfig.baseUrl}/api/v1/whatsapp/login/${session.id}/cancel`, {
         method: "POST",
         credentials: "include",
       });
@@ -806,7 +807,7 @@ function WhatsAppProfileSetup({ config, onChange }: {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`${appConfig.baseUrl}/api/v1/whatsapp/logout`, {
+      const res = await apiFetch(`${appConfig.baseUrl}/api/v1/whatsapp/logout`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -944,7 +945,7 @@ function DeliveryFields({ config, onChange, gatewayRunning, channelName, savedBo
       {config.type === "telegram" && (
         <>
           <Field label="Bot Token" hint="From @BotFather on Telegram">
-            <Input className="h-8 text-xs font-mono" placeholder="123456:ABC-DEF..." value={config.botToken ?? ""} onChange={(e) => set({ botToken: e.target.value })} />
+            <Input data-setup-field="botToken" className="h-8 text-xs font-mono" placeholder="123456:ABC-DEF..." value={config.botToken ?? ""} onChange={(e) => set({ botToken: e.target.value })} />
           </Field>
           <TelegramTokenCheck api={api} botToken={config.botToken} channel={gatewayRunning || isMaskedSecret(config.botToken) ? channelName : undefined} />
           <Field label="Chat ID" hint="Where notifications are sent. Use Find my chat (new bot) or Connect my Telegram (saved bot) to fill it in.">
@@ -981,10 +982,10 @@ function DeliveryFields({ config, onChange, gatewayRunning, channelName, savedBo
       {config.type === "slack" && (
         <>
           <Field label="Webhook URL" hint="Slack Incoming Webhook URL">
-            <Input className="h-8 text-xs font-mono" placeholder="https://hooks.slack.com/services/..." value={config.webhookUrl ?? ""} onChange={(e) => set({ webhookUrl: e.target.value })} />
+            <Input data-setup-field="webhookUrl" className="h-8 text-xs font-mono" placeholder="https://hooks.slack.com/services/..." value={config.webhookUrl ?? ""} onChange={(e) => set({ webhookUrl: e.target.value })} />
           </Field>
           <Field label="API Key" hint="Optional - enables file uploads">
-            <Input className="h-8 text-xs font-mono" placeholder="xoxb-..." value={config.apiKey ?? ""} onChange={(e) => set({ apiKey: e.target.value || undefined })} />
+            <Input data-setup-field="apiKey" className="h-8 text-xs font-mono" placeholder="xoxb-..." value={config.apiKey ?? ""} onChange={(e) => set({ apiKey: e.target.value || undefined })} />
           </Field>
         </>
       )}
@@ -1005,7 +1006,7 @@ function DeliveryFields({ config, onChange, gatewayRunning, channelName, savedBo
           </Field>
           {config.provider !== "smtp" && (
             <Field label="API Key">
-              <Input className="h-8 text-xs font-mono" placeholder="re_..." value={config.apiKey ?? ""} onChange={(e) => set({ apiKey: e.target.value })} />
+              <Input data-setup-field="apiKey" className="h-8 text-xs font-mono" placeholder="re_..." value={config.apiKey ?? ""} onChange={(e) => set({ apiKey: e.target.value })} />
             </Field>
           )}
           {config.provider === "smtp" && (
@@ -1033,7 +1034,7 @@ function DeliveryFields({ config, onChange, gatewayRunning, channelName, savedBo
       {config.type === "webhook" && (
         <>
           <Field label="Notification URL" hint="Optional: Polpo POSTs notifications here as JSON. Leave empty for an inbound-only webhook.">
-            <Input className="h-8 text-xs font-mono" placeholder="https://example.com/webhook" value={config.url ?? ""} onChange={(e) => set({ url: e.target.value || undefined })} />
+            <Input data-setup-field="url" className="h-8 text-xs font-mono" placeholder="https://example.com/webhook" value={config.url ?? ""} onChange={(e) => set({ url: e.target.value || undefined })} />
           </Field>
           <Field label="Headers" hint="key:value pairs, one per line">
             <textarea
@@ -1648,10 +1649,14 @@ function ChannelsTab({ settings, onUpdateConfig }: {
     objectOrEmpty(settings.notifications).channels,
   );
 
-  // Dialog state
-  const [editOpen, setEditOpen] = useState(false);
-  const [editName, setEditName] = useState("");
-  const [editConfig, setEditConfig] = useState<NotificationChannelConfig>(defaultChannelConfig("telegram"));
+  // Dialog state (a link from an assistant, ?channel=<name>, opens that channel's form)
+  const [linked] = useState(() => {
+    const name = readSetupParams().channel;
+    return name && channels[name] ? name : undefined;
+  });
+  const [editOpen, setEditOpen] = useState(!!linked);
+  const [editName, setEditName] = useState(linked ?? "");
+  const [editConfig, setEditConfig] = useState<NotificationChannelConfig>(() => (linked ? { ...channels[linked] } : defaultChannelConfig("telegram")));
   const [isNew, setIsNew] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -1693,6 +1698,7 @@ function ChannelsTab({ settings, onUpdateConfig }: {
     try {
       await onUpdateConfig({ path: `/${encodeURIComponent(name)}`, method: "PUT", body: editConfig });
       setEditOpen(false);
+      notifySetupSaved();
     } catch (e) {
       setSaveError((e as Error).message);
     } finally {
@@ -1716,7 +1722,7 @@ function ChannelsTab({ settings, onUpdateConfig }: {
     setTesting(name);
     setTestResults((prev) => ({ ...prev, [name]: null }));
     try {
-      const res = await fetch(`${appConfig.baseUrl}/api/v1/config/channels/${encodeURIComponent(name)}/test`, { method: "POST" });
+      const res = await apiFetch(`${appConfig.baseUrl}/api/v1/config/channels/${encodeURIComponent(name)}/test`, { method: "POST" });
       const data = await res.json();
       setTestResults((prev) => ({
         ...prev,
@@ -2011,81 +2017,70 @@ function SettingRow({ icon: Icon, label, description, value, placeholder, onClic
   );
 }
 
-function AppearanceTab({ branding, onUpdateBranding, onUploadLogo, onRemoveLogo }: {
+function LogoPicker({ label, hint, value, busy, onChange, onUpload, onRemove, uploadedUrl }: {
+  label: string;
+  hint: string;
+  value: string;
+  busy: boolean;
+  onChange: (value: string) => void;
+  onUpload: (file: File) => Promise<void>;
+  onRemove?: () => void;
+  uploadedUrl: string;
+}) {
+  return (
+    <label className="grid gap-1.5 sm:col-span-2">
+      <span className="text-xs font-medium">{label}</span>
+      <div className="flex min-w-0 gap-2">
+        <Input value={value} onChange={(event) => onChange(event.target.value)} placeholder="https://example.com/logo.png" className="min-w-0" />
+        <Button
+          variant="outline"
+          disabled={busy}
+          onClick={() => {
+            const input = document.createElement("input");
+            input.type = "file";
+            input.accept = "image/png,image/jpeg,image/webp,image/gif";
+            input.onchange = () => {
+              const file = input.files?.[0];
+              if (!file) return;
+              void onUpload(file).then(() => onChange(uploadedUrl)).catch((error) => toast.error(error instanceof Error ? error.message : "Logo upload failed"));
+            };
+            input.click();
+          }}
+        >
+          <Upload className="h-3.5 w-3.5" /> Upload
+        </Button>
+        {onRemove && (
+          <Button variant="ghost" disabled={busy} onClick={onRemove} title={`Remove the ${label.toLowerCase()}`}>
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        )}
+      </div>
+      <span className="text-[10px] text-muted-foreground">{hint}</span>
+    </label>
+  );
+}
+
+function AppearanceTab({ branding, onUpdateBranding, onUploadLogo, onRemoveLogo, onSaveInstanceAppearance }: {
   branding?: BrandingConfig;
   onUpdateBranding: (branding: BrandingConfig) => Promise<void>;
-  onUploadLogo: (file: File) => Promise<void>;
-  onRemoveLogo: () => Promise<void>;
+  onUploadLogo: (file: File, variant: "light" | "dark") => Promise<void>;
+  onRemoveLogo: (variant: "light" | "dark") => Promise<void>;
+  onSaveInstanceAppearance: (appearance: InstanceAppearance | null) => Promise<void>;
 }) {
-  const { palette, setPalette } = usePalette();
-  const { appearance, setAppearance, resetAppearance } = useAppearance();
   const [productName, setProductName] = useState(branding?.productName ?? "");
   const [tagline, setTagline] = useState(branding?.tagline ?? "");
   const [logoUrl, setLogoUrl] = useState(branding?.logoUrl ?? "");
+  const [logoDarkUrl, setLogoDarkUrl] = useState(branding?.logoDarkUrl ?? "");
   const [brandingBusy, setBrandingBusy] = useState(false);
-  const [mode, setMode] = useState<"light" | "dark">("light");
-  const activeTheme = appearance[mode];
-  const [primaryDraft, setPrimaryDraft] = useState(activeTheme.primary);
-  const [secondaryDraft, setSecondaryDraft] = useState(activeTheme.secondary);
-  const [textDraft, setTextDraft] = useState(activeTheme.text);
-  const [fontDraft, setFontDraft] = useState(activeTheme.fontFamily);
-
-  const updateAppearance = (patch: Partial<typeof appearance> | { enabled: boolean }) => {
-    setAppearance({ ...appearance, ...patch });
+  const draft = { productName, tagline, logoUrl, logoDarkUrl };
+  /** Busy while it runs; errors go on to the caller. */
+  const busyRun = (work: Promise<void>) => {
+    setBrandingBusy(true);
+    return work.finally(() => setBrandingBusy(false));
   };
-
-  const updateTheme = (patch: Partial<typeof activeTheme>) => {
-    setAppearance({
-      ...appearance,
-      [mode]: {
-        ...activeTheme,
-        ...patch,
-      },
-    });
-  };
-
-  // Re-seed the drafts when the underlying theme values change (mode switch,
-  // reset, external update) — adjusted during render, not in an effect.
-  const [draftSource, setDraftSource] = useState(activeTheme);
-  if (
-    draftSource.primary !== activeTheme.primary ||
-    draftSource.secondary !== activeTheme.secondary ||
-    draftSource.text !== activeTheme.text ||
-    draftSource.fontFamily !== activeTheme.fontFamily
-  ) {
-    setDraftSource(activeTheme);
-    setPrimaryDraft(activeTheme.primary);
-    setSecondaryDraft(activeTheme.secondary);
-    setTextDraft(activeTheme.text);
-    setFontDraft(activeTheme.fontFamily);
-  }
-
-  const updateHexDraft = (
-    value: string,
-    setDraft: (value: string) => void,
-    key: "primary" | "secondary" | "text",
-  ) => {
-    setDraft(value);
-    if (/^#[0-9a-f]{6}$/i.test(value)) {
-      updateTheme({ [key]: value });
-    }
-  };
-
-  const fontPresets = [
-    { label: "Satoshi", value: "\"Satoshi\", ui-sans-serif, system-ui, sans-serif" },
-    { label: "System", value: "ui-sans-serif, system-ui, sans-serif" },
-    { label: "Inter", value: "\"Inter\", ui-sans-serif, system-ui, sans-serif" },
-    { label: "Serif", value: "ui-serif, Georgia, Cambria, \"Times New Roman\", Times, serif" },
-    { label: "Mono", value: "\"JetBrains Mono\", ui-monospace, \"Cascadia Code\", monospace" },
-  ];
-
-  const previewStyle = {
-    "--preview-primary": activeTheme.primary,
-    "--preview-secondary": activeTheme.secondary,
-    "--preview-text": activeTheme.text,
-    "--preview-radius": `${activeTheme.radius}px`,
-    "--preview-font": activeTheme.fontFamily,
-  } as CSSProperties;
+  /** Busy while it runs; an error becomes a toast. */
+  const busyWhile = (work: Promise<void>, failure: string) => busyRun(work)
+    .catch((error) => { toast.error(error instanceof Error ? error.message : failure); });
 
   return (
     <div className="space-y-6">
@@ -2106,358 +2101,57 @@ function AppearanceTab({ branding, onUpdateBranding, onUploadLogo, onRemoveLogo 
               <span className="text-xs font-medium">Tagline</span>
               <Input value={tagline} maxLength={120} onChange={(event) => setTagline(event.target.value)} placeholder={DEFAULT_PRODUCT_TAGLINE} />
             </label>
-            <label className="grid gap-1.5 sm:col-span-2">
-              <span className="text-xs font-medium">Logo URL</span>
-              <div className="flex min-w-0 gap-2">
-                <Input value={logoUrl} onChange={(event) => setLogoUrl(event.target.value)} placeholder="https://example.com/logo.png" className="min-w-0" />
-                <Button
-                  variant="outline"
-                  disabled={brandingBusy}
-                  onClick={() => {
-                    const input = document.createElement("input");
-                    input.type = "file";
-                    input.accept = "image/png,image/jpeg,image/webp,image/gif";
-                    input.onchange = () => {
-                      const file = input.files?.[0];
-                      if (!file) return;
-                      setBrandingBusy(true);
-                      void onUploadLogo(file)
-                        .then(() => setLogoUrl("/api/v1/config/branding/logo"))
-                        .catch((error) => toast.error(error instanceof Error ? error.message : "Logo upload failed"))
-                        .finally(() => setBrandingBusy(false));
-                    };
-                    input.click();
-                  }}
-                >
-                  <Upload className="h-3.5 w-3.5" /> Upload
-                </Button>
-              </div>
-              <span className="text-[10px] text-muted-foreground">Use an HTTPS URL or upload PNG, JPEG, WebP, or GIF up to 4 MB.</span>
-            </label>
+            <LogoPicker
+              label="Logo"
+              hint="Use an HTTPS URL or upload PNG, JPEG, WebP, or GIF up to 4 MB."
+              value={logoUrl}
+              busy={brandingBusy}
+              onChange={setLogoUrl}
+              uploadedUrl="/api/v1/config/branding/logo"
+              onUpload={(file) => busyRun(onUploadLogo(file, "light"))}
+              onRemove={branding?.logoUrl ? () => void busyWhile(onRemoveLogo("light").then(() => setLogoUrl("")), "Failed to remove logo") : undefined}
+            />
+            <LogoPicker
+              label="Logo for dark mode"
+              hint="Optional: shown in dark mode instead of the logo (which is used when this is empty)."
+              value={logoDarkUrl}
+              busy={brandingBusy}
+              onChange={setLogoDarkUrl}
+              uploadedUrl="/api/v1/config/branding/logo-dark"
+              onUpload={(file) => busyRun(onUploadLogo(file, "dark"))}
+              onRemove={branding?.logoDarkUrl ? () => void busyWhile(onRemoveLogo("dark").then(() => setLogoDarkUrl("")), "Failed to remove logo") : undefined}
+            />
             <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
               <Button
                 disabled={brandingBusy}
-                onClick={() => {
-                  setBrandingBusy(true);
-                  void onUpdateBranding({
-                    productName: productName.trim() || undefined,
-                    tagline: tagline.trim() || undefined,
-                    logoUrl: logoUrl.trim() || undefined,
-                  }).catch((error) => toast.error(error instanceof Error ? error.message : "Failed to update branding"))
-                    .finally(() => setBrandingBusy(false));
-                }}
+                onClick={() => void busyWhile(onUpdateBranding({
+                  productName: productName.trim() || undefined,
+                  tagline: tagline.trim() || undefined,
+                  logoUrl: logoUrl.trim() || undefined,
+                  logoDarkUrl: logoDarkUrl.trim() || undefined,
+                }), "Failed to update branding")}
               >
                 {brandingBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save branding
               </Button>
-              {branding?.logoUrl && (
-                <Button
-                  variant="ghost"
-                  disabled={brandingBusy}
-                  onClick={() => {
-                    setBrandingBusy(true);
-                    void onRemoveLogo().then(() => setLogoUrl(""))
-                      .catch((error) => toast.error(error instanceof Error ? error.message : "Failed to remove logo"))
-                      .finally(() => setBrandingBusy(false));
-                  }}
-                >
-                  <Trash2 className="h-3.5 w-3.5" /> Remove logo
-                </Button>
-              )}
             </div>
           </div>
-          <div className="flex min-h-36 items-center justify-center border border-border/50 bg-muted/15 p-5">
-            <div className="flex min-w-0 items-center gap-3">
-              <BrandMark branding={{ productName, tagline, logoUrl }} className="h-12 w-12 rounded-lg text-xl" />
-              <div className="min-w-0">
-                <div className="max-w-40 truncate text-sm font-bold">{productName.trim() || DEFAULT_PRODUCT_NAME}</div>
-                <div className="max-w-40 truncate text-[10px] uppercase text-muted-foreground">{tagline.trim() || DEFAULT_PRODUCT_TAGLINE}</div>
+          <div className="grid gap-2">
+            {(["light", "dark"] as const).map((variant) => (
+              <div key={variant} className={cn("flex min-h-24 items-center justify-center border border-border/50 p-4", variant === "dark" ? "bg-neutral-950 text-neutral-100" : "bg-white text-neutral-900")}>
+                <div className="flex min-w-0 items-center gap-3">
+                  <BrandMark branding={draft} variant={variant} className="h-10 w-10 rounded-lg text-xl" />
+                  <div className="min-w-0">
+                    <div className="max-w-36 truncate text-sm font-bold">{productName.trim() || DEFAULT_PRODUCT_NAME}</div>
+                    <div className="max-w-36 truncate text-[10px] uppercase opacity-60">{tagline.trim() || DEFAULT_PRODUCT_TAGLINE} · {variant}</div>
+                  </div>
+                </div>
               </div>
-            </div>
+            ))}
           </div>
         </div>
       </section>
 
-      <section>
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
-          <PaletteIcon className="h-3.5 w-3.5" /> Palette
-        </h3>
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-          {PALETTES.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              onClick={() => setPalette(option.id)}
-              className={cn(
-                "rounded-lg border p-3 text-left transition-colors",
-                palette === option.id
-                  ? "border-primary/60 bg-primary/5"
-                  : "border-border/40 bg-card/60 hover:border-border/70 hover:bg-accent/25",
-              )}
-            >
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <span className="text-sm font-semibold">{option.name}</span>
-                {palette === option.id && <Check className="h-3.5 w-3.5 text-primary" />}
-              </div>
-              <div className="mb-2 flex h-5 overflow-hidden rounded-md border border-border/30">
-                {option.swatchLight.map((color, index) => (
-                  <span key={index} className="flex-1" style={{ background: color }} />
-                ))}
-              </div>
-              <p className="text-[11px] leading-snug text-muted-foreground">{option.blurb}</p>
-            </button>
-          ))}
-        </div>
-        <p className="mt-2 text-[10px] text-muted-foreground">Theme, palette, and overrides are saved in this browser and scoped to this Polpo instance.</p>
-      </section>
-
-      <section>
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-            <Settings2 className="h-3.5 w-3.5" /> Overrides
-          </h3>
-          <div className="flex items-center gap-2">
-            <div className="inline-flex rounded-lg border border-border/40 bg-muted/20 p-0.5">
-              {[
-                { label: "No", value: false },
-                { label: "Yes", value: true },
-              ].map((option) => (
-                <button
-                  key={option.label}
-                  type="button"
-                  onClick={() => updateAppearance({ enabled: option.value })}
-                  className={cn(
-                    "h-7 rounded-md px-3 text-xs font-medium transition-colors",
-                    appearance.enabled === option.value
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={resetAppearance}>
-              Reset
-            </Button>
-          </div>
-        </div>
-        <div className={cn(
-          "grid gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]",
-          !appearance.enabled && "opacity-60",
-        )}>
-          <div className="space-y-3">
-            <div className="rounded-lg border border-border/40 bg-card/60 p-3">
-              <label className="mb-2 block text-xs font-medium">Theme target</label>
-              <div className="inline-flex rounded-lg border border-border/40 bg-muted/20 p-0.5">
-                {[
-                  { label: "Light", value: "light" as const },
-                  { label: "Dark", value: "dark" as const },
-                ].map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => setMode(option.value)}
-                    className={cn(
-                      "h-7 rounded-md px-3 text-xs font-medium transition-colors",
-                      mode === option.value
-                        ? "bg-background text-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-border/40 bg-card/60 p-3">
-              <label className="mb-2 flex items-center justify-between gap-3 text-xs font-medium">
-                Primary
-                <code className="text-[11px] text-muted-foreground">{activeTheme.primary}</code>
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="color"
-                  value={activeTheme.primary}
-                  onChange={(event) => {
-                    setPrimaryDraft(event.target.value);
-                    updateTheme({ primary: event.target.value });
-                  }}
-                  disabled={!appearance.enabled}
-                  className="h-9 w-12 shrink-0 cursor-pointer rounded-md border border-border bg-transparent p-1"
-                />
-                <Input
-                  value={primaryDraft}
-                  onChange={(event) => updateHexDraft(event.target.value, setPrimaryDraft, "primary")}
-                  disabled={!appearance.enabled}
-                  className="h-9 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-border/40 bg-card/60 p-3">
-              <label className="mb-2 flex items-center justify-between gap-3 text-xs font-medium">
-                Secondary
-                <code className="text-[11px] text-muted-foreground">{activeTheme.secondary}</code>
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="color"
-                  value={activeTheme.secondary}
-                  onChange={(event) => {
-                    setSecondaryDraft(event.target.value);
-                    updateTheme({ secondary: event.target.value });
-                  }}
-                  disabled={!appearance.enabled}
-                  className="h-9 w-12 shrink-0 cursor-pointer rounded-md border border-border bg-transparent p-1"
-                />
-                <Input
-                  value={secondaryDraft}
-                  onChange={(event) => updateHexDraft(event.target.value, setSecondaryDraft, "secondary")}
-                  disabled={!appearance.enabled}
-                  className="h-9 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-border/40 bg-card/60 p-3">
-              <label className="mb-2 flex items-center justify-between gap-3 text-xs font-medium">
-                Text
-                <code className="text-[11px] text-muted-foreground">{activeTheme.text}</code>
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="color"
-                  value={activeTheme.text}
-                  onChange={(event) => {
-                    setTextDraft(event.target.value);
-                    updateTheme({ text: event.target.value });
-                  }}
-                  disabled={!appearance.enabled}
-                  className="h-9 w-12 shrink-0 cursor-pointer rounded-md border border-border bg-transparent p-1"
-                />
-                <Input
-                  value={textDraft}
-                  onChange={(event) => updateHexDraft(event.target.value, setTextDraft, "text")}
-                  disabled={!appearance.enabled}
-                  className="h-9 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-border/40 bg-card/60 p-3">
-              <label className="mb-2 flex items-center justify-between gap-3 text-xs font-medium">
-                Font
-                <span className="text-[11px] text-muted-foreground">any CSS font stack</span>
-              </label>
-              <div className="grid gap-2 sm:grid-cols-[12rem_minmax(0,1fr)]">
-                <Select
-                  value={fontPresets.some((font) => font.value === activeTheme.fontFamily) ? activeTheme.fontFamily : "custom"}
-                  onValueChange={(value) => {
-                    if (value === "custom") return;
-                    setFontDraft(value);
-                    updateTheme({ fontFamily: value });
-                  }}
-                  disabled={!appearance.enabled}
-                >
-                  <SelectTrigger className="h-9 text-xs">
-                    <SelectValue placeholder="Preset" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {fontPresets.map((font) => (
-                      <SelectItem key={font.label} value={font.value}>
-                        {font.label}
-                      </SelectItem>
-                    ))}
-                    <SelectItem value="custom">Custom</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Input
-                  value={fontDraft}
-                  onChange={(event) => {
-                    setFontDraft(event.target.value);
-                    updateTheme({ fontFamily: event.target.value });
-                  }}
-                  disabled={!appearance.enabled}
-                  className="h-9 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-border/40 bg-card/60 p-3">
-              <label className="mb-2 flex items-center justify-between gap-3 text-xs font-medium">
-                Rounded
-                <code className="text-[11px] text-muted-foreground">{activeTheme.radius}px</code>
-              </label>
-              <input
-                type="range"
-                min={0}
-                max={24}
-                step={1}
-                value={activeTheme.radius}
-                onChange={(event) => updateTheme({ radius: Number(event.target.value) })}
-                disabled={!appearance.enabled}
-                className="w-full accent-primary"
-              />
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-border/40 bg-card/60 p-4" style={previewStyle}>
-            <div className="mb-3 flex items-center justify-between">
-              <span className="text-xs font-semibold">Preview</span>
-              <Badge variant="outline" className="text-[10px]">{mode}</Badge>
-            </div>
-            <div
-              className="space-y-3 rounded-[var(--preview-radius)] border p-3"
-              style={{
-                borderColor: "color-mix(in srgb, var(--preview-primary) 28%, transparent)",
-                color: "var(--preview-text)",
-                fontFamily: "var(--preview-font)",
-              }}
-            >
-              <button
-                type="button"
-                className="h-9 w-full rounded-[var(--preview-radius)] px-3 text-sm font-medium"
-                style={{
-                  background: "var(--preview-primary)",
-                  color: "#fff",
-                }}
-              >
-                Primary action
-              </button>
-              <div
-                className="rounded-[var(--preview-radius)] p-3 text-xs"
-                style={{
-                  background: "var(--preview-secondary)",
-                  color: "var(--preview-text)",
-                }}
-              >
-                Secondary surface
-              </div>
-              <p className="text-sm" style={{ color: "var(--preview-text)" }}>
-                Text color and font preview
-              </p>
-              <div className="flex gap-2">
-                <span
-                  className="inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
-                  style={{ background: "var(--preview-primary)", color: "#fff" }}
-                >
-                  Badge
-                </span>
-                <span
-                  className="inline-flex rounded-full border px-2 py-0.5 text-xs font-medium"
-                  style={{
-                    borderColor: "var(--preview-primary)",
-                    color: "var(--preview-text)",
-                  }}
-                >
-                  Secondary
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
+      <AppearanceEditor onSaveInstanceDefault={onSaveInstanceAppearance} />
     </div>
   );
 }
@@ -2922,8 +2616,12 @@ function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsag
   const [authProvidersLoaded, setAuthProvidersLoaded] = useState(false);
 
   // ── "Connect specific provider" dialog (direct flow) ──
-  const [connectTarget, setConnectTarget] = useState<string | null>(null);
-  const [connectMode, setConnectMode] = useState<"choose" | "oauth" | "apikey">("choose");
+  // a link from an assistant (?section=providers&provider=openai&focus=apiKey) opens that provider's key form
+  const [connectTarget, setConnectTarget] = useState<string | null>(() => {
+    const p = readSetupParams();
+    return p.section === "providers" && p.provider && p.focus === "apiKey" ? p.provider : null;
+  });
+  const [connectMode, setConnectMode] = useState<"choose" | "oauth" | "apikey">(() => (connectTarget ? "apikey" : "choose"));
   const [oauthProviders, setOauthProviders] = useState<OAuthProvider[]>([]);
 
   // ── Disconnect ──
@@ -2999,6 +2697,7 @@ function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsag
     });
     if (result.ok) {
       await refreshProviderList();
+      notifySetupSaved();
       return true;
     }
     return false;
@@ -3243,9 +2942,11 @@ export function ConfigPage() {
   const { agents } = useAgents();
   const { authStatus, refetch: refetchAuth } = useAuthStatus();
   const [activeSection, setActiveSection] = useState<SectionId>(() => {
-    const requested = new URLSearchParams(window.location.search).get("section");
+    const requested = readSetupParams().section;
     return baseSections.find((section) => section.id === requested)?.id ?? "general";
   });
+  // a link from an assistant (setup_url): scroll to the field to fill and focus it
+  useEffect(() => focusSetupField(readSetupParams()), [activeSection]);
 
   // ── Rule dialog state ──
   const [ruleDialogOpen, setRuleDialogOpen] = useState(false);
@@ -3562,8 +3263,8 @@ export function ConfigPage() {
               notifyBrandingChanged();
               toast.success("Branding updated");
             }}
-            onUploadLogo={async (file) => {
-              const response = await fetch(`${appConfig.baseUrl}/api/v1/config/instance-logo`, {
+            onUploadLogo={async (file, variant) => {
+              const response = await apiFetch(`${appConfig.baseUrl}/api/v1/config/instance-logo${variant === "dark" ? "?variant=dark" : ""}`, {
                 method: "POST",
                 headers: {
                   "Content-Type": file.type,
@@ -3578,12 +3279,24 @@ export function ConfigPage() {
               notifyBrandingChanged();
               toast.success("Logo uploaded");
             }}
-            onRemoveLogo={async () => {
-              const result = await api("/config/instance-logo", { method: "DELETE" });
+            onRemoveLogo={async (variant) => {
+              const result = await api(`/config/instance-logo${variant === "dark" ? "?variant=dark" : ""}`, { method: "DELETE" });
               if (!result.ok) throw new Error(result.error ?? "Failed to remove logo");
               if (result.data) setOptimistic(result.data); else await refetch();
               notifyBrandingChanged();
               toast.success("Logo removed");
+            }}
+            onSaveInstanceAppearance={async (appearance) => {
+              const result = await api("/config/settings", {
+                method: "PATCH",
+                body: JSON.stringify({ appearance }),
+              });
+              if (!result.ok) throw new Error(result.error ?? "Failed to save the instance appearance");
+              if (result.data) setOptimistic(result.data); else await refetch();
+              setInstanceAppearance((result.data?.settings?.appearance as InstanceAppearance | undefined) ?? {});
+              // this browser follows the new default (nothing of its own left over)
+              followInstanceDefault();
+              toast.success(appearance ? "Saved as the instance default: everyone sees it now" : "Instance default cleared");
             }}
           />
         )}
@@ -4193,7 +3906,7 @@ function CloudSyncPanel() {
   const fetchCfg = async () => {
     setLoading(true);
     try {
-      const res = await fetch(apiUrl("/api/v1/sync/config"), { credentials: "include" });
+      const res = await apiFetch(apiUrl("/api/v1/sync/config"), { credentials: "include" });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.ok) throw new Error("config");
       setCfg(body.data as SyncCfg);
@@ -4213,7 +3926,7 @@ function CloudSyncPanel() {
 
   const fetchHistory = async () => {
     try {
-      const res = await fetch(apiUrl("/api/v1/sync/history?limit=50"), { credentials: "include" });
+      const res = await apiFetch(apiUrl("/api/v1/sync/history?limit=50"), { credentials: "include" });
       const body = await res.json().catch(() => null);
       if (res.ok && body?.ok) setHistory(body.data as SyncHistoryEntry[]);
     } catch { /* ignore */ }
@@ -4224,7 +3937,7 @@ function CloudSyncPanel() {
    * server-side process completes (active comes back null). */
   const fetchActive = async () => {
     try {
-      const res = await fetch(apiUrl("/api/v1/sync/active"), { credentials: "include" });
+      const res = await apiFetch(apiUrl("/api/v1/sync/active"), { credentials: "include" });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.ok) return null;
       return body.data as ActiveSync | null;
@@ -4272,7 +3985,7 @@ function CloudSyncPanel() {
   const save = async () => {
     setSaving(true);
     try {
-      const res = await fetch(apiUrl("/api/v1/sync/config"), {
+      const res = await apiFetch(apiUrl("/api/v1/sync/config"), {
         method: "PUT",
         credentials: "include",
         headers: { "content-type": "application/json" },
@@ -4281,6 +3994,7 @@ function CloudSyncPanel() {
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.ok) throw new Error(body?.error || "save failed");
       toast.success("Sync config saved");
+      notifySetupSaved();
       setCfg(body.data as SyncCfg);
       setSecretDirty(false);
     } catch (err) {
@@ -4293,7 +4007,7 @@ function CloudSyncPanel() {
   const clearConfig = async () => {
     setSaving(true);
     try {
-      const res = await fetch(apiUrl("/api/v1/sync/config"), {
+      const res = await apiFetch(apiUrl("/api/v1/sync/config"), {
         method: "PUT",
         credentials: "include",
         headers: { "content-type": "application/json" },
@@ -4314,7 +4028,7 @@ function CloudSyncPanel() {
   const test = async () => {
     setSaving(true);
     try {
-      const res = await fetch(apiUrl("/api/v1/sync/test"), { method: "POST", credentials: "include" });
+      const res = await apiFetch(apiUrl("/api/v1/sync/test"), { method: "POST", credentials: "include" });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.ok) throw new Error(body?.error || "test failed");
       toast.success("R2 connection OK");
@@ -4327,7 +4041,7 @@ function CloudSyncPanel() {
 
   const cancelSync = async () => {
     try {
-      const res = await fetch(apiUrl("/api/v1/sync/cancel"), { method: "POST", credentials: "include" });
+      const res = await apiFetch(apiUrl("/api/v1/sync/cancel"), { method: "POST", credentials: "include" });
       if (res.ok) toast.message("Cancelling…");
     } catch { /* ignore */ }
   };
@@ -4341,7 +4055,7 @@ function CloudSyncPanel() {
     let summary = { files: 0, bytes: 0 };
     let result: { ok: boolean; error?: string } = { ok: false };
     try {
-      const res = await fetch(apiUrl(`/api/v1/sync/${kind}`), {
+      const res = await apiFetch(apiUrl(`/api/v1/sync/${kind}`), {
         method: "POST",
         credentials: "include",
         headers: { "content-type": "application/json" },
@@ -4439,6 +4153,7 @@ function CloudSyncPanel() {
               <div className="flex items-center gap-2">
                 <input
                   type={showSecret ? "text" : "password"}
+                  data-setup-field="secretAccessKey"
                   value={draft.secretAccessKey}
                   onChange={(e) => { setDraft({ ...draft, secretAccessKey: e.target.value }); setSecretDirty(true); }}
                   placeholder={configured && !secretDirty ? "(stored — click to replace)" : "raw secret"}
@@ -4635,7 +4350,7 @@ function ExcludesSection({ cfg, reload }: { cfg: SyncCfg | null; reload: () => P
   const save = async () => {
     setSaving(true);
     try {
-      const res = await fetch(apiUrl("/api/v1/sync/config"), {
+      const res = await apiFetch(apiUrl("/api/v1/sync/config"), {
         method: "PUT",
         credentials: "include",
         headers: { "content-type": "application/json" },
@@ -4758,7 +4473,7 @@ function ScheduleSection({ cfg, configured, reload }: { cfg: SyncCfg | null; con
   const save = async (nextEnabled?: boolean) => {
     setSaving(true);
     try {
-      const res = await fetch(apiUrl("/api/v1/sync/config"), {
+      const res = await apiFetch(apiUrl("/api/v1/sync/config"), {
         method: "PUT",
         credentials: "include",
         headers: { "content-type": "application/json" },

@@ -27,6 +27,21 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-22-appearance-config-mcp",
+    date: "2026-11-22",
+    kind: "new",
+    title: "Il tuo brand ovunque, e tutta la configurazione da Claude",
+    summary: "Colori, font, sidebar e logo scuro per tutta l'istanza, senza più il lampo al caricamento; e ogni impostazione si configura anche da MCP.",
+    body: [
+      "- **Aspetto dell'istanza**: tema, palette e tutti i colori (brand, superfici, testo, bordi, sidebar, grafici), font e arrotondamenti valgono per tutti; ognuno può comunque personalizzare il proprio browser.",
+      "- **Niente lampo al caricamento**: il tema si applica prima che la pagina appaia.",
+      "- **Logo per il tema scuro**.",
+      "- **Tutta la Configuration da Claude o ChatGPT**: sandbox, policy, membri, accessi MCP, canali (anche abbinamenti Telegram e login WhatsApp con QR), sync. Le chiavi non passano mai dalla chat: l'assistente ti dà il link al campo giusto, aspetta che lo compili e continua da solo.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri l'aspetto", to: "/config?section=appearance" },
+  },
+  {
     id: "2026-11-22-mcp-permissions",
     date: "2026-11-22",
     kind: "new",

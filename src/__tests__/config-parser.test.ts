@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { parseConfig, generatePolpoConfigDefault, savePolpoConfig } from "../core/config.js";
@@ -220,6 +220,43 @@ describe("parseConfig (.polpo/polpo.json)", () => {
       const workDir = writeConfig(cfg);
       const config = await parseConfig(workDir);
       expect(config.teams).toEqual([]); // ignored
+    });
+
+    it("reads the instance appearance, the dark-mode logo and Polpo's voice replies", async () => {
+      const cfg = {
+        ...minimalConfig(),
+        settings: {
+          ...minimalConfig().settings,
+          voiceReplies: "voice",
+          branding: { logoDarkUrl: "/api/v1/config/branding/logo-dark" },
+          appearance: { theme: "system", palette: "mono", custom: { enabled: true, light: { text: "#111111", radius: 6 }, dark: { primary: "oklch(0.7 0.15 200)" } } },
+        },
+      };
+      const config = await parseConfig(writeConfig(cfg));
+      expect(config.settings.voiceReplies).toBe("voice");
+      expect(config.settings.branding?.logoDarkUrl).toBe("/api/v1/config/branding/logo-dark");
+      // the old `text` is foreground
+      expect(config.settings.appearance).toEqual({
+        theme: "system", palette: "mono", custom: { enabled: true, light: { foreground: "#111111", radius: 6 }, dark: { primary: "oklch(0.7 0.15 200)" } },
+      });
+    });
+
+    it("ignores the invalid part of an appearance with a warning, never refusing to start", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const appearance = {
+        theme: "purple", palette: "mono", extra: 1,
+        custom: { enabled: true, light: { primary: "red;}", background: "#ffffff", radius: 40 }, dark: { fontFamily: "x; } body {", nope: "#fff", ring: "#000000" } },
+      };
+      const config = await parseConfig(writeConfig({ ...minimalConfig(), settings: { ...minimalConfig().settings, appearance } }));
+      expect(config.settings.appearance).toEqual({ palette: "mono", custom: { enabled: true, light: { background: "#ffffff" }, dark: { ring: "#000000" } } });
+      const message = warn.mock.calls.map((c) => String(c[0])).join("\n");
+      for (const part of ["theme", "extra", "custom.light.primary", "custom.light.radius", "fontFamily", "unknown token nope"]) expect(message).toContain(part);
+      warn.mockRestore();
+      // not an object at all: ignored too
+      const silent = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const plain = await parseConfig(writeConfig({ ...minimalConfig(), settings: { ...minimalConfig().settings, appearance: "dark" } }));
+      expect(plain.settings.appearance).toBeUndefined();
+      silent.mockRestore();
     });
 
     it("throws on invalid logLevel", async () => {
