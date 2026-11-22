@@ -247,6 +247,13 @@ export interface PolpoEventMap {
     /** Durable facts saved to memory by this compaction. */
     savedFacts?: number;
   } & EventOrigin;
+  /** A branch of a chat started with its parent's context checkpoint (no need to compact the copied history again). */
+  "context:checkpoint-carried": {
+    sessionId: string; parentSessionId: string; agentName?: string;
+    /** Messages with text the carried summary covers. */
+    coveredMessages: number;
+    compactionCount: number;
+  };
 
   // Sandboxes (where agents' tools run) and storage (mounted buckets)
   "sandbox:created": { workspaceId: string; provider: string; scope: "chat" | "task"; taskId?: string; runId?: string; sessionId?: string; agentName?: string; network: string };
