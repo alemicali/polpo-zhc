@@ -3,7 +3,7 @@
  * Opening the page marks everything as seen (clears the nav dot and banner).
  */
 import { useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Megaphone } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { ChangelogTimeline } from "@/components/whats-new/changelog-timeline";
@@ -12,6 +12,9 @@ import { CHANGELOG } from "@/lib/changelog";
 
 export function ChangelogPage() {
   const navigate = useNavigate();
+  // /changelog#<entry-id>: open that entry and its day, and scroll to it
+  const { hash } = useLocation();
+  const focusId = hash.length > 1 ? safeDecode(hash.slice(1)) : undefined;
   // what arrived since the last visit, read before opening the page marks it all as seen
   const unreadIds = useChangelogUnreadSnapshot(true);
 
@@ -34,8 +37,16 @@ export function ChangelogPage() {
           </div>
         </header>
 
-        <ChangelogTimeline entries={CHANGELOG} unreadIds={unreadIds} onAction={(to) => navigate(to)} />
+        <ChangelogTimeline entries={CHANGELOG} unreadIds={unreadIds} focusId={focusId} onAction={(to) => navigate(to)} />
       </div>
     </div>
   );
+}
+
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }

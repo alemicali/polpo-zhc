@@ -23,7 +23,7 @@ export function WhatsNewDrawer() {
 
   return (
     <Sheet open={open} onOpenChange={setWhatsNewOpen}>
-      <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 sm:max-w-[440px]">
+      <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 sm:max-w-[34rem]">
         <SheetHeader className="relative isolate shrink-0 overflow-hidden border-b border-primary/15 px-5 py-4 text-left">
           <div aria-hidden className="pointer-events-none absolute -right-16 -top-20 -z-10 h-44 w-44 rounded-full bg-primary/20 blur-3xl" />
           <div className="flex items-center gap-3">
@@ -36,7 +36,7 @@ export function WhatsNewDrawer() {
             </div>
           </div>
         </SheetHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-5">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-3 pb-[env(safe-area-inset-bottom)]">
           <ChangelogTimeline
             compact
             entries={CHANGELOG}

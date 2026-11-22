@@ -32,6 +32,20 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-22-whats-new-accordion",
+    date: "2026-11-22",
+    kind: "improved",
+    title: "Novità più facili da scorrere",
+    summary: "Le novità sono raggruppate per giorno su una linea del tempo: vedi solo i titoli e apri quelle che ti interessano.",
+    body: [
+      "- **Un giorno alla volta**: ogni giorno è un gruppo che puoi aprire o chiudere; mentre scorri, la data resta in alto con quante novità ci sono e quante non hai ancora letto. Il giorno più recente è aperto, quelli precedenti sono chiusi.",
+      "- **Solo i titoli**: ogni novità è una riga con tipo, titolo e ora; premendola (o con Invio / Spazio) si apre il dettaglio, con il pulsante per provarla. Le novità non lette sono evidenziate.",
+      "- **Espandi tutto / Comprimi tutto** in cima, e le frecce ↑ ↓ per spostarti tra le righe.",
+      "- Quello che apri e chiudi viene ricordato su questo dispositivo, e un link a una novità (`/changelog#…`) la apre direttamente.",
+      "- Il pannello delle novità è un po' più largo.",
+    ].join("\n"),
+  },
+  {
     id: "2026-11-22-chat-navigation",
     date: "2026-11-22",
     kind: "fixed",
@@ -970,6 +984,16 @@ export function formatChangelogDate(iso: string): string {
   return Number.isNaN(date.getTime()) ? iso : DATE_FORMAT.format(date);
 }
 
+const LONG_DAY_FORMAT = new Intl.DateTimeFormat("it-IT", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+
+/** "Sabato 22 novembre 2026": the day headers of the timeline. */
+export function formatChangelogDayLong(iso: string): string {
+  const date = changelogDate(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const text = LONG_DAY_FORMAT.format(date);
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 /** id → ISO datetime the entry went online on this instance (recorded by the UI server). */
 export type ChangelogPublishedAt = Readonly<Record<string, string>>;
 
@@ -993,6 +1017,11 @@ const TIME_FORMAT = new Intl.DateTimeFormat("it-IT", { hour: "2-digit", minute: 
 /** "22 nov 2026 · 18:52" (local time zone). */
 export function formatChangelogDateTime(date: Date): string {
   return `${SHORT_DATE_FORMAT.format(date).replace(/\./g, "")} · ${TIME_FORMAT.format(date)}`;
+}
+
+/** "18:52" (local time zone). */
+export function formatChangelogTime(date: Date): string {
+  return TIME_FORMAT.format(date);
 }
 
 /** "online alle 18:52" today, else "online il 21 nov alle 18:52". */

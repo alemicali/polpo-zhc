@@ -32,3 +32,14 @@ export function ChangelogKindBadge({ kind, className }: { kind: ChangelogKind; c
     </span>
   );
 }
+
+const KIND_DOT: Record<ChangelogKind, string> = {
+  new: "bg-primary",
+  improved: "bg-success",
+  fixed: "bg-warning",
+};
+
+/** The entry's dot on the timeline rail, coloured by kind. */
+export function ChangelogKindDot({ kind, className }: { kind: ChangelogKind; className?: string }) {
+  return <span aria-hidden className={cn("block h-2.5 w-2.5 rounded-full ring-[3px] ring-background", KIND_DOT[kind], className)} />;
+}
