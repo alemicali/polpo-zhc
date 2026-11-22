@@ -357,7 +357,7 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
   const isToolUse = entry.type === "tool_use";
   const isToolResult = entry.type === "tool_result";
   const isAssistant = entry.type === "assistant";
-  // agent harness runs (Claude Code, Codex) also log lines, reasoning and per-turn usage
+  // agent harness runs (Claude Code, Codex, OpenCode) also log lines, reasoning and per-turn usage
   const isLog = entry.type === "log";
   const isUsage = entry.type === "usage";
   const isError = entry.type === "error";

@@ -84,6 +84,7 @@
     "@ai-sdk/harness": "1.0.190",
     "@ai-sdk/harness-claude-code": "1.0.194",
     "@ai-sdk/harness-codex": "1.0.192",
+    "@ai-sdk/harness-opencode": "1.0.193",
     "@daytona/sdk": "0.233.0",
     "@daytona/sdk-v2": "npm:@daytona/sdk@2.1.0",
     "@earendil-works/pi-agent-core": "^1.6.0",

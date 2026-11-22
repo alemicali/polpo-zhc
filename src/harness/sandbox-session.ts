@@ -314,6 +314,12 @@ export interface HarnessCredentialBroker {
   lease?: Pick<HarnessRelayLease, "addRules" | "setRules">;
   scheme?: "x-api-key" | "bearer" | "none";
   rules?: RequestTransformation[];
+  /**
+   * Polpo's own credential rules (OpenCode: Polpo writes the runtime's config, so the placeholder
+   * and its rule are Polpo's, not the SDK's). Installed with the session, before any process
+   * starts, and kept when the runtime replaces its own rules.
+   */
+  credentialRules?: RequestTransformation[];
 }
 
 /** "native" (the provider rewrites requests), "relay" (Polpo's lease) or "none" (no brokering). */
@@ -328,11 +334,23 @@ export function brokeringOf(machine: Pick<HarnessMachine, "nativeRequestTransfor
  * `port`: the bridge port this session's runtime listens on. `broker`: credential brokering
  * (addRequestTransformations / setRequestTransformations), for any provider.
  */
-export function createHarnessSandboxSession(machine: HarnessMachine, opts: { port: number; broker?: HarnessCredentialBroker }): HarnessSandbox {
+export function createHarnessSandboxSession(machine: HarnessMachine, opts: {
+  port: number; broker?: HarnessCredentialBroker;
+  /** Environment every process the runtime spawns starts from (the runtime's own variables win). */
+  spawnEnv?: Record<string, string>;
+}): HarnessSandbox {
   const abs = (p: string) => (p.startsWith("/") ? p : posix.join(machine.workDir, p));
   const brokering = brokeringOf(machine, opts.broker);
-  const polpoRules = opts.broker?.rules ?? [];
+  const credentialRules = opts.broker?.credentialRules ?? [];
+  const polpoRules = [...(opts.broker?.rules ?? []), ...credentialRules];
   let nativeRules: RequestTransformation[] | undefined;
+  if (brokering === "relay" && credentialRules.length) opts.broker!.lease!.addRules(credentialRules);
+  /** Native brokering with Polpo's own credential rules: installed before the first process at the latest. */
+  const ensureNative = async () => {
+    if (brokering !== "native" || nativeRules || !credentialRules.length) return;
+    nativeRules = [...polpoRules];
+    await machine.nativeRequestTransformations!(nativeRules, { replace: true });
+  };
   const transformations: Record<string, (rules: ReadonlyArray<RequestTransformation>) => Promise<void>> = brokering === "native"
     ? {
         // Polpo's rules go with the first set; later additions only add the runtime's
@@ -350,7 +368,7 @@ export function createHarnessSandboxSession(machine: HarnessMachine, opts: { por
     : brokering === "relay"
       ? {
           addRequestTransformations: async (rules) => { opts.broker!.lease!.addRules(rules); },
-          setRequestTransformations: async (rules) => { opts.broker!.lease!.setRules(rules); },
+          setRequestTransformations: async (rules) => { opts.broker!.lease!.setRules([...credentialRules, ...rules]); },
         }
       : {};
   const session: Record<string, any> = {
@@ -390,7 +408,9 @@ export function createHarnessSandboxSession(machine: HarnessMachine, opts: { por
     },
     spawn: async ({ command, workingDirectory, env, abortSignal, stdin }: { command: string; workingDirectory?: string; env?: Record<string, string>; abortSignal?: AbortSignal; stdin?: boolean }) => {
       if (stdin === true) throw new Error("Polpo harness sandbox: interactive stdin is not supported");
-      const p = await machine.spawn(command, { cwd: workingDirectory ? abs(workingDirectory) : undefined, env });
+      await ensureNative();
+      const spawnEnv = opts.spawnEnv || env ? { ...(opts.spawnEnv ?? {}), ...(env ?? {}) } : undefined;
+      const p = await machine.spawn(command, { cwd: workingDirectory ? abs(workingDirectory) : undefined, env: spawnEnv });
       abortSignal?.addEventListener("abort", () => void p.kill(), { once: true });
       return { pid: undefined, processId: p.id, stdout: p.stdout, stderr: p.stderr, wait: () => p.wait(), kill: () => p.kill() };
     },

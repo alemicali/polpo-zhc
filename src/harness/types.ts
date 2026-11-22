@@ -31,7 +31,7 @@ export interface HarnessTurnResult {
   finishReason: string;
   /** This turn's usage. */
   usage: HarnessUsage;
-  /** The runtime's own spend estimate for this turn (USD), when it reports one. */
+  /** The runtime's own spend estimate for this turn (USD), when it reports one (OpenCode: the sum of its per-step costs). */
   costUsd?: number;
   /** The runtime's conversation id (Claude Code session id, Codex thread id). */
   runtimeSessionId?: string;
@@ -99,6 +99,10 @@ export interface HarnessRuntimeSpec {
     headers?: Record<string, string>;
     /** Non-Claude models behind the Anthropic format: no adaptive thinking, no effort. */
     nonClaude?: boolean;
+    /** OpenCode: its config for this run (provider section with the key or a placeholder, model). */
+    openCodeConfig?: Record<string, unknown>;
+    /** OpenCode: the model's provider id (amazon-bedrock, openai, polpo-gateway…). */
+    openCode?: { provider: string };
   };
   /** Bridge diagnostics (reconnects, failures) for the run log. */
   onDebug?: (event: { type: string; [k: string]: unknown }) => void;

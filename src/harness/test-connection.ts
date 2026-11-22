@@ -10,6 +10,9 @@
  *   function tool. Passes on response.completed (or incomplete at the token limit).
  * - Bedrock: a minimal Converse call with the model (Bedrock API key or SigV4 access keys).
  * - Vertex AI: a minimal rawPredict call (service account → OAuth token).
+ * - OpenCode: the format of its provider: Anthropic Messages, OpenAI Responses, OpenAI Chat
+ *   Completions (streamed, with a tool), Gemini generateContent, Bedrock Converse with the Bedrock
+ *   API key, the Vercel AI Gateway's Chat Completions endpoint.
  *
  * Returns ok, latency, and a labelled error (authentication, model access, network, timeout,
  * protocol, configuration) with every secret scrubbed.
@@ -123,10 +126,10 @@ function authHeaders(scheme: "x-api-key" | "bearer" | "none" | undefined, key: s
 
 const endpointOf = (u: string) => { const x = new URL(u); return `${x.host}${x.pathname}`; };
 
-async function testAnthropic(a: ResolvedHarnessAuth, model: string, f: typeof fetch, signal: AbortSignal): Promise<Omit<HarnessTestResult, "harness" | "latencyMs">> {
+async function testAnthropic(a: ResolvedHarnessAuth, model: string, f: typeof fetch, signal: AbortSignal, messagesUrl?: string): Promise<Omit<HarnessTestResult, "harness" | "latencyMs">> {
   const r = a.route!;
-  const url = `${r.upstream.replace(/\/+$/, "")}/v1/messages`;
-  const provider = r.mode === "direct" ? "Anthropic" : r.mode === "ai-gateway" ? "Vercel AI Gateway" : `Gateway ${new URL(r.upstream).host}`;
+  const url = messagesUrl ?? `${r.upstream.replace(/\/+$/, "")}/v1/messages`;
+  const provider = a.providerLabel ?? (r.mode === "direct" ? "Anthropic" : r.mode === "ai-gateway" ? "Vercel AI Gateway" : `Gateway ${new URL(r.upstream).host}`);
   const providerId: HarnessProvider | undefined = r.mode === "direct" ? "anthropic" : undefined;
   const res = await f(url, {
     method: "POST", signal,
@@ -161,7 +164,7 @@ async function testAnthropic(a: ResolvedHarnessAuth, model: string, f: typeof fe
   const missing = !seq.start ? "message_start" : !seq.tool ? "a tool_use block (the gateway or model must support tools and tool_choice)" : "message_stop";
   return {
     ok: false, status: res.status, endpoint, model, errorKind: "protocol",
-    error: `${provider}: the streamed answer has no ${missing}: Claude Code needs Anthropic Messages streaming with tools (events seen: ${[...new Set(events.map((e) => e.event))].join(", ") || "none"})`,
+    error: `${provider}: the streamed answer has no ${missing}: ${a.openCode ? "OpenCode" : "Claude Code"} needs Anthropic Messages streaming with tools (events seen: ${[...new Set(events.map((e) => e.event))].join(", ") || "none"})`,
   };
 }
 
@@ -170,7 +173,7 @@ async function testResponses(a: ResolvedHarnessAuth, model: string, f: typeof fe
   const base = r.upstream.replace(/\/+$/, "");
   // Codex adds /v1 to the AI Gateway's base URL
   const url = `${r.mode === "ai-gateway" && !/\/v1$/.test(base) ? `${base}/v1` : base}/responses`;
-  const provider = r.mode === "direct" ? "OpenAI" : r.mode === "ai-gateway" ? "Vercel AI Gateway" : `Gateway ${new URL(r.upstream).host}`;
+  const provider = a.providerLabel ?? (r.mode === "direct" ? "OpenAI" : r.mode === "ai-gateway" ? "Vercel AI Gateway" : `Gateway ${new URL(r.upstream).host}`);
   const providerId: HarnessProvider | undefined = r.mode === "direct" ? "openai" : undefined;
   const res = await f(url, {
     method: "POST", signal,
@@ -197,7 +200,7 @@ async function testResponses(a: ResolvedHarnessAuth, model: string, f: typeof fe
   }
   return {
     ok: false, status: res.status, endpoint, model, errorKind: "protocol",
-    error: `${provider}: no response.completed event: Codex needs the OpenAI Responses API with streaming (events seen: ${[...new Set(events.map((e) => e.event))].join(", ") || "none"})`,
+    error: `${provider}: no response.completed event: ${a.openCode ? "OpenCode" : "Codex"} needs the OpenAI Responses API with streaming (events seen: ${[...new Set(events.map((e) => e.event))].join(", ") || "none"})`,
   };
 }
 
@@ -227,9 +230,9 @@ export function sigV4(o: { url: URL; body: string; region: string; service: stri
   return { ...rest, authorization: `AWS4-HMAC-SHA256 Credential=${o.accessKeyId}/${scope}, SignedHeaders=${signed.join(";")}, Signature=${signature}` };
 }
 
-async function testBedrock(a: ResolvedHarnessAuth, f: typeof fetch, signal: AbortSignal): Promise<Omit<HarnessTestResult, "harness" | "latencyMs">> {
+async function testBedrock(a: ResolvedHarnessAuth, f: typeof fetch, signal: AbortSignal, modelId?: string): Promise<Omit<HarnessTestResult, "harness" | "latencyMs">> {
   const c = a.cloud as Extract<NonNullable<ResolvedHarnessAuth["cloud"]>, { kind: "bedrock" }>;
-  const model = a.model ?? bedrockDefaultModel(c.region);
+  const model = modelId ?? a.model ?? bedrockDefaultModel(c.region);
   const url = new URL(`https://bedrock-runtime.${c.region}.amazonaws.com/model/${encodeURIComponent(model)}/converse`);
   const body = JSON.stringify({ messages: [{ role: "user", content: [{ text: "Say ok." }] }], inferenceConfig: { maxTokens: 16 } });
   const headers = c.bearer
@@ -285,6 +288,72 @@ async function testVertex(a: ResolvedHarnessAuth, f: typeof fetch, signal: Abort
   return { ok: true, status: res.status, endpoint: endpointOf(url), model };
 }
 
+// ── OpenCode: its provider's own format ─────────────────────────────────
+
+/** OpenAI Chat Completions, streamed, with one tool (OpenCode's openai-compatible providers). */
+async function testChat(a: ResolvedHarnessAuth, model: string, url: string, f: typeof fetch, signal: AbortSignal): Promise<Omit<HarnessTestResult, "harness" | "latencyMs">> {
+  const r = a.route!;
+  const provider = a.providerLabel ?? `Gateway ${new URL(r.upstream).host}`;
+  const res = await f(url, {
+    method: "POST", signal,
+    headers: { "content-type": "application/json", accept: "text/event-stream", ...authHeaders(r.scheme, r.key, "bearer"), ...r.headers },
+    body: JSON.stringify({
+      model, stream: true, max_tokens: 16,
+      messages: [{ role: "user", content: "Call the ping tool." }],
+      tools: [{ type: "function", function: { name: "ping", description: "Answers ping. Call it.", parameters: { type: "object", properties: {} } } }],
+    }),
+  });
+  const endpoint = endpointOf(url);
+  if (!res.ok) {
+    const l = labelHarnessTestError({ provider, status: res.status, text: await res.text().catch(() => ""), model });
+    return { ok: false, status: res.status, endpoint, model, errorKind: l.kind, error: l.message };
+  }
+  const events = await readSse(res, (_e, d) => d === "[DONE]" || !!d?.error || !!d?.choices?.[0]?.finish_reason, signal);
+  const err = events.find((e) => e.data?.error);
+  if (err) {
+    const l = labelHarnessTestError({ provider, status: res.status, text: JSON.stringify(err.data.error), model });
+    return { ok: false, status: res.status, endpoint, model, errorKind: l.kind, error: l.message };
+  }
+  if (events.some((e) => Array.isArray(e.data?.choices))) return { ok: true, status: res.status, endpoint, model };
+  return { ok: false, status: res.status, endpoint, model, errorKind: "protocol", error: `${provider}: no streamed Chat Completions chunk: OpenCode needs streaming Chat Completions with tools` };
+}
+
+/** Gemini generateContent with the API key header. */
+async function testGemini(a: ResolvedHarnessAuth, model: string, f: typeof fetch, signal: AbortSignal): Promise<Omit<HarnessTestResult, "harness" | "latencyMs">> {
+  const r = a.route!;
+  const url = `${r.upstream.replace(/\/+$/, "")}/models/${encodeURIComponent(model)}:generateContent`;
+  const res = await f(url, {
+    method: "POST", signal,
+    headers: { "content-type": "application/json", ...(r.key ? { "x-goog-api-key": r.key } : {}) },
+    body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: "Say ok." }] }], generationConfig: { maxOutputTokens: 16 } }),
+  });
+  const text = await res.text().catch(() => "");
+  if (!res.ok) {
+    const l = labelHarnessTestError({ provider: a.providerLabel ?? "Google", status: res.status, text, model });
+    return { ok: false, status: res.status, endpoint: endpointOf(url), model, errorKind: l.kind, error: l.message };
+  }
+  return { ok: true, status: res.status, endpoint: endpointOf(url), model };
+}
+
+async function testOpenCode(a: ResolvedHarnessAuth, f: typeof fetch, signal: AbortSignal): Promise<Omit<HarnessTestResult, "harness" | "latencyMs">> {
+  const oc = a.openCode!;
+  const r = a.route!;
+  const base = r.upstream.replace(/\/+$/, "");
+  const model = oc.modelId;
+  let out: Omit<HarnessTestResult, "harness" | "latencyMs">;
+  switch (r.format) {
+    case "bedrock": out = await testBedrock(a, f, signal, model); break;
+    case "anthropic": out = await testAnthropic(a, model, f, signal, `${base}/messages`); break;
+    case "openai-responses": out = await testResponses(a, model, f, signal); break;
+    case "google": out = await testGemini(a, model, f, signal); break;
+    // the AI Gateway's OpenAI-compatible endpoint (OpenCode itself speaks the gateway's own protocol)
+    case "ai-gateway": out = await testChat(a, model, `${base.replace(/\/v1\/ai$/, "")}/v1/chat/completions`, f, signal); break;
+    default: out = await testChat(a, model, `${base}/chat/completions`, f, signal);
+  }
+  // the model as OpenCode names it (provider/model)
+  return { ...out, model: a.model ?? out.model };
+}
+
 /**
  * Test one harness's settings (saved or not) from this server. `agent`: test with that agent's
  * engine (its own credential and model). Never throws.
@@ -314,7 +383,8 @@ export async function testHarnessConnection(o: {
   const timer = setTimeout(() => ac.abort(new Error("timeout")), o.timeoutMs ?? 30_000);
   try {
     let r: Omit<HarnessTestResult, "harness" | "latencyMs">;
-    if (a.cloud?.kind === "bedrock") r = await testBedrock(a, f, ac.signal);
+    if (a.openCode) r = await testOpenCode(a, f, ac.signal);
+    else if (a.cloud?.kind === "bedrock") r = await testBedrock(a, f, ac.signal);
     else if (a.cloud?.kind === "vertex") r = await testVertex(a, f, ac.signal);
     else if (a.route?.format === "openai-responses") r = await testResponses(a, a.model ?? (a.route.mode === "ai-gateway" ? DEFAULT_MODELS.aiGatewayOpenai : DEFAULT_MODELS.openai), f, ac.signal);
     else r = await testAnthropic(a, a.model ?? (a.route?.mode === "ai-gateway" ? DEFAULT_MODELS.aiGatewayAnthropic : DEFAULT_MODELS.anthropic), f, ac.signal);

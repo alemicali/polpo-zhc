@@ -168,7 +168,7 @@ export interface TaskToolScope {
 }
 
 /** The engine a run used: Polpo's own, or an agent harness. */
-export type TaskRunEngine = "polpo" | "claude-code" | "codex";
+export type TaskRunEngine = "polpo" | "claude-code" | "codex" | "opencode";
 
 /** Where and with what a task run executed (no secrets). */
 export interface TaskRunContext {
@@ -182,8 +182,8 @@ export interface TaskRunContext {
   agent?: string;
   engine: TaskRunEngine;
   model?: string;
-  /** The harness authentication kind (never the credential). */
-  auth?: { kind: "api-key" | "bedrock" | "vertex"; region?: string };
+  /** The harness authentication kind (never the credential); provider: OpenCode's model provider (anthropic, openai, amazon-bedrock, vercel, polpo-gateway…). */
+  auth?: { kind: "api-key" | "bedrock" | "vertex" | "ai-gateway" | "gateway"; region?: string; provider?: string };
   permissionMode?: string;
   effort?: string;
   computer: {
@@ -606,7 +606,7 @@ export interface Mission {
 /** USD, tokens and runs of a slice of a mission's cost. */
 export interface MissionCostBucket {
   usd: number;
-  /** The harness runtimes' own estimate (Claude Code, Codex). */
+  /** The harness runtimes' own estimate (Claude Code, Codex, OpenCode). */
   harnessUsd: number;
   /** The model cost the provider reported (Polpo's engine). */
   modelUsd: number;

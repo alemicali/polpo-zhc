@@ -5,7 +5,7 @@
  *   lifecycle actions its status allows (Start, Stop / Hibernate / Pause, Restart, Reset, Recreate),
  *   Edit and Delete (Remove from Polpo when its machine was deleted at the provider).
  * - Tiles: last use, uptime, when it stops or hibernates by itself, what was spent on it.
- * - Sessions: the agent harness sessions on it (Claude Code, Codex) and the recent task runs that
+ * - Sessions: the agent harness sessions on it (Claude Code, Codex, OpenCode) and the recent task runs that
  *   used it (from each task's runs), with links; its recent activity (status changes, wakes,
  *   rotations, errors, a machine deleted at the provider).
  * - Aside: the agents using it; lifecycle; snapshots (Daytona v2); machine (image, region, size,

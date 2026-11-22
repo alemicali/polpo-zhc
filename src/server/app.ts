@@ -199,7 +199,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   }
 
   // ── Model relay for agent harnesses (public) ─────────────────────────
-  // Computers' Claude Code / Codex reach their model through here with placeholders instead of the
+  // Computers' Claude Code / Codex / OpenCode reach their model through here with placeholders instead of the
   // key: the per-run token in the path selects the run's relay lease (src/harness/relay.ts), which
   // swaps the credential outside the VM. Before the rate limit: long agent turns make many calls.
   // Exposed publicly at <POLPO_PUBLIC_URL>/api/v1/harness-relay/ (docs/harnesses.md).
@@ -1570,7 +1570,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   };
   authed.route("/computers", computerRoutes(computerDeps));
   authed.route("/computer-webhooks", computerWebhookAdminRoutes({ webhooks: computerWebhooks }));
-  // agent harnesses (Claude Code, Codex): settings overview and their sessions (status, stop, reset)
+  // agent harnesses (Claude Code, Codex, OpenCode): settings overview and their sessions (status, stop, reset)
   authed.route("/harnesses", harnessRoutes({
     polpoDir: () => o.getPolpoDir(),
     settings: () => o.getConfig()?.settings,
