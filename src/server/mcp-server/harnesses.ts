@@ -159,7 +159,7 @@ export function registerHarnessTools(tool: Register, deps: McpDeps): void {
       + "kill the task instead. Keys come from polpo_harness_sessions_list.",
     inputSchema: {
       key: z.string().min(1).describe("The session's key (polpo_harness_sessions_list), e.g. task:abc123"),
-      action: z.enum(["stop", "reset"]),
+      action: z.enum(["stop", "reset"]).describe("stop: end the runtime, keep the conversation; reset: forget it (needs confirm)"),
       confirm: confirmParam("forget the session's conversation"),
     },
     outputSchema: { key: z.string(), action: z.string(), message: z.string() },
