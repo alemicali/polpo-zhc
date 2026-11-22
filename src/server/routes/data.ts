@@ -99,7 +99,10 @@ export function dataRoutes(getDeps: () => { runtime: DataRuntime; store: DataReg
 
   app.get("/:id", async (c) => {
     const source = await getDeps().store.getSource(c.req.param("id"));
-    return source ? c.json({ ok: true, data: source }) : c.json({ ok: false, error: "Data source not found" }, 404);
+    if (!source) return c.json({ ok: false, error: "Data source not found" }, 404);
+    // which credentials are stored (field names only, never values): the dashboard and MCP's setup hand-off
+    const entry = await getDeps().vaultStore?.get("$data", `data:${source.id}`).catch(() => undefined);
+    return c.json({ ok: true, data: { ...source, credentialKeys: Object.keys(entry?.credentials ?? {}) } });
   });
 
   app.put("/:id", async (c) => {
