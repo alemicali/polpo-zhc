@@ -1,5 +1,5 @@
 /**
- * Agent harnesses (Claude Code, Codex as an agent's engine), for the dashboard, Polpo and MCP.
+ * Agent harnesses (Claude Code, Codex, OpenCode as an agent's engine), for the dashboard, Polpo and MCP.
  * Mounted under the authenticated API (/api/v1/harnesses). The settings themselves change through
  * PATCH /config/settings { harnesses } (vault references only, never secrets).
  *
@@ -14,7 +14,7 @@
  */
 import { Hono } from "hono";
 import {
-  agentHarness, harnessesSettingsOf, parseHarnessesSettings,
+  HARNESS_NAMES, agentHarness, harnessesSettingsOf, parseHarnessesSettings,
   type AgentConfig, type AgentHarnessEngine, type ComputerConfig, type HarnessesSettings, type PolpoSettings, type VaultStore,
 } from "@polpo-ai/core";
 import { testHarnessConnection } from "../../harness/test-connection.js";
@@ -49,7 +49,7 @@ export function harnessRoutes(deps: HarnessRouteDeps): Hono {
   app.post("/test", async (c) => {
     const body = await c.req.json().catch(() => ({})) as { harness?: string; settings?: unknown; agent?: string };
     const harness = body.harness;
-    if (harness !== "claude-code" && harness !== "codex") return c.json({ ok: false, error: "harness must be \"claude-code\" or \"codex\"", code: "VALIDATION_ERROR" }, 400);
+    if (harness !== "claude-code" && harness !== "codex" && harness !== "opencode") return c.json({ ok: false, error: "harness must be \"claude-code\", \"codex\" or \"opencode\"", code: "VALIDATION_ERROR" }, 400);
     let settings: HarnessesSettings | undefined;
     try {
       settings = body.settings !== undefined && body.settings !== null
@@ -58,7 +58,7 @@ export function harnessRoutes(deps: HarnessRouteDeps): Hono {
     } catch (err) {
       return c.json({ ok: false, error: (err as Error).message, code: "VALIDATION_ERROR" }, 400);
     }
-    if (!settings?.[harness]) return c.json({ ok: false, error: `${harness === "codex" ? "Codex" : "Claude Code"} has no settings to test`, code: "VALIDATION_ERROR" }, 400);
+    if (!settings?.[harness]) return c.json({ ok: false, error: `${HARNESS_NAMES[harness]} has no settings to test`, code: "VALIDATION_ERROR" }, 400);
     let agentEngine: AgentHarnessEngine | undefined;
     if (body.agent) {
       const agent = (await deps.agents()).find((a) => a.name === body.agent);

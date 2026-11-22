@@ -41,7 +41,7 @@ export interface PolpoEventMap {
   "task:direction": { taskId: string; action: TaskDirectionMode; direction: TaskDirection };
 
   // Agent lifecycle
-  /** engine: "polpo", "claude-code" or "codex"; computerId: "host", a computer id or "ephemeral" (see Task.runs). */
+  /** engine: "polpo", "claude-code", "codex" or "opencode"; computerId: "host", a computer id or "ephemeral" (see Task.runs). */
   "agent:spawned": { taskId: string; agentName: string; taskTitle: string; engine?: import("./run-context.js").RunEngine; computerId?: string };
   "agent:finished": { taskId: string; agentName: string; exitCode: number; duration: number; sessionId?: string };
   "agent:activity": { taskId: string; agentName: string; tool?: string; file?: string; summary?: string };

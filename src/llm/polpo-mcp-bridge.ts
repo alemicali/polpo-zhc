@@ -51,7 +51,7 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_connector_update", name: "connector_update", group: "connectors" },
   { mcp: "polpo_connector_test", name: "connector_test", group: "connectors" },
   { mcp: "polpo_connector_disconnect", name: "connector_disconnect", group: "connectors" },
-  // Agent harnesses (Claude Code, Codex)
+  // Agent harnesses (Claude Code, Codex, OpenCode)
   { mcp: "polpo_harnesses_get", name: "harnesses_get", group: "harnesses" },
   { mcp: "polpo_harnesses_update", name: "harnesses_update", group: "harnesses" },
   { mcp: "polpo_harness_sessions_list", name: "harness_sessions_list", group: "harnesses" },

@@ -67,7 +67,7 @@ export interface AgentCard {
   generatedAt: string;
   agent: {
     name: string; displayName?: string; role?: string; model?: string; timezone?: string;
-    /** Its engine: Polpo's own or an agent harness (Claude Code, Codex), with the mark the card draws. */
+    /** Its engine: Polpo's own or an agent harness (Claude Code, Codex, OpenCode), with the mark the card draws. */
     engine?: { id: string; label: string; mark: BrandMark; model?: string; modelLabel?: string };
     /** The computer its chats and tasks run on (defaultComputer): "this server" or its id. */
     computer?: string;

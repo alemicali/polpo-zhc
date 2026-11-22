@@ -3,7 +3,7 @@
  * continuations, the runs a direction or "continue" started), in USD and tokens, by engine, with
  * each run's own cost — the same numbers a mission's cost adds up (mission-cost.ts builds on it).
  *
- * A run's cost is the harness runtime's own estimate (`harnessUsd`, Claude Code / Codex) or the
+ * A run's cost is the harness runtime's own estimate (`harnessUsd`, Claude Code / Codex / OpenCode) or the
  * model cost the provider reports (`modelUsd`, Polpo's engine). A task keeps at most
  * MAX_TASK_RUNS runs: when it has that many, older ones may have been dropped. Its harness cost
  * then comes back from the token-usage records (`agent_harness`, the task id as session; they are
@@ -18,7 +18,7 @@ import { MAX_TASK_RUNS, type RunContextStatus, type RunCostContext, type RunEngi
 export interface CostBucket {
   /** USD: the harness estimate plus the model cost. */
   usd: number;
-  /** The harness runtimes' own estimate (Claude Code, Codex), USD. */
+  /** The harness runtimes' own estimate (Claude Code, Codex, OpenCode), USD. */
   harnessUsd: number;
   /** The model cost the provider reported (Polpo's engine), USD. */
   modelUsd: number;
@@ -207,7 +207,7 @@ export function taskMayHaveDroppedRuns(task: { runs?: unknown[] }): boolean {
   return (task.runs?.length ?? 0) >= MAX_TASK_RUNS;
 }
 
-const ENGINE_NAMES: Record<string, string> = { polpo: "Polpo", "claude-code": "Claude Code", codex: "Codex" };
+const ENGINE_NAMES: Record<string, string> = { polpo: "Polpo", "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode" };
 export const usdText = (v: number) => (v === 0 ? "$0" : v < 0.01 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`);
 export const engineName = (e: string) => ENGINE_NAMES[e] ?? e;
 

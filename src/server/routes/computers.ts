@@ -46,7 +46,7 @@ export interface ComputerRouteDeps {
   instance?: () => string | undefined;
   /** Tasks (the detail's recent runs on a computer). */
   tasks?: () => Promise<Task[]>;
-  /** The agent harness sessions (Claude Code, Codex) bound to a computer. */
+  /** The agent harness sessions (Claude Code, Codex, OpenCode) bound to a computer. */
   harnessSessions?: (computerId: string) => HarnessSessionView[];
 }
 

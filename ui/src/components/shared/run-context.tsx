@@ -1,6 +1,6 @@
 /**
  * Where and with what a task run executed (Task.runs): the engine with its official mark (Claude
- * Code, Codex, Polpo) and model, the harness authentication (Bedrock, Vertex AI, API key), the
+ * Code, Codex, OpenCode, Polpo) and model, the harness authentication (Bedrock, Vertex AI, API key), the
  * computer (Daytona v0/v2, E2B, this server) with its live status, the browser egress (direct, or
  * a proxy through Tailscale), the harness session (new or resumed, bootstrap time), the cost
  * (the harness's estimate or the model's) against the budget, and the runs before it.
@@ -21,7 +21,9 @@ import { StatusBadge } from "@/components/computers/status-badge";
 import type { Computer } from "@/lib/computers-api";
 import {
   agentEngineId, latestRun, AUTH_LABELS, authBrand, computerBrand, computerKindLabel, engineBrand, engineDetail, engineLabel, formatMs, formatUsd, modelLabel,
+  openCodeProviderIcon,
 } from "@/lib/run-context";
+import { ProviderIcon } from "@/components/shared/provider-icon";
 import { hasRecordedCost, taskCostOf } from "@/lib/task-cost";
 import { formatTokens } from "@/lib/mission-cost";
 import { cn } from "@/lib/utils";
@@ -117,8 +119,11 @@ function RunDetail({ run, computer }: { run: TaskRunContext; computer?: Computer
         <span className="font-medium" data-testid="run-engine">{engineLabel(run.engine)}</span>
         {detail && <span className="text-muted-foreground" data-testid="run-model" title={run.model}>{detail}</span>}
         {run.auth && (
-          <span className="inline-flex items-center gap-1 text-muted-foreground" title={`${AUTH_LABELS[run.auth.kind] ?? run.auth.kind}${run.auth.region ? ` · ${run.auth.region}` : ""}`}>
-            <BrandIcon name={authBrand(run.auth.kind, run.engine)} size={14} />
+          <span className="inline-flex items-center gap-1 text-muted-foreground" data-testid="run-auth"
+            title={`${AUTH_LABELS[run.auth.kind] ?? run.auth.kind}${run.auth.provider && run.auth.kind === "api-key" ? ` · ${run.auth.provider}` : ""}${run.auth.region ? ` · ${run.auth.region}` : ""}`}>
+            {openCodeProviderIcon(run.engine, run.auth)
+              ? <ProviderIcon name={openCodeProviderIcon(run.engine, run.auth)!} size={14} />
+              : <BrandIcon name={authBrand(run.auth.kind, run.engine, run.auth.provider)} size={14} />}
             {run.auth.region && <span className="text-caption">{run.auth.region}</span>}
           </span>
         )}

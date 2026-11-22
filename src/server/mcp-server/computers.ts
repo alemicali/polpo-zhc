@@ -61,7 +61,7 @@ export function registerComputerTools(tool: Register, deps: McpDeps): void {
     title: "Get a computer",
     description: "One computer in full, as its page shows it: live status, the agents using it, its snapshots (Daytona v2), what a new machine "
       + "is made from (image or snapshot, region, size), when it hibernates or stops by itself, its recent activity (status changes, wakes, "
-      + "rotations, errors, a machine deleted at the provider), the agent harness sessions on it (Claude Code, Codex: state, turns, tokens, cost), "
+      + "rotations, errors, a machine deleted at the provider), the agent harness sessions on it (Claude Code, Codex, OpenCode: state, turns, tokens, cost), "
       + "the recent task runs on it (agent, engine, model, status, duration, cost) and what was spent on it. Read-only: never starts it.",
     inputSchema: { id: z.string().min(1).describe("The computer's id (polpo_computers_list)") },
     outputSchema: { computer: computerItem },

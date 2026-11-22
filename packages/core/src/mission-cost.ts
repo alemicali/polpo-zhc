@@ -4,7 +4,7 @@
  * optional budget (Mission.budgetUsd).
  *
  * The source is Task.runs (run-context.ts): every run, on Polpo's engine or on an agent harness,
- * records its cost there — the harness runtime's own estimate (`harnessUsd`, Claude Code / Codex)
+ * records its cost there — the harness runtime's own estimate (`harnessUsd`, Claude Code / Codex / OpenCode)
  * or the model cost the provider reports (`modelUsd`, Polpo's engine). It is in every store and
  * cheap to read, and the orchestrator enforces the budget from it on every tick.
  *

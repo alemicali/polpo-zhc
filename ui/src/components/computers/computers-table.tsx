@@ -69,7 +69,7 @@ export interface ComputersTableProps {
   computers: Computer[];
   busy: string | null;
   agentEngines?: Record<string, string | undefined>;
-  /** Harness sessions (Claude Code, Codex), all computers. */
+  /** Harness sessions (Claude Code, Codex, OpenCode), all computers. */
   sessions: HarnessSession[];
   onOpen: (computer: Computer) => void;
   onAction: (computer: Computer, action: ComputerAction) => void;

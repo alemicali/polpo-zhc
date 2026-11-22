@@ -8,7 +8,7 @@
  * Scope (decided in @polpo-ai/core taskReadScope): the task's own dependencies and the tasks of
  * its own mission (itself included). Tasks of other missions or other agents' standalone tasks
  * are refused. Given to a task run whose task has dependencies or belongs to a mission, on
- * Polpo's engine and, as host tools, on the agent harnesses (Claude Code, Codex).
+ * Polpo's engine and, as host tools, on the agent harnesses (Claude Code, Codex, OpenCode).
  */
 
 import { Type } from "typebox";

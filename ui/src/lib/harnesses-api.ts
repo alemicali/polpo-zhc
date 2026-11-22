@@ -1,5 +1,5 @@
 /**
- * Agent harnesses (Claude Code, Codex as an agent's engine) — thin client for /api/v1/harnesses,
+ * Agent harnesses (Claude Code, Codex, OpenCode as an agent's engine) — thin client for /api/v1/harnesses,
  * the settings (PATCH /config/settings { harnesses }) and an agent's engine (PATCH /agents/:name).
  * Credentials are vault references only (owner + service); values never reach the dashboard.
  *
@@ -8,18 +8,44 @@
 import { apiUrl, config } from "@/lib/config";
 import type { VaultRef } from "@/lib/vault-ref";
 
-export type HarnessId = "claude-code" | "codex";
-export const HARNESS_NAMES: Record<HarnessId, string> = { "claude-code": "Claude Code", codex: "Codex" };
+export type HarnessId = "claude-code" | "codex" | "opencode";
+export const HARNESS_IDS: readonly HarnessId[] = ["claude-code", "codex", "opencode"];
+export const HARNESS_NAMES: Record<HarnessId, string> = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode" };
 export type ClaudeCodeAuth = "api-key" | "bedrock" | "vertex" | "ai-gateway" | "gateway";
 export const CLAUDE_CODE_AUTH_LABELS: Record<ClaudeCodeAuth, string> = {
   "api-key": "Anthropic API key", bedrock: "Amazon Bedrock", vertex: "Google Vertex AI", "ai-gateway": "Vercel AI Gateway", gateway: "Model gateway",
 };
 export type CodexAuth = "api-key" | "ai-gateway" | "gateway";
 export const CODEX_AUTH_LABELS: Record<CodexAuth, string> = { "api-key": "OpenAI API key", "ai-gateway": "Vercel AI Gateway", gateway: "Model gateway" };
+export type OpenCodeAuth = "api-key" | "bedrock" | "ai-gateway" | "gateway";
+export const OPENCODE_AUTH_LABELS: Record<OpenCodeAuth, string> = {
+  "api-key": "Provider API key", bedrock: "Amazon Bedrock (API key)", "ai-gateway": "Vercel AI Gateway", gateway: "Model gateway",
+};
+/** OpenCode's providers with an API key (packages/core OPENCODE_PROVIDERS): id, name, an example model. */
+export const OPENCODE_PROVIDERS = [
+  { id: "anthropic", name: "Anthropic", example: "claude-sonnet-4-5" },
+  { id: "openai", name: "OpenAI", example: "gpt-5" },
+  { id: "google", name: "Google Gemini", example: "gemini-2.5-pro" },
+  { id: "xai", name: "xAI", example: "grok-4" },
+  { id: "mistral", name: "Mistral", example: "devstral-medium-2507" },
+  { id: "groq", name: "Groq", example: "moonshotai/kimi-k2-instruct-0905" },
+  { id: "deepseek", name: "DeepSeek", example: "deepseek-chat" },
+  { id: "openrouter", name: "OpenRouter", example: "moonshotai/kimi-k2" },
+  { id: "moonshotai", name: "Moonshot AI", example: "kimi-k2-0905-preview" },
+  { id: "zai", name: "Z.ai", example: "glm-4.6" },
+] as const;
+export type OpenCodeProviderId = (typeof OPENCODE_PROVIDERS)[number]["id"];
+/** An example model for an OpenCode setting (the form's placeholder). */
+export function openCodeModelExample(s: { auth?: string; provider?: string } | undefined): string {
+  if (s?.auth === "bedrock") return "global.moonshotai.kimi-k3.1";
+  if (s?.auth === "ai-gateway") return "moonshotai/kimi-k2";
+  if (s?.auth === "gateway") return "the gateway's model id";
+  return OPENCODE_PROVIDERS.find((p) => p.id === s?.provider)?.example ?? "provider model id";
+}
 export type HarnessPermissionMode = "allow-all" | "allow-edits" | "allow-reads";
 export type HarnessEffort = "low" | "medium" | "high" | "xhigh" | "max";
 
-export type GatewayFormat = "anthropic" | "openai-responses";
+export type GatewayFormat = "anthropic" | "openai-responses" | "openai-chat";
 export type GatewayAuthScheme = "x-api-key" | "bearer" | "none";
 export type GatewayPreset = "vercel" | "cloudflare" | "openrouter" | "litellm" | "portkey" | "kong" | "custom";
 
@@ -57,6 +83,7 @@ export interface AgentHarnessEngine {
 
 export interface ClaudeCodeSetting { auth: ClaudeCodeAuth; credentialRef?: VaultRef; gateway?: HarnessGateway; bedrock?: { region: string }; vertex?: { region: string; projectId: string }; model?: string }
 export interface CodexSetting { auth: CodexAuth; credentialRef?: VaultRef; gateway?: HarnessGateway; model?: string }
+export interface OpenCodeSetting { auth: OpenCodeAuth; provider?: OpenCodeProviderId; credentialRef?: VaultRef; gateway?: HarnessGateway; bedrock?: { region: string }; model?: string }
 
 export interface HarnessItem {
   id: HarnessId;
@@ -69,10 +96,12 @@ export interface HarnessItem {
   model?: string;
   bedrock?: { region: string };
   vertex?: { region: string; projectId: string };
+  /** OpenCode with an API key: the model provider. */
+  provider?: string;
   gateway?: HarnessGateway;
   /** The setting as saved (vault references only). */
-  settings?: ClaudeCodeSetting | CodexSetting;
-  /** How the model key reaches the model: Polpo's relay, in the VM (no public URL), or not brokerable (Bedrock / Vertex). */
+  settings?: ClaudeCodeSetting | CodexSetting | OpenCodeSetting;
+  /** How the model key reaches the model: Polpo's relay, in the VM (no public URL), or not brokerable (Claude Code on Bedrock / Vertex). */
   brokering?: "relay" | "in-vm" | "not-brokered";
   agents: string[];
 }
@@ -115,6 +144,7 @@ export interface HarnessesSettings {
   allowHost?: boolean;
   "claude-code"?: ClaudeCodeSetting;
   codex?: CodexSetting;
+  opencode?: OpenCodeSetting;
 }
 
 /** POST /harnesses/test: one tiny model request from the Polpo server. */
@@ -172,6 +202,7 @@ export const harnessesApi = {
 export function settingsFromOverview(o: HarnessesOverview): HarnessesSettings {
   const cc = o.harnesses.find((h) => h.id === "claude-code");
   const cx = o.harnesses.find((h) => h.id === "codex");
+  const oc = o.harnesses.find((h) => h.id === "opencode");
   const strip = <T extends { gateway?: HarnessGateway }>(s: T): T => s.gateway?.headers
     ? { ...s, gateway: { ...s.gateway, headers: s.gateway.headers.map(({ credentialFound: _f, ...h }) => h) } }
     : s;
@@ -180,6 +211,7 @@ export function settingsFromOverview(o: HarnessesOverview): HarnessesSettings {
     ...(o.allowHost ? { allowHost: true } : {}),
     ...(cc?.settings ? { "claude-code": strip(cc.settings as ClaudeCodeSetting) } : {}),
     ...(cx?.settings ? { codex: strip(cx.settings as CodexSetting) } : {}),
+    ...(oc?.settings ? { opencode: strip(oc.settings as OpenCodeSetting) } : {}),
   };
 }
 
@@ -205,29 +237,29 @@ export const GATEWAY_PRESET_INFO: GatewayPresetInfo[] = [
   },
   {
     id: "cloudflare", label: "Cloudflare AI Gateway", fields: [{ key: "account", label: "Account id" }, { key: "gateway", label: "Gateway id" }],
-    baseUrl: (h, f) => `https://gateway.ai.cloudflare.com/v1/${f.account || "<account>"}/${f.gateway || "<gateway>"}/${h === "codex" ? "openai" : "anthropic"}`,
+    baseUrl: (h, f) => `https://gateway.ai.cloudflare.com/v1/${f.account || "<account>"}/${f.gateway || "<gateway>"}/${h === "codex" ? "openai" : h === "opencode" ? "compat" : "anthropic"}`,
     authScheme: "none",
     headers: () => [{ name: "cf-aig-authorization", prefix: "Bearer " }],
     hint: "Authenticated gateway: cf-aig-authorization carries the gateway token (vault). Provider keys stored in Cloudflare (BYOK): auth none; to send your own provider key, choose x-api-key (Claude) or bearer (Codex).",
   },
   {
-    id: "openrouter", label: "OpenRouter", baseUrl: (h) => (h === "codex" ? "https://openrouter.ai/api/v1" : "https://openrouter.ai/api"), authScheme: "bearer",
+    id: "openrouter", label: "OpenRouter", baseUrl: (h) => (h === "claude-code" ? "https://openrouter.ai/api" : "https://openrouter.ai/api/v1"), authScheme: "bearer",
     hint: "OpenRouter key as a Bearer token; model ids like anthropic/claude-sonnet-4.5. Non-Claude models: tick \"non-Claude models\".",
   },
   {
-    id: "litellm", label: "LiteLLM", baseUrl: (h) => (h === "codex" ? "https://litellm.example.com/v1" : "https://litellm.example.com"), authScheme: "bearer",
+    id: "litellm", label: "LiteLLM", baseUrl: (h) => (h === "claude-code" ? "https://litellm.example.com" : "https://litellm.example.com/v1"), authScheme: "bearer",
     hint: "Your LiteLLM proxy's URL; its virtual key as a Bearer token. Model ids are the proxy's model names.",
   },
   {
-    id: "portkey", label: "Portkey", baseUrl: (h) => (h === "codex" ? "https://api.portkey.ai/v1" : "https://api.portkey.ai"), authScheme: "none",
-    headers: (h) => [{ name: "x-portkey-api-key" }, { name: "x-portkey-provider", value: h === "codex" ? "openai" : "anthropic" }],
+    id: "portkey", label: "Portkey", baseUrl: (h) => (h === "claude-code" ? "https://api.portkey.ai" : "https://api.portkey.ai/v1"), authScheme: "none",
+    headers: (h) => [{ name: "x-portkey-api-key" }, { name: "x-portkey-provider", value: h === "claude-code" ? "anthropic" : "openai" }],
     hint: "x-portkey-api-key from the vault; x-portkey-provider is a provider or an @integration slug (not a secret).",
   },
   {
-    id: "kong", label: "Kong AI Gateway", baseUrl: (h) => (h === "codex" ? "https://kong.example.com/ai/v1" : "https://kong.example.com/ai"), authScheme: "bearer",
+    id: "kong", label: "Kong AI Gateway", baseUrl: (h) => (h === "claude-code" ? "https://kong.example.com/ai" : "https://kong.example.com/ai/v1"), authScheme: "bearer",
     hint: "Your Kong route's URL; the key as your Kong key-auth plugin expects it (Bearer, x-api-key, or a header).",
   },
-  { id: "custom", label: "Custom", baseUrl: (h) => (h === "codex" ? "https://gateway.example.com/v1" : "https://gateway.example.com"), authScheme: "bearer", hint: "Any gateway with the Anthropic Messages API (Claude Code) or the OpenAI Responses API (Codex)." },
+  { id: "custom", label: "Custom", baseUrl: (h) => (h === "claude-code" ? "https://gateway.example.com" : "https://gateway.example.com/v1"), authScheme: "bearer", hint: "Any gateway with the Anthropic Messages API (Claude Code), the OpenAI Responses API (Codex) or, for OpenCode, any of these or OpenAI Chat Completions." },
 ];
 
 /** Cloudflare account and gateway ids back from a base URL (to edit them). */
@@ -273,6 +305,19 @@ export function cleanHarnessSettings(form: HarnessesSettings): HarnessesSettings
   if (cx) {
     if (isGatewayAuth(cx.auth)) { cx.gateway = cleanGateway(cx.auth, cx.gateway); delete cx.credentialRef; } else delete cx.gateway;
     if (isGatewayAuth(cx.auth) ? !cx.gateway : !cx.credentialRef) delete out.codex; else out.codex = cx;
+  }
+  const oc = out.opencode ? { ...out.opencode } : undefined;
+  if (oc) {
+    if (isGatewayAuth(oc.auth)) {
+      const g = cleanGateway(oc.auth, oc.gateway);
+      if (g) { delete g.nonClaude; if (g.models) g.models = { main: g.models.main }; }
+      oc.gateway = g;
+      delete oc.credentialRef;
+    } else delete oc.gateway;
+    if (oc.auth !== "bedrock") delete oc.bedrock;
+    if (oc.auth !== "api-key") delete oc.provider;
+    if (!oc.model) delete oc.model;
+    if (isGatewayAuth(oc.auth) ? !oc.gateway : !oc.credentialRef) delete out.opencode; else out.opencode = oc;
   }
   return out;
 }

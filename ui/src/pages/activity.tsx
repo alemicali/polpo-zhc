@@ -1048,7 +1048,7 @@ function HistoryView() {
  * Events: what polpo-zhc emits (tasks, agents, missions, approvals, notifications, system
  * messages…), live as it happens or from the history kept per server start.
  */
-/** Each agent's engine ("polpo", "claude-code", "codex"): run events show the harness's mark. */
+/** Each agent's engine ("polpo", "claude-code", "codex", "opencode"): run events show the harness's mark. */
 const AgentEnginesContext = createContext<Record<string, string>>({});
 
 /** The engine mark of a run event: the engine it reports (agent:spawned), else its agent's. */
