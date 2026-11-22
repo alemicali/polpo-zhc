@@ -536,6 +536,9 @@ export function openAuthWindow(): Window | null {
   }
 }
 
+/** How long to wait, after sign-in, for the server's first connection to a connector. */
+const FIRST_CONNECTION_GRACE_MS = 30_000;
+
 export type OAuthOutcome =
   | { kind: "connected"; connector: Connector }
   | { kind: "authorized_with_error"; connector: Connector; error: string }
@@ -557,6 +560,8 @@ export function waitForOAuth(
     let done = false;
     let closedPolls = 0;
     const started = Date.now();
+    // signed in but not connected yet: the server is still making the first connection
+    let authorizedAt: number | undefined;
     const finish = (outcome: OAuthOutcome) => {
       if (done) return;
       done = true;
@@ -572,7 +577,15 @@ export function waitForOAuth(
         if (done) return;
         if (!c.secrets.oauth.pending) {
           if (c.status === "connected") return finish({ kind: "connected", connector: c });
-          if (c.secrets.oauth.authorized) return finish({ kind: "authorized_with_error", connector: c, error: c.lastError ?? "The first connection failed" });
+          if (c.secrets.oauth.authorized) {
+            // the tokens land before the first connection finishes: wait for it (or its error)
+            if (c.lastError) return finish({ kind: "authorized_with_error", connector: c, error: c.lastError });
+            authorizedAt ??= Date.now();
+            if (Date.now() - authorizedAt > FIRST_CONNECTION_GRACE_MS) {
+              return finish({ kind: "authorized_with_error", connector: c, error: "The first connection failed" });
+            }
+            return;
+          }
           if (c.lastError) return finish({ kind: "failed", error: c.lastError });
         }
       } catch { /* keep waiting */ }
