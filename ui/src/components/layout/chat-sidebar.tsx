@@ -19,6 +19,7 @@ import {
 import { useLocation } from "react-router-dom";
 import { useSidebarOpen } from "@/hooks/chat-context";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useOrchestratorName } from "@/lib/orchestrator-name";
 import {
   PromptInput,
   PromptInputTextarea,
@@ -55,6 +56,7 @@ const readStoredSidebarWidth = () => {
  * The prompt input is real (disabled) so the user always sees a consistent UI.
  */
 function SidebarSkeleton() {
+  const orchestratorName = useOrchestratorName();
   return (
     <div className="flex flex-col flex-1 min-h-0">
       {/* Toolbar skeleton */}
@@ -99,7 +101,7 @@ function SidebarSkeleton() {
       <div className="bg-background/80 backdrop-blur-md px-4 pt-2 pb-1.5 shrink-0">
         <div className="mx-auto max-w-3xl">
           <PromptInput onSubmit={() => {}} className="[&_[data-slot=input-group]]:rounded-[calc(var(--radius)+8px)]">
-            <PromptInputTextarea placeholder="Message Polpo..." disabled />
+            <PromptInputTextarea placeholder={`Message ${orchestratorName}...`} disabled />
             <PromptInputFooter>
               <div className="flex items-center gap-1" />
               <PromptInputSubmit disabled />

@@ -534,8 +534,11 @@ describe("agent harnesses through MCP", () => {
   });
 
   it("enables Claude Code on Bedrock with a vault reference, hands off the missing key, refuses a subscription", async () => {
-    const sub = await tool("polpo_harnesses_update", { enabled: ["claude-code"], claude_code: { auth: "subscription" as any, credential_ref: { owner: "agent-1", service: "x" } } });
+    const sub = await tool("polpo_harnesses_update", { enabled: ["claude-code"], claude_code: { auth: "subscription", credential_ref: { owner: "agent-1", service: "x" } } });
     expect(sub.isError).toBe(true);
+    // the explicit terms message, not a generic schema error
+    expect(text(sub)).toMatch(/Anthropic's terms/);
+    expect(text(sub)).not.toMatch(/Invalid option|Input validation/);
 
     const r = await tool("polpo_harnesses_update", {
       enabled: ["claude-code"], claude_code: { auth: "bedrock", credential_ref: { owner: "agent-1", service: "bedrock" }, bedrock_region: "us-east-1", model: "us.anthropic.claude-haiku-4-5-20251001-v1:0" },
@@ -550,6 +553,11 @@ describe("agent harnesses through MCP", () => {
     expect(got.structuredContent.harnesses.find((h: any) => h.id === "claude-code")).toMatchObject({
       enabled: true, auth: "bedrock", credentialRef: { owner: "agent-1", service: "bedrock" }, credentialFound: false, bedrock: { region: "us-east-1" },
     });
+    expect(text(got)).toMatch(/credential agent-1 \/ bedrock \(MISSING in the vault\)/);
+    // found is said too, not only missing
+    const { harnessLine } = await import("../server/mcp-server/harnesses.js");
+    expect(harnessLine({ id: "claude-code", name: "Claude Code", enabled: true, auth: "api-key", credentialRef: { owner: "ops", service: "anthropic" }, credentialFound: true, agents: [] }))
+      .toContain("credential ops / anthropic (found in the vault)");
     expect((await settingsFile()).data.settings.harnesses).toMatchObject({ enabled: ["claude-code"], "claude-code": { auth: "bedrock" } });
   });
 

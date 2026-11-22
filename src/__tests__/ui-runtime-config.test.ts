@@ -19,6 +19,7 @@ let apiHits = 0;
 let appearance: unknown = { theme: "light", palette: "claude", custom: { enabled: true, light: { primary: "#c96442" } }, fonts: [{ family: "Manrope", source: "google", weights: "400;700" }] };
 let branding: unknown = { productName: "Acme Ops", tagline: "Internal AI", logoUrl: "/api/v1/config/branding/logo", logoFrame: "none", secret: "never inlined" };
 let brandingHits = 0;
+let orchestrator: unknown = { name: "Ada" };
 const uis: ChildProcess[] = [];
 
 async function startUi(env: Record<string, string>): Promise<string> {
@@ -50,6 +51,11 @@ beforeAll(async () => {
       apiHits++;
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ ok: true, data: appearance }));
+      return;
+    }
+    if (req.url === "/api/v1/config/orchestrator") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true, data: orchestrator }));
       return;
     }
     if (req.url === "/api/v1/config/branding") {
@@ -127,12 +133,22 @@ describe("runtime-config.js", () => {
     expect(plain).toContain("<title>Polpo ZHC — AI Factory</title>");
   });
 
+  it("carries the orchestrator's display name, separate from the branding; an invalid one is left out", async () => {
+    const apiUrl = `http://127.0.0.1:${(api.address() as AddressInfo).port}`;
+    const base = await startUi({ POLPO_API_URL: apiUrl, POLPO_APPEARANCE_TTL_MS: "0" });
+    expect((await runtimeConfig(base)).config.orchestratorName).toBe("Ada");
+    orchestrator = { name: "x".repeat(41) };
+    expect("orchestratorName" in (await runtimeConfig(base)).config).toBe(false);
+    orchestrator = { name: "Ada" };
+  });
+
   it("leaves it out when the API cannot be reached", async () => {
     const base = await startUi({ POLPO_API_URL: "http://127.0.0.1:9", POLPO_APPEARANCE_TTL_MS: "0" });
     const { config } = await runtimeConfig(base);
     expect(config.baseUrl).toBe("http://127.0.0.1:9");
     expect("appearance" in config).toBe(false);
     expect("branding" in config).toBe(false);
+    expect("orchestratorName" in config).toBe(false);
     expect(await (await fetch(`${base}/`)).text()).toContain("<title>Polpo ZHC — AI Factory</title>");
   });
 });

@@ -9878,6 +9878,12 @@
                       }
                     ]
                   },
+                  "orchestratorName": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 40,
+                    "pattern": "^[^\\r\\n]*$"
+                  },
                   "imageModel": {
                     "type": "string",
                     "nullable": true

@@ -11,6 +11,7 @@ import { readSystemContext } from "./orchestrator-tools.js";
 import { detectProviders } from "../setup/providers.js";
 import { inkRegistry } from "../core/ink-config.js";
 import { describeVoiceReplies } from "../tools/voice-reply-tools.js";
+import { DEFAULT_ORCHESTRATOR_NAME, orchestratorName } from "../core/orchestrator-name.js";
 
 /**
  * Describe what tools/capabilities an agent has based on its allowedTools config.
@@ -139,6 +140,22 @@ export function buildReachabilitySection(
   ].join("\n");
 }
 
+/**
+ * The identity line of the orchestrator's chat prompt: its display name (settings.orchestratorName),
+ * with "Polpo" kept as the platform's name when the two differ.
+ */
+export function orchestratorIdentity(name: string): string[] {
+  if (name === DEFAULT_ORCHESTRATOR_NAME) {
+    return [`You are Polpo — an AI orchestrator that manages teams of autonomous AI agents.`];
+  }
+  return [
+    `You are ${name} — an AI orchestrator that manages teams of autonomous AI agents.`,
+    `Your name is ${name}: introduce and sign yourself as ${name}. You run on Polpo, the agent orchestration`,
+    `platform; where this prompt says "Polpo" about the software (its loop, server, API, tools), it means`,
+    `that platform, and where it speaks of you as Polpo, it means you, ${name}.`,
+  ];
+}
+
 export async function buildChatSystemPrompt(
   orchestrator: Orchestrator,
   state: PolpoState | null,
@@ -155,7 +172,7 @@ export async function buildChatSystemPrompt(
 
   const parts: string[] = [
     // ── Identity ──
-    `You are Polpo — an AI orchestrator that manages teams of autonomous AI agents.`,
+    ...orchestratorIdentity(orchestratorName(config?.settings)),
     `You help people build their personal AI assistant, their AI team, or even their entire`,
     `virtual AI company. Coding is one use case — but your agents can do anything: research,`,
     `writing, data analysis, web scraping, email outreach, social media, customer support,`,

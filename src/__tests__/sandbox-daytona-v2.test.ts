@@ -808,12 +808,25 @@ describe("computers on Daytona v2: hibernate (memory and disk snapshots)", () =>
     expect(m.read().nina.restoredFrom).toBe("snap_1");
     expect([...v2.snapshots.keys()]).toEqual(["snap_1"]); // keepSnapshots 1: the one it runs from
 
-    // second cycle: snap_1 goes only after the VM from snap_2 runs
+    // second cycle: snap_1 goes once snap_2 is ready and the VM is deleted (keepSnapshots 1 while
+    // hibernated too: live, nina kept 2 snapshots between a hibernation and the next wake)
     await m.stop(nina);
-    expect([...v2.snapshots.keys()]).toEqual(["snap_1", "snap_2"]);
-    await m.start(nina, sb());
-    expect(idx("delete-snapshot snap_1")).toBeGreaterThan(idx("restore snap_2"));
+    expect(idx("delete-snapshot snap_1")).toBeGreaterThan(idx("delete sbx_2"));
     expect([...v2.snapshots.keys()]).toEqual(["snap_2"]);
+    expect(m.read().nina.restoredFrom).toBeUndefined();
+    expect(m.read().nina.snapshots!.map((x) => x.id)).toEqual(["snap_2"]);
+    await m.start(nina, sb());
+    expect(v2.restores.at(-1)!.snapshot).toBe("snap_2");
+    expect([...v2.snapshots.keys()]).toEqual(["snap_2"]);
+  });
+
+  test("keepSnapshots 2: a hibernated computer keeps its two newest snapshots", async () => {
+    providerOptions.value = { api: "v2", hibernate: { keepSnapshots: 2 } };
+    const { m } = setup();
+    await m.ensure(nina, sb());
+    for (let i = 0; i < 3; i++) { await m.stop(nina); await m.ensure(nina, sb()); }
+    await m.stop(nina);
+    expect([...v2.snapshots.keys()]).toEqual(["snap_3", "snap_4"]);
   });
 
   test("a failed wake keeps every snapshot; the next use tries again", async () => {
@@ -822,11 +835,12 @@ describe("computers on Daytona v2: hibernate (memory and disk snapshots)", () =>
     await m.stop(nina);
     await m.ensure(nina, sb());
     await m.stop(nina);
+    const deletes = v2.calls.filter((c) => c.startsWith("delete-snapshot")).length;
     v2.restoreError = Object.assign(new Error("no capacity"), { statusCode: 503 });
     await expect(m.ensure(nina, sb())).rejects.toThrow(/no capacity/);
     expect(m.live("nina").status).toBe("error");
-    expect([...v2.snapshots.keys()]).toEqual(["snap_1", "snap_2"]);
-    expect(v2.calls.some((c) => c.startsWith("delete-snapshot"))).toBe(false);
+    expect([...v2.snapshots.keys()]).toEqual(["snap_2"]);
+    expect(v2.calls.filter((c) => c.startsWith("delete-snapshot"))).toHaveLength(deletes); // the failed wake deleted none
     v2.restoreError = undefined;
     await m.ensure(nina, sb());
     expect(v2.restores.at(-1)!.snapshot).toBe("snap_2");
@@ -979,7 +993,8 @@ describe("computers on Daytona v2: hibernate (memory and disk snapshots)", () =>
     await m.stop(nina);
     await m.ensure(nina, sb());
     await m.stop(nina);
-    expect([...v2.snapshots.keys()].sort()).toEqual(["snap_1", "snap_2", "snap_other_computer", "snap_other_instance"]);
+    // pruning after a hibernation never touches another computer's or instance's snapshots
+    expect([...v2.snapshots.keys()].sort()).toEqual(["snap_2", "snap_other_computer", "snap_other_instance"]);
     await m.reset(nina, sb());
     expect([...v2.snapshots.keys()].sort()).toEqual(["snap_other_computer", "snap_other_instance"]);
     expect(v2.creates).toHaveLength(2);

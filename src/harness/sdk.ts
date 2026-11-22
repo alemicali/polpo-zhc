@@ -84,14 +84,29 @@ function errorText(err: unknown): string {
   try { return JSON.stringify(err); } catch { return String(err); }
 }
 
+/** Up to this many host tools, Claude Code gets every one of them with the first request. */
+export const HOST_TOOLS_EAGER_LIMIT = 40;
+
+/**
+ * Claude Code's tool search (ENABLE_TOOL_SEARCH) for the host tools: off ("false": every tool in
+ * the first request, no ToolSearch lookup the model can skip) for up to HOST_TOOLS_EAGER_LIMIT
+ * tools; "auto" above (deferred only when their definitions take a large share of the context).
+ */
+export function claudeCodeToolSearch(hostTools: number): "false" | "auto" {
+  return hostTools <= HOST_TOOLS_EAGER_LIMIT ? "false" : "auto";
+}
+
 function buildHarness(spec: HarnessRuntimeSpec): any {
   const debug = spec.onDebug ? (e: any) => { try { spec.onDebug!({ ...e, type: String(e?.type ?? "debug") }); } catch { /* never breaks the bridge */ } } : undefined;
   if (spec.harness === "claude-code") {
-    // host tools load with the first request (no ToolSearch round trip per session)
+    // Host tools load with the first request (no ToolSearch round trip). The `alwaysLoad` hint
+    // (MCP `_meta["anthropic/alwaysLoad"]`) alone is not honored by the pinned Claude Code (live:
+    // register_outcome stayed in the deferred set), so tool search is turned off for a normal
+    // tool set; the hint stays for when it is on.
     const toolHints = Object.fromEntries(spec.tools.map((t) => [t.name, { alwaysLoad: true, ...(t.readOnly ? { readOnly: true } : {}) }]));
     return createClaudeCode({
       auth: { ...spec.auth.auth },
-      env: { ...spec.auth.env },
+      env: { ENABLE_TOOL_SEARCH: claudeCodeToolSearch(spec.tools.length), ...spec.auth.env },
       toolHints,
       // the agent's own MCP servers are Polpo connectors, offered as host tools: no .mcp.json in the repo
       strictMcpConfig: true,

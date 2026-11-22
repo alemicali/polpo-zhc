@@ -17,6 +17,7 @@ import {
   type McpDeps, type Register, type ResolveHost,
 } from "./kit.js";
 import { setupHandoff } from "./setup.js";
+import { ORCHESTRATOR_NAME_MAX_LENGTH, orchestratorName } from "../../core/orchestrator-name.js";
 
 /** Largest logo accepted (the dashboard's upload limit). */
 export const MAX_LOGO_BYTES = 4 * 1024 * 1024;
@@ -87,11 +88,11 @@ export async function fetchPublicImage(deps: McpDeps, url: string): Promise<{ ok
 }
 
 const settingsView = z.object({
-  orchestratorModel: z.unknown().optional(), imageModel: z.string().optional(), reasoning: z.string().optional(),
+  orchestratorModel: z.unknown().optional(), orchestratorName: z.string().optional(), imageModel: z.string().optional(), reasoning: z.string().optional(),
 }).passthrough();
 
 type Settings = Record<string, unknown> & {
-  orchestratorModel?: string | { primary?: string; fallbacks?: string[] }; imageModel?: string; reasoning?: string;
+  orchestratorModel?: string | { primary?: string; fallbacks?: string[] }; orchestratorName?: string; imageModel?: string; reasoning?: string;
   branding?: { productName?: string; tagline?: string; logoUrl?: string; logoDarkUrl?: string; logoFrame?: "box" | "none" };
   appearance?: AppearanceSettings;
   notifications?: { channels?: Record<string, { type?: string }>; rules?: Array<{ id?: string; name?: string; events?: string[]; channels?: string[] }> };
@@ -100,7 +101,7 @@ type Settings = Record<string, unknown> & {
 
 /** The settings people choose, without secrets or internals. */
 function publicSettings(s: Settings): Record<string, unknown> {
-  const keys = ["orchestratorModel", "imageModel", "reasoning", ...GENERAL_KEYS, "storage", "compaction", "mcp", "connectors", "egressProxies", "tailscale",
+  const keys = ["orchestratorName", "orchestratorModel", "imageModel", "reasoning", ...GENERAL_KEYS, "storage", "compaction", "mcp", "connectors", "egressProxies", "tailscale",
     "escalationPolicy", "sla", "appearance"];
   return Object.fromEntries(keys.filter((k) => s[k] !== undefined).map((k) => [k, k === "egressProxies" ? maskProxies(s[k]) : s[k]]));
 }
@@ -337,7 +338,7 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
 
   tool("config", "polpo_config_get", {
     title: "Get the configuration",
-    description: "The instance's settings (Polpo's model and fallbacks, image model, reasoning, retries, concurrency, scheduler…), branding, "
+    description: "The instance's settings (the orchestrator's display name, Polpo's model and fallbacks, image model, reasoning, retries, concurrency, scheduler…), branding, "
       + "and a summary of notification channels, notification rules and approval gates. Secrets are never included.",
     inputSchema: {},
     outputSchema: {
@@ -355,13 +356,15 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
     const channels = Object.entries(s.notifications?.channels ?? {}).map(([name, c]) => ({ name, ...(c?.type ? { type: c.type } : {}) }));
     const rules = (s.notifications?.rules ?? []).map((x) => ({ id: x.id, name: x.name, events: x.events, channels: x.channels }));
     const gates = (s.approvalGates ?? []).map((g) => ({ id: g.id, name: g.name, hook: g.hook, handler: g.handler }));
-    const settings = publicSettings(s);
+    // the orchestrator's display name always, its default ("Polpo") too
+    const settings = { ...publicSettings(s), orchestratorName: orchestratorName(s) };
     const om = s.orchestratorModel;
     const text = [
       `project: ${cfg.project ?? "-"}`,
+      `orchestrator name: ${settings.orchestratorName}${s.orchestratorName ? "" : " (default)"}`,
       `Polpo's model: ${typeof om === "string" ? om : om?.primary ?? "default"}${typeof om === "object" && om?.fallbacks?.length ? ` (fallbacks: ${om.fallbacks.join(", ")})` : ""}`,
       `image model: ${s.imageModel ?? "default"} · reasoning: ${s.reasoning ?? "default"}`,
-      ...Object.entries(settings).filter(([k]) => !["orchestratorModel", "imageModel", "reasoning"].includes(k)).map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : String(v)}`),
+      ...Object.entries(settings).filter(([k]) => !["orchestratorName", "orchestratorModel", "imageModel", "reasoning"].includes(k)).map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : String(v)}`),
       `branding: ${s.branding?.productName ?? "Polpo"}${s.branding?.tagline ? ` — ${s.branding.tagline}` : ""}${s.branding?.logoUrl ? " (custom logo)" : ""}`,
       `channels: ${channels.map((c) => `${c.name}${c.type ? ` (${c.type})` : ""}`).join(", ") || "none"}`,
       `rules: ${rules.map((x) => x.name ?? x.id).join(", ") || "none"} · approval gates: ${gates.map((g) => g.name ?? g.id).join(", ") || "none"}`,
@@ -371,12 +374,14 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
 
   tool("config", "polpo_config_update", {
     title: "Update settings",
-    description: "Change the instance's settings: Polpo's own model (and fallbacks), the image model, the reasoning level, the egress proxies agents' "
+    description: "Change the instance's settings: the orchestrator's display name (orchestrator_name), Polpo's own model (and fallbacks), the image model, the reasoning level, the egress proxies agents' "
       + "browsers can use (agent.browserEgress picks one), the general settings (retries, concurrency, timeouts, log level, scheduler, quality, "
       + "voice replies…), compaction, Tailscale in remote computers, Polpo's MCP server (toolsets, named keys) and connectors' network policy. "
       + "Secrets are only vault references ({ owner, service }). Only the fields given change; models are checked against the catalog "
       + "(polpo_models_list). The result lists what changed. Needs the admin scope.",
     inputSchema: {
+      orchestrator_name: z.string().trim().max(ORCHESTRATOR_NAME_MAX_LENGTH).regex(/^[^\r\n]*$/, "a single line").nullable().optional()
+        .describe("The orchestrator's display name in chats, groups, channels and its own prompt (1–40 characters); null or '' restores the default, Polpo"),
       orchestrator_model: modelSpec.optional().describe("Polpo's model: provider:model, or { primary, fallbacks }"),
       image_model: z.string().nullable().optional().describe("The model for images (provider:model), or null for the default"),
       reasoning: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional().describe("How much Polpo reasons before answering"),
@@ -406,8 +411,9 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
     },
     outputSchema: { changed: z.array(z.string()), settings: settingsView },
     annotations: UPDATE,
-  }, async ({ orchestrator_model, image_model, reasoning, egress_proxies, allow_unlisted, general, compaction, tailscale, mcp, connectors }) => {
+  }, async ({ orchestrator_name, orchestrator_model, image_model, reasoning, egress_proxies, allow_unlisted, general, compaction, tailscale, mcp, connectors }) => {
     const body: Record<string, unknown> = {};
+    if (orchestrator_name !== undefined) body.orchestratorName = orchestrator_name || null;
     if (orchestrator_model !== undefined) body.orchestratorModel = orchestrator_model;
     if (image_model !== undefined) body.imageModel = image_model;
     if (reasoning !== undefined) body.reasoning = reasoning;
@@ -437,7 +443,7 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
       };
     }
     if (Object.keys(body).length === 0) {
-      return fail("Nothing to change: give orchestrator_model, image_model, reasoning, egress_proxies, general, compaction, tailscale, mcp or connectors.");
+      return fail("Nothing to change: give orchestrator_name, orchestrator_model, image_model, reasoning, egress_proxies, general, compaction, tailscale, mcp or connectors.");
     }
     const missing = await missingVaultRefs(deps, refs);
     if (missing.length) {

@@ -87,6 +87,7 @@ import { connectorRoutes, connectorOAuthCallback } from "./routes/connectors.js"
 import { connectorManagerFor, connectorsPromptSection, notePublicOrigin, clientMetadataDocument, CONNECTOR_CLIENT_METADATA_PATH, CONNECTOR_OAUTH_CALLBACK_PATH } from "../mcp/runtime.js";
 import { isMcpToolName, toolResultText } from "../mcp/tools.js";
 import { AgentTalk } from "./agent-talk.js";
+import { orchestratorName } from "../core/orchestrator-name.js";
 import { resolveBrowserEgress } from "../tools/browser-egress.js";
 import { appPreviewRoutes } from "./routes/app-preview.js";
 import { backgroundWaitRoutes } from "./routes/background-waits.js";
@@ -1097,6 +1098,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
     },
     agents: async () => (await o.getAgents()).map((a) => ({ name: a.name, ...(a.role ? { role: a.role } : {}) })),
+    orchestratorName: () => orchestratorName(o.getConfig()?.settings),
     // The answer joins the conversation now: into the running answer, else as the next turn
     // (streamed, so an open chat shows it live), whatever auto-send says.
     deliver: async (sessionId, content) => {

@@ -258,6 +258,13 @@ export async function apiGet(deps: McpDeps, path: string): Promise<Unwrapped> {
   return unwrap(await deps.api("GET", `/api/v1${path}`));
 }
 
+/** The orchestrator's display name (settings.orchestratorName) for replies; "Polpo" when unknown. */
+export async function orchestratorLabel(deps: McpDeps): Promise<string> {
+  const r = await apiGet(deps, "/config/orchestrator").catch(() => undefined);
+  const name = r?.ok ? (r.data as { name?: unknown } | undefined)?.name : undefined;
+  return typeof name === "string" && name.trim() ? name.trim() : "Polpo";
+}
+
 /** A write to /api/v1{path}. */
 export async function apiSend(deps: McpDeps, method: string, path: string, body?: unknown): Promise<Unwrapped> {
   return unwrap(await deps.api(method, `/api/v1${path}`, body));

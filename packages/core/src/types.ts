@@ -946,6 +946,9 @@ export interface PolpoSettings {
   /** Model for orchestrator LLM calls (question detection, deadlock, missions).
    *  Can be a simple string ("anthropic:claude-opus-4-6") or a ModelConfig with fallbacks. */
   orchestratorModel?: string | ModelConfig;
+  /** The orchestrator's display name in chats, channels, MCP and its system prompt (1–40 chars).
+   *  Default "Polpo". Independent of branding.productName. */
+  orchestratorName?: string;
   /** Polpo's voice replies in chats (Telegram); default "off". Polpo can change it (set_voice_replies). */
   voiceReplies?: VoiceReplyMode;
   /** Image-capable model for tasks that need vision (falls back to orchestratorModel). */

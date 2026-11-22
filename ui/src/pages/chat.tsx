@@ -152,7 +152,7 @@ import { useAgents, useEvents, useSkills, usePolpo } from "@polpo-ai/react";
 import type { AgentConfig, Mission, PlaybookInfo, SkillWithAssignment, Task } from "@polpo-ai/react";
 import { cn } from "@/lib/utils";
 import { config } from "@/lib/config";
-import { getInstanceBranding } from "@/lib/branding";
+import { useOrchestratorName } from "@/lib/orchestrator-name";
 import { useChatFirstSessionsOpen, setChatFirstSessionsOpen } from "@/hooks/use-layout-mode";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
@@ -1981,10 +1981,6 @@ function isFileAllowedForAgent(file: MentionFile, agent?: AgentConfig): boolean 
 /** Key used for orchestrator (non-agent) sessions in the group map */
 const ORCHESTRATOR_KEY = "__orchestrator__";
 
-/** The orchestrator's name in the chat: the instance's product name when one is set (branding), else Polpo. */
-function orchestratorName(): string {
-  return getInstanceBranding()?.productName || "Polpo";
-}
 const SIDEBAR_VIEW_KEY = "polpo-chat-sidebar-view";
 const SESSION_SIDEBAR_WIDTH_KEY = "polpo-chat-session-sidebar-width";
 const SESSION_SIDEBAR_DEFAULT_WIDTH = 360;
@@ -2206,6 +2202,7 @@ function SessionSidebar({
   /** "Groups" section rendered above the threads. */
   groupsSection?: ReactNode;
 }) {
+  const orchestratorName = useOrchestratorName();
   const { agents } = useAgents();
   const agentMap = agents ? Object.fromEntries(agents.map((a) => [a.name, a])) : {};
   const [sidebarWidth, setSidebarWidth] = useState(readStoredSessionSidebarWidth);
@@ -2338,7 +2335,7 @@ function SessionSidebar({
     // Drill-down mode with an active group → show back + agent name
     if (view === "drill" && activeGroup) {
       const agent = activeGroup !== ORCHESTRATOR_KEY ? agentMap[activeGroup] : undefined;
-      const name = agent ? (agent.identity?.displayName ?? agent.name) : orchestratorName();
+      const name = agent ? (agent.identity?.displayName ?? agent.name) : orchestratorName;
       return (
         <div className="px-3 py-2.5 border-b border-border/40 flex items-start gap-2 shrink-0">
           <Button
@@ -2447,7 +2444,7 @@ function SessionSidebar({
     <div className="p-1.5 space-y-0.5">
       {groups.map(([key, groupSessions]: [string, SessionItem[]]) => {
         const agent = key !== ORCHESTRATOR_KEY ? agentMap[key] : undefined;
-        const displayName = agent ? (agent.identity?.displayName ?? agent.name) : orchestratorName();
+        const displayName = agent ? (agent.identity?.displayName ?? agent.name) : orchestratorName;
         const latestSession = groupSessions[0];
         const count = groupSessions.length;
         const hasActive = groupSessions.some((s: SessionItem) => s.id === activeSessionId);
@@ -2502,7 +2499,7 @@ function SessionSidebar({
     <div className="p-1.5 space-y-1">
       {groups.map(([key, groupSessions]: [string, SessionItem[]]) => {
         const agent = key !== ORCHESTRATOR_KEY ? agentMap[key] : undefined;
-        const displayName = agent ? (agent.identity?.displayName ?? agent.name) : orchestratorName();
+        const displayName = agent ? (agent.identity?.displayName ?? agent.name) : orchestratorName;
         const count = groupSessions.length;
         const isExpanded = expandedGroups.has(key);
         const hasActive = groupSessions.some((s: SessionItem) => s.id === activeSessionId);
@@ -2761,6 +2758,7 @@ function ChatToolbar({
   onToggleSidebar: () => void;
   compact?: boolean;
 }) {
+  const orchestratorName = useOrchestratorName();
   const { messages, isLoading, sessionId, sessions, selectedAgent } = useChatState();
   const { newSession, clear } = useChatActions();
   const { agents } = useAgents();
@@ -2825,7 +2823,7 @@ function ChatToolbar({
             ) : (
               <>
                 <span className="shrink-0 text-sm leading-none">🐙</span>
-                <span className="truncate text-sm font-semibold leading-5 text-foreground">{orchestratorName()}</span>
+                <span className="truncate text-sm font-semibold leading-5 text-foreground">{orchestratorName}</span>
               </>
             )}
           </div>
@@ -2918,7 +2916,7 @@ function ChatToolbar({
           ) : (
             <>
               <span className="shrink-0 text-sm leading-none">🐙</span>
-              <span className="truncate text-sm font-semibold leading-5 text-foreground">{orchestratorName()}</span>
+              <span className="truncate text-sm font-semibold leading-5 text-foreground">{orchestratorName}</span>
             </>
           )}
         </div>
@@ -2959,12 +2957,13 @@ function ChatToolbar({
 // ── ChatEmptyState — shown when no messages ──
 
 function ChatEmptyState() {
+  const orchestratorName = useOrchestratorName();
   const { send, setSelectedAgent } = useChatActions();
   const { selectedAgent } = useChatState();
   const { agents } = useAgents();
   const { skills } = useSkills();
   const agentConfig = selectedAgent && agents ? agents.find((a) => a.name === selectedAgent) : undefined;
-  const name = agentConfig?.identity?.displayName ?? agentConfig?.name ?? orchestratorName();
+  const name = agentConfig?.identity?.displayName ?? agentConfig?.name ?? orchestratorName;
   const agentSuggestions = useMemo(() => {
     if (!agentConfig) return [];
 
@@ -3029,7 +3028,7 @@ function ChatEmptyState() {
             >
               <span className="text-xs leading-none">🐙</span>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium">{orchestratorName()}</p>
+                <p className="text-sm font-medium">{orchestratorName}</p>
                 <p className="text-caption text-muted-foreground">Orchestrator</p>
               </div>
               {!selectedAgent && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
@@ -3105,7 +3104,7 @@ function ChatEmptyState() {
             <div>
               <p className="text-xs font-medium">Create a mission</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {orchestratorName()} will ask what to build
+                {orchestratorName} will ask what to build
               </p>
             </div>
           </button>
@@ -3207,6 +3206,7 @@ function useChatSandboxInfo(agentName: string | null): ChatSandboxInfo | null {
 }
 
 function ChatMessages() {
+  const orchestratorName = useOrchestratorName();
   const { messages, isLoading, messagesLoading, pendingQuestions, pendingMission, pendingVault, pendingWhatsApp, pendingEmail, pendingSetDesign, selectedAgent, sessions, sessionId } = useChatState();
   const chatSandbox = useChatSandboxInfo(selectedAgent ?? sessions.find((s) => s.id === sessionId)?.agent ?? null);
   const { answerQuestions, respondToMission, respondToVault, respondToWhatsApp, respondToEmail, consumeSetDesign, forkSession, loadSession } = useChatActions();
@@ -3241,7 +3241,7 @@ function ChatMessages() {
   // Derive current agent: from selectedAgent (for new sessions) or from the active session's agent field
   const currentAgentName = selectedAgent ?? sessions.find((s) => s.id === sessionId)?.agent ?? null;
   const currentAgent = currentAgentName ? agentMap[currentAgentName] : undefined;
-  const assistantName = currentAgent?.identity?.displayName ?? currentAgent?.name ?? orchestratorName();
+  const assistantName = currentAgent?.identity?.displayName ?? currentAgent?.name ?? orchestratorName;
   const assistantAvatar = currentAgent?.identity?.avatar;
 
   const [atBottom, setAtBottom] = useState(true);
@@ -3664,6 +3664,7 @@ function ChatMessages() {
 // ── ChatInput — prompt input area with mentions, attachments, mic ──
 
 function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
+  const orchestratorName = useOrchestratorName();
   const { messages, isLoading, pendingQuestions, pendingMission, pendingVault, pendingWhatsApp, pendingEmail, pendingSetDesign, sessionId, selectedAgent, sessions, activeSessionKey } = useChatState();
   const { send, stop, steer, cancelSteer } = useChatActions();
   const steersPending = usePendingSteers(activeSessionKey);
@@ -3996,7 +3997,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
     selectedAgent ?? sessions.find((s: { id: string; agent?: string }) => s.id === sessionId)?.agent ?? null;
   const isOrchestratorChat = !currentAgentName || currentAgentName === "orchestrator";
   const selectedAgentConfig = currentAgentName && agents ? agents.find((a) => a.name === currentAgentName) : undefined;
-  const recipientName = selectedAgentConfig?.identity?.displayName ?? selectedAgentConfig?.name ?? orchestratorName();
+  const recipientName = selectedAgentConfig?.identity?.displayName ?? selectedAgentConfig?.name ?? orchestratorName;
 
   const mentionAgents = useMemo(
     () => (isOrchestratorChat ? agents : []),
@@ -4401,6 +4402,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
 // ── ChatLoadingSkeleton — full-page skeleton while sessions are loading ──
 
 function ChatLoadingSkeleton() {
+  const orchestratorName = useOrchestratorName();
   return (
     <div className="flex flex-1 min-h-0">
       <div className="flex-1 flex flex-col min-w-0 h-full">
@@ -4422,7 +4424,7 @@ function ChatLoadingSkeleton() {
         <div className="bg-background/80 backdrop-blur-md px-4 pt-2 pb-1.5 shrink-0">
           <div className="mx-auto max-w-3xl">
             <PromptInput onSubmit={() => {}} className="[&_[data-slot=input-group]]:rounded-[calc(var(--radius)+8px)]">
-              <PromptInputTextarea placeholder={`Message ${orchestratorName()}...`} disabled />
+              <PromptInputTextarea placeholder={`Message ${orchestratorName}...`} disabled />
               <PromptInputFooter>
                 <div className="flex items-center gap-1" />
                 <PromptInputSubmit disabled />

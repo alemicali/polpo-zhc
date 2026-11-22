@@ -9,7 +9,7 @@
 import QRCode from "qrcode";
 import { z } from "zod";
 import {
-  DESTRUCTIVE, MAX_WAIT_SECONDS, READ, UPDATE, apiError, apiGet, apiSend, confirmParam, dashboardLink, enc, fail, looseObject, ok, progress, qs, sleep,
+  DESTRUCTIVE, MAX_WAIT_SECONDS, READ, UPDATE, apiError, apiGet, apiSend, confirmParam, dashboardLink, enc, fail, looseObject, ok, orchestratorLabel, progress, qs, sleep,
   type CallToolResult, type McpDeps, type Register,
 } from "./kit.js";
 import { setupHandoff } from "./setup.js";
@@ -71,7 +71,8 @@ export function registerChannelSetupTools(tool: Register, deps: McpDeps): void {
     const c = await channelsNow(deps);
     if (!c.ok) return c.res;
     const routes = Object.entries(c.channels).map(([name, ch]) => routeView(name, ch));
-    return ok(routes.map((r) => `- ${String(r.channel)} (${String(r.type)}): ${r.inbound ? `inbound on, answered by ${r.agent ?? "Polpo"}` : "inbound off"}`
+    const polpo = await orchestratorLabel(deps);
+    return ok(routes.map((r) => `- ${String(r.channel)} (${String(r.type)}): ${r.inbound ? `inbound on, answered by ${r.agent ?? polpo}` : "inbound off"}`
       + `${r.reply_to ? `, replies via ${(r.reply_to as { channel: string }).channel}` : ""}${r.group_replies ? `, groups: ${String(r.group_replies)}` : ""}`).join("\n") || "No channels.",
     { routes });
   });
@@ -130,7 +131,7 @@ export function registerChannelSetupTools(tool: Register, deps: McpDeps): void {
     if (!r.ok) return apiError(r, `Saving the route of ${a.channel}`);
     const changed = [...new Set([...Object.keys(before), ...Object.keys(g)])].filter((k) => JSON.stringify(before[k]) !== JSON.stringify(g[k]));
     const route = routeView(a.channel, { ...current, gateway: g });
-    return ok(changed.length ? `Route of ${a.channel}: ${route.inbound ? `answered by ${route.agent ?? "Polpo"}` : "inbound off"} (changed ${changed.join(", ")}).` : "Nothing changed (the values were the same).",
+    return ok(changed.length ? `Route of ${a.channel}: ${route.inbound ? `answered by ${route.agent ?? await orchestratorLabel(deps)}` : "inbound off"} (changed ${changed.join(", ")}).` : "Nothing changed (the values were the same).",
       { route, changed });
   });
 
