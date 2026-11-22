@@ -1866,6 +1866,8 @@ export interface MissionPreviewPayload {
   data: unknown;
   /** Original user prompt that generated this mission */
   prompt?: string;
+  /** Proposed spending limit in USD for the whole mission (create it with this budget) */
+  budgetUsd?: number;
 }
 
 // === Vault Entry Metadata (safe listing — no secret values) ===

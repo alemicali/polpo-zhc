@@ -217,6 +217,19 @@ describe("tasks", () => {
     expect(await call(deps(f), "polpo_tasks_list", { cursor: "not-a-cursor" })).toMatchObject({ isError: true });
   });
 
+  it("lists by time (updated_since: relative or ISO) with when each was updated", async () => {
+    const f = fakeInstance();
+    const r = await call(deps(f), "polpo_tasks_list", { updated_since: "24h" });
+    const path = f.calls.filter((c) => c.path.startsWith("/api/v1/tasks?")).at(-1)!.path;
+    const since = new URL(path, "http://x").searchParams.get("updatedSince")!;
+    expect(Math.abs(Date.parse(since) - (Date.now() - 24 * 3_600_000))).toBeLessThan(60_000);
+    expect(r.content[0].text).toMatch(/t3 \[failed\] Weigh in → coach · updated 2026-11-21T10:00:0\d\.000Z/);
+    expect(r.structuredContent.items[0]).toMatchObject({ id: "t3", updatedAt: expect.any(String) });
+    await call(deps(f), "polpo_tasks_list", { updated_since: "2026-11-20T00:00:00Z" });
+    expect(new URL(f.calls.filter((c) => c.path.startsWith("/api/v1/tasks?")).at(-1)!.path, "http://x").searchParams.get("updatedSince")).toBe("2026-11-20T00:00:00.000Z");
+    expect(await call(deps(f), "polpo_tasks_list", { updated_since: "last week" })).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/neither a duration/) }] });
+  });
+
   it("gets a task with its recent activity", async () => {
     const f = fakeInstance();
     const r = await call(deps(f), "polpo_task_get", { id: "t2", activity: 3 });
@@ -614,6 +627,9 @@ describe("connector tools per agent", () => {
     const list = await call(deps(f), "polpo_connectors_list", { agent: "coach" });
     expect(list.structuredContent.items.map((c: { id: string }) => c.id)).toEqual(["lin"]);
     expect(list.structuredContent.items[0].agent_tools).toEqual(["create_issue", "delete_issue", "gone_tool"]);
+    // what it has no access to, and to grant it before scoping a task to it
+    expect(list.structuredContent.no_access).toEqual(["notion"]);
+    expect(list.content[0].text).toMatch(/coach has no access to: notion[\s\S]*polpo_connector_update \{ id, add_agents: \["coach"\] \}/);
     expect((await call(deps(f), "polpo_connectors_list", { agent: "writer" })).structuredContent.items[0]).toMatchObject({ id: "notion", agent_tools: "*" });
     const one = await call(deps(f), "polpo_connectors_list", { id: "lin", agent: "coach" });
     expect(one.structuredContent.tools).toEqual([
@@ -622,7 +638,9 @@ describe("connector tools per agent", () => {
       { name: "delete_issue", policy: "off", agent_gets: false },
     ]);
     expect(one.structuredContent.stale_tools).toEqual(["gone_tool"]);
-    expect((await call(deps(f), "polpo_connectors_list", { id: "lin", agent: "writer" })).isError).toBe(true);
+    const denied = await call(deps(f), "polpo_connectors_list", { id: "lin", agent: "writer" });
+    expect(denied.isError).toBe(true);
+    expect(denied.content[0].text).toMatch(/Agent "writer" has no access to connector lin[\s\S]*polpo_connector_update \{ id: "lin", add_agents: \["writer"\] \}/);
   });
 });
 

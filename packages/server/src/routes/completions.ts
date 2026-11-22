@@ -436,6 +436,19 @@ function sseChunk(
   });
 }
 
+/**
+ * The mission_preview payload of a create_mission call: every field of the call (name, plan,
+ * prompt, budgetUsd), so approving it creates the mission exactly as proposed.
+ */
+export function missionPreviewOf(args: Record<string, unknown>, data: unknown): { name: string; data: unknown; prompt?: string; budgetUsd?: number } {
+  return {
+    name: args.name as string,
+    data,
+    prompt: args.prompt as string | undefined,
+    ...(typeof args.budgetUsd === "number" && Number.isFinite(args.budgetUsd) && args.budgetUsd > 0 ? { budgetUsd: args.budgetUsd } : {}),
+  };
+}
+
 function completionResponse(id: string, content: string, promptTokens: number, completionTokens: number) {
   return {
     id,
@@ -933,9 +946,20 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
       return progressive ? { ...prepared, messages: restoreToolAnnouncements(current, prepared.messages) } : prepared;
     };
 
+    // What the model calls of THIS request used, as the provider reported it (summed over its
+    // steps): the non-streaming response's `usage`. Without any report: an estimate.
+    const callUsage = { prompt: 0, completion: 0, reported: false };
+    const responseUsage = (fallbackPrompt: number, fallbackCompletion: number) => (callUsage.reported
+      ? { prompt_tokens: callUsage.prompt, completion_tokens: callUsage.completion, total_tokens: callUsage.prompt + callUsage.completion }
+      : { prompt_tokens: fallbackPrompt, completion_tokens: fallbackCompletion, total_tokens: fallbackPrompt + fallbackCompletion });
     const recordResponseUsage = async (response: any): Promise<void> => {
       const usage = response?.usage;
-      if (usage) compaction.noteUsage((Number(usage.input) || 0) + (Number(usage.cacheRead) || 0) + (Number(usage.cacheWrite) || 0));
+      if (usage) {
+        compaction.noteUsage((Number(usage.input) || 0) + (Number(usage.cacheRead) || 0) + (Number(usage.cacheWrite) || 0));
+        callUsage.prompt += (Number(usage.input) || 0) + (Number(usage.cacheRead) || 0) + (Number(usage.cacheWrite) || 0);
+        callUsage.completion += Number(usage.output) || 0;
+        callUsage.reported = true;
+      }
       if (!usage || !deps.recordTokenUsage) return;
       try {
         await deps.recordTokenUsage({
@@ -956,6 +980,25 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
       }
     };
 
+
+    /**
+     * set_session_title: renamed here, not by the executor (Polpo and agents alike), in both the
+     * streaming and the non-streaming path. The result text goes back to the model.
+     */
+    const renameSessionFromTool = async (args: Record<string, unknown>): Promise<{ resultText: string; isErr: boolean; title?: string }> => {
+      const title = (typeof args.title === "string" ? args.title : "").trim().slice(0, 80);
+      if (!title) return { resultText: "Error: title must be a non-empty string.", isErr: true };
+      if (!sessionId) return { resultText: "Error: no session in context — cannot rename.", isErr: true };
+      if (!sessionStore) return { resultText: "Error: session store unavailable.", isErr: true };
+      try {
+        const ok = await sessionStore.renameSession(sessionId, title);
+        if (!ok) return { resultText: "Error: session not found.", isErr: true };
+        deps.emit("session:updated", { sessionId, title });
+        return { resultText: `Session title set to: "${title}".`, isErr: false, title };
+      } catch (e: any) {
+        return { resultText: `Error: ${e?.message ?? "rename failed"}`, isErr: true };
+      }
+    };
 
     // ── Manual compaction: summarize now, save the checkpoint, no answer ──
     if (body.compact) {
@@ -1250,11 +1293,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
                 let missionData: unknown;
                 try { missionData = JSON.parse(args.data as string); } catch { missionData = args.data; }
                 await emit(sseChunk(completionId, {}, "mission_preview", {
-                  mission_preview: {
-                    name: args.name as string,
-                    data: missionData,
-                    prompt: args.prompt as string | undefined,
-                  },
+                  mission_preview: missionPreviewOf(args, missionData),
                 }));
               } else if (interactiveCall.name === "set_vault_entry") {
                 const args = interactiveCall.arguments as Record<string, unknown>;
@@ -1383,38 +1422,12 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
               // store directly, emits a `session_title` SSE chunk so the
               // sidebar refreshes in real time. Result text is fed back to
               // the model so it knows the rename succeeded.
-              if (call.name === "set_session_title") {
-                const args = (call.arguments ?? {}) as Record<string, unknown>;
-                const raw = typeof args.title === "string" ? args.title : "";
-                const title = raw.trim().slice(0, 80);
-                let resultText: string;
-                let isErr = false;
-                if (!title) {
-                  resultText = "Error: title must be a non-empty string.";
-                  isErr = true;
-                } else if (!sessionId) {
-                  resultText = "Error: no session in context — cannot rename.";
-                  isErr = true;
-                } else if (!sessionStore) {
-                  resultText = "Error: session store unavailable.";
-                  isErr = true;
-                } else {
-                  try {
-                    const ok = await sessionStore.renameSession(sessionId, title);
-                    if (ok) {
-                      resultText = `Session title set to: "${title}".`;
-                      deps.emit("session:updated", { sessionId, title });
-                      await emit(sseChunk(completionId, {}, null, {
-                        session_title: { sessionId, title },
-                      }));
-                    } else {
-                      resultText = "Error: session not found.";
-                      isErr = true;
-                    }
-                  } catch (e: any) {
-                    resultText = `Error: ${e?.message ?? "rename failed"}`;
-                    isErr = true;
-                  }
+              if (call.name === "set_session_title" && !invalidCalls.has(call.id)) {
+                const { resultText, isErr, title } = await renameSessionFromTool((call.arguments ?? {}) as Record<string, unknown>);
+                if (title && sessionId) {
+                  await emit(sseChunk(completionId, {}, null, {
+                    session_title: { sessionId, title },
+                  }));
                 }
                 toolCallsAccum.push({
                   id: call.id,
@@ -1704,11 +1717,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
               object: "chat.completion" as const,
               created: Math.floor(Date.now() / 1000),
               model: "polpo" as const,
-              usage: {
-                prompt_tokens: Math.ceil(fullSystemPrompt.length / 4),
-                completion_tokens: Math.ceil(finalText.length / 4),
-                total_tokens: Math.ceil(fullSystemPrompt.length / 4) + Math.ceil(finalText.length / 4),
-              },
+              usage: responseUsage(Math.ceil(fullSystemPrompt.length / 4), Math.ceil(finalText.length / 4)),
             };
 
             if (interactiveCall.name === "ask_user") {
@@ -1734,11 +1743,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
                   index: 0,
                   message: { role: "assistant" as const, content: finalText },
                   finish_reason: "mission_preview" as const,
-                  mission_preview: {
-                    name: args.name as string,
-                    data: missionData,
-                    prompt: args.prompt as string | undefined,
-                  },
+                  mission_preview: missionPreviewOf(args, missionData),
                 }],
               });
             }
@@ -1921,6 +1926,16 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
           for (const call of toolCalls) {
             if (skipIds.has(call.id)) continue;
             ensureToolSegment(segmentsAccum, call.id);
+            // set_session_title: the route renames the session (the executor does not know the tool)
+            if (call.name === "set_session_title" && !invalidCalls.has(call.id)) {
+              const { resultText, isErr } = await renameSessionFromTool((call.arguments ?? {}) as Record<string, unknown>);
+              toolCallsAccum.push({ id: call.id, name: call.name, arguments: call.arguments, result: resultText, state: isErr ? "error" : "completed" });
+              messages.push({
+                role: "toolResult", toolCallId: call.id, toolName: call.name,
+                content: [{ type: "text", text: resultText }], isError: isErr, timestamp: Date.now(),
+              });
+              continue;
+            }
             const result = invalidCalls.get(call.id) ?? await effectiveToolExecutor(call.name, call.arguments, {
               signal: c.req.raw.signal,
               turnId: completionId,
@@ -1972,10 +1987,9 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
           finalText += finalText.trim() && closingText.trim() ? `\n\n${closingText}` : closingText;
         }
 
-        const promptTokens = Math.ceil(fullSystemPrompt.length / 4);
-        const completionTokens = Math.ceil(finalText.length / 4);
+        const usage = responseUsage(Math.ceil(fullSystemPrompt.length / 4), Math.ceil(finalText.length / 4));
         turnOutcome = "completed";
-        return c.json(completionResponse(completionId, finalText, promptTokens, completionTokens));
+        return c.json(completionResponse(completionId, finalText, usage.prompt_tokens, usage.completion_tokens));
       } finally {
         // Always persist the final text + tool calls — even on early return (ask_user) or error
         // SECURITY: Redact vault credentials before persisting to SQLite

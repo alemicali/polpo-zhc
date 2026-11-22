@@ -48,6 +48,22 @@ export const CHANGELOG: ChangelogEntry[] = [
     cta: { label: "Apri le impostazioni", to: "/config?section=harnesses" },
   },
   {
+    id: "2026-11-22-polpo-fixes",
+    date: "2026-11-22",
+    kind: "fixed",
+    title: "Polpo fa quello che chiedi, come lo chiedi",
+    summary: "Una missione approvata in chat tiene il budget proposto; Polpo crea task in bozza, limita davvero i connettori e dice chiaramente quando non può.",
+    body: [
+      "- **Budget delle missioni**: la scheda della missione proposta in chat mostra il budget, e approvarla (Esegui o Salva come bozza) crea la missione con quel budget.",
+      "- **Task in bozza**: «crea un task in bozza» crea un task in bozza (non una missione), che parte quando lo avvii.",
+      "- **Limiti ai connettori**: «solo Linear» diventa davvero un limite del task; se l'agente non ha accesso al connettore, Polpo te lo dice e ti propone di darglielo prima. Non dice più che un task è limitato quando non lo è.",
+      "- **Domande sui task**: «cosa è successo nelle ultime 24 ore?» e «perché sono falliti?» hanno risposta con date e motivi, senza aprire i task uno per uno.",
+      "- **Account dei connettori**: dopo il collegamento Polpo prova a riconoscere con quale account sei entrato (Linear, GitHub, Slack…) e lo mostra.",
+      "- **Claude Code e Codex**: alle domande su modelli e autenticazione Polpo parte dalla configurazione attuale e ti dà il link giusto per le chiavi.",
+    ].join("\n"),
+    highlight: false,
+  },
+  {
     id: "2026-11-22-whats-new-accordion",
     date: "2026-11-22",
     kind: "improved",

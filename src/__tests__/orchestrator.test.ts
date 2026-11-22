@@ -319,7 +319,7 @@ describe("Orchestrator", () => {
       expect(got).toContain(`Depends on: Collect [pending] (${dep.id})`);
       expect(got).toContain("Claude Code claude-sonnet-4-5 via Bedrock · on computer gpu (daytona v2)");
       const list = await executeOrchestratorTool("list_tasks", { status: "failed" }, orchestrator);
-      expect(list).toContain(`— ${stderr} (not retried)`);
+      expect(list).toContain(`— failed (model_access): ${stderr} (not retried)`);
     });
 
     it("creates a team and moves an agent through hot orchestrator tools", async () => {

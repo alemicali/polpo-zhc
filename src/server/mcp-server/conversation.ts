@@ -40,7 +40,7 @@ export interface Pending {
   kind: PendingKind;
   actions: readonly string[];
   questions?: PendingQuestion[];
-  mission?: { name: string; prompt?: string; plan: unknown };
+  mission?: { name: string; prompt?: string; plan: unknown; budget_usd?: number };
   whatsapp?: Record<string, unknown>;
   email?: Record<string, unknown>;
   /** A secret to save: its fields' names only, never their values. */
@@ -70,7 +70,7 @@ const pendingSchema = z.object({
     options: z.array(z.object({ label: z.string(), description: z.string().optional() })),
     multiple: z.boolean().optional(), custom: z.boolean().optional(),
   })).optional(),
-  mission: z.object({ name: z.string(), prompt: z.string().optional(), plan: z.unknown() }).optional(),
+  mission: z.object({ name: z.string(), prompt: z.string().optional(), plan: z.unknown(), budget_usd: z.number().optional().describe("The proposed spending limit in USD for the whole mission") }).optional(),
   whatsapp: z.record(z.string(), z.unknown()).optional(),
   email: z.record(z.string(), z.unknown()).optional(),
   vault: z.object({ agent: z.string(), service: z.string(), type: z.string(), label: z.string().optional(), fields: z.array(z.string()) }).optional(),
@@ -129,7 +129,8 @@ export function pendingFrom(deps: McpDeps, tool: string, args: Record<string, un
     case "mission_preview": {
       let plan: unknown = args.data;
       if (typeof plan === "string") { try { plan = JSON.parse(plan); } catch { /* keep the text */ } }
-      return { ...base, mission: { name: str(args.name) ?? "mission", ...(str(args.prompt) ? { prompt: str(args.prompt) } : {}), plan } };
+      const budget = typeof args.budgetUsd === "number" && Number.isFinite(args.budgetUsd) && args.budgetUsd > 0 ? args.budgetUsd : undefined;
+      return { ...base, mission: { name: str(args.name) ?? "mission", ...(str(args.prompt) ? { prompt: str(args.prompt) } : {}), plan, ...(budget !== undefined ? { budget_usd: budget } : {}) } };
     }
     case "whatsapp_preview": {
       const file = tool === "whatsapp_send_file";
@@ -286,7 +287,7 @@ export function turnText(out: TurnOutput, note?: string, polpo = "Polpo"): strin
       parts.push(`${out.agent ?? polpo} asks:\n${qs}\nAsk the person, then ${how} with answers: [{ question_id, selected?, text? }].`);
     } else if (p.kind === "mission_preview") {
       const tasks = ((p.mission?.plan as { tasks?: Array<{ title?: string; assignTo?: string }> })?.tasks ?? []);
-      parts.push(`Mission to review: "${p.mission?.name}" (${tasks.length} tasks)\n${tasks.map((t, i) => `${i + 1}. ${t.title}${t.assignTo ? ` → ${t.assignTo}` : ""}`).join("\n")}\n`
+      parts.push(`Mission to review: "${p.mission?.name}" (${tasks.length} tasks${p.mission?.budget_usd !== undefined ? `, budget $${p.mission.budget_usd}` : ""})\n${tasks.map((t, i) => `${i + 1}. ${t.title}${t.assignTo ? ` → ${t.assignTo}` : ""}`).join("\n")}\n`
         + `Show the plan to the person. ${how} action: execute (with confirm: true) | save_draft | refine (with feedback) | cancel.`);
     } else if (p.kind === "whatsapp_preview" || p.kind === "email_preview") {
       const m = (p.whatsapp ?? p.email)!;
@@ -397,6 +398,7 @@ export function registerConversationTools(tool: Register, deps: McpDeps): void {
         if (act === "execute" && confirm !== true) return fail("Executing a mission starts its tasks: show the plan to the person and, if they agree, call again with confirm: true.");
         const created = await apiSend(deps, "POST", "/missions", {
           data: typeof m.plan === "string" ? m.plan : JSON.stringify(m.plan), name: m.name, ...(m.prompt ? { prompt: m.prompt } : {}), status: "draft",
+          ...(m.budget_usd !== undefined ? { budgetUsd: m.budget_usd } : {}),
         });
         if (!created.ok) return go(`Failed to save the mission: ${created.error}`);
         const mission = created.data as { id: string; name: string };

@@ -42,6 +42,7 @@ export function MissionPreviewDialog({
       status: "draft",
       data,
       prompt: preview.prompt,
+      ...(preview.budgetUsd !== undefined ? { budgetUsd: preview.budgetUsd } : {}),
       createdAt: now,
       updatedAt: now,
     } as Mission;

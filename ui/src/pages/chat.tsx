@@ -130,6 +130,7 @@ import { useChatState, useChatActions, useChatInputDisabled } from "@/hooks/chat
 import { setChatPageSessionsOpen, useChatPageSessionsOpen } from "@/hooks/chat-context";
 import { WidgetCard, WidgetPendingCard } from "@/components/widget-card";
 import { ArtifactChatCard } from "@/components/artifacts/artifact-chat-card";
+import { budgetText } from "@/lib/mission-preview";
 import { artifactIdOf } from "@/lib/artifacts-api";
 import { WhatsAppPreviewCard, EmailPreviewCard } from "@/components/send-preview-card";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
@@ -576,6 +577,9 @@ function MissionPreviewCard({
             {tasks.length} task{tasks.length !== 1 ? "s" : ""}
             {mission?.team && mission.team.length > 0 && (
               <> &middot; {mission.team.length} agent{mission.team.length !== 1 ? "s" : ""}</>
+            )}
+            {preview.budgetUsd !== undefined && (
+              <> &middot; budget {budgetText(preview.budgetUsd)}</>
             )}
           </p>
         </div>

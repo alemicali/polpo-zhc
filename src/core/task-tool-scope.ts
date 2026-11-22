@@ -4,7 +4,7 @@
  * (narrow only, apply at run time) live in @polpo-ai/core (task-tool-scope.ts).
  */
 import {
-  applyTaskToolScope, normalizeTaskToolScope, taskToolScopeGrantProblems, taskToolScopeProblems,
+  applyTaskToolScope, normalizeTaskToolScope, taskToolScopeGrantProblems, taskToolScopeMissingGrants, taskToolScopeProblems,
   type AgentConfig, type ConnectorConfig, type TaskToolScope,
 } from "@polpo-ai/core";
 import { ConnectorStore } from "../mcp/store.js";
@@ -14,8 +14,14 @@ import type { RunnerConfig } from "./types.js";
 export class TaskToolScopeError extends Error {
   readonly code = "INVALID_TOOL_SCOPE";
   readonly status = 400;
-  constructor(readonly problems: string[]) {
+  /**
+   * The connectors the scope names that are not granted to the agent: a scope never grants, so
+   * the fix is granting them (connector access) first, then setting the scope.
+   */
+  readonly missingGrants: Array<{ agent: string; id: string; label: string }>;
+  constructor(readonly problems: string[], missingGrants: Array<{ agent: string; id: string; label: string }> = []) {
     super(`Invalid toolScope: ${problems.join("; ")}`);
+    this.missingGrants = missingGrants;
     this.name = "TaskToolScopeError";
   }
 }
@@ -59,7 +65,7 @@ const LIST_TIMEOUT_MS = 8_000;
  */
 export async function checkTaskToolScope(
   host: TaskToolScopeCheckHost, agentName: string | undefined, value: unknown, opts: { live?: boolean } = {},
-): Promise<{ scope?: TaskToolScope; problems: string[] }> {
+): Promise<{ scope?: TaskToolScope; problems: string[]; missingGrants?: Array<{ agent: string; id: string; label: string }> }> {
   const shape = taskToolScopeProblems(value);
   if (shape.length) return { problems: shape };
   const scope = normalizeTaskToolScope(value);
@@ -82,15 +88,16 @@ export async function checkTaskToolScope(
   const problems = taskToolScopeGrantProblems(scope, {
     agent, connectors, knownTools: await knownBuiltinTools(), connectorToolNames: (id) => listed.get(id),
   });
-  return { scope, problems };
+  const missingGrants = taskToolScopeMissingGrants(scope, agent.name, connectors).map((g) => ({ agent: agent.name, id: g.id, label: g.label }));
+  return { scope, problems, ...(missingGrants.length ? { missingGrants } : {}) };
 }
 
 /** Same as checkTaskToolScope, throwing TaskToolScopeError on problems. */
 export async function requireTaskToolScope(
   host: TaskToolScopeCheckHost, agentName: string | undefined, value: unknown, opts: { live?: boolean } = {},
 ): Promise<TaskToolScope | undefined> {
-  const { scope, problems } = await checkTaskToolScope(host, agentName, value, opts);
-  if (problems.length) throw new TaskToolScopeError(problems);
+  const { scope, problems, missingGrants } = await checkTaskToolScope(host, agentName, value, opts);
+  if (problems.length) throw new TaskToolScopeError(problems, missingGrants);
   return scope;
 }
 

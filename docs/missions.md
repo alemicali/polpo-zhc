@@ -52,7 +52,10 @@ chat calls are not task runs and are not counted.
 - REST: `POST /api/v1/missions { …, budgetUsd: 20 }`, `PATCH /api/v1/missions/:id { budgetUsd: 30 }`
   (`null` clears it).
 - MCP: `budget_usd` on `polpo_mission_create` and `polpo_mission_update` (`null` clears it).
-- Polpo: `budgetUsd` on `create_mission` and `update_mission`.
+- Polpo: `budgetUsd` on `create_mission` and `update_mission`. In the chat, `create_mission` is a
+  preview card to approve: the card shows the proposed budget, and approving it (Execute or Save as
+  draft, in the dashboard or with `polpo_answer` over MCP, where the pending mission has `budget_usd`)
+  creates the mission with that budget.
 - Dashboard: the mission page's cost button → Budget.
 
 When what the mission spent reaches its budget:

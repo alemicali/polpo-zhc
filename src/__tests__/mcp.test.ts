@@ -229,6 +229,18 @@ describe("Polpo MCP server", () => {
     expect(last).toMatch(/I approved and executed the mission "Report" \(ID: m-1\)/);
   });
 
+  it("a mission preview with a budget: shown, and approving creates the mission with it", async () => {
+    const fake = fakeApi();
+    const deps = { api: fake.api, version: "x" };
+    const plan = { tasks: [{ title: "Research", description: "Find sources", assignTo: "coach" }] };
+    fake.next.push({ message: { content: "Plan:" }, finish_reason: "mission_preview", mission_preview: { name: "Capped", data: plan, budgetUsd: 20 } });
+    const asked = await call(deps, "polpo_ask", { message: "a mission, at most $20" });
+    expect(asked.structuredContent.pending).toMatchObject({ kind: "mission_preview", mission: { name: "Capped", plan, budget_usd: 20 } });
+    expect(asked.content[0].text).toContain("(1 tasks, budget $20)");
+    await call(deps, "polpo_answer", { session_id: asked.structuredContent.session_id, action: "save_draft" });
+    expect(fake.calls.find((c) => c.path === "/api/v1/missions")!.body).toEqual({ data: JSON.stringify(plan), name: "Capped", status: "draft", budgetUsd: 20 });
+  });
+
   it("refining a preview needs feedback and sends it to Polpo", async () => {
     const fake = fakeApi();
     const deps = { api: fake.api, version: "x" };

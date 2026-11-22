@@ -212,7 +212,7 @@ export function registerMissionTools(tool: Register, deps: McpDeps): void {
     const missing = await unknownAgents(deps, plan.tasks.map((t) => t.assignTo));
     if (missing) return fail(missing);
     const r = await apiSend(deps, "POST", "/missions", { data: valid.data, name, ...(goal ? { prompt: goal } : {}), status: "draft", ...(budget_usd !== undefined ? { budgetUsd: budget_usd } : {}) });
-    if (!r.ok) return apiError(r, "Creating the mission", r.code === "INVALID_TOOL_SCOPE" ? "A task's tool scope may only narrow what its agent has: polpo_connectors_list { agent } shows its connectors and tools." : undefined);
+    if (!r.ok) return apiError(r, "Creating the mission", r.code === "INVALID_TOOL_SCOPE" ? "A task's tool scope may only narrow what its agent has: polpo_connectors_list { agent } shows its connectors and tools. A scope never grants: when an agent has no access to a connector, offer the person to grant it first (polpo_connector_update { id, add_agents: [agent] }), then set the scope." : undefined);
     const mission = r.data as Mission;
     if (run) {
       const ex = await apiSend(deps, "POST", `/missions/${enc(mission.id)}/execute`);
@@ -260,7 +260,7 @@ export function registerMissionTools(tool: Register, deps: McpDeps): void {
     let mission = m.mission;
     if (Object.keys(body).length) {
       const r = await apiSend(deps, "PATCH", `/missions/${enc(id)}`, body);
-      if (!r.ok) return apiError(r, `Updating mission ${id}`, r.code === "INVALID_TOOL_SCOPE" ? "A task's tool scope may only narrow what its agent has: polpo_connectors_list { agent } shows its connectors and tools." : undefined);
+      if (!r.ok) return apiError(r, `Updating mission ${id}`, r.code === "INVALID_TOOL_SCOPE" ? "A task's tool scope may only narrow what its agent has: polpo_connectors_list { agent } shows its connectors and tools. A scope never grants: when an agent has no access to a connector, offer the person to grant it first (polpo_connector_update { id, add_agents: [agent] }), then set the scope." : undefined);
       mission = r.data as Mission;
     }
     const { data: _d, ...rest } = mission;
