@@ -33,6 +33,11 @@ export function parseImportedAppearance(text: string): { ok: true; value: Instan
     const n = kit.normalizeCustom(c);
     out.custom = { enabled: c.enabled === undefined ? true : n.enabled, derive: n.derive, light: n.light, dark: n.dark };
   }
-  if (out.theme === undefined && out.palette === undefined && out.custom === undefined) return { ok: false, error: "Nothing to import (theme, palette or custom)" };
+  if (r.fonts !== undefined) {
+    if (!Array.isArray(r.fonts)) return { ok: false, error: "fonts must be a list of web fonts" };
+    for (const [i, f] of r.fonts.entries()) if (!kit.normalizeWebFont(f)) return { ok: false, error: `fonts[${i}] is not a valid web font (family, source google or url)` };
+    out.fonts = kit.normalizeWebFonts(r.fonts);
+  }
+  if (out.theme === undefined && out.palette === undefined && out.custom === undefined && out.fonts === undefined) return { ok: false, error: "Nothing to import (theme, palette, custom or fonts)" };
   return { ok: true, value: out };
 }

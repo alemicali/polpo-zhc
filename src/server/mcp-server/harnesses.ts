@@ -19,6 +19,7 @@ import {
   type McpDeps, type Register,
 } from "./kit.js";
 import { setupHandoff } from "./setup.js";
+import { CLAUDE_SUBSCRIPTION_REFUSAL } from "@polpo-ai/core/harnesses";
 
 type HarnessItem = {
   id: string; name: string; enabled: boolean; auth?: string; credentialRef?: { owner: string; service: string }; credentialFound?: boolean;
@@ -35,9 +36,10 @@ const vaultRef = z.object({ owner: z.string().min(1).describe("The agent whose v
 const harnessItem = z.object({ id: z.string(), name: z.string(), enabled: z.boolean(), agents: z.array(z.string()) }).passthrough();
 const sessionItem = z.object({ key: z.string(), agent: z.string(), harness: z.string(), computerId: z.string(), state: z.string(), live: z.boolean(), costUsd: z.number() }).passthrough();
 
-const harnessLine = (h: HarnessItem) => `- ${h.name} (${h.id}): ${h.enabled ? "enabled" : "disabled"}`
+/** One harness, in words: the credential is always said to be found or missing in the vault. */
+export const harnessLine = (h: HarnessItem) => `- ${h.name} (${h.id}): ${h.enabled ? "enabled" : "disabled"}`
   + (h.auth ? `, auth ${h.auth}${h.bedrock ? ` (${h.bedrock.region})` : ""}${h.vertex ? ` (${h.vertex.projectId}, ${h.vertex.region})` : ""}` : ", not configured")
-  + (h.credentialRef ? `, credential ${h.credentialRef.owner} / ${h.credentialRef.service}${h.credentialFound ? "" : " (MISSING in the vault)"}` : "")
+  + (h.credentialRef ? `, credential ${h.credentialRef.owner} / ${h.credentialRef.service} ${h.credentialFound ? "(found in the vault)" : "(MISSING in the vault)"}` : "")
   + (h.model ? `, model ${h.model}` : "")
   + (h.agents.length ? ` · agents: ${h.agents.join(", ")}` : "");
 
@@ -74,7 +76,9 @@ export function registerHarnessTools(tool: Register, deps: McpDeps): void {
       enabled: z.array(z.enum(["claude-code", "codex"])).optional().describe("The harnesses agents may use (replaces the list; [] disables all)"),
       allow_host: z.boolean().optional().describe("Agents on this server (no remote computer) may use a harness, with an isolated HOME (default false)"),
       claude_code: z.object({
-        auth: z.enum(["api-key", "bedrock", "vertex"]).optional().describe("api-key: Anthropic API key; bedrock: Amazon Bedrock; vertex: Google Vertex AI"),
+        // "subscription" is accepted here only to answer with the reason it is refused (Anthropic's terms)
+        auth: z.enum(["api-key", "bedrock", "vertex", "subscription"]).optional()
+          .describe("api-key: Anthropic API key; bedrock: Amazon Bedrock; vertex: Google Vertex AI. \"subscription\" (a Claude Pro/Max login) is always refused"),
         credential_ref: vaultRef.optional().describe("The vault entry with the credential: api-key/bedrock → apiKey (Bedrock: a Bedrock API key, or accessKeyId + secretAccessKey); vertex → serviceAccountJson"),
         bedrock_region: z.string().optional().describe("AWS region for Bedrock, e.g. us-east-1"),
         vertex: z.object({ region: z.string(), project_id: z.string() }).optional().describe("Google Cloud region and project for Vertex AI"),
@@ -91,6 +95,7 @@ export function registerHarnessTools(tool: Register, deps: McpDeps): void {
     if (enabled === undefined && allow_host === undefined && claude_code === undefined && codex === undefined) {
       return fail("Nothing to change: give enabled, allow_host, claude_code or codex.");
     }
+    if (claude_code?.auth === "subscription") return fail(`${CLAUDE_SUBSCRIPTION_REFUSAL}. Nothing was changed.`);
     const cfg = await apiGet(deps, "/config");
     if (!cfg.ok) return apiError(cfg, "Reading the configuration");
     const cur = ((cfg.data as { settings?: { harnesses?: Record<string, any> } })?.settings?.harnesses ?? { enabled: [] }) as Record<string, any>;

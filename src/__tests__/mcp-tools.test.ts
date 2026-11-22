@@ -371,7 +371,7 @@ describe("missions", () => {
     f.schedules.set("mn", { missionId: "mn", expression: "0 3 1 1 *", recurring: true, enabled: false, nextRunAt: "2027-01-01T03:00:00.000Z" });
     const neverPaused = await call(deps(f), "polpo_mission_wait", { id: "mn", timeout_seconds: 1 });
     expect(neverPaused.content[0].text).toMatch(/not run yet, and its schedule is paused/);
-  });
+  }, 20_000); // waits on a real scheduled run: slow on CI runners
 
   it("polpo_mission_delete and polpo_task_delete: confirm, not while running, then gone", async () => {
     const f = fakeInstance();

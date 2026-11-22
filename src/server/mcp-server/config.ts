@@ -8,6 +8,7 @@ import { isIP } from "node:net";
 import { z } from "zod";
 import {
   APPEARANCE_CASES, APPEARANCE_PALETTES, APPEARANCE_THEMES, APPEARANCE_TOKENS, APPEARANCE_TOKEN_NAMES, EGRESS_PROXY_NAME, EGRESS_PROXY_URL, parseAppearanceSettings,
+  APPEARANCE_NUMBER_RANGES, APPEARANCE_FONT_HOSTS, APPEARANCE_BUNDLED_FONTS, APPEARANCE_PRELOADED_FONTS, APPEARANCE_MAX_WEB_FONTS, unloadedFontFamilies,
   type AppearanceSettings,
 } from "@polpo-ai/core";
 import { isPrivateAddress } from "../oauth.js";
@@ -183,12 +184,27 @@ const brandingOutput = {
   logoFrame: z.enum(["box", "none"]).optional().describe("How the logo is shown: box (a tile, the default) or none (bare)"),
 };
 
-const tokenMapOutput = z.record(z.string(), z.union([z.string(), z.number()]));
+const gradientShape = z.object({ from: z.string(), to: z.string(), angle: z.number().optional() });
+const tokenMapOutput = z.record(z.string(), z.union([z.string(), z.number(), gradientShape]));
+const webFontShape = z.object({
+  family: z.string().min(1).max(64).describe("The family name a font stack uses, e.g. Manrope"),
+  source: z.enum(["google", "url"]).describe("google: Google Fonts by family (and weights); url: an https stylesheet on an allowed font host"),
+  url: z.string().max(512).optional().describe(`source url only: the stylesheet, on ${APPEARANCE_FONT_HOSTS.join(", ")}`),
+  weights: z.string().max(60).optional().describe("source google only: 400;600;700, or 300..800 for a variable font (default: regular only)"),
+});
 const appearanceOutput = z.object({
   theme: z.enum(APPEARANCE_THEMES).optional(),
   palette: z.enum(APPEARANCE_PALETTES).optional(),
   custom: z.object({ enabled: z.boolean(), derive: z.boolean().optional(), light: tokenMapOutput.optional(), dark: tokenMapOutput.optional() }).passthrough().optional(),
+  fonts: z.array(webFontShape.passthrough()).optional(),
 }).passthrough();
+
+/** Where the dashboard's fonts come from: what a font stack can name without adding a web font. */
+const FONT_SOURCES = {
+  bundled: [...APPEARANCE_BUNDLED_FONTS],
+  preloaded: [...APPEARANCE_PRELOADED_FONTS],
+  web_font_hosts: [...APPEARANCE_FONT_HOSTS],
+};
 
 const logoInput = z.union([
   z.object({ url: z.string().url().describe("A public https URL of the image") }),
@@ -199,14 +215,17 @@ const logoInput = z.union([
 /** Every design token, each optional; null removes it (back to the palette's value). */
 const tokensInput = z.object(Object.fromEntries(APPEARANCE_TOKEN_NAMES.map((name) => {
   const kind = APPEARANCE_TOKENS[name].kind;
-  const value = kind === "radius" ? z.number().min(0).max(24)
-    : kind === "weight" ? z.number().min(100).max(900)
+  const range = APPEARANCE_NUMBER_RANGES[name];
+  const value: z.ZodTypeAny = range ? z.number().min(range[0]).max(range[1])
     : kind === "case" ? z.enum(APPEARANCE_CASES)
+    : kind === "gradient" ? gradientShape.strict()
     : z.string().min(1).max(240);
   const hint = ({
-    color: "colour", font: "CSS font stack", radius: "px, 0–24", shadow: "box-shadow",
+    color: "colour", font: "CSS font stack", radius: `px, ${range?.[0]}–${range?.[1]}`, shadow: "box-shadow",
     size: "font size: rem 0.5–6 or px 8–96, e.g. 1.5rem", weight: "font weight 100–900, e.g. 600",
     tracking: "letter-spacing: em -0.1–0.3 or px -3–6, 0 or normal, e.g. 0.06em", case: "label case",
+    gradient: "{ from, to, angle }: two colours and 0–360 degrees (default 135); replaces the solid fill",
+    opacity: "0.5–1 (1 opaque)", blur: "backdrop blur, px 0–24",
   } as const)[kind];
   return [name, value.nullable().optional().describe(`${APPEARANCE_TOKENS[name].css} (${hint})`)];
 }))).strict();
@@ -243,8 +262,10 @@ async function appearanceNow(deps: McpDeps): Promise<AppearanceSettings> {
 type TokensPatch = { enabled?: boolean; derive?: boolean; light?: Record<string, unknown>; dark?: Record<string, unknown>; replace?: boolean };
 
 /** The appearance after a change: theme and palette set or removed (null), tokens merged (null removes one) or replaced. */
-export function mergeAppearance(before: AppearanceSettings, change: { theme?: string | null; palette?: string | null; tokens?: TokensPatch }): Record<string, unknown> {
+export function mergeAppearance(before: AppearanceSettings, change: { theme?: string | null; palette?: string | null; tokens?: TokensPatch; fonts?: unknown[] | null }): Record<string, unknown> {
   const out = JSON.parse(JSON.stringify(before ?? {})) as Record<string, unknown> & { custom?: Record<string, unknown> };
+  if (change.fonts === null || (Array.isArray(change.fonts) && change.fonts.length === 0)) delete out.fonts;
+  else if (change.fonts !== undefined) out.fonts = change.fonts;
   for (const key of ["theme", "palette"] as const) {
     if (change[key] === null) delete out[key];
     else if (change[key] !== undefined) out[key] = change[key];
@@ -284,6 +305,7 @@ export function appearanceChanges(before: AppearanceSettings, after: AppearanceS
       out["custom.derive"] = a.custom.derive !== false;
       for (const mode of ["light", "dark"] as const) for (const [k, v] of Object.entries(a.custom[mode] ?? {})) out[`custom.${mode}.${k}`] = v;
     }
+    for (const f of a.fonts ?? []) out[`fonts.${f.family}`] = f;
     return out;
   };
   const a = flat(before ?? {});
@@ -299,7 +321,16 @@ function describeAppearance(a: AppearanceSettings): string {
     const names = (m?: Record<string, unknown>) => Object.keys(m ?? {}).join(", ") || "none";
     parts.push(`custom tokens ${a.custom.enabled ? "on" : "off"}${a.custom.derive === false ? " (no derive)" : ""} (light: ${names(a.custom.light)}; dark: ${names(a.custom.dark)})`);
   }
+  if (a.fonts?.length) parts.push(`web fonts ${a.fonts.map((f) => `${f.family} (${f.source === "google" ? `Google${f.weights ? ` ${f.weights}` : ""}` : f.url})`).join(", ")}`);
   return parts.join(" · ") || "the built-in default (dark, tide)";
+}
+
+/** A note when the look's font stacks name families the dashboard does not load. */
+function fontWarning(a: AppearanceSettings): string[] {
+  const unloaded = unloadedFontFamilies(a);
+  return unloaded.length
+    ? [`Note: ${unloaded.join(", ")} ${unloaded.length === 1 ? "is" : "are"} not loaded by the dashboard (shown only where installed): add ${unloaded.length === 1 ? "it" : "them"} with fonts, e.g. [{ family: "${unloaded[0]}", source: "google", weights: "400;600;700" }].`]
+    : [];
 }
 
 export function registerConfigTools(tool: Register, deps: McpDeps): void {
@@ -444,10 +475,15 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
     title: "Get the branding and appearance",
     description: "The instance's branding and default look everyone sees in the dashboard: product name, tagline, logo and dark-mode logo, "
       + "how the logo is framed (logoFrame: box, the default tile, or none, bare); "
-      + "the default theme (light, dark, system), palette and custom design tokens per mode (colours, fonts, radius, shadows). "
+      + "the default theme (light, dark, system), palette and custom design tokens per mode (colours, fonts, radius, shadows), and the web fonts it loads. "
+      + "font_sources says which families a font stack can name as they are: bundled (self-hosted, e.g. Inter Tight), preloaded (declared by the dashboard), "
+      + "or any other one once added as a web font (polpo_branding_update fonts) from web_font_hosts. "
       + "A person may still customize their own browser.",
     inputSchema: {},
-    outputSchema: { ...brandingOutput, logo_link: z.string().optional(), logo_dark_link: z.string().optional(), appearance: appearanceOutput, tokens: z.array(z.string()) },
+    outputSchema: {
+      ...brandingOutput, logo_link: z.string().optional(), logo_dark_link: z.string().optional(), appearance: appearanceOutput, tokens: z.array(z.string()),
+      font_sources: z.object({ bundled: z.array(z.string()), preloaded: z.array(z.string()), web_font_hosts: z.array(z.string()) }),
+    },
     annotations: READ,
   }, async () => {
     const b = await brandingNow(deps) as Branding;
@@ -459,8 +495,11 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
       `${b.productName ?? "Polpo (default name)"}${b.tagline ? ` — ${b.tagline}` : ""}`,
       `logo: ${logoLink ?? "default"} · dark-mode logo: ${darkLink ?? (logoLink ? "the logo" : "default")} · frame: ${b.logoFrame ?? "box (default)"}`,
       `appearance: ${describeAppearance(appearance)}`,
+      `fonts: bundled ${FONT_SOURCES.bundled.join(", ")}; preloaded ${FONT_SOURCES.preloaded.join(", ")}; any other family needs a web font (fonts) from ${FONT_SOURCES.web_font_hosts.join(", ")}`,
+      ...fontWarning(appearance),
     ].join("\n"), {
       ...b, ...(logoLink ? { logo_link: logoLink } : {}), ...(darkLink ? { logo_dark_link: darkLink } : {}), appearance, tokens: APPEARANCE_TOKEN_NAMES,
+      font_sources: FONT_SOURCES,
     });
   });
 
@@ -469,7 +508,12 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
     description: "Change what everyone sees in the dashboard: the product name, the tagline, the logo, the dark-mode logo, how the logo is framed, and the default look "
       + "(theme, palette, custom design tokens per mode). Only the fields given change; an empty string restores a default name or tagline. "
       + "A logo comes from a public https URL (fetched by the server), a file of the instance, or base64 data; PNG, JPEG, WebP or GIF up to 4 MB; "
-      + "null removes it. Tokens: colours (#rrggbb, oklch(…), hsl(…), rgb(…)), fonts (a CSS font stack; Inter Tight is bundled with the dashboard, loaded only when used: \"Inter Tight\", sans-serif), radius (0–24 px), shadows (shadowCard on cards, shadowRaised on popovers, menus, dialogs); "
+      + "null removes it. Tokens: colours (#rrggbb, oklch(…), hsl(…), rgb(…)), fonts (a CSS font stack, e.g. \"Inter Tight\", sans-serif), radius (0–24 px; radiusCard for cards and tiles, radiusControl for buttons, inputs, selects: 0–32 px, default from radius), shadows (shadowCard on cards, shadowRaised on popovers, menus, dialogs); "
+      + "the primary button: buttonPrimaryBg (a solid fill, default primary) or buttonGradient { from, to, angle } (a linear gradient), buttonPrimaryForeground (its text, derived readable); hover is derived; "
+      + "the sidebar: sidebarOpacity (0.5–1) and sidebarBlur (0–24 px backdrop blur); "
+      + "FONTS: Inter Tight is bundled (self-hosted, no download setup needed); Satoshi, Inter, IBM Plex Sans, JetBrains Mono and Newsreader are preloaded; "
+      + `any other family must be added to fonts (at most ${APPEARANCE_MAX_WEB_FONTS}): { family, source: "google", weights: "400;600;700" } loads it from Google Fonts, `
+      + `{ family, source: "url", url } an https stylesheet on ${APPEARANCE_FONT_HOSTS.join(", ")}; then name the family in fontFamily / headingFont / monoFont; `
       + "status colours (success, warning, info, destructive and their *Foreground; statusRunning, statusQueued, statusAssigned for task states); "
       + "the type scale (textDisplay, textH1, textH2, textH3, textBody, textSmall, textCaption, textMicro: rem 0.5–6 or px 8–96), headingWeight (100–900), "
       + "headingTracking and labelTracking (em -0.1–0.3), labelCase (uppercase, none, capitalize, lowercase); "
@@ -491,21 +535,23 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
         dark: tokensInput.optional().describe("Dark-mode tokens to set (null removes one)"),
         replace: z.boolean().optional().describe("true: the given light/dark maps replace the current ones instead of merging"),
       }).strict().optional().describe("Custom design tokens per mode"),
-      reset_appearance: z.boolean().optional().describe("true: drop the instance's default look (theme, palette and tokens) before applying the rest"),
+      fonts: z.array(webFontShape.strict()).max(APPEARANCE_MAX_WEB_FONTS).nullable().optional()
+        .describe("The web fonts to load (replaces the list; [] or null: none). E.g. [{ family: \"Manrope\", source: \"google\", weights: \"400;600;700\" }]"),
+      reset_appearance: z.boolean().optional().describe("true: drop the instance's default look (theme, palette, tokens and web fonts) before applying the rest"),
     },
-    outputSchema: { changed: z.array(z.string()), branding: z.object({ ...brandingOutput }), appearance: appearanceOutput },
+    outputSchema: { changed: z.array(z.string()), branding: z.object({ ...brandingOutput }), appearance: appearanceOutput, unloaded_fonts: z.array(z.string()).optional() },
     annotations: UPDATE,
-  }, async ({ product_name, tagline, logo, logo_dark, remove_logo, logo_frame, theme, palette, tokens, reset_appearance }) => {
-    const touchesAppearance = theme !== undefined || palette !== undefined || tokens !== undefined || reset_appearance === true;
+  }, async ({ product_name, tagline, logo, logo_dark, remove_logo, logo_frame, theme, palette, tokens, fonts, reset_appearance }) => {
+    const touchesAppearance = theme !== undefined || palette !== undefined || tokens !== undefined || fonts !== undefined || reset_appearance === true;
     if (product_name === undefined && tagline === undefined && logo === undefined && logo_dark === undefined && !remove_logo && logo_frame === undefined && !touchesAppearance) {
-      return fail("Nothing to change: give product_name, tagline, logo, logo_dark, logo_frame, theme, palette, tokens or reset_appearance.");
+      return fail("Nothing to change: give product_name, tagline, logo, logo_dark, logo_frame, theme, palette, tokens, fonts or reset_appearance.");
     }
     if (logo && remove_logo) return fail("Give either logo or remove_logo, not both.");
     // the appearance first (pure validation): if it is not valid, nothing changes
     let nextAppearance: AppearanceSettings | null | undefined;
     const before = touchesAppearance ? await appearanceNow(deps) : {};
     if (touchesAppearance) {
-      const merged = mergeAppearance(reset_appearance ? {} : before, { theme, palette, tokens });
+      const merged = mergeAppearance(reset_appearance ? {} : before, { theme, palette, tokens, fonts });
       try {
         nextAppearance = parseAppearanceSettings(merged);
       } catch (err) {
@@ -546,10 +592,11 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
     const now = await brandingNow(deps) as Branding;
     const appearance = await appearanceNow(deps);
     if (touchesAppearance) changed.push(...appearanceChanges(before, appearance));
-    return ok(changed.length
+    const unloaded = unloadedFontFamilies(appearance);
+    return ok([changed.length
       ? `Updated: ${changed.join(", ")}. Now: ${now.productName ?? "Polpo"}${now.tagline ? ` — ${now.tagline}` : ""}${now.logoUrl ? " with a custom logo" : ""}${now.logoDarkUrl ? " (and a dark-mode one)" : ""}${now.logoFrame === "none" ? ", shown bare" : ""}; appearance: ${describeAppearance(appearance)}.`
-      : "Nothing changed (the values were the same).",
-    { changed, branding: now, appearance });
+      : "Nothing changed (the values were the same).", ...fontWarning(appearance)].join("\n"),
+    { changed, branding: now, appearance, ...(unloaded.length ? { unloaded_fonts: unloaded } : {}) });
   });
 
   const providerItem = z.object({

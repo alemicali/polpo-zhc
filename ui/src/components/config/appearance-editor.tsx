@@ -6,7 +6,7 @@
  */
 import { useMemo, useRef, useState, type CSSProperties } from "react";
 import { toast } from "sonner";
-import { Check, Download, Globe, Laptop, Loader2, Moon, Palette as PaletteIcon, RotateCcw, Save, Sun, Upload, X } from "lucide-react";
+import { Check, Download, Globe, Laptop, Loader2, Moon, Palette as PaletteIcon, Plus, RotateCcw, Save, Sun, Upload, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,20 +18,20 @@ import {
   appearanceAsInstanceDefault, customizeInBrowser, followInstanceDefault, getInstanceAppearance, kit, setBrowserChoice,
   useResolvedAppearance, type AppearanceSettings, type InstanceAppearance,
 } from "@/lib/appearance";
-import type { TokenGroup, TokenMap } from "@/lib/appearance-kit";
+import type { GradientValue, TokenGroup, TokenMap, TokenValue, WebFont } from "@/lib/appearance-kit";
 import { parseImportedAppearance } from "@/lib/appearance-import";
 import { FONT_PRESETS } from "@/lib/font-presets";
 
 const GROUPS: Array<{ id: TokenGroup; label: string; hint: string }> = [
-  { id: "brand", label: "Brand", hint: "Buttons, links, highlights" },
+  { id: "brand", label: "Brand", hint: "Buttons (solid or gradient), links, highlights" },
   { id: "surfaces", label: "Surfaces", hint: "Page, cards, menus, quiet areas" },
   { id: "text", label: "Text", hint: "On the page and on each surface" },
   { id: "borders", label: "Borders & focus", hint: "Lines, inputs, focus ring" },
-  { id: "sidebar", label: "Sidebar", hint: "The navigation column" },
+  { id: "sidebar", label: "Sidebar", hint: "The navigation column; its opacity and backdrop blur" },
   { id: "charts", label: "Charts", hint: "Series colours" },
   { id: "status", label: "Status", hint: "Success, warning, info, errors (and text on them); task states" },
-  { id: "typography", label: "Typography", hint: "Fonts; the type scale (rem or px); heading weight; label tracking and case" },
-  { id: "shape", label: "Shape", hint: "Corners and shadows" },
+  { id: "typography", label: "Typography", hint: "Fonts (and web fonts to load); the type scale (rem or px); heading weight; label tracking and case" },
+  { id: "shape", label: "Shape", hint: "Corners (global, cards, controls) and shadows" },
 ];
 
 function label(name: string): string {
@@ -71,14 +71,106 @@ function Segmented<T extends string>({ value, options, onChange }: { value: T; o
   );
 }
 
-function TokenRow({ name, value, derived, computed, onChange }: {
+/** The primary button: solid (its fill, default the primary colour) or a gradient (two colours, an angle). */
+function GradientRow({ value, computed, onChange }: {
+  value: GradientValue | undefined;
+  computed: string;
+  onChange: (value: GradientValue | undefined) => void;
+}) {
+  const fallback = toHex(computed) ?? toHex(getComputedStyle(document.documentElement).getPropertyValue("--primary").trim()) ?? "#000000";
+  const g: GradientValue = value ?? { from: fallback, to: fallback, angle: kit.GRADIENT_ANGLE };
+  const set = (patch: Partial<GradientValue>) => onChange(kit.tokenValue("buttonGradient", { ...g, ...patch }) as GradientValue | undefined);
+  return (
+    <div className="grid grid-cols-[8.5rem_minmax(0,1fr)_auto] items-center gap-2 py-1">
+      <span className="truncate text-xs" title="--button-primary-bg">Button style</span>
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <Segmented value={value ? "gradient" : "solid"} options={[{ value: "solid", label: "Solid" }, { value: "gradient", label: "Gradient" }]}
+          onChange={(v) => onChange(v === "gradient" ? g : undefined)} />
+        {value && (
+          <>
+            <input type="color" aria-label="Gradient start" value={toHex(g.from) ?? fallback} onChange={(e) => set({ from: e.target.value })}
+              className="h-8 w-10 shrink-0 cursor-pointer rounded-md border border-border bg-transparent p-0.5" />
+            <input type="color" aria-label="Gradient end" value={toHex(g.to) ?? fallback} onChange={(e) => set({ to: e.target.value })}
+              className="h-8 w-10 shrink-0 cursor-pointer rounded-md border border-border bg-transparent p-0.5" />
+            <input type="range" min={0} max={360} step={5} aria-label="Gradient angle" value={g.angle} onChange={(e) => set({ angle: Number(e.target.value) })}
+              className="w-24 accent-primary" />
+            <code className="w-10 shrink-0 text-right text-caption text-muted-foreground">{g.angle}°</code>
+          </>
+        )}
+      </div>
+      <Button variant="ghost" size="icon" className="h-7 w-7" disabled={!value} title="Back to a solid fill" onClick={() => onChange(undefined)}>
+        <X className="h-3.5 w-3.5" />
+      </Button>
+    </div>
+  );
+}
+
+/** Typography → web fonts: a family from Google Fonts (with weights) or a stylesheet on an allowed host, with a preview. */
+function WebFonts({ fonts, onChange, onUse }: {
+  fonts: WebFont[];
+  onChange: (fonts: WebFont[]) => void;
+  onUse: (family: string) => void;
+}) {
+  const [family, setFamily] = useState("");
+  const [source, setSource] = useState<"google" | "url">("google");
+  const [weights, setWeights] = useState("400;600;700");
+  const [url, setUrl] = useState("");
+  const candidate = kit.normalizeWebFont({ family, source, weights: source === "google" ? weights : undefined, url: source === "url" ? url : undefined });
+  const duplicate = !!candidate && fonts.some((f) => f.family.toLowerCase() === candidate.family.toLowerCase());
+  const add = () => {
+    if (!candidate || duplicate) return;
+    onChange([...fonts, candidate]);
+    setFamily("");
+    setUrl("");
+  };
+  return (
+    <div className="mt-2 space-y-2 border-t border-border/40 pt-2" data-testid="web-fonts">
+      <div className="text-xs font-semibold">Web fonts</div>
+      <p className="text-micro text-muted-foreground">
+        Inter Tight is bundled; Satoshi, Inter, IBM Plex Sans, JetBrains Mono and Newsreader are always available. Add any other family here,
+        then pick it above. Loaded with font-display swap from {kit.FONT_HOSTS.join(", ")}.
+      </p>
+      {fonts.map((f) => (
+        <div key={f.family} className="flex items-center gap-2 rounded-control border border-border/40 px-2 py-1.5">
+          <span className="min-w-0 flex-1 truncate text-body" style={{ fontFamily: `"${f.family}", var(--app-font-family)` }}>{f.family} — The quick brown fox</span>
+          <code className="hidden truncate text-micro text-muted-foreground sm:block">{f.source === "google" ? `Google${f.weights ? ` ${f.weights}` : ""}` : new URL(f.url ?? "https://x").hostname}</code>
+          <Button variant="ghost" size="sm" className="h-6 px-2 text-micro" onClick={() => onUse(f.family)}>Use</Button>
+          <Button variant="ghost" size="icon" className="h-6 w-6" title="Remove" onClick={() => onChange(fonts.filter((x) => x !== f))}>
+            <X className="h-3 w-3" />
+          </Button>
+        </div>
+      ))}
+      <div className="flex flex-wrap items-center gap-2">
+        <Input value={family} onChange={(e) => setFamily(e.target.value)} placeholder="Family, e.g. Manrope" aria-label="Web font family" className="h-8 w-40 text-caption" />
+        <select aria-label="Web font source" value={source} onChange={(e) => setSource(e.target.value as "google" | "url")}
+          className="h-8 rounded-control border border-border bg-background px-2 text-xs">
+          <option value="google">Google Fonts</option>
+          <option value="url">Stylesheet URL</option>
+        </select>
+        {source === "google"
+          ? <Input value={weights} onChange={(e) => setWeights(e.target.value)} placeholder="400;600;700 or 300..800" aria-label="Web font weights" className="h-8 w-36 font-mono text-caption" />
+          : <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://fonts.bunny.net/css?family=…" aria-label="Web font stylesheet" className="h-8 min-w-0 flex-1 font-mono text-caption" />}
+        <Button size="sm" variant="outline" className="h-8 text-xs" disabled={!candidate || duplicate || fonts.length >= 8} onClick={add}>
+          <Plus className="h-3.5 w-3.5" /> Add a web font
+        </Button>
+      </div>
+      {family.trim() !== "" && !candidate && <p className="text-micro text-destructive">Check the family (letters, digits, spaces), the weights (100–900) or the URL (https, on an allowed host).</p>}
+      {duplicate && <p className="text-micro text-destructive">{candidate?.family} is already added.</p>}
+    </div>
+  );
+}
+
+function TokenRow({ name, value, derived, computed, webFonts, onChange }: {
   name: string;
   value: string | number | undefined;
   derived: string | number | undefined;
   computed: string;
+  webFonts: WebFont[];
   onChange: (value: string | number | undefined) => void;
 }) {
   const kind = kit.TOKENS[name][2];
+  const range = kit.RANGES[name] ?? [0, 24];
+  const fontOptions = [...FONT_PRESETS, ...webFonts.map((f) => ({ label: f.family, value: `"${f.family}", ${name === "monoFont" ? "ui-monospace, monospace" : "ui-sans-serif, system-ui, sans-serif"}` }))];
   const [draft, setDraft] = useState(value === undefined ? "" : String(value));
   const [source, setSource] = useState(value);
   if (source !== value) {
@@ -87,14 +179,14 @@ function TokenRow({ name, value, derived, computed, onChange }: {
   }
   const shown = value ?? derived;
   const placeholder = derived !== undefined ? `${derived} (derived)` : computed ? `${computed} (palette)` : "palette";
-  const numeric = kind === "radius" || kind === "weight";
+  const numeric = kind === "radius" || kind === "weight" || kind === "opacity" || kind === "blur";
   const invalid = draft.trim() !== "" && !numeric && kit.tokenValue(name, draft) === undefined;
 
   const commit = (text: string) => {
     setDraft(text);
     if (text.trim() === "") return onChange(undefined);
     const ok = kit.tokenValue(name, numeric ? Number(text) : text);
-    if (ok !== undefined) onChange(ok);
+    if (ok !== undefined && typeof ok !== "object") onChange(ok);
   };
 
   return (
@@ -113,16 +205,18 @@ function TokenRow({ name, value, derived, computed, onChange }: {
             className="h-8 w-10 shrink-0 cursor-pointer rounded-md border border-border bg-transparent p-0.5"
           />
         )}
-        {kind === "radius" ? (
+        {kind === "radius" || kind === "blur" || kind === "opacity" ? (
           <>
             <input
-              type="range" min={0} max={24} step={1}
-              aria-label="Radius"
-              value={typeof shown === "number" ? shown : 8}
+              type="range" min={range[0]} max={range[1]} step={kind === "opacity" ? 0.05 : 1}
+              aria-label={name === "radius" ? "Radius" : label(name)}
+              value={typeof shown === "number" ? shown : kind === "opacity" ? 1 : kind === "blur" ? 0 : 8}
               onChange={(e) => commit(e.target.value)}
               className="w-full accent-primary"
             />
-            <code className="w-12 shrink-0 text-right text-caption text-muted-foreground">{value === undefined ? "palette" : `${value}px`}</code>
+            <code className="w-12 shrink-0 text-right text-caption text-muted-foreground">
+              {value === undefined ? (kind === "radius" && name !== "radius" ? "auto" : "palette") : kind === "opacity" ? `${Math.round(Number(value) * 100)}%` : `${value}px`}
+            </code>
           </>
         ) : kind === "weight" ? (
           <>
@@ -149,12 +243,12 @@ function TokenRow({ name, value, derived, computed, onChange }: {
           <div className="flex min-w-0 flex-1 gap-2">
             <select
               aria-label={`${label(name)} preset`}
-              value={FONT_PRESETS.some((f) => f.value === value) ? String(value) : ""}
+              value={fontOptions.some((f) => f.value === value) ? String(value) : ""}
               onChange={(e) => commit(e.target.value)}
               className="h-8 w-32 shrink-0 rounded-md border border-border bg-background px-2 text-xs"
             >
               <option value="">{value === undefined ? "Palette" : "Custom"}</option>
-              {FONT_PRESETS.map((f) => <option key={f.label} value={f.value}>{f.label}</option>)}
+              {fontOptions.map((f) => <option key={f.label} value={f.value}>{f.label}</option>)}
             </select>
             <Input value={draft} placeholder={placeholder} onChange={(e) => commit(e.target.value)}
               className={cn("h-8 min-w-0 font-mono text-caption", invalid && "border-destructive")} />
@@ -194,11 +288,18 @@ export function AppearanceEditor({ onSaveInstanceDefault }: {
     ? getComputedStyle(document.documentElement).getPropertyValue(css).trim() : "");
 
   const setCustom = (next: AppearanceSettings) => setBrowserChoice("custom", JSON.stringify(next));
-  const setToken = (name: string, value: string | number | undefined) => {
+  const setToken = (name: string, value: TokenValue | undefined) => {
     const nextTokens: TokenMap = { ...tokens };
     if (value === undefined) delete nextTokens[name];
     else nextTokens[name] = value;
     setCustom({ ...custom, enabled: true, [mode]: nextTokens });
+  };
+  const webFonts = custom.fonts ?? [];
+  const setWebFonts = (fonts: WebFont[]) => {
+    const next: AppearanceSettings = { ...custom };
+    if (fonts.length) next.fonts = fonts;
+    else delete next.fonts;
+    setCustom(next);
   };
   const resetGroup = (group: TokenGroup) => {
     const nextTokens: TokenMap = {};
@@ -222,7 +323,10 @@ export function AppearanceEditor({ onSaveInstanceDefault }: {
     if (!parsed.ok) { toast.error(`Import failed: ${parsed.error}`); return; }
     if (parsed.value.theme) setBrowserChoice("theme", parsed.value.theme);
     if (parsed.value.palette) setBrowserChoice("palette", parsed.value.palette);
-    if (parsed.value.custom) setCustom(kit.normalizeCustom(parsed.value.custom));
+    if (parsed.value.custom || parsed.value.fonts) {
+      const base = parsed.value.custom ? kit.normalizeCustom(parsed.value.custom) : custom;
+      setCustom(parsed.value.fonts ? { ...base, fonts: parsed.value.fonts } : base);
+    }
     setImportOpen(false);
     setImportText("");
     toast.success("Appearance imported in this browser");
@@ -242,6 +346,13 @@ export function AppearanceEditor({ onSaveInstanceDefault }: {
   const previewStyle = {
     "--pv-primary": String(withDerived.primary ?? "var(--primary)"),
     "--pv-primary-fg": String(withDerived.primaryForeground ?? "var(--primary-foreground)"),
+    "--pv-button": typeof withDerived.buttonGradient === "object" ? kit.gradientCss(withDerived.buttonGradient)
+      : String(withDerived.buttonPrimaryBg ?? withDerived.primary ?? "var(--button-primary-bg)"),
+    "--pv-button-fg": String(withDerived.buttonPrimaryForeground ?? withDerived.primaryForeground ?? "var(--button-primary-foreground)"),
+    "--pv-radius-card": typeof withDerived.radiusCard === "number" ? `${withDerived.radiusCard}px`
+      : typeof withDerived.radius === "number" ? `${withDerived.radius + 4}px` : "var(--radius-card)",
+    "--pv-radius-control": typeof withDerived.radiusControl === "number" ? `${withDerived.radiusControl}px`
+      : typeof withDerived.radius === "number" ? `${Math.max(0, withDerived.radius - 2)}px` : "var(--radius-control)",
     "--pv-bg": String(withDerived.background ?? "var(--background)"),
     "--pv-card": String(withDerived.card ?? "var(--card)"),
     "--pv-text": String(withDerived.foreground ?? "var(--foreground)"),
@@ -394,12 +505,25 @@ export function AppearanceEditor({ onSaveInstanceDefault }: {
                       Reset group
                     </Button>
                   </div>
-                  {names.map((name) => (
-                    <TokenRow key={`${mode}-${name}`} name={name} value={tokens[name]}
-                      derived={tokens[name] === undefined ? withDerived[name] : undefined}
-                      computed={computed(kit.TOKENS[name][0])}
-                      onChange={(value) => setToken(name, value)} />
-                  ))}
+                  {names.map((name) => {
+                    const v = tokens[name];
+                    if (kit.TOKENS[name][2] === "gradient") {
+                      return <GradientRow key={`${mode}-${name}`} value={typeof v === "object" ? v : undefined}
+                        computed={computed("--primary")} onChange={(value) => setToken(name, value)} />;
+                    }
+                    const d = withDerived[name];
+                    return (
+                      <TokenRow key={`${mode}-${name}`} name={name} value={typeof v === "object" ? undefined : v}
+                        derived={v === undefined && typeof d !== "object" ? d : undefined}
+                        computed={computed(kit.TOKENS[name][0])}
+                        webFonts={webFonts}
+                        onChange={(value) => setToken(name, value)} />
+                    );
+                  })}
+                  {group.id === "typography" && (
+                    <WebFonts fonts={webFonts} onChange={setWebFonts}
+                      onUse={(family) => setToken("fontFamily", `"${family}", ui-sans-serif, system-ui, sans-serif`)} />
+                  )}
                 </div>
               );
             })}
@@ -414,9 +538,9 @@ export function AppearanceEditor({ onSaveInstanceDefault }: {
               style={{ background: "var(--pv-bg)", borderColor: "var(--pv-border)", color: "var(--pv-text)", fontFamily: "var(--pv-font)" }}>
               <div className="text-micro font-semibold" style={{ letterSpacing: "var(--pv-label-tracking)", textTransform: "var(--pv-label-case)" as CSSProperties["textTransform"] }}>Label</div>
               <div style={{ fontFamily: "var(--pv-heading)", fontWeight: "var(--pv-heading-weight)" as CSSProperties["fontWeight"], fontSize: "var(--pv-heading-size)" }}>Heading</div>
-              <button type="button" className="h-9 w-full rounded-[var(--pv-radius)] px-3 text-sm font-medium"
-                style={{ background: "var(--pv-primary)", color: "var(--pv-primary-fg)" }}>Primary action</button>
-              <div className="rounded-[var(--pv-radius)] border p-3 text-xs" style={{ background: "var(--pv-card)", borderColor: "var(--pv-border)" }}>
+              <button type="button" className="h-9 w-full rounded-[var(--pv-radius-control)] px-3 text-sm font-medium"
+                style={{ background: "var(--pv-button)", color: "var(--pv-button-fg)" }}>Primary action</button>
+              <div className="rounded-[var(--pv-radius-card)] border p-3 text-xs" style={{ background: "var(--pv-card)", borderColor: "var(--pv-border)" }}>
                 Card surface
                 <div className="mt-1" style={{ color: "var(--pv-muted-fg)" }}>Muted text</div>
               </div>

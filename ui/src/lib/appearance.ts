@@ -141,7 +141,9 @@ export function setBrowserChoice(field: keyof typeof kit.KEYS, value: string): v
 
 /** The current look as an instance default (what "Save as instance default" sends). */
 export function appearanceAsInstanceDefault(r: ResolvedAppearance = currentAppearance()): Required<InstanceAppearance> {
-  return { theme: r.theme, palette: r.palette, custom: r.custom };
+  // the web fonts are settings.appearance.fonts, not part of custom
+  const { fonts, ...custom } = r.custom;
+  return { theme: r.theme, palette: r.palette, custom, fonts: fonts ?? [] };
 }
 
 /** Re-read the layers whenever any of them changes. */

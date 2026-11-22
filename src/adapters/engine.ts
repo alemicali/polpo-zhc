@@ -98,11 +98,12 @@ export function describeToolsForAgent(agent: AgentConfig): string {
     ["ls", "- `ls` — list directory contents"],
     ["http_fetch", "- `http_fetch` — make HTTP requests (GET, POST, PUT, DELETE)"],
     ["http_download", "- `http_download` — download files from URLs"],
-    ["register_outcome", "- `register_outcome` — declare task deliverables (files, URLs, text, data)"],
   ];
   lines.push(
     "**Core:**",
     ...core.filter(([name]) => grantsTool(agent, name)).map(([, line]) => line),
+    // every agent gets register_outcome, whatever its allowedTools (createOutcomeTools)
+    "- `register_outcome` — declare task deliverables (files, URLs, text, data)",
     "- `vault_get` — retrieve stored credentials/secrets",
     "- `vault_list` — list available vault entries",
   );

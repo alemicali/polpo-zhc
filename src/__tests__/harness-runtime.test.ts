@@ -207,13 +207,22 @@ describe("SDK wrapper", () => {
     // an object auth: the adapter never reads process.env, ~/.claude or a subscription on this server
     expect(cc.auth).toEqual({});
     expect(typeof cc.auth).toBe("object");
-    expect(cc.env).toEqual({ CLAUDE_CODE_USE_BEDROCK: "1" });
+    // tool search off: host tools (register_outcome) are in the first request, no ToolSearch lookup
+    expect(cc.env).toEqual({ CLAUDE_CODE_USE_BEDROCK: "1", ENABLE_TOOL_SEARCH: "false" });
     expect(cc.toolHints).toEqual({ register_outcome: { alwaysLoad: true } });
     expect(cc).toMatchObject({ strictMcpConfig: true, maxBudgetUsd: 1.5, maxTurns: 12, thinking: { type: "disabled" } });
     const agent = sdk.agents[0];
     expect(agent).toMatchObject({ id: "ada", instructions: "Be brief.", permissionMode: "allow-all", sandboxConfig: { workDir: "." } });
     expect(agent.skills).toEqual([{ name: "review", description: "Review code", content: "# Review" }]);
     expect(await agent.tools.register_outcome.execute({ a: 1 }, { toolCallId: "c1" })).toEqual({ got: { a: 1 } });
+  });
+
+  it("Claude Code tool search: off for a normal tool set, auto for a very large one; an explicit env wins", () => {
+    const many = Array.from({ length: 41 }, (_, i) => ({ name: `t${i}`, description: "x", inputSchema: { type: "object", properties: {} }, execute: async () => "ok" }));
+    createSdkHarnessRuntime(spec({ tools: many }) as any);
+    expect(sdk.claudeCode[0].env.ENABLE_TOOL_SEARCH).toBe("auto");
+    createSdkHarnessRuntime(spec({ auth: { auth: {}, env: { ENABLE_TOOL_SEARCH: "true" }, secrets: [] } }) as any);
+    expect(sdk.claudeCode[1].env.ENABLE_TOOL_SEARCH).toBe("true");
   });
 
   it("Codex: the API key as an explicit auth environment", () => {
@@ -270,7 +279,7 @@ describe("harness engine (tasks)", () => {
   const task = { id: "t1", title: "Write notes", description: "Create notes.txt", expectations: [], status: "in_progress" } as any;
   const agent = { name: "ada", role: "dev", engine: { harness: "claude-code", maxBudgetUsd: 2 } } as any;
 
-  function setup(turns: Array<(session: any, onEvent: (e: any) => void, spec: any) => Promise<any>>, machineOpts: { remoteId?: () => string } = {}) {
+  function setup(turns: Array<(session: any, onEvent: (e: any) => void, spec: any) => Promise<any>>, machineOpts: { remoteId?: () => string } = {}, runAgent: any = agent) {
     const root = tmp("polpo-harness-engine-");
     const polpoDir = join(root, ".polpo");
     mkdirSync(polpoDir, { recursive: true });
@@ -302,7 +311,7 @@ describe("harness engine (tasks)", () => {
       },
     };
     const transcript: any[] = [];
-    const handle = spawnHarnessEngine(agent, task, root, { polpoDir, outputDir: join(polpoDir, "output", "t1"), vaultStore: vault } as any, {
+    const handle = spawnHarnessEngine(runAgent, task, root, { polpoDir, outputDir: join(polpoDir, "output", "t1"), vaultStore: vault } as any, {
       settings: () => settings,
       openMachine: async () => ({ machine: machine as any, computerId: "nina", hold: () => () => {}, ...machineOpts }),
       runtimeFactory: (s) => { spec = s; return runtime as any; },
@@ -347,6 +356,14 @@ describe("harness engine (tasks)", () => {
     expect(status).toMatchObject({ state: "stopped", resumable: true, turns: 1, costUsd: 0.05, runtimeSessionId: "cc-1", computerId: "nina" });
     expect(env.vault.m.has(`${HARNESS_VAULT_OWNER}/task:t1`)).toBe(true);
     expect(JSON.stringify(status)).not.toContain("privateKey");
+  });
+
+  it("register_outcome is a host tool even when the agent's allowedTools omit it", async () => {
+    const env = setup([async () => done("ok")], {}, { ...agent, allowedTools: ["read", "write", "bash"] });
+    await env.handle.done;
+    const names = env.getSpec().tools.map((t: any) => t.name);
+    expect(names).toContain("register_outcome");
+    expect(env.getSpec().instructions).toMatch(/Polpo's tools[^\n]*register_outcome/);
   });
 
   it("hibernation between turns: detaches (resume state in the vault), then the next turn resumes on the new VM", async () => {

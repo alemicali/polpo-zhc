@@ -12,6 +12,8 @@ export type { TokenUsageRange } from "@polpo-ai/core/token-usage";
 export interface TaskTokenEvent {
   timestamp: string;
   totalTokens: number;
+  /** The task of the run (from the log's header line). */
+  taskId?: string;
 }
 
 interface CachedTaskLog {
@@ -63,16 +65,18 @@ export class FileTokenUsageStore implements TokenUsageStore {
 function parseTaskTokenEvents(content: string): TaskTokenEvent[] {
   const events: TaskTokenEvent[] = [];
   let previousTotal = 0;
+  let taskId: string | undefined;
   for (const line of content.split("\n")) {
     if (!line.trim()) continue;
     try {
-      const record = JSON.parse(line) as { ts?: string; event?: string; data?: { totalTokens?: number } };
+      const record = JSON.parse(line) as { _run?: boolean; taskId?: string; ts?: string; event?: string; data?: { totalTokens?: number } };
+      if (record._run && typeof record.taskId === "string") { taskId = record.taskId; continue; }
       if (record.event !== "activity" || !record.ts) continue;
       const currentTotal = Number(record.data?.totalTokens) || 0;
       if (currentTotal <= 0 || currentTotal === previousTotal) continue;
       const delta = currentTotal > previousTotal ? currentTotal - previousTotal : currentTotal;
       previousTotal = currentTotal;
-      if (delta > 0) events.push({ timestamp: record.ts, totalTokens: delta });
+      if (delta > 0) events.push({ timestamp: record.ts, totalTokens: delta, ...(taskId ? { taskId } : {}) });
     } catch {
       // Ignore partial or unrelated log records.
     }

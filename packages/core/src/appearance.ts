@@ -17,11 +17,12 @@ export const APPEARANCE_PALETTES = ["tide", "lovable", "chatgpt", "claude", "bru
 export type AppearancePalette = (typeof APPEARANCE_PALETTES)[number];
 
 /**
- * How a token's value is checked: colour, font stack, radius (px 0–24), box-shadow, font size
- * (rem 0.5–6 / px 8–96), font weight (100–900), letter-spacing (em -0.1–0.3 / px -3–6, 0,
- * normal), text case (uppercase, none, capitalize, lowercase).
+ * How a token's value is checked: colour, font stack, radius (px; 0–24, card and control radius
+ * 0–32), box-shadow, font size (rem 0.5–6 / px 8–96), font weight (100–900), letter-spacing (em
+ * -0.1–0.3 / px -3–6, 0, normal), text case (uppercase, none, capitalize, lowercase), a gradient
+ * ({ from, to, angle }: two colours and 0–360 degrees), an opacity (0.5–1), a blur (px 0–24).
  */
-export type AppearanceTokenKind = "color" | "font" | "radius" | "shadow" | "size" | "weight" | "tracking" | "case";
+export type AppearanceTokenKind = "color" | "font" | "radius" | "shadow" | "size" | "weight" | "tracking" | "case" | "gradient" | "opacity" | "blur";
 
 /** Editor groups, in the order the dashboard shows them. */
 export const APPEARANCE_TOKEN_GROUPS = ["brand", "surfaces", "text", "borders", "sidebar", "charts", "status", "typography", "shape"] as const;
@@ -35,6 +36,9 @@ export const APPEARANCE_TOKENS = {
   primary: { css: "--primary", group: "brand", kind: "color" },
   secondary: { css: "--secondary", group: "brand", kind: "color" },
   accent: { css: "--accent", group: "brand", kind: "color" },
+  buttonPrimaryBg: { css: "--button-primary-bg", group: "brand", kind: "color" },
+  buttonGradient: { css: "--button-primary-bg", group: "brand", kind: "gradient" },
+  buttonPrimaryForeground: { css: "--button-primary-foreground", group: "brand", kind: "color" },
   background: { css: "--background", group: "surfaces", kind: "color" },
   card: { css: "--card", group: "surfaces", kind: "color" },
   popover: { css: "--popover", group: "surfaces", kind: "color" },
@@ -57,6 +61,8 @@ export const APPEARANCE_TOKENS = {
   sidebarAccentForeground: { css: "--sidebar-accent-foreground", group: "sidebar", kind: "color" },
   sidebarBorder: { css: "--sidebar-border", group: "sidebar", kind: "color" },
   sidebarRing: { css: "--sidebar-ring", group: "sidebar", kind: "color" },
+  sidebarOpacity: { css: "--sidebar-opacity", group: "sidebar", kind: "opacity" },
+  sidebarBlur: { css: "--sidebar-blur", group: "sidebar", kind: "blur" },
   chart1: { css: "--chart-1", group: "charts", kind: "color" },
   chart2: { css: "--chart-2", group: "charts", kind: "color" },
   chart3: { css: "--chart-3", group: "charts", kind: "color" },
@@ -89,6 +95,8 @@ export const APPEARANCE_TOKENS = {
   labelTracking: { css: "--tracking-label", group: "typography", kind: "tracking" },
   labelCase: { css: "--label-transform", group: "typography", kind: "case" },
   radius: { css: "--radius", group: "shape", kind: "radius" },
+  radiusCard: { css: "--radius-card", group: "shape", kind: "radius" },
+  radiusControl: { css: "--radius-control", group: "shape", kind: "radius" },
   shadowCard: { css: "--shadow-card", group: "shape", kind: "shadow" },
   shadowRaised: { css: "--shadow-raised", group: "shape", kind: "shadow" },
 } as const satisfies Record<string, { css: string; group: AppearanceTokenGroup; kind: AppearanceTokenKind }>;
@@ -109,6 +117,17 @@ export const APPEARANCE_FONT = /^[A-Za-z0-9 ,"'_.-]{1,200}$/;
 export const APPEARANCE_SHADOW = /^(none|[0-9a-zA-Z.%\s,/#()+-]{1,240})$/;
 export const APPEARANCE_RADIUS_MIN = 0;
 export const APPEARANCE_RADIUS_MAX = 24;
+/** The numeric tokens' bounds: the radii (px), the heading weight, the sidebar's opacity and blur (px). */
+export const APPEARANCE_NUMBER_RANGES: Record<string, readonly [number, number]> = {
+  radius: [APPEARANCE_RADIUS_MIN, APPEARANCE_RADIUS_MAX],
+  radiusCard: [0, 32],
+  radiusControl: [0, 32],
+  headingWeight: [100, 900],
+  sidebarOpacity: [0.5, 1],
+  sidebarBlur: [0, 24],
+};
+/** A gradient's default angle (degrees), when not given. */
+export const APPEARANCE_GRADIENT_ANGLE = 135;
 /** A font size (the type scale): rem 0.5–6 or px 8–96. */
 export const APPEARANCE_SIZE = /^(\d{1,2}(?:\.\d{1,4})?|\.\d{1,4})(rem|px)$/;
 export const APPEARANCE_SIZE_RANGE = { rem: [0.5, 6], px: [8, 96] } as const;
@@ -133,8 +152,12 @@ export const APPEARANCE_FONT_PRESETS: Record<string, string> = {
   Mono: "\"JetBrains Mono\", ui-monospace, \"Cascadia Code\", monospace",
 };
 
-/** Token values for one mode: any subset of APPEARANCE_TOKENS (radius in px and headingWeight numbers, the rest strings). */
-export type AppearanceTokens = Partial<Record<Exclude<AppearanceTokenName, "radius" | "headingWeight">, string>> & { radius?: number; headingWeight?: number };
+/** A gradient token (buttonGradient): two colours and an angle in degrees (default 135). */
+export interface AppearanceGradient { from: string; to: string; angle?: number }
+type NumberTokenName = "radius" | "radiusCard" | "radiusControl" | "headingWeight" | "sidebarOpacity" | "sidebarBlur";
+/** Token values for one mode: any subset of APPEARANCE_TOKENS (radii in px, headingWeight, sidebarOpacity and sidebarBlur numbers; buttonGradient an object; the rest strings). */
+export type AppearanceTokens = Partial<Record<Exclude<AppearanceTokenName, NumberTokenName | "buttonGradient">, string>>
+  & Partial<Record<NumberTokenName, number>> & { buttonGradient?: AppearanceGradient };
 /** @deprecated the old five-field shape; still accepted (text = foreground). */
 export type AppearanceColors = AppearanceTokens & { text?: string };
 
@@ -146,20 +169,185 @@ export interface AppearanceCustom {
   dark?: AppearanceTokens;
 }
 
+/**
+ * A web font the dashboard loads (settings.appearance.fonts), so a font stack can name it:
+ * "google" builds the Google Fonts css2 URL from the family and weights; "url" takes an https
+ * stylesheet on one of APPEARANCE_FONT_HOSTS. index.html's inline script adds it (preconnect and
+ * stylesheet) before the first paint; the families use font-display: swap.
+ */
+export interface AppearanceWebFont {
+  family: string;
+  source: "google" | "url";
+  /** The stylesheet (source "url" only). */
+  url?: string;
+  /** Weights: a list (400;600;700) or a range for a variable font (300..800). Google only; default: the regular weight. */
+  weights?: string;
+}
+
 export interface AppearanceSettings {
   theme?: AppearanceTheme;
   palette?: AppearancePalette;
   custom?: AppearanceCustom;
+  /** Web fonts to load (any mode's font stacks may name them). */
+  fonts?: AppearanceWebFont[];
+}
+
+/** The font services a web font stylesheet may come from. */
+export const APPEARANCE_FONT_HOSTS = ["fonts.googleapis.com", "fonts.bunny.net", "use.typekit.net", "api.fontshare.com", "rsms.me"] as const;
+/** At most this many web fonts. */
+export const APPEARANCE_MAX_WEB_FONTS = 8;
+/** A web font's family: letters, digits, spaces, _ and -, 1–64 characters, starting with a letter or digit. */
+export const APPEARANCE_FONT_FAMILY = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,63}$/;
+/** The fonts the dashboard ships itself (self-hosted in ui/public/fonts): no web font needed. */
+export const APPEARANCE_BUNDLED_FONTS = ["Inter Tight"] as const;
+/** The fonts index.html declares from font services: no web font needed. */
+export const APPEARANCE_PRELOADED_FONTS = ["Satoshi", "IBM Plex Sans", "Inter", "JetBrains Mono", "Newsreader"] as const;
+
+/** Weights as Google Fonts takes them ("400;600;700" or "300..800"), or null when not valid. */
+export function normalizeFontWeights(raw: string): string | null {
+  const s = raw.trim();
+  const ok = (n: number) => n >= 100 && n <= 900;
+  const range = /^(\d{3})\s*\.\.\s*(\d{3})$/.exec(s);
+  if (range) {
+    const a = Number(range[1]);
+    const b = Number(range[2]);
+    return ok(a) && ok(b) && a < b ? `${a}..${b}` : null;
+  }
+  const parts = s.split(/[\s;,]+/).filter(Boolean);
+  if (!parts.length || parts.length > 9 || parts.some((p) => !/^\d{3}$/.test(p) || !ok(Number(p)))) return null;
+  return [...new Set(parts.map(Number))].sort((a, b) => a - b).join(";");
+}
+
+/** An https stylesheet on an allowed font host (font-display swap added where the service takes it), or null. */
+export function normalizeFontUrl(raw: string): string | null {
+  const s = raw.trim();
+  if (s.length > 512 || !/^https:\/\/[^\s"'<>\\`]+$/.test(s)) return null;
+  let url: URL;
+  try { url = new URL(s); } catch { return null; }
+  if (url.protocol !== "https:" || url.username || url.password || url.port) return null;
+  url.hash = "";
+  if (!(APPEARANCE_FONT_HOSTS as readonly string[]).includes(url.hostname)) return null;
+  if (["fonts.googleapis.com", "fonts.bunny.net", "api.fontshare.com"].includes(url.hostname) && !url.searchParams.has("display")) {
+    // appended as is: searchParams.set would re-encode the rest (family=Inter:wght@400;700)
+    return `${url.href}${url.search ? "&" : "?"}display=swap`;
+  }
+  return url.href;
+}
+
+/** The stylesheet URL of a (valid) web font. */
+export function webFontHref(font: AppearanceWebFont): string {
+  if (font.source === "google") {
+    const family = encodeURIComponent(font.family).replace(/%20/g, "+");
+    return `https://fonts.googleapis.com/css2?family=${family}${font.weights ? `:wght@${font.weights}` : ""}&display=swap`;
+  }
+  return font.url ?? "";
+}
+
+/** One web font, checked; an error names the field. */
+export function parseWebFont(raw: unknown, path: string): AppearanceWebFont {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${path} must be an object { family, source, url?, weights? }`);
+  const r = raw as Record<string, unknown>;
+  const unknown = Object.keys(r).filter((k) => !["family", "source", "url", "weights"].includes(k));
+  if (unknown.length) throw new Error(`${path}: unknown field ${unknown.join(", ")} (use family, source, url, weights)`);
+  const family = typeof r.family === "string" ? r.family.trim().replace(/\s+/g, " ") : "";
+  if (!APPEARANCE_FONT_FAMILY.test(family)) throw new Error(`${path}.family must be a font family name: letters, digits, spaces, _ and -, up to 64 characters (e.g. Manrope)`);
+  if (r.source !== "google" && r.source !== "url") throw new Error(`${path}.source must be google or url`);
+  const out: AppearanceWebFont = { family, source: r.source };
+  if (r.source === "google") {
+    if (r.url !== undefined && r.url !== null && r.url !== "") throw new Error(`${path}.url is only for source url (google builds the URL from family and weights)`);
+    if (r.weights !== undefined && r.weights !== null && r.weights !== "") {
+      const weights = typeof r.weights === "string" || typeof r.weights === "number" ? normalizeFontWeights(String(r.weights)) : null;
+      if (!weights) throw new Error(`${path}.weights must be weights 100–900 like 400;600;700, or a range like 300..800 for a variable font`);
+      out.weights = weights;
+    }
+    return out;
+  }
+  const url = typeof r.url === "string" ? normalizeFontUrl(r.url) : null;
+  if (!url) throw new Error(`${path}.url must be an https stylesheet URL on ${APPEARANCE_FONT_HOSTS.join(", ")}`);
+  out.url = url;
+  return out;
+}
+
+/** The web fonts, checked: at most APPEARANCE_MAX_WEB_FONTS, one per family. */
+export function parseWebFonts(raw: unknown, path: string): AppearanceWebFont[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) throw new Error(`${path} must be a list of web fonts [{ family, source: "google" | "url", url?, weights? }]`);
+  if (raw.length > APPEARANCE_MAX_WEB_FONTS) throw new Error(`${path} takes at most ${APPEARANCE_MAX_WEB_FONTS} web fonts`);
+  const out: AppearanceWebFont[] = [];
+  raw.forEach((item, i) => {
+    const font = parseWebFont(item, `${path}[${i}]`);
+    if (out.some((f) => f.family.toLowerCase() === font.family.toLowerCase())) throw new Error(`${path}[${i}].family ${font.family} is given twice`);
+    out.push(font);
+  });
+  return out;
+}
+
+/** Generic families and ones on (nearly) every device: never "not loaded". */
+const SYSTEM_FONTS = new Set([
+  "serif", "sans-serif", "monospace", "cursive", "fantasy", "system-ui", "ui-sans-serif", "ui-serif", "ui-monospace", "ui-rounded",
+  "math", "emoji", "fangsong", "-apple-system", "blinkmacsystemfont",
+  "arial", "helvetica", "helvetica neue", "georgia", "times", "times new roman", "cambria", "courier", "courier new",
+  "segoe ui", "roboto", "cascadia code", "menlo", "monaco", "consolas", "sf mono", "verdana", "tahoma",
+]);
+
+/**
+ * The families an appearance's font stacks name that the dashboard does not load (not bundled, not
+ * declared by index.html, not a web font, not a generic or common system family): they show only
+ * on devices that have them installed.
+ */
+export function unloadedFontFamilies(a: AppearanceSettings | undefined): string[] {
+  if (!a) return [];
+  const loaded = new Set<string>([...APPEARANCE_BUNDLED_FONTS, ...APPEARANCE_PRELOADED_FONTS, ...(a.fonts ?? []).map((f) => f.family)].map((f) => f.toLowerCase()));
+  const out: string[] = [];
+  for (const mode of [a.custom?.light, a.custom?.dark]) {
+    for (const key of ["fontFamily", "headingFont", "monoFont"] as const) {
+      const stack = mode?.[key];
+      if (typeof stack !== "string") continue;
+      for (const part of stack.split(",")) {
+        const family = part.trim().replace(/^["']|["']$/g, "").trim();
+        const low = family.toLowerCase();
+        if (!family || SYSTEM_FONTS.has(low) || loaded.has(low) || out.includes(family)) continue;
+        out.push(family);
+      }
+    }
+  }
+  return out;
+}
+
+/** A gradient token's value, checked: { from, to, angle? } (colours; 0–360 degrees, default 135). */
+export function parseAppearanceGradient(value: unknown, path: string): AppearanceGradient {
+  const hint = `${path} must be a gradient { from, to, angle }: two colours (#rrggbb, oklch(…), hsl(…), rgb(…)) and an angle 0–360 (default ${APPEARANCE_GRADIENT_ANGLE})`;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(hint);
+  const v = value as Record<string, unknown>;
+  const unknown = Object.keys(v).filter((k) => !["from", "to", "angle"].includes(k));
+  if (unknown.length) throw new Error(`${path}: unknown field ${unknown.join(", ")} (use from, to, angle)`);
+  const color = (c: unknown, field: string) => {
+    const s = typeof c === "string" ? c.trim() : "";
+    if (!APPEARANCE_COLOR.test(s)) throw new Error(`${path}.${field} must be a colour: #rrggbb, #rgb, oklch(…), hsl(…) or rgb(…)`);
+    return s.startsWith("#") ? s.toLowerCase() : s;
+  };
+  const angle = v.angle === undefined || v.angle === null ? APPEARANCE_GRADIENT_ANGLE : v.angle;
+  if (typeof angle !== "number" || !Number.isFinite(angle) || angle < 0 || angle > 360) throw new Error(`${path}.angle must be a number of degrees from 0 to 360`);
+  return { from: color(v.from, "from"), to: color(v.to, "to"), angle: Math.round(angle) };
 }
 
 /** One token's value, checked; an error names the field and what it takes. */
-export function parseAppearanceToken(name: AppearanceTokenName, value: unknown, path: string): string | number {
+export function parseAppearanceToken(name: AppearanceTokenName, value: unknown, path: string): string | number | AppearanceGradient {
+  if (APPEARANCE_TOKENS[name].kind === "gradient") return parseAppearanceGradient(value, path);
   const kind: AppearanceTokenKind = APPEARANCE_TOKENS[name].kind;
-  if (kind === "radius") {
-    if (typeof value !== "number" || !Number.isFinite(value) || value < APPEARANCE_RADIUS_MIN || value > APPEARANCE_RADIUS_MAX) {
-      throw new Error(`${path} must be a number of px from ${APPEARANCE_RADIUS_MIN} to ${APPEARANCE_RADIUS_MAX}`);
+  if (kind === "radius" || kind === "blur") {
+    const [min, max] = APPEARANCE_NUMBER_RANGES[name] ?? [APPEARANCE_RADIUS_MIN, APPEARANCE_RADIUS_MAX];
+    if (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max) {
+      throw new Error(`${path} must be a number of px from ${min} to ${max}`);
     }
     return Math.round(value * 2) / 2;
+  }
+  if (kind === "opacity") {
+    const [min, max] = APPEARANCE_NUMBER_RANGES[name] ?? [0, 1];
+    if (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max) {
+      throw new Error(`${path} must be an opacity from ${min} to ${max} (e.g. 0.85)`);
+    }
+    return Math.round(value * 100) / 100;
   }
   if (kind === "weight") {
     if (typeof value !== "number" || !Number.isFinite(value) || value < APPEARANCE_WEIGHT_MIN || value > APPEARANCE_WEIGHT_MAX) {
@@ -208,7 +396,7 @@ export function parseAppearanceTokens(raw: unknown, path: string): AppearanceTok
     if (r.foreground === undefined) r.foreground = r.text;
     delete r.text;
   }
-  const out: Record<string, string | number> = {};
+  const out: Record<string, string | number | AppearanceGradient> = {};
   for (const [key, value] of Object.entries(r)) {
     if (value === undefined || value === null) continue;
     if (!(key in APPEARANCE_TOKENS)) {
@@ -248,14 +436,18 @@ export function parseAppearanceSettings(raw: unknown, path = "settings.appearanc
       ...(Object.keys(dark).length ? { dark } : {}),
     };
   }
-  const unknown = Object.keys(r).filter((k) => !["theme", "palette", "custom"].includes(k));
-  if (unknown.length) throw new Error(`${path}: unknown field ${unknown.join(", ")} (use theme, palette, custom)`);
+  if (r.fonts !== undefined && r.fonts !== null) {
+    const fonts = parseWebFonts(r.fonts, `${path}.fonts`);
+    if (fonts.length) out.fonts = fonts;
+  }
+  const unknown = Object.keys(r).filter((k) => !["theme", "palette", "custom", "fonts"].includes(k));
+  if (unknown.length) throw new Error(`${path}: unknown field ${unknown.join(", ")} (use theme, palette, custom, fonts)`);
   return out;
 }
 
 /** Is an appearance empty (nothing chosen: the built-in defaults)? */
 export function isEmptyAppearance(a: AppearanceSettings | undefined): boolean {
-  return !a || (a.theme === undefined && a.palette === undefined && a.custom === undefined);
+  return !a || (a.theme === undefined && a.palette === undefined && a.custom === undefined && !a.fonts?.length);
 }
 
 /**
@@ -273,7 +465,20 @@ export function sanitizeAppearanceSettings(raw: unknown, path = "settings.appear
   const attempt = (fn: () => void) => { try { fn(); } catch (err) { problems.push(err instanceof Error ? err.message : String(err)); } };
   attempt(() => { Object.assign(value, parseAppearanceSettings({ theme: r.theme }, path)); });
   attempt(() => { Object.assign(value, parseAppearanceSettings({ palette: r.palette }, path)); });
-  for (const k of Object.keys(r)) if (!["theme", "palette", "custom"].includes(k)) problems.push(`${path}: unknown field ${k}`);
+  for (const k of Object.keys(r)) if (!["theme", "palette", "custom", "fonts"].includes(k)) problems.push(`${path}: unknown field ${k}`);
+  if (r.fonts !== undefined && r.fonts !== null) {
+    if (!Array.isArray(r.fonts)) {
+      problems.push(`${path}.fonts must be a list of web fonts`);
+    } else {
+      const fonts: AppearanceWebFont[] = [];
+      r.fonts.forEach((item, i) => attempt(() => {
+        if (fonts.length >= APPEARANCE_MAX_WEB_FONTS) throw new Error(`${path}.fonts takes at most ${APPEARANCE_MAX_WEB_FONTS} web fonts`);
+        const font = parseWebFont(item, `${path}.fonts[${i}]`);
+        if (!fonts.some((f) => f.family.toLowerCase() === font.family.toLowerCase())) fonts.push(font);
+      }));
+      if (fonts.length) value.fonts = fonts;
+    }
+  }
   if (r.custom !== undefined && r.custom !== null) {
     if (typeof r.custom !== "object" || Array.isArray(r.custom)) {
       problems.push(`${path}.custom must be an object`);

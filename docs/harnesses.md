@@ -103,16 +103,22 @@ REST: `GET /api/v1/harnesses`, `GET /api/v1/harnesses/sessions?agent=&computer=`
 3. Instructions: the agent's prompt (identity, responsibilities, `systemPrompt`), its working and
    output directories, the list of Polpo tools, connectors, and the repository's `AGENTS.md`
    (Claude Code; Codex reads it itself). The agent's skills are given to the runtime as its skills.
-   Polpo tools load with the first request (`alwaysLoad`), not behind Claude Code's tool search.
+   Polpo tools load with the first request, not behind Claude Code's tool search: Polpo starts
+   Claude Code with `ENABLE_TOOL_SEARCH=false` when the agent has up to 40 Polpo tools (the
+   `alwaysLoad` tool hint alone is not honored by the pinned Claude Code), and `auto` above that
+   (deferred only when the tool definitions take a large share of the context). `register_outcome`
+   is always among them, whatever the agent's `allowedTools`.
 4. The turn streams into the run's transcript (text, reasoning, every tool call and result, the
    runtime's own tools and Polpo's) and its activity (tool calls, files written or edited). Secrets
    are scrubbed from everything written.
 5. Usage and cost: each turn's tokens (input, cached, output) go to the task's activity, and a
    token-usage record (`source: "agent_harness"`) carries the runtime's cost estimate (Claude Code
    reports it cumulatively per session; Polpo records the difference). `GET /api/v1/token-usage`
-   adds it to the cost (`harnessCost`).
+   adds it to the cost (`harnessCost`); `?taskId=<id>` narrows it to one task (its runs' tokens and
+   harness cost), `?range=` is `1h`, `today`, `24h`, `7d` (default), `30d` or `all` (anything else: 400).
 6. Deliverables: what the runtime registers with `register_outcome`, and the output directory
-   copied back like any remote run.
+   copied back like any remote run. A continuation of the task adds its outcomes to the previous
+   runs' (as with Polpo's engine); a retry or fix starts over.
 7. Directions: a follow-up runs as the next turn; a steer goes to the running turn; kill aborts it.
 8. At the end the runtime stops (its bridge exits); its conversation stays in the VM, and a
    continuation of the task ("continue" direction) resumes it.

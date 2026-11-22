@@ -831,14 +831,23 @@ export interface BrandingConfig {
   logoFrame?: "box" | "none";
 }
 
-/** A mode's design tokens (any subset): colours, fonts, radius (px), shadows. See docs/configuration. */
-export type AppearanceTokens = Record<string, string | number>;
+/** A mode's design tokens (any subset): colours, fonts, radii (px), shadows, buttonGradient { from, to, angle }. See docs/appearance.md. */
+export type AppearanceTokens = Record<string, string | number | { from: string; to: string; angle?: number }>;
+
+/** A web font the dashboard loads: Google Fonts by family (and weights), or an https stylesheet on an allowed font host. */
+export interface AppearanceWebFont {
+  family: string;
+  source: "google" | "url";
+  url?: string;
+  weights?: string;
+}
 
 /** The dashboard's default look for everyone (settings.appearance); a person may customize their own browser. */
 export interface AppearanceConfig {
   theme?: "light" | "dark" | "system";
   palette?: "tide" | "lovable" | "chatgpt" | "claude" | "brutal" | "editorial" | "redline" | "cyber" | "mono";
   custom?: { enabled: boolean; derive?: boolean; light?: AppearanceTokens; dark?: AppearanceTokens };
+  fonts?: AppearanceWebFont[];
 }
 
 export interface PolpoSettings {

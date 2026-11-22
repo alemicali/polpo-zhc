@@ -66,7 +66,8 @@ A v2 computer is kept as **memory and disk snapshots** of its VM:
 
 - **Hibernate** (idle for `idleStopMinutes`, or **Stop**): a snapshot
   `polpo-computer-<instance>-<id>-<UTC timestamp>` (`createSnapshot`; ready in about 2 s, waited
-  for up to `snapshotTimeoutSeconds`, default 5 min), then the VM is deleted. Status
+  for up to `snapshotTimeoutSeconds`, default 5 min), then the VM is deleted, then older snapshots
+  beyond `keepSnapshots` (default 1: a hibernated computer keeps only the newest). Status
   **hibernated** ("Hibernated (resumes in a few seconds)"); the card, the agent's Computer tab,
   `polpo_computers_list` and `computers_list` show the last snapshot's time and size. A snapshot
   that fails (or never gets ready) **keeps the VM running**: the error is on the card and it is
@@ -77,7 +78,7 @@ A v2 computer is kept as **memory and disk snapshots** of its VM:
   a wall clock of `min(maxTimeoutSeconds, 86400)` that deletes it; its network rule is applied
   again (a VM that cannot get it is deleted again: it never runs wider than asked); its tailnet is
   checked again (tailscaled comes back with the memory; it is restarted when it did not). Only
-  then are older snapshots deleted (`keepSnapshots`, default 1). No snapshot (first use, or every
+  then are older snapshots deleted (`keepSnapshots`, default 1; a failed wake deletes none). No snapshot (first use, or every
   snapshot gone): a new VM from the image, with a notice when there were snapshots.
 - **The 24 h wall clock**: an hour before it (`rotateBeforeMinutes`) the computer is rotated —
   snapshot, then a new VM from it (a pause of a few seconds; commands wait) — at once when idle,
