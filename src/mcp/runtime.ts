@@ -23,6 +23,7 @@ export function connectorManagerFor(host: ConnectorHost): ConnectorManager {
     vaultStore: host.getVaultStore?.(),
     settings: () => host.getConfig?.()?.settings ?? undefined,
     emit: (event) => { host.emit("connector:changed", event); },
+    autoDiscoverIcons: true,
   });
 }
 

@@ -6,8 +6,10 @@ import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { NETWORK_MODES } from "@/lib/sandbox-api";
 import {
   EMPTY_COMPUTER_FORM, computerInput, computersApi, formFromComputer, validateComputerForm,
   type Computer, type ComputerForm, type ComputerKind,
@@ -67,14 +69,15 @@ export function ComputerDialog({
   const kind = form.kind;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
-        <DialogHeader>
+      <DialogContent className="flex flex-col gap-0 overflow-hidden p-0 sm:max-w-lg">
+        <DialogHeader className="shrink-0 border-b px-6 pb-4 pt-6 pr-12">
           <DialogTitle>{editing ? `Edit ${editing.name}` : "New computer"}</DialogTitle>
           <DialogDescription>
             A machine an agent keeps between chats and tasks: its files, installed tools and browser profile stay. It stops by itself
             when nobody uses it and is never deleted automatically.
           </DialogDescription>
         </DialogHeader>
+        <DialogBody>
         <form className="space-y-4" noValidate onSubmit={(e) => { e.preventDefault(); void submit(); }}>
           {!editing && (
             <Field label="Id" hint="Lowercase letters, digits and -" error={visible.id}>
@@ -123,6 +126,35 @@ export function ComputerDialog({
               )}
             </div>
           )}
+          {kind !== "host" && (
+            <div className="space-y-2" data-testid="computer-network-fields">
+              <Field label="Network" hint={NETWORK_MODES.find((m) => m.id === form.networkMode)?.description ?? "The agent's rule, else the instance's (Settings → Sandbox)"}>
+                <select className={selectClass} value={form.networkMode} onChange={(e) => set("networkMode", e.target.value as ComputerForm["networkMode"])} aria-label="Network">
+                  <option value="">Inherited (agent or instance)</option>
+                  {NETWORK_MODES.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+                </select>
+              </Field>
+              {form.networkMode === "allowlist" && (
+                <Field label="Allowed hosts" hint="One per line; *.example.com covers subdomains" error={visible.networkAllow}>
+                  <Textarea rows={3} value={form.networkAllow} onChange={(e) => set("networkAllow", e.target.value)} placeholder={"github.com\n*.npmjs.org"} aria-label="Allowed hosts" aria-invalid={!!visible.networkAllow} />
+                </Field>
+              )}
+            </div>
+          )}
+          {kind === "daytona" && (
+            <div className="grid grid-cols-3 gap-2" data-testid="computer-resource-fields">
+              <Field label="CPU" error={visible.cpus}>
+                <Input inputMode="decimal" value={form.cpus} onChange={(e) => set("cpus", e.target.value)} placeholder="default" aria-label="CPU" aria-invalid={!!visible.cpus} />
+              </Field>
+              <Field label="Memory (GB)" error={visible.memoryGb}>
+                <Input inputMode="decimal" value={form.memoryGb} onChange={(e) => set("memoryGb", e.target.value)} placeholder="default" aria-label="Memory (GB)" aria-invalid={!!visible.memoryGb} />
+              </Field>
+              <Field label="Disk (GB)" error={visible.diskGb}>
+                <Input inputMode="decimal" value={form.diskGb} onChange={(e) => set("diskGb", e.target.value)} placeholder="default" aria-label="Disk (GB)" aria-invalid={!!visible.diskGb} />
+              </Field>
+              <p className="col-span-3 -mt-1 text-xs text-muted-foreground">With a Docker image (a snapshot has its own size). Size, image and network apply to a new machine (Reset); on Daytona v2 the network applies at the next start or wake.</p>
+            </div>
+          )}
           <Field
             label="Egress proxy"
             hint={kind === "host"
@@ -138,11 +170,12 @@ export function ComputerDialog({
             </label>
           )}
           {children}
-          <DialogFooter>
+          <DialogFooter sticky>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
             <Button type="submit" disabled={saving}>{saving && <Loader2 className="h-4 w-4 animate-spin" />}{editing ? "Save" : "Create"}</Button>
           </DialogFooter>
         </form>
+        </DialogBody>
       </DialogContent>
     </Dialog>
   );

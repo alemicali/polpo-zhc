@@ -284,7 +284,7 @@ export {
   connectorToolSelected, connectorToolsProblems, normalizeConnectorTools,
 } from "./connectors.js";
 export type {
-  ConnectorConfig, ConnectorIcon, ConnectorTransport, ConnectorAuth, ConnectorAuthType, ConnectorOAuthSettings, ConnectorAccess,
+  ConnectorConfig, ConnectorIcon, ConnectorIconAsset, ConnectorIconImage, ConnectorIconSource, ConnectorTransport, ConnectorAuth, ConnectorAuthType, ConnectorOAuthSettings, ConnectorAccess,
   ConnectorToolPolicy, ConnectorStatus, ConnectorOAuthApp, AgentConnectorTools, ConnectorsFile, ConnectorCatalogEntry, ConnectorChangedEvent,
 } from "./connectors.js";
 export { EGRESS_PROXY_NAME, EGRESS_PROXY_URL, parseEgressProxies } from "./egress-proxies.js";

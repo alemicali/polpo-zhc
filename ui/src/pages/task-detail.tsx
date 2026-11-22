@@ -399,7 +399,7 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
     if (entry.type === "stdout") return { icon: Terminal, color: "text-success", dot: "bg-success" };
     if (isError) return { icon: XCircle, color: "text-destructive", dot: "bg-destructive" };
     if (isUsage) return { icon: Activity, color: "text-muted-foreground", dot: "bg-muted-foreground" };
-    if (isToolUse) return { icon: Wrench, color: "text-chart-5", dot: "bg-chart-5" };
+    if (isToolUse) return { icon: Wrench, color: "text-primary", dot: "bg-primary" };
     if (isToolResult && entry.isError) return { icon: XCircle, color: "text-destructive", dot: "bg-destructive" };
     if (isToolResult) return { icon: CheckCircle2, color: "text-success", dot: "bg-success" };
     if (isAssistant) return { icon: Bot, color: "text-info", dot: "bg-info" };
