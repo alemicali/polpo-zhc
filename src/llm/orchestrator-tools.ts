@@ -943,6 +943,9 @@ const agentEngineParam = Type.Optional(Type.Union([
     permissionMode: Type.Optional(Type.Union([Type.Literal("allow-all"), Type.Literal("allow-edits"), Type.Literal("allow-reads")], { description: "What the runtime may do without asking (default allow-all: it works unattended in its computer)" })),
     effort: Type.Optional(Type.Union([Type.Literal("low"), Type.Literal("medium"), Type.Literal("high"), Type.Literal("xhigh"), Type.Literal("max")], { description: "Reasoning effort" })),
     maxBudgetUsd: Type.Optional(Type.Number({ description: "Stop a run when its estimated spend passes this (USD)" })),
+    credentialRef: Type.Optional(Type.Object({ owner: Type.String(), service: Type.String() }, {
+      description: "This agent's own key (cost separation): a vault entry (owner + service, never the key) that replaces the harness's API key or gateway key",
+    })),
   }),
 ], {
   description: "Its engine: \"polpo\" (Polpo's own, the default) or { harness: \"claude-code\" | \"codex\", ... }: an official harness that runs the agent's TASKS "

@@ -837,6 +837,9 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
         connectorNames: connectorManager
           ? Object.fromEntries(connectorManager.store.list().map((connector) => [connector.id, connectorLabel(connector)]))
           : undefined,
+        connectorApps: connectorManager
+          ? Object.fromEntries(connectorManager.store.list().flatMap((connector) => (connector.catalogId ? [[connector.id, connector.catalogId]] : [])))
+          : undefined,
         // a resumed run keeps what its transcript already declares
         loaded: declaredTools(ctx?.resumeMessages ?? []).keys(),
       });

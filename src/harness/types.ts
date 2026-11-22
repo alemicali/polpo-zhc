@@ -62,6 +62,26 @@ export interface HarnessAuth {
   secrets: string[];
 }
 
+/** A matcher of the AI SDK's request transformations (`HarnessV1RequestTransformation`), copied here. */
+export type RequestMatcher = { exact: string } | { startsWith: string } | { regex: string };
+export interface RequestKeyValueMatcher { readonly key?: RequestMatcher; readonly value?: RequestMatcher }
+
+/**
+ * An outbound request transformation (structurally the AI SDK's `HarnessV1RequestTransformation`):
+ * requests that match get `transform.headers` set outside the sandbox. In Polpo's rules a header
+ * value "" removes the header (used to present a brokered key the way a gateway wants it).
+ */
+export interface RequestTransformation {
+  readonly match: {
+    readonly host: string;
+    readonly path?: RequestMatcher;
+    readonly method?: ReadonlyArray<string>;
+    readonly queryString?: ReadonlyArray<RequestKeyValueMatcher>;
+    readonly headers?: ReadonlyArray<RequestKeyValueMatcher>;
+  };
+  readonly transform: { readonly headers: Readonly<Record<string, string>> };
+}
+
 export interface HarnessRuntimeSpec {
   harness: HarnessId;
   /** Stable id for logs (the Polpo agent name). */
@@ -74,7 +94,12 @@ export interface HarnessRuntimeSpec {
   effort?: HarnessEffort;
   maxBudgetUsd?: number;
   maxTurns?: number;
-  auth: HarnessAuth;
+  auth: HarnessAuth & {
+    /** Extra model-request headers sent from the VM (only when they are not brokered). */
+    headers?: Record<string, string>;
+    /** Non-Claude models behind the Anthropic format: no adaptive thinking, no effort. */
+    nonClaude?: boolean;
+  };
   /** Bridge diagnostics (reconnects, failures) for the run log. */
   onDebug?: (event: { type: string; [k: string]: unknown }) => void;
 }

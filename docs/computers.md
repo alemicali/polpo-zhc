@@ -107,6 +107,17 @@ Settings (`settings.sandbox.providers.daytona.hibernate`, all optional):
 If snapshots are not available to the project (the API refuses them), Stop and idle hibernation
 fail with the API's error on the card and the VM keeps running.
 
+### Credential brokering (agent harnesses)
+
+When an agent runs on a harness (Claude Code, Codex: [harnesses.md](harnesses.md)), its model key
+should not enter the VM. Brokering is implemented once in the shared harness sandbox session, for
+every provider:
+
+- Every provider today (Daytona v2, Daytona v0, E2B, and any new provider by default) is brokered by
+  **Polpo's model relay**: the VM's base URL becomes `<POLPO_PUBLIC_URL>/api/v1/harness-relay/<token>`
+  and Polpo applies the same rules outside the VM (see harnesses.md → Credential brokering, and the
+  Funnel path to expose).
+
 ## Which machine a run uses
 
 1. A task or mission that asks for an **ephemeral sandbox** gets one from the sandbox cascade:

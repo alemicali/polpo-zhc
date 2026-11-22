@@ -501,6 +501,8 @@ export interface CompletionRouteDeps {
   recordTokenUsage?: (usage: TokenUsageRecord) => void | Promise<void>;
   /** Display names of connectors by id: progressive tool discovery lists them in the prompt. */
   connectorNames?: () => Record<string, string> | Promise<Record<string, string>>;
+  /** Catalog app of connectors by id (gmail-2 → gmail): tools_search / tools_load by app cover all its accounts. */
+  connectorApps?: () => Record<string, string> | Promise<Record<string, string>>;
   /**
    * Decides what the session says next when a turn is over (undelivered steers, queued prompts).
    * Optional: without it steers that miss the turn are returned instead of carried over.
@@ -864,7 +866,9 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
     {
       let connectorNames: Record<string, string> | undefined;
       try { connectorNames = await deps.connectorNames?.(); } catch { /* ids instead of names */ }
-      const options = { tools: effectiveTools, mode: progressiveMode, threshold: toolsSettings?.progressiveThreshold, groups: deferrableGroups, connectorNames };
+      let connectorApps: Record<string, string> | undefined;
+      try { connectorApps = await deps.connectorApps?.(); } catch { /* app names unknown: ids and names still work */ }
+      const options = { tools: effectiveTools, mode: progressiveMode, threshold: toolsSettings?.progressiveThreshold, groups: deferrableGroups, connectorNames, connectorApps };
       const probe = new ProgressiveToolSet(options);
       if (probe.enabled) {
         let loaded: string[] = [];

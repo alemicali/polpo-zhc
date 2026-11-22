@@ -48,6 +48,8 @@ const agentFields = {
       permissionMode: z.enum(["allow-all", "allow-edits", "allow-reads"]).optional().describe("What the runtime may do without asking (default allow-all: it works unattended in its computer)"),
       effort: z.enum(["low", "medium", "high", "xhigh", "max"]).optional().describe("Reasoning effort"),
       maxBudgetUsd: z.number().positive().max(10000).optional().describe("Stop a run when its estimated spend passes this (USD)"),
+      credentialRef: z.object({ owner: z.string().min(1), service: z.string().min(1) }).optional()
+        .describe("This agent's own key (cost separation): a vault entry (owner + service, never the key) that replaces the harness's API key or gateway key"),
     }),
   ]).optional().describe("Its engine: \"polpo\" (Polpo's own, the default) or an official harness (Claude Code, Codex) running inside its computer "
     + "(a Daytona v2 computer, set with defaultComputer). Credentials come from the harness settings (polpo_harnesses_update), never from here."),

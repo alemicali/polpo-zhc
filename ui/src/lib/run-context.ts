@@ -24,7 +24,7 @@ export function agentEngineId(engine: unknown): TaskRunEngine {
   return "polpo";
 }
 
-export const AUTH_LABELS: Record<string, string> = { bedrock: "Bedrock", vertex: "Vertex AI", "api-key": "API key" };
+export const AUTH_LABELS: Record<string, string> = { bedrock: "Bedrock", vertex: "Vertex AI", "api-key": "API key", "ai-gateway": "Vercel AI Gateway", gateway: "model gateway" };
 
 export function authBrand(kind: string | undefined, engine?: string): BrandName {
   if (kind === "bedrock") return "bedrock";

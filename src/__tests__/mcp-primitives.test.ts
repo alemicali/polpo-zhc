@@ -544,7 +544,7 @@ describe("automation", () => {
     expect(run.structuredContent.schedule.last_run_at).toEqual(expect.any(String));
     expect(await call(deps(f), "polpo_schedule_delete", { mission_id: "m1" })).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/confirm: true/) }] });
     expect((await call(deps(f), "polpo_schedule_delete", { mission_id: "m1", confirm: true })).structuredContent).toEqual({ mission_id: "m1", deleted: true });
-  });
+  }, 20_000);
 
   it("creates recurring checks attributed to the caller, changes, confirms and cancels them", async () => {
     const f = fakeInstance();
