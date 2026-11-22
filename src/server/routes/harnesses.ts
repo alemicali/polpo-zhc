@@ -13,7 +13,8 @@
 import { Hono } from "hono";
 import type { AgentConfig, ComputerConfig, PolpoSettings, VaultStore } from "@polpo-ai/core";
 import { controlHarnessSession, harnessesOverview, harnessSessionViews } from "../../harness/control.js";
-import { driverHost, type ComputerManager } from "../../sandbox/computers.js";
+import { type ComputerManager } from "../../sandbox/computers.js";
+import { bridgeCommandRunner } from "../../harness/janitor.js";
 
 export interface HarnessRouteDeps {
   polpoDir: () => string;
@@ -43,18 +44,9 @@ export function harnessRoutes(deps: HarnessRouteDeps): Hono {
         const body = await c.req.json().catch(() => ({})) as { confirm?: boolean };
         if (body.confirm !== true) return c.json({ ok: false, error: "Resetting forgets the session's conversation: send { confirm: true }", code: "CONFIRM_REQUIRED" }, 400);
       }
-      const computers = (deps.settings()?.computers ?? []) as ComputerConfig[];
       const r = await controlHarnessSession({
         polpoDir: deps.polpoDir(), vault: deps.vault(), settings: deps.settings(), key, action,
-        onComputer: async (computerId, command) => {
-          const computer = computers.find((x) => x.id === computerId);
-          if (!computer) return false;
-          const done = await deps.manager().whenRunning(computer, async (driver) => {
-            await driverHost(driver).exec(command, { timeoutMs: 15_000 });
-            return true;
-          });
-          return done === true;
-        },
+        onComputer: bridgeCommandRunner(deps.manager, () => (deps.settings()?.computers ?? []) as ComputerConfig[]),
       });
       if (!r.ok) return c.json({ ok: false, error: r.error, code: r.status === 404 ? "NOT_FOUND" : "CONFLICT" }, r.status);
       return c.json({ ok: true, data: { message: r.message, ...(r.session ? { session: r.session } : {}) } });
