@@ -7,7 +7,7 @@
  * Live: `computer:changed` over SSE. The card, dialog and actions are shared with the agent's
  * Computer tab (components/computers, hooks/use-computer-actions).
  */
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Loader2, Monitor, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/shared/page-header";
@@ -16,12 +16,23 @@ import { ComputerConfirmDialog } from "@/components/computers/computer-confirm-d
 import { ComputerDialog } from "@/components/computers/computer-dialog";
 import { useComputerActions } from "@/hooks/use-computer-actions";
 import { useComputers } from "@/hooks/use-computers";
+import { useAgents } from "@polpo-ai/react";
+import { harnessesApi, type HarnessSession } from "@/lib/harnesses-api";
+import { agentEngineId } from "@/lib/run-context";
 import type { Computer } from "@/lib/computers-api";
 
 export function ComputersPage() {
   const { computers, loading, error, refresh, upsert, drop } = useComputers();
   const { busy, pending, setPending, run, confirm } = useComputerActions({ upsert, drop, refresh });
   const [dialog, setDialog] = useState<{ editing?: Computer } | null>(null);
+  // which agents run on a harness (their mark next to them) and the harness sessions per computer
+  const { agents } = useAgents();
+  const agentEngines = useMemo(
+    () => Object.fromEntries(agents.map((a) => [a.name, agentEngineId((a as { engine?: unknown }).engine)])),
+    [agents],
+  );
+  const [sessions, setSessions] = useState<HarnessSession[]>([]);
+  useEffect(() => { void harnessesApi.sessions().then(setSessions).catch(() => setSessions([])); }, [computers.length]);
 
   return (
     <div className="mx-auto flex h-full w-full max-w-6xl flex-col gap-4 overflow-y-auto p-4 pb-bottom-nav sm:p-6 lg:pb-6">
@@ -47,7 +58,8 @@ export function ComputersPage() {
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {computers.map((c) => (
-            <ComputerCard key={c.id} computer={c} busy={busy === c.id} onAction={(a) => void run(c, a)}>
+            <ComputerCard key={c.id} computer={c} busy={busy === c.id} onAction={(a) => void run(c, a)}
+              agentEngines={agentEngines} harnessSessions={sessions.filter((s) => s.computerId === c.id)}>
               <Button size="icon" variant="ghost" className="ml-auto h-7 w-7" disabled={busy === c.id} onClick={() => setDialog({ editing: c })} aria-label={`Edit ${c.name}`}>
                 <Pencil className="h-3.5 w-3.5" />
               </Button>

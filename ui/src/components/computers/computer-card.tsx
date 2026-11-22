@@ -8,6 +8,10 @@ import { Link } from "react-router-dom";
 import { Monitor, Play, RefreshCw, RotateCcw, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/computers/status-badge";
+import { BrandIcon } from "@/components/shared/brand-icon";
+import { EngineBadge } from "@/components/shared/run-context";
+import { HARNESS_NAMES, type HarnessSession } from "@/lib/harnesses-api";
+import { computerBrand, formatUsd } from "@/lib/run-context";
 import {
   KIND_LABELS, availableActions, formatLastUsed, formatSnapshot, formatUptime, type Computer, type ComputerAction,
 } from "@/lib/computers-api";
@@ -20,7 +24,7 @@ const ACTION_META: Record<ComputerAction, { label: string; icon: typeof Play }> 
 };
 
 export function ComputerCard({
-  computer, busy, onAction, badge, showAgents = true, children,
+  computer, busy, onAction, badge, showAgents = true, agentEngines, harnessSessions, children,
 }: {
   computer: Computer;
   busy: boolean;
@@ -29,14 +33,20 @@ export function ComputerCard({
   badge?: ReactNode;
   /** The "Agents" row (the agent's own tab leaves it out). */
   showAgents?: boolean;
+  /** Each agent's engine ("polpo" or { harness }): its mark next to the agent. */
+  agentEngines?: Record<string, string | undefined>;
+  /** The agent harness sessions (Claude Code, Codex) bound to this computer. */
+  harnessSessions?: HarnessSession[];
   /** Trailing buttons after the lifecycle actions (not shown for this server). */
   children?: ReactNode;
 }) {
   const image = computer.snapshot ? `snapshot ${computer.snapshot}` : computer.image ? `image ${computer.image}` : computer.template ? `template ${computer.template}` : null;
   return (
-    <div data-testid={`computer-card-${computer.id}`} className="flex flex-col gap-3 rounded-card border bg-card p-4">
+    <div id={`computer-${computer.id}`} data-testid={`computer-card-${computer.id}`} className="flex flex-col gap-3 rounded-card border bg-card p-4">
       <div className="flex items-start gap-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border bg-muted/40"><Monitor className="h-4 w-4" /></div>
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border bg-muted/40">
+          {computer.kind === "host" ? <Monitor className="h-4 w-4" /> : <BrandIcon name={computerBrand({ kind: computer.kind })} size={20} />}
+        </div>
         <div className="min-w-0 flex-1">
           <p className="flex min-w-0 items-center gap-1.5 font-medium leading-tight">
             <span className="truncate">{computer.name}</span>
@@ -57,8 +67,13 @@ export function ComputerCard({
         {showAgents && (
           <>
             <dt className="text-muted-foreground">Agents</dt>
-            <dd className="truncate" data-testid="computer-agents">
-              {computer.agents.length ? computer.agents.map((a) => `${a.name}${a.isDefault || computer.builtin ? "" : " (may use)"}`).join(", ") : "none"}
+            <dd className="flex min-w-0 flex-wrap items-center gap-x-1.5" data-testid="computer-agents">
+              {computer.agents.length ? computer.agents.map((a, i) => (
+                <span key={a.name} className="inline-flex min-w-0 items-center gap-1">
+                  <EngineBadge engine={agentEngines?.[a.name]} size={12} />
+                  <span className="truncate">{a.name}{a.isDefault || computer.builtin ? "" : " (may use)"}{i < computer.agents.length - 1 ? "," : ""}</span>
+                </span>
+              )) : "none"}
             </dd>
           </>
         )}
@@ -83,6 +98,19 @@ export function ComputerCard({
           </>
         )}
       </dl>
+      {harnessSessions && harnessSessions.length > 0 && (
+        <div className="space-y-1" data-testid="computer-harness-sessions">
+          <p className="text-label text-muted-foreground">Harness sessions</p>
+          {harnessSessions.map((s) => (
+            <div key={s.key} className="flex min-w-0 items-center gap-1.5 text-xs" title={`${HARNESS_NAMES[s.harness]} · ${s.key}`}>
+              <BrandIcon name={s.harness} size={14} />
+              <span className="truncate">{s.agent}{s.taskId ? <span className="text-muted-foreground"> · task {s.taskId.slice(0, 8)}</span> : null}</span>
+              <span className={s.live ? "text-status-running" : s.state === "error" ? "text-destructive" : "text-muted-foreground"}>{s.live ? "running" : s.state}</span>
+              <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">{formatUsd(s.costUsd)}</span>
+            </div>
+          ))}
+        </div>
+      )}
       {computer.builtin ? (
         <p className="mt-auto text-xs text-muted-foreground">
           Agents without a computer work here, in the sandbox set in <Link to="/config?section=sandbox" className="underline">Settings → Sandbox</Link>.

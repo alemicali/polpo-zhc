@@ -731,11 +731,12 @@ export class TaskRunner {
       await this.ctx.runStore.upsertRun(runRecord);
 
       // where and with what this run executes (no secrets): the task keeps one entry per run
+      let runCtx: ReturnType<typeof buildRunContext> | undefined;
       try {
         const continuation = this.ctx.taskControlStore
           ? (await this.ctx.taskControlStore.listDirections(task.id)).some((d) => d.mode === "continue" && d.status === "queued")
           : false;
-        const runCtx = buildRunContext({
+        runCtx = buildRunContext({
           runId, startedAt: now, agent, settings: this.ctx.config.settings as never, sandbox,
           browserEgress: runnerConfig.browserEgress, continuation,
         });
@@ -747,6 +748,7 @@ export class TaskRunner {
         taskId: task.id,
         agentName: agent.name,
         taskTitle: task.title,
+        ...(runCtx ? { engine: runCtx.engine, computerId: runCtx.computer.id } : {}),
       });
       this.ctx.emitter.emit("sandbox:created", {
         workspaceId: runId, provider: sandbox.provider, scope: "task", taskId: task.id, runId,

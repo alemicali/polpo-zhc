@@ -22,6 +22,8 @@ vi.mock("@polpo-ai/react", async () => {
       );
       return { events: filter?.length ? all.filter((e) => filter.includes(e.event)) : all };
     },
+    // sitoinchat runs on Claude Code (its mark next to it on its computer)
+    useAgents: () => ({ agents: [{ name: "sitoinchat", engine: { harness: "claude-code" } }, { name: "dev" }] }),
   };
 });
 
@@ -59,6 +61,9 @@ function installFetch() {
       return ok(created, 201);
     }
     if (path.startsWith("/agents/")) return ok({});
+    if (path === "/harnesses/sessions") {
+      return ok({ sessions: [{ key: "task:t1", agent: "sitoinchat", harness: "claude-code", computerId: "nina", scope: "task", taskId: "t1abcdef99", state: "idle", live: true, resumable: true, turns: 2, costUsd: 0.0723, updatedAt: new Date().toISOString() }] });
+    }
     const [, , id, action] = path.split("/");
     const current = server.computers.find((c) => c.id === id)!;
     const save = (next: Computer) => { server.computers = server.computers.map((c) => (c.id === id ? next : c)); return next; };
@@ -138,6 +143,14 @@ test("cards show provider, status, agents, last use and uptime; host has no butt
   expect(n.textContent).toContain("Daytona");
   expect(n.querySelector('[data-testid="computer-status"]')!.textContent).toBe("Stopped");
   expect(n.querySelector('[data-testid="computer-agents"]')!.textContent).toBe("sitoinchat");
+  // the agent on a harness shows its mark; the harness sessions on the computer are listed with theirs
+  expect(n.querySelector('[data-testid="computer-agents"] [data-testid="engine-badge"]')?.getAttribute("data-engine")).toBe("claude-code");
+  const sessions = n.querySelector('[data-testid="computer-harness-sessions"]')!;
+  expect(sessions.querySelector('[data-brand="claude-code"]')).not.toBeNull();
+  expect(sessions.textContent).toMatch(/sitoinchat · task t1abcdef.*running.*\$0\.07/);
+  expect(card("host").querySelector('[data-testid="computer-harness-sessions"]')).toBeNull();
+  // a Daytona computer shows Daytona's mark
+  expect(n.querySelector('[data-brand="daytona"]')).not.toBeNull();
   expect(n.textContent).toContain("10 min ago");
   expect(n.textContent).toContain("2 h 5 min");
   expect(card("host").querySelectorAll("button")).toHaveLength(0);

@@ -78,6 +78,8 @@ import { useAsyncAction, useConfig } from "@/hooks/use-polpo";
 import { AppliedRulesPanel } from "@/components/shared/applied-rules-panel";
 import type { AnyRule, ScopedRules } from "@/lib/applied-rules";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
+import { RunContextCard } from "@/components/shared/run-context";
+import { useComputers } from "@/hooks/use-computers";
 import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -353,6 +355,10 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
   const isToolUse = entry.type === "tool_use";
   const isToolResult = entry.type === "tool_result";
   const isAssistant = entry.type === "assistant";
+  // agent harness runs (Claude Code, Codex) also log lines, reasoning and per-turn usage
+  const isLog = entry.type === "log";
+  const isUsage = entry.type === "usage";
+  const isError = entry.type === "error";
 
   const eventLabel = entry.event ?? entry.type ?? "unknown";
 
@@ -364,6 +370,13 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
     expandContent = entry.content ?? entry.text;
   } else if (isAssistant) {
     expandContent = entry.text;
+  } else if (isUsage) {
+    expandContent = JSON.stringify({
+      inputTokens: entry.inputTokens, outputTokens: entry.outputTokens, cacheReadTokens: entry.cacheReadTokens,
+      cacheWriteTokens: entry.cacheWriteTokens, totalTokens: entry.totalTokens, ...(entry.costUsd !== undefined ? { costUsd: entry.costUsd } : {}),
+    }, null, 2);
+  } else if ((isLog || isError) && entry.message) {
+    expandContent = entry.message;
   } else if (entry.data != null) {
     expandContent = JSON.stringify(entry.data, null, 2);
   } else if (entry.text) {
@@ -383,6 +396,8 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
     if (entry.event === "error") return { icon: XCircle, color: "text-destructive", dot: "bg-destructive" };
     if (entry.event === "sigterm") return { icon: XCircle, color: "text-warning", dot: "bg-warning" };
     if (entry.type === "stdout") return { icon: Terminal, color: "text-success", dot: "bg-success" };
+    if (isError) return { icon: XCircle, color: "text-destructive", dot: "bg-destructive" };
+    if (isUsage) return { icon: Activity, color: "text-muted-foreground", dot: "bg-muted-foreground" };
     if (isToolUse) return { icon: Wrench, color: "text-chart-5", dot: "bg-chart-5" };
     if (isToolResult && entry.isError) return { icon: XCircle, color: "text-destructive", dot: "bg-destructive" };
     if (isToolResult) return { icon: CheckCircle2, color: "text-success", dot: "bg-success" };
@@ -411,6 +426,13 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
     inlineSummary = preview || undefined;
   } else if (isAssistant && entry.text) {
     inlineSummary = entry.text.slice(0, 100).replace(/\n/g, " ");
+  } else if ((isLog || isError) && entry.message) {
+    inlineSummary = entry.message.slice(0, 120).replace(/\n/g, " ");
+  } else if (entry.type === "reasoning" && entry.text) {
+    inlineSummary = entry.text.slice(0, 100).replace(/\n/g, " ");
+  } else if (isUsage) {
+    const tokens = entry.totalTokens ?? ((entry.inputTokens ?? 0) + (entry.outputTokens ?? 0));
+    inlineSummary = `${(tokens / 1000).toFixed(1)}k tokens${entry.costUsd !== undefined ? ` · $${entry.costUsd.toFixed(4)}` : ""}${entry.harness ? ` · ${entry.harness}` : ""}`;
   }
 
   return (
@@ -432,6 +454,12 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
               isToolResult && entry.isError && "text-destructive border-destructive/30"
             )}>
               {entry.tool}
+            </Badge>
+          )}
+          {/* a harness's Polpo tool runs on the Polpo server, not in the runtime */}
+          {entry.host && (
+            <Badge variant="outline" className="text-micro px-1.5 py-0 shrink-0 text-primary border-primary/30" title="Polpo tool: it ran on the Polpo server" data-testid="activity-host-tool">
+              Polpo
             </Badge>
           )}
           {/* Inline summary */}
@@ -499,12 +527,12 @@ function activityMatchesFilter(entry: RunActivityEntry, filter: ActivityFilter):
   if (entry.event === "activity") return false;
   if (filter === "all") return true;
   if (filter === "conversation") {
-    return entry.type === "assistant" || entry.type === "tool_use" || entry.type === "tool_result"
+    return entry.type === "assistant" || entry.type === "tool_use" || entry.type === "tool_result" || entry.type === "reasoning"
       || entry.type === "error" || entry.type === "result" || entry.event === "error" || entry.event === "direction:applied";
   }
   if (filter === "tools") return entry.type === "tool_use" || entry.type === "tool_result";
   return entry.event === "spawning" || entry.event === "spawned" || entry.event === "done"
-    || entry.event === "sigterm" || entry.event === "error" || entry.event === "checkpoint";
+    || entry.event === "sigterm" || entry.event === "error" || entry.event === "checkpoint" || entry.type === "log" || entry.type === "usage";
 }
 
 function ActivityRunHeader({
@@ -864,6 +892,8 @@ export function TaskDetailPage() {
 
   // ── File preview state ──
   const { previewState, openPreview, closePreview } = useFilePreview();
+  // the run card shows the computer's live status (cached state: no provider call)
+  const { computers } = useComputers({ live: false });
 
   if (isLoading) {
     return (
@@ -991,6 +1021,9 @@ export function TaskDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Where and with what it runs: engine, computer, egress, session, cost (and earlier runs) */}
+      <RunContextCard runs={task.runs} computers={computers} />
 
       {/* Live activity for running tasks */}
       {process && <LiveActivityStrip process={process} />}

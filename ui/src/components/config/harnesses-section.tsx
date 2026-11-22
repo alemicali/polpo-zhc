@@ -5,7 +5,7 @@
  * an OpenAI API key. Below: the harness sessions agents run, with stop / reset.
  */
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Bot, Loader2, RefreshCw, Save, Square, Trash2 } from "lucide-react";
+import { AlertTriangle, Loader2, RefreshCw, Save, Square, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { VaultRefPicker } from "@/components/vault/vault-ref-picker";
+import { BrandIcon } from "@/components/shared/brand-icon";
+import { authBrand, computerBrand } from "@/lib/run-context";
 import {
   CLAUDE_CODE_AUTH_LABELS, HARNESS_NAMES, harnessesApi, settingsFromOverview,
   type ClaudeCodeAuth, type HarnessesOverview, type HarnessesSettings, type HarnessId, type HarnessSession,
@@ -89,12 +91,14 @@ export function HarnessesSection() {
       <Card className="gap-0 py-0"><CardContent className="space-y-3 px-4 py-3 text-xs">
         <label className="flex items-center gap-2 text-sm font-medium">
           <input type="checkbox" checked={form.enabled.includes("claude-code")} onChange={(e) => toggle("claude-code", e.target.checked)} aria-label="Enable Claude Code" />
-          <Bot className="h-4 w-4" /> Claude Code
+          <BrandIcon name="claude-code" size={18} /> Claude Code
           {item("claude-code")?.agents.length ? <Badge variant="secondary" className="text-micro">{item("claude-code")!.agents.join(", ")}</Badge> : null}
         </label>
         <div className="grid gap-2 sm:grid-cols-2">
           <label className="space-y-1">
-            <span className="text-muted-foreground">Authentication</span>
+            <span className="flex items-center gap-1.5 text-muted-foreground">
+              Authentication <BrandIcon name={authBrand(cc?.auth ?? "api-key", "claude-code")} size={14} />
+            </span>
             <select className={`${selectClass} w-full`} aria-label="Claude Code authentication" value={cc?.auth ?? "api-key"} onChange={(e) => setCc({ auth: e.target.value as ClaudeCodeAuth })}>
               {(Object.keys(CLAUDE_CODE_AUTH_LABELS) as ClaudeCodeAuth[]).map((a) => <option key={a} value={a}>{CLAUDE_CODE_AUTH_LABELS[a]}</option>)}
             </select>
@@ -143,12 +147,12 @@ export function HarnessesSection() {
       <Card className="gap-0 py-0"><CardContent className="space-y-3 px-4 py-3 text-xs">
         <label className="flex items-center gap-2 text-sm font-medium">
           <input type="checkbox" checked={form.enabled.includes("codex")} onChange={(e) => toggle("codex", e.target.checked)} aria-label="Enable Codex" />
-          <Bot className="h-4 w-4" /> Codex
+          <BrandIcon name="codex" size={18} /> Codex
           {item("codex")?.agents.length ? <Badge variant="secondary" className="text-micro">{item("codex")!.agents.join(", ")}</Badge> : null}
         </label>
         <div className="grid gap-2 sm:grid-cols-2">
           <label className="space-y-1">
-            <span className="text-muted-foreground">OpenAI API key (vault entry)</span>
+            <span className="flex items-center gap-1.5 text-muted-foreground">OpenAI API key (vault entry) <BrandIcon name="openai" size={14} /></span>
             <VaultRefPicker value={cx?.credentialRef} onChange={(ref) => setForm({ ...form, codex: { ...(cx ?? {}), auth: "api-key", credentialRef: ref ?? (undefined as never) } })}
               requiredKeys={["apiKey"]} aria-label="Codex credential" />
           </label>
@@ -177,8 +181,13 @@ export function HarnessesSection() {
         </div>
         {sessions.length === 0 ? <p className="text-xs text-muted-foreground">No harness sessions yet.</p> : sessions.map((s) => (
           <div key={s.key} className="flex flex-wrap items-center gap-2 rounded-lg border p-2 text-xs" data-testid={`harness-session-${s.key}`}>
+            <BrandIcon name={s.harness} size={16} />
             <code>{s.key}</code>
-            <span>{s.agent} · {HARNESS_NAMES[s.harness]} on {s.computerId}</span>
+            <span className="inline-flex items-center gap-1">
+              {s.agent} · {HARNESS_NAMES[s.harness]} on
+              <BrandIcon name={s.computerId === "host" ? "host" : computerBrand({ kind: "daytona", provider: "daytona" })} size={12} />
+              {s.computerId}
+            </span>
             <Badge variant={s.state === "error" ? "destructive" : "secondary"} className="text-micro">{s.state}{s.live ? " · live" : ""}</Badge>
             <span className="text-muted-foreground">{s.turns} turn(s) · ${s.costUsd.toFixed(4)}{s.lastResumeAt ? ` · resumed ${new Date(s.lastResumeAt).toLocaleString()}` : ""}</span>
             <div className="ml-auto flex gap-1">

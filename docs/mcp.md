@@ -28,7 +28,7 @@ Every tool has a title and honest annotations (`readOnlyHint`, `destructiveHint`
 | Tool | What it does | Annotations |
 |---|---|---|
 | `polpo_tasks_list` | Tasks by status, agent, mission, group or words; paged. | read-only |
-| `polpo_task_get` | One task: description, result and assessment, outcomes, timestamps, dependencies and its latest activity. | read-only |
+| `polpo_task_get` | One task: description, result and assessment, outcomes, timestamps, dependencies, where and with what each run executed (`runs`: engine, model, computer, egress, session, cost) and its latest activity. | read-only |
 | `polpo_task_create` | Give an agent a task (title, description, `assignTo`, `dependsOn`, group, expectations, retries, duration, side effects, draft). `dependsOn` takes ids of existing tasks: an unknown id is refused (it would keep the task pending for ever). | write |
 | `polpo_task_update` | Change the description, agent, retries or side-effects flag, or start a draft; returns what changed. | write, idempotent |
 | `polpo_task_retry` | Run a failed task again. | write |
@@ -36,7 +36,7 @@ Every tool has a title and honest annotations (`readOnlyHint`, `destructiveHint`
 | `polpo_task_delete` | Delete a task and its result for good (`confirm: true`); a running task is stopped first with `polpo_task_kill`. | destructive |
 | `polpo_task_direct` | Steer a running task, add a follow-up, or continue a finished one. | write |
 | `polpo_task_wait` | Wait until a task is done, failed, in review or waiting for approval (or given statuses), at most 55 s; returns its state, so call again to keep waiting. | read-only |
-| `polpo_task_logs` | The activity of the task's runs, newest first, paged backwards. | read-only |
+| `polpo_task_logs` | The activity of the task's runs (Polpo's engine and agent harnesses alike: messages, tool calls, results, usage), newest first, paged backwards, with `runs`. | read-only |
 
 ### missions (on by default)
 

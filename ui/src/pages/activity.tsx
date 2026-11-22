@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { createContext, useContext, useState, useMemo, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -50,7 +50,9 @@ import {
   CalendarClock,
   Box,
 } from "lucide-react";
-import { useEvents, usePolpo, useLogs } from "@polpo-ai/react";
+import { useAgents, useEvents, usePolpo, useLogs } from "@polpo-ai/react";
+import { EngineBadge } from "@/components/shared/run-context";
+import { agentEngineId } from "@/lib/run-context";
 import type { LogEntry } from "@polpo-ai/react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -544,6 +546,7 @@ function EventRow({ event }: { event: EventRowData }) {
                 <span className="text-xs font-medium text-foreground">
                   {narrative}
                 </span>
+                <EventEngineBadge event={event} />
               </div>
               <div className="flex items-center gap-2 mt-0.5">
                 <Badge
@@ -1042,7 +1045,34 @@ function HistoryView() {
  * Events: what polpo-zhc emits (tasks, agents, missions, approvals, notifications, system
  * messages…), live as it happens or from the history kept per server start.
  */
+/** Each agent's engine ("polpo", "claude-code", "codex"): run events show the harness's mark. */
+const AgentEnginesContext = createContext<Record<string, string>>({});
+
+/** The engine mark of a run event: the engine it reports (agent:spawned), else its agent's. */
+function EventEngineBadge({ event }: { event: EventRowData }) {
+  const engines = useContext(AgentEnginesContext);
+  const category = getCategory(event.event);
+  if (category !== "agent" && category !== "task") return null;
+  const data = (event.data ?? {}) as Record<string, unknown>;
+  const agent = agentOf(event.data);
+  const engine = typeof data.engine === "string" ? data.engine : agent ? engines[agent] : undefined;
+  return <EngineBadge engine={engine} size={13} />;
+}
+
 export function EventsPage() {
+  const { agents } = useAgents();
+  const engines = useMemo(
+    () => Object.fromEntries(agents.map((a) => [a.name, agentEngineId((a as { engine?: unknown }).engine)])),
+    [agents],
+  );
+  return (
+    <AgentEnginesContext.Provider value={engines}>
+      <EventsPageInner />
+    </AgentEnginesContext.Provider>
+  );
+}
+
+function EventsPageInner() {
   const { events } = useEvents(undefined, 500);
   const { connectionStatus } = usePolpo();
   const brandName = productName(useInstanceBranding());
