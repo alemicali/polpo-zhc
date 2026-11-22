@@ -4,12 +4,13 @@
  * The agent loop (model calls, vault, database, memory, events) always stays on the host; the
  * tools that act on files and processes go through a Workspace, whose adapter decides where they
  * run: the host itself ("local"), a bubblewrap jail ("bwrap"), a container ("docker"), or a
- * remote sandbox ("daytona", "e2b": task runs only).
+ * remote sandbox ("daytona", "e2b": task runs, and chats where a person opted in with chatRemote).
  *
  * Design: /home/alessio/dev/polpo/polpo-arch/SANDBOX.md
  */
 import { resolveRuntimeSandboxOptions, type RuntimeSandboxLifecycleOptions, type RuntimeSandboxOptions, type RuntimeSandboxVolumeSelection, type SandboxIsolation, type SandboxVolumeAccess, type SandboxVolumeWriteBack } from "./runtime-sandbox.js";
 import type { SandboxVolumeStrategy } from "./sandbox-provider.js";
+import { EPHEMERAL_COMPUTER, HOST_COMPUTER_ID, isRemoteComputer, type ComputerConfig, type ComputerContext } from "./computers.js";
 
 // ── Workspace ────────────────────────────────────────────────────────────
 
@@ -137,11 +138,161 @@ export interface SandboxSettings {
   warm?: Partial<Record<RemoteSandboxProvider, number>>;
   /** Provider-specific options (image, template, region…); never secrets. */
   providers?: Partial<Record<SandboxProviderId, Record<string, unknown>>>;
+  /**
+   * Mission and task levels: the machine this run uses instead of the agent's default computer.
+   * "ephemeral": a sandbox from the cascade (not the agent's computer); a computer id: that one,
+   * if the agent may use it; "host": this server.
+   */
+  computer?: string;
 }
 
 /** The settings a workspace is created with, after the cascade. */
 export type RemoteSandboxProvider = "daytona" | "e2b";
 export const REMOTE_SANDBOX_PROVIDERS: readonly RemoteSandboxProvider[] = ["daytona", "e2b"];
+
+// ── Daytona API versions ─────────────────────────────────────────────────
+
+/**
+ * Which Daytona service `providers.daytona` talks to:
+ * - "v0" (default, what every instance used so far): https://app.daytona.io/api (or a custom
+ *   `apiUrl`, e.g. self-hosted), organization API keys, `snapshot` images, container or linux-vm
+ *   class depending on the snapshot.
+ * - "v2": Daytona's new service (https://api.daytona.com, Daytona Cloud only, no custom URL),
+ *   project API keys, registered `image`s, and every sandbox is a Linux VM. On the plans seen so
+ *   far a Linux v2 sandbox is NOT persistent: pause and stop are refused (409), the lifecycle
+ *   policy accepts only "delete", and its wall-clock timeout (at most the plan's, 86400 s) deletes
+ *   it. Polpo never pauses a v2 VM. Computers (persistent machines) HIBERNATE instead: a memory
+ *   and disk snapshot, then the VM is deleted; their next use creates a VM from that snapshot
+ *   (files and running processes kept, a few seconds). See providers.daytona.hibernate.
+ */
+export type DaytonaApiVersion = "v0" | "v2";
+export const DAYTONA_API_VERSIONS: readonly DaytonaApiVersion[] = ["v0", "v2"];
+/** The class every Daytona v2 sandbox Polpo creates has (v2 `create()` makes Linux VMs only). */
+export const DAYTONA_V2_SANDBOX_CLASS = "linux-vm";
+/**
+ * The runner image (scripts/build-sandbox-images.mjs --provider daytona-v2) a v2 sandbox is
+ * created from when `providers.daytona.image` is not set. The suffix is the recipe revision: it
+ * changes only when the image contents change, not with every Polpo release.
+ */
+export const DAYTONA_V2_RUNNER_IMAGE = "polpo-runner-vm-2";
+
+/** Default (and the plans' usual maximum) wall-clock budget of a v2 sandbox: providers.daytona.maxTimeoutSeconds. */
+export const DAYTONA_V2_MAX_TIMEOUT_SECONDS = 86_400;
+
+/**
+ * How Daytona v2 computers hibernate (providers.daytona.hibernate). A v2 Linux VM cannot pause
+ * and its wall clock (at most maxTimeoutSeconds) deletes it, so a computer is kept as memory and
+ * disk snapshots of its VM:
+ * - keepSnapshots: snapshots kept per computer (the newest; storage is billed, roughly the VM's
+ *   memory plus its disk each). Older ones are deleted only after a VM woke from a newer one.
+ * - safetySnapshotHours: while it runs, a snapshot this often (0: never), so a VM that vanishes
+ *   (wall clock, provider) loses at most that window.
+ * - rotateBeforeMinutes: this long before the VM's wall clock ends it is rotated (snapshot, new
+ *   VM from it): at once when idle, else at the first quiet gap of rotateIdleGapSeconds, and in
+ *   any case once forceRotateMinutes are left (a pause of a few seconds; running commands break).
+ * - snapshotTimeoutSeconds: how long a snapshot may take to become ready; past it the hibernation
+ *   fails, the VM keeps running and it is tried again after retryMinutes.
+ */
+export interface DaytonaV2HibernateSettings {
+  keepSnapshots: number;
+  safetySnapshotHours: number;
+  rotateBeforeMinutes: number;
+  rotateIdleGapSeconds: number;
+  forceRotateMinutes: number;
+  snapshotTimeoutSeconds: number;
+  retryMinutes: number;
+}
+
+export const DAYTONA_V2_HIBERNATE_DEFAULTS: Readonly<DaytonaV2HibernateSettings> = Object.freeze({
+  keepSnapshots: 1,
+  safetySnapshotHours: 6,
+  rotateBeforeMinutes: 60,
+  rotateIdleGapSeconds: 90,
+  forceRotateMinutes: 10,
+  snapshotTimeoutSeconds: 300,
+  retryMinutes: 10,
+});
+
+/** Bounds of each hibernate setting (whole numbers). */
+const HIBERNATE_BOUNDS: Record<keyof DaytonaV2HibernateSettings, [number, number]> = {
+  keepSnapshots: [1, 10],
+  safetySnapshotHours: [0, 24],
+  rotateBeforeMinutes: [5, 600],
+  rotateIdleGapSeconds: [10, 3600],
+  forceRotateMinutes: [2, 120],
+  snapshotTimeoutSeconds: [30, 3600],
+  retryMinutes: [1, 1440],
+};
+
+/** providers.daytona.hibernate with the defaults filled in (invalid values fall back to them). */
+export function daytonaV2HibernateSettings(options: Record<string, unknown> | undefined): DaytonaV2HibernateSettings {
+  const raw = options?.hibernate && typeof options.hibernate === "object" ? options.hibernate as Record<string, unknown> : {};
+  const out = { ...DAYTONA_V2_HIBERNATE_DEFAULTS };
+  for (const key of Object.keys(HIBERNATE_BOUNDS) as (keyof DaytonaV2HibernateSettings)[]) {
+    const v = raw[key];
+    const [min, max] = HIBERNATE_BOUNDS[key];
+    if (typeof v === "number" && Number.isInteger(v) && v >= min && v <= max) out[key] = v;
+  }
+  // forced rotation happens inside the rotation window
+  if (out.forceRotateMinutes >= out.rotateBeforeMinutes) out.forceRotateMinutes = Math.max(2, Math.floor(out.rotateBeforeMinutes / 2));
+  return out;
+}
+
+function hibernateErrors(raw: unknown, where: string): string[] {
+  if (raw === undefined || raw === null) return [];
+  if (typeof raw !== "object" || Array.isArray(raw)) return [`${where} must be an object`];
+  const errors: string[] = [];
+  for (const [key, v] of Object.entries(raw as Record<string, unknown>)) {
+    const bounds = HIBERNATE_BOUNDS[key as keyof DaytonaV2HibernateSettings];
+    if (!bounds) { errors.push(`${where}.${key} is not a hibernate setting (${Object.keys(HIBERNATE_BOUNDS).join(", ")})`); continue; }
+    if (typeof v !== "number" || !Number.isInteger(v) || v < bounds[0] || v > bounds[1]) errors.push(`${where}.${key} must be a whole number from ${bounds[0]} to ${bounds[1]}`);
+  }
+  return errors;
+}
+
+/** The wall-clock cap for v2 sandboxes (providers.daytona.maxTimeoutSeconds, default 86400). */
+export function daytonaV2MaxTimeoutSeconds(options: Record<string, unknown> | undefined): number {
+  const v = options?.maxTimeoutSeconds;
+  return typeof v === "number" && Number.isInteger(v) && v >= 60 ? v : DAYTONA_V2_MAX_TIMEOUT_SECONDS;
+}
+
+/** The Daytona API version of provider options (settings.sandbox.providers.daytona). */
+export function daytonaApiVersion(options: Record<string, unknown> | undefined): DaytonaApiVersion {
+  return options?.api === "v2" ? "v2" : "v0";
+}
+
+/**
+ * Problems with settings.sandbox.providers.daytona (empty when fine). `where` prefixes the
+ * messages. Unknown keys are left alone (other options live there too).
+ */
+export function daytonaProviderErrors(raw: unknown, where = "settings.sandbox.providers.daytona"): string[] {
+  if (raw === undefined || raw === null) return [];
+  if (typeof raw !== "object" || Array.isArray(raw)) return [`${where} must be an object`];
+  const r = raw as Record<string, unknown>;
+  const errors: string[] = [];
+  if (r.api !== undefined && r.api !== null && !(DAYTONA_API_VERSIONS as readonly unknown[]).includes(r.api)) {
+    errors.push(`${where}.api must be "v0" (app.daytona.io, the default) or "v2" (Daytona's new service, Linux VMs)`);
+  }
+  for (const key of ["apiUrl", "target", "region", "image", "snapshot"] as const) {
+    if (r[key] !== undefined && r[key] !== null && typeof r[key] !== "string") errors.push(`${where}.${key} must be a string`);
+  }
+  if (r.maxTimeoutSeconds !== undefined && r.maxTimeoutSeconds !== null
+    && (typeof r.maxTimeoutSeconds !== "number" || !Number.isInteger(r.maxTimeoutSeconds) || r.maxTimeoutSeconds < 60)) {
+    errors.push(`${where}.maxTimeoutSeconds must be a whole number of seconds, at least 60 (v2: the plan's maximum sandbox lifetime, default ${DAYTONA_V2_MAX_TIMEOUT_SECONDS})`);
+  }
+  errors.push(...hibernateErrors(r.hibernate, `${where}.hibernate`));
+  if (r.api === "v2") {
+    if (typeof r.apiUrl === "string" && r.apiUrl.trim()) {
+      errors.push(`${where}.apiUrl: Daytona v2 only talks to Daytona Cloud (https://api.daytona.com) and takes no API URL. Remove apiUrl, or keep api "v0" for a custom or self-hosted Daytona`);
+    }
+    for (const key of ["class", "sandboxClass"] as const) {
+      if (r[key] !== undefined && r[key] !== null && r[key] !== DAYTONA_V2_SANDBOX_CLASS) {
+        errors.push(`${where}.${key}: Daytona v2 sandboxes are always Linux VMs ("${DAYTONA_V2_SANDBOX_CLASS}")`);
+      }
+    }
+  }
+  return errors;
+}
 
 // Isolation, lifecycle and volume selection: open Polpo's runtime-sandbox.ts (copied as is) is
 // the source of truth for the names, the validation and how levels combine.
@@ -151,6 +302,7 @@ export type {
 } from "./runtime-sandbox.js";
 export { SANDBOX_VOLUME_NAME_PATTERN, SANDBOX_VOLUMES_MAX, SANDBOX_IDLE_TTL_MINUTES_MAX, SandboxVolumeGrantError, resolveRuntimeSandboxOptions } from "./runtime-sandbox.js";
 export type { SandboxVolumeStrategy } from "./sandbox-provider.js";
+export * from "./computers.js";
 /** What happens after a run releases its remote sandbox (open Polpo's lifecycle options). */
 export type SandboxLifecycleSettings = RuntimeSandboxLifecycleOptions;
 /** One selected volume (open Polpo's volume selection). */
@@ -202,6 +354,13 @@ export interface EffectiveSandbox {
   lifecycle?: Required<Omit<SandboxLifecycleSettings, "idleTtlMinutes">>;
   /** Selected volumes (names, narrowed); resolved against the agent's grants by the host. */
   volumes?: SandboxVolumeSelection[];
+  /** The provider the settings chose is not available here: `provider` is what runs instead. */
+  fallback?: { from: SandboxProviderId; reason: "unavailable" };
+  /**
+   * The computer this run uses (see computers.ts). Remote kinds: the persistent VM found by its
+   * label, never deleted by the run; "host" kinds: this server (provider from the cascade).
+   */
+  computer?: ComputerConfig;
 }
 
 export interface SandboxCascade {
@@ -284,11 +443,21 @@ function domainAllowed(requested: string, allow: string[]): boolean {
  */
 export function resolveSandbox(
   cascade: SandboxCascade,
-  context: { scope: "chat" | "task"; agentTools?: string[]; available?: ReadonlySet<SandboxProviderId> },
+  context: { scope: "chat" | "task"; agentTools?: string[]; available?: ReadonlySet<SandboxProviderId>; computers?: ComputerContext },
 ): EffectiveSandbox {
+  const denied: EffectiveSandbox["denied"] = [];
+  // computers first (precedence in computers.ts): a remote computer is the whole answer
+  const selection = computerSelection(cascade, context.computers);
+  if (selection.denied) denied.push(selection.denied);
+  if (selection.computer && isRemoteComputer(selection.computer)) {
+    const remote = remoteComputerSandbox(selection.computer, cascade, context);
+    if (remote) return { ...remote, denied: [...denied, ...remote.denied] };
+  }
+  // a host computer is this server: its network (if it has one) stands for the agent level's
+  const hostComputer = selection.computer?.kind === "host" && selection.computer.id !== HOST_COMPUTER_ID ? selection.computer : undefined;
+  if (hostComputer?.network) cascade = { ...cascade, agent: { ...(cascade.agent ?? {}), network: hostComputer.network } };
   const instance = cascade.instance ?? {};
   const agent = cascade.agent ?? {};
-  const denied: EffectiveSandbox["denied"] = [];
 
   const allowed = new Set<SandboxProviderId>(agent.allowedProviders ?? instance.allowedProviders ?? ["local", "bwrap", "docker", "daytona", "e2b"]);
   let provider: SandboxProviderId = agent.provider ?? instance.provider ?? "local";
@@ -340,10 +509,12 @@ export function resolveSandbox(
   if (context.scope === "chat" && !LOCAL_PROVIDERS.has(provider) && !chatRemote) {
     provider = context.available?.has("docker") ? "docker" : "bwrap";
   }
-  // A provider this host cannot run falls back to the next stronger local one, never weaker.
+  // A provider this host cannot run falls back to a local jail (bwrap or docker). For a remote
+  // provider that is weaker isolation than asked for: it is reported in `fallback`, not hidden.
+  let fallbackFrom: SandboxProviderId | undefined;
   if (context.available && !context.available.has(provider)) {
     const fallback = (["bwrap", "docker"] as SandboxProviderId[]).find((p) => context.available!.has(p) && PROVIDER_ISOLATION[p] >= Math.min(PROVIDER_ISOLATION[provider], 1));
-    if (fallback) provider = fallback;
+    if (fallback) { fallbackFrom = provider; provider = fallback; }
   }
 
   return {
@@ -355,6 +526,86 @@ export function resolveSandbox(
     isolation,
     lifecycle,
     ...(volumes ? { volumes } : {}),
+    ...(fallbackFrom ? { fallback: { from: fallbackFrom, reason: "unavailable" as const } } : {}),
+    ...(hostComputer ? { computer: hostComputer } : {}),
+  };
+}
+
+/** True when `requested` is a stricter network than `have` (or an allowlist `have` does not cover). */
+function stricterNetwork(requested: SandboxNetwork, have: SandboxNetwork): boolean {
+  if (NETWORK_STRICTNESS[requested.mode] > NETWORK_STRICTNESS[have.mode]) return true;
+  if (requested.mode === "allowlist" && have.mode === "allowlist") {
+    const want = new Set(requested.allow ?? []);
+    return (have.allow ?? []).some((d) => !want.has(d));
+  }
+  return false;
+}
+
+/**
+ * Which computer a run uses (precedence in computers.ts): none when the task or mission asks for
+ * an ephemeral sandbox, one it names (if the agent may use it), else the agent's default.
+ */
+export function computerSelection(cascade: SandboxCascade, ctx: ComputerContext | undefined): { computer?: ComputerConfig; denied?: EffectiveSandbox["denied"][number] } {
+  if (!ctx) return {};
+  const find = (id: string): ComputerConfig | undefined => id === HOST_COMPUTER_ID ? { id: HOST_COMPUTER_ID, name: "This server", kind: "host" } : ctx.computers.find((c) => c.id === id);
+  for (const level of ["task", "mission"] as const) {
+    const s = cascade[level];
+    if (!s) continue;
+    if (s.computer === EPHEMERAL_COMPUTER || s.provider || s.isolation === "fresh") return {};
+    if (s.computer) {
+      const c = find(s.computer);
+      if (c && ctx.allowed.includes(c.id)) return { computer: c };
+      // not one of the agent's computers: its default applies
+      const fallback = ctx.defaultComputer ? find(ctx.defaultComputer) : undefined;
+      return { ...(fallback ? { computer: fallback } : {}), denied: { level, field: "computer", requested: s.computer, applied: fallback?.id ?? HOST_COMPUTER_ID } };
+    }
+  }
+  return ctx.defaultComputer ? { computer: find(ctx.defaultComputer) } : {};
+}
+
+/**
+ * The sandbox of a run on a remote computer: its provider, image and network, the volumes it
+ * attaches. Undefined when it cannot be used here (the provider has no key on this server) or a
+ * task/mission asked for a stricter network than the computer has: the cascade applies then.
+ */
+function remoteComputerSandbox(
+  computer: ComputerConfig,
+  cascade: SandboxCascade,
+  context: { available?: ReadonlySet<SandboxProviderId> },
+): EffectiveSandbox | undefined {
+  const provider = computer.kind as RemoteSandboxProvider;
+  if (context.available && !context.available.has(provider)) return undefined;
+  const instance = cascade.instance ?? {};
+  const agent = cascade.agent ?? {};
+  // a computer may serve several agents: its own rule, else the instance default (never one agent's)
+  const network: SandboxNetwork = computer.network ?? instance.network ?? { mode: "open" };
+  for (const level of ["mission", "task"] as const) {
+    const requested = cascade[level]?.network;
+    if (requested && stricterNetwork(requested, network)) return undefined;
+  }
+  const denied: EffectiveSandbox["denied"] = [];
+  for (const level of ["mission", "task"] as const) {
+    const r = cascade[level]?.resources;
+    for (const key of ["cpus", "memoryMb", "diskMb"] as const) {
+      if (r?.[key] !== undefined && r[key] !== computer.resources?.[key]) denied.push({ level, field: `resources.${key}`, requested: r[key], applied: computer.resources?.[key] ?? "the computer's size" });
+    }
+  }
+  const providerOptions: Record<string, unknown> = { ...(instance.providers?.[provider] ?? {}) };
+  if (computer.image) { providerOptions.image = computer.image; delete providerOptions.snapshot; }
+  if (computer.snapshot) { providerOptions.snapshot = computer.snapshot; delete providerOptions.image; }
+  if (computer.template) providerOptions.template = computer.template;
+  const runtime = resolveRuntimeLevels(cascade);
+  const timeoutMin = cascade.task?.resources?.timeoutMin ?? cascade.mission?.resources?.timeoutMin ?? agent.resources?.timeoutMin ?? instance.resources?.timeoutMin;
+  return {
+    provider,
+    network,
+    resources: { ...(computer.resources ?? {}), ...(timeoutMin ? { timeoutMin } : {}) },
+    providerOptions,
+    denied,
+    isolation: "reuse",
+    lifecycle: effectiveLifecycle(undefined),
+    ...(computer.volumes ? { volumes: computer.volumes } : runtime?.volumes ? { volumes: runtime.volumes } : {}),
+    computer,
   };
 }
 
@@ -461,6 +712,7 @@ export function normalizeSandboxSettings(raw: unknown): SandboxSettings | undefi
   if (typeof r.confineExternalContent === "boolean") out.confineExternalContent = r.confineExternalContent;
   if (typeof r.chatIdleMinutes === "number" && r.chatIdleMinutes > 0) out.chatIdleMinutes = r.chatIdleMinutes;
   if (typeof r.chatRemote === "boolean") out.chatRemote = r.chatRemote;
+  if (typeof r.computer === "string" && /^[a-z0-9][a-z0-9-]{0,39}$/.test(r.computer)) out.computer = r.computer;
   // isolation, lifecycle and volumes are validated by open Polpo's resolver
   const runtime = resolveRuntimeSandboxOptions({ sandbox: r as RuntimeSandboxOptions });
   if (runtime?.isolation) out.isolation = runtime.isolation;

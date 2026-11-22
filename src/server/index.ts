@@ -16,7 +16,12 @@ import type { ServerConfig } from "./types.js";
 import { withEventOrigin } from "../core/events.js";
 import { getStorageRuntime, type StorageRuntime } from "../storage/runtime.js";
 import { configureRemoteProviders } from "../sandbox/remote-providers.js";
+import { configureTailnetEgress } from "../sandbox/tailnet-egress.js";
+import { tailnetEgressFor } from "@polpo-ai/core/sandbox";
 import { SandboxReaper } from "../sandbox/reaper.js";
+import { ComputerUpkeep, computerManagerWithEvents } from "../sandbox/computers.js";
+import { computerSandbox } from "../sandbox/manager.js";
+import { closeAllConnectorManagers } from "../mcp/manager.js";
 
 /**
  * Polpo HTTP Server.
@@ -46,6 +51,7 @@ export class PolpoServer {
   private supervisorRun: Promise<void> | null = null;
   private storage: StorageRuntime | null = null;
   private sandboxReaper: SandboxReaper | null = null;
+  private computerUpkeep: ComputerUpkeep | null = null;
 
   constructor(private config: ServerConfig) {}
 
@@ -83,6 +89,12 @@ export class PolpoServer {
     // Remote sandbox providers (Daytona, E2B): settings in settings.sandbox.providers, keys in
     // the vault entry each one references.
     configureRemoteProviders(o.getVaultStore(), () => o.getConfig()?.settings?.sandbox?.providers as Record<string, unknown> | undefined);
+    // Tailscale in remote computers (egress through a tailnet-only proxy): the auth key's vault, and
+    // each computer's tailnet egress from the current settings (brought up when it starts or resumes)
+    configureTailnetEgress({
+      vaultStore: o.getVaultStore() ?? undefined,
+      egressFor: (computer) => tailnetEgressFor(computer, o.getConfig()?.settings, o.getConfig()?.project),
+    });
 
     // Remote VM pool upkeep: expired and orphaned VMs, warm VMs (server process only)
     this.sandboxReaper?.stop();
@@ -97,6 +109,21 @@ export class PolpoServer {
       onError: (message) => o.emit("log", { level: "warn", message: `[sandbox] ${message}` }),
     });
     this.sandboxReaper.start();
+
+    // Computers (persistent machines): stop the ones nobody used for their idle time (never
+    // delete them; Daytona v2: hibernate, safety snapshots, rotation before the wall clock),
+    // announce status changes made by task runners
+    this.computerUpkeep?.stop();
+    this.computerUpkeep = new ComputerUpkeep(
+      computerManagerWithEvents(
+        polpoDir, (payload) => o.emit("computer:changed", payload), (level, message) => o.emit("log", { level, message: `[computers] ${message}` }),
+        () => o.getConfig()?.settings?.computers ?? [],
+      ),
+      () => o.getConfig()?.settings?.computers ?? [],
+      (message) => o.emit("log", { level: "warn", message: `[computers] ${message}` }),
+      (c) => computerSandbox(c, o.getConfig()?.settings),
+    );
+    this.computerUpkeep.start();
 
     // Start the SSE bridge. After a setup from the dashboard, reuse the placeholder bridge:
     // the routes and the connected browsers hold that instance, and a new bridge would
@@ -182,6 +209,8 @@ export class PolpoServer {
       fetch: app.fetch,
       port: this.config.port,
       hostname: this.config.host,
+      // Keep native fetch responses compatible with libraries that check instanceof Response.
+      overrideGlobalObjects: false,
     });
     this.terminalWs = attachTerminalWebSocket(this.server, this.orchestrator, {
       apiKeys: this.config.apiKeys,
@@ -238,9 +267,12 @@ export class PolpoServer {
     }
     // Unmount buckets after the runners stopped using them.
     this.sandboxReaper?.stop();
+    this.computerUpkeep?.stop();
     await this.storage?.shutdown().catch((err) => {
       console.error("[PolpoServer] Storage unmount failed:", err instanceof Error ? err.message : err);
     });
+    // Close connector (MCP) connections and stop local connector processes
+    await closeAllConnectorManagers().catch(() => undefined);
     this.server?.close();
     for (const fn of this.shutdownHandlers) fn();
     console.log("Polpo Server stopped.");

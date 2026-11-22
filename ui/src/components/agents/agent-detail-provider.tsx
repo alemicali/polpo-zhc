@@ -118,12 +118,6 @@ export function AgentDetailProvider({ children }: { children: React.ReactNode })
     return { teamName, teamColorIndex: idx >= 0 ? idx : 0 };
   }, [teams, agentName]);
 
-  // MCP entries
-  const mcpEntries = useMemo<[string, unknown][]>(
-    () => (agent?.mcpServers ? Object.entries(agent.mcpServers) : []),
-    [agent],
-  );
-
   // Allowed tools
   const agentAllowedTools = useMemo<string[]>(
     () => ((agent as unknown as Record<string, unknown> | undefined)?.allowedTools as string[] | undefined) ?? [],
@@ -147,7 +141,6 @@ export function AgentDetailProvider({ children }: { children: React.ReactNode })
       sortedTasks,
       skillPool,
       vaultEntries,
-      mcpEntries,
       agentAllowedTools,
       enabledCategories,
       teamName: teamInfo.teamName,
@@ -157,7 +150,7 @@ export function AgentDetailProvider({ children }: { children: React.ReactNode })
     meta: { agentName },
   }), [
     agent, isLoading, isRefreshing, error, process, subordinates, manager,
-    taskStats, sortedTasks, skillPool, vaultEntries, mcpEntries,
+    taskStats, sortedTasks, skillPool, vaultEntries,
     agentAllowedTools, enabledCategories, teamInfo, refetch, refetchVault, agentName,
   ]);
 

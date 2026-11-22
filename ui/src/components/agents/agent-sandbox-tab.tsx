@@ -4,7 +4,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Loader2, RotateCcw, Save } from "lucide-react";
+import { Loader2, Monitor, RotateCcw, Save } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -13,6 +13,7 @@ import { SandboxEditor } from "@/components/sandbox/sandbox-editor";
 import { useSandboxOverview } from "@/hooks/use-sandbox-overview";
 import { compactSandbox, describeSandbox, sandboxApi, PLACEMENT_INFO, toolPlacement, type SandboxSettings, type ToolPlacement } from "@/lib/sandbox-api";
 import { cn } from "@/lib/utils";
+import { useComputers } from "@/hooks/use-computers";
 import { useAgentDetail } from "./agent-detail-context";
 
 /** Same list as the server (EXTERNAL_CONTENT_TOOLS in @polpo-ai/core/sandbox). */
@@ -56,6 +57,7 @@ export function AgentSandboxTab() {
   return (
     <ScrollArea className="h-full">
       <div className="pr-4 pb-bottom-nav lg:pb-4 space-y-4">
+        <AgentComputerPointer defaultComputer={(agent as { defaultComputer?: string }).defaultComputer} />
         <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0">
           <CardContent className="py-3 px-4 space-y-1.5 text-xs">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Effective sandbox</div>
@@ -63,7 +65,7 @@ export function AgentSandboxTab() {
             {!overview && !error && <p className="text-muted-foreground flex items-center gap-1.5"><Loader2 className="h-3 w-3 animate-spin" /> Loading…</p>}
             {effective && (
               <>
-                <p><span className="text-muted-foreground mr-1.5">Tasks</span>{describeSandbox(effective.task)}</p>
+                <p className={effective.task.fallback ? "text-amber-600 dark:text-amber-400" : undefined}><span className="text-muted-foreground mr-1.5">Tasks</span>{describeSandbox(effective.task)}</p>
                 <p><span className="text-muted-foreground mr-1.5">Chat</span>{describeSandbox(effective.chat)}</p>
                 <p className="text-[10px] text-muted-foreground">
                   Missions and tasks can only make this stricter. Instance defaults are in{" "}
@@ -101,6 +103,30 @@ export function AgentSandboxTab() {
         <ToolPlacementCard tools={agent.allowedTools} provider={effective?.task.provider} chatProvider={effective?.chat.provider} />
       </div>
     </ScrollArea>
+  );
+}
+
+/** One line: the agent's computer (chosen in its Computer tab). */
+function AgentComputerPointer({ defaultComputer }: { defaultComputer?: string }) {
+  const id = defaultComputer || "host";
+  const { computers } = useComputers({ live: false });
+  const name = id === "host" ? "This server (host)" : computers.find((c) => c.id === id)?.name ?? id;
+  return (
+    <Card className="bg-card/80 backdrop-blur-sm border-border/40 py-0 gap-0" data-testid="agent-computer-pointer">
+      <CardContent className="py-2.5 px-4 space-y-1 text-xs">
+        <p className="flex flex-wrap items-center gap-1.5">
+          <Monitor className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-muted-foreground">Computer:</span>
+          <span className="font-medium">{name}</span>
+          <span className="text-muted-foreground">— manage in the <Link to="?tab=computer" className="underline">Computer tab</Link></span>
+        </p>
+        {id !== "host" && (
+          <p className="text-[10px] text-muted-foreground">
+            The sandbox settings below apply only when a task asks for an ephemeral sandbox; on the computer, its own network rule applies.
+          </p>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

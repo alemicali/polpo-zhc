@@ -126,6 +126,12 @@ export interface PolpoEventMap {
   "chat:turn-started": { sessionId: string; turnId: string; reason: "queue" | "steer" | "fork" | "send-now"; userMessageId?: string };
   /** A session's prompt queue changed (items or auto-send). */
   "chat:queue-updated": { sessionId: string };
+  /** Two agents talking during a chat: an exchange started ("working"), was answered or failed. */
+  "agent:message": {
+    id: string; from: string; to: string; kind: "question" | "handoff"; message: string;
+    status: "working" | "answered" | "failed"; answer?: string; error?: string;
+    fromSessionId?: string; dmSessionId?: string; startedAt: string; answeredAt?: string;
+  };
 
   // Rooms (group conversations of people and agents)
   "room:created": { room: import("./room-store.js").Room };
@@ -237,16 +243,31 @@ export interface PolpoEventMap {
 
   // Sandboxes (where agents' tools run) and storage (mounted buckets)
   "sandbox:created": { workspaceId: string; provider: string; scope: "chat" | "task"; taskId?: string; runId?: string; sessionId?: string; agentName?: string; network: string };
-  "sandbox:ready": { workspaceId: string; provider: string; durationMs: number; steps?: Record<string, number>; remoteId?: string; source?: "created" | "pool" | "warm" | "shared"; agentName?: string; taskId?: string; sessionId?: string };
+  "sandbox:ready": { workspaceId: string; provider: string; durationMs: number; steps?: Record<string, number>; remoteId?: string; source?: "created" | "pool" | "warm" | "shared" | "computer"; agentName?: string; taskId?: string; sessionId?: string };
   "sandbox:suspended": { workspaceId: string; provider: string; remoteId?: string; agentName?: string; taskId?: string; sessionId?: string; idleMs: number };
   "sandbox:resumed": { workspaceId: string; provider: string; remoteId?: string; agentName?: string; taskId?: string; sessionId?: string; durationMs: number };
   "sandbox:override-denied": { scope: "chat" | "task"; taskId?: string; agentName?: string; level: "mission" | "task"; field: string; requested: unknown; applied: unknown };
   "sandbox:network-denied": { workspaceId?: string; provider: string; scope: "chat" | "task"; taskId?: string; agentName?: string; host: string; port?: number; reason: "not-allowed" | "private-address" };
   "sandbox:failed": { workspaceId?: string; provider: string; scope: "chat" | "task"; taskId?: string; sessionId?: string; error: string };
-  "sandbox:destroyed": { workspaceId: string; provider: string; durationMs: number; reason: "done" | "idle" | "error" | "shutdown" | "expired" | "orphan"; remoteId?: string; outcome?: "pooled" | "destroyed" | "shared"; runningMs?: number; agentName?: string; taskId?: string; sessionId?: string };
+  "sandbox:destroyed": { workspaceId: string; provider: string; durationMs: number; reason: "done" | "idle" | "error" | "shutdown" | "expired" | "orphan"; remoteId?: string; outcome?: "pooled" | "destroyed" | "shared" | "kept"; runningMs?: number; agentName?: string; taskId?: string; sessionId?: string };
   /** open Polpo's volume.* events: attached, written back (checkpoint or end), revision conflict. */
   "sandbox:volume": { workspaceId: string; provider: string; step: "prepared" | "checkpointed" | "finalized" | "conflict"; name: string; revision?: number; message?: string; agentName?: string; taskId?: string; sessionId?: string };
   "storage:changed": { name: string; action: "created" | "updated" | "deleted" | "mounted" | "unmounted" | "mount-failed"; error?: string } & EventOrigin;
+  /** A connector (MCP server) was added, changed, removed, or its connection status changed. */
+  "connector:changed": import("./connectors.js").ConnectorChangedEvent & EventOrigin;
+  /**
+   * A computer (persistent machine, settings.computers) was created, changed, deleted, or its
+   * machine changed status (creating, running, stopped, paused, hibernated, archived, error…).
+   */
+  "computer:changed": {
+    id: string;
+    action: "created" | "updated" | "deleted" | "status";
+    status?: import("./computers.js").ComputerStatus;
+    remoteId?: string;
+    error?: string;
+    /** Something worth knowing that is not an error (e.g. a Daytona v2 VM that vanished was restored from its snapshot). */
+    notice?: string;
+  } & EventOrigin;
 
   // Company brain
   "brain:changed": import("./company-brain.js").BrainChangeEvent;

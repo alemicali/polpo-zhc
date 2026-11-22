@@ -226,8 +226,19 @@ export const UpdateSettingsSchema = z.object({
   branding: z.object({
     productName: z.string().trim().max(80).optional(),
     tagline: z.string().trim().max(120).optional(),
-    logoUrl: z.union([z.url(), z.literal("/api/v1/config/branding/logo")]).optional(),
+    logoUrl: z.union([z.url(), z.literal("/api/v1/config/branding/logo"), z.literal("")]).optional(),
   }).optional(),
+  /** Named egress proxies for agents' browsers ({ home: "socks5://…" }); replaces them all, null removes them. */
+  egressProxies: z.record(z.string(), z.string()).nullable().optional(),
+  /**
+   * Tailscale inside remote computers (their browser reaches a tailnet-only egress proxy):
+   * { authKey: { owner, service } (a vault entry holding the key), tags?, hostnamePrefix? }; null removes it.
+   */
+  tailscale: z.object({
+    authKey: z.object({ owner: z.string(), service: z.string() }),
+    tags: z.array(z.string()).optional(),
+    hostnamePrefix: z.string().optional(),
+  }).nullable().optional(),
 });
 
 // ── Notification rule (full top-level, with action passthrough) ───────
@@ -400,6 +411,11 @@ export const AddAgentSchema = z.object({
   reportsTo: z.string().optional(),
   // Extended tool categories (browser, email, vault, image, video, audio, excel, pdf, docx, search — HTTP is always-on core)
   browserProfile: z.string().optional(),
+  browserEgress: z.string().optional(),
+  /** Computers (settings.computers ids) the agent may use; "host" is always allowed. */
+  computers: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/)).optional(),
+  /** Its default machine for chats and tasks: a computer id or "host"; "" (update) clears it. */
+  defaultComputer: z.string().regex(/^([a-z0-9][a-z0-9-]{0,39})?$/).optional(),
   sandbox: z.any().optional(),
   compaction: z.any().optional(),
   voiceReplies: z.enum(["off", "voice", "always"]).optional(),
@@ -445,6 +461,12 @@ export const UpdateAgentSchema = z.object({
   loops: AgentLoopsSchema.optional(),
   pipeline: PipelineSchema.optional(),
   browserProfile: z.string().optional(),
+  browserEgress: z.string().optional(),
+  /** Computers (settings.computers ids) the agent may use; "host" is always allowed. */
+  /** null or [] clears it: only "host" (and the default computer). */
+  computers: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/)).nullable().optional(),
+  /** Its default machine for chats and tasks: a computer id or "host"; "" (update) clears it. */
+  defaultComputer: z.string().regex(/^([a-z0-9][a-z0-9-]{0,39})?$/).optional(),
   emailAllowedDomains: z.array(z.string()).optional(),
   team: z.string().optional(),
 });

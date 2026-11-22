@@ -132,7 +132,7 @@ export type { NotificationRouterPort } from "./notification-router-port.js";
 export type { OrchestratorContext, AssessFn, CheckProgressEvent } from "./orchestrator-context.js";
 
 // ── Cron (pure) ─────────────────────────────────────────────────────────
-export { parseCron, matchesCron, nextCronOccurrence, isCronExpression } from "./cron.js";
+export { parseCron, matchesCron, nextCronOccurrence, isCronExpression, scheduleExpressionProblem } from "./cron.js";
 
 // ── Core Managers ───────────────────────────────────────────────────────
 export { TaskManager } from "./task-manager.js";
@@ -196,6 +196,9 @@ export type {
   SandboxNetworkMode, SandboxResources, SandboxSettings, EffectiveSandbox, SandboxCascade,
   StorageMountSpec, StorageMountProvider, ToolPlacement, SandboxLifecycleSettings, RemoteSandboxProvider, SandboxIsolation, SandboxReleasePolicy, SandboxVolumeAccess, SandboxVolumeWriteBack, SandboxVolumeStrategy, SandboxVolumeSelection, ResolvedSandboxVolume,
 } from "./sandbox.js";
+// Computers: a persistent machine per agent (settings.computers)
+export * from "./computers.js";
+export { computerSelection } from "./sandbox.js";
 // open Polpo's sandbox ports and runtime policy (copied as is from lumea-labs/polpo)
 export { resolveRuntimeSandboxOptions } from "./runtime-sandbox.js";
 export type { RuntimeSandboxOptions, RuntimeSandboxLifecycleOptions, RuntimeSandboxVolumeSelection } from "./runtime-sandbox.js";
@@ -231,3 +234,13 @@ export {
 export type {
   Artifact, ArtifactType, ArtifactVersion, ArtifactSummary, NewArtifact, ArtifactPatch, ArtifactFilter, ArtifactStore,
 } from "./artifacts.js";
+
+// Connectors: external tools over MCP (Linear, Notion, Google Workspace, custom servers)
+export {
+  CONNECTOR_ID_PATTERN, CONNECTORS_VAULT_OWNER, DEFAULT_CONNECTOR_TOOL_TIMEOUT_MS, connectorGrants, connectorSlug,
+} from "./connectors.js";
+export type {
+  ConnectorConfig, ConnectorIcon, ConnectorTransport, ConnectorAuth, ConnectorAuthType, ConnectorOAuthSettings, ConnectorAccess,
+  ConnectorToolPolicy, ConnectorStatus, ConnectorOAuthApp, ConnectorsFile, ConnectorCatalogEntry, ConnectorChangedEvent,
+} from "./connectors.js";
+export { EGRESS_PROXY_NAME, EGRESS_PROXY_URL, parseEgressProxies } from "./egress-proxies.js";

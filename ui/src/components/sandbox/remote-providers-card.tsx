@@ -11,14 +11,24 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { sandboxApi, type RemoteProviderId, type RemoteProviderSettings, type RemoteProviderStatus } from "@/lib/sandbox-api";
+import { sandboxApi, type DaytonaApiVersion, type RemoteProviderId, type RemoteProviderSettings, type RemoteProviderStatus } from "@/lib/sandbox-api";
 import { sameVaultRef, type VaultRef } from "@/lib/vault-ref";
 
-type TextField = Exclude<keyof RemoteProviderSettings, "credential">;
+type TextField = Exclude<keyof RemoteProviderSettings, "credential" | "api">;
+type FieldMeta = { key: TextField; label: string; placeholder: string; hint?: string };
+
+/** Daytona v2 (the new service): its own fields, key page and what it creates. */
+const DAYTONA_V2 = {
+  fields: [
+    { key: "image", label: "Image", placeholder: "polpo-runner-vm-2", hint: "Empty: the Polpo runner image" },
+    { key: "region", label: "Region", placeholder: "project default", hint: "Optional" },
+  ] as FieldMeta[],
+  keyUrl: "https://app.daytona.io/dashboard",
+};
 
 const META: Record<RemoteProviderId, {
   name: string; tagline: string; mark: string; hue: { tile: string; ring: string; glow: string; line: string; text: string; hover: string };
-  fields: Array<{ key: TextField; label: string; placeholder: string; hint?: string }>;
+  fields: FieldMeta[];
   keyUrl: string;
 }> = {
   daytona: {
@@ -29,6 +39,7 @@ const META: Record<RemoteProviderId, {
     fields: [
       { key: "apiUrl", label: "API URL", placeholder: "https://app.daytona.io/api" },
       { key: "target", label: "Region", placeholder: "eu", hint: "eu or us" },
+      { key: "snapshot", label: "Snapshot", placeholder: "polpo-runner-…", hint: "Container or linux-vm, as built" },
     ],
     keyUrl: "https://app.daytona.io/dashboard/keys",
   },
@@ -48,18 +59,26 @@ const META: Record<RemoteProviderId, {
 function ProviderCard({ status, onChanged }: { status: RemoteProviderStatus; onChanged: () => void }) {
   const meta = META[status.id];
   // undefined = unchanged; credential null = cleared in the draft
-  const [draft, setDraft] = useState<Partial<Record<TextField, string>> & { credential?: VaultRef | null }>({});
+  const [draft, setDraft] = useState<Partial<Record<TextField, string>> & { credential?: VaultRef | null; api?: DaytonaApiVersion }>({});
   const [busy, setBusy] = useState<"save" | "test" | "remove" | null>(null);
   const test = status.lastTest;
   const credential = draft.credential !== undefined ? draft.credential : status.credential ?? null;
+  const isDaytona = status.id === "daytona";
+  const api: DaytonaApiVersion = draft.api ?? status.api ?? "v0";
+  const v2 = isDaytona && api === "v2";
+  const fields = v2 ? DAYTONA_V2.fields : meta.fields;
+  const allFields = isDaytona ? [...meta.fields, ...DAYTONA_V2.fields] : meta.fields;
   const dirty = (draft.credential !== undefined && !sameVaultRef(draft.credential, status.credential) && !(draft.credential === null && !status.credential))
-    || meta.fields.some((f) => draft[f.key] !== undefined && draft[f.key]!.trim() !== (status[f.key] ?? ""));
+    || (isDaytona && api !== (status.api ?? "v0"))
+    || fields.some((f) => draft[f.key] !== undefined && draft[f.key]!.trim() !== (status[f.key] ?? ""));
 
   const save = async () => {
     setBusy("save");
     try {
-      const next: RemoteProviderSettings = { ...(credential ? { credential } : {}) };
-      for (const f of meta.fields) {
+      const next: RemoteProviderSettings = { ...(credential ? { credential } : {}), ...(v2 ? { api: "v2" as const } : {}) };
+      // the other version's options are kept for switching back, except v0's API URL (v2 refuses it)
+      for (const f of allFields) {
+        if (v2 && f.key === "apiUrl") continue;
         const value = (draft[f.key] ?? status[f.key] ?? "").trim();
         if (value) next[f.key] = value;
       }
@@ -155,8 +174,32 @@ function ProviderCard({ status, onChanged }: { status: RemoteProviderStatus; onC
               aria-label={`${meta.name} API key vault entry`}
             />
           </div>
+          {isDaytona && (
+            <div className="grid grid-cols-2 gap-2">
+              <label className="block min-w-0">
+                <span className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground/70">API</span>
+                <select
+                  className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-xs"
+                  value={api}
+                  onChange={(e) => setDraft((d) => ({ ...d, api: e.target.value as DaytonaApiVersion }))}
+                  aria-label="Daytona API version"
+                >
+                  <option value="v0">v0 · app.daytona.io</option>
+                  <option value="v2">v2 · new service (Linux VMs)</option>
+                </select>
+                <span className="mt-0.5 block text-[9.5px] text-muted-foreground/60">{v2 ? "Needs a project API key" : "Organization API key"}</span>
+              </label>
+              <div className="block min-w-0">
+                <span className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground/70">VM class</span>
+                <div className="flex h-8 items-center rounded-md border border-border/40 bg-muted/20 px-2 text-xs" data-testid="daytona-vm-class">
+                  {v2 ? "Linux VM (linux-vm)" : "From the snapshot"}
+                </div>
+                <span className="mt-0.5 block text-[9.5px] text-muted-foreground/60">{v2 ? "Computers hibernate (snapshot); pooled VMs deleted when idle" : "Container stops, linux-vm pauses"}</span>
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-2">
-            {meta.fields.map((f) => (
+            {fields.map((f) => (
               <label key={f.key} className="block min-w-0">
                 <span className="mb-1 block text-[10px] uppercase tracking-wider text-muted-foreground/70">{f.label}</span>
                 <Input
@@ -171,7 +214,7 @@ function ProviderCard({ status, onChanged }: { status: RemoteProviderStatus; onC
           </div>
           {!status.configured && (
             <p className="text-[10.5px] text-muted-foreground">
-              Create a key in the <a href={meta.keyUrl} target="_blank" rel="noreferrer" className={cn("underline", meta.hue.text)}>{meta.name} dashboard</a>,
+              Create {v2 ? "a project API key" : "a key"} in the <a href={v2 ? DAYTONA_V2.keyUrl : meta.keyUrl} target="_blank" rel="noreferrer" className={cn("underline", meta.hue.text)}>{meta.name} dashboard</a>,
               save it in an agent's vault (Credentials tab, shared with others if needed), then choose that entry here. Polpo can do it for you.
             </p>
           )}

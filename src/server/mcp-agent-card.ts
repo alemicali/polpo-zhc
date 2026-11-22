@@ -1,5 +1,5 @@
 /**
- * The agent card: what the `show_agent` MCP App shows about one agent, built from the instance's API
+ * The agent card: what the `polpo_agent_show` MCP App shows about one agent, built from the instance's API
  * data. Inline it is a compact card (status, the task at hand, today, what is next, the main goal);
  * full screen it adds the tasks, the goals and the routine.
  *

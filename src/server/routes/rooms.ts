@@ -5,7 +5,7 @@
  *   POST   /rooms                        a new web room { title, agents, settings? }
  *   GET    /rooms/:id                    one room (ids contain ":", URL-encoded)
  *   PATCH  /rooms/:id                    rename, change agents or settings
- *   DELETE /rooms/:id                    a web room and its transcript
+ *   DELETE /rooms/:id                    a web room, its transcript and its agents' "(group)" sessions
  *   GET    /rooms/:id/messages?limit=    the transcript, oldest first
  *   POST   /rooms/:id/messages           a person writes { text, name? }: the agents answer in
  *                                        the background (room:message / room:typing events)
@@ -16,7 +16,7 @@
 
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { z } from "zod";
-import type { Room, RoomStore } from "@polpo-ai/core";
+import type { Room, RoomStore, SessionStore } from "@polpo-ai/core";
 import { POLPO, ROOM_DEFAULTS, newRoomId, type RoomEngine } from "../../rooms/room-engine.js";
 
 const SettingsSchema = z.object({
@@ -25,6 +25,8 @@ const SettingsSchema = z.object({
   replyOrder: z.enum(["parallel", "sequential"]).optional(),
   agentToAgent: z.boolean().optional(),
   maxAgentHops: z.number().int().min(0).max(10).optional(),
+  goal: z.string().max(500).optional(),
+  owner: z.string().max(120).optional(),
 }).strict();
 
 const CreateSchema = z.object({
@@ -41,6 +43,8 @@ const PatchSchema = z.object({
 
 const PostSchema = z.object({
   text: z.string().trim().min(1).max(20_000),
+  /** The message this one replies to: replying to an agent's message calls that agent in. */
+  replyToId: z.string().max(100).optional(),
   name: z.string().trim().min(1).max(80).optional(),
 }).strict();
 
@@ -49,6 +53,8 @@ export interface RoomRoutesDeps {
   engine: RoomEngine;
   /** Agent names that exist (a room may only hold those, and "polpo"). */
   agentNames: () => Promise<string[]>;
+  /** The agents' own sessions for a room (scope = its id) go with it. */
+  sessions?: Pick<SessionStore, "listSessions" | "deleteSession">;
   emit: (event: "room:created" | "room:updated", payload: { room: Room }) => void;
   emitDeleted: (roomId: string) => void;
 }
@@ -115,8 +121,16 @@ export function roomRoutes(getDeps: () => RoomRoutesDeps): OpenAPIHono {
     if (!room) return fail(c, 404, "Room not found");
     if (room.kind !== "web") return fail(c, 400, "A Telegram room goes with its group");
     await getDeps().rooms.deleteRoom(id);
+    // each agent's hidden "<title> (group)" session for this room: its turns in the room
+    const sessions = getDeps().sessions;
+    let sessionsDeleted = 0;
+    if (sessions) {
+      for (const s of (await sessions.listSessions()).filter((x) => x.scope === id)) {
+        if (await sessions.deleteSession(s.id).catch(() => false)) sessionsDeleted++;
+      }
+    }
     getDeps().emitDeleted(id);
-    return c.json({ ok: true, data: { deleted: true } });
+    return c.json({ ok: true, data: { deleted: true, sessionsDeleted } });
   });
 
   app.get("/:id/messages", async (c) => {
@@ -133,7 +147,10 @@ export function roomRoutes(getDeps: () => RoomRoutesDeps): OpenAPIHono {
     if (room.kind !== "web") return fail(c, 400, "Telegram rooms are written from Telegram");
     const parsed = PostSchema.safeParse(await c.req.json().catch(() => undefined));
     if (!parsed.success) return fail(c, 400, parsed.error.issues[0]?.message ?? "Invalid message");
-    const message = await getDeps().engine.post(id, { id: "web:user", name: parsed.data.name ?? "You" }, parsed.data.text);
+    // await the post itself (not the replyToId): the answer carries the stored message
+    const message = await (parsed.data.replyToId
+      ? getDeps().engine.post(id, { id: "web:user", name: parsed.data.name ?? "You" }, parsed.data.text, { replyToId: parsed.data.replyToId })
+      : getDeps().engine.post(id, { id: "web:user", name: parsed.data.name ?? "You" }, parsed.data.text));
     return c.json({ ok: true, data: message }, 201);
   });
 

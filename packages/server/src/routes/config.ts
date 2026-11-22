@@ -1,7 +1,8 @@
-import { normalizeSandboxSettings } from "@polpo-ai/core/sandbox";
+import { daytonaProviderErrors, normalizeSandboxSettings } from "@polpo-ai/core/sandbox";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { redactPolpoConfig, redactSecrets, restoreRedactedSecrets } from "../security.js";
 import { UnrestorableSecretError } from "@polpo-ai/core/secret-redaction";
+import { computerEgressProblem, parseComputers, parseEgressProxies, parseTailscaleSettings, type TailscaleSettings } from "@polpo-ai/core";
 import {
   UpdateSettingsSchema,
   NotificationChannelConfigSchema,
@@ -58,6 +59,10 @@ const updateSettingsRoute = createRoute({
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
       description: "Settings updated",
+    },
+    400: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
+      description: "Invalid settings (e.g. an egress proxy)",
     },
     404: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string() }) } },
@@ -317,14 +322,61 @@ export function configRoutes(getDeps: () => {
   app.openapi(updateSettingsRoute, async (c) => {
     const deps = getDeps();
     const body = c.req.valid("json");
+    // Daytona API version and options (v2: no API URL): refused before anything is saved
+    if (body.sandbox && typeof body.sandbox === "object") {
+      const errors = daytonaProviderErrors((body.sandbox as { providers?: { daytona?: unknown } }).providers?.daytona);
+      if (errors.length) return c.json({ ok: false, error: errors.join("; ") }, 400);
+    }
+    let egressProxies: Record<string, string> | null | undefined;
+    if (body.egressProxies !== undefined) {
+      try {
+        egressProxies = body.egressProxies === null ? null : parseEgressProxies(body.egressProxies);
+      } catch (err) {
+        return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 400);
+      }
+    }
+    // Tailscale in remote computers: the auth key only as a vault reference
+    let tailscale: TailscaleSettings | null | undefined;
+    if (body.tailscale !== undefined) {
+      try {
+        tailscale = body.tailscale === null ? null : parseTailscaleSettings(body.tailscale);
+      } catch (err) {
+        return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 400);
+      }
+    }
+    // remote computers going out through a proxy must still be able to (Tailscale, a tailnet SOCKS5 proxy)
+    if (egressProxies !== undefined || tailscale !== undefined) {
+      const current = deps.getConfig()?.settings;
+      const next = {
+        egressProxies: egressProxies === undefined ? current?.egressProxies : egressProxies ?? undefined,
+        tailscale: tailscale === undefined ? current?.tailscale : tailscale ?? undefined,
+      };
+      let computers: ReturnType<typeof parseComputers> = [];
+      try { computers = parseComputers(current?.computers); } catch { /* invalid computers are reported where they are edited */ }
+      const problems = computers.filter((x) => x.kind !== "host").map((x) => computerEgressProblem(x, next)).filter((p): p is string => !!p);
+      if (problems.length) return c.json({ ok: false, error: `${problems.join("; ")}. Change the computer's egress first.` }, 400);
+    }
 
     const result = await mutateConfig(deps, (config) => {
       const settings = config.settings ?? {};
+      if (egressProxies !== undefined) settings.egressProxies = egressProxies === null || Object.keys(egressProxies).length === 0 ? undefined : egressProxies;
+      if (tailscale !== undefined) settings.tailscale = tailscale === null ? undefined : tailscale;
       if (body.orchestratorModel !== undefined) settings.orchestratorModel = body.orchestratorModel;
       if (body.imageModel !== undefined) settings.imageModel = body.imageModel === null ? undefined : body.imageModel;
       if (body.reasoning !== undefined) settings.reasoning = body.reasoning;
       if (body.sandbox !== undefined) settings.sandbox = body.sandbox === null ? undefined : normalizeSandboxSettings(body.sandbox);
       if (body.compaction !== undefined) settings.compaction = body.compaction === null ? undefined : body.compaction;
+      if (body.branding !== undefined) {
+        // only the fields given change; an empty string restores the default
+        const branding: Record<string, string | undefined> = { ...(settings.branding ?? {}) };
+        for (const key of ["productName", "tagline", "logoUrl"] as const) {
+          const value = body.branding[key];
+          if (value === undefined) continue;
+          if (value === "") delete branding[key];
+          else branding[key] = value;
+        }
+        settings.branding = Object.keys(branding).some((k) => branding[k] !== undefined) ? branding : undefined;
+      }
       config.settings = settings;
     });
 

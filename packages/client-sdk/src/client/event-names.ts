@@ -19,7 +19,7 @@ export const POLPO_EVENT_NAMES = [
   "task:direction", "task:retry:blocked", "agent:created", "agent:updated", "agent:removed", "agent:learned", "agent:reflected",
   "team:created", "team:updated", "team:removed", "assessment:check:started",
   "assessment:check:complete", "approval:rejected", "delay:started", "delay:expired",
-  "chat:turn-started", "chat:queue-updated", "room:created", "room:updated", "room:deleted",
+  "chat:turn-started", "chat:queue-updated", "agent:message", "room:created", "room:updated", "room:deleted",
   "room:message", "room:typing", "background-wait:created", "background-wait:ready",
   "background-wait:running", "background-wait:completed", "background-wait:failed",
   "background-wait:cancelled", "app:changed", "data-source:changed", "data-view:changed", "artifact:changed",
@@ -34,7 +34,7 @@ export const POLPO_EVENT_NAMES = [
   "sandbox:suspended",
   "sandbox:volume",
   "sandbox:resumed", "sandbox:override-denied", "sandbox:network-denied",
-  "sandbox:failed", "sandbox:destroyed", "storage:changed", "log",
+  "sandbox:failed", "sandbox:destroyed", "storage:changed", "connector:changed", "computer:changed", "log",
 ] as const;
 
 export type PolpoEventName = typeof POLPO_EVENT_NAMES[number];

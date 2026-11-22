@@ -1,5 +1,6 @@
 import { nanoid } from "nanoid";
-import { resolve, join, dirname } from "node:path";
+import { resolve, join, dirname, basename } from "node:path";
+import { resolveSharedFile } from "./shared-files.js";
 import { mkdirSync, existsSync, readFileSync, writeFileSync, watch, type FSWatcher } from "node:fs";
 import { getPolpoDir } from "./constants.js";
 import type { Server } from "node:net";
@@ -122,7 +123,7 @@ import { protectPolpoDir } from "../tools/path-sandbox.js";
 import { availableProviders, createWorkspace, effectiveSandbox, WorkspaceShell } from "../sandbox/manager.js";
 import { RemoteWorkspace } from "../sandbox/remote.js";
 import { remoteThenLocal } from "../sandbox/workspace-fs.js";
-import { normalizeSandboxSettings, type EffectiveSandbox, type ResolvedSandboxVolume, type StorageMountProvider, type Workspace } from "@polpo-ai/core/sandbox";
+import { computerContext, normalizeSandboxSettings, type EffectiveSandbox, type ResolvedSandboxVolume, type StorageMountProvider, type Workspace } from "@polpo-ai/core/sandbox";
 import type { Shell } from "@polpo-ai/core/shell";
 
 // Re-export for backward compatibility (consumed by core/index.ts and external modules)
@@ -367,6 +368,8 @@ export class Orchestrator extends TypedEmitter {
       cascade: { instance: instanceSandbox, agent: normalizeSandboxSettings(agent?.sandbox) },
       // Polpo reads messages from people on channels: treat it like an agent reading external content
       agentTools: agent ? agent.allowedTools : (instanceSandbox?.allowLocal ? [] : ["http_fetch"]),
+      // the agent's default computer: its chats run there too
+      computers: computerContext(agent, this.config?.settings),
     });
     // Polpo's own commands manage this instance: they never run in a remote VM
     if (!agent && (sandbox.provider === "daytona" || sandbox.provider === "e2b")) sandbox = { ...sandbox, provider: "bwrap" };
@@ -439,6 +442,7 @@ export class Orchestrator extends TypedEmitter {
       case "released": this.emit("sandbox:destroyed", { ...base, durationMs: e.durationMs, reason: "done", remoteId: e.remoteId, outcome: e.outcome, runningMs: e.runningMs }); break;
       case "volume": this.emit("sandbox:volume", { ...base, step: e.step, name: e.name, revision: e.revision, message: e.message }); break;
       case "warning": this.emit("log", { level: "warn", message: `[sandbox ${at.agentName ?? ""}] ${e.message}` }); break;
+      case "progress": this.emit("log", { level: "info", message: `[sandbox ${at.agentName ?? ""}] ${e.message}` }); break;
       default: break;
     }
   }
@@ -492,6 +496,10 @@ export class Orchestrator extends TypedEmitter {
   getBackgroundWaitManager(): BackgroundWaitManager | undefined { return this.backgroundWaitMgr; }
   /** Recurring checks agents run in a chat (schedule_check). */
   getConversationCheckManager(): ConversationCheckManager | undefined { return this.conversationCheckMgr; }
+  private agentTalk: import("../tools/agent-talk-tools.js").AgentTalkAccess | undefined;
+  /** Agents talking to each other during a chat (set by the server, which runs the turns). */
+  setAgentTalk(talk: import("../tools/agent-talk-tools.js").AgentTalkAccess): void { this.agentTalk = talk; }
+  getAgentTalk(): import("../tools/agent-talk-tools.js").AgentTalkAccess | undefined { return this.agentTalk; }
   /** Agents learning from their conversations (learning in the agent config). */
   getLearningManager(): LearningManager | undefined { return this.learningMgr; }
   /** Agents pursuing a purpose on their own initiative (drive in the agent config). */
@@ -1573,14 +1581,25 @@ export class Orchestrator extends TypedEmitter {
    * group, the person never wrote to it), by the agent's other bots, then any bot of the instance.
    * A group's message joins its transcript. Returns the bot that sent it.
    */
-  async sendToChat(target: ConversationCheckTarget, text: string, agent?: string): Promise<string> {
+  async sendToChat(target: ConversationCheckTarget, text: string, agent?: string, files: string[] = []): Promise<string> {
+    // only the agents' workspace is shareable, never .polpo or files named like credentials
+    const resolved = files.map((f) => ({ asked: f, path: resolveSharedFile(f, [this.getAgentWorkDir()]) }));
+    const missing = resolved.filter((f) => !f.path).map((f) => f.asked);
+    if (missing.length) throw new Error(`Cannot send ${missing.join(", ")}: not a file in the agents' workspace`);
+    const thread = target.threadId !== undefined ? { threadId: target.threadId } : undefined;
     const tried: string[] = [];
     for (const key of botOrder(this.chatBots(), target, agent)) {
       const poller = this.telegramPollersByChannel.get(key);
       if (!poller) continue;
       tried.push(key);
-      if (!await poller.sendMarkdown(target.chatId, text, undefined, undefined, target.threadId !== undefined ? { threadId: target.threadId } : undefined)) continue;
-      if (target.conversation) await this.channelGateways.get(key)?.recordConversationReport(target.conversation, text);
+      if (text && !await poller.sendMarkdown(target.chatId, text, undefined, undefined, thread)) continue;
+      let sent = 0;
+      for (const f of resolved) if (await poller.sendDocument(target.chatId, f.path!, basename(f.path!), thread)) sent++;
+      // the text went out: a file refused by this bot is reported rather than resent by another one
+      if (!text && sent === 0) continue;
+      if (sent < resolved.length) throw new Error(`Sent ${text ? "the message and " : ""}${sent} of ${resolved.length} files: Telegram refused the others (too large, over 50 MB?)`);
+      const report = [text, ...resolved.map((f) => `[file: ${basename(f.path!)}]`)].filter(Boolean).join("\n");
+      if (target.conversation) await this.channelGateways.get(key)?.recordConversationReport(target.conversation, report);
       return key;
     }
     throw new Error(tried.length

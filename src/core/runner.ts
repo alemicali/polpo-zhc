@@ -243,6 +243,14 @@ async function main(): Promise<void> {
     if (remoteProvider === "daytona" || remoteProvider === "e2b") {
       const { configureRemoteProviders } = await import("../sandbox/remote-providers.js");
       configureRemoteProviders(vaultStore, () => ({ [remoteProvider]: config.sandbox!.providerOptions }));
+      // a remote computer going out through the tailnet: the auth key is read from the vault here
+      // (the run's config carries only its reference)
+      const tailnet = config.browserEgress?.tailnet;
+      if (tailnet) {
+        const { configureTailnetEgress } = await import("../sandbox/tailnet-egress.js");
+        const egress = config.browserEgress;
+        configureTailnetEgress({ vaultStore, egressFor: (computer) => (computer.id === tailnet.computerId ? egress : undefined) });
+      }
     }
 
     // WhatsApp store + send function (if configured)
@@ -334,6 +342,7 @@ async function main(): Promise<void> {
       polpoDir: config.polpoDir,
       outputDir: config.outputDir,
       emailAllowedDomains: config.emailAllowedDomains,
+      browserEgress: config.browserEgress,
       reasoning: config.reasoning,
       compaction: config.compaction,
       sandbox: config.sandbox,

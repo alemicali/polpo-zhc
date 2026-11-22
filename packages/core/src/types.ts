@@ -408,6 +408,10 @@ export interface AgentConfig {
   drive?: AgentDrive;
   /** Where this agent's tools run (sandbox), set by a person: overrides the instance default. */
   sandbox?: import("./sandbox.js").SandboxSettings;
+  /** Computers (settings.computers ids) this agent may use; "host" (this server) always. */
+  computers?: string[];
+  /** The machine its chats and tasks run on by default: a computer id, or "host" (unset: this server, with the sandbox cascade). */
+  defaultComputer?: string;
   /** Runtime profile used by deterministic loop execution. */
   runtime?: string;
   /** Named deterministic loops available to this agent. */
@@ -430,6 +434,9 @@ export interface AgentConfig {
    *  Defaults to agent name. Used with agent-browser's --profile flag.
    *  Profiles stored in .polpo/browser-profiles/<name>/. */
   browserProfile?: string;
+  /** Where its browser goes out to the internet: the name of a proxy in settings.egressProxies
+   *  (e.g. "home", a residential line over Tailscale). Unset: directly from the server. */
+  browserEgress?: string;
   /** Allowed recipient email domains for email_send (e.g. ["acme.com", "partner.io"]).
    *  When set, emails can only be sent to addresses in these domains.
    *  When omitted, all domains are allowed (backwards compatible). */
@@ -725,6 +732,8 @@ export interface RunnerConfig {
   notifySocket?: string;
   /** Email domain allowlist (from settings or agent config). */
   emailAllowedDomains?: string[];
+  /** The agent's browser egress proxy (settings.egressProxies[agent.browserEgress]). */
+  browserEgress?: { name: string; url: string; tailnet?: import("./tailnet.js").TailnetEgressRef };
   /** Global reasoning level from settings — used as fallback for agents that don't specify one. */
   reasoning?: ReasoningLevel;
   /** Instance compaction settings (the agent's own `compaction` is applied on top by the engine). */
@@ -935,6 +944,8 @@ export interface PolpoSettings {
   compaction?: import("./context-compactor.js").CompactionSettings;
   /** Where agents' tools run: default sandbox and what lower levels may choose. */
   sandbox?: import("./sandbox.js").SandboxSettings;
+  /** Persistent machines agents work on (agent.defaultComputer); "host" (this server) is implicit. */
+  computers?: import("./computers.js").ComputerConfig[];
   /** Max assessment retries when all reviewers fail before falling back to fix/retry. Default: 1 */
   maxAssessmentRetries?: number;
   /** Max concurrent agent processes. Default: unlimited (undefined). */
@@ -953,6 +964,22 @@ export interface PolpoSettings {
   defaultQualityThreshold?: number;
   /** Allowed recipient email domains — applies to all agents (can be overridden per-agent). */
   emailAllowedDomains?: string[];
+  /** Named egress proxies for agents' browsers (agent.browserEgress): { home: "socks5://100.101.55.7:1080" }. */
+  egressProxies?: Record<string, string>;
+  /** Tailscale inside remote computers, so their browser can reach a tailnet-only egress proxy (see tailnet.ts). */
+  tailscale?: import("./tailnet.js").TailscaleSettings;
+  /** Connectors (MCP servers): network policy and defaults. */
+  connectors?: {
+    /** Allow remote connectors on private / local network addresses (and http:// on localhost). Default false. */
+    allowPrivateNetwork?: boolean;
+    /** Default tool call timeout in ms (per-connector toolTimeoutMs wins). Default 60000. */
+    toolTimeoutMs?: number;
+  };
+  /** Polpo's own MCP server (/mcp). */
+  mcp?: {
+    /** Toolsets offered to MCP clients ("all", "default" or names such as core, tasks, admin). Default: every toolset except admin. POLPO_MCP_TOOLSETS wins. */
+    toolsets?: string[];
+  };
 }
 
 // === Polpo State (persisted in .polpo/state.json) ===

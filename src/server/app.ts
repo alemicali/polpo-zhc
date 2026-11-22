@@ -43,13 +43,14 @@ import {
   isTrustedApiCall,
   TRUSTED_API_CALL_HEADER,
   CHAT_ORIGIN_HEADER,
+  AGENT_CHAIN_HEADER,
 } from "@polpo-ai/server";
 import { getCookie } from "hono/cookie";
 import { createHmac } from "node:crypto";
-import { handleMcpRequest } from "./mcp.js";
-import { authorizationServerMetadata, consentPage, OAuthError, OAuthServer, protectedResourceMetadata } from "./oauth.js";
+import { handleMcpRequest, resolveToolsets, type McpPrincipal } from "./mcp.js";
+import { authorizationServerMetadata, consentPage, OAUTH_SCOPE, OAuthError, OAuthServer, protectedResourceMetadata } from "./oauth.js";
 import { hasValidApiKey } from "./middleware/instance-auth.js";
-import { reactionHint } from "../notifications/telegram-reactions.js";
+import { reactionHint, telegramFilesHint } from "../notifications/telegram-reactions.js";
 // Node.js-only routes (stay in src/server/routes/)
 import { brandingConfigRoutes, publicConfigRoutes } from "./routes/config.js";
 import { filesystemRoutes } from "./routes/filesystem.js";
@@ -65,14 +66,25 @@ import { audioRoutes } from "./routes/audio.js";
 import { mobileDiagnosticsRoutes } from "./routes/mobile-diagnostics.js";
 import { pushRoutes } from "./routes/push.js";
 import { expoPushRoutes } from "./routes/expo-push.js";
+import { agentEgressName, computerContext, tailnetEgressFor } from "@polpo-ai/core/sandbox";
+import { computerRoutes, egressRoutes, type ComputerRouteDeps } from "./routes/computers.js";
+import { computerManagerWithEvents } from "../sandbox/computers.js";
+import { computerSandbox } from "../sandbox/manager.js";
 import { whatsappRoutes } from "./routes/whatsapp.js";
 import { emailRoutes } from "./routes/email.js";
 import { codingRoutes } from "./routes/coding.js";
 import { roomRoutes } from "./routes/rooms.js";
 import { learningRoutes } from "./routes/learning.js";
+import { checkRoutes, telegramRoutes } from "./routes/checks.js";
 import { driveRoutes } from "./routes/drive.js";
 import { syncRoutes } from "./routes/sync.js";
 import { browserDashboardRoutes } from "./routes/browser-dashboard.js";
+import { browserProfileRoutes } from "./routes/browser-profiles.js";
+import { connectorRoutes, connectorOAuthCallback } from "./routes/connectors.js";
+import { connectorManagerFor, connectorsPromptSection, notePublicOrigin, clientMetadataDocument, CONNECTOR_CLIENT_METADATA_PATH, CONNECTOR_OAUTH_CALLBACK_PATH } from "../mcp/runtime.js";
+import { isMcpToolName, toolResultText } from "../mcp/tools.js";
+import { AgentTalk } from "./agent-talk.js";
+import { resolveBrowserEgress } from "../tools/browser-egress.js";
 import { appPreviewRoutes } from "./routes/app-preview.js";
 import { backgroundWaitRoutes } from "./routes/background-waits.js";
 import { tokenUsageRoutes } from "./routes/token-usage.js";
@@ -128,6 +140,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   const app = new OpenAPIHono();
   const activeWorkDir = () => orchestrator.isInitialized ? orchestrator.getWorkDir() : opts?.workDir;
   const activePolpoDir = () => getPolpoDir(activeWorkDir() ?? opts?.workDir ?? process.cwd());
+  /** Agents talking to each other during a chat (set up once the completions pipeline exists). */
+  let agentTalk: AgentTalk | undefined;
   const activeAppRegistry = () => getAppRegistryRuntime(activePolpoDir(), (event) => orchestrator.emit("app:changed", event));
   const activeDataRegistry = () => getDataRegistryRuntime(activePolpoDir(), orchestrator?.getVaultStore?.(), (event) => {
     if (event.type === "source") {
@@ -323,11 +337,18 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       } catch { /* ignore — keep prompt without mailboxes section */ }
       const { sandbox, volumes } = await o.chatSandbox(agentConfig).catch(() => ({ sandbox: undefined, volumes: [] }));
       const remote = sandbox?.provider === "daytona" || sandbox?.provider === "e2b";
+      // the connectors it may use (state from the last connection; tools come with resolveAgentTools)
+      let connectorsNote = "";
+      try {
+        const section = connectorsPromptSection(connectorManagerFor(o).store.list(), agentConfig.name);
+        if (section) connectorsNote = `\n\n${section}`;
+      } catch { /* no connectors file: nothing to say */ }
       return buildSystemPrompt(agentConfig, o.getAgentWorkDir(), o.getPolpoDir(), undefined, undefined, mailboxes)
         + sandboxPromptNote(sandbox, remote ? volumes.filter((v) => v.remote) : volumes.filter((v) => v.hostPath),
-          remote ? { outputDir: o.chatOutputDir(agentConfig.name) } : {});
+          remote ? { outputDir: o.chatOutputDir(agentConfig.name) } : {})
+        + connectorsNote;
     },
-    resolveAgentTools: async (agentConfig: any, context?: { sessionId: () => string | undefined; origin?: import("@polpo-ai/core").ConversationCheckTarget }) => {
+    resolveAgentTools: async (agentConfig: any, context?: { sessionId: () => string | undefined; origin?: import("@polpo-ai/core").ConversationCheckTarget; chain?: string[] }) => {
       const { createAllTools } = await import("../tools/system-tools.js");
       const { createMemoryTools } = await import("../tools/memory-tools.js");
       const { createDataAgentTools } = await import("../tools/data-tools.js");
@@ -384,7 +405,9 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         : undefined;
       // The chat's sandbox provider: anything but "local" keeps secret values away from the model
       // (vault_get → bash env_from_vault). If it cannot be resolved, fail closed.
-      const chatSandboxProvider = await o.chatSandbox(agentConfig).then((c) => c.sandbox.provider, () => "bwrap");
+      const chatResolved = await o.chatSandbox(agentConfig).catch(() => undefined);
+      const chatSandboxProvider = chatResolved?.sandbox.provider ?? "bwrap";
+      const chatComputer = chatResolved?.sandbox.computer;
       // commands (bash, grep, glob, the browser in Cowork chats) run in this agent's chat sandbox;
       // Cowork chats keep their files in the remote VM: every tool that touches files goes there too
       const chatShell = o.chatShell(agentConfig, context?.sessionId);
@@ -396,6 +419,9 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         browserSession: agentConfig.name,
         browserProfileDir,
         browserNetwork: await o.chatBrowserNetwork(agentConfig),
+        // a remote computer's egress (through Tailscale in its VM), else the agent's own or its host computer's
+        browserEgress: tailnetEgressFor(chatComputer, o.getConfig()?.settings, o.getConfig()?.project)
+          ?? resolveBrowserEgress({ browserEgress: agentEgressName(agentConfig, o.getConfig()?.settings) }, o.getConfig()?.settings?.egressProxies),
         vault,
         emailAllowedDomains: agentConfig.emailAllowedDomains,
         outputDir: undefined,
@@ -439,6 +465,15 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         emitFileChanged: (payload) => o.emit("file:changed", payload),
         fs: chatFs,
       }));
+      // Connectors granted to this agent (mcp__<connector>__<tool>), filtered by allowedTools. A
+      // connector that cannot connect is skipped (and logged): it never breaks the chat.
+      try {
+        const { tools: connectorTools } = await connectorManagerFor(o).toolsFor(agentConfig.name, agentConfig.allowedTools);
+        const taken = new Set(tools.map((tool: any) => tool.name));
+        tools.push(...connectorTools.filter((tool) => !taken.has(tool.name)));
+      } catch (err) {
+        console.warn(`[connectors] ${agentConfig.name}: ${err instanceof Error ? err.message : String(err)}`);
+      }
       // Cowork chats with hydrated read-write volumes: persist them on demand
       {
         const { sandbox: chatSbx, volumes: chatVolumes } = await o.chatSandbox(agentConfig).catch(() => ({ sandbox: undefined, volumes: [] as any[] }));
@@ -499,6 +534,14 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
           } : {}),
         })).filter((tool) => !existingToolNames.has(tool.name)));
       }
+      // Talking to other agents in the middle of the chat (nobody waits: answers arrive live)
+      if (agentTalk && !existingToolNames.has("ask_agent")) {
+        const { createAgentTalkTools } = await import("../tools/agent-talk-tools.js");
+        const talk = agentTalk;
+        tools.push(...createAgentTalkTools(talk, () => ({
+          agent: agentConfig.name, chain: context?.chain ?? [], sessionId: context?.sessionId?.(), origin: context?.origin,
+        })).filter((tool) => !existingToolNames.has(tool.name)));
+      }
       // Opt-in `render_widget` per agente, via allowedTools (es.
       // `["read","write","render_widget"]` in polpo.json). NON è nei
       // CLIENT_SIDE_CHAT_TOOLS perché è un display tool potente: lo
@@ -537,6 +580,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         if (!tool) return `Error: Unknown tool "${name}"`;
         try {
           const result = await tool.execute(nanoid(), args as any);
+          if (isMcpToolName(name)) return toolResultText(result);
           return result.content.map((c: any) => c.text ?? "").join("");
         } catch (err: any) {
           return `Error: ${err.message}`;
@@ -569,29 +613,51 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     resolveSummaryModel: (conversation: any, configured: string | undefined, promptTokens: number) =>
       resolveSummaryModel(conversation, configured, promptTokens),
     // only Telegram turns carry an origin (see ChannelGateway.checkTarget)
-    channelTurnPrompt: () => `## Channel\nThis turn comes from Telegram: your answer is sent as a Telegram message. ${reactionHint()}`,
+    channelTurnPrompt: () => `## Channel\nThis turn comes from Telegram: your answer is sent as a Telegram message. ${reactionHint()}\n${telegramFilesHint()}`,
     resolveOrchestratorContext: async () => {
       const { buildChatSystemPrompt } = await import("../llm/prompts.js");
       const { resolveModel, resolveModelSpec, buildStreamOpts } = await import("../llm/pi-client.js");
       const { ALL_ORCHESTRATOR_TOOLS, executeOrchestratorTool, isInteractive } = await import("../llm/orchestrator-tools.js");
       const state = await (async () => { try { return await o.getStore()?.getState() ?? null; } catch { return null; } })();
-      const systemPrompt = await buildChatSystemPrompt(o, state);
+      let systemPrompt = await buildChatSystemPrompt(o, state);
       const settings = o.getConfig()?.settings;
       const modelSpec = resolveModelSpec(settings?.orchestratorModel);
       const m = resolveModel(modelSpec);
+      // Connectors granted to Polpo (access.polpo): their tools are appended to Polpo's static ones
+      const connectorManager = connectorManagerFor(o);
+      const connectorTools = await connectorManager.toolsFor(undefined).catch((err) => {
+        console.warn(`[connectors] polpo: ${err instanceof Error ? err.message : String(err)}`);
+        return { tools: [], notes: [] };
+      });
+      const connectorSection = connectorsPromptSection(connectorManager.store.list(), undefined, connectorTools.notes);
+      if (connectorSection) systemPrompt += `\n\n${connectorSection}`;
+      const connectorToolMap = new Map(connectorTools.tools.map((tool) => [tool.name, tool]));
+      const runTool = async (name: string, args: Record<string, unknown>, context: any): Promise<string> => {
+        const connectorTool = connectorToolMap.get(name);
+        if (!connectorTool) return executeOrchestratorTool(name, args, o, context);
+        try {
+          return toolResultText(await connectorTool.execute(`polpo-${Date.now()}`, args as any));
+        } catch (err) {
+          return `Error: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      };
       return {
         systemPrompt,
         model: m,
         streamOpts: buildStreamOpts(undefined, settings?.reasoning, m.maxTokens),
-        tools: ALL_ORCHESTRATOR_TOOLS,
+        tools: [...ALL_ORCHESTRATOR_TOOLS, ...connectorTools.tools],
         executor: (name: string, args: Record<string, unknown>, context) =>
-          withEventOrigin({ source: "polpo" }, () => executeOrchestratorTool(name, args, o, context)),
+          withEventOrigin({ source: "polpo" }, () => runTool(name, args, context)),
         isInteractive,
       };
     },
   }), opts?.apiKeys);
   // Chat turns from outside (web UI, API clients) are "api"; internal channel turns keep their origin
-  app.use("/v1/chat/completions", (c, next) => currentEventOrigin() ? next() : withEventOrigin({ source: "api" }, () => next()));
+  app.use("/v1/chat/completions", (c, next) => {
+    // Polpo's connector_add needs the OAuth redirect URI as people reach this instance
+    if (!currentEventOrigin()) notePublicOrigin(publicOrigin(c));
+    return currentEventOrigin() ? next() : withEventOrigin({ source: "api" }, () => next());
+  });
   app.route("/v1/chat/completions", completionApp);
 
   // ── OAuth for the MCP connector (Claude web/Desktop/mobile, ChatGPT…) ──
@@ -718,39 +784,55 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   // Streamable HTTP, stateless. The tools call this server's REST API in process, so they follow
   // the same rules; the caller is authenticated here: an API or MCP key (Bearer or X-API-Key), an OAuth
   // token or a dashboard session, or nothing when the server has no auth and no key at all (localhost-only).
+  // Who calls, for attribution (events' `by`, approvals' resolvedBy, artifacts' author) and scopes:
+  // an OAuth client (and the person who allowed it), an API or MCP key, a dashboard session, or
+  // nobody on a server without auth and keys (localhost-only). Null: not allowed.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- any Hono context
-  const mcpAuthorized = (c: any): boolean => {
+  const mcpPrincipal = (c: any): McpPrincipal | null => {
     const keys = mcpKeys();
     const instanceAuth = isInstanceAuthEnabled();
-    if (!instanceAuth && keys.length === 0) return true;
-    if (hasValidApiKey(c.req.raw, keys)) return true;
+    if (hasValidApiKey(c.req.raw, keys)) return { kind: "key", actor: "mcp-key", scopes: [OAUTH_SCOPE] };
     // an OAuth access token issued for this endpoint (Claude, ChatGPT and other connectors)
     const auth = c.req.header("authorization") as string | undefined;
     const bearer = auth?.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : undefined;
-    if (bearer?.startsWith("polpo_at_") && oauthServer().verifyAccessToken(bearer, `${publicOrigin(c)}/mcp`)) return true;
-    return instanceAuth && !!opts?.workDir && !!validateSession(getPolpoDir(opts.workDir), getCookie(c, AUTH_COOKIE_NAME));
+    const grant = bearer?.startsWith("polpo_at_") ? oauthServer().verifyAccessToken(bearer, `${publicOrigin(c)}/mcp`) : null;
+    if (grant) {
+      const client = oauthServer().clientName(grant.client_id);
+      const actor = grant.subject.includes("@") ? `${grant.subject} via ${client}`
+        : grant.subject === "api-key" ? `${client} (MCP key)` : `${client} (MCP)`;
+      return { kind: "oauth", actor, subject: grant.subject, client, scopes: grant.scope.split(/\s+/).filter(Boolean) };
+    }
+    const session = instanceAuth && opts?.workDir ? validateSession(getPolpoDir(opts.workDir), getCookie(c, AUTH_COOKIE_NAME)) : null;
+    if (session) return { kind: "session", actor: session.email, subject: session.email, scopes: [OAUTH_SCOPE] };
+    if (!instanceAuth && keys.length === 0) return { kind: "open", actor: "mcp", scopes: [OAUTH_SCOPE] };
+    return null;
   };
   app.all("/mcp", async (c) => {
-    if (!mcpAuthorized(c)) {
-      c.header("WWW-Authenticate", `Bearer resource_metadata="${publicOrigin(c)}/.well-known/oauth-protected-resource/mcp"`);
+    const principal = mcpPrincipal(c);
+    if (!principal) {
+      c.header("WWW-Authenticate", `Bearer resource_metadata="${publicOrigin(c)}/.well-known/oauth-protected-resource/mcp", scope="${OAUTH_SCOPE}"`);
       return c.json({ error: "Authentication required: send Authorization: Bearer <your Polpo API key>" }, 401);
     }
     if (!orchestrator?.isInitialized) return c.json({ error: "Polpo is not initialized. Complete setup first." }, 503);
-    return withEventOrigin({ source: "api", by: "mcp" }, () => handleMcpRequest(c.req.raw, {
+    return withEventOrigin({ source: "api", by: principal.actor }, () => handleMcpRequest(c.req.raw, {
       version: POLPO_PACKAGE_VERSION,
       log: (line) => console.log(`[polpo/mcp] ${line}`),
       routes: () => app.routes,
+      principal,
+      toolsets: resolveToolsets(process.env.POLPO_MCP_TOOLSETS, orchestrator.getConfig()?.settings?.mcp?.toolsets),
+      publicUrl: publicOrigin(c),
       api: async (method, path, body, headers) => {
         const form = body instanceof FormData;
+        const binary = body instanceof Uint8Array || body instanceof ArrayBuffer || body instanceof Blob;
         const res = await app.request(path, {
           method,
           headers: {
-            ...(body !== undefined && !form ? { "content-type": "application/json" } : {}),
+            ...(body !== undefined && !form && !binary ? { "content-type": "application/json" } : {}),
             ...trustedApiCallHeaders(),
             ...(opts?.apiKeys?.[0] ? { authorization: `Bearer ${opts.apiKeys[0]}` } : {}),
             ...headers,
           },
-          ...(body !== undefined ? { body: form ? body : JSON.stringify(body) } : {}),
+          ...(body !== undefined ? { body: form || binary ? body as BodyInit : JSON.stringify(body) } : {}),
         });
         const bytes = new Uint8Array(await res.arrayBuffer());
         const raw = new TextDecoder().decode(bytes);
@@ -759,6 +841,19 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         return { status: res.status, body: parsed, headers: res.headers, bytes };
       },
     }));
+  });
+
+  // ── Connectors: the OAuth callback ────────────────────────────────────
+  // The browser comes back here from the provider (Linear, Notion, Google…) without the API key or
+  // a session: it is public, and authenticated by the single-use, 10-minute state it carries.
+  app.get(CONNECTOR_OAUTH_CALLBACK_PATH, async (c, next) => {
+    if (!orchestrator?.isInitialized) return next();
+    return connectorOAuthCallback({ manager: () => connectorManagerFor(o), uiUrl: publicOrigin })(c);
+  });
+  // Our OAuth Client ID Metadata Document: servers that support CIMD fetch it (its URL is our client_id)
+  app.get(CONNECTOR_CLIENT_METADATA_PATH, (c) => {
+    c.header("Cache-Control", "public, max-age=3600");
+    return c.json(clientMetadataDocument(publicOrigin(c)));
   });
 
   // ── Authenticated routes (require initialized orchestrator) ───────────
@@ -951,6 +1046,48 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     return { text: typeof content === "string" ? content : "" };
   });
 
+  // Agents talking to each other during a chat: their turns go through the same completions pipeline
+  agentTalk = new AgentTalk(activePolpoDir(), {
+    turn: async ({ agent, sessionId, messages, chain, origin, signal }) => {
+      const headers: Record<string, string> = {
+        "content-type": "application/json",
+        "x-session-id": sessionId,
+        [AGENT_CHAIN_HEADER]: chain.join(","),
+        "x-polpo-lease-wait": String(10 * 60 * 1000),
+        ...(origin ? { [CHAT_ORIGIN_HEADER]: encodeURIComponent(JSON.stringify(origin)) } : {}),
+        ...internalCallHeaders(),
+      };
+      if (opts?.apiKeys?.[0]) headers.authorization = `Bearer ${opts.apiKeys[0]}`;
+      const response = await completionApp.request(new Request("http://polpo.internal/", {
+        method: "POST", headers, ...(signal ? { signal } : {}),
+        body: JSON.stringify({ stream: false, ...(agent ? { agent } : {}), messages }),
+      }));
+      const payload = await response.json().catch(() => null) as any;
+      if (!response.ok) throw new Error(payload?.error?.message ?? `turn failed (${response.status})`);
+      const content = payload?.choices?.[0]?.message?.content;
+      return { text: typeof content === "string" ? content : "", sessionId: response.headers.get("x-session-id") ?? sessionId };
+    },
+    history: async (sessionId) => {
+      const messages = await o.getSessionStore()?.getMessages(sessionId) ?? [];
+      return messages.filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string" && m.content.trim())
+        .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+    },
+    agents: async () => (await o.getAgents()).map((a) => ({ name: a.name, ...(a.role ? { role: a.role } : {}) })),
+    // The answer joins the conversation now: into the running answer, else as the next turn
+    // (streamed, so an open chat shows it live), whatever auto-send says.
+    deliver: async (sessionId, content) => {
+      const queue = o.getChatQueueStore();
+      if (!queue) throw new Error("Chat queue not available");
+      const item = await queue.add(sessionId, content, { front: true });
+      o.emit("chat:queue-updated" as any, { sessionId } as any);
+      await turnScheduler.sendNow(sessionId, item.id);
+    },
+    post: (origin, text, agent) => o.sendToChat(origin, text, agent),
+    emit: (event, data) => o.emit(event as any, data as any),
+    log: (line) => console.warn(`[polpo/agent-talk] ${line}`),
+  });
+  o?.setAgentTalk?.(agentTalk);
+
   // Messaging channels (Telegram, WhatsApp) run agent turns, and any turn with
   // media, through the same completions pipeline as the web UI: prompt, memory,
   // tools, compaction, attachment storage and persistence stay identical.
@@ -1003,8 +1140,21 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     const { normalizeSandboxSettings } = await import("@polpo-ai/core/sandbox");
     const instance = normalizeSandboxSettings(o.getConfig()?.settings?.sandbox);
     const agents = await o.getAgents();
+    // Daytona deactivates snapshots nobody used for a while: say so (the next create reactivates it)
+    const available = availableProviders();
+    const daytonaSnapshot = instance?.providers?.daytona?.snapshot;
+    let snapshot: { provider: "daytona"; name: string; state: string } | undefined;
+    if (available.has("daytona") && typeof daytonaSnapshot === "string" && daytonaSnapshot) {
+      const { remoteAdapter } = await import("../sandbox/remote-adapters.js");
+      const state = await Promise.race([
+        remoteAdapter("daytona").snapshotState?.(daytonaSnapshot).catch(() => undefined),
+        new Promise<undefined>((r) => setTimeout(() => r(undefined), 5_000).unref?.()),
+      ]);
+      if (state) snapshot = { provider: "daytona", name: daytonaSnapshot, state };
+    }
     return c.json({ ok: true, data: {
-      available: [...availableProviders()],
+      ...(snapshot ? { snapshot } : {}),
+      available: [...available],
       settings: instance ?? null,
       polpo: effectiveSandbox({ scope: "chat", cascade: { instance }, agentTools: instance?.allowLocal ? [] : ["http_fetch"] }),
       agents: agents.map((agent) => {
@@ -1012,8 +1162,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         return {
           name: agent.name,
           settings: cascade.agent ?? null,
-          task: effectiveSandbox({ scope: "task", cascade, agentTools: agent.allowedTools }),
-          chat: effectiveSandbox({ scope: "chat", cascade, agentTools: agent.allowedTools }),
+          task: effectiveSandbox({ scope: "task", cascade, agentTools: agent.allowedTools, computers: computerContext(agent, o.getConfig()?.settings) }),
+          chat: effectiveSandbox({ scope: "chat", cascade, agentTools: agent.allowedTools, computers: computerContext(agent, o.getConfig()?.settings) }),
         };
       }),
     } });
@@ -1120,6 +1270,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     taskStore: o.getStore(),
     runStore: o.getRunStore(),
     polpoDir: o.getPolpoDir(),
+    computerIds: () => (o.getConfig()?.settings?.computers ?? []).map((c) => c.id),
     fs: new NodeFileSystem(),
   })));
 
@@ -1140,6 +1291,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     rooms: o.getRoomStore(),
     engine: o.getRoomEngine(),
     agentNames: async () => (await o.getAgents()).map(a => a.name),
+    sessions: o.getSessionStore() ?? undefined,
     emit: (event, payload) => o.emit(event, payload),
     emitDeleted: (roomId) => o.emit("room:deleted", { roomId }),
   })));
@@ -1238,6 +1390,19 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     taskStore: o.getStore(),
   })));
 
+  authed.route("/checks", checkRoutes(() => ({
+    checks: o.getConversationCheckManager(),
+    sessions: o.getSessionStore(),
+    agentNames: async () => (await o.getAgents()).map((a) => a.name),
+    resolveChatTarget: (to, opts) => o.resolveChatTarget(to, opts),
+  })));
+  authed.route("/telegram", telegramRoutes(() => ({
+    listChats: () => o.listChats(),
+    chatBots: () => o.chatBots(),
+    resolveChatTarget: (to, opts) => o.resolveChatTarget(to, opts),
+    sendToChat: (target, text, agent, files) => o.sendToChat(target, text, agent, files),
+  })));
+
   authed.route("/background-waits", backgroundWaitRoutes(o));
   authed.route("/apps", appsRoutes(() => ({ ...activeAppRegistry(), polpoDir: activePolpoDir() })));
   authed.route("/data", dataRoutes(() => {
@@ -1251,8 +1416,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     author: (c) => {
       const email = c.get("polpoUserEmail" as never) as string | undefined;
       if (email) return `person:${email}`;
-      // made through the MCP connector (the server calls the API for an authenticated client)
-      return isTrustedApiCall(c.req.header(TRUSTED_API_CALL_HEADER)) ? "person:mcp" : "person:dashboard";
+      // made through the MCP connector (the server calls the API for an authenticated client): who that is
+      return isTrustedApiCall(c.req.header(TRUSTED_API_CALL_HEADER)) ? `person:${currentEventOrigin()?.by ?? "mcp"}` : "person:dashboard";
     },
     emit: (payload) => orchestrator.emit("artifact:changed", payload),
   })));
@@ -1283,6 +1448,35 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   authed.route("/diagnostics/mobile", mobileDiagnosticsRoutes());
 
   authed.route("/browser-dashboard", browserDashboardRoutes());
+  // Agent conversations: the pairs' conversations and the latest exchanges (live: agent:message events)
+  authed.get("/agent-talk", (c) => c.json({ ok: true, data: agentTalk?.overview() ?? { conversations: [], recent: [] } }));
+  authed.route("/browser-profiles", browserProfileRoutes({ polpoDir: () => orchestrator.getPolpoDir(), agents: () => orchestrator.getAgents() }));
+  authed.use("/connectors/*", async (c, next) => { notePublicOrigin(publicOrigin(c)); return next(); });
+  authed.route("/connectors", connectorRoutes({
+    manager: () => connectorManagerFor(o),
+    settings: () => o.getConfig()?.settings,
+    redirectUri: (c) => `${publicOrigin(c)}${CONNECTOR_OAUTH_CALLBACK_PATH}`,
+  }));
+  const computerDeps: ComputerRouteDeps = {
+    computers: () => o.getConfig()?.settings?.computers ?? [],
+    settings: () => o.getConfig()?.settings,
+    agents: () => o.getAgents(),
+    manager: () => computerManagerWithEvents(
+      o.getPolpoDir(), (payload) => o.emit("computer:changed", payload), (level, message) => o.emit("log", { level, message: `[computers] ${message}` }),
+      () => o.getConfig()?.settings?.computers ?? [],
+    ),
+    save: async (computers) => {
+      const { savePolpoSettingsKey } = await import("../core/config.js");
+      savePolpoSettingsKey(o.getPolpoDir(), "computers", computers.length ? computers : undefined);
+      await o.reloadConfig();
+    },
+    sandboxFor: (computer) => computerSandbox(computer, o.getConfig()?.settings),
+    instance: () => o.getConfig()?.project,
+    emit: (payload) => o.emit("computer:changed", payload),
+  };
+  authed.route("/computers", computerRoutes(computerDeps));
+  // every egress proxy and every remote computer's egress (read-only)
+  authed.route("/egress", egressRoutes(computerDeps));
   authed.route("/app-preview", appPreviewRoutes(() => ({
     codingSessionStore: o.getCodingSessionStore(),
     codeServerManager: opts?.codeServerManager,

@@ -13,7 +13,10 @@ const TaskDetailPage = lazy(() => import("@/pages/task-detail").then(m => ({ def
 const MissionsPage = lazy(() => import("@/pages/missions").then(m => ({ default: m.MissionsPage })));
 const MissionDetailPage = lazy(() => import("@/pages/mission-detail").then(m => ({ default: m.MissionDetailPage })));
 const AgentsPage = lazy(() => import("@/pages/agents").then(m => ({ default: m.AgentsPage })));
+const ConnectorsPage = lazy(() => import("@/pages/connectors").then(m => ({ default: m.ConnectorsPage })));
+const ComputersPage = lazy(() => import("@/pages/computers").then(m => ({ default: m.ComputersPage })));
 const AgentDetailPage = lazy(() => import("@/pages/agent-detail").then(m => ({ default: m.AgentDetailPage })));
+const AgentTalkPage = lazy(() => import("@/pages/agent-talk").then(m => ({ default: m.AgentTalkPage })));
 const EventsPage = lazy(() => import("@/pages/activity").then(m => ({ default: m.EventsPage })));
 const ChatPage = lazy(() => import("@/pages/chat").then(m => ({ default: m.ChatPage })));
 const ChangelogPage = lazy(() => import("@/pages/changelog").then(m => ({ default: m.ChangelogPage })));
@@ -190,6 +193,9 @@ export function App() {
           <Route path="missions/:missionId" element={<Suspense fallback={<PageLoader />}><MissionDetailPage /></Suspense>} />
           <Route path="agents" element={<Suspense fallback={<PageLoader />}><AgentsPage /></Suspense>} />
           <Route path="agents/:name" element={<Suspense fallback={<PageLoader />}><AgentDetailPage /></Suspense>} />
+          <Route path="connectors" element={<Suspense fallback={<PageLoader />}><ConnectorsPage /></Suspense>} />
+          <Route path="computers" element={<Suspense fallback={<PageLoader />}><ComputersPage /></Suspense>} />
+          <Route path="agent-talk" element={<Suspense fallback={<PageLoader />}><AgentTalkPage /></Suspense>} />
           <Route path="skills" element={<Suspense fallback={<PageLoader />}><SkillsPage /></Suspense>} />
           <Route path="skills/:skillName" element={<Suspense fallback={<PageLoader />}><SkillDetailPage /></Suspense>} />
           <Route path="events" element={<Suspense fallback={<PageLoader />}><EventsPage /></Suspense>} />

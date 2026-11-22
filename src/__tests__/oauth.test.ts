@@ -70,7 +70,7 @@ describe("OAuth for the MCP connector", () => {
     const code2 = oauth.issueCode(req, RESOURCE, "ada@example.com");
     const tokens = oauth.exchange({ grant_type: "authorization_code", code: code2, redirect_uri: req.redirect_uri, code_verifier: verifier, client_id: client.client_id });
     expect(tokens).toMatchObject({ token_type: "Bearer", expires_in: 3600, scope: "polpo" });
-    expect(oauth.verifyAccessToken(tokens.access_token, RESOURCE)).toEqual({ subject: "ada@example.com", client_id: client.client_id });
+    expect(oauth.verifyAccessToken(tokens.access_token, RESOURCE)).toEqual({ subject: "ada@example.com", client_id: client.client_id, scope: "polpo" });
     expect(oauth.verifyAccessToken(tokens.access_token, "https://other.example.com/mcp")).toBeNull();
     // only hashes are stored
     expect(readFileSync(join(dir, "oauth.json"), "utf-8")).not.toContain(tokens.access_token);

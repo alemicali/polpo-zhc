@@ -7,19 +7,29 @@
  *   - agent-browser + its Chromium, with every shared library Chromium needs, and fonts;
  *     playwright-core (pdf_create renders HTML with that Chromium, in the VM)
  *   - mountpoint-s3, rclone and FUSE (storage mounts)
+ *   - tailscale + tailscaled (a pinned release, checksum checked): computers whose browser goes out
+ *     through a tailnet-only egress proxy join the tailnet from inside the VM
  *   - git, curl, python3 (+ edge-tts), poppler-utils, sudo, node 22
  *
- * Daytona: a snapshot built from the SDK's declarative Image, named "polpo-runner-<version>".
+ * Daytona v0: a snapshot built from the SDK's declarative Image, named "polpo-runner-<version>".
+ * Daytona v2: an image (Linux VM) built with the 2.x SDK's ImageBuilder in the project the key
+ *   belongs to, named DAYTONA_V2_IMAGE ("polpo-runner-vm-<recipe revision>", the default of
+ *   providers.daytona.image when api is "v2": nothing to set when you keep that name).
  * E2B: a template built with the SDK's Template builder, named "polpo-runner-<version with dashes>".
  *
  * Idempotent: an image that already exists (and is usable) is left alone; --force rebuilds it.
- * Then set, per instance, settings.sandbox.providers.daytona.snapshot / .e2b.template to the name.
+ * Then set, per instance, settings.sandbox.providers.daytona.snapshot (v0) / .e2b.template to the
+ * name.
  *
- * Keys come from the environment (DAYTONA_API_KEY, DAYTONA_API_URL, DAYTONA_TARGET, E2B_API_KEY,
+ * Keys come from the environment (DAYTONA_API_KEY, DAYTONA_API_URL, DAYTONA_TARGET for v0;
+ * DAYTONA_V2_API_KEY, a v2 project API key, and optionally DAYTONA_V2_REGION for v2; E2B_API_KEY,
  * E2B_DOMAIN) or from --env-file <path> (KEY=value lines). They are never printed.
  *
- *   node scripts/build-sandbox-images.mjs [--provider daytona|e2b|all] [--force] [--env-file f]
+ *   node scripts/build-sandbox-images.mjs [--provider daytona|daytona-v2|e2b|all] [--force] [--env-file f]
  *   node scripts/build-sandbox-images.mjs --dockerfile     # the equivalent Dockerfile, nothing built
+ *
+ * Daytona v2 only (what switching an instance to v2 needs):
+ *   DAYTONA_V2_API_KEY=dtn_... node scripts/build-sandbox-images.mjs --provider daytona-v2
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -30,6 +40,12 @@ const version = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).ver
 
 export const BASE_IMAGE = "node:22-bookworm-slim";
 export const DAYTONA_SNAPSHOT = `polpo-runner-${version}`;
+/**
+ * Daytona v2 image name: bump the revision when ROOT_STEPS/USER_STEPS/BASE_IMAGE change (Polpo's
+ * DAYTONA_V2_RUNNER_IMAGE in packages/core/src/sandbox.ts must match; a test checks it). A named
+ * v2 image with other contents cannot be rebuilt under the same name.
+ */
+export const DAYTONA_V2_IMAGE = "polpo-runner-vm-2";
 export const E2B_TEMPLATE = `polpo-runner-${version.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
 
 /** Debian packages: baseline tools, PDF text, python for edge-tts, FUSE, every library agent-browser's Chromium links against, fonts. */
@@ -43,6 +59,21 @@ const APT_PACKAGES = [
   "fonts-liberation", "fonts-dejavu-core", "fonts-noto-color-emoji",
 ];
 
+/**
+ * Tailscale for computers going out through a tailnet-only proxy (src/sandbox/tailnet-egress.ts
+ * pins the same release for VMs without it; a test checks they match).
+ */
+export const TAILSCALE_VERSION = "1.104.7";
+export const TAILSCALE_SHA256 = {
+  amd64: "e56693ff74a64f2591b7e819c280635a100aae1ddfb0ef058fcd052b7cd8d16c",
+  arm64: "d6bed2720310b328b861f943d7b4016c5358a9bad60575eb51e8143b79068484",
+};
+const TAILSCALE_STEP =
+  `case "$(uname -m)" in x86_64|amd64) A=amd64; S=${TAILSCALE_SHA256.amd64};; aarch64|arm64) A=arm64; S=${TAILSCALE_SHA256.arm64};; *) echo "unsupported architecture" >&2; exit 1;; esac`
+  + ` && F=tailscale_${TAILSCALE_VERSION}_$A && curl -fsSL -o /tmp/ts.tgz "https://pkgs.tailscale.com/stable/$F.tgz"`
+  + ` && echo "$S  /tmp/ts.tgz" | sha256sum -c - && tar xzf /tmp/ts.tgz -C /tmp`
+  + ` && install -m 755 "/tmp/$F/tailscale" "/tmp/$F/tailscaled" /usr/local/bin/ && rm -rf /tmp/ts.tgz "/tmp/$F" && tailscale version`;
+
 /** Steps run as root, in order (shared by both providers and the printed Dockerfile). */
 export const ROOT_STEPS = [
   `apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ${APT_PACKAGES.join(" ")} && rm -rf /var/lib/apt/lists/*`,
@@ -50,6 +81,8 @@ export const ROOT_STEPS = [
   `ARCH=$(uname -m) && curl -fsSL "https://s3.amazonaws.com/mountpoint-s3-release/latest/$ARCH/mount-s3.deb" -o /tmp/mount-s3.deb && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/mount-s3.deb && rm -rf /tmp/mount-s3.deb /var/lib/apt/lists/*`,
   // rclone (what Polpo mounts granted buckets with)
   "curl -fsSL https://rclone.org/install.sh | bash",
+  // tailscale (userspace networking: no TUN, no root needed when it runs)
+  TAILSCALE_STEP,
   // edge-tts: free voices for audio_speak (slim Debian is PEP 668 locked)
   "pip install --no-cache-dir --break-system-packages edge-tts",
   // agent-browser CLI (its Chromium is downloaded per user, below); playwright-core for pdf_create
@@ -81,7 +114,7 @@ function parseArgs(argv) {
     else if (a === "--env-file") out.envFile = argv[++i];
     else throw new Error(`Unknown argument ${a}`);
   }
-  if (!["all", "daytona", "e2b"].includes(out.provider)) throw new Error(`--provider must be daytona, e2b or all`);
+  if (!["all", "daytona", "daytona-v2", "e2b"].includes(out.provider)) throw new Error(`--provider must be daytona, daytona-v2, e2b or all`);
   return out;
 }
 
@@ -101,7 +134,7 @@ const log = (msg) => console.log(`[build-sandbox-images] ${msg}`);
 const elapsed = (t0) => `${Math.round((Date.now() - t0) / 1000)} s`;
 
 async function buildDaytona(env, force) {
-  const { Daytona, Image } = await import("@daytonaio/sdk");
+  const { Daytona, Image } = await import("@daytona/sdk");
   const daytona = new Daytona({ apiKey: env.DAYTONA_API_KEY, apiUrl: env.DAYTONA_API_URL || undefined, target: env.DAYTONA_TARGET || undefined });
   const existing = await daytona.snapshot.get(DAYTONA_SNAPSHOT).catch(() => undefined);
   if (existing && !force && !/error|failed/i.test(String(existing.state))) {
@@ -128,6 +161,49 @@ async function buildDaytona(env, force) {
   log(`daytona: snapshot ${snapshot.name} ${snapshot.state} in ${elapsed(t0)}${lastLine && !/active/i.test(snapshot.state) ? ` (last log: ${lastLine.slice(0, 200)})` : ""}`);
   if (!/active/i.test(String(snapshot.state))) throw new Error(`Daytona snapshot ended in state ${snapshot.state}${snapshot.errorReason ? `: ${snapshot.errorReason}` : ""}`);
   return DAYTONA_SNAPSHOT;
+}
+
+/** How long a v2 image build may take (it installs Chromium and its libraries). */
+const DAYTONA_V2_BUILD_SECONDS = 60 * 60;
+
+/**
+ * Daytona v2 (`@daytona/sdk` 2.x, aliased @daytona/sdk-v2): the same steps as an ImageBuilder,
+ * built as the named image DAYTONA_V2_IMAGE in the project of DAYTONA_V2_API_KEY. v2 sandboxes are
+ * Linux VMs; the image carries no size (each sandbox is sized when it is created).
+ * `daytona` is injectable for tests (a v2 client: images.get/build/delete).
+ */
+export async function buildDaytonaV2(env, force, daytona) {
+  if (!daytona) {
+    const { Daytona } = await import("@daytona/sdk-v2");
+    daytona = new Daytona({ apiKey: env.DAYTONA_V2_API_KEY }).v2;
+  }
+  const { ImageBuilder } = await import("@daytona/sdk-v2/v2");
+  const region = env.DAYTONA_V2_REGION || undefined;
+  let existing = await daytona.images.get(DAYTONA_V2_IMAGE).catch(() => undefined);
+  if (existing && !force && /pending|building/i.test(String(existing.status))) {
+    log(`daytona-v2: image ${DAYTONA_V2_IMAGE} is being built (${existing.status}): waiting for it`);
+    existing = await daytona.images.get(existing.id, { wait: "ready", timeoutSeconds: DAYTONA_V2_BUILD_SECONDS });
+  }
+  if (existing && !force && existing.status === "ready") {
+    log(`daytona-v2: image ${DAYTONA_V2_IMAGE} already exists (${existing.status}, class ${existing.sandboxClass})`);
+    return DAYTONA_V2_IMAGE;
+  }
+  if (existing) {
+    log(`daytona-v2: deleting image ${DAYTONA_V2_IMAGE} (${existing.status}) to rebuild it`);
+    await daytona.images.delete(existing.id);
+    for (let i = 0; i < 60 && await daytona.images.get(DAYTONA_V2_IMAGE).catch(() => undefined); i++) {
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+  }
+  // commands run as the image's user (root here): Chromium goes in root's home
+  const builder = ImageBuilder.fromRegistry(BASE_IMAGE).runCommands(...ROOT_STEPS, ...USER_STEPS);
+  const t0 = Date.now();
+  log(`daytona-v2: building image ${DAYTONA_V2_IMAGE} from ${BASE_IMAGE}${region ? ` in ${region}` : ""}…`);
+  const submitted = await daytona.images.build(builder, { name: DAYTONA_V2_IMAGE, ...(region ? { region } : {}) });
+  const image = await daytona.images.get(submitted.id, { wait: "ready", timeoutSeconds: DAYTONA_V2_BUILD_SECONDS });
+  log(`daytona-v2: image ${image.name ?? DAYTONA_V2_IMAGE} (${image.id}) ${image.status} in ${elapsed(t0)}, class ${image.sandboxClass}`);
+  if (image.status !== "ready") throw new Error(`Daytona v2 image ended ${image.status}${image.error ? `: ${image.error}` : ""}`);
+  return DAYTONA_V2_IMAGE;
 }
 
 async function buildE2B(env, force) {
@@ -161,23 +237,25 @@ async function main() {
     return;
   }
   const env = { ...(args.envFile ? loadEnvFile(args.envFile) : {}), ...Object.fromEntries(Object.entries(process.env).filter(([, v]) => v)) };
-  const wanted = args.provider === "all" ? ["daytona", "e2b"] : [args.provider];
+  const wanted = args.provider === "all" ? ["daytona", "daytona-v2", "e2b"] : [args.provider];
+  const KEYS = { daytona: "DAYTONA_API_KEY", "daytona-v2": "DAYTONA_V2_API_KEY", e2b: "E2B_API_KEY" };
+  const BUILD = { daytona: buildDaytona, "daytona-v2": buildDaytonaV2, e2b: buildE2B };
   const results = {};
   let failed = false;
   for (const provider of wanted) {
-    const key = provider === "daytona" ? env.DAYTONA_API_KEY : env.E2B_API_KEY;
-    if (!key) {
-      log(`${provider}: no API key in the environment, skipped`);
+    if (!env[KEYS[provider]]) {
+      log(`${provider}: no API key in the environment (${KEYS[provider]}), skipped`);
       continue;
     }
     try {
-      results[provider] = provider === "daytona" ? await buildDaytona(env, args.force) : await buildE2B(env, args.force);
+      results[provider] = await BUILD[provider](env, args.force);
     } catch (err) {
       failed = true;
       log(`${provider}: failed: ${err?.message ?? err}`);
     }
   }
   if (results.daytona) log(`set settings.sandbox.providers.daytona.snapshot = "${results.daytona}"`);
+  if (results["daytona-v2"]) log(`Daytona v2: image "${results["daytona-v2"]}" is the default with providers.daytona.api = "v2" (set providers.daytona.image only to use another one)`);
   if (results.e2b) log(`set settings.sandbox.providers.e2b.template = "${results.e2b}"`);
   if (failed) process.exitCode = 1;
 }

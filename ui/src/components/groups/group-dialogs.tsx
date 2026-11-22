@@ -126,7 +126,7 @@ export function NewGroupDialog({ open, onOpenChange, members, membersLoading, re
           </div>
           <div className="space-y-3">
             <FieldLabel>Settings</FieldLabel>
-            <GroupSettingsFields settings={value.settings} onChange={(settings) => setValue({ ...value, settings })} />
+            <GroupSettingsFields settings={value.settings} onChange={(settings) => setValue({ ...value, settings })} members={members.filter((m) => value.agents.includes(m.id)).map((m) => ({ id: m.id, name: m.name }))} />
           </div>
         </form>
         <DialogFooter className="shrink-0 border-t border-border/50 px-6 py-4">
@@ -233,7 +233,7 @@ export function GroupSettingsDialog({ room, open, onOpenChange, members, members
             </div>
             <div className="space-y-3">
               <FieldLabel>Settings</FieldLabel>
-              <GroupSettingsFields settings={value.settings} onChange={(settings) => setValue({ ...value, settings })} />
+              <GroupSettingsFields settings={value.settings} onChange={(settings) => setValue({ ...value, settings })} members={members.filter((m) => value.agents.includes(m.id)).map((m) => ({ id: m.id, name: m.name }))} />
             </div>
             <Separator className="bg-border/50" />
             <div className="flex flex-wrap items-center justify-between gap-3 pb-2">

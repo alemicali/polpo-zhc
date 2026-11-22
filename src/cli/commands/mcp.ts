@@ -13,7 +13,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { CallToolRequestSchema, ListResourcesRequestSchema, ListResourceTemplatesRequestSchema, ListToolsRequestSchema, ReadResourceRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { POLPO_PACKAGE_VERSION } from "../../core/version.js";
 
 /** The /mcp endpoint of a server URL (given as the server, or already as its /mcp). */
@@ -44,10 +44,20 @@ export function registerMcpCommand(program: Command): void {
       const info = upstream.getServerVersion();
       const server = new Server(
         { name: info?.name ?? "polpo", title: "Polpo", version: info?.version ?? POLPO_PACKAGE_VERSION },
-        { capabilities: { tools: {} }, instructions: upstream.getInstructions() },
+        { capabilities: { tools: {}, resources: {} }, instructions: upstream.getInstructions() },
       );
       server.setRequestHandler(ListToolsRequestSchema, async (request) => upstream.listTools(request.params));
-      server.setRequestHandler(CallToolRequestSchema, async (request) => upstream.callTool(request.params));
+      server.setRequestHandler(CallToolRequestSchema, async (request, extra) => upstream.callTool(request.params, undefined, {
+        // progress from the server reaches the stdio client
+        ...(request.params._meta?.progressToken !== undefined ? {
+          onprogress: (p) => { void extra.sendNotification({ method: "notifications/progress", params: { ...p, progressToken: request.params._meta!.progressToken! } }); },
+        } : {}),
+        timeout: 120_000,
+      }));
+      // resources too: the agent card (an MCP App) is a ui:// resource
+      server.setRequestHandler(ListResourcesRequestSchema, async (request) => upstream.listResources(request.params));
+      server.setRequestHandler(ListResourceTemplatesRequestSchema, async (request) => upstream.listResourceTemplates(request.params));
+      server.setRequestHandler(ReadResourceRequestSchema, async (request) => upstream.readResource(request.params));
       await server.connect(new StdioServerTransport());
       console.error(`polpo mcp: forwarding to ${endpoint.href}`);
     });

@@ -1,4 +1,5 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { scheduleExpressionProblem } from "@polpo-ai/core";
 
 // ── Schemas ───────────────────────────────────────────────────────────
 
@@ -69,6 +70,10 @@ const updateScheduleRoute = createRoute({
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
       description: "Schedule updated",
     },
+    400: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "Invalid expression",
+    },
     404: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
       description: "Schedule not found",
@@ -96,6 +101,31 @@ const deleteScheduleRoute = createRoute({
   },
 });
 
+const runScheduleRoute = createRoute({
+  method: "post",
+  path: "/{missionId}/run",
+  tags: ["Schedules"],
+  summary: "Run a scheduled mission now",
+  description: "Runs the mission out of turn; the next scheduled run stays as it is, and a paused schedule stays paused.",
+  request: {
+    params: z.object({ missionId: z.string() }),
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
+      description: "The schedule, with its new lastRunAt",
+    },
+    404: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "Schedule not found",
+    },
+    409: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "The mission cannot run now",
+    },
+  },
+});
+
 // ── Route handlers ────────────────────────────────────────────────────
 
 export function scheduleRoutes(getDeps: () => {
@@ -104,6 +134,20 @@ export function scheduleRoutes(getDeps: () => {
   updateMission: (id: string, updates: any) => Promise<any>;
 }): OpenAPIHono {
   const app = new OpenAPIHono();
+
+  // POST /schedules/:missionId/run — run it now
+  app.openapi(runScheduleRoute, async (c) => {
+    const scheduler = getDeps().getScheduler();
+    const { missionId } = c.req.valid("param");
+    if (!scheduler?.getScheduleByMissionId(missionId)) {
+      return c.json({ ok: false, error: `No schedule found for mission "${missionId}"`, code: "NOT_FOUND" }, 404);
+    }
+    try {
+      return c.json({ ok: true, data: scheduler.runNow(missionId) }, 200);
+    } catch (err) {
+      return c.json({ ok: false, error: err instanceof Error ? err.message : String(err), code: "CANNOT_RUN" }, 409);
+    }
+  });
 
   // GET /schedules — list all schedule entries
   app.openapi(listSchedulesRoute, (c) => {
@@ -127,6 +171,9 @@ export function scheduleRoutes(getDeps: () => {
     }
 
     const isRecurring = body.recurring ?? false;
+    // checked before the mission changes: a bad expression leaves it as it was
+    const problem = scheduleExpressionProblem(body.expression, { recurring: isRecurring });
+    if (problem) return c.json({ ok: false, error: problem, code: "INVALID_EXPRESSION" }, 400);
     const newStatus = isRecurring ? "recurring" : "scheduled";
     const missionUpdate: Record<string, unknown> = {
       schedule: body.expression,
@@ -160,6 +207,11 @@ export function scheduleRoutes(getDeps: () => {
     }
 
     const body = c.req.valid("json");
+
+    if (body.expression !== undefined) {
+      const problem = scheduleExpressionProblem(body.expression, { recurring: body.recurring ?? existing.recurring });
+      if (problem) return c.json({ ok: false, error: problem, code: "INVALID_EXPRESSION" }, 400);
+    }
 
     if (body.expression !== undefined) {
       const mission = await deps.getMission(missionId);

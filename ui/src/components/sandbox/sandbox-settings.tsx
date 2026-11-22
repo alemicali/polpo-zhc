@@ -49,6 +49,14 @@ export function SandboxSettingsSection({ onSaved }: { onSaved?: () => void }) {
 
   return (
     <div className="space-y-8">
+      {overview.snapshot && overview.snapshot.state !== "active" && (
+        <div role="status" data-testid="snapshot-inactive" className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-400">
+          Daytona snapshot <code>{overview.snapshot.name}</code> is {overview.snapshot.state === "inactive" ? "inactive" : overview.snapshot.state}
+          {overview.snapshot.state === "inactive"
+            ? " (Daytona deactivates snapshots nobody used for a while). It is activated automatically on the next run, which then takes a few minutes longer."
+            : "."}
+        </div>
+      )}
       <NetworkDeniedCard overview={overview} onChanged={() => { void reload(); onSaved?.(); }} />
       <section>
         <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
@@ -105,7 +113,7 @@ export function SandboxSettingsSection({ onSaved }: { onSaved?: () => void }) {
                 {agent.name}
                 {agent.settings && <Badge variant="outline" className="ml-1.5 text-[9px] align-middle">override</Badge>}
               </Link>
-              <span className="text-muted-foreground"><span className="text-[10px] uppercase tracking-wider mr-1.5">tasks</span>{describeSandbox(agent.task)}</span>
+              <span className={agent.task.fallback ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}><span className="text-[10px] uppercase tracking-wider mr-1.5">tasks</span>{describeSandbox(agent.task)}</span>
               <span className="text-muted-foreground">
                 <span className="text-[10px] uppercase tracking-wider mr-1.5">chat</span>
                 {agent.chat.provider === agent.task.provider ? "same" : providerLabel(agent.chat.provider)}

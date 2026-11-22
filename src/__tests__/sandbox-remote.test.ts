@@ -193,6 +193,15 @@ describe("task runner processes", () => {
       root: tmpdir(), onRemoteEvent: (e) => { if (e.kind === "warning") warnings.push(e.message); },
     });
     expect(ws.provider).toBe("bwrap");
-    expect(warnings[0]).toMatch(/not configured.*bubblewrap/);
+    expect(warnings[0]).toMatch(/Daytona is not available where this runs \(no API key.*bubblewrap on this server instead, which isolates less/);
+  });
+
+  test.skipIf(!bwrapAvailable())("a sandbox the resolver already moved to bubblewrap warns too", () => {
+    const warnings: string[] = [];
+    const ws = createWorkspace({ provider: "bwrap", fallback: { from: "e2b", reason: "unavailable" }, network: { mode: "open" }, resources: {}, providerOptions: {}, denied: [] }, {
+      root: tmpdir(), onRemoteEvent: (e) => { if (e.kind === "warning") warnings.push(e.message); },
+    });
+    expect(ws.provider).toBe("bwrap");
+    expect(warnings).toEqual([expect.stringMatching(/^E2B is not available where this runs/)]);
   });
 });

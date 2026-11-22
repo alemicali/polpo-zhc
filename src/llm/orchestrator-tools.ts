@@ -57,9 +57,16 @@ import { ARTIFACT_TOOLS, executeArtifactTool } from "../tools/artifact-tools.js"
 import { getArtifactStore } from "../server/artifact-runtime.js";
 import { BRAIN_ORCHESTRATOR_TOOLS, executeCompanyBrainTool } from "../tools/company-brain-tools.js";
 import { STORAGE_ORCHESTRATOR_TOOLS, executeStorageTool } from "../tools/storage-tools.js";
-import { normalizeSandboxSettings, type EffectiveSandbox } from "@polpo-ai/core/sandbox";
+import { CONNECTOR_TOOLS, executeConnectorTool } from "../tools/connector-tools.js";
+import { connectorManagerFor, connectorRedirectUri } from "../mcp/runtime.js";
+import { isMcpToolName, toolResultText } from "../mcp/tools.js";
+import { computerContext, normalizeSandboxSettings, type EffectiveSandbox } from "@polpo-ai/core/sandbox";
 import { loadPolpoConfig, savePolpoConfig } from "../core/config.js";
 import { inkApiUrl, inkRegistry } from "../core/ink-config.js";
+import { clearBrowserProfile, finishProfileLogin, listBrowserProfiles, startProfileLogin } from "../tools/browser-profiles.js";
+import { ASK_AGENT_DESCRIPTION, AskAgentSchema, execAskAgent, execMessageAgent, MESSAGE_AGENT_DESCRIPTION, MessageAgentSchema } from "../tools/agent-talk-tools.js";
+import { proxyReachable } from "../tools/browser-egress.js";
+import { CHECK_NOTHING_TO_REPORT, scheduleExpressionProblem } from "@polpo-ai/core";
 import { VOICE_REPLY_MODES, isVoiceReplyMode } from "../tools/voice-reply-tools.js";
 import {
   CANCEL_CHECK_DESCRIPTION, CancelCheckSchema, LIST_CHECKS_DESCRIPTION, ListChecksSchema, SCHEDULE_CHECK_DESCRIPTION, ScheduleCheckSchema,
@@ -83,6 +90,8 @@ export interface OrchestratorToolExecutionContext {
   sessionId?: string;
   /** Where the turn came from (a Telegram chat or topic): recurring checks report there. */
   origin?: import("@polpo-ai/core").ConversationCheckTarget;
+  /** Agents already in an agent-to-agent exchange that led to this turn. */
+  chain?: string[];
 }
 
 
@@ -926,6 +935,7 @@ const addAgentTool: Tool = {
     maxTurns: Type.Optional(Type.Number({ description: "Max conversation turns before agent stops. Default: 200" })),
     maxConcurrency: Type.Optional(Type.Number({ description: "Max concurrent tasks this agent can run. Default: 1" })),
     browserProfile: Type.Optional(Type.String({ description: "Persistent browser profile name (shares cookies/state across tasks). Requires browser_* in allowedTools." })),
+    browserEgress: Type.Optional(Type.String({ description: "Name of an egress proxy (settings.egressProxies, e.g. \"home\": a residential line) its browser goes out through, for sites that block datacenter IPs" })),
     emailAllowedDomains: Type.Optional(Type.Array(Type.String(), { description: "Restrict email sending to these domains only (e.g. ['company.com'])" })),
     learning: agentLearningParam,
     voiceReplies: agentVoiceRepliesParam,
@@ -989,6 +999,7 @@ const updateAgentTool: Tool = {
     maxTurns: Type.Optional(Type.Number({ description: "Max conversation turns" })),
     maxConcurrency: Type.Optional(Type.Number({ description: "Max concurrent tasks" })),
     browserProfile: Type.Optional(Type.String({ description: "Persistent browser profile name" })),
+    browserEgress: Type.Optional(Type.String({ description: "Name of an egress proxy (settings.egressProxies, e.g. \"home\") its browser goes out through; empty string: directly" })),
     emailAllowedDomains: Type.Optional(Type.Array(Type.String(), { description: "Restrict email to these domains" })),
     sandbox: agentSandboxParam,
     learning: agentLearningParam,
@@ -1220,6 +1231,98 @@ const cancelCheckTool: Tool = { name: "cancel_check", description: CANCEL_CHECK_
 const confirmCheckTool: Tool = { name: "confirm_check", description: CONFIRM_CHECK_DESCRIPTION, parameters: ConfirmCheckSchema };
 const listChatsTool: Tool = { name: "list_chats", description: LIST_CHATS_DESCRIPTION, parameters: ListChatsSchema };
 const sendMessageTool: Tool = { name: "send_message", description: SEND_MESSAGE_DESCRIPTION, parameters: SendMessageSchema };
+const askAgentTool: Tool = { name: "ask_agent", description: ASK_AGENT_DESCRIPTION, parameters: AskAgentSchema };
+const messageAgentTool: Tool = { name: "message_agent", description: MESSAGE_AGENT_DESCRIPTION, parameters: MessageAgentSchema };
+
+// ── Browser profiles (agents' persistent browser state: cookies, logins) ──
+const browserProfilesTool: Tool = {
+  name: "browser_profiles",
+  description: "List the browser profiles (each agent's persistent browser: cookies and logins in .polpo/browser-profiles/<name>): "
+    + "which agents use each, size, last use, whether it holds cookies (signed in somewhere) and whether a login session is open.",
+  parameters: Type.Object({}),
+};
+const browserProfileLoginTool: Tool = {
+  name: "browser_profile_login",
+  description: "Let the person sign in to a site with an agent's browser profile, so the agent finds it logged in: "
+    + "action \"start\" opens the profile at the url in a session the Live browser view shows (the person signs in there, "
+    + "with password, 2FA or captcha); \"finish\" closes it once they are done, and the login stays in the profile. "
+    + "profile = the agent's browserProfile, else the agent's name (browser_profiles lists them).",
+  parameters: Type.Object({
+    action: Type.Union([Type.Literal("start"), Type.Literal("finish")]),
+    profile: Type.String({ description: "Profile name" }),
+    url: Type.Optional(Type.String({ description: "For start: the sign-in page (https://…)" })),
+  }),
+};
+const computersListTool: Tool = {
+  name: "computers_list",
+  description: "The computers (persistent machines agents work on: settings.computers) with their live status (running, stopped, paused, "
+    + "hibernated = Daytona v2 snapshot, wakes in a few seconds, archived, creating, error, missing = not created yet), provider, last use, uptime, "
+    + "last snapshot and the agents using each. \"host\" is this server.",
+  parameters: Type.Object({}),
+};
+const computerCreateTool: Tool = {
+  name: "computer_create",
+  description: "Create a computer: a persistent machine (Daytona or E2B) an agent keeps between chats and tasks — files, installed tools and "
+    + "browser profile stay. It is created on first use or with start: true; it stops after idleStopMinutes without use and is never deleted "
+    + "automatically. Then assign it to an agent with computer_assign. Ask the person first: a running machine costs money.",
+  parameters: Type.Object({
+    id: Type.String({ description: "Slug: lowercase letters, digits and -, e.g. \"nina\"" }),
+    name: Type.Optional(Type.String({ description: "Display name" })),
+    kind: Type.Union([Type.Literal("daytona"), Type.Literal("e2b"), Type.Literal("host")], { description: "daytona or e2b (remote), host (this server, e.g. with an egress proxy)" }),
+    snapshot: Type.Optional(Type.String({ description: "Daytona snapshot (default: the instance's)" })),
+    image: Type.Optional(Type.String({ description: "Daytona Docker image instead of a snapshot" })),
+    template: Type.Optional(Type.String({ description: "E2B template (default: the instance's)" })),
+    idleStopMinutes: Type.Optional(Type.Number({ description: "Stop/pause after this many minutes without use (default 15)" })),
+    autoArchiveDays: Type.Optional(Type.Number({ description: "Daytona: archive after this many days stopped (default Daytona's, 7)" })),
+    egress: Type.Optional(Type.String({ description: "Egress proxy name (settings.egressProxies) its agents' browsers go out through. A remote computer reaches it through Tailscale in its VM: needs settings.tailscale and a SOCKS5 proxy on a tailnet address (egress_status)" })),
+    start: Type.Optional(Type.Boolean({ description: "Create the machine now instead of on first use" })),
+  }),
+};
+const computerAssignTool: Tool = {
+  name: "computer_assign",
+  description: "Make a computer an agent's default machine: its chats and tasks run there from now on (a task can still ask for an "
+    + "ephemeral sandbox). \"host\" puts it back on this server.",
+  parameters: Type.Object({
+    agent: Type.String({ description: "Agent name" }),
+    computer: Type.String({ description: "Computer id (computers_list), or \"host\"" }),
+  }),
+};
+const computerStartTool: Tool = {
+  name: "computer_start",
+  description: "Start (or resume) a computer's machine; it is created if it has none yet. Agents start it by themselves when they need it.",
+  parameters: Type.Object({ id: Type.String({ description: "Computer id" }) }),
+};
+const computerStopTool: Tool = {
+  name: "computer_stop",
+  description: "Stop (Daytona v0), pause (E2B) or hibernate (Daytona v2: memory and disk snapshot, its VM deleted) a computer's machine now: "
+    + "nothing is lost; it starts (wakes) again on next use.",
+  parameters: Type.Object({ id: Type.String({ description: "Computer id" }) }),
+};
+const egressStatusTool: Tool = {
+  name: "egress_status",
+  description: "The egress proxies agents' browsers can go out through (settings.egressProxies, e.g. \"home\": a residential line over Tailscale), "
+    + "whether each is reachable now, which agents use it (agent browserEgress, set with update_agent), and for remote computers with an egress "
+    + "(through Tailscale in their VM): tailnet up/down, node name, path (direct or DERP relay), proxy reachable and where their browser goes out now.",
+  parameters: Type.Object({}),
+};
+const setCheckInsTool: Tool = {
+  name: "set_check_ins",
+  description: "Turn on, change or off your own check-ins with the person, as their primary bot: on a schedule you look at what needs them "
+    + "(approvals waiting, failed or stuck tasks, agents' proposals to confirm, finished missions, work that keeps coming back and deserves a "
+    + "dedicated agent) and write only when something does. Default schedule: 9:00 and 18:00 in the given timezone; reports go to `to` "
+    + "(a chat from list_chats), else to where this was asked.",
+  parameters: Type.Object({
+    enabled: Type.Boolean(),
+    cron: Type.Optional(Type.String({ description: "When (5-field cron), default \"0 9,18 * * *\"" })),
+    timezone: Type.Optional(Type.String({ description: "IANA timezone, e.g. Europe/Rome" })),
+    to: Type.Optional(Type.String({ description: "Where to write: a chat, group or person (list_chats); default: here" })),
+  }),
+};
+const browserProfileClearTool: Tool = {
+  name: "browser_profile_clear",
+  description: "Delete a browser profile and every login it holds (its open browser sessions are closed first). The agents that use it start signed out.",
+  parameters: Type.Object({ profile: Type.String({ description: "Profile name" }) }),
+};
 
 // ═══════════════════════════════════════════════════════
 //  MODEL CATALOG
@@ -2157,7 +2260,7 @@ export const READ_TOOLS = new Set([
   "list_agents", "get_team", "get_memory", "get_config",
   "list_approvals", "list_checkpoints", "list_delays", "get_logs",
   // Read-only listing tools
-  "list_schedules", "list_checks", "list_chats", "list_models", "get_agent_learning", "get_agent_drive", "list_notification_rules", "list_watchers", "wait_for_task",
+  "list_schedules", "list_checks", "list_chats", "browser_profiles", "egress_status", "computers_list", "list_models", "get_agent_learning", "get_agent_drive", "list_notification_rules", "list_watchers", "wait_for_task",
   // Skills (read-only)
   "list_orchestrator_skills", "list_agent_skills", "search_skills", "get_skill",
   // Playbooks (read-only)
@@ -2178,6 +2281,8 @@ export const READ_TOOLS = new Set([
   "brain_stats", "brain_search", "brain_get_entity", "brain_get_context", "brain_list_runs",
   // Storage (buckets)
   "storage_list_entries", "storage_list", "storage_read", "storage_presign",
+  // Connectors
+  "connectors_list",
 ]);
 
 export const WRITE_TOOLS = new Set([
@@ -2200,6 +2305,8 @@ export const WRITE_TOOLS = new Set([
   "review_agent_learning", "revert_agent_learning", "reflect_agent", "confirm_check",
   // Conversation checks
   "schedule_check", "cancel_check", "send_message",
+  // Browser profiles (deleting one signs its agents out)
+  "browser_profile_clear",
   // Artifacts
   "artifact_create", "artifact_update", "artifact_delete",
   // Notification rules
@@ -2236,6 +2343,8 @@ export const WRITE_TOOLS = new Set([
   "brain_enrich_text", "brain_merge_entities", "brain_set_grant",
   // Storage (buckets)
   "storage_mount", "storage_unmount", "storage_write", "storage_delete",
+  // Connectors
+  "connector_add", "connector_connect", "connector_update_access", "connector_remove",
 ]);
 
 /** Tools that pause the conversation to collect user input / show a preview. */
@@ -2329,6 +2438,14 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   setVoiceRepliesTool,
   // Conversation checks
   scheduleCheckTool, listChecksTool, cancelCheckTool, confirmCheckTool, listChatsTool, sendMessageTool,
+  // Browser profiles and egress
+  browserProfilesTool, browserProfileLoginTool, browserProfileClearTool, egressStatusTool,
+  // Computers (persistent machines)
+  computersListTool, computerCreateTool, computerAssignTool, computerStartTool, computerStopTool,
+  // Talking to agents during the chat
+  askAgentTool, messageAgentTool,
+  // Primary bot check-ins
+  setCheckInsTool,
   // Model catalog
   listModelsTool,
   // Agent learning
@@ -2368,6 +2485,8 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   ...BRAIN_ORCHESTRATOR_TOOLS,
   // Storage: S3/R2 buckets (host-side; admin + object tools)
   ...STORAGE_ORCHESTRATOR_TOOLS,
+  // Connectors (MCP): managing them; their own tools are added per chat (access.polpo)
+  ...CONNECTOR_TOOLS,
   // WhatsApp (3)
   whatsappSendTool, whatsappSendFileTool, whatsappReadTool,
   // Interactive (2)
@@ -2425,6 +2544,11 @@ const TOOL_LABELS: Record<string, string> = {
   data_delete_view: "Delete Data View",
   storage_list_entries: "List Storage",
   storage_mount: "Mount Storage",
+  connectors_list: "Connectors",
+  connector_add: "Add Connector",
+  connector_connect: "Connect Connector",
+  connector_update_access: "Connector Access",
+  connector_remove: "Remove Connector",
   storage_unmount: "Unmount Storage",
   storage_list: "List Storage Files",
   storage_read: "Read Storage File",
@@ -2487,6 +2611,18 @@ const TOOL_LABELS: Record<string, string> = {
   cancel_check: "Cancel Check",
   list_chats: "List Chats",
   send_message: "Send Message",
+  browser_profiles: "Browser Profiles",
+  ask_agent: "Ask Agent",
+  message_agent: "Message Agent",
+  egress_status: "Egress Status",
+  computers_list: "Computers",
+  computer_create: "Create Computer",
+  computer_assign: "Assign Computer",
+  computer_start: "Start Computer",
+  computer_stop: "Stop Computer",
+  set_check_ins: "Check-ins",
+  browser_profile_login: "Browser Profile Login",
+  browser_profile_clear: "Clear Browser Profile",
   list_models: "List Models",
   get_agent_learning: "Agent Learning",
   review_agent_learning: "Review Agent Learning",
@@ -2685,6 +2821,15 @@ export async function executeOrchestratorTool(
           emitFileChanged: (payload) => polpo.emit("file:changed", { ...payload, source: "chat" }),
         });
 
+      // ── Connectors ──
+      case "connectors_list": case "connector_add": case "connector_connect": case "connector_update_access": case "connector_remove":
+        return executeConnectorTool(toolName, args, {
+          manager: connectorManagerFor(polpo),
+          settings: polpo.getConfig()?.settings,
+          redirectUri: connectorRedirectUri(),
+          agentNames: async () => (await polpo.getAgents()).map((a) => a.name),
+        });
+
       // ── Task ──
       case "create_task":      return execCreateTask(polpo, args);
       case "update_task":      return execUpdateTask(polpo, args);
@@ -2768,7 +2913,19 @@ export async function executeOrchestratorTool(
       case "list_checks":    return execListChecks({ manager: polpo.getConversationCheckManager(), sessionId: context.sessionId }, args);
       case "cancel_check":   return execCancelCheck(args, { manager: polpo.getConversationCheckManager(), sessionId: context.sessionId });
       case "list_chats":     return execListChats({ chats: polpo });
-      case "send_message":   return execSendMessage(args, { chats: polpo });
+      case "send_message":   return execSendMessage(args, { chats: polpo, origin: context.origin });
+      case "ask_agent":     return execAskAgent(args, polpo.getAgentTalk(), { chain: context.chain ?? [], sessionId: context.sessionId, origin: context.origin });
+      case "message_agent": return execMessageAgent(args, polpo.getAgentTalk(), { chain: context.chain ?? [], sessionId: context.sessionId, origin: context.origin });
+      case "browser_profiles":      return execBrowserProfiles(polpo);
+      case "egress_status":         return execEgressStatus(polpo);
+      case "computers_list":        return execComputersList(polpo);
+      case "computer_create":       return execComputerCreate(polpo, args);
+      case "computer_assign":       return execComputerAssign(polpo, args);
+      case "computer_start":
+      case "computer_stop":         return execComputerControl(polpo, toolName === "computer_start" ? "start" : "stop", args);
+      case "set_check_ins":         return execSetCheckIns(polpo, args, context);
+      case "browser_profile_login": return execBrowserProfileLogin(polpo, args);
+      case "browser_profile_clear": return execBrowserProfileClear(polpo, args);
 
       // ── Notification Rules ──
       case "add_notification_rule":    return execAddNotificationRule(polpo, args);
@@ -2864,6 +3021,13 @@ export async function executeOrchestratorTool(
         // mirror every case branch.
         if (ORCHESTRATOR_BROWSER_TOOL_NAMES.has(toolName)) {
           return await executeOrchestratorBrowserTool(toolName, args, polpo);
+        }
+        // ── Connector tools (mcp__<connector>__<tool>), for connectors Polpo may use ──
+        if (isMcpToolName(toolName)) {
+          const { tools } = await connectorManagerFor(polpo).toolsFor(undefined);
+          const tool = tools.find((t) => t.name === toolName);
+          if (!tool) return `Unknown or unavailable connector tool: ${toolName}`;
+          return toolResultText(await tool.execute(nanoid(), args as never));
         }
         return `Unknown tool: ${toolName}`;
     }
@@ -3657,11 +3821,16 @@ async function execCreateTask(polpo: Orchestrator, args: Record<string, unknown>
   const resolved = resolveAgentName(agents, args.assignTo as string);
   if ("error" in resolved) return resolved.error;
   const agentName = resolved.name;
+  const dependsOn = args.dependsOn as string[] | undefined;
+  // a dependency that does not exist would keep the task pending for ever
+  const missing: string[] = [];
+  for (const id of new Set(dependsOn ?? [])) if (!(await polpo.getStore().getTask(id))) missing.push(id);
+  if (missing.length) return `Error: dependsOn: there is no task ${missing.map((id) => `"${id}"`).join(", ")} (give the ids of existing tasks: list_tasks).`;
   const task = await polpo.addTask({
     title: args.title as string,
     description: args.description as string,
     assignTo: agentName,
-    dependsOn: args.dependsOn as string[] | undefined,
+    dependsOn,
     group: args.group as string | undefined,
     expectations: args.expectations as any[] | undefined,
     sideEffects: args.sideEffects as boolean | undefined,
@@ -4032,6 +4201,7 @@ async function execAddAgent(polpo: Orchestrator, args: Record<string, unknown>):
     maxTurns: args.maxTurns as number | undefined,
     maxConcurrency: args.maxConcurrency as number | undefined,
     browserProfile: args.browserProfile as string | undefined,
+    browserEgress: args.browserEgress as string | undefined,
     emailAllowedDomains: args.emailAllowedDomains as string[] | undefined,
     learning: args.learning as AgentConfig["learning"] | undefined,
     voiceReplies: args.voiceReplies as AgentConfig["voiceReplies"] | undefined,
@@ -4080,6 +4250,7 @@ async function execUpdateAgent(polpo: Orchestrator, args: Record<string, unknown
   if (args.maxTurns !== undefined) updates.maxTurns = args.maxTurns as number;
   if (args.maxConcurrency !== undefined) updates.maxConcurrency = args.maxConcurrency as number;
   if (args.browserProfile !== undefined) updates.browserProfile = args.browserProfile as string;
+  if (args.browserEgress !== undefined) updates.browserEgress = (args.browserEgress as string) || undefined;
   if (args.emailAllowedDomains !== undefined) updates.emailAllowedDomains = args.emailAllowedDomains as string[];
   if (args.team !== undefined) updates.team = args.team as string;
   if (args.learning !== undefined) updates.learning = args.learning as AgentConfig["learning"];
@@ -4115,7 +4286,9 @@ async function execSandboxStatus(polpo: Orchestrator, args: Record<string, unkno
     const hint = s.provider === "local" ? " (not enforced: no isolation)"
       : s.network.mode === "open" ? " (public destinations only, via proxy)"
       : s.network.mode === "unrestricted" ? " (whole machine network, local services included)" : "";
-    return `${s.provider}, network ${s.network.mode}${s.network.allow?.length ? ` [${s.network.allow.join(", ")}]` : ""}${hint}${limits ? `, ${limits}` : ""}`;
+    const fallback = s.fallback ? ` (WEAKER than set: ${s.fallback.from} is not available on this server)` : "";
+    const onComputer = s.computer ? ` on computer "${s.computer.id}"` : "";
+    return `${s.provider}${onComputer}${fallback}, network ${s.network.mode}${s.network.allow?.length ? ` [${s.network.allow.join(", ")}]` : ""}${hint}${limits ? `, ${limits}` : ""}`;
   };
   const lines = [
     `Available on this server: ${[...availableProviders()].join(", ")}`,
@@ -4126,7 +4299,7 @@ async function execSandboxStatus(polpo: Orchestrator, args: Record<string, unkno
   for (const agent of await polpo.getAgents()) {
     if (wanted && agent.name !== wanted) continue;
     const cascade = { instance, agent: normalizeSandboxSettings(agent.sandbox) };
-    lines.push(`- ${agent.name}: tasks ${describe(effectiveSandbox({ scope: "task", cascade, agentTools: agent.allowedTools }))}; chat ${effectiveSandbox({ scope: "chat", cascade, agentTools: agent.allowedTools }).provider}${cascade.agent ? ` (overrides: ${JSON.stringify(cascade.agent)})` : ""}`);
+    lines.push(`- ${agent.name}: tasks ${describe(effectiveSandbox({ scope: "task", cascade, agentTools: agent.allowedTools, computers: computerContext(agent, polpo.getConfig()?.settings) }))}; chat ${effectiveSandbox({ scope: "chat", cascade, agentTools: agent.allowedTools, computers: computerContext(agent, polpo.getConfig()?.settings) }).provider}${cascade.agent ? ` (overrides: ${JSON.stringify(cascade.agent)})` : ""}`);
   }
   const refused = polpo.getNetworkDenied?.() ?? [];
   if (refused.length) lines.push(`Refused recently: ${refused.slice(0, 8).map((r) => `${r.host}${r.port ? `:${r.port}` : ""} (${r.agentName ?? "?"}, ${r.reason}, x${r.count})`).join("; ")}. A person can approve them in Settings → Sandbox.`);
@@ -4213,6 +4386,8 @@ async function execCreateSchedule(polpo: Orchestrator, args: Record<string, unkn
   if (!mission) return `Error: Mission "${missionId}" not found.`;
 
   const isRecurring = (args.recurring as boolean) ?? false;
+  const problem = scheduleExpressionProblem(String(args.expression ?? ""), { recurring: isRecurring });
+  if (problem) return `Error: ${problem}`;
   // Set schedule expression and transition status to scheduled/recurring
   const newStatus = isRecurring ? "recurring" : "scheduled";
   const missionUpdate: Record<string, unknown> = {
@@ -4263,6 +4438,10 @@ async function execUpdateSchedule(polpo: Orchestrator, args: Record<string, unkn
   if (!existing) return `Error: No schedule found for mission "${missionId}".`;
 
   const changes: string[] = [];
+  if (args.expression !== undefined) {
+    const problem = scheduleExpressionProblem(String(args.expression), { recurring: (args.recurring as boolean | undefined) ?? existing.recurring });
+    if (problem) return `Error: ${problem}`;
+  }
   if (args.expression !== undefined) {
     // Re-register with new expression
     const mission = await polpo.getMission(missionId);
@@ -6950,4 +7129,210 @@ export function readSystemContext(polpoDir: string): string {
     return readFileSync(contextPath, "utf-8").trim();
   }
   return "";
+}
+
+// ── Browser profiles ──
+
+const formatBytes = (n: number): string => n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
+
+async function execBrowserProfiles(polpo: Orchestrator): Promise<string> {
+  const profiles = await listBrowserProfiles(polpo.getPolpoDir(), await polpo.getAgents());
+  if (profiles.length === 0) return "No browser profiles yet: an agent with browser tools gets one the first time it opens the browser.";
+  return profiles.map((p) => `- ${p.name}: ${p.agents.length ? `used by ${p.agents.join(", ")}` : "no agent uses it"}; `
+    + (p.exists ? `${formatBytes(p.sizeBytes)}${p.lastUsedAt ? `, last used ${p.lastUsedAt.slice(0, 16).replace("T", " ")}` : ""}, ${p.hasCookies ? "has cookies (signed in somewhere)" : "no cookies"}` : "not created yet")
+    + (p.loginOpen ? "; a login session is open in the Live view" : "")).join("\n");
+}
+
+async function execBrowserProfileLogin(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const profile = String(args.profile ?? "").trim();
+  try {
+    if (args.action === "finish") {
+      const closed = await finishProfileLogin(profile);
+      return closed ? `Login session for "${profile}" closed: the profile keeps what was signed in.` : `No login session was open for "${profile}".`;
+    }
+    if (typeof args.url !== "string" || !args.url.trim()) return "Error: start needs the url of the sign-in page";
+    const { session } = await startProfileLogin(polpo.getPolpoDir(), profile, args.url.trim());
+    return `Opened ${args.url} with the profile "${profile}" in the browser session "${session}". `
+      + "Tell the person to open the Live browser view (Browser), pick that session and sign in; when they are done, call browser_profile_login with action \"finish\". "
+      + "Agents using this profile should not run browser tasks meanwhile.";
+  } catch (err) {
+    return `Error: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
+async function execBrowserProfileClear(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const profile = String(args.profile ?? "").trim();
+  try {
+    const { deleted, closedSessions } = await clearBrowserProfile(polpo.getPolpoDir(), profile, await polpo.getAgents());
+    const closed = closedSessions.length ? ` Closed its browser sessions: ${closedSessions.join(", ")}.` : "";
+    return deleted ? `Deleted the browser profile "${profile}" and its logins.${closed}` : `There is no browser profile "${profile}".${closed}`;
+  } catch (err) {
+    return `Error: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
+// ── Computers ─────────────────────────────────────────────────────────
+
+async function computerTools(polpo: Orchestrator) {
+  const [{ computerManagerWithEvents }, { computerSandbox }, { savePolpoSettingsKey }, core] = await Promise.all([
+    import("../sandbox/computers.js"), import("../sandbox/manager.js"), import("../core/config.js"), import("@polpo-ai/core/sandbox"),
+  ]);
+  const settings = () => polpo.getConfig()?.settings;
+  return {
+    core,
+    computers: (): import("@polpo-ai/core/sandbox").ComputerConfig[] => settings()?.computers ?? [],
+    manager: () => computerManagerWithEvents(polpo.getPolpoDir(), (payload) => polpo.emit("computer:changed", payload), undefined, () => settings()?.computers ?? []),
+    sandbox: (c: import("@polpo-ai/core/sandbox").ComputerConfig) => computerSandbox(c, settings()),
+    save: async (list: import("@polpo-ai/core/sandbox").ComputerConfig[]) => {
+      savePolpoSettingsKey(polpo.getPolpoDir(), "computers", list.length ? list : undefined);
+      await polpo.reloadConfig();
+    },
+  };
+}
+
+/** " (0.2 GB memory + 1.4 GB disk)" for a Daytona v2 snapshot, "" when the sizes are unknown. */
+function snapshotSizes(s: { memoryBytes?: number; diskBytes?: number }): string {
+  const gb = (n: number) => `${(n / 1024 ** 3).toFixed(1)} GB`;
+  const parts = [s.memoryBytes !== undefined ? `${gb(s.memoryBytes)} memory` : "", s.diskBytes !== undefined ? `${gb(s.diskBytes)} disk` : ""].filter(Boolean);
+  return parts.length ? ` (${parts.join(" + ")})` : "";
+}
+
+async function execComputersList(polpo: Orchestrator): Promise<string> {
+  const t = await computerTools(polpo);
+  const agents = await polpo.getAgents();
+  const here = agents.filter((a) => !a.defaultComputer || a.defaultComputer === "host").map((a) => a.name);
+  const lines = [`- host (this server): running; default of ${here.join(", ") || "nobody"}`];
+  for (const c of t.computers()) {
+    const live = await t.manager().refresh(c).catch((err) => ({ ...t.manager().live(c.id), status: "unknown" as const, lastError: (err as Error).message }));
+    const users = t.core.computerUsers(c.id, agents).map((u) => `${u.name}${u.isDefault ? " (default)" : ""}`);
+    lines.push(`- ${c.id} "${c.name}" (${c.kind}${c.snapshot ? `, snapshot ${c.snapshot}` : c.image ? `, image ${c.image}` : c.template ? `, template ${c.template}` : ""}): ${live.status}`
+      + `${live.lastUsedAt ? `, last used ${live.lastUsedAt}` : ""}${live.uptimeMinutes ? `, ${live.uptimeMinutes} min running so far` : ""}`
+      + `${live.lastSnapshot ? `, last snapshot ${live.lastSnapshot.at}${snapshotSizes(live.lastSnapshot)}` : ""}`
+      + `${live.notice ? `, note: ${live.notice}` : ""}${live.lastError ? `, error: ${live.lastError}` : ""}; stops after ${t.core.computerIdleStopMinutes(c)} idle min; agents: ${users.join(", ") || "none"}`);
+  }
+  return `Computers:\n${lines.join("\n")}`;
+}
+
+async function execComputerCreate(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const t = await computerTools(polpo);
+  const lifecycle = { ...(args.idleStopMinutes !== undefined ? { idleStopMinutes: args.idleStopMinutes } : {}), ...(args.autoArchiveDays !== undefined ? { autoArchiveDays: args.autoArchiveDays } : {}) };
+  let computer: import("@polpo-ai/core/sandbox").ComputerConfig;
+  try {
+    computer = t.core.parseComputer({ id: args.id, name: args.name, kind: args.kind, snapshot: args.snapshot, image: args.image, template: args.template, egress: args.egress, ...(Object.keys(lifecycle).length ? { lifecycle } : {}) });
+  } catch (err) {
+    return `Error: ${(err as Error).message}`;
+  }
+  const existing = t.computers();
+  if (existing.some((c) => c.id === computer.id)) return `Error: a computer "${computer.id}" already exists (computers_list)`;
+  const egressProblem = t.core.computerEgressProblem(computer, polpo.getConfig()?.settings);
+  if (egressProblem) return `Error: ${egressProblem} (egress_status)`;
+  if (t.core.isRemoteComputer(computer)) await t.manager().revive(computer.id);
+  await t.save([...existing, computer]);
+  polpo.emit("computer:changed", { id: computer.id, action: "created", status: t.core.isRemoteComputer(computer) ? "missing" : "running" });
+  if (args.start === true && t.core.isRemoteComputer(computer)) {
+    const sandbox = t.sandbox(computer);
+    if ("error" in sandbox) return `Computer "${computer.id}" created, but not started: ${sandbox.error}`;
+    try { await t.manager().start(computer, sandbox); }
+    catch (err) { return `Computer "${computer.id}" created, but it could not start: ${(err as Error).message}`; }
+    return `Computer "${computer.id}" created and running. Assign it with computer_assign.`;
+  }
+  return `Computer "${computer.id}" created (${computer.kind}${t.core.isRemoteComputer(computer) ? "; its machine is created on first use" : ""}). Assign it with computer_assign.`;
+}
+
+async function execComputerAssign(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const t = await computerTools(polpo);
+  const name = String(args.agent ?? "");
+  const id = String(args.computer ?? "");
+  const agent = (await polpo.getAgents()).find((a) => a.name === name);
+  if (!agent) return `Error: there is no agent "${name}"`;
+  if (id !== "host" && !t.computers().some((c) => c.id === id)) return `Error: there is no computer "${id}" (computers_list, or computer_create)`;
+  const computers = id === "host" ? agent.computers : [...new Set([...(agent.computers ?? []), id])];
+  await polpo.updateAgent(name, { defaultComputer: id === "host" ? undefined : id, ...(computers ? { computers } : {}) } as any);
+  return id === "host" ? `${name} runs on this server again.` : `${name} now works on computer "${id}": its chats and tasks run there.`;
+}
+
+async function execComputerControl(polpo: Orchestrator, op: "start" | "stop", args: Record<string, unknown>): Promise<string> {
+  const t = await computerTools(polpo);
+  const id = String(args.id ?? "");
+  const computer = t.computers().find((c) => c.id === id);
+  if (!computer) return id === "host" ? "Error: \"host\" is this server: there is no machine to start or stop" : `Error: there is no computer "${id}" (computers_list)`;
+  if (!t.core.isRemoteComputer(computer)) return `Error: "${id}" runs on this server: there is no machine to ${op}`;
+  try {
+    if (op === "stop") {
+      const live = await t.manager().stop(computer);
+      return `Computer "${id}": ${live.status} (${live.status === "hibernated" ? "memory and disk saved in a snapshot; it wakes in a few seconds on its next use" : "disk kept"}).`;
+    }
+    const sandbox = t.sandbox(computer);
+    if ("error" in sandbox) return `Error: ${sandbox.error}`;
+    return `Computer "${id}": ${(await t.manager().start(computer, sandbox)).status}.`;
+  } catch (err) {
+    return `Error: could not ${op} computer "${id}": ${(err as Error).message}`;
+  }
+}
+
+async function execEgressStatus(polpo: Orchestrator): Promise<string> {
+  const proxies = polpo.getConfig()?.settings?.egressProxies ?? {};
+  const agents = await polpo.getAgents();
+  const names = Object.keys(proxies);
+  if (names.length === 0) return "No egress proxies configured (settings.egressProxies): every browser goes out directly from the server.";
+  const lines = await Promise.all(names.map(async (name) => {
+    const users = agents.filter((a) => a.browserEgress === name).map((a) => a.name);
+    const up = await proxyReachable(proxies[name]!);
+    return `- ${name}: ${up ? "reachable" : "UNREACHABLE (browsers fall back to the server's address; profiles signed in through it pause)"}; `
+      + `used by ${users.length ? users.join(", ") : "no agent"}`;
+  }));
+  const unknown = agents.filter((a) => a.browserEgress && !proxies[a.browserEgress]).map((a) => `${a.name} (${a.browserEgress})`);
+  // remote computers reach their proxy through Tailscale in their VM: what each one sees from there
+  const settings = polpo.getConfig()?.settings;
+  const remote = (settings?.computers ?? []).filter((c) => (c.kind === "daytona" || c.kind === "e2b") && c.egress);
+  const remoteLines: string[] = [];
+  if (remote.length) {
+    const t = await computerTools(polpo);
+    const { computerEgressStatus, describeComputerEgress } = await import("../sandbox/computers.js");
+    for (const c of remote) {
+      const s = await computerEgressStatus(t.manager(), c, settings, polpo.getConfig()?.project).catch((err) => ({ error: (err as Error).message } as const));
+      if (!s) continue;
+      if (!("proxy" in s)) { remoteLines.push(`- computer ${c.id} (${c.kind}) → ${c.egress}: could not be checked (${s.error})`); continue; }
+      remoteLines.push(`- ${describeComputerEgress(c, s)}`);
+    }
+  }
+  return lines.join("\n") + (unknown.length ? `\nAgents naming a proxy that does not exist: ${unknown.join(", ")}` : "")
+    + (remoteLines.length ? `\nRemote computers (through Tailscale in their VM):\n${remoteLines.join("\n")}` : "");
+}
+
+// ── Primary bot check-ins ──
+
+export const CHECK_IN_WHY = "polpo:check-in";
+export const CHECK_IN_INSTRUCTIONS = [
+  "Check in with the person as their primary bot. Look at what needs them since your last check-in:",
+  "- approvals waiting (list_approvals);",
+  "- tasks that failed or are stuck, missions that finished (list_tasks, list_missions);",
+  "- agents' proposals waiting for a yes (list_checks with all=true: the proposed ones; get_agent_drive for an agent's plans);",
+  "- requests that keep coming back to you or to an agent and would deserve a dedicated agent: propose one (name and job), do not create it.",
+  "Write a short message with only what needs them, the most important first, each with what you suggest. "
+    + `If nothing needs them, answer exactly ${CHECK_NOTHING_TO_REPORT}.`,
+].join("\n");
+
+async function execSetCheckIns(polpo: Orchestrator, args: Record<string, unknown>, context: OrchestratorToolExecutionContext): Promise<string> {
+  const manager = polpo.getConversationCheckManager();
+  if (!manager) return "Error: scheduled checks are not available on this instance";
+  const current = (await manager.list({ states: ["active"] })).filter((c) => !c.agent && c.why === CHECK_IN_WHY);
+  for (const c of current) await manager.cancel(c.id);
+  if (args.enabled !== true) return current.length ? "Check-ins turned off." : "Check-ins were not on.";
+  if (!context.sessionId) return "Error: check-ins need a conversation to report to; ask from a chat";
+  try {
+    const to = typeof args.to === "string" && args.to.trim() ? args.to.trim() : undefined;
+    const target = to ? await polpo.resolveChatTarget(to, {}) : context.origin;
+    const cron = typeof args.cron === "string" && args.cron.trim() ? args.cron.trim() : "0 9,18 * * *";
+    const timezone = typeof args.timezone === "string" && args.timezone.trim() ? args.timezone.trim() : undefined;
+    const check = await manager.create({
+      sessionId: context.sessionId, prompt: CHECK_IN_INSTRUCTIONS, everyMinutes: 0, cron,
+      ...(timezone ? { timezone } : {}), ...(target ? { target } : {}), why: CHECK_IN_WHY, createdBy: "person",
+    });
+    const where = target ? (target.name ? `to "${target.name}"` : `to Telegram chat ${target.chatId}`) : "in this conversation";
+    return `Check-ins on (${check.id}): cron "${cron}"${timezone ? ` ${timezone}` : ""}, next ${check.nextRunAt}, ${where}. `
+      + "You write only when something needs the person.";
+  } catch (err) {
+    return `Error: ${err instanceof Error ? err.message : String(err)}`;
+  }
 }

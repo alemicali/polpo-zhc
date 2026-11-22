@@ -14,6 +14,8 @@ import { isCronExpression, nextCronOccurrence } from "./cron.js";
  */
 export class Scheduler {
   private schedules = new Map<string, ScheduleEntry>();
+  /** The entry being replaced by rescheduleMission (its pause and last run carry over). */
+  private replacing = new Map<string, ScheduleEntry>();
   private lastCheckMs = 0;
   private checkIntervalMs: number;
   private executeMissionFn?: (missionId: string) => void;
@@ -74,14 +76,18 @@ export class Scheduler {
       }
     }
 
+    // re-registered (a run finished, the expression changed): a paused schedule stays paused,
+    // and keeps its last run and creation time
+    const prev = this.schedules.get(`sched-${mission.id}`) ?? this.replacing.get(mission.id);
     const entry: ScheduleEntry = {
       id: `sched-${mission.id}`,
       missionId: mission.id,
       expression: mission.schedule,
       recurring: isRecurring,
-      enabled: true,
+      enabled: prev?.enabled ?? true,
       nextRunAt,
-      createdAt: new Date().toISOString(),
+      ...(prev?.lastRunAt ? { lastRunAt: prev.lastRunAt } : {}),
+      createdAt: prev?.createdAt ?? new Date().toISOString(),
     };
 
     this.schedules.set(entry.id, entry);
@@ -97,8 +103,15 @@ export class Scheduler {
 
   /** Re-schedule a mission whose schedule changed: one schedule:updated, or removed if it no longer runs. */
   rescheduleMission(mission: Mission): ScheduleEntry | null {
+    const prev = this.schedules.get(`sched-${mission.id}`);
     const had = this.schedules.delete(`sched-${mission.id}`);
-    const entry = this.registerMission(mission, had ? "updated" : "created");
+    if (prev) this.replacing.set(mission.id, prev);
+    let entry: ScheduleEntry | null;
+    try {
+      entry = this.registerMission(mission, had ? "updated" : "created");
+    } finally {
+      this.replacing.delete(mission.id);
+    }
     if (had && !entry) this.ctx.emitter.emit("schedule:removed", { scheduleId: `sched-${mission.id}`, missionId: mission.id });
     return entry;
   }
@@ -109,6 +122,21 @@ export class Scheduler {
     if (!entry || entry.enabled === enabled) return entry;
     entry.enabled = enabled;
     this.emitUpdated(entry);
+    return entry;
+  }
+
+  /**
+   * Run a scheduled mission now, out of turn: the next scheduled run stays as it is. Throws when
+   * the mission has no schedule or nothing can execute it.
+   */
+  runNow(missionId: string): ScheduleEntry {
+    const entry = this.schedules.get(`sched-${missionId}`);
+    if (!entry) throw new Error(`No schedule for mission "${missionId}"`);
+    if (!this.executeMissionFn) throw new Error("The scheduler cannot execute missions on this instance");
+    this.ctx.emitter.emit("schedule:triggered", { scheduleId: entry.id, missionId, expression: entry.expression });
+    this.executeMissionFn(missionId);
+    entry.lastRunAt = new Date().toISOString();
+    this.ctx.emitter.emit("schedule:completed", { scheduleId: entry.id, missionId });
     return entry;
   }
 

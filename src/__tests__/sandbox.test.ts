@@ -53,6 +53,17 @@ describe("sandbox cascade", () => {
     expect(resolveSandbox({ agent: { provider: "docker" } }, { scope: "task", available: new Set(["local", "bwrap"] as const) }).provider).toBe("bwrap");
   });
 
+  test("a fallback to weaker isolation is reported, not hidden", () => {
+    const local = new Set(["local", "bwrap"] as const);
+    const task = resolveSandbox({ agent: { provider: "daytona" } }, { scope: "task", available: local });
+    expect(task.provider).toBe("bwrap");
+    expect(task.fallback).toEqual({ from: "daytona", reason: "unavailable" });
+    expect(resolveSandbox({ agent: { provider: "daytona" } }, { scope: "task", available: all }).fallback).toBeUndefined();
+    expect(resolveSandbox({ agent: { provider: "bwrap" } }, { scope: "task", available: local }).fallback).toBeUndefined();
+    // chats on this machine by design (no Cowork opt-in) are not a fallback
+    expect(resolveSandbox({ agent: { provider: "e2b" } }, { scope: "chat", available: all }).fallback).toBeUndefined();
+  });
+
   test("settings are normalized: unknown keys and bad values dropped", () => {
     expect(normalizeSandboxSettings({ provider: "bwrap", network: { mode: "allowlist", allow: [" a.com ", 3] }, resources: { memoryMb: -1, cpus: 2 }, junk: true }))
       .toEqual({ provider: "bwrap", network: { mode: "allowlist", allow: ["a.com"] }, resources: { cpus: 2 } });

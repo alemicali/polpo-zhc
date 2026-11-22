@@ -70,6 +70,7 @@ import {
   Database,
   Table2,
   UsersRound,
+  MessagesSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -145,7 +146,7 @@ import { useChatQueue, migrateNewSessionQueue, NEW_SESSION_QUEUE_KEY } from "@/h
 import { composerKeyAction, mergeDraft, onComposerRestore, pendingSteers, usePendingSteers } from "@/hooks/use-chat-steering";
 import { useBackgroundWaits } from "@/hooks/use-background-waits";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
-import { useAgents, useSkills, usePolpo } from "@polpo-ai/react";
+import { useAgents, useEvents, useSkills, usePolpo } from "@polpo-ai/react";
 import type { AgentConfig, Mission, PlaybookInfo, SkillWithAssignment, Task } from "@polpo-ai/react";
 import { cn } from "@/lib/utils";
 import { config } from "@/lib/config";
@@ -3318,7 +3319,17 @@ function ChatMessages() {
   } : undefined, [currentSession?.id, currentSession?.parentSessionId, parentSession?.title]);
 
   // Stable identities: a new components object each render makes Virtuoso rebuild its parts
-  const virtuosoContext = useMemo(() => ({ isLoading }), [isLoading]);
+  // Agents this chat is waiting on (ask_agent / message_agent): live, from agent:message events
+  const { events: talkEvents } = useEvents(["agent:message"], 100);
+  const waitingOn = useMemo(() => {
+    const latest = new Map<string, AgentTalkEvent>();
+    for (const e of talkEvents) {
+      const data = e.data as AgentTalkEvent;
+      if (data?.id && data.fromSessionId === sessionId) latest.set(data.id, data);
+    }
+    return [...latest.values()].filter((x) => x.status === "working");
+  }, [talkEvents, sessionId]);
+  const virtuosoContext = useMemo(() => ({ isLoading, waitingOn }), [isLoading, waitingOn]);
   const virtuosoAllComponents = useMemo(() => ({ ...virtuosoComponents, Footer: ChatWorkingFooter }), [virtuosoComponents]);
 
   return (
@@ -3352,6 +3363,8 @@ function ChatMessages() {
           itemContent={(i, msg) => {
             const isStreaming = isLoading && i === messages.length - 1;
 
+            const agentReply = msg.role === "user" ? parseAgentReply(msg.content) : null;
+            if (agentReply) return <AgentReplyCard reply={agentReply} ts={msg.ts} />;
             return msg.role === "user" ? (
               <div className="group w-full py-4 px-4">
                 <div className="mx-auto max-w-3xl">
@@ -3564,8 +3577,30 @@ function ChatMessages() {
                           <MessageActions className="mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
                             <CopyAction text={msg.content} />
                             {msg.content.trim() && <SpeakAction text={msg.content} />}
+                            {sessionId && !msg.id.startsWith("temp-") && (
+                              <MessageAction
+                                tooltip="Thread from this reply — new chat that continues from here"
+                                label="Thread from this reply"
+                                onClick={() => { void handleFork(msg.id); }}
+                                disabled={forking !== null}
+                              >
+                                {forking === msg.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <GitBranch className="h-3.5 w-3.5" />}
+                              </MessageAction>
+                            )}
                           </MessageActions>
                         )}
+                        {!isStreaming && forksByMessage.get(msg.id)?.map((fork) => (
+                          <button
+                            key={fork.id}
+                            type="button"
+                            onClick={() => { void loadSession(fork.id); }}
+                            className="mt-1 flex max-w-full items-center gap-1 rounded px-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                            title="Open the thread started from this reply"
+                          >
+                            <GitBranch className="h-3 w-3 shrink-0" />
+                            <span className="truncate">Thread: {fork.title || "Untitled"}</span>
+                          </button>
+                        ))}
                         {msg.askUserQuestions && msg.askUserQuestions.length > 0 && (
                           <AskUserCards
                             questions={msg.askUserQuestions}
@@ -4762,8 +4797,72 @@ function RenameSessionDialog({
 }
 
 /** Footer of the message list while the agent works (reads `isLoading` from the Virtuoso context). */
-function ChatWorkingFooter({ context }: { context?: { isLoading: boolean } }) {
-  return context?.isLoading ? (
+interface AgentTalkEvent {
+  id: string;
+  from: string;
+  to: string;
+  kind: "question" | "handoff";
+  status: "working" | "answered" | "failed";
+  fromSessionId?: string;
+}
+
+/** An answer another agent sent back into this chat (ask_agent / message_agent). */
+const AGENT_REPLY = /^\[([^\]\n]+?) (answered your question|replied to what you handed them)\]\n?/;
+
+function parseAgentReply(content: string): { agent: string; kind: "question" | "handoff"; text: string } | null {
+  const match = AGENT_REPLY.exec(content);
+  if (!match) return null;
+  return { agent: match[1]!, kind: match[2]!.startsWith("answered") ? "question" : "handoff", text: content.slice(match[0].length) };
+}
+
+function AgentReplyCard({ reply, ts }: { reply: { agent: string; kind: "question" | "handoff"; text: string }; ts?: string }) {
+  return (
+    <div className="group w-full py-3 px-4" data-testid="agent-reply">
+      <div className="mx-auto max-w-3xl">
+        <div className="rounded-xl border border-border/70 bg-muted/40 px-4 py-3">
+          <div className="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <MessagesSquare className="h-3.5 w-3.5 shrink-0" />
+            <span>
+              <span className="font-medium text-foreground">{reply.agent}</span>
+              {reply.kind === "question" ? " answered" : " replied to the handoff"}
+            </span>
+            {ts && <span className="ml-auto text-[10px]">{chatTimeAgo(new Date(ts))}</span>}
+          </div>
+          <div className="text-sm">
+            <MessageResponse mode="static">{reply.text}</MessageResponse>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChatWorkingFooter({ context }: { context?: { isLoading: boolean; waitingOn?: AgentTalkEvent[] } }) {
+  const waiting = context?.waitingOn ?? [];
+  return (
+    <>
+      {waiting.length > 0 && (
+        <div className="w-full px-4 pt-1" data-testid="agent-waiting">
+          <div className="mx-auto max-w-3xl space-y-1 pl-10">
+            {waiting.map((w) => (
+              <div key={w.id} className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                <span>
+                  <span className="font-medium text-foreground">{w.to}</span>
+                  {w.kind === "question" ? ` is answering ${w.from}…` : ` is working on what ${w.from} handed over…`}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <ChatWorkingIndicator isLoading={!!context?.isLoading} />
+    </>
+  );
+}
+
+function ChatWorkingIndicator({ isLoading }: { isLoading: boolean }) {
+  return isLoading ? (
     <div className="w-full py-2 px-4">
       <div className="mx-auto max-w-3xl">
         <div className="flex items-center gap-2.5 pl-10 py-1.5">

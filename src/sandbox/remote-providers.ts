@@ -6,6 +6,7 @@
  * template). The key itself stays in that vault entry and is read when a VM is created.
  */
 import type { VaultStore } from "@polpo-ai/core";
+import { DAYTONA_V2_RUNNER_IMAGE, DAYTONA_V2_SANDBOX_CLASS, daytonaV2HibernateSettings, daytonaV2MaxTimeoutSeconds, type DaytonaApiVersion, type DaytonaV2HibernateSettings } from "@polpo-ai/core/sandbox";
 import { CREDENTIAL_NAMES, normalizeVaultRef, pickCredential, resolveVaultRef, type VaultRef } from "@polpo-ai/core/vault-ref";
 
 export type RemoteProviderId = "daytona" | "e2b";
@@ -14,10 +15,26 @@ export const REMOTE_PROVIDERS: RemoteProviderId[] = ["daytona", "e2b"];
 /** settings.sandbox.providers.<id> for a remote provider (no secrets). */
 export interface RemoteProviderSettings {
   credential?: VaultRef;
-  /** Daytona: API URL (default https://app.daytona.io/api). */
+  /**
+   * Daytona: which service. "v0" (default): app.daytona.io (organization key, snapshots). "v2":
+   * Daytona's new service (project API key, images, Linux VMs that cannot pause: computers
+   * hibernate as memory and disk snapshots).
+   */
+  api?: DaytonaApiVersion;
+  /** Daytona v0: API URL (default https://app.daytona.io/api). Not accepted with v2. */
   apiUrl?: string;
-  /** Daytona: region/target (e.g. "eu", "us"). */
+  /** Daytona v0: region/target (e.g. "eu", "us"). */
   target?: string;
+  /** Daytona v2: region for new sandboxes (default: the project's). */
+  region?: string;
+  /** Daytona v0: the snapshot new sandboxes are created from. */
+  snapshot?: string;
+  /** Daytona: image (v2: a registered image name or id, default the Polpo runner image; v0: a Docker image). */
+  image?: string;
+  /** Daytona v2: the longest wall clock a sandbox may get (the plan's maximum; default 86400 s). */
+  maxTimeoutSeconds?: number;
+  /** Daytona v2: how computers hibernate (snapshots kept, safety snapshots, wall-clock rotation). */
+  hibernate?: DaytonaV2HibernateSettings;
   /** E2B: custom domain (self-hosted). */
   domain?: string;
   /** E2B: default template. */
@@ -34,6 +51,13 @@ export interface RemoteProviderStatus extends RemoteProviderSettings {
   configured: boolean;
   /** The chosen entry exists and holds a key. */
   keyFound: boolean;
+  /**
+   * Daytona: the class of the machines it creates ("linux-vm" on v2; on v0 it comes with the
+   * snapshot, container or linux-vm, so it is not known here).
+   */
+  vmClass?: string;
+  /** Daytona v2: the image new sandboxes come from (the setting, else the runner image). */
+  effectiveImage?: string;
   lastTest?: { ok: boolean; at: string; durationMs?: number; error?: string };
 }
 
@@ -56,9 +80,13 @@ export function remoteProviderSettings(id: RemoteProviderId): RemoteProviderSett
   const out: RemoteProviderSettings = {};
   const credential = normalizeVaultRef(raw.credential);
   if (credential) out.credential = credential;
-  for (const f of ["apiUrl", "target", "domain", "template"] as const) {
+  const fields = id === "daytona" ? (["apiUrl", "target", "region", "snapshot", "image"] as const) : (["domain", "template"] as const);
+  for (const f of fields) {
     if (typeof raw[f] === "string" && (raw[f] as string).trim()) out[f] = (raw[f] as string).trim();
   }
+  if (id === "daytona" && raw.api === "v2") out.api = "v2";
+  if (id === "daytona" && raw.maxTimeoutSeconds !== undefined) out.maxTimeoutSeconds = daytonaV2MaxTimeoutSeconds(raw);
+  if (id === "daytona" && raw.hibernate !== undefined) out.hibernate = daytonaV2HibernateSettings(raw);
   return out;
 }
 
@@ -70,6 +98,8 @@ export function configuredRemoteProviders(): RemoteProviderId[] {
 /** The key (from the referenced vault entry) and the options, when a VM is about to be created. */
 export async function remoteProviderCredentials(id: RemoteProviderId): Promise<RemoteProviderCredentials | undefined> {
   const { credential, ...options } = remoteProviderSettings(id);
+  // v2 never sees v0's URL or region (the settings validation refuses an apiUrl with v2)
+  if (options.api === "v2") { delete options.apiUrl; delete options.target; }
   const apiKey = pickCredential(await resolveVaultRef(store, credential), [...CREDENTIAL_NAMES.apiKey]);
   return apiKey ? { apiKey, ...options } : undefined;
 }
@@ -78,8 +108,11 @@ export async function remoteProviderStatus(): Promise<RemoteProviderStatus[]> {
   return Promise.all(REMOTE_PROVIDERS.map(async (id) => {
     const settings = remoteProviderSettings(id);
     const keyFound = !!(await remoteProviderCredentials(id));
+    const daytonaV2 = id === "daytona" && settings.api === "v2";
     return {
       id, ...settings, configured: !!settings.credential, keyFound,
+      ...(id === "daytona" ? { api: settings.api ?? "v0" } : {}),
+      ...(daytonaV2 ? { vmClass: DAYTONA_V2_SANDBOX_CLASS, effectiveImage: settings.image ?? DAYTONA_V2_RUNNER_IMAGE } : {}),
       ...(lastTests.get(id) ? { lastTest: lastTests.get(id) } : {}),
     };
   }));

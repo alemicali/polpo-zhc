@@ -30,6 +30,9 @@ import { Type } from "@sinclair/typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { resolveToolOutputDir, withToolOutputOffload } from "./tool-output.js";
 import { browserProxyContext, proxyArgs, type BrowserNetworkGuard } from "./browser-network-guard.js";
+import type { ResolvedVault } from "../vault/index.js";
+import { createSecretMasker, formatVaultRef, resolveEnvFromVault } from "../vault/env-from-vault.js";
+import { decideEgress, decideRemoteEgress, shellHost, type BrowserEgressConfig } from "./browser-egress.js";
 
 /** Agent browser results above this are saved in full to a file (head + tail + path for the model). */
 const MAX_OUTPUT_BYTES = 50_000;
@@ -183,7 +186,15 @@ type BrowserCallResult = { success: boolean; data?: any; error?: string; raw: st
  * profile out (close); `saves` is the file the command writes (screenshots), already checked
  * against the allowed paths.
  */
-export type BrowserExec = (args: string[], options?: { signal?: AbortSignal; timeout?: number; profile?: boolean; saves?: string }) => Promise<BrowserCallResult>;
+export type BrowserExec = (args: string[], options?: {
+  signal?: AbortSignal; timeout?: number; profile?: boolean; saves?: string;
+  /** A secret for one argument (the arg equal to BROWSER_SECRET_ARG): never in a command line that is logged. */
+  secret?: string;
+}) => Promise<BrowserCallResult>;
+
+/** Stands for the secret among an exec's args; on the host it becomes the value, in a sandbox an environment variable. */
+export const BROWSER_SECRET_ARG = "\u0000polpo-secret\u0000";
+const BROWSER_SECRET_ENV = "POLPO_BROWSER_SECRET";
 
 /** Quote an argument for a POSIX shell command line. */
 function shq(arg: string): string {
@@ -194,12 +205,15 @@ function shq(arg: string): string {
 export const SANDBOX_BROWSER_PROFILES = ".polpo/browser-profiles";
 
 /** The agent-browser command line run in a sandbox (exported for tests). */
-export function sandboxBrowserCommand(args: string[], options: { session?: string; profileName?: string } = {}): string {
+export function sandboxBrowserCommand(args: string[], options: { session?: string; profileName?: string; proxy?: string } = {}): string {
   const parts = ["agent-browser"];
   if (options.session) parts.push("--session", shq(options.session));
   // the profile lives in the VM user's home: the host path means nothing there
   if (options.profileName) parts.push("--profile", `"$HOME"/${shq(`${SANDBOX_BROWSER_PROFILES}/${options.profileName}`)}`);
-  for (const a of args) parts.push(shq(a));
+  // the egress proxy inside the VM (the tailnet forwarder, see sandbox/tailnet-egress.ts)
+  for (const a of proxyArgs(options.proxy)) parts.push(shq(a));
+  // a secret comes from the command's environment, so the command line (which sandboxes log) never holds it
+  for (const a of args) parts.push(a === BROWSER_SECRET_ARG ? `"$${BROWSER_SECRET_ENV}"` : shq(a));
   parts.push("--json");
   return parts.join(" ");
 }
@@ -270,14 +284,15 @@ export function ensureSandboxBrowser(shell: Shell): Promise<string | undefined> 
 async function execSandboxBrowser(
   shell: Shell,
   args: string[],
-  options: { session?: string; profileName?: string; timeout?: number; cwd?: string; saves?: string },
+  options: { session?: string; profileName?: string; timeout?: number; cwd?: string; saves?: string; secret?: string; proxy?: string },
 ): Promise<BrowserCallResult> {
   const missing = await ensureSandboxBrowser(shell);
   if (missing) return { success: false, error: missing, raw: missing };
   try {
     // agent-browser does not create the folder of the file it saves
     const mkdir = options.saves ? `mkdir -p ${shq(dirname(options.saves))} && ` : "";
-    const result = await shell.execute(mkdir + sandboxBrowserCommand(args, options), { cwd: options.cwd, timeout: options.timeout ?? DEFAULT_TIMEOUT });
+    const env = options.secret !== undefined ? { env: { [BROWSER_SECRET_ENV]: options.secret } } : {};
+    const result = await shell.execute(mkdir + sandboxBrowserCommand(args, options), { cwd: options.cwd, timeout: options.timeout ?? DEFAULT_TIMEOUT, ...env });
     return parseShellBrowserResult(result);
   } catch (err: any) {
     const message = err?.message ?? String(err);
@@ -365,18 +380,37 @@ function createBrowserClickTool(exec: BrowserExec): AgentTool<typeof BrowserClic
 
 const BrowserFillSchema = Type.Object({
   selector: Type.String({ description: "Element ref from snapshot (e.g. '@e3') or CSS selector" }),
-  text: Type.String({ description: "Text to fill into the input" }),
+  text: Type.Optional(Type.String({ description: "Text to fill into the input" })),
+  from_vault: Type.Optional(Type.String({
+    description: "Fill a secret from your vault instead of text: \"service.key\", e.g. \"github.password\" (vault_list shows them). "
+      + "The value goes into the field without ever being shown to you.",
+  })),
 });
 
-function createBrowserFillTool(exec: BrowserExec): AgentTool<typeof BrowserFillSchema> {
+function createBrowserFillTool(exec: BrowserExec, vault?: ResolvedVault): AgentTool<typeof BrowserFillSchema> {
   return {
     name: "browser_fill",
     label: "Browser Fill",
-    description: "Clear an input field and type new text. Use refs from snapshot for targeting.",
+    description: "Clear an input field and type new text. Use refs from snapshot for targeting. "
+      + "For a password, token or any credential, use from_vault (\"service.key\") instead of text: never copy secrets into text.",
     parameters: BrowserFillSchema,
     async execute(_id, params, signal) {
-      const result = await exec(["fill", params.selector, params.text], { signal });
-      return browserResult(result);
+      const hasText = typeof params.text === "string";
+      if (hasText === !!params.from_vault) {
+        return browserResult({ success: false, error: "give either text or from_vault", raw: "" });
+      }
+      if (!params.from_vault) return browserResult(await exec(["fill", params.selector, params.text!], { signal }));
+      const resolved = resolveEnvFromVault({ [`FILL`]: params.from_vault }, vault);
+      if (resolved.errors.length > 0) {
+        return browserResult({ success: false, error: `from_vault: ${resolved.errors.join("; ").replace(/^FILL: /, "")}`, raw: "" });
+      }
+      const secret = resolved.env.FILL!;
+      const mask = createSecretMasker([secret]);
+      const result = await exec(["fill", params.selector, BROWSER_SECRET_ARG], { signal, secret });
+      const masked = { ...result, raw: mask(result.raw), ...(result.error ? { error: mask(result.error) } : {}),
+        ...(result.data !== undefined ? { data: JSON.parse(mask(JSON.stringify(result.data))) } : {}) };
+      if (!masked.success) return browserResult(masked);
+      return { content: [{ type: "text", text: `Filled ${params.selector} with ${formatVaultRef(params.from_vault)} from the vault.` }], details: { from_vault: formatVaultRef(params.from_vault) } };
     },
   };
 }
@@ -751,6 +785,57 @@ function guardedByNetwork(tool: AgentTool<any>, network: BrowserNetworkGuard | u
 }
 
 /**
+ * The proxy each agent-browser session was started with: a change needs a restart (the proxy is set
+ * at launch). Keyed by where the browser runs ("host:" or "vm:") and the session.
+ */
+const sessionEgress = new Map<string, string | undefined>();
+
+/** Forget the sessions' proxies (tests). */
+export function resetBrowserEgressSessions(): void {
+  sessionEgress.clear();
+}
+
+/**
+ * The agent's egress proxy (a residential line, see browser-egress.ts): the browser runs behind it while
+ * it is reachable, otherwise directly, or not at all for a profile signed in through it.
+ * - On this server, a sandbox network rule takes precedence (its own proxy).
+ * - In a remote computer's VM, the computer's egress goes through Tailscale there (egress.tailnet):
+ *   the browser in the VM uses the tailnet forwarder. Without it, a browser in a VM goes out from the VM.
+ */
+function withEgress(
+  tool: AgentTool<any>, egress: BrowserEgressConfig | undefined, network: BrowserNetworkGuard | undefined,
+  inSandbox: () => Promise<boolean>, session: string, profileDir: string | undefined,
+  remote: { host?: () => ReturnType<typeof shellHost> | undefined; profilePath?: string; close: () => Promise<unknown> },
+): AgentTool<any> {
+  if (!egress) return tool;
+  return {
+    ...tool,
+    async execute(id, params: any, signal, ...rest) {
+      const vm = await inSandbox();
+      if (vm && !egress.tailnet) return tool.execute(id, params, signal, ...rest);
+      if (!vm && (network || egress.tailnet)) return tool.execute(id, params, signal, ...rest);
+      const host = vm ? remote.host?.() : undefined;
+      if (vm && !host) return tool.execute(id, params, signal, ...rest);
+      const decision = vm
+        ? await decideRemoteEgress(egress as BrowserEgressConfig & { tailnet: NonNullable<BrowserEgressConfig["tailnet"]> }, host!, remote.profilePath)
+        : await decideEgress(egress, profileDir);
+      if (decision.refusal) return { content: [{ type: "text", text: `Browser error: ${decision.refusal}` }], details: { error: decision.refusal, egress: decision.label } };
+      // the proxy is fixed when the browser starts: switching means a fresh browser on the same profile
+      const key = `${vm ? "vm" : "host"}:${session}`;
+      if (!sessionEgress.has(key) ? decision.proxy !== undefined : sessionEgress.get(key) !== decision.proxy) {
+        if (tool.name !== "browser_close") {
+          await (vm ? remote.close() : execAgentBrowser(["close"], { session, timeout: 15_000 })).catch(() => undefined);
+        }
+      }
+      sessionEgress.set(key, decision.proxy);
+      return decision.proxy
+        ? browserProxyContext.run({ proxy: decision.proxy }, () => tool.execute(id, params, signal, ...rest))
+        : tool.execute(id, params, signal, ...rest);
+    },
+  };
+}
+
+/**
  * Create browser automation tools powered by agent-browser CLI.
  *
  * @param cwd - Working directory for resolving relative file paths (screenshots)
@@ -774,16 +859,20 @@ export function createBrowserTools(
   toolOutputDir: string = resolveToolOutputDir({ agentName: session }),
   allowedPaths?: string[],
   network?: BrowserNetworkGuard,
-  runtime: { shell?: Shell; fs?: FileSystem } = {},
+  runtime: { shell?: Shell; fs?: FileSystem; vault?: ResolvedVault; egress?: BrowserEgressConfig } = {},
 ): AgentTool<any>[] {
-  const { shell, fs } = runtime;
+  const { shell, fs, vault, egress } = runtime;
   const inSandbox = () => shellIsRemote(shell);
   const profileName = profileDir ? basename(profileDir).replace(/[^A-Za-z0-9._-]/g, "_") || "default" : undefined;
   const exec: BrowserExec = async (args, options = {}) => {
     const withProfile = options.profile !== false;
     if (shell && await inSandbox()) {
-      return execSandboxBrowser(shell, args, { session, profileName: withProfile ? profileName : undefined, timeout: options.timeout, cwd, saves: options.saves });
+      // a proxy here is the computer's egress (the tailnet forwarder in the VM); none: the VM's own network
+      const proxy = browserProxyContext.getStore()?.proxy;
+      return execSandboxBrowser(shell, args, { session, profileName: withProfile ? profileName : undefined, timeout: options.timeout, cwd, saves: options.saves, secret: options.secret, ...(proxy ? { proxy } : {}) });
     }
+    // on the host the arguments go straight to the process (no shell, no log)
+    if (options.secret !== undefined) args = args.map((a) => (a === BROWSER_SECRET_ARG ? options.secret! : a));
     const hostOptions = { session, profileDir: withProfile ? profileDir : undefined, signal: options.signal, timeout: options.timeout };
     // the browser runs here but the agent's files may not: save to a private file, then through fs
     if (options.saves && fs) {
@@ -807,7 +896,7 @@ export function createBrowserTools(
     browser_navigate: () => createBrowserNavigateTool(exec),
     browser_snapshot: () => createBrowserSnapshotTool(exec),
     browser_click: () => createBrowserClickTool(exec),
-    browser_fill: () => createBrowserFillTool(exec),
+    browser_fill: () => createBrowserFillTool(exec, vault),
     browser_type: () => createBrowserTypeTool(exec),
     browser_press: () => createBrowserPressTool(exec),
     browser_screenshot: () => createBrowserScreenshotTool(exec, cwd, allowedPaths),
@@ -829,5 +918,15 @@ export function createBrowserTools(
     ? ALL_BROWSER_TOOL_NAMES.filter(n => allowedTools.some(a => a.toLowerCase() === n))
     : ALL_BROWSER_TOOL_NAMES;
 
-  return names.map(n => withToolOutputOffload(guardedByNetwork(factories[n](), network, inSandbox), { dir: toolOutputDir, maxChars: MAX_OUTPUT_BYTES, fs }));
+  // the VM side of the egress: one host per toolset (its tailnet checks are cached per computer)
+  let host: ReturnType<typeof shellHost> | undefined;
+  const remote = {
+    host: () => (shell ? (host ??= shellHost(shell, fs)) : undefined),
+    profilePath: profileName ? `${SANDBOX_BROWSER_PROFILES}/${profileName}` : undefined,
+    close: () => exec(["close"], { profile: false, timeout: 15_000 }),
+  };
+  return names.map(n => withToolOutputOffload(
+    withEgress(guardedByNetwork(factories[n](), network, inSandbox), egress, network, inSandbox, session, profileDir, remote),
+    { dir: toolOutputDir, maxChars: MAX_OUTPUT_BYTES, fs },
+  ));
 }

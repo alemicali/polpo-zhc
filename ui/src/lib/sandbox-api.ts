@@ -65,6 +65,10 @@ export interface EffectiveSandbox {
   provider: SandboxProvider;
   network: { mode: SandboxNetworkMode; allow?: string[] };
   resources: { cpus?: number; memoryMb?: number; diskMb?: number; timeoutMin?: number };
+  /** The provider the settings chose is not available on the server: `provider` runs instead (weaker isolation). */
+  fallback?: { from: SandboxProvider; reason: "unavailable" };
+  /** The agent's computer this runs on (a persistent machine), when it has one. */
+  computer?: { id: string; name: string; kind: string };
 }
 
 export interface SandboxOverview {
@@ -72,6 +76,8 @@ export interface SandboxOverview {
   settings: SandboxSettings | null;
   polpo: EffectiveSandbox;
   agents: Array<{ name: string; settings: SandboxSettings | null; task: EffectiveSandbox; chat: EffectiveSandbox }>;
+  /** The instance's Daytona snapshot and its state, when the server could read it ("inactive": activated on the next create). */
+  snapshot?: { provider: "daytona"; name: string; state: string };
 }
 
 export const SANDBOX_PROVIDERS: Array<{ id: SandboxProvider; label: string; description: string; remote?: boolean }> = [
@@ -113,7 +119,9 @@ export function describeSandbox(sandbox: EffectiveSandbox): string {
     sandbox.resources.cpus ? `${sandbox.resources.cpus} CPU` : null,
     sandbox.resources.timeoutMin ? `${sandbox.resources.timeoutMin} min` : null,
   ].filter(Boolean).join(", ");
-  return `${providerLabel(sandbox.provider)} · network ${network}${limits ? ` · ${limits}` : ""}`;
+  const fallback = sandbox.fallback ? ` (instead of ${providerLabel(sandbox.fallback.from)}: not available on this server)` : "";
+  const computer = sandbox.computer ? ` · computer ${sandbox.computer.name || sandbox.computer.id}` : "";
+  return `${providerLabel(sandbox.provider)}${computer}${fallback} · network ${network}${limits ? ` · ${limits}` : ""}`;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -139,12 +147,22 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export type RemoteProviderId = "daytona" | "e2b";
 
 /** settings.sandbox.providers.<id> for Daytona/E2B: no secrets, the key stays in the referenced vault entry. */
+export type DaytonaApiVersion = "v0" | "v2";
+
 export interface RemoteProviderSettings {
   credential?: VaultRef;
-  /** Daytona: API URL. */
+  /** Daytona: "v0" (app.daytona.io, default) or "v2" (the new service: Linux VMs, project keys). */
+  api?: DaytonaApiVersion;
+  /** Daytona v0: API URL (not accepted with v2). */
   apiUrl?: string;
-  /** Daytona: region. */
+  /** Daytona v0: region. */
   target?: string;
+  /** Daytona v2: region for new sandboxes. */
+  region?: string;
+  /** Daytona v0: snapshot new sandboxes come from. */
+  snapshot?: string;
+  /** Daytona: image (v2: a registered image; default the Polpo runner image). */
+  image?: string;
   /** E2B: custom domain (self-hosted). */
   domain?: string;
   /** E2B: default template. */
@@ -157,18 +175,30 @@ export interface RemoteProviderStatus extends RemoteProviderSettings {
   configured: boolean;
   /** The chosen entry exists and holds a key. */
   keyFound: boolean;
+  /** Daytona: the class of the machines it creates ("linux-vm" with v2; with v0 it comes with the snapshot). */
+  vmClass?: string;
+  /** Daytona v2: the image new sandboxes come from (the setting, else the runner image). */
+  effectiveImage?: string;
   lastTest?: { ok: boolean; at: string; durationMs?: number; error?: string };
 }
 
+/** The fields the provider card edits: other options stored with the provider are kept on save. */
+export const REMOTE_PROVIDER_FIELDS: Record<RemoteProviderId, ReadonlyArray<keyof RemoteProviderSettings>> = {
+  daytona: ["credential", "api", "apiUrl", "target", "region", "snapshot", "image"],
+  e2b: ["credential", "domain", "template"],
+};
+
 /**
  * The instance sandbox settings with one remote provider set (or removed with null): the rest of
- * the sandbox settings and the other providers are kept as they are.
+ * the sandbox settings, the other providers, and the provider's options the card does not edit
+ * are kept as they are. An empty field removes that option.
  */
 export function withRemoteProvider(current: SandboxSettings | null | undefined, id: RemoteProviderId, settings: RemoteProviderSettings | null): SandboxSettings {
   const providers = { ...(current?.providers ?? {}) };
   if (settings) {
+    const kept = Object.fromEntries(Object.entries(providers[id] ?? {}).filter(([k]) => !(REMOTE_PROVIDER_FIELDS[id] as readonly string[]).includes(k)));
     const clean = Object.fromEntries(Object.entries(settings).filter(([, v]) => v !== undefined && v !== null && v !== ""));
-    providers[id] = clean;
+    providers[id] = { ...kept, ...clean };
   } else {
     delete providers[id];
   }

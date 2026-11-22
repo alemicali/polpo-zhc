@@ -20,7 +20,7 @@ import {
   parseSummary,
   type CompactionInfo,
 } from "@polpo-ai/core";
-import { effectiveCompactionSettings } from "../core/config.js";
+import { effectiveCompactionSettings, loadPolpoConfig } from "../core/config.js";
 import { createWorkspace, hostVolumeMounts, WorkspaceShell, isRemoteWorkspace } from "../sandbox/manager.js";
 import { RemoteWorkspace } from "../sandbox/remote.js";
 import { createSandboxVolumeCheckpointTool } from "../tools/sandbox-volume-tools.js";
@@ -52,6 +52,8 @@ import { getArtifactStore } from "../server/artifact-runtime.js";
 import { createStorageAgentTools } from "../tools/storage-tools.js";
 import { createCompanyBrainAgentTools } from "../tools/company-brain-tools.js";
 import { inkRegistry } from "../core/ink-config.js";
+import { ConnectorManager } from "../mcp/manager.js";
+import { connectorsPromptSection } from "../mcp/runtime.js";
 
 /**
  * Build an "## Available Tools" section for the agent's system prompt.
@@ -458,6 +460,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   const start = Date.now();
   let alive = true;
   let browserNetwork: BrowserNetworkGuard | undefined;
+  let connectorManager: ConnectorManager | undefined;
 
   // Enforce model allowlist (throws if model not allowed)
   if (agentConfig.model) {
@@ -814,6 +817,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
           browserSession: agentConfig.name,
           browserProfileDir,
           browserNetwork,
+          browserEgress: ctx?.browserEgress,
           vault,
           emailAllowedDomains: agentConfig.emailAllowedDomains ?? ctx?.emailAllowedDomains,
           outputDir,
@@ -834,6 +838,24 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
         allTools.push(...createCompanyBrainAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
         allTools.push(...createStorageAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, { vaultStore: ctx.vaultStore as any, cwd, allowedPaths: effectiveAllowedPaths, outputDir, fs: remoteFs }));
       }
+      // Connectors granted to the agent (mcp__<connector>__<tool>): a connector that cannot connect is
+      // skipped with a note in the prompt, never failing the run.
+      let connectorNote = "";
+      if (ctx?.polpoDir) {
+        const polpoDir = ctx.polpoDir;
+        try {
+          connectorManager = new ConnectorManager({
+            polpoDir,
+            vaultStore: ctx.vaultStore,
+            settings: () => (loadPolpoConfig(polpoDir)?.settings ?? undefined) as any,
+            log: (line) => handle.onTranscript?.({ type: "log", message: line }),
+          });
+          const { tools: connectorTools, notes } = await connectorManager.toolsFor(agentConfig.name, agentConfig.allowedTools);
+          const taken = new Set(allTools.map((tool) => tool.name));
+          allTools.push(...connectorTools.filter((tool) => !taken.has(tool.name)));
+          connectorNote = connectorsPromptSection(connectorManager.store.list(), agentConfig.name, notes);
+        } catch { /* no connectors */ }
+      }
       agent.state.tools = allTools;
 
       // Refresh system prompt with mailboxes info now that vault is resolved.
@@ -850,6 +872,10 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
           head && head.role === "system"
             ? [{ ...head, content: prompt }, ...rest]
             : [{ role: "system", content: prompt, timestamp: Date.now() } as AgentMessage, ...agent.state.messages];
+      }
+      if (connectorNote) {
+        const [head, ...rest] = agent.state.messages;
+        if (head && head.role === "system" && typeof head.content === "string") agent.state.messages = [{ ...head, content: `${head.content}\n\n${connectorNote}` }, ...rest];
       }
 
       if (ctx?.continuation) {
@@ -899,6 +925,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       }
       await workspace?.dispose().catch(() => undefined);
       await browserNetwork?.close().catch(() => undefined);
+      await connectorManager?.closeAll().catch(() => undefined);
     }
   })();
 

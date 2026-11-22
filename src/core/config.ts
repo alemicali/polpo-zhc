@@ -1,9 +1,10 @@
-import { normalizeSandboxSettings } from "@polpo-ai/core/sandbox";
+import { daytonaProviderErrors, normalizeSandboxSettings } from "@polpo-ai/core/sandbox";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve, join } from "node:path";
 import type { PolpoFileConfig, PolpoFileConfigRaw, PolpoSettings, PolpoConfig, ProviderConfig, ModelConfig, Team } from "./types.js";
 import { getPolpoDir } from "./constants.js";
 import { parseStoredProvider } from "@polpo-ai/core/provider-config";
+import { parseEgressProxies, parseComputers, parseTailscaleSettings, computerEgressProblem, isRemoteComputer, COMPUTER_ID_PATTERN, HOST_COMPUTER_ID } from "@polpo-ai/core";
 
 const DEFAULT_SETTINGS: PolpoSettings = {
   maxRetries: 3,
@@ -73,6 +74,24 @@ export function savePolpoSettings(polpoDir: string, settings: Record<string, unk
   writeFileSync(filePath, JSON.stringify({ ...raw, settings: next }, null, 2), "utf-8");
 }
 
+/** Set (or, with undefined, remove) one key of polpo.json's `settings`; nothing else in the file changes. */
+export function savePolpoSettingsKey(polpoDir: string, key: string, value: unknown): void {
+  const filePath = join(polpoDir, "polpo.json");
+  let raw: Record<string, unknown> = {};
+  if (existsSync(filePath)) {
+    try {
+      raw = JSON.parse(readFileSync(filePath, "utf-8")) as Record<string, unknown>;
+    } catch {
+      throw new Error("polpo.json is not valid JSON — refusing to overwrite it");
+    }
+  }
+  const settings = { ...((raw.settings && typeof raw.settings === "object" ? raw.settings : {}) as Record<string, unknown>) };
+  if (value === undefined) delete settings[key];
+  else settings[key] = value;
+  if (!existsSync(polpoDir)) mkdirSync(polpoDir, { recursive: true });
+  writeFileSync(filePath, JSON.stringify({ ...raw, settings }, null, 2), "utf-8");
+}
+
 /**
  * Read-modify-write the raw `providers` map of polpo.json (nothing else in the file changes).
  * Returns the new raw providers map.
@@ -126,6 +145,15 @@ export function validateAgents(agents: any[]): void {
       if (typeof agent.browserProfile !== "string" || !/^[a-zA-Z0-9_-]+$/.test(agent.browserProfile)) {
         throw new Error(`Agent "${agent.name}": browserProfile must contain only letters, numbers, hyphens, underscores`);
       }
+    }
+    if (agent.browserEgress !== undefined && (typeof agent.browserEgress !== "string" || !/^[A-Za-z0-9_-]*$/.test(agent.browserEgress))) {
+      throw new Error(`Agent "${agent.name}": browserEgress must be the name of a proxy in settings.egressProxies`);
+    }
+    if (agent.computers !== undefined && (!Array.isArray(agent.computers) || agent.computers.some((c: unknown) => typeof c !== "string" || (c !== HOST_COMPUTER_ID && !COMPUTER_ID_PATTERN.test(c))))) {
+      throw new Error(`Agent "${agent.name}": computers must be a list of computer ids (settings.computers)`);
+    }
+    if (agent.defaultComputer !== undefined && (typeof agent.defaultComputer !== "string" || (agent.defaultComputer !== HOST_COMPUTER_ID && !COMPUTER_ID_PATTERN.test(agent.defaultComputer)))) {
+      throw new Error(`Agent "${agent.name}": defaultComputer must be "host" or a computer id (settings.computers)`);
     }
     // Vault credentials are now stored in .polpo/vault.enc (encrypted) — no longer inline.
     // Silently strip any leftover vault field from old configs.
@@ -389,6 +417,9 @@ function parseSettings(raw: any): PolpoSettings {
   if (typeof raw?.logRetentionDays === "number" && raw.logRetentionDays >= 0) settings.logRetentionDays = raw.logRetentionDays;
   const compaction = normalizeCompactionSettings(raw?.compaction);
   if (compaction) settings.compaction = compaction;
+  // Daytona's API version and its options (v2 takes no API URL): refused with a clear message
+  const daytonaErrors = daytonaProviderErrors(raw?.sandbox?.providers?.daytona);
+  if (daytonaErrors.length) throw new Error(daytonaErrors.join("; "));
   const sandbox = normalizeSandboxSettings(raw?.sandbox);
   if (sandbox) settings.sandbox = sandbox;
 
@@ -402,6 +433,31 @@ function parseSettings(raw: any): PolpoSettings {
   if (raw?.reasoning) settings.reasoning = raw.reasoning;
   if (raw?.orchestratorSkills) settings.orchestratorSkills = raw.orchestratorSkills;
   if (raw?.emailAllowedDomains) settings.emailAllowedDomains = raw.emailAllowedDomains;
+  if (raw?.egressProxies && typeof raw.egressProxies === "object") {
+    settings.egressProxies = parseEgressProxies(raw.egressProxies);
+  }
+  if (raw?.tailscale !== undefined && raw?.tailscale !== null) {
+    settings.tailscale = parseTailscaleSettings(raw.tailscale);
+  }
+  if (raw?.computers !== undefined && raw?.computers !== null) {
+    const computers = parseComputers(raw.computers);
+    if (computers.length) settings.computers = computers;
+    // a remote computer's egress goes through Tailscale in its VM: refused when it cannot work
+    for (const c of computers) {
+      if (!isRemoteComputer(c)) continue;
+      const problem = computerEgressProblem(c, settings);
+      if (problem) throw new Error(`settings.computers: ${problem}`);
+    }
+  }
+  if (raw?.connectors && typeof raw.connectors === "object") {
+    const connectors: NonNullable<PolpoSettings["connectors"]> = {};
+    if (typeof raw.connectors.allowPrivateNetwork === "boolean") connectors.allowPrivateNetwork = raw.connectors.allowPrivateNetwork;
+    if (typeof raw.connectors.toolTimeoutMs === "number" && raw.connectors.toolTimeoutMs > 0) connectors.toolTimeoutMs = raw.connectors.toolTimeoutMs;
+    settings.connectors = connectors;
+  }
+  if (raw?.mcp && typeof raw.mcp === "object" && Array.isArray(raw.mcp.toolsets)) {
+    settings.mcp = { toolsets: (raw.mcp.toolsets as unknown[]).filter((t): t is string => typeof t === "string") };
+  }
 
   // Storage backend.
   // Default to "sqlite" so new installs get the indexed/transactional store

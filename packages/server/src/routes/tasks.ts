@@ -81,6 +81,10 @@ const createTaskRoute = createRoute({
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
       description: "Task created",
     },
+    400: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "dependsOn names a task that does not exist",
+    },
     409: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
       description: "A task with this title already exists among active tasks",
@@ -450,6 +454,16 @@ export function taskRoutes(getDeps: () => {
   app.openapi(createTaskRoute, async (c) => {
     const deps = getDeps();
     const body = c.req.valid("json");
+
+    // a dependency that does not exist would keep the task pending for ever
+    const missing: string[] = [];
+    for (const id of new Set(body.dependsOn ?? [])) if (!(await deps.taskStore.getTask(id))) missing.push(id);
+    if (missing.length) {
+      return c.json({
+        ok: false, code: "UNKNOWN_DEPENDENCY",
+        error: `dependsOn: there is no task ${missing.map((id) => `"${id}"`).join(", ")} (dependsOn takes the ids of existing tasks: list them with GET /tasks)`,
+      }, 400);
+    }
 
     const task = await deps.addTask({
       title: body.title,

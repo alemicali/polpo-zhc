@@ -41,7 +41,7 @@ import type { InboundGroup } from "./telegram-groups.js";
 import type { GroupIntentArbiter, IntentCandidate } from "./group-intent.js";
 import type { ConversationCheckTarget, RoomKind, RoomMessage, RoomStore, VoiceReplyMode } from "@polpo-ai/core";
 import { synthesizeSpeech, transcribeSpeech } from "../tools/audio-tools.js";
-import { reactionHint, reactionOf } from "./telegram-reactions.js";
+import { reactionHint, reactionOf, telegramFilesHint } from "./telegram-reactions.js";
 import { loadAgentVaultEntries, resolveAgentVault } from "../vault/index.js";
 import { speechVaultFor } from "./speech-vault.js";
 import type { TelegramAgentRelay } from "../rooms/telegram-relay.js";
@@ -1481,7 +1481,7 @@ export class ChannelGateway {
         : peer
           ? `\n\n## Caller context\nName: ${peer.displayName ?? "Unknown"}\nChannel: ${peer.channel}\nPeer ID: ${peer.id}`
           : "";
-      const channelContext = msg.channel === "telegram" ? `\n\n## Channel\n${reactionHint()}` : "";
+      const channelContext = msg.channel === "telegram" ? `\n\n## Channel\n${reactionHint()}\n${telegramFilesHint()}` : "";
 
       // Resolve model
       const settings = this.orchestrator.getConfig()?.settings;

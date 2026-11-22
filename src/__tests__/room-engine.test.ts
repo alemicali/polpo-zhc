@@ -133,15 +133,88 @@ describe("RoomEngine", () => {
     expect(await say("@growth budget?")).toEqual(["Ada: @growth budget?", "Giulia: @ops pay it"]);
   });
 
-  it("mentions-only room with one agent: whatever the person writes is for it", async () => {
-    const { say, classify } = setup({ agents: ["polpo"], settings: { replyMode: "mentions" } });
-    expect(await say("status?")).toEqual(["Ada: status?", "Polpo: polpo here"]);
+  it("mentions-only room with one agent: only a mention is answered (the setting is respected, as seen live)", async () => {
+    const { say, classify, runner } = setup({ agents: ["polpo"], settings: { replyMode: "mentions" } });
+    expect(await say("status?")).toEqual(["Ada: status?"]);
+    expect(runner).not.toHaveBeenCalled();
+    expect(await say("@polpo status?")).toEqual(["Ada: status?", "Ada: @polpo status?", "Polpo: polpo here"]);
     expect(classify).not.toHaveBeenCalled();
+    // an "intent" room with one agent still answers everything
+    rmSync(dir, { recursive: true, force: true });
+    dir = mkdtempSync(join(tmpdir(), "polpo-room-engine-"));
+    const intent = setup({ agents: ["growth"], settings: { replyMode: "intent" } });
+    expect(await intent.say("hello")).toEqual(["Ada: hello", "Giulia: growth here"]);
+  });
+
+  it("a mention is never lost to a quick follow-up, and the agent stays typing while its queued turns run (live: no PONG, room_wait settled early)", async () => {
+    const { rooms, engine, runner, events } = setup({ agents: ["growth"], settings: { replyMode: "mentions" } });
+    await rooms.ensureRoom({ id: "web:r1", kind: "web", title: "Team", agents: ["growth"], settings: { replyMode: "mentions" } });
+    // one turn per session (as the completion route's lease does): the second waits for the first
+    let busy: Promise<unknown> = Promise.resolve();
+    const gates: Array<() => void> = [];
+    runner.mockImplementation(async ({ messages }) => {
+      const prev = busy;
+      let done!: () => void;
+      busy = new Promise<void>((r) => { done = r; });
+      await prev;
+      await new Promise<void>((r) => gates.push(r));
+      done();
+      // the message it answers is the turn's last line
+      const target = String(messages.at(-1)!.content).split("\n").at(-1) ?? "";
+      return { text: target.includes("reply with PONG") ? "PONG" : "ok" };
+    });
+    const user = { id: "web:user", name: "Ada" };
+    await engine.post("web:r1", user, "@growth ping 1");
+    await vi.waitFor(() => expect(gates).toHaveLength(1));
+    await engine.post("web:r1", user, "@growth reply with PONG");
+    // a follow-up without a mention right after: it must not swallow the mention's answer
+    await engine.post("web:r1", user, "thanks");
+    // the first turn ends: the second (the PONG) is queued, so growth is still typing
+    gates.shift()!();
+    await vi.waitFor(() => expect(gates).toHaveLength(1));
+    expect(engine.typingIn("web:r1")).toEqual([{ agent: "growth", name: "Giulia" }]);
+    gates.shift()!();
+    await engine.settled();
+    expect(engine.typingIn("web:r1")).toEqual([]);
+    const transcript = (await rooms.getRecentMessages("web:r1", 50)).map((m) => `${m.authorName}: ${m.text}`);
+    expect(transcript).toContain("Giulia: PONG");
+    expect(runner).toHaveBeenCalledTimes(2); // "thanks" (no mention) is not answered
+    // typing went on once and off once
+    expect(events.filter((e) => e.type === "room:typing").map((e) => (e as { typing: boolean }).typing)).toEqual([true, false]);
   });
 
   it("the orchestrator runs as itself (no agent)", async () => {
     const { say, runner } = setup({ agents: ["polpo", "growth"], p: { polpo: 0.9 } });
     await say("what is running?");
     expect(runner.mock.calls.some(([r]) => r.agent === undefined)).toBe(true);
+  });
+});
+
+describe("group chats in the Grok Bot style", () => {
+  it("@everyone calls every agent of the group", async () => {
+    expect(mentionedAgents("@everyone where are we?", Object.values(PROFILES))).toEqual(["growth", "ops", "polpo"]);
+    expect(mentionedAgents("@tutti a che punto siamo?", [PROFILES.growth!, PROFILES.ops!])).toEqual(["growth", "ops"]);
+    expect(mentionedAgents("write to everyone@acme.com", [PROFILES.growth!])).toEqual([]);
+    const { say } = setup({ settings: { replyMode: "mentions" } });
+    expect(await say("@everyone status?")).toEqual(expect.arrayContaining(["Giulia: growth here", "Otto: ops here"]));
+  });
+
+  it("replying to an agent's message calls that agent in, without a mention", async () => {
+    const { rooms, engine, runner } = setup({ settings: { replyMode: "mentions" } });
+    await rooms.ensureRoom({ id: "web:r1", kind: "web", title: "Team", agents: ["growth", "ops"], settings: { replyMode: "mentions" } });
+    await engine.post("web:r1", { id: "web:user", name: "Ada" }, "@ops invoices?");
+    await engine.settled();
+    const otto = (await rooms.getRecentMessages("web:r1", 10)).find((m) => m.authorId === "ops")!;
+    runner.mockClear();
+    const reply = await engine.post("web:r1", { id: "web:user", name: "Ada" }, "and the late ones?", { replyToId: otto.id });
+    await engine.settled();
+    expect(reply).toMatchObject({ replyToId: otto.id, addressedTo: ["ops"] });
+    expect(runner.mock.calls.map(([r]) => r.agent)).toEqual(["ops"]);
+  });
+
+  it("the owner of the next step answers what nobody picks up, and every agent knows the goal", async () => {
+    const { say, turnText } = setup({ p: { growth: 0.2, ops: 0.3 }, settings: { goal: "launch the spring campaign", owner: "growth" } });
+    expect(await say("so, what now?")).toContain("Giulia: growth here");
+    expect(turnText("growth")).toContain("The group's goal: launch the spring campaign. You own the next step");
   });
 });
