@@ -57,6 +57,8 @@ export const missionsSqlite = sqliteTable("missions", {
   deadline: text("deadline"),
   notifications: text("notifications"),
   executionCount: integer("execution_count").notNull().default(0),
+  budgetUsd: text("budget_usd"),
+  pauseReason: text("pause_reason"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 }, (table) => [
@@ -136,6 +138,8 @@ export const missionsPg = pgTable("missions", {
   deadline: pgText("deadline"),
   notifications: jsonb("notifications"),
   executionCount: pgInteger("execution_count").notNull().default(0),
+  budgetUsd: pgText("budget_usd"),
+  pauseReason: pgText("pause_reason"),
   createdAt: pgText("created_at").notNull(),
   updatedAt: pgText("updated_at").notNull(),
 }, (table) => [

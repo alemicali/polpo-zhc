@@ -9,7 +9,7 @@ export const POLPO_EVENT_NAMES = [
   "assessment:progress", "assessment:complete", "assessment:corrected", "orchestrator:started",
   "orchestrator:tick", "orchestrator:deadlock", "orchestrator:shutdown", "deadlock:detected",
   "deadlock:resolving", "deadlock:resolved", "deadlock:unresolvable", "mission:saved",
-  "mission:executed", "mission:completed", "mission:resumed", "mission:deleted", "session:created",
+  "mission:executed", "mission:completed", "mission:resumed", "mission:deleted", "mission:budget-exceeded", "mission:budget-resumed", "session:created",
   "session:updated", "session:deleted", "message:added", "approval:requested", "approval:resolved",
   "approval:timeout", "escalation:triggered", "escalation:resolved", "escalation:human",
   "sla:warning", "sla:violated", "sla:met", "quality:gate:passed", "quality:gate:failed",

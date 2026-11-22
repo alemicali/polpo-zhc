@@ -77,6 +77,8 @@ import {
 } from "@/lib/mission-data";
 import { withMeasured } from "@/lib/graph-nodes";
 import { TaskEngineBadge } from "@/components/shared/run-context";
+import { MissionBudgetBanner, MissionCostButton } from "@/components/missions/mission-cost";
+import { useMissionCost } from "@/hooks/use-mission-cost";
 
 // ── Copyable ID ──
 
@@ -1730,6 +1732,15 @@ export function MissionDetailView({
 
   const hasScheduleInfo = !!(mission.schedule || mission.deadline || mission.endDate || mission.qualityThreshold != null || scheduleEntry);
 
+  // What the mission cost so far (every run of its tasks) and its budget: fetched again as its
+  // tasks report cost or the mission changes
+  const costKey = useMemo(
+    () => `${mission.updatedAt}|${mission.budgetUsd ?? ""}|${mission.status}|${groupTasks.map(t => `${t.id}:${t.updatedAt}`).join(",")}`,
+    [mission.updatedAt, mission.budgetUsd, mission.status, groupTasks],
+  );
+  const { cost, loading: costLoading, saveBudget } = useMissionCost(mission.id, costKey);
+  const pausedByBudget = mission.status === "paused" && mission.pauseReason === "budget";
+
   const [actionPending, setActionPending] = useState<string | null>(null);
   const handleAction = async (action: () => Promise<unknown>, label: string) => {
     if (actionPending) return;
@@ -1777,6 +1788,15 @@ export function MissionDetailView({
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          <MissionCostButton
+            cost={cost}
+            budgetUsd={mission.budgetUsd}
+            loading={costLoading}
+            onSaveBudget={async (budgetUsd) => {
+              await saveBudget(budgetUsd);
+              toast.success(budgetUsd === null ? "Budget cleared" : `Budget set to $${budgetUsd}`);
+            }}
+          />
           {mission.status === "active" && totalCount > 0 && (
             <div className="flex items-center gap-2 mr-3">
               <Progress value={progress} className="h-2 w-28" />
@@ -1806,6 +1826,8 @@ export function MissionDetailView({
           )}
         </div>
       </div>
+
+      {pausedByBudget && <MissionBudgetBanner cost={cost} budgetUsd={mission.budgetUsd} />}
 
       {/* Scheduling info strip */}
       {hasScheduleInfo && (

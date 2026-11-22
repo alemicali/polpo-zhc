@@ -10,6 +10,7 @@ import {
   type McpDeps, type Register,
 } from "./kit.js";
 import { taskLine, taskSummary, unknownAgents } from "./tasks.js";
+import { describeMissionCost, type MissionCost, type MissionCostSummary } from "@polpo-ai/core/mission-cost";
 
 export const MISSION_STATUSES = ["draft", "scheduled", "recurring", "active", "paused", "completed", "failed", "cancelled"] as const;
 /** A mission that is over, or waits for a person: what polpo_mission_wait waits for. */
@@ -23,9 +24,26 @@ const EDITABLE = ["draft", "scheduled", "recurring", "paused", "failed", "cancel
 
 const missionSummary = z.object({
   id: z.string(), name: z.string(), status: z.string(), taskCount: z.number().optional(), updatedAt: z.string().optional(),
+  cost_usd: z.number().optional().describe("What its tasks' runs cost so far, USD"),
+  budget_usd: z.number().optional().describe("Its spending limit, USD"),
+  over_budget: z.boolean().optional(),
 }).passthrough();
 
-type Mission = { id: string; name: string; status: string; data?: string; prompt?: string; updatedAt?: string; createdAt?: string; taskCount?: number; executionCount?: number; schedule?: string };
+type Mission = {
+  id: string; name: string; status: string; data?: string; prompt?: string; updatedAt?: string; createdAt?: string; taskCount?: number; executionCount?: number; schedule?: string;
+  budgetUsd?: number; pauseReason?: string; cost?: MissionCost | MissionCostSummary;
+};
+
+const usd = (v: number) => (v === 0 ? "$0" : v < 0.01 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`);
+
+/** " · $1.24 of $5" / " · $1.24" for list lines. */
+function costTag(spent: number | undefined, budget: number | undefined): string {
+  if (spent === undefined) return budget !== undefined ? ` · budget ${usd(budget)}` : "";
+  return ` · ${usd(spent)}${budget !== undefined ? ` of ${usd(budget)}${spent >= budget ? " (over budget)" : ""}` : ""}`;
+}
+
+const budgetParam = () => z.number().positive().max(1_000_000).optional()
+  .describe("Spending limit in USD for the whole mission (all its tasks' runs, retries included): when reached, no new task starts and the mission pauses until it is raised or cleared");
 type TaskRow = { id: string; title: string; status: string; assignTo?: string; group?: string; missionId?: string; updatedAt?: string };
 
 /**
@@ -111,7 +129,7 @@ function planOf(m: Mission): Record<string, unknown> | undefined {
 export function registerMissionTools(tool: Register, deps: McpDeps): void {
   tool("missions", "polpo_missions_list", {
     title: "List missions",
-    description: "Missions (plans of tasks run together), most recently updated first: id, name, status, number of tasks. "
+    description: "Missions (plans of tasks run together), most recently updated first: id, name, status, number of tasks, what they cost so far and their budget. "
       + "polpo_mission_get reads one with its plan and its tasks' progress.",
     inputSchema: {
       status: z.enum(MISSION_STATUSES).optional().describe("Only missions in this status"),
@@ -128,18 +146,24 @@ export function registerMissionTools(tool: Register, deps: McpDeps): void {
     const all = ((r.data as Mission[]) ?? [])
       .filter((m) => (!status || m.status === status) && words.every((w) => m.name.toLowerCase().includes(w)))
       .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))
-      .map((m) => ({ id: m.id, name: m.name, status: m.status, ...(m.taskCount !== undefined ? { taskCount: m.taskCount } : {}), ...(m.updatedAt ? { updatedAt: m.updatedAt } : {}) }));
+      .map((m) => ({
+        id: m.id, name: m.name, status: m.status, ...(m.taskCount !== undefined ? { taskCount: m.taskCount } : {}), ...(m.updatedAt ? { updatedAt: m.updatedAt } : {}),
+        ...(m.cost ? { cost_usd: m.cost.usd } : {}),
+        ...(m.budgetUsd !== undefined ? { budget_usd: m.budgetUsd, over_budget: (m.cost?.usd ?? 0) >= m.budgetUsd } : {}),
+        ...(m.pauseReason ? { pause_reason: m.pauseReason } : {}),
+      }));
     const p = page(all, limit ?? 20, cursor);
     if (!p) return fail(BAD_CURSOR);
-    const lines = p.items.map((m) => `- ${m.id} [${m.status}] ${short(m.name, 100)}${m.taskCount !== undefined ? ` (${m.taskCount} tasks)` : ""}`);
+    const lines = p.items.map((m) => `- ${m.id} [${m.status}${m.pause_reason ? `: ${m.pause_reason}` : ""}] ${short(m.name, 100)}${m.taskCount !== undefined ? ` (${m.taskCount} tasks)` : ""}${costTag(m.cost_usd, m.budget_usd)}`);
     return ok(`${lines.join("\n") || "No missions match."}${p.next_cursor ? `\n(more: cursor ${p.next_cursor})` : ""}`, p);
   });
 
   tool("missions", "polpo_mission_get", {
     title: "Get a mission",
-    description: "A mission with its plan (tasks, dependencies, checkpoints, delays, quality gates), its status and the status of the tasks it started.",
+    description: "A mission with its plan (tasks, dependencies, checkpoints, delays, quality gates), its status, the status of the tasks it started, "
+      + "and what it cost so far (every run of its tasks, retries included: USD, tokens, by agent and engine) against its budget.",
     inputSchema: { id: z.string().min(1).describe("The mission's id (polpo_missions_list)") },
-    outputSchema: { mission: looseObject, plan: looseObject.optional(), tasks: z.array(taskSummary), task_counts: z.record(z.string(), z.number()) },
+    outputSchema: { mission: looseObject, plan: looseObject.optional(), tasks: z.array(taskSummary), task_counts: z.record(z.string(), z.number()), cost: looseObject.optional() },
     annotations: READ,
   }, async ({ id }) => {
     const m = await loadMission(deps, id);
@@ -147,14 +171,16 @@ export function registerMissionTools(tool: Register, deps: McpDeps): void {
     const tasks = await missionTasks(deps, id);
     const plan = planOf(m.mission);
     const planTasks = (plan?.tasks as Array<{ title: string; assignTo?: string; dependsOn?: string[] }> | undefined) ?? [];
-    const { data: _d, ...mission } = m.mission;
+    const { data: _d, cost, ...mission } = m.mission;
+    const full = cost && "byAgent" in cost ? cost : undefined;
     const text = [
-      `${m.mission.id} [${m.mission.status}] ${m.mission.name}${m.mission.prompt ? `\ngoal: ${short(m.mission.prompt, 400)}` : ""}`,
+      `${m.mission.id} [${m.mission.status}${m.mission.pauseReason === "budget" ? ": over budget" : ""}] ${m.mission.name}${m.mission.prompt ? `\ngoal: ${short(m.mission.prompt, 400)}` : ""}`,
+      ...(full ? [describeMissionCost(full)] : m.mission.budgetUsd !== undefined ? [`budget: ${usd(m.mission.budgetUsd)}`] : []),
       "", "plan:",
       ...planTasks.map((t, i) => `${i + 1}. ${t.title}${t.assignTo ? ` → ${t.assignTo}` : ""}${t.dependsOn?.length ? ` (after ${t.dependsOn.join(", ")})` : ""}`),
       ...(tasks.length ? ["", `tasks: ${countText(counts(tasks))}`, ...tasks.map(taskLine)] : []),
     ].join("\n");
-    return ok(text, { mission: mission as Record<string, unknown>, ...(plan ? { plan } : {}), tasks, task_counts: counts(tasks) });
+    return ok(text, { mission: mission as Record<string, unknown>, ...(plan ? { plan } : {}), tasks, task_counts: counts(tasks), ...(cost ? { cost: cost as unknown as Record<string, unknown> } : {}) });
   });
 
   tool("missions", "polpo_mission_create", {
@@ -166,16 +192,17 @@ export function registerMissionTools(tool: Register, deps: McpDeps): void {
       name: z.string().min(1).max(120).describe("The mission's name (made unique if taken)"),
       goal: z.string().optional().describe("What the mission is for, in a sentence or two"),
       ...planShape,
+      budget_usd: budgetParam(),
       run: z.boolean().optional().describe("true to start it right away (default false: a draft)"),
     },
     outputSchema: { mission: looseObject, started: z.boolean() },
     annotations: WRITE,
-  }, async ({ name, goal, run, ...plan }) => {
+  }, async ({ name, goal, run, budget_usd, ...plan }) => {
     const valid = validatePlan(plan);
     if (!valid.ok) return fail(valid.error);
     const missing = await unknownAgents(deps, plan.tasks.map((t) => t.assignTo));
     if (missing) return fail(missing);
-    const r = await apiSend(deps, "POST", "/missions", { data: valid.data, name, ...(goal ? { prompt: goal } : {}), status: "draft" });
+    const r = await apiSend(deps, "POST", "/missions", { data: valid.data, name, ...(goal ? { prompt: goal } : {}), status: "draft", ...(budget_usd !== undefined ? { budgetUsd: budget_usd } : {}) });
     if (!r.ok) return apiError(r, "Creating the mission");
     const mission = r.data as Mission;
     if (run) {
@@ -188,9 +215,9 @@ export function registerMissionTools(tool: Register, deps: McpDeps): void {
 
   tool("missions", "polpo_mission_update", {
     title: "Update a mission",
-    description: "Rename a mission or replace parts of its plan: tasks, checkpoints, delays or quality gates (each one given replaces that list: "
-      + "read the plan with polpo_mission_get, change it, send it back). Not while it runs: abort it first. The new plan is validated; "
-      + "the result lists what changed.",
+    description: "Rename a mission, set or clear its budget, or replace parts of its plan: tasks, checkpoints, delays or quality gates (each one given replaces that list: "
+      + "read the plan with polpo_mission_get, change it, send it back). The plan cannot change while it runs (abort it first); the budget can, "
+      + "and raising or clearing it lets a mission paused by its budget go on. The new plan is validated; the result lists what changed.",
     inputSchema: {
       id: z.string().min(1).describe("The mission's id"),
       name: z.string().min(1).max(120).optional().describe("A new name"),
@@ -198,10 +225,12 @@ export function registerMissionTools(tool: Register, deps: McpDeps): void {
       checkpoints: planShape.checkpoints,
       delays: planShape.delays,
       qualityGates: planShape.qualityGates,
+      budget_usd: z.number().positive().max(1_000_000).nullable().optional()
+        .describe("Spending limit in USD for the whole mission; null clears it. Raising or clearing it lets a mission paused by its budget go on"),
     },
     outputSchema: { mission: looseObject, changed: z.array(z.string()) },
     annotations: UPDATE,
-  }, async ({ id, name, tasks, checkpoints, delays, qualityGates }) => {
+  }, async ({ id, name, tasks, checkpoints, delays, qualityGates, budget_usd }) => {
     const m = await loadMission(deps, id);
     if (!m.ok) return m.status === 404 ? notFound(id) : apiError(m, `Reading mission ${id}`);
     const planChange = tasks !== undefined || checkpoints !== undefined || delays !== undefined || qualityGates !== undefined;
@@ -209,6 +238,7 @@ export function registerMissionTools(tool: Register, deps: McpDeps): void {
     const body: Record<string, unknown> = {};
     const changed: string[] = [];
     if (name !== undefined && name !== m.mission.name) { body.name = name; changed.push("name"); }
+    if (budget_usd !== undefined && (budget_usd ?? undefined) !== m.mission.budgetUsd) { body.budgetUsd = budget_usd; changed.push("budget"); }
     if (planChange) {
       const current = planOf(m.mission) ?? {};
       const next = { ...current, ...(tasks ? { tasks } : {}), ...(checkpoints ? { checkpoints } : {}), ...(delays ? { delays } : {}), ...(qualityGates ? { qualityGates } : {}) };
@@ -225,7 +255,9 @@ export function registerMissionTools(tool: Register, deps: McpDeps): void {
       mission = r.data as Mission;
     }
     const { data: _d, ...rest } = mission;
-    return ok(changed.length ? `Updated mission ${id}: ${changed.join(", ")}.` : `Nothing changed on mission ${id}.`, { mission: rest as Record<string, unknown>, changed });
+    const budgetNote = changed.includes("budget") && m.mission.pauseReason === "budget"
+      ? " If it is now under its budget, it goes on by itself within seconds." : "";
+    return ok(changed.length ? `Updated mission ${id}: ${changed.join(", ")}.${budgetNote}` : `Nothing changed on mission ${id}.`, { mission: rest as Record<string, unknown>, changed });
   });
 
   tool("missions", "polpo_mission_run", {

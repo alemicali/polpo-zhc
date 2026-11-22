@@ -85,6 +85,7 @@ const DEFAULT_SUGGESTED_EVENT_NAMES = new Set<string>([
   "task:timeout",
   "task:question",
   "mission:completed",
+  "mission:budget-exceeded",
   "schedule:triggered",
   "approval:requested",
   "sla:violated",

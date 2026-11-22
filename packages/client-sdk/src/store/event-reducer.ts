@@ -381,6 +381,23 @@ export function reduceEvent(state: StoreState, sseEvent: SSEEvent): StoreState {
       return { ...next, missions, missionsStale: true };
     }
 
+    // A mission over its budget pauses; a raised or cleared budget makes it active again.
+    case "mission:budget-exceeded":
+    case "mission:budget-resumed": {
+      const { missionId } = data as { missionId?: string };
+      const existing = missionId ? state.missions.get(missionId) : undefined;
+      if (!existing || !missionId) return { ...next, missionsStale: true };
+      const missions = new Map(state.missions);
+      const exceeded = event === "mission:budget-exceeded";
+      missions.set(missionId, {
+        ...existing,
+        status: (exceeded ? "paused" : "active") as MissionStatus,
+        ...(exceeded ? { pauseReason: "budget" as const } : { pauseReason: undefined }),
+        updatedAt: new Date().toISOString(),
+      });
+      return { ...next, missions, missionsStale: true };
+    }
+
     // ── Delays ────────────────────────────────────────────────
 
     case "delay:started": {

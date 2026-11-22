@@ -88,7 +88,7 @@ function fakeInstance() {
     if (p === "/missions" && method === "GET") return okData([...missions.values()].map(({ data: _d, ...x }) => x));
     if (p === "/missions" && method === "POST") {
       const b = body as Mission;
-      const mi = { id: `m${missions.size + 1}`, name: b.name, status: b.status ?? "draft", data: b.data, prompt: b.prompt, updatedAt: now() };
+      const mi = { id: `m${missions.size + 1}`, name: b.name, status: b.status ?? "draft", data: b.data, prompt: b.prompt, updatedAt: now(), ...(b.budgetUsd !== undefined ? { budgetUsd: b.budgetUsd } : {}) };
       missions.set(mi.id, mi);
       return okData(mi, 201);
     }
@@ -361,6 +361,43 @@ describe("missions", () => {
     expect(badCheckpoint).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/unknown task "Nope"/) }] });
     expect(await call(deps(f), "polpo_mission_create", { name: "R", tasks: [{ title: "A", description: "a", assignTo: "ghost" }] })).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/No agent "ghost"/) }] });
     expect(f.missions.size).toBe(0);
+  });
+
+  it("sets a mission's budget, and shows what it cost (text and structured) in the list and in the mission", async () => {
+    const f = fakeInstance();
+    const made = await call(deps(f), "polpo_mission_create", { name: "Report", ...plan, budget_usd: 5 });
+    expect(f.calls.find((c) => c.method === "POST" && c.path.endsWith("/missions"))!.body).toMatchObject({ budgetUsd: 5 });
+    expect(made.structuredContent.mission).toMatchObject({ budgetUsd: 5 });
+
+    const cost = {
+      currency: "USD", usd: 6.2, harnessUsd: 6, modelUsd: 0.2, tokens: 12000, runs: 4, tasks: 2, unpricedRuns: 0, runsActive: 0,
+      byAgent: [{ agent: "coach", usd: 6, harnessUsd: 6, modelUsd: 0, tokens: 2000, runs: 3 }, { agent: "writer", usd: 0.2, harnessUsd: 0, modelUsd: 0.2, tokens: 10000, runs: 1 }],
+      byEngine: [{ engine: "claude-code", usd: 6, harnessUsd: 6, modelUsd: 0, tokens: 2000, runs: 3 }, { engine: "polpo", usd: 0.2, harnessUsd: 0, modelUsd: 0.2, tokens: 10000, runs: 1 }],
+      partial: false, budgetUsd: 5, remainingUsd: -1.2, budgetUsed: 1.24, overBudget: true,
+    };
+    Object.assign(f.missions.get("m1")!, { status: "paused", pauseReason: "budget", cost });
+    const got = await call(deps(f), "polpo_mission_get", { id: "m1" });
+    expect(got.structuredContent.cost).toMatchObject({ usd: 6.2, overBudget: true });
+    expect(got.structuredContent.mission.cost).toBeUndefined();
+    expect(got.content[0].text).toMatch(/\[paused: over budget\]/);
+    expect(got.content[0].text).toMatch(/cost: \$6\.20 · 12,000 tokens · 4 runs over 2 tasks/);
+    expect(got.content[0].text).toMatch(/budget: \$5\.00 · 124% used · OVER BUDGET/);
+    expect(got.content[0].text).toMatch(/by engine: Claude Code \$6\.00 \(3\), Polpo \$0\.20 \(1\)/);
+
+    f.missions.get("m1")!.cost = { usd: 6.2, tokens: 12000, runs: 4, budgetUsd: 5, overBudget: true } as never;
+    const listed = await call(deps(f), "polpo_missions_list", {});
+    expect(listed.structuredContent.items[0]).toMatchObject({ id: "m1", cost_usd: 6.2, budget_usd: 5, over_budget: true });
+    expect(listed.content[0].text).toMatch(/- m1 \[paused: budget\] Report · \$6\.20 of \$5\.00 \(over budget\)/);
+
+    // raising it: the update says the mission goes on by itself
+    const raised = await call(deps(f), "polpo_mission_update", { id: "m1", budget_usd: 10 });
+    expect(raised.structuredContent.changed).toEqual(["budget"]);
+    expect(raised.content[0].text).toMatch(/goes on by itself/);
+    expect(f.calls.at(-1)).toMatchObject({ method: "PATCH", body: { budgetUsd: 10 } });
+    // clearing it
+    await call(deps(f), "polpo_mission_update", { id: "m1", budget_usd: null });
+    expect(f.calls.at(-1)).toMatchObject({ method: "PATCH", body: { budgetUsd: null } });
+    expect(await call(deps(f), "polpo_mission_create", { name: "Bad", ...plan, budget_usd: -3 })).toMatchObject({ isError: true });
   });
 
   it("creates a draft, reads it with its tasks, updates and runs it, waits and aborts with confirm", async () => {

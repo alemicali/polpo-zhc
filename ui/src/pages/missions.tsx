@@ -41,6 +41,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { useMissions, useTasks, useAgents } from "@polpo-ai/react";
+import { MissionCostBadge } from "@/components/missions/mission-cost";
 import type { Mission, MissionStatus } from "@polpo-ai/react";
 import { useAsyncAction } from "@/hooks/use-polpo";
 import { useNow } from "@/hooks/use-now";
@@ -256,6 +257,10 @@ function MissionRow({
 
       {/* Status badges */}
       <div className="flex items-center gap-1.5 shrink-0">
+        <MissionCostBadge cost={mission.cost} budgetUsd={mission.budgetUsd} className="mr-1" />
+        {mission.status === "paused" && mission.pauseReason === "budget" && (
+          <Badge variant="outline" className="text-micro border-destructive/30 text-destructive">over budget</Badge>
+        )}
         {stats.running > 0 && (
           <Badge variant="secondary" className="text-micro">{stats.running} running</Badge>
         )}

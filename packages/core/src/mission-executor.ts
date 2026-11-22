@@ -8,6 +8,7 @@ import type { CheckpointStore, CheckpointState } from "./checkpoint-store.js";
 import type { DelayStore, DelayState } from "./delay-store.js";
 import type { NotificationRouterPort } from "./notification-router-port.js";
 import { parseISO8601Duration } from "./iso-duration.js";
+import { isValidBudgetUsd, missionSpentUsd, tasksOfMission } from "./mission-cost.js";
 
 // ── In-memory fallback stores (no Node.js deps) ─────────────────────────
 
@@ -240,7 +241,7 @@ export class MissionExecutor {
           ? await this.ctx.registry.getMission?.(taskMissionId)
           : await this.ctx.registry.getMissionByName?.(group);
         if (mission && mission.status === "active") {
-          await this.ctx.registry.updateMission?.(mission.id, { status: "paused" });
+          await this.ctx.registry.updateMission?.(mission.id, { status: "paused", ...(mission.pauseReason ? { pauseReason: undefined } : {}) });
         }
 
         // Register notification rules for this checkpoint's channels
@@ -282,7 +283,8 @@ export class MissionExecutor {
     const groupTasks = (await this.ctx.registry.getAllTasks()).filter(t => t.group === group);
     const mission = await this.resolveMissionForGroup(groupTasks, group);
     if (mission && mission.status === "paused") {
-      await this.ctx.registry.updateMission?.(mission.id, { status: "active" });
+      // the budget check pauses it again at the next tick if it is still over its budget
+      await this.ctx.registry.updateMission?.(mission.id, { status: "active", ...(mission.pauseReason ? { pauseReason: undefined } : {}) });
     }
 
     this.ctx.emitter.emit("checkpoint:resumed", {
@@ -493,8 +495,9 @@ export class MissionExecutor {
     return this.resolveMissionForGroup(groupTasks, group);
   }
 
-  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules }): Promise<Mission> {
+  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules; budgetUsd?: number }): Promise<Mission> {
     if (!this.ctx.registry.saveMission) throw new Error("Store does not support missions");
+    if (opts.budgetUsd !== undefined && !isValidBudgetUsd(opts.budgetUsd)) throw new Error("budgetUsd must be a positive number of USD");
     const requested = opts.name ?? (await this.ctx.registry.nextMissionName?.()) ?? `mission-${Date.now()}`;
     const name = await this.uniqueMissionName(requested);
     const mission = await this.ctx.registry.saveMission({
@@ -503,6 +506,7 @@ export class MissionExecutor {
       prompt: opts.prompt,
       status: opts.status ?? "draft",
       notifications: opts.notifications,
+      ...(opts.budgetUsd !== undefined ? { budgetUsd: opts.budgetUsd } : {}),
     });
     this.ctx.emitter.emit("mission:saved", { missionId: mission.id, name: mission.name, status: mission.status });
     return mission;
@@ -533,9 +537,24 @@ export class MissionExecutor {
     return (await this.ctx.registry.getAllMissions?.()) ?? [];
   }
 
+  /**
+   * Update a mission. `budgetUsd: undefined` (the key present) or null clears the budget; a mission
+   * leaving "paused" forgets why it was paused (pauseReason). A budget raised or cleared on a
+   * mission the budget paused lets it go on at the next tick (OrchestratorEngine).
+   */
   async updateMission(missionId: string, updates: Partial<Omit<Mission, "id">>): Promise<Mission> {
     if (!this.ctx.registry.updateMission) throw new Error("Store does not support missions");
-    return this.ctx.registry.updateMission(missionId, updates);
+    let next = updates;
+    if ("budgetUsd" in updates) {
+      const b = (updates as { budgetUsd?: number | null }).budgetUsd;
+      if (b !== undefined && b !== null && !isValidBudgetUsd(b)) throw new Error("budgetUsd must be a positive number of USD (null clears it)");
+      next = { ...next, budgetUsd: b ?? undefined };
+    }
+    if (updates.status !== undefined && updates.status !== "paused" && !("pauseReason" in updates)
+      && (await this.getMission(missionId))?.pauseReason) {
+      next = { ...next, pauseReason: undefined };
+    }
+    return this.ctx.registry.updateMission(missionId, next);
   }
 
   async deleteMission(missionId: string): Promise<boolean> {
@@ -612,6 +631,12 @@ export class MissionExecutor {
   async resumeMission(missionId: string, opts?: { retryFailed?: boolean }): Promise<{ retried: number; pending: number }> {
     const mission = await this.getMission(missionId);
     if (!mission) throw new Error("Mission not found");
+    if (mission.status === "paused" && mission.pauseReason === "budget" && isValidBudgetUsd(mission.budgetUsd)) {
+      const spent = missionSpentUsd(tasksOfMission(mission, await this.ctx.registry.getAllTasks()));
+      if (spent >= mission.budgetUsd) {
+        throw new Error(`Mission "${mission.name}" is over its budget ($${spent.toFixed(2)} spent of $${mission.budgetUsd.toFixed(2)}): raise or clear budgetUsd and it goes on by itself.`);
+      }
+    }
 
     // Re-register volatile agents if they were cleaned up
     this.forgetCleanedGroup(mission.name);
