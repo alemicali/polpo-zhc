@@ -110,6 +110,36 @@ export class VaultOAuthProvider implements OAuthClientProvider {
     return this;
   }
 
+  /**
+   * Forget a stored client that no longer matches this instance's public URLs: a CIMD client_id
+   * (metadata document URL) other than the current one, or a dynamic registration for another
+   * redirect URI. The next authorization then registers again (or uses the current CIMD URL).
+   * Returns why it was dropped, if it was.
+   */
+  async dropStaleClient(): Promise<string | undefined> {
+    if (this.options.preregistered || !this.options.redirectUrl) return undefined;
+    const creds = await this.creds();
+    const info = parse<{ client_id?: unknown; redirect_uris?: unknown }>(creds[SECRET_KEYS.clientInfo]);
+    if (!info || typeof info.client_id !== "string") return undefined;
+    const redirect = this.options.redirectUrl;
+    let reason: string | undefined;
+    if (/^https?:\/\//.test(info.client_id)) {
+      if (info.client_id !== this.clientMetadataUrl) reason = `metadata document URL changed (was ${info.client_id})`;
+    } else if (Array.isArray(info.redirect_uris)) {
+      if (!info.redirect_uris.includes(redirect)) reason = `registered for another redirect URI (${info.redirect_uris.join(", ")})`;
+    } else if (creds[SECRET_KEYS.redirectUri] && creds[SECRET_KEYS.redirectUri] !== redirect) {
+      reason = `registered for another redirect URI (${creds[SECRET_KEYS.redirectUri]})`;
+    }
+    if (!reason) return undefined;
+    await this.invalidateCredentials("client");
+    return reason;
+  }
+
+  /** The pre-registered client in use, if any. */
+  get preregisteredClient(): PreregisteredClient | undefined {
+    return this.options.preregistered;
+  }
+
   get redirectUrl(): string | undefined {
     return this.options.redirectUrl;
   }

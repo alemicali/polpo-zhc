@@ -76,6 +76,15 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** A log line for a started authorization: where it goes and with which client (no state, PKCE or secrets). */
+function describeAuthorization(url: URL, clientMetadataUrl: string | undefined, preregistered: boolean): string {
+  const clientId = url.searchParams.get("client_id") ?? "";
+  const client = preregistered ? "pre-registered client"
+    : clientMetadataUrl && clientId === clientMetadataUrl ? `client_id ${clientId} (metadata document)`
+    : "dynamically registered client";
+  return `authorize at ${url.origin}${url.pathname}, ${client}, redirect_uri ${url.searchParams.get("redirect_uri") ?? "(none)"}`;
+}
+
 function safeEqual(a: string, b: string): boolean {
   const x = Buffer.from(a);
   const y = Buffer.from(b);
@@ -106,7 +115,7 @@ export class ConnectorManager {
   }
 
   private log(message: string): void {
-    (this.options.log ?? ((m: string) => console.log(m)))(`[connectors] ${message}`);
+    (this.options.log ?? ((m: string) => console.log(m)))(`[polpo/connectors] ${message}`);
   }
 
   private urlPolicy() {
@@ -427,18 +436,44 @@ export class ConnectorManager {
         ...(metadataUrl ? { clientMetadataUrl: metadataUrl } : {}),
       }).init();
       if (connector.status === "needs_reauth") await provider.invalidateCredentials("tokens");
+      // a client registered for another public URL (e.g. before POLPO_PUBLIC_URL was set) would fail at the provider
+      if (!(await provider.tokens())) {
+        const stale = await provider.dropStaleClient();
+        if (stale) this.log(`oauth start ${id}: dropped the stored OAuth client (${stale}); registering again`);
+      }
       const scopes = connector.auth.oauth?.scopes;
       const result = await auth(provider, { serverUrl: url, fetchFn: provider.fetch, ...(scopes?.length ? { scope: scopes.join(" ") } : {}) });
       if (result === "AUTHORIZED") {
+        this.log(`oauth start ${id}: already authorized (stored tokens)`);
         await this.close(id);
         return { authorized: true };
       }
       if (!provider.authorizationUrl) throw new ConnectorError("The server did not start an authorization", "error");
       if (connector.lastError) this.setStatus(id, "needs_auth");
+      this.log(`oauth start ${id}: ${describeAuthorization(provider.authorizationUrl, provider.clientMetadataUrl, !!provider.preregisteredClient)}`);
       return { authorizationUrl: provider.authorizationUrl.toString() };
     } catch (err) {
-      throw this.recordFailure(id, this.oauthFailure(connector, err, provider) ?? err);
+      const failure = this.recordFailure(id, this.oauthFailure(connector, err, provider) ?? err);
+      this.log(`oauth start ${id} failed (redirect_uri ${redirectUrl}): ${errorMessage(failure)}`);
+      throw failure;
     }
+  }
+
+  /**
+   * The provider sent the browser back with an error (access_denied, invalid_client…) instead of a
+   * code: drop the pending authorization and keep the reason as the connector's lastError.
+   */
+  async abortOAuth(state: string, error: string, description?: string): Promise<ConnectorConfig | undefined> {
+    const reason = [error, description].filter(Boolean).join(": ");
+    const pending = await this.findPendingState(state);
+    if (!pending) {
+      this.log(`oauth callback (unknown or expired state): provider returned ${reason}`);
+      return undefined;
+    }
+    await this.secrets.unset(pending.id, [SECRET_KEYS.state, SECRET_KEYS.stateExpires, SECRET_KEYS.verifier]);
+    this.setStatus(pending.id, "error", { error: `Authorization was not completed (${reason}).` });
+    this.log(`oauth callback ${pending.id}: provider returned ${reason}`);
+    return this.store.get(pending.id) ?? pending;
   }
 
   /** The connector waiting for this state (unexpired), if any. */
@@ -460,7 +495,10 @@ export class ConnectorManager {
   /** The browser came back: exchange the code (state is single use), store the tokens, connect. */
   async finishOAuth(state: string, code: string): Promise<{ connector: ConnectorConfig; toolCount?: number; error?: string }> {
     const connector = await this.findPendingState(state);
-    if (!connector) throw new ConnectorError("Unknown or expired authorization: start connecting again", "error");
+    if (!connector) {
+      this.log("oauth callback: unknown or expired state");
+      throw new ConnectorError("Unknown or expired authorization: start connecting again", "error");
+    }
     // single use: the state goes before anything else
     await this.secrets.unset(connector.id, [SECRET_KEYS.state, SECRET_KEYS.stateExpires]);
     let provider: VaultOAuthProvider | undefined;
@@ -470,13 +508,16 @@ export class ConnectorManager {
       }).init();
       await auth(provider, { serverUrl: connector.transport.url!, authorizationCode: code, fetchFn: provider.fetch });
     } catch (err) {
-      throw this.recordFailure(connector.id, this.oauthFailure(connector, err, provider) ??
+      const failure = this.recordFailure(connector.id, this.oauthFailure(connector, err, provider) ??
         new ConnectorError(`Authorization failed: ${errorMessage(err)}`, "error"));
+      this.log(`oauth callback ${connector.id}: code exchange failed: ${errorMessage(failure)}`);
+      throw failure;
     } finally {
       await this.secrets.unset(connector.id, [SECRET_KEYS.verifier]);
     }
     await this.close(connector.id);
     const result = await this.test(connector.id);
+    this.log(`oauth callback ${connector.id}: authorized${result.error ? `, but the first connection failed: ${result.error}` : result.tools ? `, ${result.tools.length} tools` : ""}`);
     return { connector: this.store.get(connector.id) ?? connector, ...(result.tools ? { toolCount: result.tools.length } : {}), ...(result.error ? { error: result.error } : {}) };
   }
 

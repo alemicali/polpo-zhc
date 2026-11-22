@@ -69,6 +69,30 @@ describe("connectors in the app", () => {
     });
   });
 
+  it("with a path-prefixed POLPO_PUBLIC_URL, the dashboard calling on another port still gets public provider URLs", async () => {
+    const saved = { public: process.env.POLPO_PUBLIC_URL, dashboard: process.env.POLPO_DASHBOARD_URL };
+    process.env.POLPO_PUBLIC_URL = "https://lumea-dev.example.ts.net/lumea";
+    process.env.POLPO_DASHBOARD_URL = "https://lumea-dev.example.ts.net:5174";
+    const privatePort = { "x-forwarded-host": "lumea-dev.example.ts.net:3001", "x-forwarded-proto": "https" };
+    try {
+      const catalog = await (await app.request("/api/v1/connectors/catalog", { headers: { ...auth, ...privatePort } })).json();
+      expect(catalog.data.redirectUri).toBe("https://lumea-dev.example.ts.net/lumea/api/v1/connectors/oauth/callback");
+      const doc = await (await app.request("/api/v1/connectors/oauth/client-metadata.json", { headers: privatePort })).json();
+      expect(doc).toMatchObject({
+        client_id: "https://lumea-dev.example.ts.net/lumea/api/v1/connectors/oauth/client-metadata.json",
+        redirect_uris: ["https://lumea-dev.example.ts.net/lumea/api/v1/connectors/oauth/callback"],
+      });
+      // the callback page sends the browser back to the dashboard, not to the API origin
+      const callback = await (await app.request("/api/v1/connectors/oauth/callback?error=access_denied&state=x", { headers: { host: "lumea-dev.example.ts.net" } })).text();
+      expect(callback).toContain("https://lumea-dev.example.ts.net:5174/connectors");
+    } finally {
+      for (const [key, value] of [["POLPO_PUBLIC_URL", saved.public], ["POLPO_DASHBOARD_URL", saved.dashboard]] as const) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+
   it("creates a connector and never returns its secrets", async () => {
     const res = await app.request("/api/v1/connectors", {
       method: "POST",

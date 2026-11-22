@@ -84,7 +84,10 @@ import { syncRoutes } from "./routes/sync.js";
 import { browserDashboardRoutes } from "./routes/browser-dashboard.js";
 import { browserProfileRoutes } from "./routes/browser-profiles.js";
 import { connectorRoutes, connectorOAuthCallback } from "./routes/connectors.js";
-import { connectorManagerFor, connectorsPromptSection, notePublicOrigin, clientMetadataDocument, CONNECTOR_CLIENT_METADATA_PATH, CONNECTOR_OAUTH_CALLBACK_PATH } from "../mcp/runtime.js";
+import {
+  connectorManagerFor, connectorsPromptSection, notePublicOrigin, clientMetadataDocument, connectorDashboardBase, connectorPublicBase,
+  CONNECTOR_CLIENT_METADATA_PATH, CONNECTOR_OAUTH_CALLBACK_PATH,
+} from "../mcp/runtime.js";
 import { isMcpToolName, toolResultText } from "../mcp/tools.js";
 import { AgentTalk } from "./agent-talk.js";
 import { orchestratorName } from "../core/orchestrator-name.js";
@@ -873,12 +876,13 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   // a session: it is public, and authenticated by the single-use, 10-minute state it carries.
   app.get(CONNECTOR_OAUTH_CALLBACK_PATH, async (c, next) => {
     if (!orchestrator?.isInitialized) return next();
-    return connectorOAuthCallback({ manager: () => connectorManagerFor(o), uiUrl: publicOrigin })(c);
+    // back to the dashboard (POLPO_DASHBOARD_URL), not to the API's public origin
+    return connectorOAuthCallback({ manager: () => connectorManagerFor(o), uiUrl: (ctx) => connectorDashboardBase(publicOrigin(ctx)) })(c);
   });
   // Our OAuth Client ID Metadata Document: servers that support CIMD fetch it (its URL is our client_id)
   app.get(CONNECTOR_CLIENT_METADATA_PATH, (c) => {
     c.header("Cache-Control", "public, max-age=3600");
-    return c.json(clientMetadataDocument(publicOrigin(c)));
+    return c.json(clientMetadataDocument(connectorPublicBase(publicOrigin(c))));
   });
 
   // ── Authenticated routes (require initialized orchestrator) ───────────
@@ -1481,7 +1485,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   authed.route("/connectors", connectorRoutes({
     manager: () => connectorManagerFor(o),
     settings: () => o.getConfig()?.settings,
-    redirectUri: (c) => `${publicOrigin(c)}${CONNECTOR_OAUTH_CALLBACK_PATH}`,
+    // what the provider must reach: POLPO_PUBLIC_URL when set, even when the dashboard calls the API on another port
+    redirectUri: (c) => `${connectorPublicBase(publicOrigin(c))}${CONNECTOR_OAUTH_CALLBACK_PATH}`,
   }));
   const computerDeps: ComputerRouteDeps = {
     computers: () => o.getConfig()?.settings?.computers ?? [],

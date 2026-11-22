@@ -32,9 +32,28 @@ export function notePublicOrigin(origin: string | undefined): void {
   if (origin) notedOrigin = origin.replace(/\/+$/, "");
 }
 
+/** POLPO_PUBLIC_URL (no trailing slash), when set. */
+function configuredPublicUrl(): string | undefined {
+  return process.env.POLPO_PUBLIC_URL?.trim().replace(/\/+$/, "") || undefined;
+}
+
+/**
+ * The base of every URL a third-party OAuth provider must reach (redirect URI, Client ID Metadata
+ * Document): POLPO_PUBLIC_URL whenever it is set, whatever host the request came through (the
+ * dashboard may call the API on a private port), else the request's public origin.
+ */
+export function connectorPublicBase(requestOrigin: string): string {
+  return configuredPublicUrl() ?? requestOrigin.replace(/\/+$/, "");
+}
+
+/** Where the browser goes back after the OAuth callback: the dashboard (POLPO_DASHBOARD_URL, POLPO_UI_PUBLIC_URL), else `fallback`. */
+export function connectorDashboardBase(fallback: string): string {
+  return (process.env.POLPO_DASHBOARD_URL?.trim() || process.env.POLPO_UI_PUBLIC_URL?.trim() || fallback).replace(/\/+$/, "");
+}
+
 /** The OAuth redirect URI: POLPO_PUBLIC_URL, else the origin the dashboard was last reached at. */
 export function connectorRedirectUri(): string | undefined {
-  const base = process.env.POLPO_PUBLIC_URL?.replace(/\/+$/, "") || notedOrigin;
+  const base = configuredPublicUrl() || notedOrigin;
   return base ? `${base}${CONNECTOR_OAUTH_CALLBACK_PATH}` : undefined;
 }
 

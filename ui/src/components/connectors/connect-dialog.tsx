@@ -169,7 +169,7 @@ function DetailsStep({ entry, connector, onSubmit }: { entry?: CatalogEntry; con
 }
 
 export function ConnectDialog({
-  state, redirectUri, onBegin, onSetup, onSetupSaved, onOpenFallback, onClose, onManage, onRetry,
+  state, redirectUri, onBegin, onSetup, onSetupSaved, onOpenFallback, onClose, onManage, onRetry, onRemove,
 }: {
   state: ConnectState;
   redirectUri: string;
@@ -180,11 +180,19 @@ export function ConnectDialog({
   onClose: () => void;
   onManage: (connector: Connector) => void;
   onRetry: () => void;
+  /** Stop and delete a connector whose sign-in never completed. */
+  onRemove?: (connector: Connector) => void;
 }) {
   const product = productName(useInstanceBranding());
   const { phase, target } = state;
   const entry = target?.entry;
   const connector = state.connector ?? target?.connector;
+  // added, but never signed in: offer to drop it instead of leaving a "Sign-in needed" connector behind
+  const removeButton = onRemove && connector && connector.auth.type === "oauth" && !connector.secrets.oauth.authorized ? (
+    <Button variant="ghost" className="text-destructive hover:text-destructive sm:mr-auto" onClick={() => onRemove(connector)}>
+      Cancel and remove
+    </Button>
+  ) : null;
   const name = connector?.name ?? entry?.name ?? target?.create?.name ?? "Connector";
   const open = phase !== "idle";
   return (
@@ -227,6 +235,7 @@ export function ConnectDialog({
             )}
             <p className="text-xs text-muted-foreground">This page updates by itself once you approve access.</p>
             <DialogFooter>
+              {removeButton}
               <Button variant="outline" onClick={onClose}>Cancel</Button>
             </DialogFooter>
           </div>
@@ -259,6 +268,7 @@ export function ConnectDialog({
               <span className="break-words">{state.error ?? "Something went wrong"}</span>
             </div>
             <DialogFooter>
+              {removeButton}
               {connector && <Button variant="outline" onClick={() => onManage(connector)}>Open settings</Button>}
               <Button variant={state.oauthApp ? "outline" : "default"} onClick={onRetry}>Try again</Button>
               {state.oauthApp && <Button onClick={onSetup}>Set up OAuth app</Button>}

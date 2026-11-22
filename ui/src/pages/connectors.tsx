@@ -25,7 +25,7 @@ import { OAuthAppsDialog } from "@/components/connectors/oauth-apps-dialog";
 import { useConnectFlow } from "@/components/connectors/use-connect-flow";
 import { useConnectors } from "@/hooks/use-connectors";
 import {
-  authLabel, catalogCardState, catalogCategories, connectorState, filterCatalog, filterConnectors,
+  authLabel, catalogCardState, catalogCategories, connectorState, connectorsApi, filterCatalog, filterConnectors,
   type CatalogEntry, type Connector, type ConnectorCardState,
 } from "@/lib/connectors-api";
 import { cn } from "@/lib/utils";
@@ -54,9 +54,11 @@ function actionLabel(state: ConnectorCardState): string {
 }
 
 function CatalogCard({
-  entry, state, onConnect, onManage,
-}: { entry: CatalogEntry; state: ConnectorCardState; onConnect: () => void; onManage: () => void }) {
+  entry, state, connector, onConnect, onManage,
+}: { entry: CatalogEntry; state: ConnectorCardState; connector?: Connector; onConnect: () => void; onManage: () => void }) {
   const primary = state === "connect" || state === "needs_setup" || state === "needs_auth" || state === "needs_reauth";
+  // an added connector waiting for sign-in (or setup) can also be managed: sign in, or remove it
+  const manageToo = primary && !!connector;
   return (
     <div data-testid={`catalog-card-${entry.id}`} className="flex flex-col gap-3 rounded-card border bg-card p-4 transition-colors hover:border-foreground/20">
       <div className="flex items-start gap-3">
@@ -75,10 +77,15 @@ function CatalogCard({
             <BadgeCheck className="h-3 w-3" /> In Claude directory
           </Badge>
         )}
+        {manageToo && (
+          <Button size="sm" variant="ghost" className="ml-auto h-7 px-2 text-xs" onClick={onManage} aria-label={`Manage ${entry.name}`}>
+            Manage
+          </Button>
+        )}
         <Button
           size="sm"
           variant={primary ? "default" : "outline"}
-          className="ml-auto h-7 px-3 text-xs"
+          className={cn("h-7 px-3 text-xs", !manageToo && "ml-auto")}
           onClick={primary ? onConnect : onManage}
           aria-label={`${actionLabel(state)} ${entry.name}`}
         >
@@ -110,13 +117,11 @@ function ConnectorRow({
         </span>
       </button>
       <StateBadge state={state} className="hidden sm:inline-flex" />
-      {needsSignIn ? (
-        <Button size="sm" className="h-8" onClick={onReconnect}>{actionLabel(state)}</Button>
-      ) : (
-        <Button size="icon" variant="ghost" className="h-8 w-8" onClick={onManage} aria-label={`Manage ${connector.name}`}>
-          <Settings2 className="h-4 w-4" />
-        </Button>
-      )}
+      {needsSignIn && <Button size="sm" className="h-8" onClick={onReconnect}>{actionLabel(state)}</Button>}
+      {/* always reachable: the sheet signs in again, disconnects or removes it */}
+      <Button size="icon" variant="ghost" className="h-8 w-8" onClick={onManage} aria-label={`Manage ${connector.name}`}>
+        <Settings2 className="h-4 w-4" />
+      </Button>
     </div>
   );
 }
@@ -256,6 +261,7 @@ export function ConnectorsPage() {
                     key={entry.id}
                     entry={entry}
                     state={state}
+                    connector={connector}
                     onConnect={() => { stay(); flow.open({ entry, ...(connector ? { connector } : {}) }); }}
                     onManage={() => connector && manage(connector)}
                   />
@@ -276,6 +282,16 @@ export function ConnectorsPage() {
         onClose={flow.close}
         onManage={manage}
         onRetry={() => { if (flow.state.target) flow.open(flow.state.target); }}
+        onRemove={async (c) => {
+          flow.close();
+          try {
+            await connectorsApi.remove(c.id);
+            drop(c.id);
+            toast.success(`${c.name} removed`);
+          } catch (reason) {
+            toast.error(reason instanceof Error ? reason.message : String(reason));
+          }
+        }}
       />
 
       <CustomConnectorDialog
