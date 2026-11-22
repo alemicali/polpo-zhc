@@ -11,8 +11,8 @@
  * Computer tab (components/computers, hooks/use-computer-actions).
  */
 import { useEffect, useMemo, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
-import { Activity, ArrowUpDown, Check, Cloud, Loader2, Monitor, Plus, RefreshCw, Search, X } from "lucide-react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Activity, ArrowUpDown, Check, Cloud, Loader2, Monitor, Plus, RefreshCw, Search, Webhook, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -101,6 +101,7 @@ export function ComputersPage() {
           <Button variant="outline" onClick={() => void refreshNow()} disabled={refreshing} aria-label="Refresh status">
             <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
           </Button>
+          <Button variant="outline" asChild><Link to="/config?section=computers"><Webhook className="h-4 w-4" /> <span className="hidden sm:inline">Webhooks</span></Link></Button>
           <Button onClick={() => setDialog({})}><Plus className="h-4 w-4" /> New computer</Button>
         </>}
       />

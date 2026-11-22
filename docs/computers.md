@@ -170,10 +170,11 @@ A machine can be deleted outside Polpo: in the provider's dashboard or API, by i
   starts a new bridge).
 - When: on every live status read (`GET /computers`, the Computers page, `polpo_computers_list`),
   whose provider answers are reused for **15 s** (`?fresh=1`, and the page's refresh button, ask
-  again), and in the background every **5 minutes**: one listing of this instance's computer
-  machines per provider (label `polpo-scope=computer`) and, for hibernated v2 computers, one snapshot
-  listing; only the computers that disagree with it get the full check. A provider that cannot be
-  asked changes nothing.
+  again), at once when the provider pushes an event (webhooks, below), and in the background every
+  **5 minutes** (every **20** when every provider in use pushes its events: a safety net): one
+  listing of this instance's computer machines per provider (label `polpo-scope=computer`) and, for
+  hibernated v2 computers, one snapshot listing; only the computers that disagree with it get the
+  full check. A provider that cannot be asked changes nothing.
 - **Recreate** (the page's action for a `deleted` computer) is a confirmed **Reset**: a new machine
   from the image, without the old files. **Remove from Polpo** is **Delete**.
 - Using it anyway (a chat, a task, a harness turn, Start) makes a new machine from the image instead
@@ -188,6 +189,43 @@ Daytona deactivates snapshots nobody used for a while; creating from one then fa
 the server log) and tries once more; if activation fails the error says what to do. Settings →
 Sandbox and the computer's card show when the snapshot is not active. Daytona v2 has no such
 snapshots: a missing image fails the create with the command that builds it.
+
+### Provider webhooks
+
+Providers that have lifecycle webhooks push their machines' changes, so a machine deleted, stopped
+or paused outside Polpo shows at once. An event is a hint: it triggers the computer's full check at
+its provider (idempotent), and events about machines that are not this instance's computers are
+ignored. Set up in **Settings → Computers** (status per provider: receiving, configured with no event
+yet, or not configured; the last event; the URL to give the provider).
+
+- Endpoint: `POST <POLPO_PUBLIC_URL>/api/v1/computers/webhooks/<provider>` — public, authenticated
+  by the provider's signature, 256 KB at most, rate limited (300 a minute per provider). **Behind
+  Tailscale Funnel the path `/<instance>/api/v1/computers/webhooks/` must be exposed** (by default
+  only `/mcp` is); Polpo does not change the Funnel.
+- **Daytona**: in Daytona's dashboard, Webhooks → Add Endpoint with that URL and the events
+  `sandbox.created`, `sandbox.state.updated` (`oldState` → `newState`; `destroyed` = gone) and
+  `snapshot.removed`; then paste the endpoint's signing secret (`whsec_…`) in Settings → Computers:
+  it goes to the vault (owner `$computers`, entry `webhook-daytona`), never through chat or MCP (the
+  MCP tool gives a setup link). Deliveries are verified Svix-style: headers `svix-id`,
+  `svix-timestamp`, `svix-signature` (or `webhook-*`), HMAC-SHA256 of `<id>.<timestamp>.<body>` with
+  the key after `whsec_`, timestamp within 5 minutes. (Daytona's docs do not describe the signature:
+  this is how its Svix-based webhooks sign; a delivery that does not verify is counted as refused in
+  Settings → Computers.)
+- **E2B**: Polpo registers the endpoint itself (`POST https://api.e2b.app/events/webhooks` with the
+  project's API key) for `sandbox.lifecycle.created|killed|updated|paused|resumed|checkpointed`, with
+  a secret it makes and keeps in the vault (`$computers` / `webhook-e2b`, with the webhook's id): by
+  itself when the instance has E2B computers, an API key and `POLPO_PUBLIC_URL` (a failure waits an
+  hour), or with **Register**; **Unregister** deletes it. Deliveries carry `e2b-signature` =
+  base64(sha256(secret + body)) without padding; events older than 24 h are refused. The computer is
+  found by its label in the sandbox's metadata.
+- **Vercel Sandbox** (not a provider yet) has no lifecycle webhooks: reconcile only.
+- Replays: a delivery id (Svix) or event id is accepted once (remembered 24 h); counts and the last
+  event are kept in `.polpo/computer-webhooks.json`.
+- REST (authenticated): `GET /api/v1/computer-webhooks`, `PUT|DELETE /api/v1/computer-webhooks/daytona/secret`
+  (`{ secret }`), `POST|DELETE /api/v1/computer-webhooks/e2b/register`. MCP: `polpo_computer_webhooks`
+  (`action: status | register | unregister`); Polpo: `computer_webhooks`.
+- A pushed change emits `computer:changed` like any other (the pages update live) and adds a line to
+  the computer's activity ("The provider reported sandbox.state.updated (started → destroyed)").
 
 ## API, tools, events
 

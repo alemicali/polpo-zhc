@@ -37,6 +37,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "- **Una pagina per ogni computer**: la riga apre la sua pagina con stato e azioni (avvia, ferma o iberna, riavvia, reset, elimina), quando si iberna da solo, quanto è costato, le sessioni harness e i task che ci sono girati (con link), l'attività recente, gli agenti, gli snapshot, la macchina e la rete con l'egress. Modifica imposta anche rete e risorse.",
       "- **Eliminato dal provider**: se la macchina (e, su Daytona v2, i suoi snapshot) viene eliminata dalla dashboard del provider, Polpo se ne accorge da solo entro pochi minuti, o subito con Aggiorna, e lo mostra invece di continuare a dirlo acceso o ibernato. Puoi **Ricrearlo** (una macchina nuova dall'immagine, senza i file di prima) o **Rimuoverlo da Polpo**.",
       "- **Niente errori misteriosi**: se un agente usa un computer la cui macchina è sparita, Polpo ne crea una nuova e lo avvisa, invece di fallire.",
+      "- **Avvisi immediati dal provider**: in Impostazioni → Computers colleghi i webhook di Daytona (incolli l'URL nella sua dashboard e il segreto di firma in Polpo) ed E2B (Polpo lo registra da solo): ogni cambio di stato arriva subito, e il controllo periodico diventa una rete di sicurezza.",
     ].join("\n"),
     cta: { label: "Apri i computer", to: "/computers" },
   },

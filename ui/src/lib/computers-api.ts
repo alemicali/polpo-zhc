@@ -334,7 +334,7 @@ export function allowEntries(text: string): string[] {
   return [...new Set(text.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean))];
 }
 
-const RESERVED_COMPUTER_IDS = ["host", "ephemeral"];
+const RESERVED_COMPUTER_IDS = ["host", "ephemeral", "webhooks"];
 
 /** A free computer id from an agent's name ("Nina Bot" → "nina-bot", "nina-bot-2" if taken). */
 export function suggestComputerId(name: string, taken: string[]): string {
@@ -396,3 +396,31 @@ export function computerInput(form: ComputerForm, editing = false): Record<strin
   if (!editing && form.start && form.kind !== "host") out.start = true;
   return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined));
 }
+
+// ── Provider webhooks (Settings → Computers) ─────────────────────────────
+
+export interface ComputerWebhookStatus {
+  provider: "daytona" | "e2b";
+  label: string;
+  registration: "manual" | "api";
+  secretSet: boolean;
+  registered?: boolean;
+  url?: string;
+  inUse: boolean;
+  lastEventAt?: string;
+  lastEventType?: string;
+  received: number;
+  rejected: number;
+  ignored: number;
+  lastError?: string;
+  lastErrorAt?: string;
+  state: "receiving" | "configured" | "not-configured";
+}
+
+export const computerWebhooksApi = {
+  status: () => request<{ providers: ComputerWebhookStatus[]; note: string; reconcileOnly: string[] }>("/computer-webhooks"),
+  setSecret: (provider: string, secret: string) => request<ComputerWebhookStatus>(`/computer-webhooks/${encodeURIComponent(provider)}/secret`, json("PUT", { secret })),
+  removeSecret: (provider: string) => request<ComputerWebhookStatus>(`/computer-webhooks/${encodeURIComponent(provider)}/secret`, json("DELETE")),
+  registerE2b: () => request<ComputerWebhookStatus>("/computer-webhooks/e2b/register", json("POST")),
+  unregisterE2b: () => request<ComputerWebhookStatus>("/computer-webhooks/e2b/register", json("DELETE")),
+};

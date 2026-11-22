@@ -233,6 +233,8 @@ export const RECREATED_NOTICE = "Its machine had been deleted at the provider: a
 export const REFRESH_TTL_MS = 15_000;
 /** How often the server checks every computer against its provider (one listing per provider). */
 export const RECONCILE_EVERY_MS = 5 * 60_000;
+/** The same when every provider in use pushes its machines' events (webhooks): a safety net. */
+export const RECONCILE_WITH_WEBHOOKS_MS = 20 * 60_000;
 
 /** A reset whose wipe is done tries this many times to make the new machine (the provider may lag a deletion). */
 const RESET_CREATE_ATTEMPTS = 3;
@@ -1321,6 +1323,24 @@ export class ComputerManager {
     return checked;
   }
 
+  /**
+   * A provider pushed an event about this computer's machine (a webhook): the activity says what it
+   * reported when that differs from what Polpo knew, then the computer is checked at its provider
+   * (the event is a hint; the provider is the truth). Idempotent.
+   */
+  async providerEvent(c: ComputerConfig, e: { type: string; state?: string; from?: string; gone: boolean; remoteId?: string; snapshotName?: string }): Promise<ComputerLive> {
+    if (!isRemoteComputer(c) || this.deleting.has(c.id)) return this.live(c.id);
+    const cur = this.read()[c.id];
+    const machineGone = e.gone && !e.snapshotName;
+    const hinted = machineGone ? "missing" : e.state && !e.snapshotName ? computerStatusOf(c.kind as RemoteSandboxProvider, e.state) : undefined;
+    const known = cur?.status === "deleted" ? "missing" : cur?.status;
+    if ((hinted && hinted !== known) || (e.snapshotName && e.gone)) {
+      const change = [e.from, e.state].filter(Boolean).join(" → ");
+      this.notify(c, "info", `The provider reported ${e.type}${change ? ` (${change})` : ""}${e.snapshotName ? ` for snapshot ${e.snapshotName}` : e.remoteId ? ` for ${e.remoteId}` : ""}`);
+    }
+    return this.refresh(c, undefined, { force: true });
+  }
+
   // ── Server upkeep ──────────────────────────────────────────────────
 
   /**
@@ -1528,7 +1548,8 @@ export class ComputerUpkeep {
     private readonly onError?: (message: string) => void,
     /** The sandbox a rotated computer's new VM is made with. */
     private readonly sandboxFor?: (c: ComputerConfig) => EffectiveSandbox | { error: string } | undefined,
-    private readonly opts: { reconcileEveryMs?: number; now?: () => number } = {},
+    /** reconcileEveryMs: a number, or asked at each tick (slower when providers push their events). */
+    private readonly opts: { reconcileEveryMs?: number | (() => number | Promise<number>); now?: () => number; beforeReconcile?: () => Promise<void> } = {},
   ) {}
 
   start(): void {
@@ -1548,8 +1569,10 @@ export class ComputerUpkeep {
     try {
       await this.manager.idleTick(this.computers(), this.sandboxFor);
       const now = (this.opts.now ?? Date.now)();
-      if (now - this.reconciledAt >= (this.opts.reconcileEveryMs ?? RECONCILE_EVERY_MS)) {
+      const every = typeof this.opts.reconcileEveryMs === "function" ? await this.opts.reconcileEveryMs() : this.opts.reconcileEveryMs ?? RECONCILE_EVERY_MS;
+      if (now - this.reconciledAt >= every) {
         this.reconciledAt = now;
+        await this.opts.beforeReconcile?.().catch(() => undefined);
         await this.manager.reconcile(this.computers());
       }
     } catch (err) {

@@ -109,7 +109,7 @@ export function parseComputer(raw: unknown, where = "computer"): ComputerConfig 
   const r = raw as Record<string, unknown>;
   const id = str(r.id);
   if (!id || !COMPUTER_ID_PATTERN.test(id)) throw new ComputerConfigError(`${where}.id must be a slug of lowercase letters, digits and - (up to 40), e.g. "nina"`);
-  if (id === HOST_COMPUTER_ID || id === EPHEMERAL_COMPUTER) throw new ComputerConfigError(`${where}.id "${id}" is reserved`);
+  if (id === HOST_COMPUTER_ID || id === EPHEMERAL_COMPUTER || id === "webhooks") throw new ComputerConfigError(`${where}.id "${id}" is reserved`);
   const kind = r.kind;
   if (typeof kind !== "string" || !(COMPUTER_KINDS as string[]).includes(kind)) throw new ComputerConfigError(`${where}.kind must be one of ${COMPUTER_KINDS.join(", ")}`);
   const out: ComputerConfig = { id, name: str(r.name) ?? id, kind: kind as ComputerKind };
