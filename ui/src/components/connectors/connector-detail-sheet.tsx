@@ -17,7 +17,7 @@ import {
 } from "@/lib/connectors-api";
 import { cn } from "@/lib/utils";
 import { ConnectorIcon } from "./connector-icon";
-import { StateBadge, Switch } from "./connector-bits";
+import { FixItLink, StateBadge, Switch } from "./connector-bits";
 import { productName, useInstanceBranding } from "@/lib/branding";
 
 export interface AgentOption {
@@ -382,7 +382,10 @@ export function ConnectorDetailSheet({
           {connector.lastError && state !== "connected" && (
             <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm" role="alert">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
-              <span className="break-words">{connector.lastError}</span>
+              <span className="min-w-0 space-y-1">
+                <span className="block break-words">{connector.lastError}</span>
+                <FixItLink message={connector.lastError} />
+              </span>
             </div>
           )}
 

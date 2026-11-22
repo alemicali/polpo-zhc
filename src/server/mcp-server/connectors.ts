@@ -21,7 +21,7 @@ type Connector = {
 };
 type CatalogEntry = {
   id: string; name: string; category: string; description: string; url?: string; urlTemplate?: string; variants?: Array<{ label: string; url: string }>;
-  auth: string; authNotes?: string; oauth?: { app?: string }; docs?: string; setup?: string;
+  auth: string; authNotes?: string; oauth?: { app?: string }; docs?: string; setup?: string; setupManifest?: string;
 };
 
 const connectorItem = z.object({
@@ -302,7 +302,7 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
     if (c.auth.type === "oauth") {
       const start = await oauthStart(c.id);
       if (!start.ok) {
-        return ok(`Added ${c.name} [${c.id}], but it cannot be authorized yet: ${start.error}. ${entry?.setup ? `${entry.setup}\n` : ""}The person finishes the setup in the dashboard (${setup}), then polpo_connector_connect.`,
+        return ok(`Added ${c.name} [${c.id}], but it cannot be authorized yet: ${start.error}. ${entry?.setup ? `${entry.setup}\n` : ""}${entry?.setupManifest ? `App manifest (the redirect URL is this instance's public URL + /api/v1/connectors/oauth/callback; the dashboard shows it filled in):\n${entry.setupManifest}\n` : ""}The person finishes the setup in the dashboard (${setup}), then polpo_connector_connect.`,
           { connector: v, setup_url: setup, next: "Finish the OAuth setup in the dashboard, then polpo_connector_connect" });
       }
       if (start.url) {
@@ -398,7 +398,16 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
       return ok(`${id} signs in with ${cur.connector.auth.type === "none" ? "nothing (test it with polpo_connector_test)" : `a token, entered in the dashboard: ${setup}`}.`, { authorized: false, setup_url: setup });
     }
     const start = await oauthStart(id);
-    if (!start.ok) return fail(`${id} cannot be authorized from here: ${start.error}. The person finishes the setup in the dashboard: ${setup}`);
+    if (!start.ok) {
+      // A catalog connector whose OAuth app is not set up yet: give its setup steps.
+      let steps = "";
+      if (cur.connector.catalogId) {
+        const cat = await apiGet(deps, "/connectors/catalog");
+        const entry = cat.ok ? ((cat.data as { entries: CatalogEntry[] }).entries ?? []).find((e) => e.id === cur.connector.catalogId) : undefined;
+        if (entry?.setup) steps = `\n${entry.setup}`;
+      }
+      return fail(`${id} cannot be authorized from here: ${start.error}. The person finishes the setup in the dashboard: ${setup}${steps}`);
+    }
     if (start.authorized) return ok(`${id} is authorized already.`, { authorized: true });
     return ok(`The person opens this link to sign in and allow ${cur.connector.name}:\n${start.url}`, { authorized: false, ...(start.url ? { authorization_url: start.url } : {}) });
   });

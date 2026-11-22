@@ -112,6 +112,8 @@ export interface CatalogEntry {
   icon?: ConnectorIconRef;
   verified: boolean;
   setup?: string;
+  /** App manifest to create the vendor's OAuth app from, with the redirect URI as a placeholder. */
+  setupManifest?: string;
 }
 
 export interface OAuthApp {
@@ -419,6 +421,11 @@ export function setupSteps(entry: CatalogEntry, redirectUri: string): string[] {
     .split("\n")
     .map((l) => l.replace(/<public URL>\/api\/v1\/connectors\/oauth\/callback/g, redirectUri).trim())
     .filter(Boolean);
+}
+
+/** The app manifest with this instance's redirect URI filled in (undefined when the entry has none). */
+export function setupManifest(entry: CatalogEntry, redirectUri: string): string | undefined {
+  return entry.setupManifest?.replace(/<public URL>\/api\/v1\/connectors\/oauth\/callback/g, redirectUri);
 }
 
 /** Placeholders of a URL template ("https://mcp.dev.azure.com/{organization}" → ["organization"]). */
