@@ -229,6 +229,11 @@ export const UpdateSettingsSchema = z.object({
     progressiveThreshold: z.number().int().min(0).optional(),
     progressive: z.enum(["auto", "always", "never"]).optional(),
   }).strict().nullable().optional(),
+  /** How much of their dependencies' results tasks receive in their prompt (null removes it: defaults 2000 / 20000). */
+  dependencyResults: z.object({
+    perTaskChars: z.number().int().min(240).max(200_000).optional(),
+    totalChars: z.number().int().min(480).max(1_000_000).optional(),
+  }).strict().nullable().optional(),
   orchestratorModel: z.union([z.string(), ModelConfigSchema]).optional(),
   /** The orchestrator's display name (default "Polpo"); null or "" restores the default. */
   orchestratorName: z.string().trim().max(40, "at most 40 characters")

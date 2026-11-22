@@ -27,6 +27,21 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-22-dependency-results",
+    date: "2026-11-22",
+    kind: "new",
+    title: "I task ricevono i risultati dei task da cui dipendono",
+    summary: "Un task che dipende da altri trova nel suo prompt i loro risultati, output ed eventuali errori, e può leggerli per intero con lo strumento task_result.",
+    body: [
+      "- **Risultati nel prompt**: per ogni task da cui dipende vede titolo, agente, stato, la risposta finale, gli output registrati (testi per intero, file come riferimento) e l'errore se è fallito. Vale al primo avvio, nei nuovi tentativi e nelle continuazioni, con Polpo, Claude Code e Codex.",
+      "- **Nessun copia e incolla**: in una missione basta `dependsOn`; non serve un checkpoint né uno script per passare i risultati al task finale.",
+      "- **Lettura completa**: se un risultato è lungo viene accorciato, e l'agente lo legge tutto con `task_result` (solo i task da cui dipende e quelli della sua missione).",
+      "- **Spazio regolabile**: quanti caratteri per task e in totale, da `dependencyResults` nelle impostazioni (predefiniti 2000 e 20000).",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri le missioni", to: "/missions" },
+  },
+  {
     id: "2026-11-22-mission-cost",
     date: "2026-11-22",
     kind: "new",

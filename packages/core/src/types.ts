@@ -990,6 +990,8 @@ export interface PolpoSettings {
   compaction?: import("./context-compactor.js").CompactionSettings;
   /** Progressive tool discovery for agents and Polpo (tools_search / tools_load). */
   tools?: import("./progressive-tools.js").ToolsSettings;
+  /** How much of their dependencies' results tasks receive in their prompt (characters per dependency, in total). */
+  dependencyResults?: import("./dependency-results.js").DependencyResultsSettings;
   /** Where agents' tools run: default sandbox and what lower levels may choose. */
   sandbox?: import("./sandbox.js").SandboxSettings;
   /** Persistent machines agents work on (agent.defaultComputer); "host" (this server) is implicit. */

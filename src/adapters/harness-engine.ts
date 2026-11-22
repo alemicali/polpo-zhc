@@ -18,7 +18,7 @@
  */
 import { join } from "node:path";
 import {
-  agentEngineProblem, agentHarness, buildAgentSystemPrompt, HARNESS_NAMES, harnessesSettingsOf, isRemoteComputer,
+  agentEngineProblem, agentHarness, buildAgentSystemPrompt, DEPENDENCY_RESULTS_TOOL, HARNESS_NAMES, harnessesSettingsOf, isRemoteComputer,
   type AgentHarnessEngine, type PolpoSettings,
 } from "@polpo-ai/core";
 import { daytonaApiVersion } from "@polpo-ai/core/sandbox";
@@ -246,12 +246,15 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
         browserProfileDir: join(polpoDir, "browser-profiles", agentConfig.browserProfile || agentConfig.name),
         hasExtendedTools: (agentConfig.allowedTools ?? []).some((t) => /^(browser|email|image|video|audio|excel|pdf|docx|search|whatsapp|phone)_/i.test(t)),
         log: (line) => transcript({ type: "log", message: line }),
+        task,
       });
       toolsetCleanup = [
         async () => toolset.connectorManager?.closeAll(),
         async () => toolset.browserNetwork?.close(),
       ];
-      const hostTools = toHarnessHostTools(toolset.tools, {
+      // Host tools stay within HOST_TOOLS_EAGER_LIMIT where possible (all in the first request): of the
+      // task result tools only task_result, since the dependencies' results are already in the prompt
+      const hostTools = toHarnessHostTools(toolset.tools.filter((t) => t.name !== DEPENDENCY_RESULTS_TOOL), {
         interactive: false,
         onResult: (r) => {
           if (r.isError || !r.details) return;

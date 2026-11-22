@@ -15,3 +15,5 @@ The dashboard's look (instance default, per-browser customization, design tokens
 Agent harnesses (Claude Code and Codex as an agent's engine, inside its computer) are documented in [harnesses.md](harnesses.md).
 
 What a mission costs (every run of its tasks, by agent and engine) and its optional budget, which pauses it when spent, are documented in [missions.md](missions.md).
+
+How a task receives the results of the tasks it depends on (in its prompt, and with `task_result`), and how checkpoints pause a mission, are in [missions.md](missions.md#results-between-tasks).

@@ -75,3 +75,91 @@ checkpoint is resumed, the budget is checked again.
   harness estimate and the model cost, and to set, change or clear the budget. A mission its budget
   paused shows a banner.
 - Missions list: each mission's cost (against its budget), and "over budget" when it paused.
+
+# Results between tasks
+
+A task that depends on other tasks (`dependsOn`, in a mission or between standalone tasks)
+receives their results. Nothing to set up: no checkpoint, no script appending them to its
+description.
+
+## In the prompt
+
+At every run of the task (first run, retries, fix runs, continuations), Polpo puts a
+`<dependency-results>` section before its description, with one block per dependency, in its
+`dependsOn` order:
+
+- title, agent, status and task id;
+- the final result: what its agent replied at the end of its last run (`result.stdout`);
+- its registered outcomes: text, URLs and JSON inline; files and media as references (the path its
+  producer registered, on the producer's computer, with the outcome id and the task id). A text
+  outcome equal to the result is not repeated;
+- its error, when it failed (`result.stderr`, and the reviewer's feedback when the assessment did
+  not pass).
+
+```text
+<dependency-results>
+The results of the 3 tasks this task depends on. They are your input: use them.
+A part marked …[truncated] is shortened here: read a result in full with task_result({task: "<task id or title>"}).
+Files and media are references: their path is on the computer of the task that produced them.
+
+### 1. "frase-01" — agent spike-01 — done — task id w1
+Result:
+L'alba dipinge il porto di rosa mentre i gabbiani svegliano la citta dal sonno salato.
+Outcomes:
+- text "frase-01": (same as the result above)
+
+### 2. "frase-02" — agent spike-02 — done — task id w2
+Result:
+Rapporto: lorem ipsum lorem ipsum … …[truncated]
+Outcomes:
+- file "Report" (application/pdf, 20 KB): path /home/daytona/out/report.pdf (on computer "spike-02") · outcome id o9 · task id w2
+
+### 3. "fetch" — agent spike-03 — failed — task id w3
+Error:
+HTTP 503 from the API
+</dependency-results>
+```
+
+The section has a budget: at most `perTaskChars` per dependency (default 2000) and `totalChars`
+in all (default 20000), shared fairly (short results leave their room to long ones; the longest
+parts are cut first, with `…[truncated]`). With very many dependencies, those whose share would
+be too small are listed by title and id only. Change it in `.polpo/polpo.json`:
+
+```json
+{ "settings": { "dependencyResults": { "perTaskChars": 4000, "totalChars": 40000 } } }
+```
+
+(or `PATCH /api/v1/config/settings` with `dependencyResults`; `null` restores the defaults).
+
+Dependencies are task ids; in a mission document they are titles, resolved to ids when the
+mission runs (and still matched by title within the mission if an id is not found).
+
+## The tools: task_result and dependency_results
+
+A task run whose task has dependencies or belongs to a mission gets two tools:
+
+- `task_result({task, offset?})`: one task in full (result text paged by `offset`, outcomes with
+  file references, status, error), by id or exact title;
+- `dependency_results()`: every dependency's result, with a larger budget than the prompt
+  (8000 per task, 80000 in all).
+
+They read only **the task's own dependencies and the tasks of its own mission** (itself included).
+A task of another mission, or a standalone task it does not depend on, is refused. Polpo's engine
+has both; an agent harness (Claude Code, Codex) gets `task_result` as a Polpo tool (see
+[harnesses](harnesses.md)).
+
+Polpo (its `get_task` tool) and MCP clients (`polpo_task_get`) read any task's full result.
+
+# Checkpoints
+
+A checkpoint pauses a mission when its `afterTasks` are all finished (done or failed) and holds
+its `blocksTasks` until someone resumes it (dashboard, `POST /api/v1/missions/:id/checkpoints/:name/resume`,
+Polpo's `resume_checkpoint`, MCP):
+
+```json
+{ "name": "collect", "afterTasks": ["frase-01", "frase-02"], "blocksTasks": ["frase-finale"], "message": "Check the sentences" }
+```
+
+Each task in `blocksTasks` must also list the `afterTasks` in its `dependsOn` (the mission is refused
+otherwise). A checkpoint is for a person's decision; it is not needed to pass results to the next
+task (see above).
