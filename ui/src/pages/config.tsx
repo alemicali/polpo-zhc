@@ -81,6 +81,7 @@ import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { JsonBlock } from "@/components/json-block";
 import { config as appConfig, apiFetch, apiUrl } from "@/lib/config";
+import { focusSetupField, notifySetupSaved, readSetupParams } from "@/lib/setup-link";
 import {
   disablePushNotifications,
   enablePushNotifications,
@@ -944,7 +945,7 @@ function DeliveryFields({ config, onChange, gatewayRunning, channelName, savedBo
       {config.type === "telegram" && (
         <>
           <Field label="Bot Token" hint="From @BotFather on Telegram">
-            <Input className="h-8 text-xs font-mono" placeholder="123456:ABC-DEF..." value={config.botToken ?? ""} onChange={(e) => set({ botToken: e.target.value })} />
+            <Input data-setup-field="botToken" className="h-8 text-xs font-mono" placeholder="123456:ABC-DEF..." value={config.botToken ?? ""} onChange={(e) => set({ botToken: e.target.value })} />
           </Field>
           <TelegramTokenCheck api={api} botToken={config.botToken} channel={gatewayRunning || isMaskedSecret(config.botToken) ? channelName : undefined} />
           <Field label="Chat ID" hint="Where notifications are sent. Use Find my chat (new bot) or Connect my Telegram (saved bot) to fill it in.">
@@ -981,10 +982,10 @@ function DeliveryFields({ config, onChange, gatewayRunning, channelName, savedBo
       {config.type === "slack" && (
         <>
           <Field label="Webhook URL" hint="Slack Incoming Webhook URL">
-            <Input className="h-8 text-xs font-mono" placeholder="https://hooks.slack.com/services/..." value={config.webhookUrl ?? ""} onChange={(e) => set({ webhookUrl: e.target.value })} />
+            <Input data-setup-field="webhookUrl" className="h-8 text-xs font-mono" placeholder="https://hooks.slack.com/services/..." value={config.webhookUrl ?? ""} onChange={(e) => set({ webhookUrl: e.target.value })} />
           </Field>
           <Field label="API Key" hint="Optional - enables file uploads">
-            <Input className="h-8 text-xs font-mono" placeholder="xoxb-..." value={config.apiKey ?? ""} onChange={(e) => set({ apiKey: e.target.value || undefined })} />
+            <Input data-setup-field="apiKey" className="h-8 text-xs font-mono" placeholder="xoxb-..." value={config.apiKey ?? ""} onChange={(e) => set({ apiKey: e.target.value || undefined })} />
           </Field>
         </>
       )}
@@ -1005,7 +1006,7 @@ function DeliveryFields({ config, onChange, gatewayRunning, channelName, savedBo
           </Field>
           {config.provider !== "smtp" && (
             <Field label="API Key">
-              <Input className="h-8 text-xs font-mono" placeholder="re_..." value={config.apiKey ?? ""} onChange={(e) => set({ apiKey: e.target.value })} />
+              <Input data-setup-field="apiKey" className="h-8 text-xs font-mono" placeholder="re_..." value={config.apiKey ?? ""} onChange={(e) => set({ apiKey: e.target.value })} />
             </Field>
           )}
           {config.provider === "smtp" && (
@@ -1033,7 +1034,7 @@ function DeliveryFields({ config, onChange, gatewayRunning, channelName, savedBo
       {config.type === "webhook" && (
         <>
           <Field label="Notification URL" hint="Optional: Polpo POSTs notifications here as JSON. Leave empty for an inbound-only webhook.">
-            <Input className="h-8 text-xs font-mono" placeholder="https://example.com/webhook" value={config.url ?? ""} onChange={(e) => set({ url: e.target.value || undefined })} />
+            <Input data-setup-field="url" className="h-8 text-xs font-mono" placeholder="https://example.com/webhook" value={config.url ?? ""} onChange={(e) => set({ url: e.target.value || undefined })} />
           </Field>
           <Field label="Headers" hint="key:value pairs, one per line">
             <textarea
@@ -1648,10 +1649,14 @@ function ChannelsTab({ settings, onUpdateConfig }: {
     objectOrEmpty(settings.notifications).channels,
   );
 
-  // Dialog state
-  const [editOpen, setEditOpen] = useState(false);
-  const [editName, setEditName] = useState("");
-  const [editConfig, setEditConfig] = useState<NotificationChannelConfig>(defaultChannelConfig("telegram"));
+  // Dialog state (a link from an assistant, ?channel=<name>, opens that channel's form)
+  const [linked] = useState(() => {
+    const name = readSetupParams().channel;
+    return name && channels[name] ? name : undefined;
+  });
+  const [editOpen, setEditOpen] = useState(!!linked);
+  const [editName, setEditName] = useState(linked ?? "");
+  const [editConfig, setEditConfig] = useState<NotificationChannelConfig>(() => (linked ? { ...channels[linked] } : defaultChannelConfig("telegram")));
   const [isNew, setIsNew] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -1693,6 +1698,7 @@ function ChannelsTab({ settings, onUpdateConfig }: {
     try {
       await onUpdateConfig({ path: `/${encodeURIComponent(name)}`, method: "PUT", body: editConfig });
       setEditOpen(false);
+      notifySetupSaved();
     } catch (e) {
       setSaveError((e as Error).message);
     } finally {
@@ -2610,8 +2616,12 @@ function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsag
   const [authProvidersLoaded, setAuthProvidersLoaded] = useState(false);
 
   // ── "Connect specific provider" dialog (direct flow) ──
-  const [connectTarget, setConnectTarget] = useState<string | null>(null);
-  const [connectMode, setConnectMode] = useState<"choose" | "oauth" | "apikey">("choose");
+  // a link from an assistant (?section=providers&provider=openai&focus=apiKey) opens that provider's key form
+  const [connectTarget, setConnectTarget] = useState<string | null>(() => {
+    const p = readSetupParams();
+    return p.section === "providers" && p.provider && p.focus === "apiKey" ? p.provider : null;
+  });
+  const [connectMode, setConnectMode] = useState<"choose" | "oauth" | "apikey">(() => (connectTarget ? "apikey" : "choose"));
   const [oauthProviders, setOauthProviders] = useState<OAuthProvider[]>([]);
 
   // ── Disconnect ──
@@ -2687,6 +2697,7 @@ function ProvidersTab({ settings, providers, allProviderNames, providerAgentUsag
     });
     if (result.ok) {
       await refreshProviderList();
+      notifySetupSaved();
       return true;
     }
     return false;
@@ -2931,9 +2942,11 @@ export function ConfigPage() {
   const { agents } = useAgents();
   const { authStatus, refetch: refetchAuth } = useAuthStatus();
   const [activeSection, setActiveSection] = useState<SectionId>(() => {
-    const requested = new URLSearchParams(window.location.search).get("section");
+    const requested = readSetupParams().section;
     return baseSections.find((section) => section.id === requested)?.id ?? "general";
   });
+  // a link from an assistant (setup_url): scroll to the field to fill and focus it
+  useEffect(() => focusSetupField(readSetupParams()), [activeSection]);
 
   // ── Rule dialog state ──
   const [ruleDialogOpen, setRuleDialogOpen] = useState(false);
@@ -3981,6 +3994,7 @@ function CloudSyncPanel() {
       const body = await res.json().catch(() => null);
       if (!res.ok || !body?.ok) throw new Error(body?.error || "save failed");
       toast.success("Sync config saved");
+      notifySetupSaved();
       setCfg(body.data as SyncCfg);
       setSecretDirty(false);
     } catch (err) {
@@ -4139,6 +4153,7 @@ function CloudSyncPanel() {
               <div className="flex items-center gap-2">
                 <input
                   type={showSecret ? "text" : "password"}
+                  data-setup-field="secretAccessKey"
                   value={draft.secretAccessKey}
                   onChange={(e) => { setDraft({ ...draft, secretAccessKey: e.target.value }); setSecretDirty(true); }}
                   placeholder={configured && !secretDirty ? "(stored — click to replace)" : "raw secret"}

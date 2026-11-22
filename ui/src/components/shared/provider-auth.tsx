@@ -909,6 +909,8 @@ export function ApiKeyStep({
           <div className="flex gap-2">
             <div className="relative flex-1">
               <Input
+                data-setup-field="apiKey"
+                data-setup-item={selected}
                 type={showKey ? "text" : "password"}
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
