@@ -94,6 +94,9 @@ export interface NewArtifact {
   refreshSeconds?: number;
   pinned?: boolean;
   tags?: string[];
+  /** Who wrote the first version when it is not the creator (a person duplicating it), and why. */
+  author?: string;
+  note?: string;
 }
 
 export interface ArtifactPatch {
@@ -207,6 +210,11 @@ export function applyArtifactPatch(artifact: Artifact, patch: ArtifactPatch, now
   if (patch.refreshSeconds !== undefined) next.refreshSeconds = patch.refreshSeconds === null ? undefined : patch.refreshSeconds;
   if (patch.pinned !== undefined) next.pinned = patch.pinned;
   if (patch.tags !== undefined) next.tags = patch.tags;
+  if ((patch.content === undefined || patch.content === artifact.content) && next.kind !== artifact.kind) {
+    // a new kind must still describe the current content (a doc is not a sheets workspace)
+    const problem = artifactContentProblem(artifact.type, artifact.content, next.kind);
+    if (problem) throw new Error(problem);
+  }
   if (patch.content !== undefined && patch.content !== artifact.content) {
     const problem = artifactContentProblem(artifact.type, patch.content, next.kind);
     if (problem) throw new Error(problem);
@@ -239,6 +247,8 @@ export function buildArtifact(id: string, input: NewArtifact, now = new Date().t
     ...(input.description?.trim() ? { description: input.description.trim() } : {}),
     content: input.content,
     version: 1,
+    ...(input.author && input.author !== input.createdBy ? { author: input.author } : {}),
+    ...(input.note?.trim() ? { note: input.note.trim() } : {}),
     versions: [],
     createdBy: input.createdBy,
     ...(input.sessionId ? { sessionId: input.sessionId } : {}),

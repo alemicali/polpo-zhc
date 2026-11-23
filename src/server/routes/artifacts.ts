@@ -4,7 +4,9 @@
  *   GET    /artifacts                          list (?type, kind, createdBy, sessionId, q); former data views included as type "view"
  *   POST   /artifacts                          create { title, type, content, kind?, description?, sources?, refreshSeconds?, pinned?, tags? }
  *   GET    /artifacts/:id                      one artifact, with its content and versions (?preview=1 for a compact preview)
- *   PATCH  /artifacts/:id                      change it; a new content keeps the previous one as a version
+ *   PATCH  /artifacts/:id                      change it (title, pinned, content…); a new content keeps the previous one as a version;
+ *                                              expectedVersion: 409 when it changed meanwhile
+ *   POST   /artifacts/:id/duplicate            a copy of it, or of one of its versions { version? }
  *   POST   /artifacts/:id/restore/:version     make an earlier version current (as a new version)
  *   DELETE /artifacts/:id                      delete it
  *   POST   /artifacts/:id/data                 the data bridge of an html artifact: { method: sources|describe|query|sql, params }
@@ -12,7 +14,8 @@
  * Former data views ("view:<id>") are read-only here: they change with the data tools or on the Data page.
  */
 import { OpenAPIHono } from "@hono/zod-openapi";
-import { ArtifactEditConflictError, isArtifactType, matchesArtifactFilter, type Artifact, type ArtifactFilter, type ArtifactStore } from "@polpo-ai/core/artifacts";
+import { bodyLimit } from "hono/body-limit";
+import { ArtifactEditConflictError, isArtifactType, MAX_ARTIFACT_BYTES, matchesArtifactFilter, type Artifact, type ArtifactFilter, type ArtifactStore } from "@polpo-ai/core/artifacts";
 import type { DataRuntime } from "../data-runtime.js";
 import { isViewArtifactId, runArtifactDataCall, viewAsArtifact, viewAsSummary, VIEW_ARTIFACT_PREFIX, type ArtifactDataMethod } from "../artifact-runtime.js";
 
@@ -116,6 +119,8 @@ function artifactPreview(artifact: Artifact): { content: string } {
 export function artifactRoutes(getDeps: () => ArtifactRoutesDeps): OpenAPIHono {
   const app = new OpenAPIHono();
   const fail = (c: any, status: number, error: string) => c.json({ ok: false, error }, status);
+  // A content is at most MAX_ARTIFACT_BYTES; JSON escaping (quotes, newlines, \u…) can triple it on the wire.
+  app.use("*", bodyLimit({ maxSize: 4 * MAX_ARTIFACT_BYTES, onError: (c) => fail(c, 413, `The request is over ${(4 * MAX_ARTIFACT_BYTES) / 1_000_000} MB`) }));
   const emit = (artifactId: string, action: "created" | "updated" | "deleted", type: string, title: string) =>
     getDeps().emit?.({ artifactId, action, type, title, timestamp: new Date().toISOString() });
 
@@ -217,14 +222,21 @@ export function artifactRoutes(getDeps: () => ArtifactRoutesDeps): OpenAPIHono {
     const original = await store.get(c.req.param("id"));
     if (!original) return fail(c, 404, "Artifact not found");
     const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+    if (body.version !== undefined && (typeof body.version !== "number" || !Number.isSafeInteger(body.version) || body.version < 1)) {
+      return fail(c, 400, "version must be a positive integer");
+    }
     const snapshot = body.version === undefined || body.version === original.version
       ? original : original.versions.find(item => item.version === body.version);
     if (!snapshot) return fail(c, 409, "That version is no longer available");
     const { type, kind, sources, refreshSeconds, tags, description, createdBy } = original;
     try {
-      // The copy runs under the same data-source grants as the original.
+      // The copy keeps the original's author (createdBy): an html artifact reads data with its
+      // author's rights, so it keeps the same grants — never the duplicator's, which could be wider.
+      // Who duplicated it, and from which version, is recorded on the copy's first version.
+      const by = getDeps().author?.(c) ?? "person:dashboard";
       const copy = await store.create({ type, kind, sources, refreshSeconds, tags, description, createdBy,
-        content: snapshot.content, title: original.title + " (copy)" });
+        content: snapshot.content, title: original.title + " (copy)",
+        author: by, note: `Duplicated from ${original.id} v${snapshot.version} by ${by}` });
       emit(copy.id, "created", type, copy.title);
       return c.json({ ok: true, data: copy }, 201);
     } catch (err) { return fail(c, 400, (err as Error).message); }

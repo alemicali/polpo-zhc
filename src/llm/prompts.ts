@@ -1369,7 +1369,7 @@ export async function buildChatSystemPrompt(
     `  refreshSeconds when it should stay live, and load the data in polpo.onRefresh so it reloads.`,
     `  Make it look finished: a clear layout, readable on a phone, light and dark themes (polpo.theme / <html data-theme>).`,
     `- For an editable presentation, workbook or animation, use type html and kind slides, sheets or motion. Follow the versioned JSON schema in artifact_create. For Sheets, write the kind before content and cells in reading order so the grid fills in as you work.`,
-    `- When working with an artifact already open in the dashboard, read its current content with artifact_get and edit that id with artifact_update. Preserve existing tabs, artboards, layers, and stable identifiers when changing one part.`,
+    `- When working with an artifact already open in the dashboard, read its current content with artifact_get and edit that id with artifact_update, passing baseVersion (the version you read) so a person's edit made meanwhile is never overwritten. Preserve existing tabs, artboards, layers, and stable identifiers when changing one part.`,
     `- **svg**: a drawing or an illustration. **mermaid**: a diagram (flow, sequence, ER, Gantt…).`,
     `Change an artifact with artifact_update (edits for small changes, content to rewrite it); every change keeps the`,
     `previous version, so people can go back. After creating one, navigate_to({ target: "artifact", id }) so the person sees it.`,

@@ -216,23 +216,25 @@ const artifactItem = z.object({
 export function registerArtifactTools(tool: Register, deps: McpDeps): void {
   tool("artifacts", "polpo_artifacts_list", {
     title: "List artifacts",
-    description: "Artifacts (documents, html dashboards and designs, diagrams), newest first. Filter by type or words; polpo_artifact_get reads one.",
+    description: "Artifacts, newest first: docs (Markdown, with tabs, dropdowns and comments), editable workspaces (html with kind slides, sheets, design or motion), "
+      + "html dashboards and pages, drawings (svg) and diagrams (mermaid). Filter by type, kind or words; polpo_artifact_get reads one.",
     inputSchema: {
       type: z.enum(["doc", "html", "svg", "mermaid", "view"]).optional().describe("Only this type"),
+      kind: z.string().optional().describe("Only this kind: slides, sheets, design, motion, dashboard, app, report, page"),
       q: z.string().optional().describe("Words in the title or description"),
       limit: limitParam(),
       cursor: cursorParam(),
     },
     outputSchema: pageOutput(artifactItem),
     annotations: READ,
-  }, async ({ type, q, limit, cursor }) => {
-    const r = await apiGet(deps, `/artifacts${qs({ type, q })}`);
+  }, async ({ type, kind, q, limit, cursor }) => {
+    const r = await apiGet(deps, `/artifacts${qs({ type, kind, q })}`);
     if (!r.ok) return apiError(r, "Listing artifacts");
     const all = ((r.data as Array<Record<string, unknown>>) ?? []).map(({ content: _c, ...rest }) => rest);
     const p = page(all, limit ?? 20, cursor);
     if (!p) return fail(BAD_CURSOR);
     const lines = (p.items as Array<{ id: string; title: string; type: string; kind?: string; createdBy?: string; version?: number; taskId?: string; missionId?: string; size?: number; updatedAt?: string }>)
-      .map((a) => `- ${a.id} [${a.type}${a.kind ? `/${a.kind}` : ""}] ${a.title}${a.createdBy ? ` — by ${a.createdBy}` : ""}${a.version ? `, v${a.version}` : ""}`
+      .map((a) => `- ${a.id} [${artifactLabel(a.type, a.kind)}] ${a.title}${a.createdBy ? ` — by ${a.createdBy}` : ""}${a.version ? `, v${a.version}` : ""}`
         + `${a.taskId ? `, from task ${a.taskId}${a.missionId ? ` (mission ${a.missionId})` : ""}` : ""}`
         + `${typeof a.size === "number" ? `, ${a.size} bytes` : ""}${a.updatedAt ? `, updated ${a.updatedAt.slice(0, 16).replace("T", " ")}` : ""}`);
     return ok(`${lines.join("\n") || "No artifacts."}${p.next_cursor ? `\n(more: cursor ${p.next_cursor})` : ""}`, p);
@@ -240,7 +242,8 @@ export function registerArtifactTools(tool: Register, deps: McpDeps): void {
 
   tool("artifacts", "polpo_artifact_get", {
     title: "Get an artifact",
-    description: "An artifact's details and content (polpo_artifacts_list for ids).",
+    description: "An artifact's details, its content and its earlier versions (polpo_artifacts_list for ids). "
+      + "Slides, sheets and motion are JSON in content; a design is HTML. Change it with polpo_artifact_update, passing baseVersion = its version.",
     inputSchema: { id: z.string().min(1).describe("The artifact's id") },
     outputSchema: { artifact: looseObject },
     annotations: READ,
@@ -269,6 +272,38 @@ export function registerArtifactTools(tool: Register, deps: McpDeps): void {
     const a = r.data as { id?: string; title?: string };
     return ok(`Created artifact ${a.id}: ${a.title}.`, { artifact: r.data as Record<string, unknown> });
   });
+
+  tool("artifacts", "polpo_artifact_update", {
+    title: "Change an artifact",
+    description: "Change an artifact: its whole new content (same format as polpo_artifact_create; the previous one is kept as a version people can go back to), "
+      + "title, description or pin. Pass baseVersion (the version you read with polpo_artifact_get): refused if someone changed it since, then read it again.",
+    inputSchema: {
+      id: z.string().min(1).describe("The artifact's id (art_…)"),
+      baseVersion: z.number().int().positive().optional().describe("The version you read: refused when it changed since"),
+      content: z.string().optional().describe("The whole new content"),
+      title: z.string().optional().describe("A new title"),
+      description: z.string().optional().describe("One line on what it is"),
+      pinned: z.boolean().optional().describe("Pin it at the top of the artifacts, or unpin it"),
+      note: z.string().optional().describe("What changed, in a few words (shown in the versions)"),
+    },
+    outputSchema: { artifact: looseObject },
+    annotations: WRITE,
+  }, async ({ id, baseVersion, ...patch }) => {
+    const r = await apiSend(deps, "PATCH", `/artifacts/${enc(id)}`, { ...patch, ...(baseVersion ? { expectedVersion: baseVersion } : {}) });
+    if (!r.ok) {
+      return apiError(r, `Changing artifact ${id}`, r.status === 409 ? "It changed since that version: read it again with polpo_artifact_get and redo the change."
+        : r.status === 404 ? "Check the id with polpo_artifacts_list." : undefined);
+    }
+    const a = r.data as { id?: string; title?: string; version?: number };
+    return ok(`Updated artifact ${a.id} (now v${a.version}): ${a.title}.`, { artifact: r.data as Record<string, unknown> });
+  });
+}
+
+/** "html/sheets" reads as what it is: a sheets workspace. */
+function artifactLabel(type: string, kind?: string): string {
+  const workspace: Record<string, string> = { slides: "slides", sheets: "sheets", design: "design", motion: "motion" };
+  if (type === "html" && kind && workspace[kind]) return `${workspace[kind]} workspace`;
+  return `${type}${kind ? `/${kind}` : ""}`;
 }
 
 const fileEntry = z.object({ name: z.string(), type: z.string(), size: z.number().optional(), modifiedAt: z.string().optional() }).passthrough();

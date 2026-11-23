@@ -166,6 +166,7 @@ export const MCP_EQUIVALENTS: Record<string, string> = {
   polpo_artifacts_list: "artifact_list",
   polpo_artifact_get: "artifact_get",
   polpo_artifact_create: "artifact_create",
+  polpo_artifact_update: "artifact_update",
   polpo_files_list: "list_directory",
   polpo_files_search: "grep_files",
   polpo_file_read: "read_file",

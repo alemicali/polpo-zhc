@@ -37,7 +37,8 @@ async function fixture() {
   const app = new OpenAPIHono();
   app.route("/artifacts", artifactRoutes(() => ({ store, data, author: () => "person:ada@example.com", emit: (p) => emitted.push(p) })));
   const call = async (method: string, path: string, body?: unknown) => {
-    const res = await app.request(`/artifacts${path}`, { method, ...(body ? { body: JSON.stringify(body), headers: { "content-type": "application/json" } } : {}) });
+    const json = body ? JSON.stringify(body) : undefined;
+    const res = await app.request(`/artifacts${path}`, { method, ...(json ? { body: json, headers: { "content-type": "application/json", "content-length": String(Buffer.byteLength(json)) } } : {}) });
     return { status: res.status, body: await res.json() as { ok: boolean; data: any; error?: string } };
   };
   return { polpoDir, data, source, store, call, emitted };
@@ -239,4 +240,34 @@ it("duplicates the selected version with its original source grants and filters 
   expect(blank.status).toBe(201);
   const mine = await call("GET", "?mine=true");
   expect(mine.body.data.map((a: { id: string }) => a.id)).toEqual([blank.body.data.id]);
+});
+
+it("duplicating records who made the copy, refuses a malformed version, and a too large body", async () => {
+  const { call, store } = await fixture();
+  const original = await store.create({ title: "Deck", type: "doc", content: "# One", createdBy: "analyst" });
+  const copy = await call("POST", `/${original.id}/duplicate`, {});
+  expect(copy.body.data).toMatchObject({ createdBy: "analyst", author: "person:ada@example.com", note: `Duplicated from ${original.id} v1 by person:ada@example.com` });
+  expect((await call("POST", `/${original.id}/duplicate`, { version: "1" })).status).toBe(400);
+  const huge = await call("PATCH", `/${original.id}`, { content: "x".repeat(4_100_000) });
+  expect(huge.status).toBe(413);
+});
+
+it("a new kind must still fit the current content", async () => {
+  const { call } = await fixture();
+  const created = await call("POST", "", { title: "Page", type: "html", content: "{\"hello\":1}" });
+  const changed = await call("PATCH", `/${created.body.data.id}`, { kind: "sheets" });
+  expect(changed.status).toBe(400);
+  expect(changed.body.error).toMatch(/sheets workspace/);
+});
+
+it("artifact_update with baseVersion refuses a change made since, and a whole rewrite of a long artifact needs it", async () => {
+  const { store } = await fixture();
+  const polpo = { store, author: "polpo" };
+  const doc = await store.create({ title: "Notes", type: "doc", content: "# Notes", createdBy: "polpo" });
+  await store.update(doc.id, { content: "# Notes\n\nby a person", author: "person:ada@example.com" });
+  await expect(executeArtifactTool("artifact_update", { id: doc.id, baseVersion: 1, content: "# Mine" }, polpo)).rejects.toThrow(/changed since v1 \(now v2\)/);
+  expect(await executeArtifactTool("artifact_update", { id: doc.id, baseVersion: 2, content: "# Mine" }, polpo)).toMatch(/now v3/);
+  const long = await store.create({ title: "Long", type: "doc", content: "a".repeat(70_000), createdBy: "polpo" });
+  await expect(executeArtifactTool("artifact_update", { id: long.id, content: "short" }, polpo)).rejects.toThrow(/longer than artifact_get shows/);
+  expect(await executeArtifactTool("artifact_update", { id: long.id, baseVersion: 1, content: "short" }, polpo)).toMatch(/now v2/);
 });

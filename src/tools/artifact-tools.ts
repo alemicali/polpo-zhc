@@ -50,9 +50,12 @@ export const ARTIFACT_TOOLS: Tool[] = [
   {
     name: "artifact_update",
     description: "Change an artifact: new content (whole, or edits that find and replace parts), title, description, sources, refresh. "
-      + "The previous content is kept as a version (people can go back to it).",
+      + "The previous content is kept as a version (people can go back to it). People may edit it in the dashboard meanwhile: "
+      + "pass baseVersion (the version you read with artifact_get) so a change made since is not overwritten. "
+      + "artifact_get shows at most 60,000 characters: change a larger artifact with edits, not a whole content.",
     parameters: Type.Object({
       id: Type.String({ description: "Artifact id (art_…)" }),
+      baseVersion: Type.Optional(Type.Number({ description: "The version you read (artifact_get): refused if it changed since; read it again then" })),
       content: Type.Optional(Type.String({ description: "The whole new content" })),
       edits: editsParam,
       title: Type.Optional(Type.String()),
@@ -143,9 +146,16 @@ export async function executeArtifactTool(name: string, args: Record<string, unk
       const current = await ownArtifact(ctx, String(args.id ?? ""));
       const edits = Array.isArray(args.edits) ? (args.edits as Array<{ find: string; replace: string }>) : undefined;
       if (typeof args.content === "string" && edits?.length) throw new Error("Give either content or edits, not both");
+      const base = typeof args.baseVersion === "number" && Number.isSafeInteger(args.baseVersion) ? args.baseVersion : undefined;
+      if (base !== undefined && base !== current.version) {
+        throw new Error(`Artifact ${current.id} changed since v${base} (now v${current.version}): read it again with artifact_get and redo the change`);
+      }
+      if (typeof args.content === "string" && base === undefined && current.content.length > MAX_CONTENT_IN_RESULT) {
+        throw new Error(`Artifact ${current.id} is longer than artifact_get shows (${current.content.length} characters): change it with edits, or pass baseVersion to replace the whole content`);
+      }
       const content = typeof args.content === "string" ? args.content : edits?.length ? applyArtifactEdits(current.content, edits) : undefined;
       const artifact = await ctx.store.update(current.id, {
-        ...(edits?.length ? { expectedVersion: current.version } : {}),
+        ...(edits?.length || base !== undefined ? { expectedVersion: current.version } : {}),
         ...(content !== undefined ? { content } : {}),
         ...(typeof args.title === "string" ? { title: args.title } : {}),
         ...(typeof args.description === "string" ? { description: args.description } : {}),
