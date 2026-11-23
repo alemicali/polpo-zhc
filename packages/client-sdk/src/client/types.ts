@@ -2159,3 +2159,81 @@ export interface ConnectorTool {
   description?: string;
   policy: ConnectorToolPolicy;
 }
+
+// ── Computer provider webhooks (GET /computer-webhooks, /computer-webhooks/:provider/events) ──
+
+export type ComputerWebhookProvider = "daytona" | "e2b";
+export type ComputerWebhookOutcome = "accepted" | "ignored" | "rejected" | "error";
+
+/** A computer provider's webhook status (never a secret). */
+export interface ComputerWebhookStatus {
+  provider: ComputerWebhookProvider;
+  label: string;
+  /** "manual": the person adds the endpoint at the provider (Daytona); "api": Polpo registers it (E2B). */
+  registration: "manual" | "api";
+  secretSet: boolean;
+  registered?: boolean;
+  webhookId?: string;
+  /** The URL the provider must call. */
+  url?: string;
+  /** This instance has computers on this provider. */
+  inUse: boolean;
+  lastEventAt?: string;
+  lastEventType?: string;
+  /** Deliveries that passed the signature check. */
+  received: number;
+  rejected: number;
+  ignored: number;
+  /** Deliveries Polpo could not apply. */
+  errors: number;
+  /** The last problem since the provider was configured. */
+  lastError?: string;
+  lastErrorAt?: string;
+  state: "receiving" | "configured" | "not-configured";
+  /** Configured, but no delivery ever arrived: what to expect. */
+  waitingNote?: string;
+}
+
+/** One webhook delivery, as the provider's event log keeps it (without payload). */
+export interface ComputerWebhookEventSummary {
+  id: string;
+  provider: string;
+  receivedAt: string;
+  outcome: ComputerWebhookOutcome;
+  /** Why it was ignored or rejected, or what went wrong. */
+  reason?: string;
+  /** What Polpo answered the provider. */
+  httpStatus: number;
+  signature: "valid" | "invalid" | "missing" | "not-checked";
+  eventType?: string;
+  providerEventId?: string;
+  deliveryId?: string;
+  sandboxId?: string;
+  snapshotName?: string;
+  /** This instance's computer the event is about. */
+  computerId?: string;
+  /** The provider's states the event reports. */
+  providerState?: { from?: string; to?: string };
+  /** The computer's status in Polpo before and after Polpo applied the event. */
+  statusChange?: { from?: string; to?: string; error?: string; appliedAt?: string };
+  /** What Polpo did, in a line. */
+  action?: string;
+  events?: number;
+  processingMs: number;
+  bytes: number;
+}
+
+/** One webhook delivery with its redacted payload and safe headers. */
+export interface ComputerWebhookEvent extends ComputerWebhookEventSummary {
+  payload?: unknown;
+  payloadTruncated?: boolean;
+  headers?: Record<string, string>;
+}
+
+export interface ComputerWebhookEventPage {
+  provider: string;
+  events: ComputerWebhookEventSummary[];
+  nextCursor?: string;
+  total: number;
+  counts: Record<ComputerWebhookOutcome, number>;
+}

@@ -282,6 +282,19 @@ export interface PolpoEventMap {
     /** Something worth knowing that is not an error (e.g. a Daytona v2 VM that vanished was restored from its snapshot). */
     notice?: string;
   } & EventOrigin;
+  /**
+   * A computer provider's webhook delivery (Daytona, E2B) was recorded in its event log
+   * (`action: "recorded"`), or Polpo finished applying it (`"updated"`: the computer's status change).
+   */
+  "computer:webhook": {
+    provider: string;
+    /** The log entry's id (GET /computer-webhooks/:provider/events/:id). */
+    id: string;
+    action: "recorded" | "updated";
+    outcome: "accepted" | "ignored" | "rejected" | "error";
+    eventType?: string;
+    computerId?: string;
+  };
 
   // Company brain
   "brain:changed": import("./company-brain.js").BrainChangeEvent;
