@@ -247,12 +247,10 @@ export function ArtifactDocEditor({ content, onChange, readOnly = false, instanc
 
 function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAskAssistant }: DocEditorProps & { choices: DocChoiceDefinition[] }) {
   const emitted = useRef(content);
-  const ask = useRef(onAskAssistant);
-  useEffect(() => { ask.current = onAskAssistant; }, [onAskAssistant]);
   const hasAssistant = !!onAskAssistant;
   const extensions = useMemo(() => [
     ...artifactDocExtensions,
-    DocEmptyHints.configure({ ask: () => ask.current?.(), canAsk: hasAssistant, instanceName }),
+    DocEmptyHints.configure({ canAsk: hasAssistant, instanceName }),
   ], [hasAssistant, instanceName]);
   const imageReader = useRef<FileReader | null>(null);
   const [outlineOpen, setOutlineOpen] = useState(false);
@@ -299,7 +297,7 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
       emitted.current = markdown;
       onChange(markdown);
     },
-  });
+  }, [hasAssistant, instanceName]);
 
   useEffect(() => {
     if (!editor || content === emitted.current) return;
@@ -485,7 +483,10 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
           </nav>
         )}
         <div className={docScroll}>
-          <EditorContent editor={editor} className={`min-h-full ${docColumn}`} />
+          <EditorContent editor={editor} className={`min-h-full ${docColumn}`}
+            onClick={(event) => {
+              if (event.target instanceof Element && event.target.closest("[data-doc-ask]")) onAskAssistant?.();
+            }} />
         </div>
       </div>
 
