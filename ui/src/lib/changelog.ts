@@ -32,6 +32,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-23-whats-new-layout",
+    date: "2026-11-23",
+    kind: "improved",
+    title: "Novità più leggibili: il tipo sopra il titolo",
+    summary: "Nelle Novità il badge Nuovo / Migliorato / Corretto sta sopra il titolo, con l'ora a destra: il titolo usa tutta la larghezza e va a capo molto meno.",
+    body: "- Prima badge e titolo erano affiancati e il titolo finiva spesso su due righe; ora il badge (e il pallino delle non lette) sta in una riga sopra, il titolo sotto a tutta larghezza.",
+    highlight: false,
+  },
+  {
     id: "2026-11-23-compaction-split-turn-files",
     date: "2026-11-23",
     kind: "improved",

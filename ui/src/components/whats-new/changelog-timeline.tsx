@@ -221,25 +221,29 @@ function ChangelogRow({
               compact ? "px-3 py-2" : "px-3.5 py-2.5",
             )}
           >
-            <ChangelogKindBadge kind={entry.kind} className="shrink-0" />
-            <span className={cn("min-w-0 flex-1 text-sm leading-snug", unread ? "font-semibold" : "font-medium")}>
-              {entry.title}
-            </span>
-            {unread && (
-              <span className="shrink-0" title="Non letta">
-                <span aria-hidden className="block h-2 w-2 rounded-pill bg-primary" />
-                <span className="sr-only">Non letta</span>
+            <span className="flex min-w-0 flex-1 flex-col gap-1">
+              <span className="flex items-center gap-2">
+                <ChangelogKindBadge kind={entry.kind} className="shrink-0" />
+                {unread && (
+                  <span className="shrink-0" title="Non letta">
+                    <span aria-hidden className="block h-2 w-2 rounded-pill bg-primary" />
+                    <span className="sr-only">Non letta</span>
+                  </span>
+                )}
+                {online && (
+                  <time
+                    dateTime={online.toISOString()}
+                    title={`Online su questa istanza: ${formatChangelogDateTime(online)}`}
+                    className="ml-auto shrink-0 text-caption tabular-nums text-muted-foreground"
+                  >
+                    {formatChangelogTime(online)}
+                  </time>
+                )}
               </span>
-            )}
-            {online && (
-              <time
-                dateTime={online.toISOString()}
-                title={`Online su questa istanza: ${formatChangelogDateTime(online)}`}
-                className="shrink-0 text-caption tabular-nums text-muted-foreground"
-              >
-                {formatChangelogTime(online)}
-              </time>
-            )}
+              <span className={cn("min-w-0 text-sm leading-snug", unread ? "font-semibold" : "font-medium")}>
+                {entry.title}
+              </span>
+            </span>
             <ChevronDown
               aria-hidden
               className={cn(
