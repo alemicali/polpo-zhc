@@ -268,8 +268,12 @@ recorded.
 
 The last 200 deliveries per provider are kept in `.polpo/computer-webhook-events/<provider>.json`
 (newest first; the oldest are dropped), next to the status file, whatever the instance's store: it
-is per-instance diagnostics, like the sync history. The status counters (`received`, `ignored`,
-`rejected`, `errors`) follow it.
+is per-instance diagnostics, like the sync history. The status counts (`received`, `ignored`,
+`rejected`, `errors`) are the log's, so the card and its events sheet always show the same numbers.
+Deliveries counted by an older version, before the event log existed, have no entry in it: the
+first read of an older status file moves, once, what its counters held beyond the log's entries to
+`before: { received, ignored, rejected, errors, until }` (totals only), shown apart as "Before the
+event log: 7 ignored, 1 rejected — no details" (the card, the sheet, MCP `polpo_computer_webhooks`).
 
 - `GET /api/v1/computer-webhooks/:provider/events?limit=50&cursor=<nextCursor>&outcome=rejected,error`:
   newest first, without payloads; `{ provider, events, nextCursor?, total, counts }`.

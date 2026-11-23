@@ -67,6 +67,10 @@ const providerStatusSchema = z.object({
   rejected: z.number(),
   ignored: z.number(),
   errors: z.number(),
+  before: z.object({
+    received: z.number(), ignored: z.number(), rejected: z.number(), errors: z.number(),
+    until: z.string().openapi({ description: "When the event log took over" }),
+  }).optional().openapi({ description: "Deliveries counted before the event log existed: totals only, no entry in the log. The other counts are the event log's." }),
   lastError: z.string().optional(),
   lastErrorAt: z.string().optional(),
   state: z.enum(["receiving", "configured", "not-configured"]),

@@ -179,13 +179,20 @@ export function registerComputerTools(tool: Register, deps: McpDeps): void {
     }
     const r = await apiGet(deps, "/computer-webhooks");
     if (!r.ok) return apiError(r, "Reading the computer webhooks");
-    const d = r.data as { providers: Array<Record<string, unknown> & { provider: string; label: string; state: string; url?: string; secretSet: boolean; lastEventAt?: string; registration: string; lastError?: string; waitingNote?: string; received: number; rejected: number; ignored: number; errors?: number }>; note: string };
+    const d = r.data as { providers: Array<Record<string, unknown> & { provider: string; label: string; state: string; url?: string; secretSet: boolean; lastEventAt?: string; registration: string; lastError?: string; waitingNote?: string; received: number; rejected: number; ignored: number; errors?: number;
+      before?: { received: number; ignored: number; rejected: number; errors: number; until: string } }>; note: string };
     const providers = d.providers.filter((p) => !provider || p.provider === provider);
     const lines: string[] = [];
     const extra: Record<string, unknown> = {};
     for (const p of providers) {
       lines.push(`- ${p.label}: ${p.state}${p.lastEventAt ? `, last event ${p.lastEventAt}` : ""}${p.url ? `; URL ${p.url}` : "; no URL (POLPO_PUBLIC_URL is not set)"}`
-        + `; ${p.received} received (${p.ignored} ignored), ${p.rejected} rejected${p.errors ? `, ${p.errors} errors` : ""}${p.lastError ? `; last error: ${p.lastError}` : ""}`);
+        + `; event log: ${p.received} received (${p.ignored} ignored), ${p.rejected} rejected${p.errors ? `, ${p.errors} errors` : ""}${p.lastError ? `; last error: ${p.lastError}` : ""}`);
+      if (p.before) {
+        const b = p.before;
+        const accepted = Math.max(0, b.received - b.ignored - b.errors);
+        const parts = [[accepted, "accepted"], [b.ignored, "ignored"], [b.rejected, "rejected"], [b.errors, "errors"]].filter(([n]) => Number(n) > 0).map(([n, w]) => `${n} ${w}`);
+        if (parts.length) lines.push(`  Before the event log (until ${b.until}): ${parts.join(", ")} — totals only, no details (not in the events list).`);
+      }
       if (p.waitingNote) lines.push(`  ${p.waitingNote}`);
       if (p.provider === "daytona" && !p.secretSet) {
         const h = setupHandoff(deps, { kind: "computer-webhook", item: "daytona", field: "secret" }, "Daytona webhook signing secret (whsec_…, from Daytona's dashboard → Webhooks → the endpoint)");
