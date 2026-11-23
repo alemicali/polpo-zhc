@@ -5,7 +5,6 @@
  * allows). Both share the host filesystem for the paths they expose, at the same absolute paths,
  * so file tools and commands see the same files.
  */
-import { spawn } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { readFile, writeFile, mkdir, rm, copyFile, cp } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
@@ -15,10 +14,11 @@ import type {
   EffectiveSandbox, ExecOptions, ExecResult, StorageMountSpec, Workspace, WorkspaceEntry, WorkspaceFileStat,
 } from "@polpo-ai/core/sandbox";
 import { startNetworkProxy, type NetworkDenial, type NetworkProxy } from "./net-proxy.js";
-import { killProcessTree, localShell } from "./local-shell.js";
+import { localShell } from "./local-shell.js";
+import { runCommand as run } from "./process-tree.js";
 
-/** Output kept in memory per stream; the bash tool offloads anything big to a file anyway. */
-const MAX_CAPTURE_BYTES = 32 * 1024 * 1024;
+/** Run argv on this machine, stopping the whole tree on timeout or abort (process-tree.ts). */
+export { run };
 
 export interface HostWorkspaceOptions {
   /** The agent's working directory (read-write). */
@@ -92,59 +92,6 @@ export abstract class HostFsWorkspace implements Workspace {
   async download(path: string, hostPath: string): Promise<void> { await this.upload(path, hostPath); }
   abstract exec(command: string, opts?: ExecOptions): Promise<ExecResult>;
   async dispose(): Promise<void> { /* nothing held */ }
-}
-
-/** Run argv, capture output, enforce the timeout (killing the whole process group). */
-export function run(argv: string[], opts: ExecOptions & { env: Record<string, string>; cwd?: string }): Promise<ExecResult> {
-  const started = Date.now();
-  return new Promise((resolveRun) => {
-    const child = spawn(argv[0]!, argv.slice(1), { cwd: opts.cwd, env: opts.env, detached: true, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
-    const collect = (which: "out" | "err") => (chunk: Buffer) => {
-      const text = chunk.toString("utf8");
-      opts.onOutput?.(text);
-      if (which === "out") { if (stdout.length < MAX_CAPTURE_BYTES) stdout += text; }
-      else if (stderr.length < MAX_CAPTURE_BYTES) stderr += text;
-    };
-    child.stdout.on("data", collect("out"));
-    child.stderr.on("data", collect("err"));
-    // the whole tree: the shell and what it started
-    let killed = false;
-    const kill = () => {
-      killed = true;
-      if (process.platform === "win32" && child.pid && killProcessTree(child.pid)) return;
-      try { process.kill(-child.pid!, "SIGKILL"); } catch { child.kill("SIGKILL"); }
-    };
-    const timer = opts.timeoutMs ? setTimeout(() => { timedOut = true; kill(); }, opts.timeoutMs) : undefined;
-    opts.signal?.addEventListener("abort", kill, { once: true });
-    if (opts.stdin !== undefined) child.stdin.end(opts.stdin); else child.stdin.end();
-    let settled = false;
-    const finish = (result: ExecResult) => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      resolveRun(result);
-    };
-    child.on("error", (error) => {
-      finish({ exitCode: 127, stdout, stderr: `${stderr}${error.message}`, durationMs: Date.now() - started });
-    });
-    const done = (code: number | null, signal: NodeJS.Signals | null) => {
-      const exitCode = code ?? (signal ? 128 + 9 : 1);
-      if (timedOut && !stderr) stderr = `Command timed out after ${opts.timeoutMs}ms`;
-      finish({ exitCode: timedOut && exitCode === 0 ? 124 : exitCode, stdout, stderr, ...(timedOut ? { timedOut } : {}), durationMs: Date.now() - started });
-    };
-    child.on("close", done);
-    // A stopped command ends when the shell exits: a program it left behind may keep the output
-    // open (seen with Git's bash on Windows), and the run must not wait for it.
-    child.on("exit", (code, signal) => {
-      if (!killed) return;
-      child.stdout.destroy();
-      child.stderr.destroy();
-      done(code, signal);
-    });
-  });
 }
 
 /** Commands run as the server user, with the filtered environment tools already used. */
