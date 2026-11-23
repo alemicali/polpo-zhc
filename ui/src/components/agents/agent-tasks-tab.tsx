@@ -62,22 +62,22 @@ export function AgentTasksTab() {
         {taskStats.total > 0 && (
           <div className="flex items-center gap-4 flex-wrap">
             <div className="flex items-center gap-1.5 text-xs">
-              <div className="h-2 w-2 rounded-full bg-info" />
+              <div className="h-2 w-2 rounded-pill bg-info" />
               <span className="text-muted-foreground">Active</span>
               <span className="font-mono font-bold">{taskStats.active}</span>
             </div>
             <div className="flex items-center gap-1.5 text-xs">
-              <div className="h-2 w-2 rounded-full bg-muted-foreground" />
+              <div className="h-2 w-2 rounded-pill bg-muted-foreground" />
               <span className="text-muted-foreground">Pending</span>
               <span className="font-mono font-bold">{taskStats.pending}</span>
             </div>
             <div className="flex items-center gap-1.5 text-xs">
-              <div className="h-2 w-2 rounded-full bg-success" />
+              <div className="h-2 w-2 rounded-pill bg-success" />
               <span className="text-muted-foreground">Done</span>
               <span className="font-mono font-bold">{taskStats.done}</span>
             </div>
             <div className="flex items-center gap-1.5 text-xs">
-              <div className="h-2 w-2 rounded-full bg-destructive" />
+              <div className="h-2 w-2 rounded-pill bg-destructive" />
               <span className="text-muted-foreground">Failed</span>
               <span className="font-mono font-bold">{taskStats.failed}</span>
             </div>

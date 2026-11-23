@@ -17,7 +17,7 @@
 
 export type BootTheme = "light" | "dark" | "system";
 
-export type TokenGroup = "brand" | "surfaces" | "text" | "borders" | "sidebar" | "charts" | "status" | "typography" | "shape";
+export type TokenGroup = "brand" | "surfaces" | "text" | "borders" | "sidebar" | "charts" | "agents" | "status" | "typography" | "shape";
 /**
  * How a token is checked: a colour, a font stack, a radius (px, 0–24), a box-shadow, a font size
  * (rem 0.5–6 or px 8–96), a font weight (100–900), a letter-spacing (em -0.1–0.3, px -3–6, 0 or
@@ -154,6 +154,9 @@ export function appearanceKit() {
     card: ["--card", "surfaces", "color"],
     popover: ["--popover", "surfaces", "color"],
     muted: ["--muted", "surfaces", "color"],
+    overlay: ["--overlay", "surfaces", "color"],
+    canvas: ["--canvas", "surfaces", "color"],
+    canvasForeground: ["--canvas-foreground", "surfaces", "color"],
     foreground: ["--foreground", "text", "color"],
     mutedForeground: ["--muted-foreground", "text", "color"],
     cardForeground: ["--card-foreground", "text", "color"],
@@ -179,6 +182,26 @@ export function appearanceKit() {
     chart3: ["--chart-3", "charts", "color"],
     chart4: ["--chart-4", "charts", "color"],
     chart5: ["--chart-5", "charts", "color"],
+    agent1: ["--agent-1", "agents", "color"],
+    agent2: ["--agent-2", "agents", "color"],
+    agent3: ["--agent-3", "agents", "color"],
+    agent4: ["--agent-4", "agents", "color"],
+    agent5: ["--agent-5", "agents", "color"],
+    agent6: ["--agent-6", "agents", "color"],
+    agent7: ["--agent-7", "agents", "color"],
+    agent8: ["--agent-8", "agents", "color"],
+    agent9: ["--agent-9", "agents", "color"],
+    agent10: ["--agent-10", "agents", "color"],
+    agent1Foreground: ["--agent-1-foreground", "agents", "color"],
+    agent2Foreground: ["--agent-2-foreground", "agents", "color"],
+    agent3Foreground: ["--agent-3-foreground", "agents", "color"],
+    agent4Foreground: ["--agent-4-foreground", "agents", "color"],
+    agent5Foreground: ["--agent-5-foreground", "agents", "color"],
+    agent6Foreground: ["--agent-6-foreground", "agents", "color"],
+    agent7Foreground: ["--agent-7-foreground", "agents", "color"],
+    agent8Foreground: ["--agent-8-foreground", "agents", "color"],
+    agent9Foreground: ["--agent-9-foreground", "agents", "color"],
+    agent10Foreground: ["--agent-10-foreground", "agents", "color"],
     destructive: ["--destructive", "status", "color"],
     destructiveForeground: ["--destructive-foreground", "status", "color"],
     success: ["--success", "status", "color"],
@@ -201,15 +224,36 @@ export function appearanceKit() {
     textSmall: ["--text-small", "typography", "size"],
     textCaption: ["--text-caption", "typography", "size"],
     textMicro: ["--text-micro", "typography", "size"],
+    textXs: ["--text-xs", "typography", "size"],
+    textSm: ["--text-sm", "typography", "size"],
+    textBase: ["--text-base", "typography", "size"],
+    textLg: ["--text-lg", "typography", "size"],
+    textXl: ["--text-xl", "typography", "size"],
+    text2xl: ["--text-2xl", "typography", "size"],
+    text3xl: ["--text-3xl", "typography", "size"],
     headingWeight: ["--font-weight-heading", "typography", "weight"],
+    fontWeightNormal: ["--font-weight-normal", "typography", "weight"],
+    fontWeightMedium: ["--font-weight-medium", "typography", "weight"],
+    fontWeightSemibold: ["--font-weight-semibold", "typography", "weight"],
+    fontWeightBold: ["--font-weight-bold", "typography", "weight"],
     headingTracking: ["--tracking-heading", "typography", "tracking"],
     labelTracking: ["--tracking-label", "typography", "tracking"],
     labelCase: ["--label-transform", "typography", "case"],
     radius: ["--radius", "shape", "radius"],
     radiusCard: ["--radius-card", "shape", "radius"],
     radiusControl: ["--radius-control", "shape", "radius"],
+    radiusBadge: ["--radius-badge", "shape", "radius"],
+    radiusPill: ["--radius-pill", "shape", "radius"],
+    radiusAvatar: ["--radius-avatar", "shape", "radius"],
+    radiusDialog: ["--radius-dialog", "shape", "radius"],
+    shadowControl: ["--shadow-control", "shape", "shadow"],
     shadowCard: ["--shadow-card", "shape", "shadow"],
     shadowRaised: ["--shadow-raised", "shape", "shadow"],
+    shadowGlow: ["--shadow-glow", "shape", "shadow"],
+    shadowGlowStrong: ["--shadow-glow-strong", "shape", "shadow"],
+    surfaceBlur: ["--surface-blur", "shape", "blur"],
+    overlayBlur: ["--overlay-blur", "shape", "blur"],
+    glowBlur: ["--glow-blur", "shape", "blur"],
   };
   /**
    * What a token is derived from when not given (derive on), in order: the first given or
@@ -239,6 +283,17 @@ export function appearanceKit() {
     ["successForeground", "contrast:success"],
     ["warningForeground", "contrast:warning"],
     ["infoForeground", "contrast:info"],
+    ["canvasForeground", "contrast:canvas"],
+    ["agent1Foreground", "contrast:agent1"],
+    ["agent2Foreground", "contrast:agent2"],
+    ["agent3Foreground", "contrast:agent3"],
+    ["agent4Foreground", "contrast:agent4"],
+    ["agent5Foreground", "contrast:agent5"],
+    ["agent6Foreground", "contrast:agent6"],
+    ["agent7Foreground", "contrast:agent7"],
+    ["agent8Foreground", "contrast:agent8"],
+    ["agent9Foreground", "contrast:agent9"],
+    ["agent10Foreground", "contrast:agent10"],
     ["statusRunning", "info"],
     ["statusAssigned", "primary"],
     ["statusQueued", "mutedForeground"],
@@ -248,7 +303,9 @@ export function appearanceKit() {
   ];
   /** The numeric tokens' bounds (the same as APPEARANCE_NUMBER_RANGES in packages/core/src/appearance.ts). */
   const RANGES: Record<string, [number, number]> = {
-    radius: [0, 24], radiusCard: [0, 32], radiusControl: [0, 32], headingWeight: [100, 900], sidebarOpacity: [0.5, 1], sidebarBlur: [0, 24],
+    radius: [0, 24], radiusCard: [0, 32], radiusControl: [0, 32], radiusBadge: [0, 999], radiusPill: [0, 999], radiusAvatar: [0, 999], radiusDialog: [0, 32],
+    headingWeight: [100, 900], fontWeightNormal: [100, 900], fontWeightMedium: [100, 900], fontWeightSemibold: [100, 900], fontWeightBold: [100, 900],
+    sidebarOpacity: [0.5, 1], sidebarBlur: [0, 24], surfaceBlur: [0, 24], overlayBlur: [0, 24], glowBlur: [0, 96],
   };
   const GRADIENT_ANGLE = 135;
   /** The font services a web font stylesheet may come from (APPEARANCE_FONT_HOSTS on the server). */

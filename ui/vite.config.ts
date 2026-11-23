@@ -5,12 +5,17 @@ import { VitePWA } from "vite-plugin-pwa";
 import { visualizer } from "rollup-plugin-visualizer";
 import path from "path";
 import { fileURLToPath } from "url";
-import { bootScriptSource } from "./src/lib/appearance-kit";
+import { appearanceKit, bootScriptSource } from "./src/lib/appearance-kit";
 import { CHANGELOG } from "./src/lib/changelog";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const isElectron = process.env.POLPO_ELECTRON === "1";
+
+/** The browser chrome's colour per palette, [light, dark] (lib/appearance-kit.ts, from index.css). */
+const THEME_COLORS = appearanceKit().THEME_COLORS;
+/** The default look's page background (dark, Tide Pool); server.mjs serves the instance's own. */
+const DEFAULT_CHROME = THEME_COLORS.tide[1];
 
 const pwaPlugin = VitePWA({
   registerType: "autoUpdate",
@@ -19,8 +24,8 @@ const pwaPlugin = VitePWA({
     short_name: "Polpo ZHC",
     description:
       "Monitor and orchestrate your AI coding agent team",
-    theme_color: "#0a0e1a",
-    background_color: "#0a0e1a",
+    theme_color: DEFAULT_CHROME,
+    background_color: DEFAULT_CHROME,
     display: "standalone",
     orientation: "portrait-primary",
     scope: "/",
@@ -108,7 +113,10 @@ function appearanceBootPlugin(): Plugin {
       assetBase = config.base || "/";
     },
     transformIndexHtml(html) {
-      return html.replace("<!-- polpo:appearance-boot -->", `<script>${bootScriptSource(buildBaseUrl, assetBase)}</script>`);
+      return html
+        // the browser chrome before the inline script sets the look's (the built-in default's page background)
+        .replace("<!-- polpo:theme-color -->", `<meta name="theme-color" content="${DEFAULT_CHROME}" />`)
+        .replace("<!-- polpo:appearance-boot -->", `<script>${bootScriptSource(buildBaseUrl, assetBase)}</script>`);
     },
   };
 }
@@ -118,6 +126,21 @@ function appearanceBootPlugin(): Plugin {
  * (server.mjs) records the time it first serves a build containing each id and inlines those
  * times into runtime-config.js, so the changelog shows when each entry went online.
  */
+/**
+ * dist/theme-colors.json: each palette's page background, [light, dark]. The UI server (server.mjs)
+ * serves manifest.webmanifest with the instance's own (its custom background, else its palette's,
+ * in its theme), so an installed app's splash and title bar match the look.
+ */
+function themeColorsPlugin(): Plugin {
+  return {
+    name: "polpo-theme-colors",
+    apply: "build",
+    generateBundle() {
+      this.emitFile({ type: "asset", fileName: "theme-colors.json", source: `${JSON.stringify(THEME_COLORS)}\n` });
+    },
+  };
+}
+
 function whatsNewIdsPlugin(): Plugin {
   return {
     name: "polpo-whats-new-ids",
@@ -137,6 +160,7 @@ export default defineConfig({
   plugins: [
     appearanceBootPlugin(),
     whatsNewIdsPlugin(),
+    themeColorsPlugin(),
     react(),
     tailwindcss(),
     // Disable PWA in Electron builds — service workers break file:// protocol

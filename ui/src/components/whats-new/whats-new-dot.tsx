@@ -9,7 +9,7 @@ export function WhatsNewDot({ className }: { className?: string }) {
   if (!unseen) return null;
   return (
     <span
-      className={cn("h-2 w-2 shrink-0 rounded-full bg-primary ring-2 ring-background bio-pulse", className)}
+      className={cn("h-2 w-2 shrink-0 rounded-pill bg-primary ring-2 ring-background bio-pulse", className)}
       aria-label="Novità da leggere"
       role="status"
     />

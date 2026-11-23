@@ -328,11 +328,11 @@ function WorkspaceRow({
               {branchLabel}
             </span>
             {pending ? (
-              <span className="shrink-0 rounded bg-warning/15 px-1.5 py-px text-micro font-medium text-warning/85">
+              <span className="shrink-0 rounded-xs bg-warning/15 px-1.5 py-px text-micro font-medium text-warning/85">
                 empty
               </span>
             ) : (
-              <span className="shrink-0 rounded bg-background/70 px-1.5 py-px text-micro tabular-nums text-muted-foreground">
+              <span className="shrink-0 rounded-xs bg-background/70 px-1.5 py-px text-micro tabular-nums text-muted-foreground">
                 {workspace.terminals.length}
               </span>
             )}
@@ -341,7 +341,7 @@ function WorkspaceRow({
               onClick={(e) => { e.stopPropagation(); onCloseAll(); }}
               aria-label="Archive workspace"
               title="Archive (terminates all sessions on this branch)"
-              className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-background hover:text-foreground group-hover/ws:opacity-100"
+              className="flex h-5 w-5 shrink-0 items-center justify-center rounded-xs text-muted-foreground opacity-0 hover:bg-background hover:text-foreground group-hover/ws:opacity-100"
             >
               <Archive className="h-3.5 w-3.5" />
             </button>
@@ -398,7 +398,7 @@ function PrPill({ state, number, url }: { state: string | undefined; number: num
       rel="noreferrer"
       onClick={(e) => e.stopPropagation()}
       title={`PR #${number} · ${s}`}
-      className={cn("inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-px text-micro font-medium transition-colors", tint)}
+      className={cn("inline-flex shrink-0 items-center gap-1 rounded-xs px-1.5 py-px text-micro font-medium transition-colors", tint)}
     >
       {isMerged ? <GitMerge className="h-2.5 w-2.5" /> : <GitPullRequest className="h-2.5 w-2.5" />}
       <span className="tabular-nums">#{number}</span>
@@ -413,7 +413,7 @@ function FooterIconButton({ label, children, onClick }: { label: string; childre
       aria-label={label}
       title={label}
       onClick={onClick}
-      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-xs text-muted-foreground hover:bg-muted hover:text-foreground"
     >
       {children}
     </button>

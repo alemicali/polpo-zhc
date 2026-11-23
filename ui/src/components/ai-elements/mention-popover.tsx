@@ -672,7 +672,7 @@ export const MentionPopover = forwardRef<
             </div>
             <p className="truncate text-caption text-muted-foreground">{triggerCopy.subtitle}</p>
           </div>
-          <span className="rounded border border-border bg-background px-1.5 py-0.5 font-mono text-micro tabular-nums text-muted-foreground">
+          <span className="rounded-xs border border-border bg-background px-1.5 py-0.5 font-mono text-micro tabular-nums text-muted-foreground">
             {filteredItems.length}
           </span>
         </div>
@@ -709,7 +709,7 @@ export const MentionPopover = forwardRef<
         {/* Item list */}
         <div className="min-h-0 flex-1">
           {filteredItems.length === 0 ? (
-            <div className="px-3 py-4 text-center font-mono text-caption uppercase tracking-[0.16em] text-muted-foreground">
+            <div className="px-3 py-4 text-center font-mono text-caption uppercase tracking-widest text-muted-foreground">
               No matches
             </div>
           ) : (
@@ -720,11 +720,11 @@ export const MentionPopover = forwardRef<
               itemContent={(_, row) => {
                 if (row.type === "header") {
                   return (
-                    <div className="sticky top-0 z-10 flex items-center gap-2 border-y border-border/60 bg-popover/95 px-3 py-1.5 backdrop-blur">
-                      <span className="font-mono text-micro font-bold uppercase tracking-[0.18em] text-muted-foreground">
+                    <div className="sticky top-0 z-10 flex items-center gap-2 border-y border-border/60 bg-popover/95 px-3 py-1.5 backdrop-blur-surface">
+                      <span className="font-mono text-micro font-bold uppercase tracking-widest text-muted-foreground">
                         {CATEGORY_LABELS[row.category]}
                       </span>
-                      <span className="ml-auto rounded border border-border/70 bg-muted/40 px-1.5 py-0.5 font-mono text-micro tabular-nums text-muted-foreground">
+                      <span className="ml-auto rounded-xs border border-border/70 bg-muted/40 px-1.5 py-0.5 font-mono text-micro tabular-nums text-muted-foreground">
                         {row.count}
                       </span>
                     </div>
@@ -760,7 +760,7 @@ export const MentionPopover = forwardRef<
                       <div className="flex items-baseline gap-2">
                         <span className="truncate text-small font-semibold text-foreground">{item.label}</span>
                         {item.category === "file" && (
-                          <span className="shrink-0 font-mono text-micro uppercase tracking-[0.14em] text-muted-foreground/70">
+                          <span className="shrink-0 font-mono text-micro uppercase tracking-widest text-muted-foreground/70">
                             file
                           </span>
                         )}
@@ -772,7 +772,7 @@ export const MentionPopover = forwardRef<
                       )}
                     </div>
                     {item.badge && (
-                      <kbd className="ml-auto shrink-0 rounded border border-border bg-muted/60 px-1 py-px font-mono text-micro font-bold uppercase tracking-[0.14em] text-muted-foreground">
+                      <kbd className="ml-auto shrink-0 rounded-xs border border-border bg-muted/60 px-1 py-px font-mono text-micro font-bold uppercase tracking-widest text-muted-foreground">
                         {item.badge}
                       </kbd>
                     )}
@@ -787,17 +787,17 @@ export const MentionPopover = forwardRef<
         <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-muted/30 px-3 py-2 text-caption text-muted-foreground">
           <span className="inline-flex min-w-0 items-center gap-2">
             <span className="hidden sm:inline">Use</span>
-            <span className="font-mono text-micro uppercase tracking-[0.12em]">←→</span>
+            <span className="font-mono text-micro uppercase tracking-widest">←→</span>
             <span>tabs</span>
-            <span className="font-mono text-micro uppercase tracking-[0.12em]">↑↓</span>
+            <span className="font-mono text-micro uppercase tracking-widest">↑↓</span>
             <span>to move</span>
-            <span className="font-mono text-micro uppercase tracking-[0.12em]">Enter</span>
+            <span className="font-mono text-micro uppercase tracking-widest">Enter</span>
             <span>to insert</span>
           </span>
           <button
             type="button"
             onClick={close}
-            className="cursor-pointer font-mono text-micro uppercase tracking-[0.12em] text-muted-foreground transition-colors hover:text-foreground"
+            className="cursor-pointer font-mono text-micro uppercase tracking-widest text-muted-foreground transition-colors hover:text-foreground"
           >
             Esc
           </button>

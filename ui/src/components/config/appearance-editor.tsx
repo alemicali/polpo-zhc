@@ -24,14 +24,15 @@ import { FONT_PRESETS } from "@/lib/font-presets";
 
 const GROUPS: Array<{ id: TokenGroup; label: string; hint: string }> = [
   { id: "brand", label: "Brand", hint: "Buttons (solid or gradient), links, highlights" },
-  { id: "surfaces", label: "Surfaces", hint: "Page, cards, menus, quiet areas" },
+  { id: "surfaces", label: "Surfaces", hint: "Page, cards, menus, quiet areas; the dialog scrim; the sheet behind web pages and QR codes" },
   { id: "text", label: "Text", hint: "On the page and on each surface" },
   { id: "borders", label: "Borders & focus", hint: "Lines, inputs, focus ring" },
   { id: "sidebar", label: "Sidebar", hint: "The navigation column; its opacity and backdrop blur" },
   { id: "charts", label: "Charts", hint: "Series colours" },
+  { id: "agents", label: "Agents", hint: "Ten colours that tell agents apart (avatars, badges, teams, tool kinds), each with its text colour; an agent picks one on its page" },
   { id: "status", label: "Status", hint: "Success, warning, info, errors (and text on them); task states" },
-  { id: "typography", label: "Typography", hint: "Fonts (and web fonts to load); the type scale (rem or px); heading weight; label tracking and case" },
-  { id: "shape", label: "Shape", hint: "Corners (global, cards, controls) and shadows" },
+  { id: "typography", label: "Typography", hint: "Fonts (and web fonts to load); the type scale and the small sizes xs … 3xl (rem or px); the weights; label tracking and case" },
+  { id: "shape", label: "Shape", hint: "Corners (global, cards, controls, badges, pills, avatars, dialogs; 999 = round), shadows and glows, blurs" },
 ];
 
 function label(name: string): string {
@@ -520,6 +521,20 @@ export function AppearanceEditor({ onSaveInstanceDefault }: {
                         onChange={(value) => setToken(name, value)} />
                     );
                   })}
+                  {group.id === "agents" && (
+                    <div className="mt-2 flex flex-wrap gap-1.5" data-testid="agent-colors-preview" aria-label="Agent colours preview">
+                      {Array.from({ length: 10 }, (_, i) => i + 1).map((i) => (
+                        <span key={i} title={`agent${i}`}
+                          className="flex size-7 items-center justify-center rounded-avatar text-caption font-semibold"
+                          style={{
+                            background: String(withDerived[`agent${i}`] ?? `var(--agent-${i})`),
+                            color: String(withDerived[`agent${i}Foreground`] ?? `var(--agent-${i}-foreground)`),
+                          }}>
+                          {String.fromCharCode(64 + i)}{i}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   {group.id === "typography" && (
                     <WebFonts fonts={webFonts} onChange={setWebFonts}
                       onUse={(family) => setToken("fontFamily", `"${family}", ui-sans-serif, system-ui, sans-serif`)} />
@@ -545,13 +560,13 @@ export function AppearanceEditor({ onSaveInstanceDefault }: {
                 <div className="mt-1" style={{ color: "var(--pv-muted-fg)" }}>Muted text</div>
               </div>
               <div className="flex flex-wrap gap-2">
-                <span className="rounded-full px-2 py-0.5 text-xs" style={{ background: "var(--pv-secondary)" }}>Secondary</span>
-                <span className="rounded-full px-2 py-0.5 text-xs" style={{ background: "var(--pv-success)", color: "var(--pv-success-fg)" }}>Done</span>
-                <span className="rounded-full px-2 py-0.5 text-xs" style={{ background: "var(--pv-warning)", color: "var(--pv-warning-fg)" }}>Waiting</span>
-                <span className="rounded-full px-2 py-0.5 text-xs" style={{ background: "var(--pv-info)", color: "var(--pv-info-fg)" }}>Running</span>
-                <span className="rounded-full px-2 py-0.5 text-xs" style={{ background: "var(--pv-destructive)", color: "var(--pv-destructive-fg)" }}>Error</span>
+                <span className="rounded-pill px-2 py-0.5 text-xs" style={{ background: "var(--pv-secondary)" }}>Secondary</span>
+                <span className="rounded-pill px-2 py-0.5 text-xs" style={{ background: "var(--pv-success)", color: "var(--pv-success-fg)" }}>Done</span>
+                <span className="rounded-pill px-2 py-0.5 text-xs" style={{ background: "var(--pv-warning)", color: "var(--pv-warning-fg)" }}>Waiting</span>
+                <span className="rounded-pill px-2 py-0.5 text-xs" style={{ background: "var(--pv-info)", color: "var(--pv-info-fg)" }}>Running</span>
+                <span className="rounded-pill px-2 py-0.5 text-xs" style={{ background: "var(--pv-destructive)", color: "var(--pv-destructive-fg)" }}>Error</span>
               </div>
-              <div className="flex h-4 overflow-hidden rounded">
+              <div className="flex h-4 overflow-hidden rounded-xs">
                 {["chart1", "chart2", "chart3", "chart4", "chart5"].map((c, i) => (
                   <span key={c} className="flex-1" style={{ background: String(withDerived[c] ?? `var(--chart-${i + 1})`) }} />
                 ))}

@@ -94,7 +94,7 @@ export function AgentOverviewTab() {
                     if (typeof resp === "string") {
                       return (
                         <div key={i} className="flex items-start gap-2 text-xs">
-                          <div className="h-1.5 w-1.5 rounded-full bg-primary mt-1.5 shrink-0" />
+                          <div className="h-1.5 w-1.5 rounded-pill bg-primary mt-1.5 shrink-0" />
                           <span className="text-muted-foreground">{resp}</span>
                         </div>
                       );

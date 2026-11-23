@@ -159,7 +159,7 @@ export function AppliedRulesPanel(props: AppliedRulesPanelProps) {
                     {a.matchedEvents.map(ev => (
                       <code
                         key={ev}
-                        className="text-micro font-mono px-1 py-0.5 rounded bg-muted/40 border border-border/20"
+                        className="text-micro font-mono px-1 py-0.5 rounded-xs bg-muted/40 border border-border/20"
                       >
                         {ev}
                       </code>

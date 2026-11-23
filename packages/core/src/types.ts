@@ -221,6 +221,10 @@ export interface AgentIdentity {
    *  Served via GET /api/v1/files/read?path=<avatar> */
   avatar?: string;
 
+  /** Its colour on screen (avatars, badges): one of the look's agent colour tokens, "agent1" … "agent10"
+   *  (Configuration → Appearance → Agents). Default: picked from its name. Never a raw colour. */
+  color?: string;
+
   /** Responsibilities — simple strings or structured objects with area/description/priority.
    *  Structured format is preferred for clarity. */
   responsibilities?: (string | AgentResponsibility)[];

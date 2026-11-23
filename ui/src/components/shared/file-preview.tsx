@@ -82,7 +82,7 @@ function PreviewContent({
   if (category === "image" && readUrl) {
     return (
       <div className="flex items-center justify-center h-full p-4 bg-muted/20">
-        <img src={readUrl} alt={o.label} className="max-w-full max-h-full object-contain rounded" />
+        <img src={readUrl} alt={o.label} className="max-w-full max-h-full object-contain rounded-xs" />
       </div>
     );
   }

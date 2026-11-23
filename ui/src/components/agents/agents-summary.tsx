@@ -15,7 +15,7 @@ export function SummaryHeader() {
   const utilization = agents.length > 0 ? Math.round((activeCount / agents.length) * 100) : 0;
 
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-border/40 bg-card/80 px-3 py-2 backdrop-blur-sm sm:gap-3">
+    <div className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-border/40 bg-card/80 px-3 py-2 backdrop-blur-surface sm:gap-3">
       <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
         <div className="flex items-center gap-1.5">
           <Users className="h-3.5 w-3.5 text-primary" />

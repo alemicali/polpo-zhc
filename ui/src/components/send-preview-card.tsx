@@ -96,7 +96,7 @@ export function WhatsAppPreviewCard({
         {/* Recipient pill */}
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-label text-muted-foreground">To</span>
-          <code className="rounded bg-background/60 px-1.5 py-0.5 text-xs font-mono">{recipientLabel}</code>
+          <code className="rounded-xs bg-background/60 px-1.5 py-0.5 text-xs font-mono">{recipientLabel}</code>
         </div>
 
         {/* Text body */}
@@ -175,7 +175,7 @@ export function WhatsAppPreviewCard({
           <Button size="sm" disabled={disabled || submitting} onClick={() => handle("send")}
             className="w-full gap-1.5 sm:w-auto">
             {submitting ? (
-              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              <span className="h-3.5 w-3.5 animate-spin rounded-pill border-2 border-current border-t-transparent" />
             ) : (
               <Send className="h-3.5 w-3.5" />
             )}
@@ -236,30 +236,30 @@ export function EmailPreviewCard({
       <div className="px-3 py-3 sm:px-4 space-y-1.5 border-b border-border/60">
         <div className="flex flex-wrap items-baseline gap-2 text-xs">
           <span className="w-12 text-right text-label text-muted-foreground shrink-0">To</span>
-          <code className="rounded bg-background/60 px-1.5 py-0.5 font-mono break-all">{toLabel}</code>
+          <code className="rounded-xs bg-background/60 px-1.5 py-0.5 font-mono break-all">{toLabel}</code>
         </div>
         {ccLabel && (
           <div className="flex flex-wrap items-baseline gap-2 text-xs">
             <span className="w-12 text-right text-label text-muted-foreground shrink-0">Cc</span>
-            <code className="rounded bg-background/60 px-1.5 py-0.5 font-mono break-all">{ccLabel}</code>
+            <code className="rounded-xs bg-background/60 px-1.5 py-0.5 font-mono break-all">{ccLabel}</code>
           </div>
         )}
         {bccLabel && (
           <div className="flex flex-wrap items-baseline gap-2 text-xs">
             <span className="w-12 text-right text-label text-muted-foreground shrink-0">Bcc</span>
-            <code className="rounded bg-background/60 px-1.5 py-0.5 font-mono break-all">{bccLabel}</code>
+            <code className="rounded-xs bg-background/60 px-1.5 py-0.5 font-mono break-all">{bccLabel}</code>
           </div>
         )}
         {preview.from && (
           <div className="flex flex-wrap items-baseline gap-2 text-xs">
             <span className="w-12 text-right text-label text-muted-foreground shrink-0">From</span>
-            <code className="rounded bg-background/60 px-1.5 py-0.5 font-mono break-all">{preview.from}</code>
+            <code className="rounded-xs bg-background/60 px-1.5 py-0.5 font-mono break-all">{preview.from}</code>
           </div>
         )}
         {preview.reply_to && (
           <div className="flex flex-wrap items-baseline gap-2 text-xs">
             <span className="w-12 text-right text-label text-muted-foreground shrink-0">Reply</span>
-            <code className="rounded bg-background/60 px-1.5 py-0.5 font-mono break-all">{preview.reply_to}</code>
+            <code className="rounded-xs bg-background/60 px-1.5 py-0.5 font-mono break-all">{preview.reply_to}</code>
           </div>
         )}
       </div>
@@ -335,7 +335,7 @@ export function EmailPreviewCard({
           <Button size="sm" disabled={disabled || submitting} onClick={() => handle("send")}
             className="w-full gap-1.5 sm:w-auto">
             {submitting ? (
-              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              <span className="h-3.5 w-3.5 animate-spin rounded-pill border-2 border-current border-t-transparent" />
             ) : (
               <Send className="h-3.5 w-3.5" />
             )}

@@ -24,7 +24,7 @@ export function StatusBadge({ computer, className, live = false, short = false }
     <Badge variant="outline" data-testid="computer-status" title={short ? STATUS_LABELS[computer.status] : undefined}
       className={cn("gap-1 font-normal", TONE_CLASSES[tone], className)}>
       {tone === "busy" && <Loader2 className="h-3 w-3 animate-spin" />}
-      {live && computer.status === "running" && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-success" aria-hidden />}
+      {live && computer.status === "running" && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-pill bg-success" aria-hidden />}
       {(short ? STATUS_SHORT_LABELS : STATUS_LABELS)[computer.status]}
     </Badge>
   );

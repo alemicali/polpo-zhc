@@ -22,6 +22,7 @@ import {
 } from "@modelcontextprotocol/ext-apps";
 import type { WorkCard } from "../../src/server/mcp-work-card.js";
 import { renderView, stringsFor, type Strings } from "./view.js";
+import { applyInstanceAppearance } from "../shared/theme.js";
 
 // ── State ────────────────────────────────────────────────────────────────
 
@@ -67,6 +68,7 @@ function adopt(next: unknown): void {
   const c = next as WorkCard | undefined;
   if (!c || typeof c !== "object" || (c.kind !== "task" && c.kind !== "mission")) return;
   card = card ? { ...c, key: card.key } : c;
+  applyInstanceAppearance(c.appearance);
   error = undefined;
 }
 

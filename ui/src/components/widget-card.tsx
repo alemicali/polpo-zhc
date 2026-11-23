@@ -380,7 +380,7 @@ export const WidgetCard = memo(
  */
 export function WidgetPendingCard({ argsBytes }: { argsBytes?: number }) {
   return (
-    <div className="mobile-no-x my-3 overflow-hidden rounded-xl border border-primary/15 bg-gradient-to-br from-primary/[0.03] via-primary/[0.015] to-transparent backdrop-blur-sm">
+    <div className="mobile-no-x my-3 overflow-hidden rounded-xl border border-primary/15 bg-gradient-to-br from-primary/[0.03] via-primary/[0.015] to-transparent backdrop-blur-surface">
       <style>{LEONARDO_KEYFRAMES}</style>
       <div className="flex items-center gap-2 border-b border-primary/10 bg-primary/[0.02] px-3 py-2 sm:px-4 sm:py-3">
         <Boxes className="h-3.5 w-3.5 shrink-0 text-primary animate-pulse sm:h-4 sm:w-4" />

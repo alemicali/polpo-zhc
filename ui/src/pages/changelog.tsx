@@ -28,7 +28,7 @@ export function ChangelogPage() {
         {/* Hero */}
         <header className="relative isolate mb-8 overflow-hidden rounded-xl border border-primary/20 bg-card/70 px-5 py-6 sm:px-6">
           <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-br from-primary/12 via-transparent to-transparent" />
-          <div aria-hidden className="pointer-events-none absolute -right-20 -top-24 -z-10 h-56 w-56 rounded-full bg-primary/20 blur-3xl" />
+          <div aria-hidden className="pointer-events-none absolute -right-20 -top-24 -z-10 h-56 w-56 rounded-pill bg-primary/20 blur-glow" />
           <div className="flex items-center gap-3.5">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary ring-1 ring-inset ring-primary/25">
               <Megaphone className="h-5 w-5" />

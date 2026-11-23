@@ -83,7 +83,7 @@ export function VaultRefPicker({
             aria-label={rest["aria-label"] ?? placeholder}
             data-setup-field={rest["data-setup-field"]}
             className={cn(
-              "flex h-8 w-full min-w-0 items-center gap-2 rounded-md border border-input bg-transparent px-2.5 text-left text-xs shadow-xs transition-[color,box-shadow] outline-none",
+              "flex h-8 w-full min-w-0 items-center gap-2 rounded-md border border-input bg-transparent px-2.5 text-left text-xs shadow-control transition-[color,box-shadow] outline-none",
               "focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30 dark:hover:bg-input/50",
               (notFound || missing.length > 0) && "border-warning/50",
             )}
@@ -112,7 +112,7 @@ export function VaultRefPicker({
             />
             <button
               type="button"
-              className="rounded p-1 text-muted-foreground hover:text-foreground"
+              className="rounded-xs p-1 text-muted-foreground hover:text-foreground"
               onClick={() => void reload()}
               aria-label="Reload vault entries"
               title="Reload vault entries"
@@ -152,9 +152,9 @@ export function VaultRefPicker({
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center gap-1.5">
                           <span className="truncate font-mono">{entry.owner} · {entry.service}</span>
-                          <span className="shrink-0 rounded border border-border/50 px-1 text-micro text-muted-foreground">{TYPE_LABEL[entry.type]}</span>
+                          <span className="shrink-0 rounded-xs border border-border/50 px-1 text-micro text-muted-foreground">{TYPE_LABEL[entry.type]}</span>
                           {shared && (
-                            <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-info/10 px-1.5 text-micro text-info" title={entry.allowedAgents.join(", ")}>
+                            <span className="inline-flex shrink-0 items-center gap-0.5 rounded-pill bg-info/10 px-1.5 text-micro text-info" title={entry.allowedAgents.join(", ")}>
                               <Users className="h-2.5 w-2.5" /> {shared}
                             </span>
                           )}
@@ -189,7 +189,7 @@ export function VaultRefPicker({
               <button
                 type="button"
                 onClick={() => { onChange(null); setOpen(false); }}
-                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                className="flex w-full items-center gap-2 rounded-xs px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
               >
                 <X className="h-3.5 w-3.5" /> Clear
               </button>

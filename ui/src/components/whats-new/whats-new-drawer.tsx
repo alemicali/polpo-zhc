@@ -25,7 +25,7 @@ export function WhatsNewDrawer() {
     <Sheet open={open} onOpenChange={setWhatsNewOpen}>
       <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 sm:max-w-[34rem]">
         <SheetHeader className="relative isolate shrink-0 overflow-hidden border-b border-primary/15 px-5 py-4 text-left">
-          <div aria-hidden className="pointer-events-none absolute -right-16 -top-20 -z-10 h-44 w-44 rounded-full bg-primary/20 blur-3xl" />
+          <div aria-hidden className="pointer-events-none absolute -right-16 -top-20 -z-10 h-44 w-44 rounded-pill bg-primary/20 blur-glow" />
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary ring-1 ring-inset ring-primary/25">
               <Megaphone className="h-4 w-4" />

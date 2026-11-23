@@ -14,6 +14,8 @@ const identity = z.object({
   displayName: z.string().optional().describe("A person-like name, e.g. Alice Chen"),
   title: z.string().optional().describe("A job title, e.g. Head of Growth"),
   company: z.string().optional().describe("The company it works for"),
+  color: z.string().regex(/^agent(?:[1-9]|10)$/, "an agent colour token: agent1 … agent10").optional()
+    .describe("Its colour on screen (avatar, badges): an agent colour token agent1 … agent10 of the instance's look (polpo_branding_update tokens agent1…); omit to pick one from its name"),
 }).passthrough();
 
 /** Per-connector tool selection: { <connector id>: "*" | [raw MCP tool names] }. */

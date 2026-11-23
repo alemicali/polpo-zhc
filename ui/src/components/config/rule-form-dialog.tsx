@@ -598,7 +598,7 @@ export function RuleFormDialog({
                       >
                         <div
                           className={cn(
-                            "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border",
+                            "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-xs border",
                             selected ? "bg-primary border-primary" : "border-muted-foreground/40",
                           )}
                         >
@@ -791,7 +791,7 @@ export function RuleFormDialog({
                     {availablePlaceholderList.map(p => (
                       <code
                         key={p}
-                        className="text-micro font-mono px-1.5 py-0.5 rounded bg-muted/30 border border-border/30"
+                        className="text-micro font-mono px-1.5 py-0.5 rounded-xs bg-muted/30 border border-border/30"
                       >
                         {`{{${p}}}`}
                       </code>
@@ -812,7 +812,7 @@ export function RuleFormDialog({
             </CollapsibleSection>
 
             {saveError && (
-              <div className="text-caption text-destructive bg-destructive/10 border border-destructive/30 rounded px-2 py-1.5">
+              <div className="text-caption text-destructive bg-destructive/10 border border-destructive/30 rounded-xs px-2 py-1.5">
                 {saveError}
               </div>
             )}

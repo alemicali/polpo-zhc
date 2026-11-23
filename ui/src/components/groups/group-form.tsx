@@ -46,13 +46,13 @@ function Switch({ checked, onChange, label }: { checked: boolean; onChange: (che
       aria-label={label}
       onClick={() => onChange(!checked)}
       className={cn(
-        "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors",
+        "relative inline-flex h-5 w-9 shrink-0 items-center rounded-pill transition-colors",
         checked ? "bg-success/70" : "bg-muted",
       )}
     >
       <span
         className={cn(
-          "inline-block h-3.5 w-3.5 transform rounded-full bg-background transition-transform dark:bg-foreground",
+          "inline-block h-3.5 w-3.5 transform rounded-pill bg-background transition-transform dark:bg-foreground",
           checked ? "translate-x-[1.125rem]" : "translate-x-0.5",
         )}
       />
@@ -136,7 +136,7 @@ export function MemberPicker({ members, selected, onChange, isLoading }: {
                 <span className="flex items-center gap-1.5">
                   <span className="truncate text-small font-medium">{member.name}</span>
                   {member.isOrchestrator && (
-                    <span className="shrink-0 rounded-sm border border-border/60 px-1 py-px text-micro font-bold uppercase leading-none tracking-[0.12em] text-muted-foreground/70">
+                    <span className="shrink-0 rounded-sm border border-border/60 px-1 py-px text-micro font-bold uppercase leading-none tracking-widest text-muted-foreground/70">
                       Orchestrator
                     </span>
                   )}
@@ -151,7 +151,7 @@ export function MemberPicker({ members, selected, onChange, isLoading }: {
                 )}
               </span>
               <span className={cn(
-                "flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors",
+                "flex h-4 w-4 shrink-0 items-center justify-center rounded-xs border transition-colors",
                 isSelected ? "border-primary bg-primary text-primary-foreground" : "border-border",
               )}>
                 {isSelected && <Check className="h-3 w-3" />}

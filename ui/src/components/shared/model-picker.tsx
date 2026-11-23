@@ -155,7 +155,7 @@ export function ModelPicker({
               type="button"
               onClick={() => setProviderFilter("all")}
               className={cn(
-                "px-2.5 py-1 rounded-full text-xs font-medium transition-all",
+                "px-2.5 py-1 rounded-pill text-xs font-medium transition-all",
                 providerFilter === "all"
                   ? "bg-primary text-primary-foreground"
                   : "bg-muted text-muted-foreground hover:bg-accent",
@@ -172,7 +172,7 @@ export function ModelPicker({
                   type="button"
                   onClick={() => setProviderFilter(prov === providerFilter ? "all" : prov)}
                   className={cn(
-                    "px-2.5 py-1 rounded-full text-xs font-medium transition-all flex items-center gap-1.5",
+                    "px-2.5 py-1 rounded-pill text-xs font-medium transition-all flex items-center gap-1.5",
                     providerFilter === prov
                       ? "bg-primary text-primary-foreground"
                       : "bg-muted text-muted-foreground hover:bg-accent",
