@@ -99,6 +99,10 @@ function normalizeOAuth(input: Partial<ConnectorOAuthSettings> | undefined, base
     if (input.authorizationServer) next.authorizationServer = input.authorizationServer;
     else delete next.authorizationServer;
   }
+  if (input.resourceIndicator !== undefined) {
+    if (input.resourceIndicator === false) next.resourceIndicator = false;
+    else delete next.resourceIndicator;
+  }
   return next;
 }
 

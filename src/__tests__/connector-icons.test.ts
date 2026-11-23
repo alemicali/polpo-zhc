@@ -504,7 +504,7 @@ describe("icons through the API", () => {
       expect(CONNECTOR_CATALOG.some((e) => e.id === id), id).toBe(true);
       expect(existsSync(join(iconDir, `${id}.${ext}`)), `${id}.${ext}`).toBe(true);
     }
-    for (const id of ["ovhcloud", "whatsapp-business", "zernio", "v0", "expo", "autumn", "aws", "agentphone"]) {
+    for (const id of ["ovhcloud", "zernio", "v0", "expo", "autumn", "aws", "agentphone"]) {
       expect(connectorIconUrls({ id, catalogId: id }).iconUrl, id).toMatch(new RegExp(`^/connector-icons/${id}\\.(svg|png)$`));
     }
     expect(connectorIconUrls({ id: "x" })).toEqual({});

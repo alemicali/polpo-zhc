@@ -312,6 +312,16 @@ export type ConnectorCardState =
   | "not_connected"; // added (token / no auth), not connected yet
 
 /** The shared OAuth app a catalog entry needs, when it is not configured yet. */
+/** The error says the vendor refused Polpo's dynamic client registration: the next step is an OAuth app. */
+export function registrationRefused(message: string | null | undefined): boolean {
+  return !!message && /pre-registered client in Connectors → OAuth apps|did not accept the OAuth client registration|does not offer dynamic OAuth client registration/i.test(message);
+}
+
+/** The OAuth app a connector whose registration was refused should use (the catalog's shared app, else its own). */
+export function oauthAppFor(connector: Connector, entry?: CatalogEntry): string {
+  return connector.auth.oauth?.app ?? entry?.oauth?.app ?? connector.catalogId ?? connector.id;
+}
+
 export function missingOAuthApp(entry: CatalogEntry, apps: OAuthApp[], connector?: Connector): string | undefined {
   if (entry.auth !== "oauth_preregistered") return undefined;
   const appId = entry.oauth?.app ?? entry.id;
