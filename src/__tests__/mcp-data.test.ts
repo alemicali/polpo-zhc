@@ -137,6 +137,12 @@ describe("the Data area through MCP", () => {
     const tested = await tool("polpo_data_source_test", { id });
     expect(tested.structuredContent).toMatchObject({ id, ok: true, datasets: 1 });
 
+    // the schema carries keys, native types and row counts; queries page with offset and count with includeTotal
+    expect(got.structuredContent.schema.datasets[0]).toMatchObject({ name: "customers", rowCount: 3, indexes: [], foreignKeys: [] });
+    expect(got.structuredContent.schema.datasets[0].columns[0]).toMatchObject({ name: "id", primaryKey: true, nativeType: "INTEGER" });
+    const paged = await tool("polpo_data_query", { sourceId: id, dataset: "customers", sort: [{ field: "id", direction: "asc" }], limit: 1, offset: 1, includeTotal: true });
+    expect(paged.structuredContent.result).toMatchObject({ rows: [{ name: "Linus" }], meta: { totalCount: 3 } });
+
     // read-only SQL, with a row cap and truncation note
     const sql = await tool("polpo_data_sql", { sourceId: id, sql: "SELECT name, revenue FROM customers ORDER BY revenue DESC", max_rows: 2 });
     expect(sql.structuredContent).toMatchObject({ row_count: 2, truncated: true, rows: [{ name: "Grace" }, { name: "Ada" }] });

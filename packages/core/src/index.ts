@@ -115,6 +115,11 @@ export {
   isContextOverflowError,
   CHECKPOINT_START,
   CHECKPOINT_END,
+  TURN_IN_PROGRESS_HEADING,
+  MAX_LISTED_FILES,
+  extractFileOperations,
+  parseFileLists,
+  checkpointSummaryText,
 } from "./context-compactor.js";
 export type {
   CompactionSettings,
