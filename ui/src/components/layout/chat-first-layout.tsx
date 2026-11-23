@@ -10,6 +10,7 @@
  */
 
 import { ErrorBoundary } from "@/components/error-boundary";
+import { InkHubButton } from "@/components/layout/ink-hub-button";
 import { lazy, memo, Suspense, useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
@@ -483,6 +484,7 @@ const PagesPanelHeader = memo(function PagesPanelHeader() {
           <PwaInstallQrButton />
         </div>
         <LogoutButton />
+        <InkHubButton />
         <Tooltip>
           <TooltipTrigger asChild>
             <a

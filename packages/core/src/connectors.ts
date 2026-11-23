@@ -72,6 +72,11 @@ export interface ConnectorOAuthSettings {
   extraAuthParams?: Record<string, string>;
   /** Authorization server (issuer) when the MCP server publishes no protected-resource metadata, e.g. https://accounts.google.com. */
   authorizationServer?: string;
+  /**
+   * false: leave out the RFC 8707 `resource` parameter (authorization servers that reject every
+   * resource indicator with invalid_target, e.g. Semgrep's). Default: sent, as the MCP spec asks.
+   */
+  resourceIndicator?: boolean;
 }
 
 export interface ConnectorAuth {

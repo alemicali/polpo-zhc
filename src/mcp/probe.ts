@@ -129,7 +129,7 @@ function wellKnownUrls(resource: string, suffix: string): string[] {
 }
 
 /** The authorization server's metadata: RFC 8414, then OpenID Connect discovery (both URL forms). */
-async function authServerMetadata(fetcher: SafeFetcher, issuer: string) {
+export async function authServerMetadata(fetcher: SafeFetcher, issuer: string) {
   const urls = [...wellKnownUrls(issuer, "oauth-authorization-server").slice(0, 1), ...wellKnownUrls(issuer, "openid-configuration").slice(0, 1)];
   const trimmed = issuer.replace(/\/+$/, "");
   const oidcAppended = `${trimmed}/.well-known/openid-configuration`;

@@ -150,6 +150,7 @@ export function appearanceKit() {
     buttonPrimaryBg: ["--button-primary-bg", "brand", "color"],
     buttonGradient: ["--button-primary-bg", "brand", "gradient"],
     buttonPrimaryForeground: ["--button-primary-foreground", "brand", "color"],
+    shadowButtonPrimary: ["--shadow-button-primary", "brand", "shadow"],
     background: ["--background", "surfaces", "color"],
     card: ["--card", "surfaces", "color"],
     popover: ["--popover", "surfaces", "color"],
@@ -249,6 +250,7 @@ export function appearanceKit() {
     shadowControl: ["--shadow-control", "shape", "shadow"],
     shadowCard: ["--shadow-card", "shape", "shadow"],
     shadowRaised: ["--shadow-raised", "shape", "shadow"],
+    shadowDialog: ["--shadow-dialog", "shape", "shadow"],
     shadowGlow: ["--shadow-glow", "shape", "shadow"],
     shadowGlowStrong: ["--shadow-glow-strong", "shape", "shadow"],
     surfaceBlur: ["--surface-blur", "shape", "blur"],
@@ -623,6 +625,11 @@ export function appearanceKit() {
       const out = kind === "radius" || kind === "blur" ? `${value}px` : kind === "shadow" && value === "none" ? "0 0 #0000" : value;
       lines.push(`  ${css}: ${out};`);
       if (name === "buttonPrimaryBg") lines.push(`  --button-primary-hover-bg: color-mix(in oklab, ${value} 90%, transparent);`);
+      // the primary button's glow: on hover, the look's strong glow in the primary adds to it (none stays none)
+      if (name === "shadowButtonPrimary") {
+        lines.push(`  --shadow-button-primary-hover: ${value === "none" ? "0 0 #0000"
+          : `${value}, var(--shadow-glow-strong) color-mix(in oklch, var(--primary) 55%, transparent)`};`);
+      }
       // a backdrop-filter only when blurring: any value but none makes the sidebar a containing block
       if (name === "sidebarBlur") lines.push(`  --sidebar-backdrop: ${typeof value === "number" && value > 0 ? `blur(${value}px)` : "none"};`);
       // the sans font is also Tailwind's --font-sans

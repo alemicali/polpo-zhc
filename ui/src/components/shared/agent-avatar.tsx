@@ -48,7 +48,7 @@ export function AgentAvatar({
   name?: string;
   size?: AvatarSize;
   className?: string;
-  /** Extra classes for the fallback Bot icon */
+  /** Extra classes for the fallback Bot icon (in the agent's colour unless they set one) */
   iconClassName?: string;
   /** What to render when no avatar is configured.
    *  - "icon": just the Bot lucide icon (legacy default)
@@ -85,7 +85,7 @@ export function AgentAvatar({
         </div>
       );
     }
-    return <Bot className={cn(s.icon, iconClassName ?? tone.text)} />;
+    return <Bot className={cn(s.icon, tone.text, iconClassName)} />;
   }
 
   const url = avatarUrl(avatar);

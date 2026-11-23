@@ -171,7 +171,7 @@ export function ConnectorsPage() {
   }, [connectedParam, params, setParams]);
 
   const agentOptions = useMemo<AgentOption[]>(
-    () => agents.map((a) => ({ name: a.name, label: a.identity?.displayName?.trim() || a.name })).sort((a, b) => a.label.localeCompare(b.label)),
+    () => agents.map((a) => ({ name: a.name, label: a.identity?.displayName?.trim() || a.name, avatar: a.identity?.avatar })).sort((a, b) => a.label.localeCompare(b.label)),
     [agents],
   );
   const agentLabel = (name: string) => agentOptions.find((a) => a.name === name)?.label ?? name;
@@ -377,6 +377,7 @@ export function ConnectorsPage() {
         onChanged={upsert}
         onRemoved={(id) => { drop(id); setSelectedId(null); }}
         onReconnect={(c) => { setSelectedId(null); flow.open({ connector: c, entry: selectedEntry }); }}
+        onSetupApp={(c, appId) => { setSelectedId(null); flow.open({ connector: c, entry: selectedEntry, oauthApp: appId }); }}
         accountCount={selectedEntry ? catalogCardState(selectedEntry, connectors, oauthApps).accounts.length : 0}
         onAddAccount={selectedEntry ? () => addAccount(selectedEntry) : undefined}
       />
