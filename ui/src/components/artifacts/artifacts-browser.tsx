@@ -7,8 +7,7 @@
 import { Fragment, useEffect, useMemo, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
-  ArrowDown, ArrowUp, BarChart3, Download, ExternalLink, FileText, GitBranch, Image as ImageIcon, LayoutDashboard,
-  Link2, MoreHorizontal, Palette, Sparkles, Trash2,
+  ArrowDown, ArrowUp, Download, ExternalLink, Link2, MoreHorizontal, Trash2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,16 +22,7 @@ import {
   ARTIFACT_GROUP_LABEL, absoluteTime, formatArtifactSize, groupArtifactsByType, relativeTime, type ArtifactSort, type ArtifactSortKey,
 } from "@/lib/artifacts-list";
 import { artifactPath, type ArtifactActions } from "@/hooks/use-artifact-actions";
-
-export function ArtifactIcon({ artifact, className = "h-4 w-4" }: { artifact: Pick<ArtifactSummary, "type" | "kind">; className?: string }) {
-  if (artifact.type === "doc") return <FileText className={className} />;
-  if (artifact.type === "mermaid") return <GitBranch className={className} />;
-  if (artifact.type === "svg") return <ImageIcon className={className} />;
-  if (artifact.type === "view") return <BarChart3 className={className} />;
-  if (artifact.kind === "dashboard") return <LayoutDashboard className={className} />;
-  if (artifact.kind === "design") return <Palette className={className} />;
-  return <Sparkles className={className} />;
-}
+import { ArtifactIcon } from "./artifact-icon";
 
 export function LegacyBadge() {
   return <Badge variant="outline" className="border-warning/40 text-micro text-warning">Legacy</Badge>;

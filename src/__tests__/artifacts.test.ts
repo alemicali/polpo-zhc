@@ -107,6 +107,20 @@ describe("artifacts API", () => {
     expect(emitted.map((e: any) => e.action)).toEqual(["created", "updated", "updated", "deleted"]);
   });
 
+  it("keeps a saved workspace version when another editor submits a stale draft", async () => {
+    const { call, emitted } = await fixture();
+    const original = JSON.stringify({ version: 1, sheets: [{ name: "Sheet 1", cells: {} }] });
+    const edited = JSON.stringify({ version: 1, sheets: [{ name: "Sheet 1", cells: { A1: "Budget" } }] });
+    const created = await call("POST", "", { title: "Budget", type: "html", kind: "sheets", content: original });
+    const path = `/${created.body.data.id}`;
+
+    expect((await call("PATCH", path, { content: edited, expectedVersion: 1 })).body.data).toMatchObject({ version: 2, content: edited });
+    expect((await call("PATCH", path, { content: original, expectedVersion: 1 })).status).toBe(409);
+    expect((await call("PATCH", path, { content: "{}", expectedVersion: 2 })).status).toBe(400);
+    expect((await call("GET", path)).body.data).toMatchObject({ version: 2, content: edited, versions: [{ version: 1, content: original }] });
+    expect(emitted.map((event) => event.action)).toEqual(["created", "updated"]);
+  });
+
   it("shows the former data views as read-only artifacts of type view", async () => {
     const { call, data, source } = await fixture();
     const view = await data.store.createView({

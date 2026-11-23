@@ -12,7 +12,7 @@
  * Former data views ("view:<id>") are read-only here: they change with the data tools or on the Data page.
  */
 import { OpenAPIHono } from "@hono/zod-openapi";
-import { isArtifactType, matchesArtifactFilter, type ArtifactFilter, type ArtifactStore } from "@polpo-ai/core/artifacts";
+import { ArtifactEditConflictError, isArtifactType, matchesArtifactFilter, type ArtifactFilter, type ArtifactStore } from "@polpo-ai/core/artifacts";
 import type { DataRuntime } from "../data-runtime.js";
 import { isViewArtifactId, runArtifactDataCall, viewAsArtifact, viewAsSummary, VIEW_ARTIFACT_PREFIX, type ArtifactDataMethod } from "../artifact-runtime.js";
 
@@ -96,8 +96,12 @@ export function artifactRoutes(getDeps: () => ArtifactRoutesDeps): OpenAPIHono {
     const id = c.req.param("id");
     if (isViewArtifactId(id)) return fail(c, 409, "A view changes with the data tools or on the Data page");
     const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+    if (body.expectedVersion !== undefined && (typeof body.expectedVersion !== "number" || !Number.isSafeInteger(body.expectedVersion) || body.expectedVersion < 1)) {
+      return fail(c, 400, "expectedVersion must be a positive integer");
+    }
     try {
       const artifact = await getDeps().store.update(id, {
+        ...(typeof body.expectedVersion === "number" ? { expectedVersion: body.expectedVersion } : {}),
         ...(typeof body.title === "string" ? { title: body.title } : {}),
         ...(typeof body.kind === "string" ? { kind: body.kind } : {}),
         ...(typeof body.description === "string" ? { description: body.description } : {}),
@@ -113,7 +117,7 @@ export function artifactRoutes(getDeps: () => ArtifactRoutesDeps): OpenAPIHono {
       emit(artifact.id, "updated", artifact.type, artifact.title);
       return c.json({ ok: true, data: artifact });
     } catch (err) {
-      return fail(c, 400, err instanceof Error ? err.message : String(err));
+      return fail(c, err instanceof ArtifactEditConflictError ? 409 : 400, err instanceof Error ? err.message : String(err));
     }
   });
 
@@ -126,7 +130,7 @@ export function artifactRoutes(getDeps: () => ArtifactRoutesDeps): OpenAPIHono {
       emit(artifact.id, "updated", artifact.type, artifact.title);
       return c.json({ ok: true, data: artifact });
     } catch (err) {
-      return fail(c, 400, err instanceof Error ? err.message : String(err));
+      return fail(c, err instanceof ArtifactEditConflictError ? 409 : 400, err instanceof Error ? err.message : String(err));
     }
   });
 

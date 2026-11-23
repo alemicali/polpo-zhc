@@ -55,4 +55,18 @@ describe.each(DIALECTS)("artifacts on %s", (dialect) => {
     expect(await store.get(doc.id)).toBeUndefined();
     expect(await store.delete(doc.id)).toBe(false);
   });
+
+  it("accepts just one simultaneous save from the same content version", async () => {
+    const store = stores.artifactStore;
+    const doc = await store.create({ title: "Plan", type: "doc", content: "# Plan", createdBy: "polpo" });
+    const results = await Promise.allSettled([
+      store.update(doc.id, { content: "# First edit", expectedVersion: 1 }),
+      store.update(doc.id, { content: "# Second edit", expectedVersion: 1 }),
+    ]);
+
+    expect(results.map((result) => result.status).sort()).toEqual(["fulfilled", "rejected"]);
+    const rejected = results.find((result) => result.status === "rejected");
+    expect(rejected?.reason).toMatchObject({ name: "ArtifactEditConflictError" });
+    expect(await store.get(doc.id)).toMatchObject({ version: 2, versions: [{ version: 1, content: "# Plan" }] });
+  });
 });

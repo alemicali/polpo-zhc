@@ -67,7 +67,9 @@ export const artifactsApi = {
     return request<ArtifactSummary[]>(`/artifacts${params.size ? `?${params}` : ""}`);
   },
   get: (id: string) => request<Artifact>(one(id)),
-  update: (id: string, patch: Partial<Pick<Artifact, "title" | "description" | "content" | "pinned">> & { note?: string }) =>
+  create: (input: Pick<Artifact, "title" | "type" | "content" | "kind">) =>
+    request<Artifact>("/artifacts", { method: "POST", body: JSON.stringify(input) }),
+  update: (id: string, patch: Partial<Pick<Artifact, "title" | "description" | "content" | "pinned">> & { note?: string; expectedVersion?: number }) =>
     request<Artifact>(one(id), { method: "PATCH", body: JSON.stringify(patch) }),
   restore: (id: string, version: number) => request<Artifact>(`${one(id)}/restore/${version}`, { method: "POST" }),
   remove: (id: string) => request<{ deleted: boolean }>(one(id), { method: "DELETE" }),
@@ -89,6 +91,21 @@ export function artifactLabel(a: Pick<ArtifactSummary, "type" | "kind">): string
   return ARTIFACT_TYPE_LABEL[a.type];
 }
 
+/** Structured workspaces use versioned JSON. Earlier HTML artifacts can have the same kind. */
+export function artifactWorkspace(a: Pick<Artifact, "type" | "kind">, content: string): "slides" | "sheets" | "motion" | undefined {
+  if (a.type !== "html" || !content.trimStart().startsWith("{")) return undefined;
+  return a.kind === "slides" || a.kind === "sheets" || a.kind === "motion" ? a.kind : undefined;
+}
+
+export function downloadArtifactFile(filename: string, blob: Blob): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 /** File name and media type to download an artifact. */
 export function artifactDownload(a: Pick<Artifact, "title" | "type">): { filename: string; mime: string } {
   const base = a.title.trim().replace(/[^\w\- ]+/g, "").replace(/\s+/g, "-").toLowerCase() || "artifact";
@@ -102,14 +119,13 @@ export function artifactDownload(a: Pick<Artifact, "title" | "type">): { filenam
 }
 
 /** Save an artifact's content (the current one, or a version's) as a file. */
-export function saveArtifactFile(a: Pick<Artifact, "title" | "type">, content: string): void {
+export function saveArtifactFile(a: Pick<Artifact, "title" | "type" | "kind">, content: string): void {
   const { filename, mime } = artifactDownload(a);
-  const url = URL.createObjectURL(new Blob([content], { type: mime }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  if (artifactWorkspace(a, content)) {
+    downloadArtifactFile(filename.replace(/\.html$/, ".json"), new Blob([content], { type: "application/json" }));
+  } else {
+    downloadArtifactFile(filename, new Blob([content], { type: mime }));
+  }
 }
 
 /** The artifact's address in the dashboard, to share. */

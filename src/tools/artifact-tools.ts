@@ -8,7 +8,7 @@
 import { Type } from "typebox";
 import type { Tool } from "@earendil-works/pi-ai";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { applyArtifactEdits, type Artifact, type ArtifactStore, type ArtifactType } from "@polpo-ai/core/artifacts";
+import { applyArtifactEdits, ARTIFACT_WORKSPACE_GUIDE, type Artifact, type ArtifactStore, type ArtifactType } from "@polpo-ai/core/artifacts";
 import { isViewArtifactId } from "../server/artifact-runtime.js";
 
 /** What an html artifact can call, inside its page (documented to the authors). */
@@ -34,14 +34,13 @@ const editsParam = Type.Optional(Type.Array(Type.Object({
 export const ARTIFACT_TOOLS: Tool[] = [
   {
     name: "artifact_create",
-    description: "Make an artifact people keep and open in the Artifacts section: a document (doc, Markdown), a dashboard, design, "
-      + "report or small app (html: one self-contained page), a drawing (svg) or a diagram (mermaid). Returns its id and where to open it.\n"
-      + ARTIFACT_BRIDGE_DOC,
+    description: "Create an artifact that opens in the dashboard. Also supports drawings (svg) and diagrams (mermaid). Returns the id and link.\n"
+      + ARTIFACT_WORKSPACE_GUIDE + "\n" + ARTIFACT_BRIDGE_DOC,
     parameters: Type.Object({
       title: Type.String(),
       type: Type.Union([Type.Literal("doc"), Type.Literal("html"), Type.Literal("svg"), Type.Literal("mermaid")]),
-      content: Type.String({ description: "Markdown, a complete HTML page, an <svg>, or Mermaid source" }),
-      kind: Type.Optional(Type.String({ description: "For html: dashboard, design, app, report, page" })),
+      content: Type.String({ description: "Markdown, self-contained HTML, editable-workspace JSON, SVG or Mermaid source" }),
+      kind: Type.Optional(Type.String({ description: "For html: slides, sheets, design, motion, dashboard, app, report, page" })),
       description: Type.Optional(Type.String({ description: "One line: what it is for" })),
       sources: Type.Optional(Type.Array(Type.String(), { description: "Ids of the data sources it reads (html)" })),
       refreshSeconds: Type.Optional(Type.Number({ minimum: 10, description: "Reload its data every N seconds while open (html)" })),
@@ -146,6 +145,7 @@ export async function executeArtifactTool(name: string, args: Record<string, unk
       if (typeof args.content === "string" && edits?.length) throw new Error("Give either content or edits, not both");
       const content = typeof args.content === "string" ? args.content : edits?.length ? applyArtifactEdits(current.content, edits) : undefined;
       const artifact = await ctx.store.update(current.id, {
+        ...(edits?.length ? { expectedVersion: current.version } : {}),
         ...(content !== undefined ? { content } : {}),
         ...(typeof args.title === "string" ? { title: args.title } : {}),
         ...(typeof args.description === "string" ? { description: args.description } : {}),

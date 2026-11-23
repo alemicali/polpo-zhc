@@ -2,6 +2,7 @@
  * Agents, approvals, artifacts and files (data: data.ts).
  */
 import { z } from "zod";
+import { ARTIFACT_WORKSPACE_GUIDE } from "@polpo-ai/core/artifacts";
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { agentCardText, buildAgentCard, type AgentCard } from "../mcp-agent-card.js";
@@ -251,13 +252,13 @@ export function registerArtifactTools(tool: Register, deps: McpDeps): void {
 
   tool("artifacts", "polpo_artifact_create", {
     title: "Create an artifact",
-    description: "Make an artifact people open in Polpo: a doc (Markdown), an html page (dashboard, design, report: self-contained; "
-      + "it reads data through window.polpo.query/sql), an svg or a mermaid diagram. Each call makes a new artifact.",
+    description: "Create an artifact that opens in Polpo. Also supports drawings (svg) and diagrams (mermaid). HTML can read data through window.polpo.query/sql.\n"
+      + ARTIFACT_WORKSPACE_GUIDE,
     inputSchema: {
       title: z.string().min(1).describe("The title people see"),
       type: z.enum(["doc", "html", "svg", "mermaid"]).describe("doc (Markdown), html, svg or mermaid"),
       content: z.string().min(1).describe("The full content in that format"),
-      kind: z.string().optional().describe("For html: dashboard, design, app, report, page"),
+      kind: z.string().optional().describe("For html: slides, sheets, design, motion, dashboard, app, report, page"),
       description: z.string().optional().describe("One line on what it is"),
     },
     outputSchema: { artifact: looseObject },

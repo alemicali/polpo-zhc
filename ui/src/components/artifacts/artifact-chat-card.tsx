@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ExternalLink, Sparkles } from "lucide-react";
 import { useEvents } from "@polpo-ai/react";
+import { ArtifactIcon } from "./artifact-icon";
 import { Button } from "@/components/ui/button";
 import { sidebarActions } from "@/hooks/chat-context";
 import { artifactLabel, artifactsApi, type ArtifactSummary } from "@/lib/artifacts-api";
@@ -14,14 +15,14 @@ export function ArtifactChatCard({ artifactId, updated }: { artifactId: string; 
   const navigate = useNavigate();
   const [artifact, setArtifact] = useState<Pick<ArtifactSummary, "title" | "type" | "kind" | "version"> | null>(null);
   const [gone, setGone] = useState(false);
-  const { events } = useEvents(["artifact:changed"], 1);
+  const { events: [lastEvent] } = useEvents(["artifact:changed"], 1);
 
   useEffect(() => {
     artifactsApi.get(artifactId).then(
       (a) => { setArtifact({ title: a.title, type: a.type, kind: a.kind, version: a.version }); setGone(false); },
       () => setGone(true),
     );
-  }, [artifactId, events.length]);
+  }, [artifactId, lastEvent]);
 
   const open = () => {
     navigate(`/artifacts/${encodeURIComponent(artifactId)}`);
@@ -30,7 +31,7 @@ export function ArtifactChatCard({ artifactId, updated }: { artifactId: string; 
 
   return (
     <div className="my-2 flex items-center gap-3 rounded-lg border border-border/60 bg-card/80 px-3 py-2.5">
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary"><Sparkles className="h-4 w-4" /></span>
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">{artifact ? <ArtifactIcon artifact={artifact} /> : <Sparkles className="h-4 w-4" />}</span>
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{artifact?.title ?? (gone ? "Artifact deleted" : "Artifact")}</p>
         <p className="text-caption text-muted-foreground">

@@ -5,7 +5,8 @@
  * - `doc`: Markdown.
  * - `html`: a self-contained HTML page (a dashboard, a design, a small app). It runs isolated, with no
  *   network; it reads the instance's data sources through the `polpo` bridge, with the rights of whoever
- *   made it (an agent sees only the sources it is granted).
+ *   made it (an agent sees only the sources it is granted). Slides, Sheets and Motion use JSON in
+ *   the same content field for direct editing and version history.
  * - `svg`, `mermaid`: a drawing, a diagram.
  * - `view`: a data view (JSON widget spec), the former Views, kept readable but deprecated.
  *
@@ -15,8 +16,15 @@
 export const ARTIFACT_TYPES = ["doc", "html", "svg", "mermaid", "view"] as const;
 export type ArtifactType = (typeof ARTIFACT_TYPES)[number];
 
-/** What an html artifact is, for listing and the prompt (free text accepted, these are the usual ones). */
-export const ARTIFACT_KINDS = ["dashboard", "design", "app", "report", "page"] as const;
+/** Artifact kinds used by the workbench, with free-text kinds supported for existing callers. */
+export const ARTIFACT_KINDS = ["dashboard", "design", "slides", "sheets", "motion", "app", "report", "page"] as const;
+
+/** Content formats for tools that create artifacts for the dashboard. */
+export const ARTIFACT_WORKSPACE_GUIDE = `Use type "doc" with Markdown for Docs. Use type "html" and kind "design" for a visual canvas, with self-contained HTML and real elements for text and objects the user can edit. Dashboards, small apps and reports use self-contained HTML.
+Use type "html" and the matching kind for these editable workspaces. Pass the JSON object as a string in content:
+- slides: {version:1, slides:[{id, layout:"title"|"content"|"split", title, body, secondary?, notes?, theme?:"light"|"dark"|"accent", elements?:[{id,type:"text"|"rect"|"ellipse",x,y,w,h,text?,color?,fontSize?}]}]}. Element coordinates and size are percentages; fontSize is a percentage of slide width.
+- sheets: {version:1, sheets:[{name,cells:{"A1":"Label","A2":"42","A3":"=SUM(A2:A2)"}}]}. Values and formulas are strings with A1 references. Use up to 20 sheets, 500 rows and columns A through AZ.
+- motion: {version:1,width:1280,height:720,scenes:[{id,name,duration,background,transition?:"cut"|"fade",layers:[{id,type:"text"|"rect"|"ellipse",x,y,width,height,color,text?,fontSize?,animation?:"none"|"fade"|"rise"|"slide",delay?,animationDuration?}]}]}. Positions and sizes are pixels. Duration, delay and animationDuration are seconds. Use six-digit hex colors. Give each slide, scene and element a stable unique id.`;
 
 /** Largest content kept, per artifact. */
 export const MAX_ARTIFACT_BYTES = 1_000_000;
@@ -89,6 +97,8 @@ export interface NewArtifact {
 }
 
 export interface ArtifactPatch {
+  /** The version an editor opened, if the caller requires a conditional save. */
+  expectedVersion?: number;
   title?: string;
   kind?: string;
   description?: string;
@@ -127,7 +137,7 @@ export function isArtifactType(value: unknown): value is ArtifactType {
 }
 
 /** Checks a new or changed content; returns the problem, if any. */
-export function artifactContentProblem(type: ArtifactType, content: string): string | undefined {
+export function artifactContentProblem(type: ArtifactType, content: string, kind?: string): string | undefined {
   if (!content.trim()) return "The content is empty";
   if (utf8Bytes(content) > MAX_ARTIFACT_BYTES) return `The content is over ${MAX_ARTIFACT_BYTES / 1000} KB`;
   if (type === "svg" && !/<svg[\s>]/i.test(content)) return "An svg artifact must contain an <svg> element";
@@ -137,6 +147,20 @@ export function artifactContentProblem(type: ArtifactType, content: string): str
       if (!Array.isArray(view.widgets)) return "A view is a JSON object with widgets";
     } catch {
       return "A view must be valid JSON";
+    }
+  }
+  if (type === "html" && content.trimStart().startsWith("{")) {
+    const key = kind === "slides" ? "slides" : kind === "sheets" ? "sheets" : kind === "motion" ? "scenes" : null;
+    if (key) {
+      try {
+        const value = JSON.parse(content) as Record<string, unknown>;
+        const items = value[key];
+        if (value.version !== 1 || !Array.isArray(items) || !items.length) {
+          return `A ${kind} workspace must have version 1 and a non-empty ${key} array`;
+        }
+      } catch {
+        return `A ${kind} workspace must contain valid JSON`;
+      }
     }
   }
   return undefined;
@@ -160,11 +184,21 @@ export function matchesArtifactFilter(artifact: Pick<Artifact, "type" | "kind" |
   return true;
 }
 
+export class ArtifactEditConflictError extends Error {
+  constructor() {
+    super("This artifact changed while you were editing it.");
+    this.name = "ArtifactEditConflictError";
+  }
+}
+
 /**
  * The artifact after a patch (pure): a changed content keeps the previous one as a version (newest
  * first, at most MAX_ARTIFACT_VERSIONS). Throws on an invalid content.
  */
 export function applyArtifactPatch(artifact: Artifact, patch: ArtifactPatch, now = new Date().toISOString()): Artifact {
+  if (patch.expectedVersion !== undefined && patch.expectedVersion !== artifact.version) {
+    throw new ArtifactEditConflictError();
+  }
   const next: Artifact = { ...artifact, updatedAt: now };
   if (patch.title !== undefined) next.title = patch.title.trim() || artifact.title;
   if (patch.kind !== undefined) next.kind = patch.kind.trim() || undefined;
@@ -174,7 +208,7 @@ export function applyArtifactPatch(artifact: Artifact, patch: ArtifactPatch, now
   if (patch.pinned !== undefined) next.pinned = patch.pinned;
   if (patch.tags !== undefined) next.tags = patch.tags;
   if (patch.content !== undefined && patch.content !== artifact.content) {
-    const problem = artifactContentProblem(artifact.type, patch.content);
+    const problem = artifactContentProblem(artifact.type, patch.content, next.kind);
     if (problem) throw new Error(problem);
     const previous: ArtifactVersion = {
       version: artifact.version,
@@ -195,7 +229,7 @@ export function applyArtifactPatch(artifact: Artifact, patch: ArtifactPatch, now
 /** A new artifact (pure). Throws on an invalid type or content. */
 export function buildArtifact(id: string, input: NewArtifact, now = new Date().toISOString()): Artifact {
   if (!isArtifactType(input.type)) throw new Error(`Unknown artifact type "${String(input.type)}" (${ARTIFACT_TYPES.join(", ")})`);
-  const problem = artifactContentProblem(input.type, input.content);
+  const problem = artifactContentProblem(input.type, input.content, input.kind?.trim());
   if (problem) throw new Error(problem);
   return {
     id,
