@@ -32,6 +32,20 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-23-command-safe-env",
+    date: "2026-11-23",
+    kind: "fixed",
+    title: "I comandi degli agenti non vedono più i segreti del server",
+    summary: "I comandi che un agente esegue sul server ricevono solo le variabili di sistema e quelle concesse esplicitamente, mai le chiavi API o i token di Polpo.",
+    body: [
+      "- **Prima**: un comando eseguito da un agente sul server senza sandbox (lo strumento bash, i controlli dei task) riceveva tutto l'ambiente del server: chiavi dei provider (Anthropic, OpenAI, Bedrock…), la chiave MCP di Polpo, la chiave principale del vault e ogni altro token. Bastava `env` per leggerli.",
+      "- **Ora**: riceve solo le variabili di sistema (PATH, HOME, lingua e `LC_*`, TERM, TMPDIR, fuso orario, proxy, identità git…) e quelle che Polpo gli passa apposta, come le credenziali di `env_from_vault`.",
+      "- Lo stesso vale per i servizi e i deploy delle app registrate; gli harness degli agenti sul server ricevono ora anche lingua, fuso orario e proxy.",
+      "- Se un comando usava una variabile del server che non è più passata, dagliela con `env_from_vault`.",
+    ].join("\n"),
+    highlight: false,
+  },
+  {
     id: "2026-11-23-whats-new-layout",
     date: "2026-11-23",
     kind: "improved",
