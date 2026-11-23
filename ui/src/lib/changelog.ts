@@ -32,6 +32,20 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-23-non-retryable-failures",
+    date: "2026-11-23",
+    kind: "fixed",
+    title: "Gli errori che un nuovo tentativo non può risolvere non vengono più ritentati",
+    summary: "Se il modello non è abilitato per l'account o le credenziali sono rifiutate, il task fallisce subito con il messaggio che dice cosa cambiare, senza revisioni né tentativi automatici.",
+    body: [
+      "- **Fallisce al primo tentativo**: quando un'esecuzione fallisce perché il modello non è abilitato per l'account (ad esempio Bedrock con quota 0) o perché la chiave o le credenziali non sono valide, il task diventa subito *fallito*, con l'errore che dice cosa fare (\"abilita il modello …\", \"controlla le credenziali …\").",
+      "- **Niente spesa inutile**: niente revisione dei criteri di accettazione, niente ciclo di correzione, niente tentativi automatici fino al massimo; anche la risoluzione dei blocchi tra task non lo ritenta più.",
+      "- **Lo vedi ovunque**: nei Dettagli del task, accanto ai tentativi, compare \"Not retried: the error is not retryable\"; lo dicono anche gli strumenti e le schede MCP e Polpo in chat.",
+      "- **Puoi sempre ritentare tu**: dopo aver sistemato modello o credenziali, Riprova (dalla dashboard, da REST, da MCP o chiedendolo a Polpo) funziona come prima. I limiti di spesa e gli errori di rete restano ritentabili.",
+    ].join("\n"),
+    highlight: false,
+  },
+  {
     id: "2026-11-23-bash-process-tree",
     date: "2026-11-23",
     kind: "fixed",
