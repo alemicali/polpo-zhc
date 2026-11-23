@@ -86,6 +86,7 @@ Every CSS custom property the dashboard's theme uses (`ui/src/index.css`), and w
 | Brand | `buttonPrimaryBg` | `--button-primary-bg` (primary buttons, default badges; hover `--button-primary-hover-bg` = 90%) | no (primary) | yes (default: primary) |
 | Brand | `buttonGradient` | `--button-primary-bg` as `linear-gradient(angle, from, to)` (hover: both ends at 90%) | no | yes (wins over `buttonPrimaryBg`) |
 | Brand | `buttonPrimaryForeground` | `--button-primary-foreground` | no (primary-foreground) | yes (derived by contrast on the gradient or fill; default primary-foreground) |
+| Brand | `shadowButtonPrimary` | `--shadow-button-primary` (`shadow-button-primary`: the primary button's shadow, e.g. a glow `0 0 20px oklch(0.6 0.2 290 / 40%)`; hover `--shadow-button-primary-hover` = it plus `shadowGlowStrong` in the primary) | no (none) | yes (default none: no shadow, no hover glow) |
 | Surfaces | `background` | `--background` | palette only | yes |
 | Surfaces | `card` | `--card` | palette only | yes (derived from background) |
 | Surfaces | `popover` | `--popover` | palette only | yes (derived from card) |
@@ -115,7 +116,8 @@ Every CSS custom property the dashboard's theme uses (`ui/src/index.css`), and w
 | Shape | `radiusCard` | `--radius-card` (`rounded-card`: Card, tiles) | no (`radius` + 4px) | yes (default `radius` + 4px) |
 | Shape | `radiusControl` | `--radius-control` (`rounded-control`: buttons, inputs, selects, textareas) | no (`radius` − 2px) | yes (default `radius` − 2px) |
 | Shape | `shadowCard` | `--shadow-card` (`shadow-card`: every card) | palette only | yes |
-| Shape | `shadowRaised` | `--shadow-raised` (`shadow-raised`: popovers, menus, selects, dialogs, sheets, tooltips, the mobile nav) | palette only | yes |
+| Shape | `shadowRaised` | `--shadow-raised` (`shadow-raised`: popovers, menus, selects, tooltips, the mobile nav) | palette only | yes |
+| Shape | `shadowDialog` | `--shadow-dialog` (`shadow-dialog`: dialogs and sheets) | no (`shadowRaised`) | yes (default `shadowRaised`, the palette's or the look's) |
 | Surfaces | `overlay` | `--overlay` (`bg-overlay`: the dialog and sheet scrim) | no (fixed black 50%) | yes |
 | Surfaces | `canvas`, `canvasForeground` | `--canvas`, `--canvas-foreground` (`bg-canvas`: the sheet behind embedded web pages and QR codes) | no (fixed white) | yes (foreground derived by contrast) |
 | Agents | `agent1` … `agent10` | `--agent-1` … `--agent-10` (`bg-agent-3`, `text-agent-3`, `bg-agent-3/15`) | no (fixed Tailwind hues, team colours from the chart colours) | yes (every palette, light and dark) |
@@ -171,15 +173,15 @@ The agent, task and mission cards (MCP Apps in Claude, ChatGPT and other hosts) 
 | A metric | `<StatValue label value hint tone />` |
 | Font sizes | `text-display` (2.25rem), `text-h1` (1.5rem), `text-h2` (1.125rem), `text-h3` (0.9375rem), `text-body` (0.875rem), `text-small` (0.8125rem), `text-caption` (0.6875rem), `text-micro` (0.625rem) |
 | Heading font, weight, tracking | `font-heading` |
-| Shadows | `shadow-card`, `shadow-raised` |
+| Shadows | `shadow-card`, `shadow-raised` (popovers, menus), `shadow-dialog` (dialogs, sheets), `shadow-button-primary` (the primary button) |
 | Sidebar-like chrome | `bg-sidebar text-sidebar-foreground border-sidebar-border`, hover `bg-sidebar-accent`, active `text-sidebar-primary`; the navigation column itself `sidebar-surface` (opacity and blur), the floating bottom nav `sidebar-surface-floating` |
 | Corners | `rounded-card` (cards, tiles), `rounded-control` (buttons, inputs, selects), `rounded-badge`, `rounded-pill` (pills, chips, dots, toggles, bars), `rounded-avatar`, `rounded-dialog`, `rounded-xs` … `rounded-4xl` (from the radius) |
-| Shadows and halos | `shadow-control` (inputs), `shadow-card`, `shadow-raised`, `shadow-glow` / `shadow-glow-strong` with `glow-success`, `glow-warning`, `glow-info`, `glow-destructive`, `glow-status-running`… |
+| Shadows and halos | `shadow-control` (inputs), `shadow-card`, `shadow-raised`, `shadow-dialog`, `shadow-glow` / `shadow-glow-strong` with `glow-success`, `glow-warning`, `glow-info`, `glow-destructive`, `glow-status-running`… |
 | Blur | `backdrop-blur-surface` (glassy bars), `backdrop-blur-overlay` (the scrim), `blur-glow` (soft halos) |
-| An agent's colour | `useAgentColor(name)` → `solid`, `soft`, `text`, `dot`…; `<AgentAvatar name />` |
+| An agent's colour | `useAgentColor(name)` → `solid`, `soft`, `text`, `dot`…; `<AgentAvatar name />` (a list of agents shows each with it, never a plain `Bot` icon: its fallback is the agent's coloured icon or, with `fallbackVariant="circle"`, its initials on its colour) |
 | Scrim, white sheet | `bg-overlay`; `bg-canvas text-canvas-foreground` (behind web pages and QR codes) |
 | Sizes in a style or a chart | `var(--text-micro)` (`style={{ fontSize: "var(--text-micro)" }}`), `className="text-micro"` on Recharts ticks |
-| A primary call to action of your own | `bg-button-primary text-button-primary-foreground hover:bg-button-primary-hover` (follows the button style, gradient included) |
+| A primary call to action of your own | `bg-button-primary text-button-primary-foreground shadow-button-primary hover:bg-button-primary-hover hover:shadow-button-primary-hover` (follows the button style, gradient and glow included) |
 
 `ui/tests/theme-guard.test.ts` counts, per file of `ui/src`, five kinds and fails when a file has more than `ui/tests/theme-guard.baseline.json` allows — which is **zero for every kind** (a test checks the baseline stays at zero):
 
@@ -195,7 +197,7 @@ Use a token instead (the table above), or add one. The test's `ALLOWLIST` holds 
 
 With `derive` on, a token not given is filled from one that is, in this order: `accent` ← `secondary`; `card` ← `background`; `popover` ← `card`; `sidebar` ← `background`; `cardForeground`, `popoverForeground`, `sidebarForeground` ← `foreground`; `primaryForeground`, `secondaryForeground`, `accentForeground`, `sidebarPrimaryForeground`, `sidebarAccentForeground` ← a readable black or white on their surface; `ring`, `sidebarPrimary`, `chart1` ← `primary`; `input`, `sidebarBorder` ← `border`; `sidebarAccent` ← `accent`; `sidebarRing` ← `sidebarPrimary`; `destructiveForeground`, `successForeground`, `warningForeground`, `infoForeground` ← a readable black or white on their colour; `statusRunning` ← `info`; `statusAssigned` ← `primary`; `statusQueued` ← `mutedForeground`; `buttonPrimaryForeground` ← a readable black or white on `buttonGradient` (the average of its two ends), else on `buttonPrimaryBg`. A token given always wins.
 
-Without a value the stylesheet's defaults keep today's look: `--button-primary-bg` is `var(--primary)` (hover 90%, as `bg-primary/90`), `--button-primary-foreground` `var(--primary-foreground)`, `--radius-card` `calc(var(--radius) + 4px)` (rounded-xl), `--radius-control` `calc(var(--radius) - 2px)` (rounded-md), `--sidebar-opacity` 1 and `--sidebar-blur` 0 (opaque, no `backdrop-filter`: any value but `none` would make the sidebar a containing block). Where the browser has no `backdrop-filter` or `color-mix()` the sidebar stays opaque. The bottom nav on phones is already translucent (72%, blurred): `sidebarOpacity` scales it.
+Without a value the stylesheet's defaults keep today's look: `--button-primary-bg` is `var(--primary)` (hover 90%, as `bg-primary/90`), `--button-primary-foreground` `var(--primary-foreground)`, `--shadow-button-primary` none (hover too), `--shadow-dialog` `var(--shadow-raised)`, `--radius-card` `calc(var(--radius) + 4px)` (rounded-xl), `--radius-control` `calc(var(--radius) - 2px)` (rounded-md), `--sidebar-opacity` 1 and `--sidebar-blur` 0 (opaque, no `backdrop-filter`: any value but `none` would make the sidebar a containing block). Where the browser has no `backdrop-filter` or `color-mix()` the sidebar stays opaque. The bottom nav on phones is already translucent (72%, blurred): `sidebarOpacity` scales it.
 
 ## No flash on reload
 

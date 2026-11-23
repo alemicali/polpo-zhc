@@ -18,7 +18,6 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
-  Bot,
   ListChecks,
   GitBranch,
   Quote,
@@ -80,6 +79,7 @@ import { TaskCostBadge, TaskEngineBadge } from "@/components/shared/run-context"
 import { taskCostSummaryOf } from "@/lib/task-cost";
 import { MissionBudgetBanner, MissionCostButton } from "@/components/missions/mission-cost";
 import { useMissionCost } from "@/hooks/use-mission-cost";
+import { AgentAvatar } from "@/components/shared/agent-avatar";
 
 // ── Copyable ID ──
 
@@ -302,7 +302,7 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
         <div className="flex items-center gap-1.5 flex-wrap">
           {taskDef.assignTo && (
             <Badge variant="outline" className="text-micro px-1 py-0 gap-0.5">
-              <Bot className="h-2 w-2" />
+              <AgentAvatar name={taskDef.assignTo} size="xs" />
               {taskDef.assignTo}
             </Badge>
           )}
@@ -1160,7 +1160,7 @@ function GraphTaskPreview({ node, onClose }: { node: Node<TaskNodeData>; onClose
             </div>
           )}
           <div className="flex flex-wrap gap-1.5">
-            {taskDef.assignTo && <Badge variant="outline" className="gap-1 text-micro"><Bot className="h-2.5 w-2.5" />{taskDef.assignTo}</Badge>}
+            {taskDef.assignTo && <Badge variant="outline" className="gap-1 text-micro"><AgentAvatar name={taskDef.assignTo} size="xs" />{taskDef.assignTo}</Badge>}
             {(taskDef.dependsOn?.length ?? 0) > 0 && <Badge variant="secondary" className="gap-1 text-micro"><GitBranch className="h-2.5 w-2.5" />{taskDef.dependsOn!.length} dependencies</Badge>}
             {(taskDef.expectations?.length ?? 0) > 0 && <Badge variant="secondary" className="gap-1 text-micro"><Wrench className="h-2.5 w-2.5" />{taskDef.expectations!.length} checks</Badge>}
           </div>
@@ -1319,7 +1319,7 @@ export function TaskStepCard({
             <div className="flex items-center gap-3 mt-2 text-caption text-muted-foreground">
               {taskDef.assignTo && (
                 <span className="flex items-center gap-1">
-                  <Bot className="h-3 w-3" />
+                  <AgentAvatar name={taskDef.assignTo} size="xs" />
                   {taskDef.assignTo}
                 </span>
               )}

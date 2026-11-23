@@ -122,7 +122,9 @@ describe("the primary button", () => {
     expect(index).toContain("--button-primary-hover-bg: color-mix(in oklab, var(--primary) 90%, transparent);");
     expect(index).toContain("--button-primary-foreground: var(--primary-foreground);");
     const button = readFileSync(resolve(UI, "src/components/ui/button.tsx"), "utf8");
-    expect(button).toContain('default: "bg-button-primary text-button-primary-foreground hover:bg-button-primary-hover"');
+    expect(button).toContain('default: "bg-button-primary text-button-primary-foreground shadow-button-primary hover:bg-button-primary-hover hover:shadow-button-primary-hover"');
+    // its shadow is none unless a look sets one (shadowButtonPrimary)
+    expect(index).toContain("--shadow-button-primary: 0 0 #0000;");
     // the other variants keep their own colours
     expect(button).toContain("bg-destructive text-destructive-foreground");
     expect(button).toContain("bg-secondary text-secondary-foreground");
