@@ -4,14 +4,21 @@
  * viewer with the artifact running live, its versions (go back to any), its source, and download. The
  * former data views are here too, as artifacts of type "view".
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import {
-  LayoutGrid, List, Loader2, PanelRight, Search, Sparkles,
+  LayoutGrid, List, ListFilter, PanelRight, Search, Sparkles, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useEvents, useMissions, useTasks } from "@polpo-ai/react";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem,
+  DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
+import { ArtifactPreparation } from "@/components/artifacts/artifact-preparation";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ArtifactTemplates } from "@/components/artifacts/artifact-templates";
@@ -39,6 +46,29 @@ const FILTERS: { value: "all" | ArtifactType; label: string }[] = [
   { value: "svg", label: "Drawings" },
 ];
 
+const SORTS: { key: ArtifactSort["key"]; dir: ArtifactSort["dir"]; label: string }[] = [
+  { key: "updatedAt", dir: "desc", label: "Newest updated" },
+  { key: "updatedAt", dir: "asc", label: "Oldest updated" },
+  { key: "title", dir: "asc", label: "Name (A–Z)" },
+  { key: "createdBy", dir: "asc", label: "Created by" },
+  { key: "type", dir: "asc", label: "Artifact type" },
+  { key: "size", dir: "desc", label: "Largest first" },
+];
+
+const WORKSPACE_FILTERS = [
+  { value: "slides", label: "Slides" },
+  { value: "sheets", label: "Sheets" },
+  { value: "design", label: "Design" },
+  { value: "motion", label: "Motion" },
+] as const;
+
+const DATE_FILTERS = [
+  { days: 0, label: "Any time" },
+  { days: 7, label: "Last 7 days" },
+  { days: 30, label: "Last 30 days" },
+] as const;
+const DAY_MS = 86_400_000;
+
 export function ArtifactsPage() {
   const { artifactId } = useParams();
   return artifactId ? <ArtifactDetail key={artifactId} id={artifactId} /> : <ArtifactGallery />;
@@ -48,11 +78,19 @@ function ArtifactGallery() {
   const product = productName(useInstanceBranding());
   const now = useNow();
   const [params, setParams] = useSearchParams();
-  const filter = (params.get("type") as ArtifactType | null) ?? "all";
-  // the former views have no tab of their own: they show in All (marked Legacy), or with ?type=view
-  const tab = FILTERS.some((f) => f.value === filter) ? filter : "all";
+  const requestedType = params.get("type");
+  const filter = requestedType === "view" ? "view" : FILTERS.find((f) => f.value === requestedType)?.value ?? "all";
+  const format = filter === "html" ? WORKSPACE_FILTERS.find((item) => item.value === params.get("kind"))?.value : undefined;
+  const mine = params.get("owner") === "me";
   const [q, setQ] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const search = useRef<HTMLInputElement>(null);
+  const searchTrigger = useRef<HTMLButtonElement>(null);
+  const [pinnedOnly, setPinnedOnly] = useState(false);
+  const [days, setDays] = useState(0);
   const [items, setItems] = useState<ArtifactSummary[] | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const requestIndex = useRef(0);
   const [layout, setLayoutState] = useState<ArtifactsLayout>(readArtifactsLayout);
   const [sort, setSort] = useState<ArtifactSort>(DEFAULT_ARTIFACT_SORT);
   const [active, setActive] = useState(-1);
@@ -60,11 +98,35 @@ function ArtifactGallery() {
   const { tasks } = useTasks();
   const { missions } = useMissions();
 
-  const load = useCallback(() => artifactsApi.list(filter === "all" ? {} : { type: filter }).then(setItems, (e: Error) => toast.error(e.message)), [filter]);
+  const load = useCallback(() => {
+    const request = ++requestIndex.current;
+    return artifactsApi.list({ ...(filter === "all" ? {} : { type: filter }), ...(mine ? { mine: true } : {}) }).then((result) => {
+      if (requestIndex.current === request) {
+        setItems(result);
+        setLoadError(false);
+      }
+    }, (error: Error) => {
+      if (requestIndex.current === request) {
+        setLoadError(true);
+        toast.error(error.message);
+      }
+    });
+  }, [filter, mine]);
   useEffect(() => { void load(); }, [load, lastEvent]);
   const actions = useArtifactActions(() => void load());
 
   const setLayout = (next: ArtifactsLayout) => { setLayoutState(next); writeArtifactsLayout(next); };
+
+  useEffect(() => {
+    if (searchOpen) search.current?.focus();
+  }, [searchOpen]);
+
+  const closeSearch = () => {
+    setSearchOpen(false);
+    setQ("");
+    setActive(-1);
+    searchTrigger.current?.focus();
+  };
 
   const info = useMemo(() => {
     const taskTitle = new Map((tasks ?? []).map((t) => [t.id, t.title]));
@@ -78,10 +140,16 @@ function ArtifactGallery() {
 
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    const list = items ?? [];
-    const filtered = needle ? list.filter((a) => a.title.toLowerCase().includes(needle) || (a.description ?? "").toLowerCase().includes(needle) || artifactLabel(a).toLowerCase().includes(needle)) : list;
+    const since = days ? now - days * DAY_MS : undefined;
+    const filtered = (items ?? []).filter((artifact) =>
+      (filter === "all" || artifact.type === filter) &&
+      (!format || artifact.kind === format) &&
+      (!pinnedOnly || artifact.pinned) &&
+      (since === undefined || Date.parse(artifact.updatedAt) >= since) &&
+      (!needle || [artifact.title, artifact.description ?? "", artifactLabel(artifact)].some((value) => value.toLowerCase().includes(needle))),
+    );
     return sortArtifacts(filtered, sort, { author: (a) => info(a).author, origin: (a) => info(a).origin?.label ?? "" });
-  }, [items, q, sort, info]);
+  }, [items, q, sort, info, filter, format, pinnedOnly, days, now]);
 
   // the preview layout shows one artifact: the one picked (kept in the address), else the first
   const picked = params.get("selected");
@@ -91,34 +159,109 @@ function ArtifactGallery() {
     next.set("selected", id);
     setParams(next, { replace: true });
   };
-  const changeTab = (v: string) => setParams(v === "all" ? {} : { type: v });
+  const changeTab = (value: string) => {
+    setActive(-1);
+    setParams({ ...(mine ? { owner: "me" } : {}), ...(value === "all" ? {} : { type: value }) });
+  };
+  const changeFormat = (value: string) => {
+    const workspace = WORKSPACE_FILTERS.find((item) => item.value === value);
+    if (!workspace) { changeTab(value); return; }
+    setActive(-1);
+    setParams({ ...(mine ? { owner: "me" } : {}), type: "html", kind: workspace.value });
+  };
+  const filtered = q.trim() !== "" || filter !== "all" || pinnedOnly || days !== 0;
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
-      <ArtifactTemplates />
+    <div className={cn("mx-auto flex h-full min-h-0 w-full flex-col gap-3", layout === "preview" ? "max-w-[86rem]" : "max-w-5xl")}>
+      <h1 className="mb-1 font-heading text-2xl font-semibold tracking-tight">Artifacts</h1>
       <div className="flex flex-wrap items-center gap-2">
-        <Tabs value={tab} onValueChange={changeTab} className="max-w-full overflow-x-auto">
-          <TabsList>{FILTERS.map((f) => <TabsTrigger key={f.value} value={f.value}>{f.label}</TabsTrigger>)}</TabsList>
+        <Tabs value={mine ? "mine" : "all"} onValueChange={value => {
+          const next = new URLSearchParams(params);
+          next.delete("selected");
+          if (value === "mine") next.set("owner", "me"); else next.delete("owner");
+          setActive(-1);
+          setParams(next);
+        }} className="max-w-full overflow-x-auto">
+          <TabsList><TabsTrigger value="all">All</TabsTrigger><TabsTrigger value="mine">Yours</TabsTrigger></TabsList>
         </Tabs>
-        <div className="ml-auto flex w-full flex-wrap items-center gap-2 sm:w-auto">
-          <div className="relative min-w-0 flex-1 sm:w-64 sm:flex-none">
-            <Search className="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-            <Input value={q} onChange={(e) => { setQ(e.target.value); setActive(-1); }} placeholder="Search artifacts" className="h-8 pl-7 text-sm" />
-          </div>
+        <div className="ml-auto flex items-center gap-1.5">
+          <Button ref={searchTrigger} size="icon-sm" variant="ghost" aria-label="Search artifacts" title="Search artifacts"
+            aria-expanded={searchOpen} aria-controls={searchOpen ? "artifact-search" : undefined} onClick={() => searchOpen ? closeSearch() : setSearchOpen(true)}>
+            <Search className="size-4" />
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="icon-sm" variant={filter === "all" && !pinnedOnly && !days ? "ghost" : "secondary"} aria-label="Filter and sort" title="Filter and sort">
+                <ListFilter className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44">
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>Sort by</DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  <DropdownMenuRadioGroup value={`${sort.key}:${sort.dir}`} onValueChange={(value) => {
+                    const next = SORTS.find((option) => `${option.key}:${option.dir}` === value);
+                    if (next) { setSort({ key: next.key, dir: next.dir }); setActive(-1); }
+                  }}>
+                    {SORTS.map(({ key, dir, label }) => <DropdownMenuRadioItem key={`${key}:${dir}`} value={`${key}:${dir}`}>{label}</DropdownMenuRadioItem>)}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>Type</DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  <DropdownMenuRadioGroup value={format ?? filter} onValueChange={changeFormat}>
+                    {FILTERS.map(({ value, label }) => <DropdownMenuRadioItem key={value} value={value}>{label}</DropdownMenuRadioItem>)}
+                    {WORKSPACE_FILTERS.map(({ value, label }) => <DropdownMenuRadioItem key={value} value={value}>{label}</DropdownMenuRadioItem>)}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>Updated</DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  <DropdownMenuRadioGroup value={String(days)} onValueChange={(value) => { setDays(Number(value)); setActive(-1); }}>
+                    {DATE_FILTERS.map(({ days, label }) => <DropdownMenuRadioItem key={days} value={String(days)}>{label}</DropdownMenuRadioItem>)}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              <DropdownMenuSeparator />
+              <DropdownMenuCheckboxItem checked={pinnedOnly} onCheckedChange={(checked) => { setPinnedOnly(checked); setActive(-1); }}>
+                Pinned only
+              </DropdownMenuCheckboxItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <SegmentedControl value={layout} onValueChange={setLayout} size="sm" aria-label="Layout">
-            <ToggleGroupItem value="table" aria-label="List" title="List"><List className="size-3.5" /><span className="hidden sm:inline">List</span></ToggleGroupItem>
-            <ToggleGroupItem value="grid" aria-label="Grid" title="Grid"><LayoutGrid className="size-3.5" /><span className="hidden sm:inline">Grid</span></ToggleGroupItem>
-            <ToggleGroupItem value="preview" aria-label="Preview" title="Preview"><PanelRight className="h-3.5 w-3.5" /><span className="hidden sm:inline">Preview</span></ToggleGroupItem>
+            <ToggleGroupItem value="table" aria-label="List" title="List view"><List className="size-3.5" /></ToggleGroupItem>
+            <ToggleGroupItem value="grid" aria-label="Grid" title="Grid view"><LayoutGrid className="size-3.5" /></ToggleGroupItem>
+            <ToggleGroupItem value="preview" aria-label="Preview" title="Split preview"><PanelRight className="size-3.5" /></ToggleGroupItem>
           </SegmentedControl>
         </div>
+        {searchOpen && (
+          <div id="artifact-search" className="relative w-full sm:ml-auto sm:w-72">
+            <Search className="pointer-events-none absolute left-2.5 top-2.5 size-3.5 text-muted-foreground" aria-hidden="true" />
+            <Input ref={search} type="search" value={q}
+              onChange={(event) => { setQ(event.target.value); setActive(-1); }}
+              onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); closeSearch(); } }}
+              aria-label="Find an artifact" placeholder="Search by name or type" className="h-8 min-w-0 pl-8 pr-9 text-sm [&::-webkit-search-cancel-button]:hidden" />
+            <Button type="button" size="icon-sm" variant="ghost" className="absolute right-0.5 top-0.5 size-7" aria-label="Close search" onClick={closeSearch}>
+              <X className="size-3.5" />
+            </Button>
+          </div>
+        )}
       </div>
-      {items === null ? (
-        <div className="flex flex-1 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+      <ArtifactTemplates />
+      {loadError ? (
+        <div role="status" className="flex flex-1 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
+          <p>Couldn't load artifacts.</p>
+          <Button size="sm" variant="outline" onClick={() => { setLoadError(false); void load(); }}>Retry</Button>
+        </div>
+      ) : items === null ? (
+        <div className="min-h-0 flex-1"><ArtifactPreparation /></div>
       ) : shown.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center text-sm text-muted-foreground">
           <Sparkles className="h-6 w-6" />
-          <p>{q.trim() ? "No artifacts match." : "No artifacts yet."}</p>
-          {!q.trim() && <p className="max-w-sm text-xs">Choose a template above or ask {product} to create an artifact.</p>}
+          <p>{filtered ? "No artifacts match." : "No artifacts yet."}</p>
+          {!filtered && <p className="max-w-sm text-xs">Choose a template above or ask {product} to create an artifact.</p>}
         </div>
       ) : layout === "grid" ? (
         <ArtifactsGrid items={shown} info={info} actions={actions} now={now} />

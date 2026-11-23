@@ -1,6 +1,7 @@
 import type { JSONContent } from "@tiptap/core";
 import type { ILevelsOptions, IParagraphOptions, Paragraph, ParagraphChild, Table } from "docx";
 import { embeddedDocImage } from "./artifact-doc-assets";
+import { decodeDocChoice, selectedChoice } from "./artifact-doc-choices";
 import { artifactDocUrl, readArtifactDoc } from "./artifact-doc-format";
 
 const printStyles = `
@@ -20,7 +21,15 @@ const printStyles = `
   ul[data-type="taskList"] { list-style: none; padding-left: 1.2em; }
   li[data-type="taskItem"] { display: flex; gap: .5em; }
   li p { margin: 0; }
-  @media print { body { margin: 0; padding: 0; } }
+  details { margin: 1em 0; }
+  [data-polpo-doc-choice] { border: 1px solid #cbd5e1; border-radius: 9999px; padding: .05em .45em; }
+  [data-polpo-doc-font="sans"] { font-family: system-ui, sans-serif; }
+  [data-polpo-doc-font="serif"] { font-family: Georgia, serif; }
+  [data-polpo-doc-font="mono"] { font-family: ui-monospace, monospace; }
+  @media print {
+    body { margin: 0; padding: 0; }
+    section[data-doc-tab] + section[data-doc-tab] { break-before: page; }
+  }
 `;
 
 export function printArtifactDoc(content: string, title: string): void {
@@ -46,6 +55,7 @@ export function printArtifactDoc(content: string, title: string): void {
     if (artifactDocUrl(href, true)) link.href = href;
     video.replaceWith(link);
   }
+  for (const details of page.querySelectorAll("details")) details.open = true;
   const images = Array.from(page.images);
   const ready = Promise.allSettled(images.map((image) => image.decode()));
   void Promise.race([ready, new Promise((resolve) => setTimeout(resolve, 2500))]).then(() => {
@@ -68,8 +78,13 @@ export async function artifactDocToWord(content: string, title?: string): Promis
   ];
   const numbering: { reference: string; levels: ILevelsOptions[] }[] = [];
 
+  const wordFonts: Record<string, string> = { sans: "Aptos", serif: "Georgia", mono: "Consolas" };
   const inline = async (node: JSONContent): Promise<ParagraphChild[]> => {
     if (node.type === "hardBreak") return [new TextRun({ break: 1 })];
+    if (node.type === "docChoice") {
+      const choice = decodeDocChoice(node.attrs?.choice);
+      return [new TextRun({ text: choice ? selectedChoice(choice)?.label ?? choice.name : "Dropdown", bold: true })];
+    }
     if (node.type === "image") {
       const src = String(node.attrs?.src ?? "");
       const alt = String(node.attrs?.alt || "Image");
@@ -107,12 +122,15 @@ export async function artifactDocToWord(content: string, title?: string): Promis
     if (node.type !== "text") return (await Promise.all((node.content ?? []).map(inline))).flat();
     const marks = new Set((node.marks ?? []).map((mark) => mark.type));
     const href = node.marks?.find((mark) => mark.type === "link")?.attrs?.href;
+    const family = node.marks?.find((mark) => mark.type === "docFont")?.attrs?.family;
+    const font = marks.has("code") ? "Consolas" : wordFonts[String(family)];
     const options = {
       text: node.text ?? "",
       bold: marks.has("bold"),
       italics: marks.has("italic"),
       strike: marks.has("strike"),
-      ...(marks.has("code") ? { font: "Consolas" } : {}),
+      ...(marks.has("underline") ? { underline: {} } : {}),
+      ...(font ? { font } : {}),
     };
     return typeof href === "string" && artifactDocUrl(href, false)
       ? [new ExternalHyperlink({ link: href, children: [new TextRun({ ...options, style: "Hyperlink" })] })]
@@ -148,7 +166,15 @@ export async function artifactDocToWord(content: string, title?: string): Promis
         return [new Paragraph({ children })];
       }
       case "heading":
-        return [await paragraph({ heading: headings[Number(node.attrs?.level) - 1] ?? HeadingLevel.HEADING_1 })];
+        return [await paragraph({
+          heading: headings[Number(node.attrs?.level) - 1] ?? HeadingLevel.HEADING_1,
+          ...(node.attrs?.tabStart === true ? { pageBreakBefore: true } : {}),
+        })];
+      case "docDropdown":
+        return [
+          new Paragraph({ children: [new TextRun({ text: String(node.attrs?.title ?? "Details"), bold: true })] }),
+          ...String(node.attrs?.body ?? "").split("\n").map((text) => new Paragraph({ children: [new TextRun(text)] })),
+        ];
       case "codeBlock":
         return (children.map((child) => child.text ?? "").join("").split("\n")).map((text) => new Paragraph({
           children: [new TextRun({ text, font: "Consolas", size: 20 })],

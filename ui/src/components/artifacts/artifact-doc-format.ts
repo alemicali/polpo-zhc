@@ -1,9 +1,13 @@
-import { Editor, Node } from "@tiptap/core";
+import { Editor, Mark, Node, type JSONContent } from "@tiptap/core";
 import { Image } from "@tiptap/extension-image";
+import { ReactNodeViewRenderer } from "@tiptap/react";
 import { TaskItem, TaskList } from "@tiptap/extension-list";
 import { TableKit } from "@tiptap/extension-table";
 import { Markdown } from "@tiptap/markdown";
 import { StarterKit } from "@tiptap/starter-kit";
+import { readDocTabs } from "./artifact-doc-tabs";
+import { choiceToMarkdown, decodeDocChoice, encodeDocChoice, selectedChoice } from "./artifact-doc-choices";
+import { DocChoiceChip } from "./artifact-doc-choice-chip";
 
 export function artifactDocUrl(value: string, image: boolean): boolean {
   try {
@@ -68,6 +72,137 @@ const DocVideo = Node.create({
   },
 });
 
+const DocChoice = Node.create({
+  name: "docChoice",
+  group: "inline",
+  inline: true,
+  atom: true,
+  addAttributes() {
+    return { choice: { default: "", rendered: false } };
+  },
+  parseHTML() {
+    return [{
+      tag: "span[data-polpo-doc-choice]",
+      getAttrs: (element) => {
+        const value = element.getAttribute("data-polpo-doc-choice");
+        return decodeDocChoice(value) ? { choice: value } : false;
+      },
+    }];
+  },
+  renderHTML({ node }) {
+    const choice = decodeDocChoice(node.attrs.choice);
+    const text = choice ? selectedChoice(choice)?.label ?? choice.name : "Dropdown";
+    return ["span", { "data-polpo-doc-choice": choice ? encodeDocChoice(choice) : "" }, text];
+  },
+  addNodeView() {
+    return ReactNodeViewRenderer(DocChoiceChip);
+  },
+  markdownTokenizer: {
+    name: "docChoice",
+    level: "inline",
+    start: '<span data-polpo-doc-choice="',
+    tokenize(source) {
+      const match = /^<span data-polpo-doc-choice="([^"\r\n]+)">[^<]*<\/span>/.exec(source);
+      return match && decodeDocChoice(match[1]) ? { type: "docChoice", raw: match[0], choice: match[1] } : undefined;
+    },
+  },
+  parseMarkdown(token, helpers) {
+    return helpers.createNode("docChoice", { choice: token.choice });
+  },
+  renderMarkdown(node) {
+    const choice = decodeDocChoice(node.attrs?.choice);
+    if (!choice) return "Dropdown";
+    return choiceToMarkdown(choice);
+  },
+});
+
+const dropdownBlock = /^ {0,3}<details data-polpo-dropdown=""><summary>[^\r\n]*?<\/summary><p>[^\r\n]*?<\/p><\/details>[ \t]*(?:\r?\n|$)/i;
+
+function readDropdownElement(element: ParentNode) {
+  return {
+    title: element.querySelector("summary")?.textContent || "Details",
+    body: Array.from(element.querySelector("p")?.childNodes ?? []).map((node) =>
+      node.nodeName === "BR" ? "\n" : node.textContent ?? ""
+    ).join(""),
+  };
+}
+
+const DocDropdown = Node.create({
+  name: "docDropdown",
+  group: "block",
+  atom: true,
+  draggable: true,
+  addAttributes() {
+    return { title: { default: "Details" }, body: { default: "" } };
+  },
+  parseHTML() {
+    return [{ tag: "details[data-polpo-dropdown]", getAttrs: readDropdownElement }];
+  },
+  renderHTML({ node }) {
+    const body = String(node.attrs.body ?? "").split("\n");
+    return ["details", { "data-polpo-dropdown": "" },
+      ["summary", String(node.attrs.title ?? "Details")],
+      ["p", ...body.flatMap((line, i) => i ? [["br"], line] : [line])],
+    ];
+  },
+  markdownTokenizer: {
+    name: "docDropdown",
+    level: "block",
+    start: (source) => source.search(/^ {0,3}<details data-polpo-dropdown=""/im),
+    tokenize(source) {
+      const raw = dropdownBlock.exec(source)?.[0];
+      if (!raw) return;
+      const parsed = new DOMParser().parseFromString(raw, "text/html");
+      return { type: "docDropdown", raw, ...readDropdownElement(parsed) };
+    },
+  },
+  parseMarkdown(token, helpers) {
+    return helpers.createNode("docDropdown", { title: token.title, body: token.body });
+  },
+  renderMarkdown(node) {
+    const title = escapeAttribute(String(node.attrs?.title ?? "Details"));
+    const body = escapeAttribute(String(node.attrs?.body ?? "")).replaceAll("\n", "<br>");
+    return `<details data-polpo-dropdown=""><summary>${title}</summary><p>${body}</p></details>`;
+  },
+});
+
+export const docFontFamilies = ["sans", "serif", "mono"] as const;
+
+const DocFont = Mark.create({
+  name: "docFont",
+  addAttributes() {
+    return { family: { default: "sans" } };
+  },
+  parseHTML() {
+    return [{
+      tag: "span[data-polpo-doc-font]",
+      getAttrs: (element) => {
+        const family = docFontFamilies.find((name) => element.getAttribute("data-polpo-doc-font") === name);
+        return family ? { family } : false;
+      },
+    }];
+  },
+  renderHTML({ mark }) {
+    return ["span", { "data-polpo-doc-font": mark.attrs.family }, 0];
+  },
+  markdownTokenizer: {
+    name: "docFont",
+    level: "inline",
+    start: '<span data-polpo-doc-font="',
+    tokenize(source, _tokens, lexer) {
+      const match = /^<span data-polpo-doc-font="(sans|serif|mono)">([\s\S]+?)<\/span>/.exec(source);
+      return match ? { type: "docFont", raw: match[0], family: match[1], tokens: lexer.inlineTokens(match[2]) } : undefined;
+    },
+  },
+  parseMarkdown(token, helpers) {
+    return helpers.applyMark("docFont", helpers.parseInline(token.tokens ?? []), { family: token.family });
+  },
+  renderMarkdown(node, helpers) {
+    const family = docFontFamilies.find((name) => node.attrs?.family === name) ?? "sans";
+    return `<span data-polpo-doc-font="${family}">${helpers.renderChildren(node)}</span>`;
+  },
+});
+
 const alertName = /^(?:NOTE|TIP|IMPORTANT|WARNING|CAUTION)$/;
 
 const DocAlert = Node.create({
@@ -129,11 +264,12 @@ const DocStarterKit = StarterKit.extend({
 export const artifactDocExtensions = [
   DocStarterKit.configure({
     link: { openOnClick: false, defaultProtocol: "https" },
-    // Underline is not part of Markdown and would otherwise disappear on serialization.
-    underline: false,
   }),
   DocAlert,
   DocVideo,
+  DocChoice,
+  DocDropdown,
+  DocFont,
   Image.configure({ inline: true, allowBase64: true, HTMLAttributes: { referrerpolicy: "no-referrer" } }),
   TaskList,
   TaskItem.configure({ nested: true }),
@@ -141,7 +277,7 @@ export const artifactDocExtensions = [
   Markdown.configure({ markedOptions: { gfm: true } }),
 ];
 
-export function readArtifactDoc(content: string) {
+function readArtifactDocTab(content: string) {
   const editor = new Editor({
     extensions: artifactDocExtensions,
     content,
@@ -152,4 +288,23 @@ export function readArtifactDoc(content: string) {
   } finally {
     editor.destroy();
   }
+}
+
+
+export function readArtifactDoc(content: string) {
+  const book = readDocTabs(content);
+  if (!book.namespace) return readArtifactDocTab(content);
+
+  const children: JSONContent[] = [];
+  const pages: string[] = [];
+  for (const [index, tab] of book.tabs.entries()) {
+    const { html, json } = readArtifactDocTab(tab.content);
+    children.push({
+      type: "heading",
+      attrs: { level: 1, tabStart: index > 0 },
+      content: [{ type: "text", text: tab.title }],
+    }, ...(json.content ?? []));
+    pages.push(`<section data-doc-tab><h1>${escapeAttribute(tab.title)}</h1>${html}</section>`);
+  }
+  return { html: pages.join(""), json: { type: "doc", content: children } as JSONContent };
 }

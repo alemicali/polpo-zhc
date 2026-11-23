@@ -175,14 +175,14 @@ export function ArtifactsGrid({ items, info, actions, now }: {
 }) {
   return (
     <div className="min-h-0 flex-1 overflow-auto pb-bottom-nav">
-      <ul aria-label="Artifact previews" className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,13.5rem),1fr))] gap-3">
+      <ul aria-label="Artifact previews" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {items.map((artifact) => {
           const { author } = info(artifact);
           return (
             <li key={artifact.id} className="group relative overflow-hidden rounded-lg border border-border/70 bg-card transition-colors hover:border-primary/45 focus-within:border-primary">
               <Link to={artifactPath(artifact.id)} className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
                 <ArtifactThumbnail artifact={artifact} />
-                <div className="flex min-w-0 items-start gap-2 p-3 pr-10">
+                <div className="flex min-w-0 items-start gap-2 px-3 py-2.5 pr-10">
                   <span className="grid size-7 shrink-0 place-items-center rounded-md bg-primary/10 text-primary"><ArtifactIcon artifact={artifact} className="size-3.5" /></span>
                   <span className="min-w-0 grow">
                     <span className="flex min-w-0 items-center gap-1.5">
@@ -195,7 +195,7 @@ export function ArtifactsGrid({ items, info, actions, now }: {
                   </span>
                 </div>
               </Link>
-              <ArtifactRowMenu artifact={artifact} actions={actions} className="absolute bottom-3 right-2" />
+              <ArtifactRowMenu artifact={artifact} actions={actions} className="absolute bottom-2.5 right-2" />
             </li>
           );
         })}

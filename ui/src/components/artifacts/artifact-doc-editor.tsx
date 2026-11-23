@@ -1,26 +1,34 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
 import {
-  Bold, ChevronDown, Code, FileImage, Italic, Link2, List, ListChecks, ListOrdered,
-  Minus, MoreHorizontal, PanelLeft, Plus, Quote, Redo2, SquareCode, Strikethrough, Table2, Undo2,
-  Video,
+  Bold, ChevronDown, Code, Eye, FileImage, Italic, Link2, List, ListChecks, ListOrdered,
+  Minus, MoreHorizontal, PanelLeft, Quote, Redo2, SquareCode, Strikethrough, Table2, Type, Underline, Undo2,
+  Pencil, Video,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { embeddedDocImage } from "./artifact-doc-assets";
-import { artifactDocExtensions, artifactDocUrl } from "./artifact-doc-format";
+import { artifactDocExtensions, artifactDocUrl, docFontFamilies } from "./artifact-doc-format";
+import { ArtifactDocMarkdown } from "./artifact-doc-preview";
+import { DocChoiceEditContext } from "./artifact-doc-choice-chip";
+import { DocChoicePicker } from "./artifact-doc-choice-picker";
+import { encodeDocChoice, readChoiceDefinitions, updateChoiceDefinition, type DocChoiceDefinition } from "./artifact-doc-choices";
+import { DocTabNavigation, type DocTabAction } from "./artifact-doc-tab-navigation";
+import { newDocTab, readDocTabs, writeDocTabs, type ArtifactDocTab } from "./artifact-doc-tabs";
 
 const headingLevels = [1, 2, 3, 4, 5, 6] as const;
+const fontLabels = { sans: "Sans serif", serif: "Serif", mono: "Monospace" };
 
 const docTypography = [
   "min-h-[45vh] break-words text-[15px] leading-7 outline-none",
-  "[&_p]:my-3 [&_h1]:mb-5 [&_h1]:mt-7 [&_h1]:font-heading [&_h1]:text-3xl [&_h1]:font-semibold",
+  "[&>:first-child]:mt-0 [&_p]:my-3 [&_h1]:mb-5 [&_h1]:mt-7 [&_h1]:font-heading [&_h1]:text-3xl [&_h1]:font-semibold",
   "[&_h2]:mb-3 [&_h2]:mt-6 [&_h2]:text-2xl [&_h2]:font-semibold",
   "[&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:text-xl [&_h3]:font-semibold",
   "[&_h4]:my-2 [&_h4]:text-lg [&_h4]:font-semibold [&_h5]:my-2 [&_h5]:font-semibold [&_h6]:my-2 [&_h6]:font-semibold",
@@ -31,6 +39,8 @@ const docTypography = [
   "[&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_hr]:my-6 [&_pre]:my-4 [&_pre]:overflow-auto",
   "[&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:font-mono [&_code]:text-[0.88em]",
   "[&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-4 [&_pre_code]:px-0",
+  "[&_details]:my-3 [&_details]:rounded-md [&_details]:border [&_details]:p-3 [&_summary]:cursor-pointer [&_summary]:font-medium",
+  "[&_[data-polpo-doc-font=sans]]:font-sans [&_[data-polpo-doc-font=serif]]:font-serif [&_[data-polpo-doc-font=mono]]:font-mono",
   "[&_video]:my-4 [&_video]:max-h-130 [&_video]:w-full [&_video]:rounded-md [&_video]:bg-black",
   "[&_img]:inline-block [&_img]:max-h-130 [&_img]:max-w-full [&_img]:rounded-md",
   "[&_.tableWrapper]:overflow-x-auto [&_table]:my-4 [&_table]:w-full [&_table]:border-collapse",
@@ -64,20 +74,169 @@ function FormatButton({ label, active, ...props }: React.ComponentProps<typeof B
   );
 }
 
-export function ArtifactDocEditor({ content, onChange }: {
+interface DocEditorProps {
   content: string;
   onChange: (content: string) => void;
-}) {
+}
+
+export function ArtifactDocEditor({ content, onChange }: DocEditorProps) {
+  const book = useMemo(() => readDocTabs(content), [content]);
+  const choices = useMemo(() => readChoiceDefinitions(content), [content]);
+  const [activeId, setActiveId] = useState(book.tabs[0].id);
+  const [tabsOpen, setTabsOpen] = useState(book.tabs.length > 1);
+  const [mode, setMode] = useState<"editing" | "reading">("editing");
+  const [tabDialog, setTabDialog] = useState<{ action: "rename" | "delete"; tab: ArtifactDocTab; title: string } | null>(null);
+  const sidebarId = useId();
+  const activeTab = book.tabs.find((tab) => tab.id === activeId) ?? book.tabs[0];
+
+  function updateTab(tabId: string, patch: Partial<Pick<ArtifactDocTab, "title" | "content">>) {
+    onChange(writeDocTabs({
+      ...book,
+      tabs: book.tabs.map((tab) => tab.id === tabId ? { ...tab, ...patch } : tab),
+    }));
+  }
+
+  function addTab(template?: ArtifactDocTab) {
+    const tab = newDocTab(book.tabs, template);
+    const tabs = [...book.tabs];
+    const index = template ? tabs.findIndex((entry) => entry.id === template.id) + 1 : tabs.length;
+    tabs.splice(index, 0, tab);
+    setTabsOpen(true);
+    setActiveId(tab.id);
+    setMode("editing");
+    onChange(writeDocTabs({ ...book, tabs }));
+  }
+
+  function tabAction(action: DocTabAction, tab: ArtifactDocTab) {
+    if (action === "duplicate") {
+      addTab(tab);
+      return;
+    }
+    if (action === "rename" || action === "delete") {
+      setTabDialog({ action, tab, title: tab.title });
+      return;
+    }
+    const tabs = [...book.tabs];
+    const current = tabs.findIndex((entry) => entry.id === tab.id);
+    const next = current + (action === "earlier" ? -1 : 1);
+    if (current < 0 || next < 0 || next >= tabs.length) return;
+    [tabs[current], tabs[next]] = [tabs[next], tabs[current]];
+    onChange(writeDocTabs({ ...book, tabs }));
+  }
+
+  function confirmTabAction() {
+    if (!tabDialog) return;
+    if (tabDialog.action === "rename") {
+      if (!tabDialog.title.trim()) return;
+      updateTab(tabDialog.tab.id, { title: tabDialog.title });
+    } else if (book.tabs.length > 1) {
+      const index = book.tabs.findIndex((tab) => tab.id === tabDialog.tab.id);
+      if (index < 0) return;
+      const tabs = book.tabs.filter((tab) => tab.id !== tabDialog.tab.id);
+      if (activeTab.id === tabDialog.tab.id) setActiveId(tabs[Math.min(index, tabs.length - 1)].id);
+      onChange(writeDocTabs({ ...book, tabs }));
+    }
+    setTabDialog(null);
+  }
+
+  return (
+    <div className="@container relative flex h-full min-h-0 flex-col">
+      <div className="flex min-h-10 shrink-0 items-center justify-between gap-2 border-b bg-background px-2 py-1 sm:px-4">
+        <div role="group" aria-label="Document actions">
+          <Button type="button" size="sm" variant={tabsOpen ? "secondary" : "ghost"} aria-controls={sidebarId}
+            aria-expanded={tabsOpen} onClick={() => setTabsOpen((open) => !open)}>
+            <PanelLeft /> Tabs
+          </Button>
+        </div>
+        <div role="group" aria-label="View options">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" size="sm" variant="ghost" aria-label={mode === "editing" ? "Editing, mode" : "Reading, mode"}>
+                {mode === "editing" ? <Pencil /> : <Eye />} {mode === "editing" ? "Editing" : "Reading"} <ChevronDown />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => setMode("editing")}><Pencil /> Editing</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setMode("reading")}><Eye /> Reading</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
+        <aside id={sidebarId} hidden={!tabsOpen} className="max-h-42 shrink-0 overflow-auto border-b bg-card px-3 py-2 sm:max-h-none sm:w-52 sm:border-b-0 sm:border-r">
+          <DocTabNavigation
+            tabs={book.tabs}
+            activeId={activeTab.id}
+            onSelect={setActiveId}
+            onAdd={mode === "editing" ? () => addTab() : undefined}
+            onAction={mode === "editing" ? tabAction : undefined}
+          />
+        </aside>
+        <div className="min-h-0 min-w-0 flex-1">
+          {mode === "editing" ? (
+            <DocChoiceEditContext.Provider value={(definition) => onChange(writeDocTabs({
+              ...book,
+              tabs: book.tabs.map((tab) => ({ ...tab, content: updateChoiceDefinition(tab.content, definition) })),
+            }))}>
+              <DocTabEditor key={activeTab.id} content={activeTab.content} choices={choices} onChange={(text) => updateTab(activeTab.id, { content: text })} />
+            </DocChoiceEditContext.Provider>
+          ) : (
+            <div className="h-full overflow-auto bg-muted/25 px-3 py-4 sm:px-8 sm:py-7">
+              <article className="prose prose-sm dark:prose-invert mx-auto min-h-full w-full max-w-3xl rounded-lg border bg-background px-5 py-8 shadow-sm sm:px-12">
+                {activeTab.content ? <ArtifactDocMarkdown content={activeTab.content} /> : <p className="text-muted-foreground">This tab is empty.</p>}
+              </article>
+            </div>
+          )}
+        </div>
+      </div>
+      <Dialog open={tabDialog !== null} onOpenChange={(open) => { if (!open) setTabDialog(null); }}>
+        {tabDialog && (
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{tabDialog.action === "rename" ? "Rename tab" : "Delete tab"}</DialogTitle>
+              <DialogDescription>
+                {tabDialog.action === "rename" ? "This name appears in the tab list." : `Remove “${tabDialog.tab.title}” from this document?`}
+              </DialogDescription>
+            </DialogHeader>
+            <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); confirmTabAction(); }}>
+              {tabDialog.action === "rename" && (
+                <label className="block space-y-1 text-sm">
+                  <span>Tab name</span>
+                  <Input maxLength={100} autoFocus required value={tabDialog.title}
+                    onChange={(event) => setTabDialog({ ...tabDialog, title: event.target.value })} />
+                </label>
+              )}
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setTabDialog(null)}>Cancel</Button>
+                <Button type="submit" variant={tabDialog.action === "delete" ? "destructive" : "default"}>
+                  {tabDialog.action === "rename" ? "Rename" : "Delete"}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        )}
+      </Dialog>
+    </div>
+  );
+}
+
+function DocTabEditor({ content, onChange, choices }: DocEditorProps & { choices: DocChoiceDefinition[] }) {
   const emitted = useRef(content);
   const imageReader = useRef<FileReader | null>(null);
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [insertion, setInsertion] = useState<DocInsertion | null>(null);
+  const [dropdown, setDropdown] = useState<{ title: string; body: string; position?: number } | null>(null);
   const editor = useEditor({
     extensions: artifactDocExtensions,
     content,
     contentType: "markdown",
     shouldRerenderOnTransaction: false,
     editorProps: {
+      handleDoubleClickOn: (_view, _pos, node, nodePos, _event, direct) => {
+        if (!direct || node.type.name !== "docDropdown") return false;
+        setDropdown({ title: String(node.attrs.title), body: String(node.attrs.body), position: nodePos });
+        return true;
+      },
       attributes: {
         "aria-label": "Document",
         "aria-multiline": "true",
@@ -105,6 +264,8 @@ export function ArtifactDocEditor({ content, onChange }: {
       bold: active.isActive("bold"),
       italic: active.isActive("italic"),
       strike: active.isActive("strike"),
+      underline: active.isActive("underline"),
+      font: (active.getAttributes("docFont").family as string | undefined) ?? "default",
       code: active.isActive("code"),
       bulletList: active.isActive("bulletList"),
       orderedList: active.isActive("orderedList"),
@@ -138,6 +299,18 @@ export function ArtifactDocEditor({ content, onChange }: {
   if (!editor || !format) return null;
 
   const hasAttachment = insertion ? !!embeddedDocImage(insertion.url) : false;
+
+  function saveDropdown() {
+    if (!editor || !dropdown?.title.trim()) return;
+    const attrs = { title: dropdown.title.trim(), body: dropdown.body };
+    const chain = editor.chain().focus();
+    if (dropdown.position !== undefined && editor.state.doc.nodeAt(dropdown.position)?.type.name === "docDropdown") {
+      chain.setNodeSelection(dropdown.position).updateAttributes("docDropdown", attrs).run();
+    } else {
+      chain.insertContent({ type: "docDropdown", attrs }).run();
+    }
+    setDropdown(null);
+  }
 
   const saveInsertion = () => {
     if (!insertion) return;
@@ -187,7 +360,7 @@ export function ArtifactDocEditor({ content, onChange }: {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-muted/25">
-      <div role="group" aria-label="Document formatting" className="flex flex-wrap items-center gap-x-1 gap-y-1 border-b bg-background px-2 py-1.5 sm:px-4">
+      <div role="group" aria-label="Document formatting" className="flex flex-wrap items-center gap-x-1 gap-y-1 border-b bg-background px-2 py-1 @4xl:absolute @4xl:left-1/2 @4xl:top-1 @4xl:z-10 @4xl:w-max @4xl:-translate-x-1/2 @4xl:flex-nowrap @4xl:border-b-0 @4xl:bg-transparent @4xl:py-0">
         <div role="group" aria-label="Document view and history" className="flex items-center gap-0.5 border-r pr-1.5">
           <FormatButton label="Document outline" active={outlineOpen} aria-controls="doc-outline" aria-expanded={outlineOpen} onClick={() => setOutlineOpen((value) => !value)}><PanelLeft /></FormatButton>
           <FormatButton label="Undo" disabled={!format.undo} onClick={() => editor.chain().focus().undo().run()}><Undo2 /></FormatButton>
@@ -210,59 +383,15 @@ export function ArtifactDocEditor({ content, onChange }: {
           </select>
           <FormatButton label="Bold" active={format.bold} onClick={() => editor.chain().focus().toggleBold().run()}><Bold /></FormatButton>
           <FormatButton label="Italic" active={format.italic} onClick={() => editor.chain().focus().toggleItalic().run()}><Italic /></FormatButton>
+          <FormatButton label="Underline" active={format.underline} onClick={() => editor.chain().focus().toggleUnderline().run()}><Underline /></FormatButton>
           <FormatButton label="Strikethrough" active={format.strike} onClick={() => editor.chain().focus().toggleStrike().run()}><Strikethrough /></FormatButton>
         </div>
 
-        <div role="group" aria-label="Lists" className="flex items-center gap-0.5 border-r px-1.5">
+        <div role="group" aria-label="Lists" className="flex items-center gap-0.5 px-1.5">
           <FormatButton label="Bulleted list" active={format.bulletList} onClick={() => editor.chain().focus().toggleBulletList().run()}><List /></FormatButton>
           <FormatButton label="Numbered list" active={format.orderedList} onClick={() => editor.chain().focus().toggleOrderedList().run()}><ListOrdered /></FormatButton>
-          <FormatButton label="Checklist" active={format.taskList} onClick={() => editor.chain().focus().toggleTaskList().run()}><ListChecks /></FormatButton>
         </div>
 
-        <div role="group" aria-label="Insert and more formatting" className="flex items-center gap-0.5 pl-1.5">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button type="button" size="sm" variant="ghost"><Plus /> Insert <ChevronDown className="size-3.5 text-muted-foreground" /></Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              <DropdownMenuItem onSelect={() => setInsertion({ kind: "link", url: editor.getAttributes("link").href ?? "", label: "" })}><Link2 />{format.link ? "Edit link" : "Link"}</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => setInsertion({ kind: "image", url: "", label: "" })}><FileImage /> Image</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => setInsertion({ kind: "video", url: "", label: "" })}><Video /> Video</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}><Table2 /> Table (3 × 3)</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => editor.chain().focus().setHorizontalRule().run()}><Minus /> Divider</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          {format.table && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button type="button" size="icon-sm" variant="secondary" aria-label="Table properties" title="Table properties"><Table2 /></Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                <DropdownMenuLabel>Table</DropdownMenuLabel>
-                <DropdownMenuItem onSelect={() => editor.chain().focus().addRowBefore().run()}>Add row above</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => editor.chain().focus().addRowAfter().run()}>Add row below</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => editor.chain().focus().addColumnBefore().run()}>Add column to the left</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => editor.chain().focus().addColumnAfter().run()}>Add column to the right</DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => editor.chain().focus().deleteRow().run()}>Delete row</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => editor.chain().focus().deleteColumn().run()}>Delete column</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => editor.chain().focus().deleteTable().run()}>Delete table</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button type="button" size="icon-sm" variant="ghost" aria-label="More document formatting" title="More document formatting"><MoreHorizontal /></Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              <DropdownMenuItem onSelect={() => editor.chain().focus().toggleCode().run()}><Code /> Inline code{format.code && " ✓"}</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => editor.chain().focus().toggleCodeBlock().run()}><SquareCode /> Code block{format.codeBlock && " ✓"}</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => editor.chain().focus().toggleBlockquote().run()}><Quote /> Quote{format.blockquote && " ✓"}</DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => editor.chain().focus().unsetAllMarks().clearNodes().run()}>Clear formatting</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
@@ -284,13 +413,102 @@ export function ArtifactDocEditor({ content, onChange }: {
             </ul>
           </nav>
         )}
-        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-3 py-4 sm:px-8 sm:py-7">
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-3 py-2 sm:px-8 sm:py-3">
           <EditorContent
             editor={editor}
-            className="mx-auto min-h-full w-full max-w-3xl rounded-lg border bg-background px-5 pb-12 pt-4 shadow-sm sm:px-12 sm:pt-8"
+            className="mx-auto min-h-full w-full max-w-3xl rounded-lg border bg-background px-5 pb-12 pt-3 shadow-sm sm:px-12"
           />
         </div>
       </div>
+
+      <div className="shrink-0 px-2 pb-3 pt-1">
+        <div role="group" aria-label="Insert tools" className="mx-auto flex w-fit max-w-full flex-wrap items-center justify-center gap-0.5 rounded-lg border bg-background px-1 py-0.5 shadow-sm">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" size="sm" variant="ghost" aria-label="Font" title="Font"><Type /> <span className="hidden sm:inline">Font</span> <ChevronDown /></Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuLabel>Typeface</DropdownMenuLabel>
+              <DropdownMenuRadioGroup value={format.font} onValueChange={(value) => {
+                if (value === "default") editor.chain().focus().unsetMark("docFont").run();
+                else editor.chain().focus().setMark("docFont", { family: value }).run();
+              }}>
+                <DropdownMenuRadioItem value="default">Default</DropdownMenuRadioItem>
+                {docFontFamilies.map((family) => <DropdownMenuRadioItem key={family} value={family}>{fontLabels[family]}</DropdownMenuRadioItem>)}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" size="sm" variant={format.table ? "secondary" : "ghost"} aria-label="Table" title="Table"><Table2 /> <span className="hidden sm:inline">Table</span></Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onSelect={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}>Insert 3 × 3 table</DropdownMenuItem>
+              {format.table && <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => editor.chain().focus().addRowBefore().run()}>Add row above</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => editor.chain().focus().addRowAfter().run()}>Add row below</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => editor.chain().focus().addColumnBefore().run()}>Add column to the left</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => editor.chain().focus().addColumnAfter().run()}>Add column to the right</DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => editor.chain().focus().deleteRow().run()}>Delete row</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => editor.chain().focus().deleteColumn().run()}>Delete column</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => editor.chain().focus().deleteTable().run()}>Delete table</DropdownMenuItem>
+              </>}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" size="sm" variant="ghost" aria-label="Image or video" title="Image or video"><FileImage /> <span className="hidden sm:inline">Media</span></Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onSelect={() => setInsertion({ kind: "image", url: "", label: "" })}><FileImage /> Image</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setInsertion({ kind: "video", url: "", label: "" })}><Video /> Video</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <FormatButton label="Checklist" active={format.taskList} onClick={() => editor.chain().focus().toggleTaskList().run()}><ListChecks /></FormatButton>
+          <DocChoicePicker definitions={choices} onInsert={(definition) => {
+            editor.chain().focus().insertContent({ type: "docChoice", attrs: { choice: encodeDocChoice(definition) } }).run();
+          }} />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" size="icon-sm" variant="ghost" aria-label="More document formatting" title="More document formatting"><MoreHorizontal /></Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => setInsertion({ kind: "link", url: editor.getAttributes("link").href ?? "", label: "" })}><Link2 />{format.link ? "Edit link" : "Link"}</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => editor.chain().focus().setHorizontalRule().run()}><Minus /> Divider</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => editor.chain().focus().toggleCode().run()}><Code /> Inline code{format.code && " ✓"}</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => editor.chain().focus().toggleCodeBlock().run()}><SquareCode /> Code block{format.codeBlock && " ✓"}</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => editor.chain().focus().toggleBlockquote().run()}><Quote /> Quote{format.blockquote && " ✓"}</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => editor.chain().focus().unsetAllMarks().clearNodes().run()}>Clear formatting</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </div>
+
+      <Dialog open={dropdown !== null} onOpenChange={(open) => { if (!open) setDropdown(null); }}>
+        {dropdown && (
+          <DialogContent onCloseAutoFocus={(event) => { event.preventDefault(); editor.commands.focus(); }}>
+            <DialogHeader>
+              <DialogTitle>{dropdown.position === undefined ? "Insert dropdown" : "Edit dropdown"}</DialogTitle>
+              <DialogDescription>Readers can expand the section to see its text.</DialogDescription>
+            </DialogHeader>
+            <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); saveDropdown(); }}>
+              <label className="block space-y-1 text-sm">
+                <span>Section title</span>
+                <Input autoFocus required value={dropdown.title} onChange={(event) => setDropdown({ ...dropdown, title: event.target.value })} />
+              </label>
+              <label className="block space-y-1 text-sm">
+                <span>Section text</span>
+                <Textarea rows={4} value={dropdown.body} onChange={(event) => setDropdown({ ...dropdown, body: event.target.value })} />
+              </label>
+              <DialogFooter><Button type="submit">Apply</Button></DialogFooter>
+            </form>
+          </DialogContent>
+        )}
+      </Dialog>
 
       <Dialog open={insertion !== null} onOpenChange={(open) => {
         if (!open) {

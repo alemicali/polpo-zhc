@@ -24,11 +24,18 @@ export interface MotionScene {
   layers: MotionLayer[];
 }
 
+export interface MotionAudio {
+  name: string;
+  src: string;
+  delay?: number;
+}
+
 export interface MotionProject {
   version: 1;
   width: number;
   height: number;
   scenes: MotionScene[];
+  audio?: MotionAudio;
 }
 
 export const MAX_SCENES = 24;
@@ -37,6 +44,19 @@ export const clamp = (value: number, min: number, max: number) => Math.min(Math.
 const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
 const dimension = (value: unknown): value is number => finite(value) && Number.isInteger(value) && value >= 64 && value <= 1920;
 const color = (value: unknown) => typeof value === "string" && /^#[\da-f]{6}$/i.test(value);
+export const MAX_MOTION_AUDIO_BYTES = 700_000;
+const audioTypes = "aac|flac|mp4|mpeg|ogg|wav|wave|webm|x-m4a|x-wav";
+const audioPrefix = new RegExp(`^data:audio/(?:${audioTypes});base64,`, "i");
+const audioMime = new RegExp(`^audio/(?:${audioTypes})$`, "i");
+const audioExtensions: Record<string, string> = { aac: "aac", flac: "flac", m4a: "mp4", mp3: "mpeg", ogg: "ogg", opus: "ogg", wav: "wav", webm: "webm" };
+
+export function motionAudioMime(file: File): string | undefined {
+  const typed = file.type.toLowerCase();
+  if (audioMime.test(typed)) return typed;
+  const extension = audioExtensions[file.name.split(".").pop()?.toLowerCase() ?? ""];
+  return extension ? `audio/${extension}` : undefined;
+}
+
 const animations: readonly unknown[] = ["none", "fade", "rise", "slide"];
 const record = (value: unknown) => value && typeof value === "object" ? value as Record<string, unknown> : null;
 
@@ -66,6 +86,15 @@ export function parseMotion(content: string): MotionProject | null {
         if (layer.animationDuration !== undefined && (!finite(layer.animationDuration) || layer.animationDuration < 0.05 || layer.animationDuration > 60)) return null;
         if (layer.animation !== undefined && !animations.includes(layer.animation)) return null;
       }
+    }
+    if (model.audio !== undefined) {
+      const audio = record(model.audio);
+      if (!audio || typeof audio.name !== "string" || !audio.name || typeof audio.src !== "string") return null;
+      const prefix = audioPrefix.exec(audio.src);
+      if (!prefix) return null;
+      const data = audio.src.slice(prefix[0].length);
+      if (!data || data.length > Math.ceil(MAX_MOTION_AUDIO_BYTES / 3) * 4 || data.length % 4 !== 0 || !/^[A-Za-z\d+/]+={0,2}$/.test(data)) return null;
+      if (audio.delay !== undefined && (!finite(audio.delay) || audio.delay < 0 || audio.delay > 180)) return null;
     }
     return model as unknown as MotionProject;
   } catch {
@@ -199,21 +228,5 @@ export const MOTION_STARTER = JSON.stringify({
   version: 1,
   width: 1280,
   height: 720,
-  scenes: [
-    {
-      id: "intro", name: "Opening", duration: 3.5, background: "#14262a",
-      layers: [
-        { id: "orb", type: "ellipse", x: 818, y: 125, width: 388, height: 388, color: "#1e4547", animation: "slide" },
-        { id: "dot", type: "ellipse", x: 934, y: 237, width: 155, height: 155, color: "#c9eb75", animation: "rise", delay: 0.2 },
-        { id: "heading", type: "text", x: 100, y: 225, width: 716, height: 220, color: "#f6faf7", text: "A story\nin motion", fontSize: 92, animation: "rise" },
-        { id: "subheading", type: "text", x: 105, y: 502, width: 682, height: 48, color: "#c9eb75", text: "Edit any layer to make it yours.", fontSize: 32, animation: "fade", delay: 0.35 },
-      ],
-    },
-    {
-      id: "close", name: "Closing", duration: 2.5, background: "#c9eb75", transition: "fade",
-      layers: [
-        { id: "closing-label", type: "text", x: 105, y: 250, width: 1070, height: 224, color: "#14262a", text: "The next scene\nstarts here.", fontSize: 96, animation: "rise" },
-      ],
-    },
-  ],
+  scenes: [{ id: "scene-1", name: "Scene 1", duration: 3, background: "#ffffff", layers: [] }],
 } satisfies MotionProject, null, 2);

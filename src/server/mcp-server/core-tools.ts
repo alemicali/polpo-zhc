@@ -257,8 +257,8 @@ export function registerArtifactTools(tool: Register, deps: McpDeps): void {
     inputSchema: {
       title: z.string().min(1).describe("The title people see"),
       type: z.enum(["doc", "html", "svg", "mermaid"]).describe("doc (Markdown), html, svg or mermaid"),
-      content: z.string().min(1).describe("The full content in that format"),
       kind: z.string().optional().describe("For html: slides, sheets, design, motion, dashboard, app, report, page"),
+      content: z.string().describe("The full content in that format"),
       description: z.string().optional().describe("One line on what it is"),
     },
     outputSchema: { artifact: looseObject },

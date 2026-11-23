@@ -128,10 +128,11 @@ export function artifactRoutes(getDeps: () => ArtifactRoutesDeps): OpenAPIHono {
     const { store, data } = getDeps();
     const type = c.req.query("type");
     if (type && !isArtifactType(type)) return fail(c, 400, `Unknown type "${type}"`);
+    const creator = c.req.query("mine") === "true" ? (getDeps().author?.(c) ?? "person:dashboard") : c.req.query("createdBy");
     const filter: ArtifactFilter = {
       ...(type ? { type: type as ArtifactFilter["type"] } : {}),
       ...(c.req.query("kind") ? { kind: c.req.query("kind") } : {}),
-      ...(c.req.query("createdBy") ? { createdBy: c.req.query("createdBy") } : {}),
+      ...(creator ? { createdBy: creator } : {}),
       ...(c.req.query("sessionId") ? { sessionId: c.req.query("sessionId") } : {}),
       ...(c.req.query("q") ? { q: c.req.query("q") } : {}),
     };
@@ -209,6 +210,24 @@ export function artifactRoutes(getDeps: () => ArtifactRoutesDeps): OpenAPIHono {
     } catch (err) {
       return fail(c, err instanceof ArtifactEditConflictError ? 409 : 400, err instanceof Error ? err.message : String(err));
     }
+  });
+
+  app.post("/:id/duplicate", async (c) => {
+    const { store } = getDeps();
+    const original = await store.get(c.req.param("id"));
+    if (!original) return fail(c, 404, "Artifact not found");
+    const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+    const snapshot = body.version === undefined || body.version === original.version
+      ? original : original.versions.find(item => item.version === body.version);
+    if (!snapshot) return fail(c, 409, "That version is no longer available");
+    const { type, kind, sources, refreshSeconds, tags, description, createdBy } = original;
+    try {
+      // The copy runs under the same data-source grants as the original.
+      const copy = await store.create({ type, kind, sources, refreshSeconds, tags, description, createdBy,
+        content: snapshot.content, title: original.title + " (copy)" });
+      emit(copy.id, "created", type, copy.title);
+      return c.json({ ok: true, data: copy }, 201);
+    } catch (err) { return fail(c, 400, (err as Error).message); }
   });
 
   app.post("/:id/restore/:version", async (c) => {

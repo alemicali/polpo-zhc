@@ -39,8 +39,8 @@ export const ARTIFACT_TOOLS: Tool[] = [
     parameters: Type.Object({
       title: Type.String(),
       type: Type.Union([Type.Literal("doc"), Type.Literal("html"), Type.Literal("svg"), Type.Literal("mermaid")]),
-      content: Type.String({ description: "Markdown, self-contained HTML, editable-workspace JSON, SVG or Mermaid source" }),
       kind: Type.Optional(Type.String({ description: "For html: slides, sheets, design, motion, dashboard, app, report, page" })),
+      content: Type.String({ description: "Markdown, self-contained HTML, editable-workspace JSON, SVG or Mermaid source" }),
       description: Type.Optional(Type.String({ description: "One line: what it is for" })),
       sources: Type.Optional(Type.Array(Type.String(), { description: "Ids of the data sources it reads (html)" })),
       refreshSeconds: Type.Optional(Type.Number({ minimum: 10, description: "Reload its data every N seconds while open (html)" })),

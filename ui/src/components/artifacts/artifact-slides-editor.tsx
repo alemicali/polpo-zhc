@@ -1,12 +1,16 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Circle, Copy, Download, ImagePlus, Maximize, Play, Plus, Printer, Redo2, Square, Trash2, Type, Undo2, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronDown, Circle, Copy, Download, ImagePlus, Maximize, Play, Plus, Printer, Redo2, Settings2, Shapes, Square, StickyNote, Table2, Trash2, Type, Undo2, Video, X } from "lucide-react";
 import { MAX_ARTIFACT_BYTES } from "@polpo-ai/core/artifacts";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 
-import { parseSlides, THEMES, type Layout, type Shape, type Slide, type SlideElement, type Theme } from "./artifact-slides-format";
+import { SlideTable } from "./artifact-slides-table";
+import { embeddedVideo, linkedVideo, powerPointVideoCover, videoFileExtension, VIDEO_MIME_TYPES } from "./artifact-slides-media";
+import { isLinkableSlideVideo, MAX_SLIDE_TABLE_DIMENSION, parseSlides, slideTableFontSize, THEMES, type Layout, type Shape, type Slide, type SlideElement, type Theme } from "./artifact-slides-format";
 
 function slideFields(slide: Slide) {
   const titleSlide = slide.layout === "title";
@@ -23,6 +27,15 @@ const rectStyle = (value: Pick<SlideElement, "x" | "y" | "w" | "h">) => ({
   left: `${value.x}%`, top: `${value.y}%`, width: `${value.w}%`, height: `${value.h}%`,
 });
 
+function SlideVideo({ element }: { element: SlideElement }) {
+  const [playing, setPlaying] = useState(false);
+  if (!(element.src?.startsWith("data:") || playing)) {
+    return <button type="button" className="flex size-full items-center justify-center gap-2 bg-neutral-950 text-[1.8cqw] text-white hover:bg-neutral-800"
+      onClick={() => setPlaying(true)}><Play className="size-[2cqw]" /> Play {element.alt || "video"}</button>;
+  }
+  return <video src={element.src} poster={element.poster} aria-label={element.alt || "Slide video"} controls preload="metadata" playsInline className="size-full bg-neutral-950 object-contain" />;
+}
+
 function SlideCanvas({ slide, onField, onElement, selected, onSelect, onDrag, thumbnail }: {
   slide: Slide;
   onField?: (patch: Partial<Slide>) => void;
@@ -32,7 +45,8 @@ function SlideCanvas({ slide, onField, onElement, selected, onSelect, onDrag, th
   onDrag?: (event: PointerEvent<HTMLButtonElement>, element: SlideElement, resize?: boolean) => void;
   thumbnail?: boolean;
 }) {
-  const { bg, fg, accent } = THEMES[slide.theme ?? "light"];
+  const colors = THEMES[slide.theme ?? "light"];
+  const { bg, fg, accent } = colors;
   const editableClass = "m-0 resize-none border-0 bg-transparent p-0 outline-none ring-inset hover:ring-1 hover:ring-current/25 focus-visible:ring-2 focus-visible:ring-current/45";
   const textClass = "absolute overflow-hidden break-words whitespace-pre-wrap";
   return (
@@ -48,21 +62,31 @@ function SlideCanvas({ slide, onField, onElement, selected, onSelect, onDrag, th
       {slide.elements?.map((element) => {
         const isTextBox = element.type === "text";
         const isImage = element.type === "image";
+        const isVideo = element.type === "video";
+        const isTable = element.type === "table";
         const color = element.color ?? (isTextBox ? fg : accent);
-        const style = { ...rectStyle(element), color, fontSize: `${element.fontSize ?? 3}cqw`, lineHeight: 1.2, borderRadius: element.type === "ellipse" ? "50%" : undefined, backgroundColor: isTextBox || isImage ? undefined : color };
+        const style = { ...rectStyle(element), color, fontSize: `${element.fontSize ?? 3}cqw`, lineHeight: 1.2, borderRadius: element.type === "ellipse" ? "50%" : undefined, backgroundColor: isTextBox || isImage || isVideo || isTable ? undefined : color };
         const active = selected === element.id;
         const outline = active ? " outline-2 outline-offset-2 outline-primary" : "";
         const drawing = isImage ? <img src={element.src} alt={element.alt ?? ""} draggable={false} className="size-full" /> : null;
-        if (!onSelect) return <div key={element.id} className={textClass} style={style}>{isTextBox ? element.text : drawing}</div>;
+        const videoCard = isVideo ? (element.poster
+          ? <img src={element.poster} alt="" draggable={false} className="size-full" />
+          : <span className="flex size-full items-center justify-center gap-2 bg-neutral-950 text-[1.8cqw] text-white"><Video className="size-[2cqw]" /> {element.alt || "Video"}</span>) : null;
+        const table = isTable ? <SlideTable element={element} colors={colors} onSelect={() => onSelect?.(element.id)}
+          onChange={onElement ? (cells) => onElement({ id: element.id, cells }) : undefined} /> : null;
+        if (!onSelect) return <div key={element.id} className={textClass} style={style}>
+          {isVideo && !thumbnail ? <SlideVideo key={element.src} element={element} /> : table ?? drawing ?? videoCard ?? element.text}
+        </div>;
+        const label = isImage ? element.alt || "Image" : isVideo ? element.alt || "Video" : element.type === "ellipse" ? "Ellipse" : "Rectangle";
         return (
           <div key={element.id} className={`absolute ${outline}`} style={style}>
-            {isTextBox ? <textarea aria-label="Text box" className={`size-full ${editableClass}`} value={element.text ?? ""}
+            {table ?? (isTextBox ? <textarea aria-label="Text box" className={`size-full ${editableClass}`} value={element.text ?? ""}
               onFocus={() => onSelect(element.id)} onChange={(event) => onElement?.({ id: element.id, text: event.target.value })} />
-              : <button type="button" aria-label={isImage ? element.alt || "Image" : element.type === "ellipse" ? "Ellipse" : "Rectangle"} className="size-full cursor-move touch-none rounded-[inherit] focus-visible:outline-2 focus-visible:outline-offset-2"
-                onFocus={() => onSelect(element.id)} onPointerDown={(event) => onDrag?.(event, element)}>{drawing}</button>}
-            {active && isTextBox && <button type="button" aria-label="Drag text box" className="absolute -right-2 -top-2 size-4 cursor-move touch-none rounded-full border border-background bg-primary outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              : <button type="button" aria-label={label} className="size-full cursor-move touch-none rounded-[inherit] focus-visible:outline-2 focus-visible:outline-offset-2"
+                onFocus={() => onSelect(element.id)} onPointerDown={(event) => onDrag?.(event, element)}>{drawing ?? videoCard}</button>)}
+            {active && (isTextBox || isTable) && <button type="button" aria-label={isTable ? "Drag table" : "Drag text box"} className="absolute -right-2 -top-2 size-4 cursor-move touch-none rounded-full border border-background bg-primary outline-none focus-visible:ring-2 focus-visible:ring-ring"
               onPointerDown={(event) => onDrag?.(event, element)} />}
-            {active && isImage && <button type="button" aria-label="Resize image" className="absolute -bottom-2 -right-2 size-4 cursor-nwse-resize touch-none rounded-full border border-background bg-primary outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            {active && (isImage || isVideo || isTable) && <button type="button" aria-label={`Resize ${element.type}`} className="absolute -bottom-2 -right-2 size-4 cursor-nwse-resize touch-none rounded-full border border-background bg-primary outline-none focus-visible:ring-2 focus-visible:ring-ring"
               onPointerDown={(event) => onDrag?.(event, element, true)} />}
           </div>
         );
@@ -71,6 +95,8 @@ function SlideCanvas({ slide, onField, onElement, selected, onSelect, onDrag, th
     </div>
   );
 }
+
+const SLIDE_LOGICAL_WIDTH = 1920;
 
 const step = (current: number, delta: number, length: number) => Math.min(length - 1, Math.max(0, current + delta));
 
@@ -136,6 +162,9 @@ async function printSlides(slides: Slide[], title: string) {
       print-color-adjust:exact;-webkit-print-color-adjust:exact;font-family:Arial,sans-serif}
     section:last-child{break-after:auto}
     section>div{position:absolute;overflow:hidden;overflow-wrap:anywhere;white-space:pre-wrap}
+    table{border-collapse:collapse;table-layout:fixed;width:100%;height:100%;line-height:1.15}
+    td,th{position:relative;text-align:left;vertical-align:top;border:1px solid;padding:0}
+    td>span,th>span{position:absolute;inset:0;padding:0.5cqw;overflow:hidden}
     @media print{section{width:13.333in;height:7.5in}}`;
   doc.head.append(style);
   const images: Promise<void>[] = [];
@@ -147,11 +176,33 @@ async function printSlides(slides: Slide[], title: string) {
     const boxes = [
       ...slideFields(slide).map((field) => ({ ...field, text: slide[field.key] ?? "", color: theme.fg, radius: false, fill: false })),
       { x: 8, y: 8, w: 5, h: 0.7, text: "", fontSize: 1, bold: false, color: theme.accent, radius: false, fill: true },
-      ...(slide.elements ?? []).map((element) => ({ ...element, text: element.type === "text" ? element.text ?? "" : "", fontSize: element.fontSize ?? 3, bold: false, color: element.color ?? (element.type === "text" ? theme.fg : theme.accent), radius: element.type === "ellipse", fill: element.type === "rect" || element.type === "ellipse", src: element.type === "image" ? element.src : undefined, alt: element.alt })),
+      ...(slide.elements ?? []).map((element) => ({ ...element, text: element.type === "text" ? element.text ?? "" : "", fontSize: element.fontSize ?? 3, bold: false, color: element.color ?? (element.type === "text" ? theme.fg : theme.accent), radius: element.type === "ellipse", fill: element.type === "rect" || element.type === "ellipse", src: element.type === "image" ? element.src : element.poster, link: element.type === "video" && element.src && isLinkableSlideVideo(element.src) ? element.src : undefined })),
     ];
     for (const box of boxes) {
       const node = doc.createElement("div");
-      if ("src" in box && box.src) {
+      if ("type" in box && box.type === "table" && box.cells) {
+        const table = doc.createElement("table");
+        table.style.fontSize = `${slideTableFontSize(box)}cqw`;
+        table.style.backgroundColor = theme.bg;
+        for (const [index, row] of box.cells.entries()) {
+          const tr = table.insertRow();
+          tr.style.height = `${100 / box.cells.length}%`;
+          for (const cell of row) {
+            const header = index === 0 && box.header !== false;
+            const td = doc.createElement(header ? "th" : "td");
+            td.style.borderColor = theme.accent;
+            if (header) {
+              td.style.backgroundColor = theme.accent;
+              td.style.color = theme.bg;
+            }
+            const text = doc.createElement("span");
+            text.textContent = cell;
+            td.append(text);
+            tr.append(td);
+          }
+        }
+        node.append(table);
+      } else if ("src" in box && box.src) {
         const img = doc.createElement("img");
         img.alt = box.alt ?? "";
         img.style.width = "100%";
@@ -159,6 +210,20 @@ async function printSlides(slides: Slide[], title: string) {
         img.src = box.src;
         node.append(img);
         images.push(img.decode());
+      } else if ("type" in box && box.type === "video") {
+        const label = box.alt || "Video";
+        if (box.link) {
+          const link = doc.createElement("a");
+          link.href = box.link;
+          link.textContent = `Video · ${label}`;
+          link.style.color = "inherit";
+          node.append(link);
+        } else {
+          node.textContent = `Video · ${label}`;
+        }
+        node.style.display = "grid";
+        node.style.placeItems = "center";
+        node.style.border = `1px solid ${theme.accent}`;
       } else {
         node.textContent = box.text;
       }
@@ -199,6 +264,18 @@ async function exportSlides(slides: Slide[], title: string) {
           fontFace: "Arial", fontSize: (element.fontSize ?? 3) * 9.6, fit: "shrink" });
       } else if (element.type === "image") {
         page.addImage({ data: element.src, ...position(element), altText: element.alt });
+      } else if (element.type === "video" && element.src) {
+        if (element.src.startsWith("data:")) {
+          page.addMedia({ type: "video", data: element.src, extn: videoFileExtension(element.src), cover: await powerPointVideoCover(element.poster), ...position(element) });
+        } else {
+          page.addText(`Video · ${element.alt || "Open link"}`, { ...position(element), hyperlink: { url: element.src },
+            align: "center", valign: "middle", color: color(theme.bg), fill: { color: color(theme.accent) }, margin: 0 });
+        }
+      } else if (element.type === "table" && element.cells) {
+        const rows = element.cells.map((row, index) => row.map((text) => index === 0 && element.header !== false
+          ? { text, options: { bold: true, color: color(theme.bg), fill: { color: color(theme.accent) } } } : { text }));
+        page.addTable(rows, { ...position(element), rowH: position(element).h / rows.length, autoPage: false, fontSize: slideTableFontSize(element) * 9.6,
+          color: color(theme.fg), fill: { color: color(theme.bg) }, border: { type: "solid", pt: 0.75, color: color(theme.accent) }, margin: 4, valign: "top" });
       } else {
         page.addShape(element.type === "ellipse" ? pptx.ShapeType.ellipse : pptx.ShapeType.rect,
           { ...position(element), line: { transparency: 100 }, fill: { color: color(element.color ?? theme.accent) } });
@@ -212,8 +289,8 @@ async function exportSlides(slides: Slide[], title: string) {
 
 const imageTypes = new Set(["image/png", "image/jpeg"]);
 const utf8Bytes = (content: string) => new TextEncoder().encode(content).length;
-const maxImageWidth = (image: SlideElement) => Math.min(100 - image.x, (100 - image.y) * image.w / image.h);
-const imageSize = (image: SlideElement, width: number) => ({ w: width, h: width * image.h / image.w });
+const fittedWidth = (item: SlideElement) => Math.min(100 - item.x, (100 - item.y) * item.w / item.h);
+const proportionalSize = (item: SlideElement, width: number) => ({ w: width, h: width * item.h / item.w });
 
 async function prepareImage(file: File, availableBytes: number): Promise<SlideElement> {
   if (!imageTypes.has(file.type)) throw new Error("Choose a PNG or JPEG image.");
@@ -250,6 +327,23 @@ export function ArtifactSlidesEditor({ content, onChange, title = "Slides" }: { 
   const [exporting, setExporting] = useState(false);
   const [dragPreview, setDragPreview] = useState<Pick<SlideElement, "id"> & Partial<Pick<SlideElement, "x" | "y" | "w" | "h">>>();
   const [importing, setImporting] = useState(false);
+  const [showProperties, setShowProperties] = useState(false);
+  const [showNotes, setShowNotes] = useState(false);
+  const [showOverview, setShowOverview] = useState(false);
+  const [zoom, setZoom] = useState(0);
+  const [fitZoom, setFitZoom] = useState(0);
+  const visibleCanvas = useRef<HTMLDivElement>(null);
+  const canMeasureFit = Boolean(deck && !showOverview && !zoom);
+  useEffect(() => {
+    const element = visibleCanvas.current;
+    if (!canMeasureFit || !element) return;
+    const observer = new ResizeObserver(([entry]) => {
+      setFitZoom(Math.round(entry.contentRect.width * 100 / SLIDE_LOGICAL_WIDTH));
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [canMeasureFit]);
+  const [insertPanel, setInsertPanel] = useState<"video" | "table">();
   const imageInput = useRef<HTMLInputElement>(null);
   const editable = Boolean(onChange);
   const currentContent = useRef<string | null>(null);
@@ -273,7 +367,7 @@ export function ArtifactSlidesEditor({ content, onChange, title = "Slides" }: { 
     if (!onChange) return;
     const next = JSON.stringify({ version: 1, slides }, null, 2);
     if (next === content) return;
-    if (checkBudget && utf8Bytes(next) > MAX_ARTIFACT_BYTES) throw new Error("There is not enough space left in this deck for the image.");
+    if (checkBudget && utf8Bytes(next) > MAX_ARTIFACT_BYTES) throw new Error("There is not enough space left in this deck for the file.");
     setHistory({ past: [...history.past.slice(-49), content], future: [] });
     onChange(next);
   }
@@ -314,14 +408,51 @@ export function ArtifactSlidesEditor({ content, onChange, title = "Slides" }: { 
     patchSlide({ elements: [...(slide.elements ?? []), next] });
     setSelected(id);
   }
-  async function addImage(file: File) {
+  function appendElement(item: SlideElement, checkBudget = false) {
+    patchSlide({ elements: [...(slide.elements ?? []), item] }, checkBudget);
+    setSelected(item.id);
+    setShowOverview(false);
+    setShowProperties(true);
+  }
+  function addTable(form: FormData) {
+    const rows = Number(form.get("rows"));
+    const cols = Number(form.get("columns"));
+    if (![rows, cols].every((count) => Number.isInteger(count) && count >= 1 && count <= MAX_SLIDE_TABLE_DIMENSION)) return;
+    appendElement({ id: nanoid(), type: "table", x: 18, y: 42, w: 64, h: 42, cells: Array.from({ length: rows }, () => Array<string>(cols).fill("")) });
+    setInsertPanel(undefined);
+  }
+  function addVideo(form: FormData) {
+    const url = String(form.get("url") ?? "").trim();
+    if (!isLinkableSlideVideo(url)) {
+      toast.error("Enter a direct HTTPS link to an MP4 or WebM video.");
+      return;
+    }
+    const title = String(form.get("title") ?? "").trim();
+    appendElement(linkedVideo(url, title || "Video"));
+    setInsertPanel(undefined);
+  }
+  function changeTableSize(dimension: "rows" | "columns", change: 1 | -1) {
+    const rows = element?.cells;
+    if (!rows?.length) return;
+    const nextCount = (dimension === "rows" ? rows.length : rows[0].length) + change;
+    if (nextCount < 1 || nextCount > MAX_SLIDE_TABLE_DIMENSION) return;
+    if (change < 0 && (dimension === "rows" ? rows.at(-1)?.some(Boolean) : rows.some((row) => row.at(-1)))) {
+      toast.error("Clear the last " + (dimension === "rows" ? "row" : "column") + " before removing it.");
+      return;
+    }
+    const next = dimension === "rows"
+      ? (change > 0 ? [...rows, Array<string>(rows[0].length).fill("")] : rows.slice(0, -1))
+      : rows.map((row) => change > 0 ? [...row, ""] : row.slice(0, -1));
+    patchElement({ cells: next });
+  }
+  async function addFile(file: File) {
     setImporting(true);
     try {
-      const item = await prepareImage(file, MAX_ARTIFACT_BYTES - utf8Bytes(content) - 512);
+      const available = MAX_ARTIFACT_BYTES - utf8Bytes(content) - 512;
+      const item = await (VIDEO_MIME_TYPES.has(file.type) ? embeddedVideo(file, available) : prepareImage(file, available));
       if (currentContent.current === null) return;
-      if (currentContent.current !== content) throw new Error("The deck changed while the image was loading. Add the image again.");
-      patchSlide({ elements: [...(slide.elements ?? []), item] }, true);
-      setSelected(item.id);
+      if (currentContent.current !== content) throw new Error("The deck changed while the file was loading. Add the file again.");
+      appendElement(item, true);
     } catch (error) {
       if (currentContent.current !== null) toast.error((error as Error).message);
     } finally {
@@ -348,8 +479,12 @@ export function ArtifactSlidesEditor({ content, onChange, title = "Slides" }: { 
     const coordinates = (next: globalThis.PointerEvent) => {
       const deltaX = 100 * (next.clientX - startX) / bounds.width;
       if (resize) {
-        const maxWidth = maxImageWidth(item);
-        return imageSize(item, Math.min(maxWidth, Math.max(Math.min(2, maxWidth), item.w + deltaX)));
+        const maxWidth = fittedWidth(item);
+        const deltaY = 100 * (next.clientY - startY) / bounds.height;
+        if (item.type === "table") {
+          return { w: Math.min(100 - item.x, Math.max(5, item.w + deltaX)), h: Math.min(100 - item.y, Math.max(5, item.h + deltaY)) };
+        }
+        return proportionalSize(item, Math.min(maxWidth, Math.max(Math.min(2, maxWidth), item.w + deltaX)));
       }
       return {
         x: Math.max(0, Math.min(100 - item.w, item.x + deltaX)),
@@ -408,63 +543,107 @@ export function ArtifactSlidesEditor({ content, onChange, title = "Slides" }: { 
     ? { ...slide, elements: slide.elements?.map((item) => item.id === dragPreview.id ? { ...item, ...dragPreview } : item) }
     : slide;
   const selectClass = "h-8 rounded-control border border-border bg-background px-2 text-xs";
+  const topSelectClass = "h-7 rounded-control border border-border bg-background px-2 text-xs";
+  const topButtonClass = "size-7 [@media(pointer:coarse)]:size-9";
   const theme = THEMES[slide.theme ?? "light"];
 
   return (
     <div className="@container flex h-full min-h-0 flex-col" onKeyDown={deckKeys}>
-      <div className="flex flex-wrap items-center gap-1.5 border-b border-border/60 p-2">
+      <div className="flex min-h-15 flex-wrap items-center gap-1 border-b border-border/60 px-3 py-2">
         {onChange && <>
-          <Button size="sm" variant="outline" onClick={() => insert(false)}><Plus /> Slide</Button>
-          <Button size="icon-sm" variant="ghost" aria-label="Duplicate slide" title="Duplicate slide" onClick={() => insert(true)}><Copy /></Button>
-          <Button size="icon-sm" variant="ghost" aria-label="Undo" title="Undo" disabled={!history.past.length} onClick={() => undo()}><Undo2 /></Button>
-          <Button size="icon-sm" variant="ghost" aria-label="Redo" title="Redo" disabled={!history.future.length} onClick={() => undo(true)}><Redo2 /></Button>
-          <span className="mx-1 h-5 border-l border-border/60" />
-          <input type="file" ref={imageInput} accept="image/png,image/jpeg" hidden onChange={(event) => {
-            const file = event.currentTarget.files?.[0];
-            event.currentTarget.value = "";
-            if (file) void addImage(file);
-          }} />
-          <Button size="icon-sm" variant="ghost" aria-label="Add image" title="Add image (PNG or JPEG)" disabled={importing} onClick={() => imageInput.current?.click()}><ImagePlus /></Button>
-          <Button size="icon-sm" variant="ghost" aria-label="Add text box" title="Add text box" onClick={() => addElement("text")}><Type /></Button>
-          <Button size="icon-sm" variant="ghost" aria-label="Add rectangle" title="Add rectangle" onClick={() => addElement("rect")}><Square /></Button>
-          <Button size="icon-sm" variant="ghost" aria-label="Add ellipse" title="Add ellipse" onClick={() => addElement("ellipse")}><Circle /></Button>
+          <Button size="icon-sm" className={topButtonClass} variant="outline" aria-label="Add slide" title="Add slide" onClick={() => { insert(false); setShowOverview(false); }}><Plus className="size-5" /></Button>
+          <Button size="icon-sm" className={topButtonClass} variant="ghost" aria-label="Duplicate slide" title="Duplicate slide" onClick={() => insert(true)}><Copy className="size-5" /></Button>
+          <Button size="icon-sm" className={topButtonClass} variant="ghost" aria-label="Undo" title="Undo" disabled={!history.past.length} onClick={() => undo()}><Undo2 className="size-5" /></Button>
+          <Button size="icon-sm" className={topButtonClass} variant="ghost" aria-label="Redo" title="Redo" disabled={!history.future.length} onClick={() => undo(true)}><Redo2 className="size-5" /></Button>
         </>}
-        <div className="ml-auto flex flex-wrap items-center gap-1.5">
-          <Button size="sm" variant="ghost" disabled={exporting} onClick={async () => {
-            setExporting(true);
-            try { await exportSlides(slides, title); }
-            catch { toast.error("The PowerPoint file could not be exported."); }
-            finally { setExporting(false); }
-          }}><Download /> PowerPoint</Button>
-          <Button size="sm" variant="ghost" disabled={!visibleSlides.length} onClick={() => {
-            void printSlides(visibleSlides, title).catch((error: Error) => toast.error(error.message));
-          }}><Printer /> Print / PDF</Button>
-          <Button ref={presentButton} size="sm" disabled={!visibleSlides.length} onClick={() => setPresenting(Math.max(0, visibleSlides.findIndex((item) => item.id === slide.id)))}><Play /> Present</Button>
+        <select aria-label="View" className={topSelectClass} value={showOverview ? "overview" : "slide"} onChange={(event) => setShowOverview(event.target.value === "overview")}>
+          <option value="slide">Slide view</option><option value="overview">Overview</option>
+        </select>
+        {onChange && !showOverview && <Button size="icon-sm" className={topButtonClass} variant={showNotes ? "secondary" : "ghost"}
+          aria-pressed={showNotes} aria-label="Speaker notes" title="Speaker notes" onClick={() => setShowNotes((open) => !open)}><StickyNote className="size-5" /></Button>}
+        <div className="ml-auto flex flex-wrap items-center gap-1">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild><Button size="icon-sm" className={topButtonClass} variant="ghost" aria-label="Download" title="Download" disabled={exporting}><Download className="size-5" /></Button></DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={async () => {
+                setExporting(true);
+                try { await exportSlides(slides, title); }
+                catch { toast.error("The PowerPoint file could not be exported."); }
+                finally { setExporting(false); }
+              }}>PowerPoint</DropdownMenuItem>
+              <DropdownMenuItem disabled={!visibleSlides.length} onSelect={() => {
+                void printSlides(visibleSlides, title).catch((error: Error) => toast.error(error.message));
+              }}><Printer /> Print / PDF</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button ref={presentButton} size="icon-sm" className={topButtonClass} aria-label="Present" title="Present" disabled={!visibleSlides.length}
+            onClick={() => setPresenting(Math.max(0, visibleSlides.findIndex((item) => item.id === slide.id)))}><Play className="size-5" /></Button>
+          {onChange && <Button size="icon-sm" className={topButtonClass} variant={showProperties ? "secondary" : "ghost"} aria-pressed={showProperties} aria-label="Properties" title="Properties"
+            onClick={() => setShowProperties((open) => !open)}><Settings2 className="size-5" /></Button>}
+          <select aria-label="Zoom" className={topSelectClass} value={zoom} disabled={showOverview} onChange={(event) => setZoom(Number(event.target.value))}>
+            <option value={0}>{fitZoom ? `Fit · ${fitZoom}%` : "Fit"}</option>{[25, 50, 75, 100, 125, 150, 200].map((percent) => <option key={percent} value={percent}>{percent}%</option>)}
+          </select>
         </div>
       </div>
       <div className="flex min-h-0 flex-1 flex-col @4xl:flex-row">
-        <aside data-slide-list aria-label="Slides" className="flex shrink-0 gap-2 overflow-auto border-b border-border/60 bg-muted/20 p-2 @4xl:w-36 @4xl:flex-col @4xl:border-b-0 @4xl:border-r">
+        <aside data-slide-list aria-label="Slides" className="flex shrink-0 gap-2 overflow-auto border-b border-border/60 bg-muted/20 p-2 @4xl:w-48 @4xl:px-3 @4xl:flex-col @4xl:border-b-0 @4xl:border-r">
           {slides.map((item, number) => <button key={item.id} type="button" data-slide-thumbnail aria-current={number === index ? "true" : undefined}
             aria-label={`Slide ${number + 1}: ${item.title || "Untitled"}${item.hidden ? ", skipped" : ""}`} onClick={() => selectSlide(number)}
-            className={`w-28 shrink-0 rounded-control border p-1 text-left focus-visible:outline-2 focus-visible:outline-ring @4xl:w-full ${number === index ? "border-primary bg-primary/10" : "border-transparent hover:bg-muted"} ${item.hidden ? "opacity-50" : ""}`}>
+            title={item.title || "Untitled"}
+            className={`w-28 shrink-0 rounded-control border p-1 text-left focus-visible:outline-2 focus-visible:outline-ring @4xl:grid @4xl:w-full @4xl:grid-cols-[1.25rem_minmax(0,1fr)] @4xl:gap-1 ${number === index ? "border-primary bg-primary/10" : "border-transparent hover:bg-muted"} ${item.hidden ? "opacity-50" : ""}`}>
+            <span aria-hidden className="hidden pt-1 text-center text-xs tabular-nums text-muted-foreground @4xl:block">{number + 1}</span>
             <div aria-hidden className="overflow-hidden rounded-sm border border-border/60"><SlideCanvas slide={item} thumbnail /></div>
-            <span aria-hidden className="mt-1 block truncate px-0.5 text-xs text-muted-foreground">{number + 1} · {item.title || "Untitled"}</span>
+            <span aria-hidden className="mt-1 block truncate px-0.5 text-xs text-muted-foreground @4xl:hidden">{number + 1} · {item.title || "Untitled"}</span>
           </button>)}
         </aside>
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto bg-muted/40">
-          <div className="flex min-h-min flex-1 items-center justify-center p-3 @4xl:p-6">
-            <div className="w-full max-w-5xl overflow-hidden rounded-sm border border-border/70 shadow-sm"><SlideCanvas
-              slide={shownSlide} onField={onChange ? patchSlide : undefined} onElement={onChange ? patchElement : undefined}
-              selected={selected} onSelect={onChange ? setSelected : undefined} onDrag={onChange ? drag : undefined} />
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-muted/40">
+          {showOverview ? (
+            <div className="grid min-h-0 flex-1 grid-cols-[repeat(auto-fill,minmax(min(100%,15rem),1fr))] content-start gap-3 overflow-auto p-3 @4xl:p-6">
+              {slides.map((item, number) => <button key={item.id} type="button" aria-label={`Open slide ${number + 1}: ${item.title || "Untitled"}`}
+                className="rounded-control border border-border bg-background p-1.5 text-left hover:border-primary focus-visible:outline-2 focus-visible:outline-ring"
+                onClick={() => { selectSlide(number); setShowOverview(false); }}>
+                <div aria-hidden className="overflow-hidden rounded-sm"><SlideCanvas slide={item} thumbnail /></div>
+                <span className="mt-1 block truncate px-1 text-xs text-muted-foreground">{number + 1} · {item.title || "Untitled"}</span>
+              </button>)}
             </div>
-          </div>
-          {onChange && <label className="block border-t border-border/60 bg-background p-2.5 text-xs text-muted-foreground">
-            Speaker notes
-            <textarea aria-label="Speaker notes" value={slide.notes ?? ""} onChange={(event) => patchSlide({ notes: event.target.value })}
-              rows={2} className="mt-1 block w-full resize-y rounded-control border border-border bg-background p-2 text-sm text-foreground" />
-          </label>}
+          ) : (<>
+            <div className="min-h-0 flex-1 overflow-auto [container-type:size]">
+              <div className={`flex min-h-full items-center justify-center p-3 @4xl:p-6 ${zoom ? "w-max min-w-full" : ""}`}>
+                <div ref={visibleCanvas} style={{ width: zoom ? SLIDE_LOGICAL_WIDTH * zoom / 100 : "min(100%, max(12rem, calc((100cqh - 3rem) * 16 / 9)))" }}
+                  className="shrink-0 overflow-hidden rounded-sm border border-border/70 shadow-sm">
+                  <SlideCanvas slide={shownSlide} onField={onChange ? patchSlide : undefined} onElement={onChange ? patchElement : undefined}
+                    selected={selected} onSelect={onChange ? setSelected : undefined} onDrag={onChange ? drag : undefined} />
+                </div>
+              </div>
+            </div>
+            {onChange && <>
+              <div role="group" aria-label="Insert" className="mx-auto mb-3 mt-1 flex items-center gap-1 rounded-lg border border-border bg-background p-[3px] shadow-control">
+                <input type="file" ref={imageInput} accept="image/png,image/jpeg,video/mp4,video/webm" hidden onChange={(event) => {
+                  const file = event.currentTarget.files?.[0];
+                  event.currentTarget.value = "";
+                  if (file) void addFile(file);
+                }} />
+                <Button size="icon-sm" variant="ghost" aria-label="Add text box" title="Text" onClick={() => addElement("text")}><Type className="size-5" /></Button>
+                <Button size="icon-sm" variant="ghost" aria-label="Image or video" title="Upload image or video" disabled={importing} onClick={() => imageInput.current?.click()}><ImagePlus className="size-5" /></Button>
+                <Button size="icon-sm" variant="ghost" aria-label="Video" title="Insert video link" onClick={() => setInsertPanel("video")}><Video className="size-5" /></Button>
+                <Button size="icon-sm" variant="ghost" aria-label="Table" title="Insert table" onClick={() => setInsertPanel("table")}><Table2 className="size-5" /></Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild><Button size="icon-sm" variant="ghost" aria-label="Shapes" title="Insert shape" className="w-11 gap-0.5"><Shapes className="size-5" /><ChevronDown className="size-3" /></Button></DropdownMenuTrigger>
+                  <DropdownMenuContent side="top" align="center">
+                    <DropdownMenuItem onSelect={() => addElement("rect")}><Square /> Rectangle</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => addElement("ellipse")}><Circle /> Ellipse</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+              {showNotes && <label className="block border-t border-border/60 bg-background p-2.5 text-xs text-muted-foreground">
+                Speaker notes
+                <textarea aria-label="Speaker notes" value={slide.notes ?? ""} onChange={(event) => patchSlide({ notes: event.target.value })}
+                  rows={2} className="mt-1 block w-full resize-y rounded-control border border-border bg-background p-2 text-sm text-foreground" />
+              </label>}
+            </>}
+          </>)}
         </div>
-        {onChange && <aside aria-label="Slide properties" className="flex shrink-0 flex-wrap items-start gap-2 border-t border-border/60 bg-background p-2 @4xl:w-40 @4xl:flex-col @4xl:border-l @4xl:border-t-0">
+        {onChange && showProperties && !showOverview && <aside aria-label="Slide properties" className="flex shrink-0 flex-wrap items-start gap-2 border-t border-border/60 bg-background p-2 @4xl:w-40 @4xl:flex-col @4xl:border-l @4xl:border-t-0">
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">Layout
             <select aria-label="Layout" className={selectClass} value={slide.layout} onChange={(event) => patchSlide({ layout: event.target.value as Layout })}>
               <option value="title">Title</option><option value="content">Content</option><option value="split">Two columns</option>
@@ -484,15 +663,27 @@ export function ArtifactSlidesEditor({ content, onChange, title = "Slides" }: { 
             <input type="checkbox" checked={slide.hidden ?? false} onChange={(event) => patchSlide({ hidden: event.target.checked })} /> Skip slide
           </label>
           {element && <div className="flex flex-wrap items-center gap-2 @4xl:w-full @4xl:border-t @4xl:border-border/60 @4xl:pt-2">
-            {element.type === "image" ? <>
+            {element.type === "table" ? <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-1">
+                <Button size="xs" variant="ghost" onClick={() => changeTableSize("rows", 1)}>+ Row</Button>
+                <Button size="xs" variant="ghost" aria-label="Remove last row" onClick={() => changeTableSize("rows", -1)}>− Row</Button>
+              </div>
+              <div className="flex items-center gap-1">
+                <Button size="xs" variant="ghost" onClick={() => changeTableSize("columns", 1)}>+ Column</Button>
+                <Button size="xs" variant="ghost" aria-label="Remove last column" onClick={() => changeTableSize("columns", -1)}>− Column</Button>
+              </div>
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <input type="checkbox" checked={element.header !== false} onChange={(event) => patchElement({ header: event.target.checked })} /> Header row
+              </label>
+            </div> : element.type === "image" || element.type === "video" ? <>
               <label className="flex w-full flex-col gap-1 text-xs text-muted-foreground">Alt text
                 <Input className="h-7" value={element.alt ?? ""} onChange={(event) => patchElement({ alt: event.target.value })} />
               </label>
               <label className="flex items-center gap-1 text-xs text-muted-foreground">Width %
-                <Input className="h-7 w-16" type="number" min={Math.min(2, maxImageWidth(element))} max={maxImageWidth(element)} step="any" value={Number(element.w.toFixed(2))}
+                <Input className="h-7 w-16" type="number" min={Math.min(2, fittedWidth(element))} max={fittedWidth(element)} step="any" value={Number(element.w.toFixed(2))}
                   onChange={(event) => {
                     const width = event.target.valueAsNumber;
-                    if (width > 0 && width <= maxImageWidth(element)) patchElement(imageSize(element, width));
+                    if (width > 0 && width <= fittedWidth(element)) patchElement(proportionalSize(element, width));
                   }} />
               </label>
             </> : <label className="flex items-center gap-1 text-xs text-muted-foreground">Color
@@ -509,6 +700,30 @@ export function ArtifactSlidesEditor({ content, onChange, title = "Slides" }: { 
           </div>}
         </aside>}
       </div>
+      {insertPanel && <Dialog open onOpenChange={(open) => { if (!open) setInsertPanel(undefined); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>{insertPanel === "video" ? "Insert video" : "Insert table"}</DialogTitle></DialogHeader>
+          <form className="grid gap-4" onSubmit={(event) => {
+            event.preventDefault();
+            const form = new FormData(event.currentTarget);
+            if (insertPanel === "video") addVideo(form); else addTable(form);
+          }}>
+            {insertPanel === "video" ? <>
+              <label className="grid gap-1.5 text-sm">Direct video URL
+                <Input name="url" type="url" placeholder="https://example.com/video.mp4" required autoFocus />
+              </label>
+              <label className="grid gap-1.5 text-sm">Label<Input name="title" /></label>
+            </> : <div className="grid grid-cols-2 gap-3">
+              <label className="grid gap-1.5 text-sm">Rows<Input name="rows" type="number" min={1} max={MAX_SLIDE_TABLE_DIMENSION} step={1} defaultValue={3} required autoFocus /></label>
+              <label className="grid gap-1.5 text-sm">Columns<Input name="columns" type="number" min={1} max={MAX_SLIDE_TABLE_DIMENSION} step={1} defaultValue={3} required /></label>
+            </div>}
+            <DialogFooter>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setInsertPanel(undefined)}>Cancel</Button>
+              <Button type="submit" size="sm">Insert</Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>}
       {presenting !== undefined && visibleSlides.length > 0 && <Presentation slides={visibleSlides} initial={step(presenting, 0, visibleSlides.length)} onClose={() => {
         setPresenting(undefined);
         requestAnimationFrame(() => presentButton.current?.focus());

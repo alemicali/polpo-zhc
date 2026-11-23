@@ -1,17 +1,18 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, Check, ChevronDown, Cloud, Code2, Download, ExternalLink, FileDown, History, Link2, Maximize2, MoreHorizontal, Printer, RefreshCw, RotateCcw, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, Cloud, Code2, CopyPlus, Download, ExternalLink, FileDown, History, Link2, Maximize2, MessageSquare, Pencil, Pin, Printer, RefreshCw, RotateCcw, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useEvents } from "@polpo-ai/react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { artifactDownload, artifactLabel, artifactWorkspace, artifactsApi, downloadArtifactFile, saveArtifactFile, type Artifact } from "@/lib/artifacts-api";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { artifactDownload, artifactWorkspace, artifactsApi, downloadArtifactFile, saveArtifactFile, type Artifact } from "@/lib/artifacts-api";
 import { absoluteTime, artifactAuthor } from "@/lib/artifacts-list";
 import { artifactPath, useArtifactActions } from "@/hooks/use-artifact-actions";
 import { productName, useInstanceBranding } from "@/lib/branding";
+import { sidebarActions, useSidebarOpen } from "@/hooks/chat-context";
+import { useLayoutMode } from "@/hooks/use-layout-mode";
 import { ArtifactIcon } from "./artifact-icon";
 import { ArtifactPreparation } from "./artifact-preparation";
 import { ArtifactView } from "./artifact-view";
@@ -19,7 +20,7 @@ import { ArtifactView } from "./artifact-view";
 const DocEditor = lazy(() => import("./artifact-doc-editor").then((m) => ({ default: m.ArtifactDocEditor })));
 const DesignEditor = lazy(() => import("./artifact-design-editor").then((m) => ({ default: m.ArtifactDesignEditor })));
 const SlidesEditor = lazy(() => import("./artifact-slides-editor").then((m) => ({ default: m.ArtifactSlidesEditor })));
-const SheetsEditor = lazy(() => import("./artifact-sheets-editor").then((m) => ({ default: m.ArtifactSheetsEditor })));
+const ActiveWorkbook = lazy(() => import("./artifact-generation").then(m => ({ default: m.ActiveWorkbook })));
 const MotionEditor = lazy(() => import("./artifact-motion-editor").then((m) => ({ default: m.ArtifactMotionEditor })));
 
 interface Draft {
@@ -33,6 +34,8 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
   const location = useLocation();
   const { copyLink, remove: deleteArtifact } = useArtifactActions(onDeleted);
   const product = productName(useInstanceBranding());
+  const chatOpen = useSidebarOpen();
+  const layout = useLayoutMode();
   const stage = useRef<HTMLDivElement>(null);
   const [artifact, setArtifact] = useState<Artifact | null>(() =>
     location.state?.createdArtifact?.id === id ? location.state.createdArtifact : null);
@@ -44,6 +47,8 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
   const [version, setVersion] = useState<number>();
   const [draft, setDraft] = useState<Draft>();
   const [refreshKey, setRefreshKey] = useState(0);
+  const [rename, setRename] = useState<string>();
+  const [showHistory, setShowHistory] = useState(false);
   const [busy, setBusy] = useState(false);
   const { events } = useEvents(["artifact:changed"], 1);
   const lastEvent = events[0];
@@ -68,7 +73,7 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
   }, [dirty]);
 
   const save = useCallback(async () => {
-    if (!dirty || !draft || busy || savingRef.current || artifact?.version !== draft.base.version) return;
+    if (!dirty || !draft || busy || savingRef.current || artifact?.version !== draft.base.version) return false;
     savingRef.current = true;
     setSaving(true);
     try {
@@ -93,8 +98,10 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
         content: current.content === draft.content ? updated.content : current.content,
       });
       setSaveError(undefined);
+      return true;
     } catch (err) {
       setSaveError((err as Error).message);
+      return false;
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -183,33 +190,80 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
   }
 
   const onChange = editable ? (value: string) => updateDraft({ content: value }) : undefined;
-  const canUseSource = !legacy;
-  const goBack = () => {
-    if (!saving && (!dirty || window.confirm("Discard your unsaved changes?"))) navigate("/artifacts");
-  };
+  async function duplicate() {
+    if (!artifact || busy || saving) return;
+    setBusy(true);
+    try {
+      const copy = await artifactsApi.duplicate(id, shownVersion?.version ?? artifact.version);
+      navigate(artifactPath(copy.id), { state: { createdArtifact: copy } });
+    } catch (err) { toast.error((err as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  async function togglePin() {
+    if (!artifact || busy || saving) return;
+    setBusy(true);
+    try { setArtifact(await artifactsApi.update(id, { pinned: !artifact.pinned, expectedVersion: artifact.version })); }
+    catch (err) { toast.error((err as Error).message); }
+    finally { setBusy(false); }
+  }
+  async function leaveEditor(path: string) {
+    if (busy || saving) return;
+    if (dirty) {
+      setBusy(true);
+      const saved = await save();
+      setBusy(false);
+      if (!saved) return;
+    }
+    navigate(path);
+  }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-2">
-      <header className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-border/70 bg-card/70 px-2 py-1.5">
-        {!embedded && <Button size="icon" variant="ghost" className="size-8" onClick={goBack} aria-label="Back to artifacts"><ArrowLeft className="size-4" /></Button>}
-        <span className="grid size-8 shrink-0 place-items-center rounded-md bg-primary/10 text-primary"><ArtifactIcon artifact={artifact} /></span>
-        <div className="min-w-0 flex-1">
-          {editable ? (
-            <Input aria-label="Artifact title" value={draft?.title ?? artifact.title} disabled={busy}
-              className="h-7 max-w-md border-transparent bg-transparent px-1 font-heading text-sm font-semibold shadow-none hover:border-border focus-visible:bg-background"
-              onChange={(event) => updateDraft({ title: event.target.value })} />
-          ) : (
-            <h1 className="flex items-center gap-2 truncate font-heading text-sm font-semibold">{artifact.title}{legacy && <Badge variant="outline">Legacy</Badge>}</h1>
-          )}
-          <p className="truncate px-1 text-caption text-muted-foreground">
-            {artifactLabel(artifact)} · {artifactAuthor(artifact.createdBy, product)}{legacy ? "" : ` · v${artifact.version}`}
-          </p>
-        </div>
+    <div className="flex h-full min-h-0 flex-col">
+      <header className="flex h-[45px] shrink-0 items-center gap-1.5 border-b bg-background px-2">
+        {!embedded && <Button size="icon" variant="ghost" className="size-8" disabled={busy || saving} onClick={() => void leaveEditor("/artifacts")} aria-label="Back to artifacts"><ArrowLeft className="size-4" /></Button>}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm" variant="ghost" className="h-7 min-w-0 max-w-[58%] gap-1.5 px-1.5" aria-label={`Artifact actions for ${draft?.title ?? artifact.title}`}>
+              <ArtifactIcon artifact={artifact} className="size-4 shrink-0 text-primary" />
+              <span className="truncate">{draft?.title ?? artifact.title}</span><ChevronDown className="size-3 shrink-0" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="min-w-48">
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger><Download /> Export</DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                {artifact.type === "doc" && <>
+                  <DropdownMenuItem onSelect={() => void exportDoc("word")}><FileDown /> Word document</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => void exportDoc("print")}><Printer /> Print or save PDF</DropdownMenuItem>
+                </>}
+                <DropdownMenuItem onSelect={() => saveArtifactFile(artifact, content)}><Download /> Download source</DropdownMenuItem>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+            {!legacy && <DropdownMenuItem disabled={busy || saving || dirty} onSelect={() => void togglePin()}><Pin />{artifact.pinned ? "Unpin" : "Pin"}</DropdownMenuItem>}
+            {editable && <DropdownMenuItem onSelect={() => setRename(draft?.title ?? artifact.title)}><Pencil /> Rename</DropdownMenuItem>}
+            {!legacy && <DropdownMenuItem disabled={busy || dirty || saving} onSelect={() => void duplicate()}><CopyPlus /> Duplicate</DropdownMenuItem>}
+            {!workspace && (artifact.type === "html" || legacy) && <DropdownMenuItem onSelect={() => setRefreshKey(key => key + 1)}><RefreshCw /> Refresh</DropdownMenuItem>}
+            {artifact.versions.length > 0 && <DropdownMenuItem onSelect={() => setShowHistory(true)}><History /> Version history</DropdownMenuItem>}
+            <DropdownMenuSeparator />
+            {!legacy && <DropdownMenuItem onSelect={() => setSource({ value: content, version: artifact.version })}><Code2 /> View source</DropdownMenuItem>}
+            {editable && dirty && <DropdownMenuItem disabled={saving || versionChanged} onSelect={() => void save()}><Save /> Save now</DropdownMenuItem>}
+            <DropdownMenuItem onSelect={() => void stage.current?.requestFullscreen?.().catch(() => {})}><Maximize2 /> Full screen</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void copyLink(artifact)}><Link2 /> Copy link</DropdownMenuItem>
+            {!legacy && <><DropdownMenuSeparator /><DropdownMenuItem variant="destructive" disabled={busy || saving} onSelect={() => void remove()}><Trash2 /> Delete</DropdownMenuItem></>}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <div className="flex-1" />
+        {!embedded && <Button size="sm" variant="ghost" className={layout === "chat-first" ? "lg:hidden" : ""} aria-label="Chat with assistant"
+          onClick={() => {
+            if (window.matchMedia("(max-width: 1023px)").matches) void leaveEditor(`/chat?artifact=${encodeURIComponent(id)}`);
+            else sidebarActions.setSidebarOpen(!chatOpen);
+          }}><MessageSquare className="size-4" /><span className="hidden sm:inline">Chat</span></Button>}
         {editable && <span role="status" title={saveError || autoSaveStatus} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
           {autoSaveStatus === "Saved" ? <Check className="size-3.5" /> : <Cloud className="size-3.5" />}
-          <span className="hidden sm:inline">{autoSaveStatus}</span>
+          <span className={autoSaveStatus === "Saved" ? "sr-only" : "hidden sm:inline"}>{autoSaveStatus}</span>
         </span>}
-        {!legacy && artifact.versions.length > 0 && (
+        {!legacy && showHistory && artifact.versions.length > 0 && (
           <label className="flex items-center gap-1 rounded-md border border-border px-1.5 text-xs text-muted-foreground">
             <History className="size-3.5" />
             <select className="h-7 max-w-28 rounded bg-transparent text-xs sm:max-w-36" value={shownVersion?.version ?? ""}
@@ -226,31 +280,6 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
         )}
         {shownVersion && <Button size="sm" variant="outline" disabled={busy} onClick={() => void restore()}><RotateCcw className="size-3.5" /> Restore</Button>}
         {embedded && <Button size="sm" variant="outline" onClick={() => navigate(artifactPath(id))} aria-label="Open"><ExternalLink className="size-3.5" /> Open</Button>}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button size="sm" variant="outline" aria-label="Export artifact"><Download className="size-3.5" /> <span className="hidden sm:inline">Export</span><ChevronDown className="size-3" /></Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            {artifact.type === "doc" && <>
-              <DropdownMenuItem onSelect={() => void exportDoc("word")}><FileDown /> Word document</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => void exportDoc("print")}><Printer /> Print or save PDF</DropdownMenuItem>
-            </>}
-            <DropdownMenuItem onSelect={() => saveArtifactFile(artifact, content)}><Download /> Download source</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button size="icon" variant="ghost" className="size-8" aria-label="Artifact actions"><MoreHorizontal className="size-4" /></Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            {canUseSource && <DropdownMenuItem onSelect={() => setSource({ value: content, version: artifact.version })}><Code2 /> View source</DropdownMenuItem>}
-            {editable && <DropdownMenuItem disabled={!dirty || saving || versionChanged} onSelect={() => void save()}><Save /> Save now</DropdownMenuItem>}
-            {!workspace && (artifact.type === "html" || legacy) && <DropdownMenuItem onSelect={() => setRefreshKey((key) => key + 1)}><RefreshCw /> Reload data</DropdownMenuItem>}
-            <DropdownMenuItem onSelect={() => void stage.current?.requestFullscreen?.().catch(() => {})}><Maximize2 /> Full screen</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => void copyLink(artifact)}><Link2 /> Copy link</DropdownMenuItem>
-            {!legacy && <><DropdownMenuSeparator /><DropdownMenuItem variant="destructive" disabled={busy || saving} onSelect={() => void remove()}><Trash2 /> Delete</DropdownMenuItem></>}
-          </DropdownMenuContent>
-        </DropdownMenu>
       </header>
       {(artifact.description || artifact.sources?.length || shownVersion || error) && (
         <p className="px-1 text-xs text-muted-foreground">
@@ -274,23 +303,35 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
         </div>
       )}
       {legacy && <p className="rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning">Edit this view on the Data page.</p>}
-      <div ref={stage} className="min-h-0 flex-1 overflow-hidden rounded-lg border border-border/70 bg-background" inert={busy}>
+      <div ref={stage} className="min-h-0 flex-1 overflow-hidden bg-background" inert={busy}>
         <Suspense fallback={<ArtifactPreparation kind={artifact.kind} />}>
           {workspace === "slides" ? (
             <SlidesEditor content={content} onChange={onChange} title={artifact.title} />
           ) : workspace === "sheets" ? (
-            <SheetsEditor content={content} onChange={onChange} appearanceVersion={shownVersion?.version ?? artifact.version} />
+            <ActiveWorkbook artifactId={id} content={content} onChange={onChange} version={shownVersion?.version ?? artifact.version} follow={!dirty && !shownVersion && !embedded} />
           ) : workspace === "motion" ? (
             <MotionEditor content={content} onChange={onChange} title={artifact.title} />
           ) : onChange && artifact.type === "doc" ? (
             <DocEditor content={content} onChange={onChange} />
-          ) : onChange && artifact.type === "html" && artifact.kind === "design" ? (
+          ) : artifact.type === "html" && artifact.kind === "design" ? (
             <DesignEditor artifact={artifact} content={content} onChange={onChange} refreshKey={refreshKey} />
           ) : (
             <ArtifactView artifact={artifact} content={content} refreshKey={refreshKey} />
           )}
         </Suspense>
       </div>
+      <Dialog open={rename !== undefined} onOpenChange={open => { if (!open) setRename(undefined); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader><DialogTitle>Rename artifact</DialogTitle></DialogHeader>
+          <form className="grid gap-3" onSubmit={event => {
+            event.preventDefault();
+            if (rename?.trim()) { updateDraft({ title: rename.trim() }); setRename(undefined); }
+          }}>
+            <Input aria-label="Artifact title" value={rename ?? ""} onChange={event => setRename(event.target.value)} autoFocus />
+            <Button type="submit" className="justify-self-end" disabled={!rename?.trim()}>Rename</Button>
+          </form>
+        </DialogContent>
+      </Dialog>
       <Dialog open={!!source} onOpenChange={(open) => { if (!open) setSource(undefined); }}>
         <DialogContent className="max-h-[90dvh] sm:max-w-4xl">
           <DialogHeader>

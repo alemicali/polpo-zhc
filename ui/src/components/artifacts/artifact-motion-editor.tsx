@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Circle, Copy, Download, Film, Maximize2, Minimize2, Pause, Pencil, Play, Plus, Repeat, RotateCcw, Square, Trash2, Type } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Circle, Copy, Download, Layers3, Maximize2, Minimize2, Music, Pause, Pencil, Play, Plus, Repeat, RotateCcw, SlidersHorizontal, Square, Trash2, Type, Volume2, VolumeX, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { clamp, drawMotionFrame, MAX_LAYERS, MAX_SCENES, parseMotion, sceneAt, sceneOffsets, type MotionLayer, type MotionProject, type MotionScene } from "./artifact-motion-model";
+import { loadMotionAudio } from "./artifact-motion-audio";
+import { clamp, drawMotionFrame, MAX_LAYERS, MAX_SCENES, parseMotion, sceneAt, sceneOffsets, type MotionAudio, type MotionLayer, type MotionProject, type MotionScene } from "./artifact-motion-model";
 
 export { MOTION_STARTER } from "./artifact-motion-model";
 
@@ -62,13 +63,26 @@ export function ArtifactMotionEditor({ content, onChange, title }: ArtifactMotio
 function MotionWorkspace({ project, onChange, title }: { project: MotionProject; onChange?: (content: string) => void; title?: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const audioInputRef = useRef<HTMLInputElement>(null);
+  const pendingPlay = useRef<HTMLAudioElement | null>(null);
+  const rejectedPlay = useRef(false);
+  const uploadRequest = useRef(0);
+  const latestProject = useRef(project);
+  const latestOnChange = useRef(onChange);
   const fullscreenButtonRef = useRef<HTMLButtonElement>(null);
+  const propertiesButtonRef = useRef<HTMLButtonElement>(null);
   const exitFullscreenButtonRef = useRef<HTMLButtonElement>(null);
   const exportRef = useRef<AbortController>(null);
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [loop, setLoop] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [volume, setVolume] = useState(1);
+  const [readingAudio, setReadingAudio] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  const [showProperties, setShowProperties] = useState(false);
+  const [showScenes, setShowScenes] = useState(false);
   const [editingCanvas, setEditingCanvas] = useState(true);
   const [selection, setSelection] = useState<{ sceneId: string; layerId: string }>();
   const [drag, setDrag] = useState<Drag | null>(null);
@@ -80,6 +94,8 @@ function MotionWorkspace({ project, onChange, title }: { project: MotionProject;
   const scene = project.scenes[active];
   const selected = scene.id === selection?.sceneId ? scene.layers.find((item) => item.id === selection.layerId) : undefined;
   const showLayout = !playing && editingCanvas;
+  const hasAudio = !!project.audio;
+  const audioDelay = project.audio?.delay ?? 0;
   const editing = Boolean(onChange && showLayout && !fullscreen);
 
   useEffect(() => {
@@ -103,7 +119,38 @@ function MotionWorkspace({ project, onChange, title }: { project: MotionProject;
   useEffect(() => {
     if (playing && !loop && time >= total) setPlaying(false);
   }, [playing, loop, time, total]);
-  useEffect(() => () => exportRef.current?.abort(), []);
+  useEffect(() => () => {
+    exportRef.current?.abort();
+    uploadRequest.current++;
+  }, []);
+  useEffect(() => {
+    latestProject.current = project;
+    latestOnChange.current = onChange;
+  }, [project, onChange]);
+
+  const syncAudio = useCallback((seconds: number, isPlaying: boolean, seekNow = false) => {
+    const audio = audioRef.current;
+    if (!audio || audio.error) return;
+    const relativeTime = seconds - audioDelay;
+    const duration = Number.isFinite(audio.duration) ? audio.duration : Infinity;
+    const position = clamp(relativeTime, 0, duration);
+    if (audio.readyState > 0 && (seekNow || Math.abs(audio.currentTime - position) > 0.18)) audio.currentTime = position;
+    const shouldPlay = isPlaying && relativeTime >= 0 && relativeTime < duration;
+    if (!shouldPlay) {
+      if (!audio.paused) audio.pause();
+    } else if (audio.paused && pendingPlay.current !== audio && !rejectedPlay.current) {
+      pendingPlay.current = audio;
+      void audio.play().catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "NotAllowedError") rejectedPlay.current = true;
+      }).finally(() => { if (pendingPlay.current === audio) pendingPlay.current = null; });
+    }
+  }, [audioDelay]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (audio) audio.volume = volume;
+    syncAudio(currentTime, playing);
+  }, [currentTime, playing, project.audio?.src, syncAudio, volume]);
   useEffect(() => {
     let wasFullscreen = false;
     const updateFullscreen = () => {
@@ -129,27 +176,66 @@ function MotionWorkspace({ project, onChange, title }: { project: MotionProject;
     }
   };
 
-  const saveScenes = (scenes: MotionScene[]) => onChange?.(JSON.stringify({ ...project, scenes }, null, 2));
+  const saveProject = (next: MotionProject) => onChange?.(JSON.stringify(next, null, 2));
+  const saveScenes = (scenes: MotionScene[]) => saveProject({ ...project, scenes });
+  const uploadSoundtrack = async (file: File) => {
+    const request = ++uploadRequest.current;
+    setReadingAudio(true);
+    try {
+      const audio = await loadMotionAudio(file);
+      if (request !== uploadRequest.current) return;
+      const next = { ...latestProject.current, audio };
+      const content = JSON.stringify(next, null, 2);
+      if (new TextEncoder().encode(content).length > 1_000_000) throw new Error("Adding this soundtrack would exceed the artifact size limit.");
+      rejectedPlay.current = false;
+      latestOnChange.current?.(content);
+    } catch (error) {
+      if (request === uploadRequest.current) toast.error(error instanceof Error ? error.message : "The soundtrack could not be read.");
+    } finally {
+      if (request === uploadRequest.current) setReadingAudio(false);
+    }
+  };
+  const changeSoundtrack = (audio: MotionAudio | undefined) => {
+    saveProject({ ...project, audio });
+  };
   const patchScene = (patch: Partial<MotionScene>) => saveScenes(project.scenes.map((item, index) => index === active ? { ...item, ...patch } : item));
   const patchLayer = (id: string, patch: Partial<MotionLayer>) => patchScene({ layers: scene.layers.map((layer) => layer.id === id ? { ...layer, ...patch } : layer) });
-  const selectLayer = (id: string) => setSelection({ sceneId: scene.id, layerId: id });
+  const selectLayer = (id: string) => {
+    setSelection({ sceneId: scene.id, layerId: id });
+    setShowProperties(true);
+  };
+
+  const toggleProperties = () => {
+    if (!showProperties) {
+      setPlaying(false);
+      setEditingCanvas(true);
+    }
+    setShowProperties(!showProperties);
+  };
 
   const seek = (next: number) => {
     setPlaying(false);
     setEditingCanvas(false);
     setTime(next);
+    syncAudio(next, false, true);
   };
   const openScene = (index: number) => {
     setPlaying(false);
     setEditingCanvas(true);
     setTime(offsets[index]);
+    syncAudio(offsets[index], false, true);
   };
   const togglePlay = () => {
-    if (playing) setPlaying(false);
-    else {
-      if (currentTime >= total) setTime(0);
+    if (playing) {
+      setPlaying(false);
+      syncAudio(currentTime, false);
+    } else {
+      const next = currentTime >= total ? 0 : currentTime;
+      setTime(next);
       setEditingCanvas(false);
       setPlaying(true);
+      rejectedPlay.current = false;
+      syncAudio(next, true, true);
     }
   };
 
@@ -157,11 +243,24 @@ function MotionWorkspace({ project, onChange, title }: { project: MotionProject;
     setTime(0);
     setEditingCanvas(false);
     setPlaying(true);
+    rejectedPlay.current = false;
+    syncAudio(0, true, true);
   };
   const playbackButtons = <>
     <Button type="button" size="icon-sm" aria-label={playing ? "Pause" : "Play"} title={playing ? "Pause" : "Play"} onClick={togglePlay}>{playing ? <Pause /> : <Play />}</Button>
     <Button type="button" size="icon-sm" variant="ghost" aria-label="Restart playback" title="Restart playback" onClick={restart}><RotateCcw /></Button>
     <Button type="button" size="icon-sm" variant={loop ? "secondary" : "ghost"} aria-label="Loop playback" title="Loop playback" aria-pressed={loop} onClick={() => setLoop((enabled) => !enabled)}><Repeat /></Button>
+    <span aria-label="Playback time" className="mx-1 whitespace-nowrap border-l pl-2 font-mono text-xs tabular-nums text-muted-foreground">
+      <span className="text-foreground">{formatTime(currentTime)}</span> / {formatTime(total)}
+    </span>
+    <Button type="button" size="icon-sm" variant="ghost" disabled={!hasAudio} aria-label={muted ? "Unmute" : "Mute"}
+      title={hasAudio ? muted ? "Unmute" : "Mute" : "No soundtrack"} onClick={() => {
+        setMuted((value) => !value);
+        rejectedPlay.current = false;
+        syncAudio(currentTime, playing);
+      }}>{muted || volume === 0 || !hasAudio ? <VolumeX /> : <Volume2 />}</Button>
+    {hasAudio && <input aria-label="Volume" type="range" min={0} max={1} step={0.05} value={volume} disabled={muted}
+      onChange={(event) => setVolume(Number(event.target.value))} className="mx-1 w-12 shrink-0 accent-primary sm:w-16" />}
   </>;
 
   const addScene = (duplicate: boolean) => {
@@ -231,7 +330,12 @@ function MotionWorkspace({ project, onChange, title }: { project: MotionProject;
   const dragEnd = (event: PointerEvent<HTMLCanvasElement>) => {
     if (!drag || event.pointerId !== drag.pointerId) return;
     const { x, y } = point(event);
-    if (drag.sceneId === scene.id) patchLayer(drag.id, { x: Math.round(x - drag.offsetX), y: Math.round(y - drag.offsetY) });
+    const original = scene.id === drag.sceneId ? scene.layers.find((layer) => layer.id === drag.id) : undefined;
+    const left = x - drag.offsetX;
+    const top = y - drag.offsetY;
+    if (original && (Math.abs(left - original.x) > 0.5 || Math.abs(top - original.y) > 0.5)) {
+      patchLayer(drag.id, { x: Math.round(left), y: Math.round(top) });
+    }
     setDrag(null);
   };
 
@@ -263,13 +367,15 @@ function MotionWorkspace({ project, onChange, title }: { project: MotionProject;
 
   return <section aria-label="Motion workspace" className="flex h-full min-h-0 flex-col overflow-auto bg-background">
     <header className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
-      <div className="flex items-center gap-2">
-        <Film className="size-4 text-primary" aria-hidden="true" />
-        <span className="text-sm font-medium">Motion</span>
-        <span className="font-mono text-xs text-muted-foreground">{project.width} × {project.height}</span>
+      <div role="toolbar" aria-label="Playback controls" className="flex items-center gap-1">
+        {!fullscreen && playbackButtons}
       </div>
-      <div className="ml-auto flex items-center gap-2">
+      <div role="toolbar" aria-label="Motion actions" className="ml-auto flex items-center gap-2">
         {onChange && !editing && <Button type="button" size="sm" variant="ghost" onClick={() => { setPlaying(false); setEditingCanvas(true); }}><Pencil /> Edit canvas</Button>}
+        {(onChange || project.scenes.length > 1) && <Button type="button" size="icon-sm" variant={showScenes ? "secondary" : "ghost"}
+          aria-label="Scenes" title="Scenes" aria-expanded={showScenes} onClick={() => setShowScenes((value) => !value)}><Layers3 /></Button>}
+        {onChange && <Button ref={propertiesButtonRef} type="button" size="icon-sm" variant={showProperties ? "secondary" : "ghost"} aria-label="Motion properties"
+          aria-expanded={showProperties} title="Properties and soundtrack" onClick={toggleProperties}><SlidersHorizontal /></Button>}
         <Button ref={fullscreenButtonRef} type="button" size="icon-sm" variant="ghost" aria-label="Full screen preview" title="Full screen preview" onClick={() => void toggleFullscreen()}><Maximize2 /></Button>
         {exportProgress !== null ? <>
           <span role="status" className="text-xs tabular-nums text-muted-foreground">Encoding {Math.round(exportProgress * 100)}%</span>
@@ -277,15 +383,19 @@ function MotionWorkspace({ project, onChange, title }: { project: MotionProject;
         </> : <Button type="button" size="sm" variant="outline" onClick={() => void download()}><Download /> Export video</Button>}
       </div>
     </header>
-    <div className="contents md:flex md:min-h-48 md:flex-1">
-      <div className="order-1 grid min-h-44 min-w-0 shrink-0 place-items-center overflow-hidden bg-muted/35 p-3 md:order-none md:flex-1 md:p-6">
-        <div ref={previewRef} className="relative grid size-full min-h-0 min-w-0 place-items-center overflow-hidden [&:fullscreen]:bg-black">
+    {project.audio && <audio ref={audioRef} src={project.audio.src} preload="metadata" muted={muted}
+      onLoadedMetadata={() => syncAudio(currentTime, playing, true)} hidden />}
+    <div className="contents md:relative md:flex md:min-h-48 md:flex-1">
+      <div className="order-1 grid min-h-44 min-w-0 shrink-0 place-items-center overflow-hidden bg-muted/35 px-3 pb-3 pt-2 md:order-none md:flex-1">
+        <div ref={previewRef} className="group relative grid size-full min-h-0 min-w-0 place-items-center overflow-hidden md:[container-type:size] [&:fullscreen]:bg-black [&:fullscreen]:[container-type:size]">
           <canvas ref={canvasRef} width={project.width} height={project.height}
-            className={cn("max-h-full max-w-full rounded-sm bg-black object-contain shadow-md", editing && "touch-none cursor-crosshair", drag && "cursor-grabbing")}
-            aria-label={`${scene.name} animation preview`} tabIndex={0}
+            style={{ "--motion-fit-width": `${100 * project.width / project.height}cqh` } as CSSProperties}
+            className={cn("h-auto w-full max-w-full rounded-sm bg-black shadow-md group-[:fullscreen]:w-[min(100cqw,var(--motion-fit-width))] md:w-[min(100cqw,var(--motion-fit-width))]", editing && "touch-none cursor-crosshair", drag && "cursor-grabbing")}
+            aria-label={`${scene.name} animation preview`} role={editing ? undefined : "button"} tabIndex={0}
+            onClick={() => { if (!editing) togglePlay(); }}
             onPointerDown={dragStart} onPointerMove={dragMove} onPointerUp={dragEnd} onPointerCancel={() => setDrag(null)}
             onKeyDown={(event) => {
-              if (event.key === " ") { event.preventDefault(); togglePlay(); }
+              if (event.key === " " || (!editing && event.key === "Enter")) { event.preventDefault(); togglePlay(); }
               if (!editing || !selected) return;
               const movement = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
               if (!movement) return;
@@ -301,7 +411,11 @@ function MotionWorkspace({ project, onChange, title }: { project: MotionProject;
           </div>}
         </div>
       </div>
-      {onChange && <aside aria-label="Motion properties" className="order-3 min-h-0 shrink-0 border-t p-3 md:order-none md:w-60 md:overflow-y-auto md:border-l md:border-t-0 2xl:w-72">
+      {onChange && showProperties && <aside aria-label="Motion properties" className="order-3 min-h-0 shrink-0 border-t bg-card p-3 md:absolute md:bottom-3 md:right-3 md:top-2 md:z-10 md:w-64 md:overflow-y-auto md:rounded-lg md:border md:shadow-lg 2xl:w-72">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h3 className="text-sm font-medium">Properties</h3>
+          <Button type="button" size="icon-xs" variant="ghost" aria-label="Close properties" onClick={() => { setShowProperties(false); propertiesButtonRef.current?.focus(); }}><X /></Button>
+        </div>
         <div className="grid gap-2">
           <Field label="Scene name"><Input className="h-8 px-2 text-xs" value={scene.name} onChange={(event) => patchScene({ name: event.target.value })} /></Field>
           <div className="grid grid-cols-2 gap-2">
@@ -353,32 +467,51 @@ function MotionWorkspace({ project, onChange, title }: { project: MotionProject;
             {selected.animation && selected.animation !== "none" && <NumberField label="Animation (s)" value={selected.animationDuration ?? 0.52} min={0.05} max={60} step={0.05} onChange={(animationDuration) => patchLayer(selected.id, { animationDuration })} />}
           </div>
         </div>}
+        <div className="mt-3 grid gap-2 border-t pt-3">
+          <div className="flex items-center gap-2">
+            <Music className="size-3.5 text-muted-foreground" aria-hidden="true" />
+            <h3 className="mr-auto text-xs font-medium">Soundtrack</h3>
+            {project.audio && <Button type="button" size="icon-xs" variant="ghost" aria-label="Remove soundtrack" onClick={() => changeSoundtrack(undefined)}><Trash2 /></Button>}
+          </div>
+          {project.audio && <>
+            <p className="truncate text-xs text-muted-foreground" title={project.audio.name}>{project.audio.name}</p>
+            <NumberField label="Track starts (s)" value={audioDelay} min={0} max={Math.min(total, 180)} step={0.1}
+              onChange={(delay) => { if (project.audio) changeSoundtrack({ ...project.audio, delay }); }} />
+          </>}
+          <input ref={audioInputRef} type="file" accept="audio/*,.mp3,.m4a,.wav,.ogg,.flac,.aac,.webm" hidden
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) void uploadSoundtrack(file);
+            }} />
+          <Button type="button" variant="outline" size="sm" className="justify-start" disabled={readingAudio} onClick={() => audioInputRef.current?.click()}>
+            <Plus />{readingAudio ? "Reading soundtrack…" : project.audio ? "Replace soundtrack" : "Add soundtrack"}
+          </Button>
+        </div>
       </aside>}
     </div>
-    <div aria-label="Timeline" className="order-2 shrink-0 border-t bg-card p-2.5 md:order-none">
-      <div className="flex flex-wrap items-center gap-1">
-        {!fullscreen && playbackButtons}
-        <span className="ml-1 font-mono text-xs tabular-nums text-muted-foreground">{formatTime(currentTime)} / {formatTime(total)}</span>
-        <div className="ml-auto flex items-center gap-1">
-          {onChange && <>
-            <Button type="button" size="icon-xs" variant="ghost" aria-label="Move scene earlier" title="Move scene earlier" disabled={active === 0} onClick={() => moveScene(-1)}><ArrowLeft /></Button>
-            <Button type="button" size="icon-xs" variant="ghost" aria-label="Move scene later" title="Move scene later" disabled={active === project.scenes.length - 1} onClick={() => moveScene(1)}><ArrowRight /></Button>
-            <Button type="button" size="icon-xs" variant="ghost" aria-label="Duplicate scene" title="Duplicate scene" disabled={project.scenes.length >= MAX_SCENES} onClick={() => addScene(true)}><Copy /></Button>
-            <Button type="button" size="icon-xs" variant="ghost" aria-label="Delete scene" title="Delete scene" disabled={project.scenes.length < 2} onClick={deleteScene}><Trash2 /></Button>
-            <Button type="button" size="xs" variant="outline" disabled={project.scenes.length >= MAX_SCENES} onClick={() => addScene(false)}><Plus /> Scene</Button>
-          </>}
+    <div aria-label="Timeline" className="order-2 shrink-0 border-t bg-card px-3 py-2.5 md:order-none md:px-4">
+      <div role="toolbar" aria-label="Playback timeline" className="flex min-h-8 items-center gap-3">
+        <input aria-label="Seek animation" type="range" min={0} max={total} step="any" value={currentTime}
+          aria-valuetext={formatTime(currentTime)} onChange={(event) => seek(Number(event.target.value))} className="block min-w-0 flex-1 accent-primary" />
+      </div>
+      {showScenes && <div className="mt-2 flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto" aria-label="Scenes">
+          {project.scenes.map((item, index) => <button key={item.id} type="button" aria-pressed={active === index}
+            onClick={() => openScene(index)} style={{ flexGrow: item.duration }} title={`${item.name} · ${item.duration}s`}
+            className={cn("flex min-w-20 basis-0 items-center gap-1.5 rounded-control border px-2 py-1.5 text-left text-xs hover:bg-accent", active === index && "border-primary/60 bg-primary/10")}>
+            <span aria-hidden="true" className="size-2 shrink-0 rounded-sm ring-1 ring-border" style={{ background: item.background }} />
+            <span className="truncate">{item.name || `Scene ${index + 1}`}</span>
+          </button>)}
         </div>
-      </div>
-      <input aria-label="Seek animation" type="range" min={0} max={total} step="any" value={currentTime}
-        aria-valuetext={formatTime(currentTime)} onChange={(event) => seek(Number(event.target.value))} className="mt-1 block w-full accent-primary" />
-      <div className="mt-1 flex gap-1 overflow-x-auto" aria-label="Scenes">
-        {project.scenes.map((item, index) => <button key={item.id} type="button" aria-pressed={active === index}
-          onClick={() => openScene(index)} style={{ flexGrow: item.duration }} title={`${item.name} · ${item.duration}s`}
-          className={cn("flex min-w-20 basis-0 items-center gap-1.5 rounded-control border px-2 py-1.5 text-left text-xs hover:bg-accent", active === index && "border-primary/60 bg-primary/10")}>
-          <span aria-hidden="true" className="size-2 shrink-0 rounded-sm ring-1 ring-border" style={{ background: item.background }} />
-          <span className="truncate">{item.name || `Scene ${index + 1}`}</span>
-        </button>)}
-      </div>
+        {onChange && <div className="flex shrink-0 items-center gap-1">
+          <Button type="button" size="icon-xs" variant="ghost" aria-label="Move scene earlier" title="Move scene earlier" disabled={active === 0} onClick={() => moveScene(-1)}><ArrowLeft /></Button>
+          <Button type="button" size="icon-xs" variant="ghost" aria-label="Move scene later" title="Move scene later" disabled={active === project.scenes.length - 1} onClick={() => moveScene(1)}><ArrowRight /></Button>
+          <Button type="button" size="icon-xs" variant="ghost" aria-label="Duplicate scene" title="Duplicate scene" disabled={project.scenes.length >= MAX_SCENES} onClick={() => addScene(true)}><Copy /></Button>
+          <Button type="button" size="icon-xs" variant="ghost" aria-label="Delete scene" title="Delete scene" disabled={project.scenes.length < 2} onClick={deleteScene}><Trash2 /></Button>
+          <Button type="button" size="xs" variant="outline" aria-label="Add scene" title="Add scene" disabled={project.scenes.length >= MAX_SCENES} onClick={() => addScene(false)}><Plus /><span className="hidden sm:inline">Scene</span></Button>
+        </div>}
+      </div>}
     </div>
   </section>;
 }

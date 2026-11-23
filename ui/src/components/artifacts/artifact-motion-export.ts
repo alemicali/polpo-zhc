@@ -1,3 +1,4 @@
+import { prepareMotionAudio } from "./artifact-motion-audio";
 import { drawMotionFrame, sceneOffsets, type MotionProject } from "./artifact-motion-model";
 
 export async function exportMotion(
@@ -19,28 +20,39 @@ export async function exportMotion(
   if (duration > 180) throw new Error("Video export supports up to three minutes. Shorten the animation and try again.");
   signal.throwIfAborted();
 
-  if (typeof VideoEncoder === "undefined") return recordCanvas(canvas, draw, duration, frameRate, onProgress, signal);
-  const { BufferTarget, CanvasSource, Mp4OutputFormat, Output, WebMOutputFormat, canEncodeVideo } = await import("mediabunny");
+  const audio = await prepareMotionAudio(project.audio, duration, signal);
+  if (typeof VideoEncoder === "undefined") return recordCanvas(canvas, draw, duration, frameRate, onProgress, signal, audio);
+  const { AudioBufferSource, BufferTarget, CanvasSource, Mp4OutputFormat, Output, WebMOutputFormat, canEncodeAudio, canEncodeVideo } = await import("mediabunny");
   const bitrate = Math.round(3_000_000 * canvas.width * canvas.height / (1280 * 720));
   const settings = { width: canvas.width, height: canvas.height, bitrate, frameRate };
-  const codec = await canEncodeVideo("avc", settings) ? "avc" : await canEncodeVideo("vp8", settings) ? "vp8" : null;
-  if (!codec) return recordCanvas(canvas, draw, duration, frameRate, onProgress, signal);
+  const audioSettings = audio ? { numberOfChannels: audio.numberOfChannels, sampleRate: audio.sampleRate, bitrate: 128_000 } : undefined;
+  const aac = !audioSettings || await canEncodeAudio("aac", audioSettings);
+  const avc = aac && await canEncodeVideo("avc", settings);
+  const webmAudio = avc || !audioSettings || await canEncodeAudio("opus", audioSettings);
+  const codec = avc ? "avc" : webmAudio && await canEncodeVideo("vp8", settings) ? "vp8" : null;
+  if (!codec) return recordCanvas(canvas, draw, duration, frameRate, onProgress, signal, audio);
   const mp4 = codec === "avc";
   const target = new BufferTarget();
   const output = new Output({ format: mp4 ? new Mp4OutputFormat({ fastStart: "in-memory" }) : new WebMOutputFormat(), target });
   const track = new CanvasSource(canvas, { codec, bitrate });
   output.addVideoTrack(track, { frameRate });
+  const soundtrack = audioSettings ? new AudioBufferSource({ codec: mp4 ? "aac" : "opus", bitrate: audioSettings.bitrate }) : undefined;
+  if (soundtrack) output.addAudioTrack(soundtrack);
   try {
     await output.start();
-    const frames = Math.ceil(duration * frameRate);
-    for (let frame = 0; frame < frames; frame++) {
-      signal.throwIfAborted();
-      const time = frame / frameRate;
-      draw(time);
-      await track.add(time, Math.min(1 / frameRate, duration - time));
-      if (frame % 15 === 0) onProgress((frame + 1) / frames);
-    }
-    track.close();
+    const encodeFrames = async () => {
+      const frames = Math.ceil(duration * frameRate);
+      for (let frame = 0; frame < frames; frame++) {
+        signal.throwIfAborted();
+        const time = frame / frameRate;
+        draw(time);
+        await track.add(time, Math.min(1 / frameRate, duration - time));
+        if (frame % 15 === 0) onProgress((frame + 1) / frames);
+      }
+      track.close();
+    };
+    const encodeAudio = audio && soundtrack ? soundtrack.add(audio).then(() => soundtrack.close()) : undefined;
+    await Promise.all([encodeFrames(), encodeAudio]);
     await output.finalize();
     signal.throwIfAborted();
     if (!target.buffer) throw new Error("The video encoder returned an empty file.");
@@ -58,13 +70,27 @@ async function recordCanvas(
   frameRate: number,
   onProgress: (progress: number) => void,
   signal: AbortSignal,
+  audio?: AudioBuffer,
 ): Promise<{ blob: Blob; extension: "mp4" | "webm" }> {
-  const mimeType = typeof MediaRecorder === "undefined" ? undefined : ["video/mp4;codecs=avc1", "video/webm;codecs=vp8", "video/webm"].find((type) => MediaRecorder.isTypeSupported(type));
+  const formats = audio ? ["video/mp4;codecs=avc1,mp4a.40.2", "video/webm;codecs=vp8,opus", "video/webm"] : ["video/mp4;codecs=avc1", "video/webm;codecs=vp8", "video/webm"];
+  const mimeType = typeof MediaRecorder === "undefined" ? undefined : formats.find((type) => MediaRecorder.isTypeSupported(type));
   if (!mimeType || !canvas.captureStream) throw new Error("This browser does not support video export.");
   signal.throwIfAborted();
   draw(0);
   const stream = canvas.captureStream(frameRate);
+  let context: AudioContext | undefined;
   try {
+    let source: AudioBufferSourceNode | undefined;
+    if (audio) {
+      context = new AudioContext();
+      const destination = context.createMediaStreamDestination();
+      source = context.createBufferSource();
+      source.buffer = audio;
+      source.connect(destination);
+      for (const track of destination.stream.getAudioTracks()) stream.addTrack(track);
+      await context.resume();
+      signal.throwIfAborted();
+    }
     const recorder = new MediaRecorder(stream, { mimeType });
     const blob = await new Promise<Blob>((resolve, reject) => {
       const chunks: Blob[] = [];
@@ -84,6 +110,7 @@ async function recordCanvas(
         else resolve(new Blob(chunks, { type: mimeType }));
       };
       recorder.start();
+      source?.start();
       const started = performance.now();
       signal.addEventListener("abort", abort, { once: true });
       timer = window.setInterval(() => {
@@ -97,5 +124,6 @@ async function recordCanvas(
     return { blob, extension: mimeType.startsWith("video/mp4") ? "mp4" : "webm" };
   } finally {
     stream.getTracks().forEach((track) => track.stop());
+    await context?.close();
   }
 }

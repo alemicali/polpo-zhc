@@ -116,7 +116,7 @@ export function ArtifactsTable({ items, info, sort, onSort, active, setActive, a
 
   return (
     <div ref={ref} tabIndex={0} onKeyDown={onKeyDown} aria-label="Artifacts"
-      className="min-h-0 flex-1 overflow-auto rounded-lg border border-border/50 bg-card/80 pb-bottom-nav outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      className="min-h-0 flex-1 overflow-auto rounded-lg border border-border/60 bg-background pb-bottom-nav outline-none focus-visible:ring-2 focus-visible:ring-ring">
       <Table>
         <TableHeader className="sticky top-0 z-10 bg-card">
           <TableRow className="hover:bg-transparent">
@@ -141,7 +141,7 @@ export function ArtifactsTable({ items, info, sort, onSort, active, setActive, a
             const { author, origin } = info(a);
             return (
               <TableRow key={a.id} data-row-index={i} data-state={i === active ? "selected" : undefined} aria-selected={i === active}
-                className="cursor-pointer"
+                className="h-[52px] cursor-pointer"
                 onClick={(e) => { if (!fromInteractive(e.target)) { setActive(i); actions.open(a); } }}>
                 <TableCell className="w-full max-w-0">
                   <div className="flex min-w-0 items-center gap-2">

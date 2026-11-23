@@ -1,63 +1,62 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
-import { ChevronLeft, ChevronRight, Download, FunctionSquare, Plus, SheetIcon } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type PointerEvent } from "react";
+import { ChartNoAxesColumn, Download, FileUp, FunctionSquare, MoreHorizontal, MoveLeft, MoveRight, Plus, SheetIcon, Trash2 } from "lucide-react";
+import { MAX_ARTIFACT_BYTES } from "@polpo-ai/core/artifacts";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { useProjectInfo } from "@/hooks/use-polpo";
+import { productName, useInstanceBranding } from "@/lib/branding";
 import { cn } from "@/lib/utils";
 import { SheetFormatBar } from "./artifact-sheets-format-bar";
-import { calculateWorkbook, isSupportedFormula } from "./artifact-sheets-formulas";
+import { SheetDataTools, type SheetCalculation } from "./artifact-sheets-data-tools";
+import { calculateWorkbook } from "./artifact-sheets-formulas";
+import { revealWorksheet, settleWorksheet, stopSheetAnimations, type SheetAnimations } from "./artifact-sheets-reveal";
 import {
-  cellKey, columnLabel, formattedSheetValue, readWorkbook, sheetBounds, sheetCsv, xlsxNumberFormat,
-  SHEET_COLUMNS, SHEET_ROWS, WORKBOOK_SHEETS, type CellAddress, type CellStyle, type Sheet, type SheetValue, type Workbook,
+  acceptsCellValue, cellAddress, cellKey, cellRange, columnLabel, formattedSheetValue, matchesSheetRule, rangeContains, rangeKeys, rangeLabel, readRange,
+  parseSheetRows, readWorkbook, sheetBounds, sheetCsv, SHEET_COLUMNS, SHEET_ROWS, WORKBOOK_SHEETS,
+  type CellAddress, type CellStyle, type CellValidation, type Sheet, type SheetChart, type SheetRule, type Workbook,
 } from "./artifact-sheets-model";
 
 export { SHEETS_STARTER } from "./artifact-sheets-model";
 
-const ROWS_PER_PAGE = 20;
+const ROW_HEIGHT = 26;
+const ROW_OVERSCAN = 8;
 const FIRST_CELL = { row: 1, col: 1 };
 const EMPTY_STYLE: CellStyle = {};
+const EMPTY_RULES: SheetRule[] = [];
+const EMPTY_CHARTS: SheetChart[] = [];
+const SheetChartPreview = lazy(() => import("./artifact-sheets-chart").then((module) => ({ default: module.ArtifactSheetChart })));
 
-function revealWorksheet(viewport: HTMLDivElement, sweep: HTMLDivElement, cells: Sheet["cells"], prior?: Sheet["cells"]): Animation[] {
-  if (!sweep.animate || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return [];
-  const bounds = viewport.getBoundingClientRect();
-  const visibleTop = bounds.top + (viewport.querySelector("thead")?.getBoundingClientRect().height ?? 0);
-  const visibleLeft = bounds.left + (viewport.querySelector("thead th")?.getBoundingClientRect().width ?? 0);
-  const visibleBottom = bounds.top + viewport.clientHeight;
-  const visibleRight = bounds.left + viewport.clientWidth;
-  const changing = Array.from(viewport.querySelectorAll<HTMLElement>("[data-sheet-value]")).flatMap((label) => {
-    const key = label.dataset.sheetValue ?? "";
-    if (!cells[key] || cells[key] === prior?.[key]) return [];
-    const rect = label.getBoundingClientRect();
-    if (rect.bottom <= visibleTop || rect.top >= visibleBottom || rect.right <= visibleLeft || rect.left >= visibleRight) return [];
-    return [{ label, top: Math.max(visibleTop, rect.top), left: Math.max(visibleLeft, rect.left) }];
-  });
-  if (changing.length === 0) return [];
-
-  const first = Math.min(...changing.map((cell) => cell.top));
-  const last = Math.max(...changing.map((cell) => cell.top));
-  const rowTravel = Math.max(32, last - first);
-  const across = Math.max(1, visibleRight - visibleLeft);
-  const duration = Math.min(740, 430 + rowTravel / 2);
-  const shift = (y: number) => `translateY(${y - bounds.top}px)`;
-  const animations = [sweep.animate([
-    { transform: shift(first - 12), opacity: 0, offset: 0 },
-    { opacity: 1, offset: 0.12 },
-    { opacity: 0.8, offset: 0.62 },
-    { transform: shift(Math.min(visibleBottom, last + 12)), opacity: 0, offset: 1 },
-  ], { duration, easing: "cubic-bezier(.17,.67,.31,1)" })];
-
-  // Keep the first paint bounded on dense sheets while the sweep covers the entire visible range.
-  const step = Math.max(1, Math.ceil(changing.length / 160));
-  for (let index = 0; index < changing.length; index += step) {
-    const { label, top, left } = changing[index];
-    const delay = (top - first) / rowTravel * (duration - 310) + (left - visibleLeft) / across * 65;
-    animations.push(label.animate([
-      { opacity: 0.62, transform: "translateY(3px)", backgroundColor: "transparent" },
-      { opacity: 1, transform: "translateY(0)", backgroundColor: "color-mix(in oklab, var(--primary) 16%, transparent)", offset: 0.45 },
-      { opacity: 1, transform: "translateY(0)", backgroundColor: "transparent" },
-    ], { delay, duration: 300, fill: "backwards", easing: "cubic-bezier(.2,.75,.24,1)" }));
+function rowAt(offsets: number[], offset: number): number {
+  let first = 1;
+  let last = SHEET_ROWS;
+  while (first < last) {
+    const middle = Math.floor((first + last) / 2);
+    if (offsets[middle] <= offset) first = middle + 1;
+    else last = middle;
   }
-  return animations;
+  return first;
+}
+
+function worksheetOffsets(styles?: Sheet["styles"]): number[] {
+  const heights = new Array<number>(SHEET_ROWS).fill(ROW_HEIGHT);
+  for (const [key, style] of Object.entries(styles ?? {})) {
+    if (!style.fontSize || style.fontSize <= 16) continue;
+    const address = cellAddress(key);
+    if (address) heights[address.row - 1] = Math.max(heights[address.row - 1], Math.ceil(style.fontSize * 1.25) + 2);
+  }
+  const offsets = [0];
+  for (const height of heights) offsets.push(offsets[offsets.length - 1] + height);
+  return offsets;
+}
+
+function worksheetWindow(viewport: HTMLDivElement, offsets: number[]) {
+  const firstVisible = rowAt(offsets, viewport.scrollTop);
+  return {
+    start: Math.max(1, firstVisible - ROW_OVERSCAN),
+    end: Math.min(SHEET_ROWS, rowAt(offsets, viewport.scrollTop + viewport.clientHeight) + ROW_OVERSCAN),
+  };
 }
 
 function saveFile(blob: Blob, filename: string) {
@@ -69,105 +68,166 @@ function saveFile(blob: Blob, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-async function saveXlsx(workbook: Workbook, get: (sheetName: string, key: string) => SheetValue) {
-  const { default: excel } = await import("exceljs");
-  const output = new excel.Workbook();
-  for (const sheet of workbook.sheets) {
-    const worksheet = output.addWorksheet(sheet.name);
-    const addresses = new Set([...Object.keys(sheet.cells), ...Object.keys(sheet.styles ?? {})]);
-    for (const address of addresses) {
-      const raw = sheet.cells[address];
-      const result = get(sheet.name, address);
-      const cell = worksheet.getCell(address);
-      cell.value = raw?.startsWith("=") && !result.error && isSupportedFormula(raw)
-        ? { formula: raw.slice(1), result: result.value ?? undefined }
-        : result.error ?? result.value;
-      const style = sheet.styles?.[address];
-      if (!style) continue;
-      cell.font = {
-        ...cell.font,
-        bold: style.bold,
-        italic: style.italic,
-        underline: style.underline,
-        ...(style.color ? { color: { argb: "FF" + style.color.slice(1).toUpperCase() } } : {}),
-      };
-      if (style.align) cell.alignment = { horizontal: style.align };
-      if (style.fill) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + style.fill.slice(1).toUpperCase() } };
-      const numberFormat = xlsxNumberFormat(style);
-      if (numberFormat) cell.numFmt = numberFormat;
-    }
-  }
-  const buffer = await output.xlsx.writeBuffer();
-  saveFile(new Blob([new Uint8Array(buffer)], {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  }), "workbook.xlsx");
-}
-
-export function ArtifactSheetsEditor({ content, onChange, appearanceVersion }: {
+export function ArtifactSheetsEditor({ content, onChange, appearanceVersion, streaming = false }: {
   content: string;
   onChange?: (next: string) => void;
   appearanceVersion?: number;
+  streaming?: boolean;
 }) {
   const workbook = useMemo(() => readWorkbook(content), [content]);
   if (!workbook) {
     return <p className="p-4 text-sm text-destructive">This workbook could not be read. Check the workbook JSON in Source.</p>;
   }
-  return <WorkbookGrid workbook={workbook} onChange={onChange} appearanceVersion={appearanceVersion} />;
+  return <WorkbookGrid workbook={workbook} onChange={onChange} appearanceVersion={appearanceVersion} streaming={streaming} />;
 }
 
-function WorkbookGrid({ workbook, onChange, appearanceVersion }: {
+function WorkbookGrid({ workbook, onChange, appearanceVersion, streaming }: {
   workbook: Workbook;
   onChange?: (next: string) => void;
   appearanceVersion?: number;
+  streaming: boolean;
 }) {
+  const { info } = useProjectInfo();
+  const brand = productName(useInstanceBranding());
+  const product = info?.project || brand;
   const [sheetIndex, setSheetIndex] = useState(0);
   const [selected, setSelected] = useState(FIRST_CELL);
+  const [selectionOrigin, setSelectionOrigin] = useState<CellAddress | null>(null);
   const [edit, setEdit] = useState<string | null>(null);
   const [formulaDraft, setFormulaDraft] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [chartIndex, setChartIndex] = useState<number | null>(workbook.sheets[0].charts?.length ? 0 : null);
+  const [rowWindow, setRowWindow] = useState({ start: 1, end: 32 });
   const selectedRef = useRef<HTMLTableCellElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const importRef = useRef<HTMLInputElement>(null);
+  const liveWorkbook = useRef({ workbook, onChange });
+  const importEpoch = useRef(0);
   const focusSelected = useRef(false);
+  const selectionGesture = useRef(false);
   const formulaCancelled = useRef(false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const sweepRef = useRef<HTMLDivElement>(null);
-  const appearance = useRef<{ version?: number; workbook: Workbook; worksheet: string; firstRow: number }>(null);
-  const revealAnimations = useRef<Animation[]>([]);
+  const badgeRef = useRef<HTMLDivElement>(null);
+  const appearance = useRef<{ version?: number; workbook: Workbook; worksheet: string; streaming: boolean }>(null);
+  const revealAnimations = useRef<SheetAnimations>({ cells: new Map(), outlines: new Map(), lastSweep: -Infinity });
   const activeIndex = Math.min(sheetIndex, workbook.sheets.length - 1);
   const sheet = workbook.sheets[activeIndex];
   const getValue = useMemo(() => calculateWorkbook(workbook), [workbook]);
   const bounds = useMemo(() => sheetBounds(sheet), [sheet]);
-  const rowsStart = Math.floor((selected.row - 1) / ROWS_PER_PAGE) * ROWS_PER_PAGE + 1;
-  const rowsEnd = Math.min(rowsStart + ROWS_PER_PAGE - 1, SHEET_ROWS);
-  const columns = Math.min(SHEET_COLUMNS, Math.max(8, bounds.col, selected.col + 1));
+  const rowOffsets = useMemo(() => worksheetOffsets(sheet.styles), [sheet.styles]);
+  const { start: rowsStart, end: rowsEnd } = rowWindow;
+  const columns = Math.min(SHEET_COLUMNS, Math.max(12, bounds.col + 1, selected.col + 1));
   const selectedKey = cellKey(selected);
+  const selection = cellRange(selectionOrigin ?? selected, selected);
+  const selectionLabel = rangeLabel(selection);
   const raw = sheet.cells[selectedKey] ?? "";
   const selectedStyle = sheet.styles?.[selectedKey] ?? EMPTY_STYLE;
+  const selectedValidation = sheet.validations?.[selectedKey];
+  const rules = sheet.rules ?? EMPTY_RULES;
+  const charts = sheet.charts ?? EMPTY_CHARTS;
+  const chart = chartIndex === null ? undefined : charts[chartIndex];
+  const ruleRanges = useMemo(() => rules.flatMap((rule) => {
+    const range = readRange(rule.range);
+    return range ? [{ rule, range }] : [];
+  }), [rules]);
+
+  useLayoutEffect(() => {
+    liveWorkbook.current = { workbook, onChange };
+  }, [workbook, onChange]);
+
+  useEffect(() => () => { importEpoch.current += 1; }, []);
+
+  const measureRows = useCallback((viewport: HTMLDivElement) => {
+    const next = worksheetWindow(viewport, rowOffsets);
+    setRowWindow((before) => before.start === next.start && before.end === next.end ? before : next);
+  }, [rowOffsets]);
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    measureRows(viewport);
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => measureRows(viewport)) : undefined;
+    observer?.observe(viewport);
+    return () => observer?.disconnect();
+  }, [measureRows]);
+
+  useLayoutEffect(() => {
+    const animations = revealAnimations.current;
+    return () => {
+      stopSheetAnimations(animations);
+      appearance.current = null;
+    };
+  }, []);
 
   useLayoutEffect(() => {
     const previous = appearance.current;
-    appearance.current = { version: appearanceVersion, workbook, worksheet: sheet.name, firstRow: rowsStart };
+    appearance.current = { version: appearanceVersion, workbook, worksheet: sheet.name, streaming };
     const versionChanged = !previous || previous.version !== appearanceVersion;
-    if (versionChanged || previous.worksheet !== sheet.name || previous.firstRow !== rowsStart) {
-      for (const animation of revealAnimations.current) animation.cancel();
-      revealAnimations.current = [];
-    }
+    if (previous && previous.worksheet !== sheet.name) stopSheetAnimations(revealAnimations.current);
+    if (previous?.streaming && !streaming) settleWorksheet(revealAnimations.current, badgeRef.current);
     if (!versionChanged || !viewportRef.current || !sweepRef.current) return;
     const prior = previous?.workbook.sheets.find((item) => item.name === sheet.name);
-    revealAnimations.current = revealWorksheet(viewportRef.current, sweepRef.current, sheet.cells, prior?.cells);
-  }, [appearanceVersion, rowsStart, sheet, workbook]);
+    revealWorksheet(viewportRef.current, sweepRef.current, badgeRef.current, sheet.cells, prior?.cells, revealAnimations.current, streaming);
+  }, [appearanceVersion, sheet, streaming, workbook]);
+
+  function updateViewport(viewport: HTMLDivElement) {
+    measureRows(viewport);
+    const animations = revealAnimations.current;
+    animations.badge?.cancel();
+    animations.badge = undefined;
+    const { outlines } = animations;
+    for (const [element, animation] of outlines) {
+      if (element.isConnected) continue;
+      animation.cancel();
+      outlines.delete(element);
+    }
+  }
 
   useEffect(() => {
     if (edit !== null) inputRef.current?.focus();
     else if (focusSelected.current) {
+      const viewport = viewportRef.current;
+      if (!selectedRef.current && viewport) {
+        viewport.scrollTop = rowOffsets[selected.row - 1];
+        measureRows(viewport);
+        return;
+      }
       focusSelected.current = false;
       selectedRef.current?.focus();
     }
-  }, [selected, activeIndex, edit]);
+  }, [selected, activeIndex, edit, rowWindow, rowOffsets, measureRows]);
 
-  function move(row: number, col: number) {
+  function resetViewport() {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    viewport.scrollTo({ top: 0, left: 0 });
+    measureRows(viewport);
+  }
+
+  function move(row: number, col: number, extend = false) {
     focusSelected.current = true;
+    setSelectionOrigin((origin) => extend ? origin ?? selected : null);
     setSelected({ row: Math.min(SHEET_ROWS, Math.max(1, row)), col: Math.min(SHEET_COLUMNS, Math.max(1, col)) });
+  }
+
+  function selectRow(row: number) {
+    move(row, 1);
+    setSelectionOrigin({ row, col: SHEET_COLUMNS });
+  }
+
+  function selectColumn(col: number) {
+    move(1, col);
+    setSelectionOrigin({ row: SHEET_ROWS, col });
+  }
+
+  function beginSelection(event: PointerEvent<HTMLTableCellElement>, row: number, col: number) {
+    if (event.button !== 0 || (event.target as HTMLElement).closest("input,select,button")) return;
+    // Prevent browser text selection while dragging across worksheet cells.
+    if (event.pointerType === "mouse") event.preventDefault();
+    selectionGesture.current = event.pointerType === "mouse";
+    move(row, col, event.shiftKey);
   }
 
   function updateSheet(next: Sheet) {
@@ -177,19 +237,85 @@ function WorkbookGrid({ workbook, onChange, appearanceVersion }: {
     }, null, 2));
   }
 
-  function setStyle(next: CellStyle) {
+  function setStyle(patch: Partial<CellStyle> | null) {
     const styles = { ...sheet.styles };
-    if (Object.values(next).some((value) => value !== undefined)) styles[selectedKey] = next;
-    else delete styles[selectedKey];
+    for (const key of rangeKeys(selection)) {
+      const next = patch ? { ...styles[key], ...patch } : null;
+      if (next && Object.values(next).some((value) => value !== undefined)) styles[key] = next;
+      else delete styles[key];
+    }
     updateSheet({ ...sheet, styles: Object.keys(styles).length ? styles : undefined });
   }
 
   function setCell(key: string, value: string) {
     if ((sheet.cells[key] ?? "") === value) return;
+    if (!acceptsCellValue(value, sheet.validations?.[key])) {
+      toast.error(`${key} requires a value allowed by its validation.`);
+      return;
+    }
     const cells = { ...sheet.cells };
     if (value === "") delete cells[key];
     else cells[key] = value;
     updateSheet({ ...sheet, cells });
+  }
+
+  function setValidation(validation: CellValidation | null) {
+    const validations = { ...sheet.validations };
+    for (const key of rangeKeys(selection)) {
+      if (validation) validations[key] = validation;
+      else delete validations[key];
+    }
+    updateSheet({ ...sheet, validations: Object.keys(validations).length ? validations : undefined });
+  }
+
+  function setCheckboxes(checked: boolean) {
+    const cells = { ...sheet.cells };
+    for (const key of rangeKeys(selection)) {
+      if (sheet.validations?.[key]?.type === "checkbox") cells[key] = checked ? "TRUE" : "FALSE";
+    }
+    updateSheet({ ...sheet, cells });
+  }
+
+  function insertCalculation(operation: SheetCalculation) {
+    const { start, end } = selection;
+    let firstRow = start.row;
+    let lastRow = end.row;
+    if (selectionLabel === selectedKey && !raw) {
+      lastRow = selected.row - 1;
+      firstRow = lastRow;
+      while (firstRow > 1 && sheet.cells[cellKey({ row: firstRow - 1, col: selected.col })]) firstRow -= 1;
+      if (lastRow < 1 || !sheet.cells[cellKey({ row: lastRow, col: selected.col })]) {
+        toast.error("Select values to calculate.");
+        return;
+      }
+    }
+    const targetRow = lastRow + 1;
+    if (targetRow > SHEET_ROWS) {
+      toast.error("Leave an empty row below the selection for the result.");
+      return;
+    }
+    const cells = { ...sheet.cells };
+    for (let col = start.col; col <= end.col; col += 1) {
+      const target = cellKey({ row: targetRow, col });
+      if (cells[target] || sheet.validations?.[target]) {
+        toast.error(`${target} needs to be empty and have no validation.`);
+        return;
+      }
+      const range = rangeLabel(cellRange({ row: firstRow, col }, { row: lastRow, col }));
+      cells[target] = `=${operation}(${range})`;
+    }
+    updateSheet({ ...sheet, cells });
+    move(targetRow, start.col);
+  }
+
+  function addChart(next: SheetChart) {
+    updateSheet({ ...sheet, charts: [...charts, next] });
+    setChartIndex(charts.length);
+  }
+
+  function removeChart(index: number) {
+    updateSheet({ ...sheet, charts: charts.filter((_, candidate) => index !== candidate) });
+    setChartIndex(charts.length > 1 ? Math.max(0, index - 1) : null);
   }
 
   function commitEdit() {
@@ -207,6 +333,18 @@ function WorkbookGrid({ workbook, onChange, appearanceVersion }: {
   function handleGridKey(event: KeyboardEvent<HTMLTableCellElement>) {
     if (event.target !== event.currentTarget) return;
     const { row, col } = selected;
+    if (event.key === "Escape" && selectionOrigin) {
+      event.preventDefault();
+      setSelectionOrigin(null);
+      return;
+    }
+    if (event.code === "Space" && (event.shiftKey || event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      if (event.shiftKey) selectRow(row);
+      else selectColumn(col);
+      return;
+    }
+    const viewportHeight = viewportRef.current?.clientHeight ?? 520;
     const nextByKey: Record<string, CellAddress> = {
       ArrowUp: { row: row - 1, col },
       ArrowDown: { row: row + 1, col },
@@ -214,13 +352,13 @@ function WorkbookGrid({ workbook, onChange, appearanceVersion }: {
       ArrowRight: { row, col: col + 1 },
       Home: { row: event.ctrlKey || event.metaKey ? 1 : row, col: 1 },
       End: { row: event.ctrlKey || event.metaKey ? bounds.row : row, col: bounds.col },
-      PageUp: { row: row - ROWS_PER_PAGE, col },
-      PageDown: { row: row + ROWS_PER_PAGE, col },
+      PageUp: { row: rowAt(rowOffsets, rowOffsets[row - 1] - viewportHeight), col },
+      PageDown: { row: rowAt(rowOffsets, rowOffsets[row - 1] + viewportHeight), col },
     };
     const next = nextByKey[event.key];
     if (next) {
       event.preventDefault();
-      move(next.row, next.col);
+      move(next.row, next.col, event.shiftKey);
       return;
     }
     if (onChange && (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey) {
@@ -228,16 +366,25 @@ function WorkbookGrid({ workbook, onChange, appearanceVersion }: {
       const key = shortcut === "b" ? "bold" : shortcut === "i" ? "italic" : shortcut === "u" ? "underline" : undefined;
       if (key) {
         event.preventDefault();
-        setStyle({ ...selectedStyle, [key]: selectedStyle[key] ? undefined : true });
+        setStyle({ [key]: selectedStyle[key] ? undefined : true });
         return;
       }
     }
     if (!onChange || event.ctrlKey || event.metaKey || event.altKey || event.nativeEvent.isComposing) return;
+    if (event.code === "Space" && selectedValidation?.type === "checkbox") {
+      event.preventDefault();
+      const checked = getValue(sheet.name, selectedKey).value === true;
+      setCell(selectedKey, checked ? "FALSE" : "TRUE");
+      return;
+    }
     if (event.key === "Delete" || event.key === "Backspace") {
       event.preventDefault();
-      setCell(selectedKey, "");
+      const cells = { ...sheet.cells };
+      for (const key of rangeKeys(selection)) delete cells[key];
+      updateSheet({ ...sheet, cells });
     } else if (event.key === "Enter" || event.key === "F2" || event.key.length === 1) {
       event.preventDefault();
+      setSelectionOrigin(null);
       setEdit(event.key.length === 1 ? event.key : raw);
     }
   }
@@ -260,17 +407,39 @@ function WorkbookGrid({ workbook, onChange, appearanceVersion }: {
   function pasteCells(event: ClipboardEvent<HTMLTableCellElement>) {
     if (!onChange || event.target !== event.currentTarget) return;
     event.preventDefault();
-    const text = event.clipboardData.getData("text/plain").replace(/\r\n/g, "\n").replace(/\n$/, "");
+    const text = event.clipboardData.getData("text/plain");
     const cells = { ...sheet.cells };
-    const lines = text.split("\n").slice(0, SHEET_ROWS - selected.row + 1);
-    lines.forEach((line, rowOffset) => {
-      line.split("\t").slice(0, SHEET_COLUMNS - selected.col + 1).forEach((value, colOffset) => {
-        const key = cellKey({ row: selected.row + rowOffset, col: selected.col + colOffset });
+    const { start } = selection;
+    const lines = parseSheetRows(text, "\t", SHEET_ROWS - start.row + 1, SHEET_COLUMNS - start.col + 1);
+    for (const [rowOffset, values] of lines.entries()) {
+      for (const [colOffset, value] of values.entries()) {
+        const key = cellKey({ row: start.row + rowOffset, col: start.col + colOffset });
+        if (!acceptsCellValue(value, sheet.validations?.[key])) {
+          toast.error(`The pasted value is invalid for ${key}.`);
+          return;
+        }
         if (value === "") delete cells[key];
         else cells[key] = value;
-      });
-    });
+      }
+    }
     updateSheet({ ...sheet, cells });
+  }
+
+  function copyCells(event: ClipboardEvent<HTMLTableCellElement>) {
+    if (event.target !== event.currentTarget) return;
+    event.preventDefault();
+    const { start, end } = selection;
+    const rows: string[] = [];
+    for (let row = start.row; row <= end.row; row += 1) {
+      const values: string[] = [];
+      for (let col = start.col; col <= end.col; col += 1) {
+        const key = cellKey({ row, col });
+        const display = formattedSheetValue(getValue(sheet.name, key), sheet.styles?.[key]);
+        values.push(/["\t\r\n]/.test(display) ? '"' + display.replaceAll('"', '""') + '"' : display);
+      }
+      rows.push(values.join("\t"));
+    }
+    event.clipboardData.setData("text/plain", rows.join("\n"));
   }
 
   function addSheet() {
@@ -283,17 +452,58 @@ function WorkbookGrid({ workbook, onChange, appearanceVersion }: {
     }, null, 2));
     setSheetIndex(workbook.sheets.length);
     setSelected(FIRST_CELL);
+    setSelectionOrigin(null);
+    setChartIndex(null);
+    resetViewport();
   }
 
   async function downloadWorkbook() {
     setExporting(true);
     try {
-      await saveXlsx(workbook, getValue);
+      const { buildWorkbookXlsx } = await import("./artifact-sheets-export");
+      saveFile(await buildWorkbookXlsx(workbook, getValue), "workbook.xlsx");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not export workbook");
     } finally {
       setExporting(false);
     }
+  }
+
+  async function importWorkbook(file: File) {
+    const request = ++importEpoch.current;
+    setImporting(true);
+    try {
+      const { appendImportedSheets, readWorksheetFile } = await import("./artifact-sheets-import");
+      const imported = await readWorksheetFile(file);
+      if (request !== importEpoch.current) return;
+      const { workbook: latest, onChange: apply } = liveWorkbook.current;
+      const firstAdded = latest.sheets.length;
+      if (!imported.length) throw new Error("The file has no visible worksheets.");
+      if (latest.sheets.length + imported.length > WORKBOOK_SHEETS) throw new Error(`A workbook can have up to ${WORKBOOK_SHEETS} worksheets.`);
+      const sheets = appendImportedSheets(latest.sheets, imported);
+      const next = JSON.stringify({ ...latest, sheets }, null, 2);
+      if (new TextEncoder().encode(next).length > MAX_ARTIFACT_BYTES) throw new Error("This import would exceed the artifact size limit.");
+      if (!apply) return;
+      apply(next);
+      setSheetIndex(firstAdded);
+      setSelected(FIRST_CELL);
+      setSelectionOrigin(null);
+      setChartIndex(null);
+      resetViewport();
+    } catch (error) {
+      if (request === importEpoch.current) toast.error(error instanceof Error ? error.message : "Could not import the workbook");
+    } finally {
+      if (request === importEpoch.current) setImporting(false);
+    }
+  }
+
+  function moveWorksheet(direction: -1 | 1) {
+    const destination = activeIndex + direction;
+    if (destination < 0 || destination >= workbook.sheets.length) return;
+    const sheets = [...workbook.sheets];
+    [sheets[activeIndex], sheets[destination]] = [sheets[destination], sheets[activeIndex]];
+    onChange?.(JSON.stringify({ ...workbook, sheets }, null, 2));
+    setSheetIndex(destination);
   }
 
   return (
@@ -306,6 +516,16 @@ function WorkbookGrid({ workbook, onChange, appearanceVersion }: {
           Workbook
         </span>
         <div className="ml-auto flex items-center gap-1.5">
+          {onChange && <>
+            <input ref={importRef} type="file" accept=".csv,.xlsx" className="hidden" aria-label="Upload worksheet"
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                event.currentTarget.value = "";
+                if (file) void importWorkbook(file);
+              }} />
+            <Button type="button" variant="ghost" size="xs" title="Import CSV or XLSX" disabled={importing}
+              onClick={() => importRef.current?.click()}><FileUp aria-hidden="true" /> {importing ? "Importing…" : "Import"}</Button>
+          </>}
           <Button type="button" variant="outline" size="xs" title="Download workbook" disabled={exporting} onClick={() => void downloadWorkbook()}>
             <Download aria-hidden="true" /> {exporting ? "Exporting…" : "XLSX"}
           </Button>
@@ -318,11 +538,14 @@ function WorkbookGrid({ workbook, onChange, appearanceVersion }: {
         </div>
       </div>
 
-      {onChange && <SheetFormatBar style={selectedStyle} onChange={(patch) => setStyle({ ...selectedStyle, ...patch })}
-        onClear={() => setStyle(EMPTY_STYLE)} />}
+      {onChange && <SheetFormatBar style={selectedStyle} onChange={setStyle} onClear={() => setStyle(null)}>
+        <SheetDataTools range={selectionLabel} validation={selectedValidation} rules={rules} chartCount={charts.length}
+          onValidation={setValidation} onCheckboxes={setCheckboxes} onRules={(next) => updateSheet({ ...sheet, rules: next })}
+          onChart={addChart} onCalculate={insertCalculation} />
+      </SheetFormatBar>}
 
       <div className="flex shrink-0 items-center gap-2 border-b border-border bg-muted/20 px-3 py-1.5">
-        <span className="min-w-12 border-r border-border pr-2 font-mono text-xs font-semibold text-primary" aria-label="Active cell">{selectedKey}</span>
+        <span className="min-w-12 border-r border-border pr-2 font-mono text-xs font-semibold text-primary" aria-label="Selected range">{selectionLabel}</span>
         <FunctionSquare aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
         <Input
           aria-label="Cell value or formula"
@@ -343,59 +566,86 @@ function WorkbookGrid({ workbook, onChange, appearanceVersion }: {
         />
       </div>
 
+      {streaming && <p className="sr-only" role="status">{product} is writing spreadsheet cells.</p>}
       <div className="relative isolate min-h-0 flex-1 overflow-hidden">
-        <div ref={viewportRef} className="absolute inset-0 overflow-auto">
+        <div ref={viewportRef} data-slot="sheet-grid-viewport" className="absolute inset-0 overflow-auto [overflow-anchor:none]"
+          onScroll={(event) => updateViewport(event.currentTarget)}>
           <table role="grid" aria-label={sheet.name} aria-rowcount={SHEET_ROWS + 1} aria-colcount={SHEET_COLUMNS + 1}
-            aria-readonly={!onChange} className="w-max min-w-full border-separate border-spacing-0 text-xs">
+            aria-readonly={!onChange} aria-multiselectable="true" className="w-max min-w-full select-none border-separate border-spacing-0 text-xs"
+            tabIndex={selected.row < rowsStart || selected.row > rowsEnd ? 0 : undefined}
+            onFocus={(event) => {
+              if (event.target === event.currentTarget) move(rowAt(rowOffsets, viewportRef.current?.scrollTop ?? 0), selected.col);
+            }}
+            onPointerUp={() => { selectionGesture.current = false; }}>
             <thead className="sticky top-0 z-20 bg-muted">
               <tr aria-rowindex={1}>
-                <th className="sticky left-0 w-12 min-w-12 border-b border-r border-border bg-muted" scope="col" aria-label="Rows" />
+                <th className="sticky left-0 w-10 min-w-10 border-b border-r border-border bg-muted" scope="col" aria-label="Rows" />
                 {Array.from({ length: columns }, (_, index) => (
                   <th key={index} scope="col" className={cn(
-                    "h-7 min-w-28 border-b border-r border-border px-2 text-center font-mono font-medium text-muted-foreground",
-                    selected.col === index + 1 && "bg-primary/10 text-primary",
-                  )}>{columnLabel(index + 1)}</th>
+                    "h-6 min-w-[5.5rem] cursor-s-resize border-b border-r border-border px-2 text-center font-mono text-[11px] font-medium text-muted-foreground",
+                    index + 1 >= selection.start.col && index + 1 <= selection.end.col && "bg-primary/10 text-primary",
+                  )} onClick={() => selectColumn(index + 1)}>{columnLabel(index + 1)}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
+              {rowsStart > 1 && <tr aria-hidden="true"><td colSpan={columns + 1} className="p-0" style={{ height: rowOffsets[rowsStart - 1] }} /></tr>}
               {Array.from({ length: rowsEnd - rowsStart + 1 }, (_, rowOffset) => {
                 const row = rowsStart + rowOffset;
+                const height = rowOffsets[row] - rowOffsets[row - 1];
                 return (
-                  <tr key={row} aria-rowindex={row + 1}>
+                  <tr key={row} aria-rowindex={row + 1} style={height === ROW_HEIGHT ? undefined : { height }}>
                     <th scope="row" className={cn(
-                      "sticky left-0 z-10 h-8 border-b border-r border-border bg-muted px-2 text-right font-mono font-normal text-muted-foreground",
-                      selected.row === row && "bg-accent text-primary",
-                    )}>{row}</th>
+                      "sticky left-0 z-10 h-[26px] cursor-e-resize border-b border-r border-border bg-muted px-1.5 text-right font-mono text-[11px] font-normal text-muted-foreground",
+                      row >= selection.start.row && row <= selection.end.row && "bg-accent text-primary",
+                    )} onClick={() => selectRow(row)}>{row}</th>
                     {Array.from({ length: columns }, (_, index) => {
                       const col = index + 1;
                       const key = cellKey({ row, col });
                       const active = selected.row === row && selected.col === col;
+                      const inSelection = rangeContains(selection, row, col);
                       const result = getValue(sheet.name, key);
                       const cellStyle = sheet.styles?.[key];
+                      const validation = sheet.validations?.[key];
+                      const conditionalFill = ruleRanges.find(({ rule, range }) =>
+                        rangeContains(range, row, col) && matchesSheetRule(rule, result.value))?.rule.fill;
+                      const fill = conditionalFill ?? cellStyle?.fill;
+                      const border = cellStyle?.border;
+                      const borderColor = "var(--muted-foreground)";
                       const display = formattedSheetValue(result, cellStyle);
+                      const useCheckbox = validation?.type === "checkbox" && (result.value === null || typeof result.value === "boolean");
                       return (
                         <td
                           key={key}
                           role="gridcell"
                           aria-label={display ? `${key}: ${display}` : key}
-                          aria-selected={active}
+                          aria-selected={inSelection}
                           tabIndex={active ? 0 : -1}
                           ref={active ? selectedRef : undefined}
                           className={cn(
-                            "relative h-8 max-w-36 min-w-28 cursor-cell border-b border-r border-border/75 p-0 outline-none hover:bg-muted/35",
+                            "relative h-[26px] max-w-32 min-w-[5.5rem] cursor-cell border-b border-r border-border/75 p-0 outline-none hover:bg-muted/35",
+                            inSelection && "bg-primary/10",
                             active && "bg-primary/5 ring-1 ring-inset ring-primary",
                           )}
-                          style={cellStyle?.fill ? { backgroundColor: cellStyle.fill } : undefined}
-                          onClick={() => { if (!active) move(row, col); }}
-                          onDoubleClick={() => { if (onChange && active) setEdit(raw); }}
+                          style={{
+                            backgroundColor: fill,
+                            borderTop: border === "all" || border === "top" ? `1px solid ${borderColor}` : undefined,
+                            borderLeft: border === "all" || border === "left" ? `1px solid ${borderColor}` : undefined,
+                            borderBottomColor: border === "all" || border === "bottom" ? borderColor : undefined,
+                            borderRightColor: border === "all" || border === "right" ? borderColor : undefined,
+                          }}
+                          onPointerDown={(event) => beginSelection(event, row, col)}
+                          onPointerEnter={(event) => { if (selectionGesture.current && (event.buttons & 1) && !active) move(row, col, true); }}
+                          onPointerCancel={() => { selectionGesture.current = false; }}
+                          onDoubleClick={() => {
+                            if (onChange && active) {
+                              setSelectionOrigin(null);
+                              setEdit(raw);
+                            }
+                          }}
                           onKeyDown={handleGridKey}
                           onPaste={pasteCells}
-                          onCopy={(event) => {
-                            if (event.target !== event.currentTarget) return;
-                            event.preventDefault();
-                            event.clipboardData.setData("text/plain", display);
-                          }}
+                          onCopy={copyCells}
                         >
                           {active && edit !== null ? (
                             <input
@@ -407,37 +657,83 @@ function WorkbookGrid({ workbook, onChange, appearanceVersion }: {
                               onBlur={commitEdit}
                               onKeyDown={handleEditKey}
                             />
+                          ) : useCheckbox ? (
+                            <div className="flex h-6 items-center px-2" data-sheet-value={display ? key : undefined}>
+                              <input type="checkbox" aria-label={`Checkbox ${key}`} className="size-4 accent-primary"
+                                tabIndex={active ? 0 : -1} checked={result.value === true} disabled={!onChange}
+                                onChange={(event) => setCell(key, event.target.checked ? "TRUE" : "FALSE")} />
+                            </div>
+                          ) : validation?.type === "list" ? (
+                            <select aria-label={`Dropdown ${key}`} data-sheet-value={display ? key : undefined} tabIndex={active ? 0 : -1} value={sheet.cells[key] ?? ""}
+                              disabled={!onChange} onChange={(event) => setCell(key, event.target.value)}
+                              className="h-6 w-full min-w-0 bg-transparent px-2 text-inherit">
+                              <option value="" />
+                              {sheet.cells[key] && !validation.options.includes(sheet.cells[key])
+                                && <option value={sheet.cells[key]} disabled>{sheet.cells[key]}</option>}
+                              {validation.options.map((option) => <option key={option} value={option}>{option}</option>)}
+                            </select>
                           ) : (
                             <span data-sheet-value={display ? key : undefined} title={display || undefined} className={cn(
-                              "block max-w-36 truncate px-2 leading-8",
+                              "block h-6 max-w-32 truncate px-2 leading-6",
                               typeof result.value === "number" && "text-right tabular-nums",
                               result.error && "text-destructive",
                               cellStyle?.bold && "font-bold",
                               cellStyle?.italic && "italic",
                               cellStyle?.underline && "underline",
-                            )} style={{ textAlign: cellStyle?.align, color: result.error ? undefined : cellStyle?.color }}>{display}</span>
+                            )} style={{
+                              textAlign: cellStyle?.align,
+                              color: result.error ? undefined : cellStyle?.color,
+                              fontSize: cellStyle?.fontSize,
+                              ...(height > ROW_HEIGHT ? { height: height - 2, lineHeight: `${height - 2}px` } : {}),
+                            }}>{display}</span>
                           )}
+                          <span aria-hidden="true" data-sheet-outline
+                            className="pointer-events-none absolute inset-0 z-1 rounded-[1px] border border-primary opacity-0 shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--primary)_22%,transparent)]" />
                         </td>
                       );
                     })}
                   </tr>
                 );
               })}
+              {rowsEnd < SHEET_ROWS && <tr aria-hidden="true"><td colSpan={columns + 1} className="p-0" style={{ height: rowOffsets[SHEET_ROWS] - rowOffsets[rowsEnd] }} /></tr>}
             </tbody>
           </table>
         </div>
-        <div ref={sweepRef} aria-hidden="true" className="pointer-events-none absolute left-12 right-0 top-0 z-10 h-8 border-t border-primary/35 opacity-0"
+        <div ref={sweepRef} aria-hidden="true" className="pointer-events-none absolute left-10 right-0 top-0 z-10 h-8 border-t border-primary/35 opacity-0"
           style={{ background: "linear-gradient(to bottom, color-mix(in oklab, var(--primary) 15%, transparent), transparent)" }} />
+        <div ref={badgeRef} aria-hidden="true" className="pointer-events-none absolute left-0 top-0 z-30 max-w-40 truncate rounded-control bg-primary px-1.5 text-[10px] font-semibold leading-4 text-primary-foreground opacity-0">
+          {product}
+        </div>
       </div>
 
+      {chart && (
+        <div className="shrink-0 border-t border-border bg-card" role="region" aria-label="Worksheet chart">
+          <div className="flex items-center gap-2 px-3 pt-1.5">
+            <select aria-label="Active chart" className="min-w-0 flex-1 truncate rounded-control bg-background px-1.5 py-1 text-xs"
+              value={chartIndex ?? 0} onChange={(event) => setChartIndex(Number(event.target.value))}>
+              {charts.map((item, index) => <option key={index} value={index}>{item.title}</option>)}
+            </select>
+            <span className="font-mono text-caption text-muted-foreground">{chart.range}</span>
+            {onChange && <Button type="button" size="icon-xs" variant="ghost" aria-label="Remove chart" title="Remove chart"
+              onClick={() => removeChart(chartIndex ?? 0)}><Trash2 aria-hidden="true" /></Button>}
+          </div>
+          <Suspense fallback={<p className="p-3 text-sm text-muted-foreground">Loading chart…</p>}>
+            <SheetChartPreview chart={chart} sheetName={sheet.name} getValue={getValue} />
+          </Suspense>
+        </div>
+      )}
       <div className="flex shrink-0 items-center gap-2 border-t border-border bg-card px-2 py-1">
         <div className="flex min-w-0 flex-1 items-center gap-1 overflow-auto" role="group" aria-label="Worksheets">
           {workbook.sheets.map((item, index) => (
-            <Button key={item.name} type="button" size="xs" variant={index === activeIndex ? "secondary" : "ghost"}
+            <Button key={item.name} type="button" size="xs" className="relative" variant={index === activeIndex ? "secondary" : "ghost"}
               aria-pressed={index === activeIndex} onClick={() => {
                 setSheetIndex(index);
                 setSelected(FIRST_CELL);
-              }}>{item.name}</Button>
+                setSelectionOrigin(null);
+                setChartIndex(null);
+                resetViewport();
+              }}>{item.name}{streaming && index === activeIndex &&
+                <span aria-hidden="true" className="absolute inset-x-1 bottom-0 h-px bg-primary motion-safe:animate-pulse" />}</Button>
           ))}
           {onChange && (
             <Button type="button" size="icon-xs" variant="ghost" aria-label="Add worksheet"
@@ -447,11 +743,21 @@ function WorkbookGrid({ workbook, onChange, appearanceVersion }: {
           )}
         </div>
         <div className="flex shrink-0 items-center gap-1 text-caption text-muted-foreground">
-          <Button type="button" size="icon-xs" variant="ghost" aria-label="Previous rows"
-            disabled={rowsStart === 1} onClick={() => move(rowsStart - ROWS_PER_PAGE, selected.col)}><ChevronLeft aria-hidden="true" /></Button>
-          <span className="tabular-nums">Rows {rowsStart}–{rowsEnd}</span>
-          <Button type="button" size="icon-xs" variant="ghost" aria-label="Next rows"
-            disabled={rowsEnd === SHEET_ROWS} onClick={() => move(rowsEnd + 1, selected.col)}><ChevronRight aria-hidden="true" /></Button>
+          {onChange && workbook.sheets.length > 1 && <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" size="icon-xs" variant="ghost" aria-label="Worksheet actions" title="Worksheet actions">
+                <MoreHorizontal aria-hidden="true" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem disabled={activeIndex === 0} onSelect={() => moveWorksheet(-1)}><MoveLeft aria-hidden="true" /> Move left</DropdownMenuItem>
+              <DropdownMenuItem disabled={activeIndex === workbook.sheets.length - 1} onSelect={() => moveWorksheet(1)}><MoveRight aria-hidden="true" /> Move right</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>}
+          {charts.length > 0 && <Button type="button" size="icon-xs" variant={chart ? "secondary" : "ghost"} aria-label="Show charts"
+            title={chart ? "Hide charts" : "Show charts"} aria-pressed={Boolean(chart)}
+            onClick={() => setChartIndex(chart ? null : 0)}><ChartNoAxesColumn aria-hidden="true" /></Button>}
+          <span className="font-mono tabular-nums">{selectionLabel}</span>
         </div>
       </div>
     </section>

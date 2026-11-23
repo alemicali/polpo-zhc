@@ -2,8 +2,12 @@ export const SHEET_ROWS = 500;
 export const SHEET_COLUMNS = 52;
 export const WORKBOOK_SHEETS = 20;
 export const MAX_CELL_DECIMALS = 8;
+export const MAX_SHEET_RULES = 40;
+export const MAX_SHEET_CHARTS = 12;
+export const MAX_VALIDATION_OPTIONS = 30;
 
 export type CellAddress = { row: number; col: number };
+export type CellRange = { start: CellAddress; end: CellAddress };
 export type CellStyle = {
   bold?: boolean;
   italic?: boolean;
@@ -11,10 +15,25 @@ export type CellStyle = {
   align?: "left" | "center" | "right";
   color?: string;
   fill?: string;
-  numberFormat?: "currency" | "percent";
+  fontSize?: number;
+  border?: "all" | "top" | "bottom" | "left" | "right";
+  numberFormat?: "currency" | "percent" | "date";
   decimals?: number;
 };
-export type Sheet = { name: string; cells: Record<string, string>; styles?: Record<string, CellStyle> };
+export type CellValidation = { type: "checkbox" } | { type: "list"; options: string[] };
+export const RULE_OPERATORS = ["greaterThan", "lessThan", "equal", "notEqual", "greaterThanOrEqual", "lessThanOrEqual"] as const;
+export type RuleOperator = typeof RULE_OPERATORS[number];
+export type SheetRule = { range: string; operator: RuleOperator; value: number; fill: string };
+export const CHART_KINDS = ["bar", "line", "pie"] as const;
+export type SheetChart = { range: string; kind: typeof CHART_KINDS[number]; title: string };
+export type Sheet = {
+  name: string;
+  cells: Record<string, string>;
+  styles?: Record<string, CellStyle>;
+  validations?: Record<string, CellValidation>;
+  rules?: SheetRule[];
+  charts?: SheetChart[];
+};
 export type Workbook = { version: 1; sheets: Sheet[] };
 export type CellValue = string | number | boolean | null;
 export type SheetValue = { value: CellValue; error?: string };
@@ -36,6 +55,36 @@ export function cellKey({ row, col }: CellAddress): string {
   return columnLabel(col) + row;
 }
 
+export function cellRange(first: CellAddress, last: CellAddress = first): CellRange {
+  return {
+    start: { row: Math.min(first.row, last.row), col: Math.min(first.col, last.col) },
+    end: { row: Math.max(first.row, last.row), col: Math.max(first.col, last.col) },
+  };
+}
+
+export function rangeContains({ start, end }: CellRange, row: number, col: number): boolean {
+  return row >= start.row && row <= end.row && col >= start.col && col <= end.col;
+}
+
+export function rangeLabel({ start, end }: CellRange): string {
+  const first = cellKey(start);
+  const last = cellKey(end);
+  return first === last ? first : first + ":" + last;
+}
+
+export function readRange(input: string): CellRange | null {
+  const [first, last = first, extra] = input.trim().toUpperCase().split(":");
+  const start = cellAddress(first);
+  const end = cellAddress(last);
+  return extra === undefined && start && end ? cellRange(start, end) : null;
+}
+
+export function* rangeKeys({ start, end }: CellRange): Iterable<string> {
+  for (let row = start.row; row <= end.row; row += 1) {
+    for (let col = start.col; col <= end.col; col += 1) yield cellKey({ row, col });
+  }
+}
+
 export function cellAddress(key: string): CellAddress | null {
   const match = /^([A-Z]{1,2})([1-9]\d{0,2})$/.exec(key);
   if (!match) return null;
@@ -50,8 +99,47 @@ function isCellStyle(style: CellStyle | null): boolean {
   return ([style.bold, style.italic, style.underline].every((flag) => flag === undefined || typeof flag === "boolean"))
     && (style.align === undefined || ["left", "center", "right"].includes(style.align))
     && [style.color, style.fill].every((color) => color === undefined || (typeof color === "string" && /^#[a-f0-9]{6}$/i.test(color)))
-    && (style.numberFormat === undefined || ["currency", "percent"].includes(style.numberFormat))
+    && (style.fontSize === undefined || (Number.isInteger(style.fontSize) && style.fontSize >= 8 && style.fontSize <= 36))
+    && (style.border === undefined || ["all", "top", "bottom", "left", "right"].includes(style.border))
+    && (style.numberFormat === undefined || ["currency", "percent", "date"].includes(style.numberFormat))
     && (style.decimals === undefined || (Number.isInteger(style.decimals) && style.decimals >= 0 && style.decimals <= MAX_CELL_DECIMALS));
+}
+
+function isCellValidation(validation: CellValidation): boolean {
+  if (validation?.type === "checkbox") return true;
+  return validation?.type === "list" && Array.isArray(validation.options)
+    && validation.options.length > 0 && validation.options.length <= MAX_VALIDATION_OPTIONS
+    && new Set(validation.options).size === validation.options.length
+    && validation.options.every((value) => typeof value === "string" && value.trim().length > 0 && value.length <= 100);
+}
+
+export function acceptsCellValue(raw: string, validation?: CellValidation): boolean {
+  if (!raw || !validation) return true;
+  if (validation.type === "checkbox") return /^(true|false)$/i.test(raw.trim());
+  return validation.options.includes(raw);
+}
+
+function isSheetRule(rule: SheetRule): boolean {
+  return typeof rule?.range === "string" && Boolean(readRange(rule.range))
+    && RULE_OPERATORS.includes(rule.operator) && Number.isFinite(rule.value)
+    && typeof rule.fill === "string" && /^#[a-f0-9]{6}$/i.test(rule.fill);
+}
+
+function isSheetChart(chart: SheetChart): boolean {
+  return typeof chart?.range === "string" && Boolean(readRange(chart.range)) && CHART_KINDS.includes(chart.kind)
+    && typeof chart.title === "string" && chart.title.trim().length > 0 && chart.title.length <= 100;
+}
+
+export function matchesSheetRule(rule: SheetRule, value: CellValue): boolean {
+  if (typeof value !== "number") return false;
+  switch (rule.operator) {
+    case "greaterThan": return value > rule.value;
+    case "lessThan": return value < rule.value;
+    case "equal": return value === rule.value;
+    case "notEqual": return value !== rule.value;
+    case "greaterThanOrEqual": return value >= rule.value;
+    case "lessThanOrEqual": return value <= rule.value;
+  }
 }
 
 export function readWorkbook(content: string): Workbook | null {
@@ -69,6 +157,10 @@ export function readWorkbook(content: string): Workbook | null {
       if (Object.entries(sheet.cells).some(([key, raw]) => !cellAddress(key) || typeof raw !== "string")) return null;
       if (sheet.styles !== undefined && (!sheet.styles || typeof sheet.styles !== "object" || Array.isArray(sheet.styles)
         || Object.entries(sheet.styles).some(([key, style]) => !cellAddress(key) || !isCellStyle(style)))) return null;
+      if (sheet.validations !== undefined && (!sheet.validations || typeof sheet.validations !== "object" || Array.isArray(sheet.validations)
+        || Object.entries(sheet.validations).some(([key, validation]) => !cellAddress(key) || !isCellValidation(validation)))) return null;
+      if (sheet.rules !== undefined && (!Array.isArray(sheet.rules) || sheet.rules.length > MAX_SHEET_RULES || !sheet.rules.every(isSheetRule))) return null;
+      if (sheet.charts !== undefined && (!Array.isArray(sheet.charts) || sheet.charts.length > MAX_SHEET_CHARTS || !sheet.charts.every(isSheetChart))) return null;
     }
     return workbook;
   } catch {
@@ -92,8 +184,25 @@ export function displaySheetValue({ value, error }: SheetValue) {
 }
 
 const numberFormats = new Map<string, Intl.NumberFormat>();
+const sheetDateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" });
+
+export function sheetDate(value: CellValue): Date | undefined {
+  if (typeof value === "number" && value >= 1 && value < 2_958_466) {
+    const epoch = Date.UTC(1899, 11, value < 60 ? 31 : 30);
+    return new Date(epoch + value * 86_400_000);
+  }
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const date = new Date(value + "T00:00:00Z");
+    if (Number.isFinite(date.valueOf()) && date.toISOString().slice(0, 10) === value) return date;
+  }
+}
 
 export function formattedSheetValue(result: SheetValue, style?: CellStyle): string {
+  if (style?.numberFormat === "date") {
+    const date = sheetDate(result.value);
+    if (date) return sheetDateFormat.format(date);
+    return displaySheetValue(result);
+  }
   if (typeof result.value !== "number" || (!style?.numberFormat && style?.decimals === undefined)) return displaySheetValue(result);
   const decimals = style.decimals ?? 2;
   const mode = style.numberFormat ?? "decimal";
@@ -112,6 +221,7 @@ export function formattedSheetValue(result: SheetValue, style?: CellStyle): stri
 }
 
 export function xlsxNumberFormat(style: CellStyle): string | undefined {
+  if (style.numberFormat === "date") return "yyyy-mm-dd";
   if (style.numberFormat === undefined && style.decimals === undefined) return;
   const decimals = style.decimals ?? 2;
   const number = "#,##0" + (decimals > 0 ? "." + "0".repeat(decimals) : "");
@@ -119,11 +229,50 @@ export function xlsxNumberFormat(style: CellStyle): string | undefined {
   return number + (style.numberFormat === "percent" ? "%" : "");
 }
 
+/** Parse quoted CSV or spreadsheet clipboard data, keeping embedded tabs and newlines in cells. */
+export function parseSheetRows(input: string, separator: "," | "\t", rowLimit = SHEET_ROWS, columnLimit = SHEET_COLUMNS): string[][] {
+  const text = input.replace(/^\uFEFF/, "");
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let value = "";
+  let quoted = false;
+  let endedRow = false;
+  for (let index = 0; index < text.length && rows.length < rowLimit; index += 1) {
+    const char = text[index];
+    endedRow = false;
+    if (quoted) {
+      if (char !== '"') value += char;
+      else if (text[index + 1] === '"') {
+        value += char;
+        index += 1;
+      } else quoted = false;
+    } else if (char === '"' && !value) quoted = true;
+    else if (char === separator || char === "\r" || char === "\n") {
+      if (row.length < columnLimit) row.push(value);
+      value = "";
+      if (char !== separator) {
+        if (char === "\r" && text[index + 1] === "\n") index += 1;
+        rows.push(row);
+        row = [];
+        endedRow = true;
+      }
+    } else value += char;
+  }
+  if (rows.length < rowLimit && !endedRow) {
+    if (row.length < columnLimit) row.push(value);
+    rows.push(row);
+  }
+  return rows;
+}
+
 export function sheetBounds(sheet: Sheet, includeStyles = true): CellAddress {
   let row = 1;
   let col = 1;
   const keys = Object.keys(sheet.cells);
-  if (includeStyles && sheet.styles) keys.push(...Object.keys(sheet.styles));
+  if (includeStyles) {
+    if (sheet.styles) keys.push(...Object.keys(sheet.styles));
+    if (sheet.validations) keys.push(...Object.keys(sheet.validations));
+  }
   for (const key of keys) {
     const address = cellAddress(key);
     if (!address) continue;

@@ -47,7 +47,8 @@ const page = (title: string) => `<!doctype html><html><body><h1>${title}</h1></b
 
 describe("artifact model", () => {
   it("validates content by type", () => {
-    expect(artifactContentProblem("doc", "  ")).toBe("The content is empty");
+    expect(artifactContentProblem("doc", "")).toBeUndefined();
+    expect(artifactContentProblem("html", "  ")).toBe("The content is empty");
     expect(artifactContentProblem("svg", "<div/>")).toMatch(/<svg>/);
     expect(artifactContentProblem("svg", '<svg viewBox="0 0 1 1"></svg>')).toBeUndefined();
     expect(artifactContentProblem("view", "{")).toMatch(/valid JSON/);
@@ -223,4 +224,19 @@ describe("artifact tools", () => {
     const bad = await create!.execute("t2", { title: "Broken", type: "svg", content: "<div/>" });
     expect(bad.content[0]!.text).toMatch(/^Error: An svg artifact must contain/);
   });
+});
+
+it("duplicates the selected version with its original source grants and filters the current person's items", async () => {
+  const { call, store } = await fixture();
+  const original = await store.create({ title: "Agent report", type: "html", kind: "report",
+    content: "<p>First</p>", createdBy: "analyst", sources: ["sales"], refreshSeconds: 60 });
+  await store.update(original.id, { content: "<p>Second</p>" });
+  const copy = await call("POST", `/${original.id}/duplicate`, { version: 1 });
+  expect(copy.status).toBe(201);
+  expect(copy.body.data).toMatchObject({ createdBy: "analyst", content: "<p>First</p>", version: 1, sources: ["sales"], refreshSeconds: 60 });
+  expect((await call("POST", `/${original.id}/duplicate`, { version: 75 })).status).toBe(409);
+  const blank = await call("POST", "", { title: "Untitled document", type: "doc", content: "" });
+  expect(blank.status).toBe(201);
+  const mine = await call("GET", "?mine=true");
+  expect(mine.body.data.map((a: { id: string }) => a.id)).toEqual([blank.body.data.id]);
 });

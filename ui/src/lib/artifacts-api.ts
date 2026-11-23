@@ -62,8 +62,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 const one = (id: string) => `/artifacts/${encodeURIComponent(id)}`;
 
 export const artifactsApi = {
-  list: (filter: { type?: ArtifactType; q?: string; sessionId?: string } = {}) => {
-    const params = new URLSearchParams(Object.entries(filter).filter(([, v]) => v) as [string, string][]);
+  list: (filter: { type?: ArtifactType; q?: string; sessionId?: string; mine?: boolean } = {}) => {
+    const params = new URLSearchParams(Object.entries(filter).filter(([, value]) => value).map(([key, value]) => [key, String(value)]));
     return request<ArtifactSummary[]>(`/artifacts${params.size ? `?${params}` : ""}`);
   },
   get: (id: string) => request<Artifact>(one(id)),
@@ -72,6 +72,7 @@ export const artifactsApi = {
     request<Artifact>("/artifacts", { method: "POST", body: JSON.stringify(input) }),
   update: (id: string, patch: Partial<Pick<Artifact, "title" | "description" | "content" | "pinned">> & { note?: string; expectedVersion?: number }) =>
     request<Artifact>(one(id), { method: "PATCH", body: JSON.stringify(patch) }),
+  duplicate: (id: string, version: number) => request<Artifact>(`${one(id)}/duplicate`, { method: "POST", body: JSON.stringify({ version }) }),
   restore: (id: string, version: number) => request<Artifact>(`${one(id)}/restore/${version}`, { method: "POST" }),
   remove: (id: string) => request<{ deleted: boolean }>(one(id), { method: "DELETE" }),
   data: (id: string, method: ArtifactDataMethod, params: unknown) =>

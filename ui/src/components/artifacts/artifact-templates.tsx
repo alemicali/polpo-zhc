@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowUpRight, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { artifactsApi, type ArtifactType } from "@/lib/artifacts-api";
 import { artifactPath } from "@/hooks/use-artifact-actions";
@@ -11,18 +11,18 @@ import { ArtifactPreparation } from "./artifact-preparation";
 interface Template {
   label: string;
   title: string;
-  detail: string;
+  tone: string;
   type: ArtifactType;
   kind?: string;
   load: () => Promise<string>;
 }
 
 const TEMPLATES: Template[] = [
-  { label: "Docs", title: "Untitled document", detail: "Write and format", type: "doc", load: async () => "# New document\n" },
-  { label: "Slides", title: "Untitled presentation", detail: "Build a deck", type: "html", kind: "slides", load: () => import("./artifact-slides-format").then((m) => m.SLIDES_STARTER) },
-  { label: "Sheets", title: "Untitled spreadsheet", detail: "Work with data", type: "html", kind: "sheets", load: () => import("./artifact-sheets-model").then((m) => m.SHEETS_STARTER) },
-  { label: "Design", title: "Untitled design", detail: "Prototype a page", type: "html", kind: "design", load: () => import("./artifact-design-editor").then((m) => m.DESIGN_STARTER) },
-  { label: "Motion", title: "Untitled animation", detail: "Animate scenes", type: "html", kind: "motion", load: () => import("./artifact-motion-model").then((m) => m.MOTION_STARTER) },
+  { label: "Docs", title: "Untitled document", tone: "document", type: "doc", load: async () => "" },
+  { label: "Slides", title: "Untitled presentation", tone: "slides", type: "html", kind: "slides", load: () => import("./artifact-slides-format").then((m) => m.SLIDES_STARTER) },
+  { label: "Sheets", title: "Untitled spreadsheet", tone: "sheets", type: "html", kind: "sheets", load: () => import("./artifact-sheets-model").then((m) => m.SHEETS_STARTER) },
+  { label: "Design", title: "Untitled design", tone: "design", type: "html", kind: "design", load: () => import("./artifact-design-editor").then((m) => m.DESIGN_STARTER) },
+  { label: "Motion", title: "Untitled animation", tone: "motion", type: "html", kind: "motion", load: () => import("./artifact-motion-model").then((m) => m.MOTION_STARTER) },
 ];
 
 export function ArtifactTemplates() {
@@ -47,34 +47,30 @@ export function ArtifactTemplates() {
   }
 
   return (
-    <section aria-labelledby="artifact-templates-heading" className="shrink-0 rounded-xl border border-border/70 bg-card/55 p-3 sm:p-4">
-      <h2 id="artifact-templates-heading" className="mb-3 font-heading text-sm font-semibold tracking-tight text-foreground">
-        Create an artifact
+    <section aria-labelledby="artifact-templates-heading" className="min-w-0 shrink-0 py-1.5">
+      <h2 id="artifact-templates-heading" className="mb-2.5 font-heading text-sm font-semibold text-foreground">
+        Make something new
       </h2>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5">
+      <div className="-mx-1 grid auto-cols-[7rem] grid-flow-col gap-2 overflow-x-auto px-1 pb-1 sm:auto-cols-[7.5rem]">
         {TEMPLATES.map((template) => (
           <button key={template.label} type="button" disabled={!!pending} aria-label={`Create ${template.label}`}
+            data-template={template.tone}
             className={cn(
-              "group relative flex min-w-0 items-center justify-between gap-2 overflow-hidden rounded-lg border border-border bg-background px-3 py-2.5 text-left transition-colors",
-              "hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring sm:min-h-[68px]",
-              pending === template && "border-primary/50 bg-primary/5",
+              "artifact-template-art group relative flex h-[6rem] min-w-0 flex-col rounded-lg text-left transition-colors",
+              "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring disabled:cursor-wait sm:h-[6.6875rem]",
+              pending === template && "artifact-template-pending",
             )}
             onClick={() => void create(template)}>
-            <span className="artifact-template-art pointer-events-none absolute inset-y-0 right-0 w-20 opacity-70" aria-hidden="true" />
-            <span className="relative min-w-0">
-              <span className="block truncate text-sm font-medium">{template.label}</span>
-              <span className="block truncate text-xs text-muted-foreground">{template.detail}</span>
-            </span>
-            <span className="relative grid size-8 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
+            <span className="artifact-template-glyph relative grid min-h-0 flex-1 place-items-center overflow-hidden rounded-xl border">
               {pending === template
-                ? <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden="true" />
-                : <ArtifactIcon artifact={template} />}
+                ? <Loader2 className="relative size-6 motion-safe:animate-spin" aria-hidden="true" />
+                : <ArtifactIcon artifact={template} className="relative size-7 sm:size-8" />}
             </span>
-            <ArrowUpRight className="absolute right-1.5 top-1.5 size-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" aria-hidden="true" />
+            <span className="truncate px-0.5 pt-1 text-left text-sm font-medium text-foreground">{template.label}</span>
           </button>
         ))}
       </div>
-      {pending && <div className="mt-3"><ArtifactPreparation phase="Preparing" kind={pending.kind} compact /></div>}
+      {pending && <div className="mt-2"><ArtifactPreparation phase="Preparing" kind={pending.kind ?? pending.type} compact /></div>}
     </section>
   );
 }

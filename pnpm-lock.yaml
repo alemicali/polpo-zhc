@@ -420,6 +420,9 @@ importers:
       parse5:
         specifier: ^8.1.1
         version: 8.1.1
+      partial-json:
+        specifier: 0.1.7
+        version: 0.1.7
       pptxgenjs:
         specifier: ^4.0.1
         version: 4.0.1

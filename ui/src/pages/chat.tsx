@@ -1,3 +1,4 @@
+import { Link, useLocation } from "react-router-dom";
 import { ChatAttachments } from "@/components/chat-attachments";
 import {
   Fragment,
@@ -130,7 +131,7 @@ import { useChatState, useChatActions, useChatInputDisabled } from "@/hooks/chat
 import { setChatPageSessionsOpen, useChatPageSessionsOpen } from "@/hooks/chat-context";
 import { WidgetCard, WidgetPendingCard } from "@/components/widget-card";
 import { ArtifactChatCard } from "@/components/artifacts/artifact-chat-card";
-import { ArtifactPreparation } from "@/components/artifacts/artifact-preparation";
+import { ArtifactGeneration } from "@/components/artifacts/artifact-generation";
 import { budgetText } from "@/lib/mission-preview";
 import { artifactIdOf } from "@/lib/artifacts-api";
 import { WhatsAppPreviewCard, EmailPreviewCard } from "@/components/send-preview-card";
@@ -3509,11 +3510,7 @@ function ChatMessages() {
                                 return <ArtifactChatCard key={`a-${g.key}`} artifactId={g.artifactId} updated={g.updated} />;
                               }
                               if (g.type === "artifact-pending") {
-                                const kind = g.tool.arguments?.kind ??
-                                  /"kind"\s*:\s*"([a-z]+)"/.exec(g.tool.argumentsText ?? "")?.[1];
-                                return <ArtifactPreparation key={`a-${g.tool.id}`}
-                                  phase={g.tool.state === "calling" ? "Saving" : "Preparing"}
-                                  kind={typeof kind === "string" ? kind : undefined} compact />;
+                                return <ArtifactGeneration key={`a-${g.tool.id}`} tool={g.tool} />;
                               }
                               if (g.type === "widget-pending") {
                                 // Loader skeleton dedicato — il modello
@@ -3681,6 +3678,10 @@ function ChatMessages() {
 
 function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
   const orchestratorName = useOrchestratorName();
+  const location = useLocation();
+  const routeId = /^\/artifacts\/(art_[\w-]+)\/?$/.exec(location.pathname)?.[1];
+  const mobileId = location.pathname === "/chat" ? new URLSearchParams(location.search).get("artifact") : null;
+  const artifactId = routeId ?? (mobileId && /^art_[\w-]+$/.test(mobileId) ? mobileId : undefined);
   const { messages, isLoading, pendingQuestions, pendingMission, pendingVault, pendingWhatsApp, pendingEmail, pendingSetDesign, sessionId, selectedAgent, sessions, activeSessionKey } = useChatState();
   const { send, stop, steer, cancelSteer } = useChatActions();
   const steersPending = usePendingSteers(activeSessionKey);
@@ -3824,6 +3825,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
         if (!images.some((image) => image.url === url)) images.push({ url, mimeType: "image/png", filename: undefined });
       }
       const context = [
+        artifactId ? `The open artifact is ${artifactId}. Use artifact_get to read its current version and artifact_update to apply requested changes to it.` : undefined,
         activePreviewContext ? formatAppPreviewContext(activePreviewContext) : undefined,
         activeDataContext ? formatDataPromptContext(activeDataContext) : undefined,
       ].filter(Boolean).join("\n\n");
@@ -3841,7 +3843,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
       if (activePreviewContext) clearAppPreviewContext();
       if (activeDataContext) clearDataPromptContext();
     },
-    [activeDataContext, activePreviewContext, isLoading, send, sessionId]
+    [activeDataContext, activePreviewContext, artifactId, isLoading, send, sessionId]
   );
 
   // Set the uncontrolled textarea value from speech recognition
@@ -4098,6 +4100,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
             />
           </div>
         )}
+        {mobileId && artifactId && <Link to={`/artifacts/${artifactId}`} className="mb-1 inline-block text-xs text-muted-foreground underline">Return to artifact</Link>}
         {/* Messages joining the running response, then prompts queued after it. */}
         <PendingSteers className="mb-2" steers={steersPending} onCancel={(id) => { void cancelSteer(id); }} />
         {queue.items.length > 0 && (
