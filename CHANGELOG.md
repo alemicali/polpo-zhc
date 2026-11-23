@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Artifact workspaces: Docs, Slides, Sheets, Design and Motion you can edit.** Artifacts open in an editor of their own, for people to change what an agent made or to start one with **New** in the gallery (see [docs/artifacts.md](docs/artifacts.md)):
+  - **Docs** (`type: "doc"`, Markdown): rich text, **tabs**, inline **dropdowns** (status, priority or your own lists), **comments** on a passage; export to Word (.docx), print or PDF, Markdown.
+  - **Slides** (`kind: "slides"`, JSON): layouts and themes, text boxes, shapes, images, tables and videos, speaker notes, skipped slides, full-screen presentation; export to PowerPoint (.pptx).
+  - **Sheets** (`kind: "sheets"`, JSON): several sheets, formulas, formats, colours and borders, dropdown validation, checkboxes, conditional colours, bar / line / pie charts; import CSV or XLSX, export to Excel (.xlsx) or CSV. While an agent writes a sheet in the chat, its cells appear as they are written.
+  - **Design** (`kind: "design"`, HTML): a canvas of artboards on pages, with select, move, resize, text, notes, shapes, pencil, a properties / code / CSS-variables inspector and layers; export an artboard as HTML.
+  - **Motion** (`kind: "motion"`, JSON): scenes of animated text and shape layers, transitions, a soundtrack, a timeline; export to MP4 (or WebM).
+  - **The gallery**: cards with live thumbnails, **rename**, **pin**, **duplicate** (the current version or an earlier one), versions. The editors and the export libraries load only when an artifact is opened: the dashboard's first load is unchanged.
+- **Agents, Polpo and MCP make and change them**: the artifact tools describe the formats (`ARTIFACT_WORKSPACE_GUIDE` in `@polpo-ai/core/artifacts`), so "make a deck / a spreadsheet / an animation" opens in its workspace. New MCP tool `polpo_artifact_update` (content, title, description, pin; `baseVersion`), and `polpo_artifacts_list` filters by `kind`. REST: `POST /api/v1/artifacts/:id/duplicate` (`{ version? }`), `GET /api/v1/artifacts?mine=true`, `GET /api/v1/artifacts/:id?preview=1`.
+- **Appearance token `stage` / `stageForeground`** (`bg-stage text-stage-foreground`): the dark backdrop behind videos, motion previews and full-screen presentations. Settable like every token (settings, REST, MCP `polpo_config_update`).
+
+### Changed
+- **Saving an artifact is conditional.** `PATCH /api/v1/artifacts/:id` takes `expectedVersion` and answers 409 when someone saved a newer version meanwhile (the editors offer to download the draft or open the latest); the agents' and Polpo's `artifact_update` take `baseVersion`, and a whole rewrite of an artifact longer than `artifact_get` shows (60,000 characters) needs it, so a clipped read cannot drop content. Restoring a version is conditional too.
+- **A duplicate keeps the original's author** (`createdBy`), so an HTML artifact's copy reads data sources with the same rights, never the duplicator's; who duplicated it, and from which version, is recorded on the copy's first version (`author`, `note`).
+- The artifact routes refuse a request body over 4 MB (413); a content stays at most 1 MB. Changing only an artifact's `kind` re-checks its content against the new kind.
+
 ## [0.7.0] — 2026-11-23 — Data workspace, artifacts browser, safer agent commands
 
 ### Changed
