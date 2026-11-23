@@ -440,6 +440,7 @@ const AgentIdentitySchema = z.object({
   bio: z.string().optional(),
   timezone: z.string().optional(),
   avatar: z.string().optional(),
+  color: z.string().regex(/^agent(?:[1-9]|10)$/, "an agent colour token: agent1 … agent10").optional(),
   responsibilities: z.array(z.union([z.string(), AgentResponsibilitySchema])).optional(),
   tone: z.string().optional(),
   personality: z.string().optional(),

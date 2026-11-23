@@ -79,7 +79,7 @@ export function ProviderIcon({
   /** Polpo provider id, e.g. "anthropic", "google-gemini-cli". */
   name: string;
   size?: number;
-  /** "mono" = currentColor SVG, "avatar" = brand-colour rounded square. */
+  /** "mono" = currentColor SVG, "avatar" = brand-colour rounded-xs square. */
   variant?: "mono" | "avatar";
   className?: string;
 }) {

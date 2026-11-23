@@ -58,7 +58,7 @@ function TeamHeaderNode({ data }: NodeProps<Node<TeamHeaderNodeData>>) {
   return (
     <div
       className={cn(
-        "flex items-center gap-2.5 rounded-xl border-2 bg-card shadow-md px-4 py-2.5 cursor-pointer select-none transition-all hover:shadow-lg",
+        "flex items-center gap-2.5 rounded-xl border-2 bg-card shadow-raised px-4 py-2.5 cursor-pointer select-none transition-all hover:shadow-raised",
         tc.border, tc.bg,
       )}
       onClick={data.onClick}
@@ -83,11 +83,11 @@ function AgentNode({ data, selected }: NodeProps<Node<AgentNodeData>>) {
   return (
     <div
       className={cn(
-        "rounded-xl border bg-card shadow-md cursor-pointer transition-all hover:shadow-lg select-none",
+        "rounded-xl border bg-card shadow-raised cursor-pointer transition-all hover:shadow-raised select-none",
         selected
-          ? `border-primary shadow-[0_0_24px_color-mix(in_oklch,var(--primary)_18%,transparent)] ring-2 ring-primary/30`
+          ? `border-primary shadow-glow ring-2 ring-primary/30`
           : isActive
-            ? `${tc.border} shadow-[0_0_24px_color-mix(in_oklch,var(--primary)_12%,transparent)]`
+            ? `${tc.border} shadow-glow`
             : "border-border/50 hover:border-primary/40",
       )}
       style={{ minWidth: 180, maxWidth: 240 }}
@@ -96,12 +96,12 @@ function AgentNode({ data, selected }: NodeProps<Node<AgentNodeData>>) {
       <div className="px-4 py-3 space-y-1.5">
         <div className="flex items-center gap-2.5">
           <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", tc.bg)}>
-            <AgentAvatar avatar={agent.identity?.avatar} name={agent.name} size="md" iconClassName={tc.text} />
+            <AgentAvatar avatar={agent.identity?.avatar} name={agent.name} size="md" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5">
               <span className="text-sm font-semibold truncate">{displayName}</span>
-              {isActive && <div className={cn("h-2 w-2 rounded-full animate-pulse shrink-0", tc.dot)} />}
+              {isActive && <div className={cn("h-2 w-2 rounded-pill animate-pulse shrink-0", tc.dot)} />}
             </div>
             {agent.identity?.displayName && agent.identity.displayName !== agent.name && (
               <span className="text-micro font-mono text-muted-foreground block truncate">@{agent.name}</span>
@@ -593,7 +593,7 @@ function OrgChartInner() {
           <Button
             variant="outline"
             size="sm"
-            className="h-7 text-xs bg-card/90 backdrop-blur-sm shadow-sm"
+            className="h-7 text-xs bg-card/90 backdrop-blur-surface shadow-card"
             onClick={onBack}
           >
             <ChevronRight className="h-3 w-3 mr-1 rotate-180" />
@@ -612,7 +612,7 @@ function OrgChartInner() {
             variant="outline"
             size="sm"
             className={cn(
-              "h-7 text-xs backdrop-blur-sm shadow-sm border",
+              "h-7 text-xs backdrop-blur-surface shadow-card border",
               mode === "all"
                 ? "bg-primary/15 border-primary/40 text-primary hover:bg-primary/25"
                 : "bg-card/90 border-border/40 text-muted-foreground hover:text-foreground",
@@ -636,7 +636,7 @@ function OrgChartInner() {
         <Background gap={20} size={1} className="!text-border" />
         <Controls
           showInteractive={false}
-          className="!bg-card !border-border/40 !shadow-md [&>button]:!bg-card [&>button]:!border-border/30 [&>button]:!text-muted-foreground [&>button:hover]:!bg-muted/50"
+          className="!bg-card !border-border/40 !shadow-raised [&>button]:!bg-card [&>button]:!border-border/30 [&>button]:!text-muted-foreground [&>button:hover]:!bg-muted/50"
         />
       </ReactFlow>
     </>

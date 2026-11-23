@@ -123,7 +123,7 @@ export class WorkspaceShell implements Shell {
   }
   async execute(command: string, options: ShellOptions = {}): Promise<ShellResult> {
     const result = await this.workspace.exec(command, { cwd: options.cwd, env: options.env, timeoutMs: options.timeout });
-    return { stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode };
+    return { stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode, ...(result.timedOut ? { timedOut: true } : {}) };
   }
 }
 

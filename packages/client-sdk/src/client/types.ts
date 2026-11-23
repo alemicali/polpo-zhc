@@ -364,6 +364,8 @@ export interface AgentIdentity {
   timezone?: string;
   /** Avatar image path relative to project root, served via /api/v1/files/read?path=<avatar> */
   avatar?: string;
+  /** Its colour on screen: an agent colour token, "agent1" … "agent10" (default: picked from its name) */
+  color?: string;
   /** Responsibilities — simple strings or structured objects with area/description/priority */
   responsibilities?: (string | AgentResponsibility)[];
   /** Communication tone — HOW the agent communicates */

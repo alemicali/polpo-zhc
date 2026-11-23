@@ -7,6 +7,7 @@
  */
 import type { TaskRunContext } from "@polpo-ai/core/run-context";
 import { taskFailure, type TaskFailure } from "@polpo-ai/core/task-failure";
+import { agentColorIndex } from "@polpo-ai/core/appearance";
 import { ENGINE_LABELS, agentEngine, computerLabel, engineMark, formatUsd, modelLabel, runCostUsd, runView, type BrandMark, type RunView } from "./mcp-run-view.js";
 
 export type AgentCardStatus = "working" | "idle" | "waiting";
@@ -71,7 +72,11 @@ export interface AgentCard {
     engine?: { id: string; label: string; mark: BrandMark; model?: string; modelLabel?: string };
     /** The computer its chats and tasks run on (defaultComputer): "this server" or its id. */
     computer?: string;
+    /** Its colour: the look's agent colour 1…10 (identity.color, else from its name), for the avatar. */
+    color: number;
   };
+  /** The instance look's brand, status and agent colours per mode (only those its custom look sets). */
+  appearance?: { light?: Record<string, string>; dark?: Record<string, string> };
   status: AgentCardStatus;
   /** The task in progress, or the last one it finished. */
   current?: AgentCardTask & { active: boolean };
@@ -97,7 +102,7 @@ export interface AgentCardInput {
     name: string;
     role?: string;
     model?: string;
-    identity?: { displayName?: string; title?: string; timezone?: string };
+    identity?: { displayName?: string; title?: string; timezone?: string; color?: string };
     drive?: { enabled?: boolean; goals?: string[] };
     engine?: unknown;
     defaultComputer?: string;
@@ -232,6 +237,7 @@ export function buildAgentCard(input: AgentCardInput): AgentCard {
       ...(timezone ? { timezone } : {}),
       engine: engineOf(agent),
       ...(agent.defaultComputer ? { computer: computerLabel({ id: agent.defaultComputer, kind: agent.defaultComputer === "host" ? "host" : "computer" }) } : {}),
+      color: agentColorIndex(agent.name, agent.identity?.color),
     },
     status: waitingTasks + proposals > 0 ? "waiting" : active ? "working" : "idle",
     ...(current ? { current: { ...cardTask(current), active: current === active } } : {}),

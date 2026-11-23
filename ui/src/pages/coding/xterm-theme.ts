@@ -72,6 +72,18 @@ export function terminalTheme(): ITheme {
   }
 }
 
+/** The terminal's font size in px: the look's small text (--text-small, 13px by default). */
+export function terminalFontSize(): number {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue("--text-small").trim();
+  const n = parseFloat(raw);
+  if (!Number.isFinite(n) || n <= 0) return 13;
+  if (raw.endsWith("rem")) {
+    const base = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+    return Math.round(n * base);
+  }
+  return Math.round(n);
+}
+
 export function terminalFontFamily(): string {
   const font = getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim();
   return font || FALLBACK_FONT;
@@ -88,6 +100,7 @@ export function followAppearance(term: Terminal): () => void {
     frame = requestAnimationFrame(() => {
       term.options.theme = terminalTheme();
       term.options.fontFamily = terminalFontFamily();
+      term.options.fontSize = terminalFontSize();
     });
   };
   apply();

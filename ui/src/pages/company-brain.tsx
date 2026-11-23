@@ -40,7 +40,7 @@ const TYPE_STYLES = [
 function BrainNode({ data, selected }: NodeProps<Node<BrainNodeData>>) {
   const entity = data.entity;
   const style = TYPE_STYLES[hash(entity.type) % TYPE_STYLES.length];
-  return <div className={cn("w-48 border bg-background px-3 py-2 shadow-sm transition-shadow", style, selected && "ring-2 ring-primary ring-offset-2 ring-offset-background shadow-md")}>
+  return <div className={cn("w-48 border bg-background px-3 py-2 shadow-card transition-shadow", style, selected && "ring-2 ring-primary ring-offset-2 ring-offset-background shadow-raised")}>
     <Handle type="target" position={Position.Left} className="!h-1.5 !w-1.5 !border-0 !bg-current" />
     <div className="flex items-center gap-2">
       <span className={cn("h-2 w-2 shrink-0", entity.status === "confirmed" ? "bg-success" : "bg-warning")} />
@@ -227,7 +227,7 @@ function makeFlow(graph: BrainGraph | null): { nodes: Node<BrainNodeData>[]; edg
     const sorted = entities.sort((a, b) => (degree.get(b.id) ?? 0) - (degree.get(a.id) ?? 0) || a.name.localeCompare(b.name));
     sorted.forEach((entity, row) => nodes.push({ id: entity.id, type: "brain", position: { x: column * 270, y: row * 130 + (column % 2) * 55 }, data: { entity, degree: degree.get(entity.id) ?? 0 } }));
   }
-  const edges: Edge[] = graph.relations.map((relation) => ({ id: relation.id, source: relation.fromId, target: relation.toId, label: relation.label || label(relation.type), type: "smoothstep", animated: relation.status === "candidate", markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12 }, style: { strokeWidth: relation.confidence > 0.85 ? 1.7 : 1, strokeDasharray: relation.status === "candidate" ? "5 4" : undefined }, labelStyle: { fontSize: 9 } }));
+  const edges: Edge[] = graph.relations.map((relation) => ({ id: relation.id, source: relation.fromId, target: relation.toId, label: relation.label || label(relation.type), type: "smoothstep", animated: relation.status === "candidate", markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12 }, style: { strokeWidth: relation.confidence > 0.85 ? 1.7 : 1, strokeDasharray: relation.status === "candidate" ? "5 4" : undefined }, labelStyle: { fontSize: "var(--text-micro)" } }));
   return { nodes, edges };
 }
 

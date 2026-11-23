@@ -77,7 +77,7 @@ export function AgentInstructionsTab() {
             </p>
             <div className="flex flex-wrap justify-center gap-1.5 mt-2">
               {["role", "tone", "personality", "bio", "displayName", "title", "responsibilities", "timezone", "language", "model", "allowedTools", "skills"].map(f => (
-                <span key={f} className="rounded bg-muted/50 border border-border/30 px-2 py-0.5 text-micro font-mono text-muted-foreground">
+                <span key={f} className="rounded-xs bg-muted/50 border border-border/30 px-2 py-0.5 text-micro font-mono text-muted-foreground">
                   {f}
                 </span>
               ))}

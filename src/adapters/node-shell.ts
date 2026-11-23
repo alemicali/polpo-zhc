@@ -32,6 +32,7 @@ export class NodeShell implements Shell {
         stdout: result.stdout,
         stderr: abnormal ? (result.stderr || result.shortMessage || "Command failed") : result.stderr,
         exitCode: result.exitCode ?? (abnormal ? 1 : 0),
+        ...(result.timedOut ? { timedOut: true } : {}),
       };
     } catch (err: any) {
       return {
@@ -55,7 +56,7 @@ export class NodeShell implements Shell {
     const result = await sub;
     if (timer) clearTimeout(timer);
     if (timedOut) {
-      return { stdout: result.stdout, stderr: result.stderr || `Command timed out after ${opts.timeout} milliseconds`, exitCode: result.exitCode || 1 };
+      return { stdout: result.stdout, stderr: result.stderr || `Command timed out after ${opts.timeout} milliseconds`, exitCode: result.exitCode || 1, timedOut: true };
     }
     return { stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode ?? 1 };
   }

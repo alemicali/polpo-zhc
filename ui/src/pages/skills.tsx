@@ -96,7 +96,7 @@ function MultiFilter({
           <span className="shrink-0">{icon}</span>
           <span className="truncate">{label}</span>
           {count > 0 && (
-            <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary text-micro font-bold text-primary-foreground px-1">
+            <span className="flex h-4 min-w-4 items-center justify-center rounded-pill bg-primary text-micro font-bold text-primary-foreground px-1">
               {count}
             </span>
           )}
@@ -199,9 +199,9 @@ function SkillRow({
     <button
       className={cn(
         "group flex items-center gap-4 w-full text-left rounded-lg border border-border/40",
-        "bg-card/80 backdrop-blur-sm px-4 py-3",
+        "bg-card/80 backdrop-blur-surface px-4 py-3",
         "transition-all hover:border-primary/20 hover:bg-accent/5",
-        "hover:shadow-[0_0_20px_color-mix(in_oklch,var(--primary)_6%,transparent)]",
+        "hover:shadow-glow",
       )}
       onClick={onClick}
     >
@@ -300,9 +300,9 @@ function SkillCard({
     <button
       className={cn(
         "group flex flex-col text-left rounded-lg border border-border/40",
-        "bg-card/80 backdrop-blur-sm p-4",
+        "bg-card/80 backdrop-blur-surface p-4",
         "transition-all hover:border-primary/20 hover:bg-accent/5",
-        "hover:shadow-[0_0_20px_color-mix(in_oklch,var(--primary)_6%,transparent)]",
+        "hover:shadow-glow",
         "h-full",
       )}
       onClick={onClick}
@@ -398,7 +398,7 @@ function SkillCard({
               {skill.assignedTo.slice(0, 3).map((agent) => (
                 <Tooltip key={agent}>
                   <TooltipTrigger asChild>
-                    <span className="flex h-5 items-center rounded-full bg-secondary px-1.5">
+                    <span className="flex h-5 items-center rounded-pill bg-secondary px-1.5">
                       <span className="text-micro font-medium text-secondary-foreground truncate max-w-[60px]">
                         {agent}
                       </span>
@@ -450,14 +450,14 @@ function EmptyState({ filtered }: { filtered: boolean }) {
 
 function FilterPill({ label, onClear }: { label: string; onClear: () => void }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 border border-primary/20 px-2 py-0.5 text-micro font-medium text-primary">
+    <span className="inline-flex items-center gap-1 rounded-pill bg-primary/10 border border-primary/20 px-2 py-0.5 text-micro font-medium text-primary">
       {label}
       <button
         onClick={(e) => {
           e.stopPropagation();
           onClear();
         }}
-        className="rounded-full p-0.5 hover:bg-primary/20 transition-colors"
+        className="rounded-pill p-0.5 hover:bg-primary/20 transition-colors"
       >
         <X className="h-2.5 w-2.5" />
       </button>
@@ -607,7 +607,7 @@ export function SkillsPage() {
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
       {/* ── Summary bar ── */}
-      <div className="flex items-center gap-3 rounded-lg border border-border/40 bg-card/80 backdrop-blur-sm px-3 py-2 shrink-0">
+      <div className="flex items-center gap-3 rounded-lg border border-border/40 bg-card/80 backdrop-blur-surface px-3 py-2 shrink-0">
         <div className="flex items-center gap-4">
           <StatChip label="skills" value={stats.total} accent />
           <div className="h-4 w-px bg-border/60" />

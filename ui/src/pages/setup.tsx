@@ -81,7 +81,7 @@ function StepIndicator({ current, total }: { current: number; total: number }) {
         <div
           key={i}
           className={cn(
-            "h-1.5 rounded-full transition-all duration-500",
+            "h-1.5 rounded-pill transition-all duration-500",
             i < current ? "bg-primary w-8" : i === current ? "bg-primary/60 w-6" : "bg-muted w-4",
           )}
         />
@@ -216,7 +216,7 @@ function DirectoryPickerDialog({
             <button
               type="button"
               onClick={() => handleBreadcrumbNav(-1)}
-              className="shrink-0 p-1 rounded hover:bg-accent/40 transition-colors text-muted-foreground hover:text-foreground"
+              className="shrink-0 p-1 rounded-xs hover:bg-accent/40 transition-colors text-muted-foreground hover:text-foreground"
             >
               <Home className="h-3.5 w-3.5" />
             </button>
@@ -229,7 +229,7 @@ function DirectoryPickerDialog({
                   <button
                     type="button"
                     onClick={() => handleBreadcrumbNav(i)}
-                    className="truncate px-1 py-0.5 rounded hover:bg-accent/40 transition-colors text-muted-foreground hover:text-foreground text-sm"
+                    className="truncate px-1 py-0.5 rounded-xs hover:bg-accent/40 transition-colors text-muted-foreground hover:text-foreground text-sm"
                   >
                     {seg}
                   </button>
@@ -425,7 +425,7 @@ function ProjectStep({
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            Config will be saved to <code className="bg-muted px-1 py-0.5 rounded">{workDir}/.polpo/polpo.json</code>
+            Config will be saved to <code className="bg-muted px-1 py-0.5 rounded-xs">{workDir}/.polpo/polpo.json</code>
           </p>
 
           <DirectoryPickerDialog
@@ -487,7 +487,7 @@ function AccessStep({
           placeholder="you@example.com"
         />
         <p className="text-xs text-muted-foreground">
-          Saved in <code className="bg-muted px-1 py-0.5 rounded">.polpo/auth.json</code>. Login links are sent with Resend.
+          Saved in <code className="bg-muted px-1 py-0.5 rounded-xs">.polpo/auth.json</code>. Login links are sent with Resend.
         </p>
       </div>
     </div>
@@ -780,7 +780,7 @@ export function SetupPage() {
       <div className="min-h-screen flex items-center justify-center bg-background">
         <Card className="max-w-md w-full">
           <CardContent className="pt-6 pb-6 px-6 text-center space-y-4">
-            <div className="h-12 w-12 rounded-full bg-success/15 flex items-center justify-center mx-auto">
+            <div className="h-12 w-12 rounded-pill bg-success/15 flex items-center justify-center mx-auto">
               <CheckCircle2 className="h-6 w-6 text-success" />
             </div>
             <h2 className="font-heading text-h2">Already configured</h2>
@@ -950,7 +950,7 @@ export function SetupPage() {
           {/* CLI hint */}
           <p className="text-center text-xs text-muted-foreground/60">
             You can also run setup via CLI:{" "}
-            <code className="bg-muted px-1.5 py-0.5 rounded font-mono">polpo setup</code>
+            <code className="bg-muted px-1.5 py-0.5 rounded-xs font-mono">polpo setup</code>
           </p>
         </div>
       </div>

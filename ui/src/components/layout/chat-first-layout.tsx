@@ -105,7 +105,7 @@ const ChatPage = lazy(() =>
 function ChatLoader() {
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center">
-      <div className="h-5 w-5 animate-spin rounded-full border-2 border-muted border-t-primary" />
+      <div className="h-5 w-5 animate-spin rounded-pill border-2 border-muted border-t-primary" />
     </div>
   );
 }
@@ -215,7 +215,7 @@ function ChatPanelHeader() {
   const chatActions = useChatActions();
 
   return (
-    <header className="flex min-h-12 shrink-0 items-center justify-between border-b border-border/50 bg-background/80 px-4 pt-0 backdrop-blur-md max-lg:min-h-safe-head max-lg:pt-safe-head lg:min-h-14">
+    <header className="flex min-h-12 shrink-0 items-center justify-between border-b border-border/50 bg-background/80 px-4 pt-0 backdrop-blur-surface max-lg:min-h-safe-head max-lg:pt-safe-head lg:min-h-14">
       <div className="flex min-w-0 items-center gap-1.5">
         {/* Mobile-only hamburger — reuses the global nav sheet. */}
         <div className="lg:hidden -ml-1">
@@ -421,7 +421,7 @@ const PagesPanelHeader = memo(function PagesPanelHeader() {
   const navMode = useChatFirstNavMode();
 
   return (
-    <header className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border bg-background/80 px-3 pt-0 backdrop-blur-md max-lg:min-h-safe-head max-lg:pt-safe-head lg:min-h-14">
+    <header className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border bg-background/80 px-3 pt-0 backdrop-blur-surface max-lg:min-h-safe-head max-lg:pt-safe-head lg:min-h-14">
       <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto rounded-lg bg-muted p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {navMode === "inline" && tabs.map(tab => (
           <HeaderTabButton
@@ -506,7 +506,7 @@ const PagesPanelHeader = memo(function PagesPanelHeader() {
               {resolved === "dark" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-[220px] bg-popover/95 backdrop-blur-lg border-border/50">
+          <DropdownMenuContent align="end" className="min-w-[220px] bg-popover/95 backdrop-blur-surface border-border/50">
             <DropdownMenuLabel className="text-label text-muted-foreground/70">
               Mode
             </DropdownMenuLabel>
@@ -535,9 +535,9 @@ const PagesPanelHeader = memo(function PagesPanelHeader() {
                   className="gap-2.5 text-xs py-1.5"
                 >
                   <span className="relative inline-flex shrink-0 h-4 w-4 items-center justify-center">
-                    <span className="absolute inset-0 rounded-full ring-1 ring-border/60" style={{ backgroundColor: swatch[0] }} />
-                    <span className="absolute h-3 w-3 rounded-full" style={{ backgroundColor: swatch[1], left: "30%", top: "10%" }} />
-                    <span className="absolute h-2 w-2 rounded-full" style={{ backgroundColor: swatch[2], left: "55%", top: "50%" }} />
+                    <span className="absolute inset-0 rounded-pill ring-1 ring-border/60" style={{ backgroundColor: swatch[0] }} />
+                    <span className="absolute h-3 w-3 rounded-pill" style={{ backgroundColor: swatch[1], left: "30%", top: "10%" }} />
+                    <span className="absolute h-2 w-2 rounded-pill" style={{ backgroundColor: swatch[2], left: "55%", top: "50%" }} />
                   </span>
                   <span className="flex-1 min-w-0">
                     <span className="block leading-tight">{p.name}</span>

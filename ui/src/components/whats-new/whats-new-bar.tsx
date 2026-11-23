@@ -24,7 +24,7 @@ export function WhatsNewBar({ className, entries = CHANGELOG }: { className?: st
         className,
       )}
     >
-      <div aria-hidden className="pointer-events-none absolute -left-10 top-1/2 -z-10 h-24 w-40 -translate-y-1/2 rounded-full bg-primary/25 blur-2xl motion-safe:animate-pulse" />
+      <div aria-hidden className="pointer-events-none absolute -left-10 top-1/2 -z-10 h-24 w-40 -translate-y-1/2 rounded-pill bg-primary/25 blur-glow motion-safe:animate-pulse" />
       <button
         type="button"
         onClick={openWhatsNew}
@@ -33,9 +33,9 @@ export function WhatsNewBar({ className, entries = CHANGELOG }: { className?: st
       >
         <span className="relative flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-primary/20 text-primary">
           <Megaphone className="h-3 w-3" />
-          <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-primary motion-safe:animate-ping" />
+          <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-pill bg-primary motion-safe:animate-ping" />
         </span>
-        <span className="hidden shrink-0 rounded-full bg-primary px-1.5 py-px text-micro font-bold uppercase tracking-wider text-primary-foreground sm:inline">
+        <span className="hidden shrink-0 rounded-pill bg-primary px-1.5 py-px text-micro font-bold uppercase tracking-wider text-primary-foreground sm:inline">
           Novità
         </span>
         <span className="truncate font-medium text-foreground">{newest.title}</span>
@@ -46,7 +46,7 @@ export function WhatsNewBar({ className, entries = CHANGELOG }: { className?: st
         )}
         <span className="hidden truncate text-muted-foreground md:inline">· {newest.summary}</span>
         {more > 0 && (
-          <span className="shrink-0 rounded-full border border-primary/30 px-1.5 text-caption text-primary">+{more}</span>
+          <span className="shrink-0 rounded-pill border border-primary/30 px-1.5 text-caption text-primary">+{more}</span>
         )}
         <span className="ml-auto flex shrink-0 items-center gap-0.5 text-xs font-medium text-primary group-hover:underline">
           Scopri

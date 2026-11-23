@@ -26,7 +26,7 @@ function CopyUrl({ url }: { url: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="flex min-w-0 items-center gap-1.5">
-      <code className="min-w-0 flex-1 truncate rounded border bg-muted/40 px-2 py-1 text-caption" data-testid="webhook-url">{url}</code>
+      <code className="min-w-0 flex-1 truncate rounded-xs border bg-muted/40 px-2 py-1 text-caption" data-testid="webhook-url">{url}</code>
       <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0" aria-label="Copy the URL"
         onClick={() => { void navigator.clipboard?.writeText(url).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }).catch(() => undefined); }}>
         {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}

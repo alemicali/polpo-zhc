@@ -51,7 +51,7 @@ export function Queue({
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   if (items.length === 0) return null;
   return (
-    <div className={cn("rounded-xl border border-border/60 bg-card/60 text-sm shadow-card backdrop-blur-sm", className)} data-testid="chat-queue">
+    <div className={cn("rounded-xl border border-border/60 bg-card/60 text-sm shadow-card backdrop-blur-surface", className)} data-testid="chat-queue">
       <div className="flex items-center gap-2 px-2.5 py-1">
         <button
           type="button"
@@ -69,7 +69,7 @@ export function Queue({
         <button
           type="button"
           onClick={onClear}
-          className="rounded px-1.5 py-0.5 text-caption text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+          className="rounded-xs px-1.5 py-0.5 text-caption text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
         >
           Clear
         </button>
@@ -116,12 +116,12 @@ function AutoSendSwitch({ checked, onChange }: { checked: boolean; onChange: (v:
         aria-label="Auto-send queued prompts"
         onClick={() => onChange(!checked)}
         className={cn(
-          "relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors",
+          "relative inline-flex h-4 w-7 shrink-0 items-center rounded-pill transition-colors",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
           checked ? "bg-primary" : "bg-muted-foreground/30",
         )}
       >
-        <span className={cn("inline-block h-3 w-3 transform rounded-full bg-background shadow transition-transform", checked ? "translate-x-3.5" : "translate-x-0.5")} />
+        <span className={cn("inline-block h-3 w-3 transform rounded-pill bg-background shadow-control transition-transform", checked ? "translate-x-3.5" : "translate-x-0.5")} />
       </button>
     </label>
   );
@@ -228,11 +228,11 @@ function QueueItemRow({
         <button
           type="button"
           onClick={startEditing}
-          className="min-w-0 flex-1 cursor-text rounded py-0.5 text-left leading-snug text-foreground/90 hover:text-foreground"
+          className="min-w-0 flex-1 cursor-text rounded-xs py-0.5 text-left leading-snug text-foreground/90 hover:text-foreground"
           title="Click to edit"
         >
           {item.next && (
-            <span className="mr-1.5 rounded bg-primary/10 px-1 py-px text-micro font-medium uppercase tracking-wide text-primary">next</span>
+            <span className="mr-1.5 rounded-xs bg-primary/10 px-1 py-px text-micro font-medium uppercase tracking-wide text-primary">next</span>
           )}
           <span className="line-clamp-2 whitespace-pre-wrap break-words">{item.text}</span>
         </button>
@@ -245,7 +245,7 @@ function QueueItemRow({
           onClick={onSend}
           disabled={sendDisabled}
           className={cn(
-            "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded",
+            "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-xs",
             sendDisabled ? "cursor-not-allowed text-muted-foreground/40" : "text-primary hover:bg-primary/15",
           )}
         >
@@ -256,7 +256,7 @@ function QueueItemRow({
         type="button"
         aria-label="Remove from queue"
         onClick={onRemove}
-        className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+        className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-xs text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
       >
         <X className="h-3.5 w-3.5" />
       </button>
@@ -284,7 +284,7 @@ export function PendingSteers({ steers, onCancel, className }: { steers: Pending
             aria-label="Withdraw this message"
             title="Withdraw (back to the composer)"
             onClick={() => onCancel(steer.id)}
-            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-xs text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <X className="h-3.5 w-3.5" />
           </button>

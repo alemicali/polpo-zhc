@@ -34,6 +34,10 @@
       "types": "./dist/hook-events.d.ts",
       "import": "./dist/hook-events.js"
     },
+    "./appearance": {
+      "types": "./dist/appearance.d.ts",
+      "import": "./dist/appearance.js"
+    },
     "./state-machine": {
       "types": "./dist/state-machine.d.ts",
       "import": "./dist/state-machine.js"

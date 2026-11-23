@@ -256,8 +256,8 @@ function ScoreBar({ score, label }: { score: number; label: string }) {
   return (
     <div className="flex items-center gap-2">
       <span className="text-micro text-muted-foreground w-24 truncate capitalize">{label}</span>
-      <div className="flex-1 h-1.5 rounded-full bg-muted/40 overflow-hidden">
-        <div className={cn("h-full rounded-full transition-all", color)} style={{ width: `${pct}%` }} />
+      <div className="flex-1 h-1.5 rounded-pill bg-muted/40 overflow-hidden">
+        <div className={cn("h-full rounded-pill transition-all", color)} style={{ width: `${pct}%` }} />
       </div>
       <span className="text-micro font-mono w-8 text-right">{pct}%</span>
     </div>
@@ -304,14 +304,14 @@ function LiveActivityStrip({ process }: { process: AgentProcess }) {
   if (!activity.lastTool && !activity.lastFile && !activity.summary) {
     return (
       <div className="flex items-center gap-2 px-4 py-2 bg-primary/5 rounded-lg border border-primary/10">
-        <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+        <div className="h-1.5 w-1.5 rounded-pill bg-primary animate-pulse" />
         <span className="text-xs text-primary">Running...</span>
       </div>
     );
   }
   return (
     <div className="flex items-center gap-3 px-4 py-2 bg-primary/5 rounded-lg border border-primary/10">
-      <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse shrink-0" />
+      <div className="h-1.5 w-1.5 rounded-pill bg-primary animate-pulse shrink-0" />
       {activity.lastTool && (
         <Badge variant="outline" className="text-micro font-mono px-1.5 py-0 text-primary border-primary/30">
           <Wrench className="h-2.5 w-2.5 mr-0.5" />
@@ -444,7 +444,7 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
           "flex items-center gap-2.5 px-3 py-2.5 rounded-md cursor-pointer transition-colors",
           open ? "bg-accent/10" : "hover:bg-accent/20"
         )}>
-          <div className={cn("h-2 w-2 rounded-full shrink-0", style.dot)} />
+          <div className={cn("h-2 w-2 rounded-pill shrink-0", style.dot)} />
           <Icon className={cn("h-4 w-4 shrink-0", style.color)} />
           <Badge variant="outline" className="text-xs font-mono px-2 py-0.5 shrink-0">
             {eventLabel}
@@ -482,7 +482,7 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
         <CollapsibleContent>
           <div className="ml-7 mr-2 mb-0.5">
             <pre className={cn(
-              "text-sm rounded px-3 py-2 whitespace-pre-wrap font-mono overflow-x-auto max-h-56 overflow-y-auto leading-normal border",
+              "text-sm rounded-xs px-3 py-2 whitespace-pre-wrap font-mono overflow-x-auto max-h-56 overflow-y-auto leading-normal border",
               isToolResult && entry.isError
                 ? "bg-destructive/5 text-destructive/80 border-destructive/20"
                 : "bg-muted/20 text-muted-foreground border-border/30"
@@ -555,7 +555,7 @@ function ActivityRunHeader({
   const startedAt = run.header?.startedAt;
 
   return (
-    <div className="sticky top-0 z-10 flex min-h-9 items-center gap-2 border-y border-border bg-background/95 px-3 py-2 backdrop-blur-sm">
+    <div className="sticky top-0 z-10 flex min-h-9 items-center gap-2 border-y border-border bg-background/95 px-3 py-2 backdrop-blur-surface">
       <GitBranch className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       <span className="text-xs font-semibold text-foreground">Run {run.attempt}</span>
       {isLatest && totalRuns > 1 && (
@@ -564,7 +564,7 @@ function ActivityRunHeader({
       {status && (
         <span className="flex items-center gap-1 text-micro capitalize text-muted-foreground">
           <span className={cn(
-            "h-1.5 w-1.5 rounded-full",
+            "h-1.5 w-1.5 rounded-pill",
             status === "running" ? "bg-success animate-pulse"
               : status === "completed" ? "bg-success"
                 : status === "failed" || status === "killed" ? "bg-destructive" : "bg-muted-foreground",
@@ -843,7 +843,7 @@ function TaskDirectionComposer({ task, process }: { task: Task; process?: AgentP
         <div className="mt-2 ml-7 flex flex-col gap-1 border-t border-border/40 pt-2">
           {recentDirections.map((direction) => (
             <div key={direction.id} className="flex min-w-0 items-center gap-2 text-caption text-muted-foreground">
-              <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", directionStatusStyle[direction.status])} />
+              <span className={cn("h-1.5 w-1.5 shrink-0 rounded-pill", directionStatusStyle[direction.status])} />
               <span className="shrink-0 font-medium uppercase text-foreground/60">{direction.mode.replace("_", " ")}</span>
               <span className="truncate">{direction.message}</span>
               <span className="ml-auto shrink-0 capitalize">{direction.status}</span>
@@ -1087,7 +1087,7 @@ export function TaskDetailPage() {
                             "flex items-center gap-2 px-2.5 py-1.5 rounded-md transition-colors",
                             isLatest && "bg-accent/10",
                           )}>
-                            <div className={cn("h-1.5 w-1.5 rounded-full shrink-0", dotColor, isLatest && "animate-pulse")} />
+                            <div className={cn("h-1.5 w-1.5 rounded-pill shrink-0", dotColor, isLatest && "animate-pulse")} />
                             <MsgIcon className={cn("h-3 w-3 shrink-0", iconColor)} />
                             <span className={cn("text-caption truncate min-w-0", textColor, isLatest && "font-medium")}>
                               {entry.message}
@@ -1122,7 +1122,7 @@ export function TaskDetailPage() {
 
                   {/* Score hero card */}
                   <Card className={cn(
-                    "bg-card/80 backdrop-blur-sm border-border/40 overflow-hidden py-0 gap-0",
+                    "bg-card/80 backdrop-blur-surface border-border/40 overflow-hidden py-0 gap-0",
                     assessment.passed ? "border-l-2 border-l-success" : "border-l-2 border-l-destructive"
                   )}>
                     <CardContent className="pt-4 pb-4 space-y-3">
@@ -1184,14 +1184,14 @@ export function TaskDetailPage() {
                                 "relative rounded-lg border border-border/30 overflow-hidden",
                                 "bg-gradient-to-r to-transparent", bgGlow
                               )}>
-                                <div className={cn("absolute inset-y-0 left-0 opacity-[0.04]", barColor)} style={{ width: `${pct}%` }} />
+                                <div className={cn("absolute inset-y-0 left-0 opacity-5", barColor)} style={{ width: `${pct}%` }} />
                                 <div className="relative flex items-start gap-3 p-3">
                                   <div className="shrink-0 flex flex-col items-center gap-0.5">
                                     <div
-                                      className="relative h-10 w-10 rounded-full flex items-center justify-center"
+                                      className="relative h-10 w-10 rounded-pill flex items-center justify-center"
                                       style={{ background: `conic-gradient(${tones[scoreTone(pct)].css} ${pct * 3.6}deg, color-mix(in oklch, var(--muted-foreground) 10%, transparent) 0deg)` }}
                                     >
-                                      <div className="h-7 w-7 rounded-full bg-card flex items-center justify-center">
+                                      <div className="h-7 w-7 rounded-pill bg-card flex items-center justify-center">
                                         <span className={cn("text-caption font-bold font-mono tabular-nums", scoreColor)}>{s.score.toFixed(1)}</span>
                                       </div>
                                     </div>
@@ -1270,7 +1270,7 @@ export function TaskDetailPage() {
                                           const sColor = sPct >= 80 ? "bg-success" : sPct >= 60 ? "bg-warning" : "bg-destructive";
                                           return (
                                             <div key={si} className="flex-1 h-full relative" title={`${s.dimension}: ${s.score.toFixed(1)}/5`}>
-                                              <div className={cn("absolute inset-y-0 left-0 rounded-[1px]", sColor)} style={{ width: `${sPct}%` }} />
+                                              <div className={cn("absolute inset-y-0 left-0 rounded-xs", sColor)} style={{ width: `${sPct}%` }} />
                                             </div>
                                           );
                                         })}
@@ -1329,7 +1329,7 @@ export function TaskDetailPage() {
                                             {hasExploration && (
                                               <TabsContent value="analysis" className="mt-2">
                                                 <div className="rounded-md bg-muted/10 border-l-2 border-info/30 pl-3 pr-2.5 py-2.5 max-h-72 overflow-y-auto">
-                                                  <MessageResponse mode="static" className="text-caption leading-[1.7] text-muted-foreground/90 [&_p]:mb-1.5 [&_ul]:mb-1.5 [&_ol]:mb-1.5 [&_li]:text-caption [&_code]:text-micro [&_h1]:text-xs [&_h2]:text-xs [&_h3]:text-caption">
+                                                  <MessageResponse mode="static" className="text-caption leading-relaxed text-muted-foreground/90 [&_p]:mb-1.5 [&_ul]:mb-1.5 [&_ol]:mb-1.5 [&_li]:text-caption [&_code]:text-micro [&_h1]:text-xs [&_h2]:text-xs [&_h3]:text-caption">
                                                     {r.exploration!.analysis}
                                                   </MessageResponse>
                                                 </div>
@@ -1361,7 +1361,7 @@ export function TaskDetailPage() {
                                                       <Collapsible key={mi}>
                                                         <CollapsibleTrigger asChild>
                                                           <div className="flex items-center gap-2 px-2.5 py-2 rounded-md cursor-pointer transition-colors hover:bg-accent/20">
-                                                            <div className={cn("h-1.5 w-1.5 rounded-full shrink-0", msgDot)} />
+                                                            <div className={cn("h-1.5 w-1.5 rounded-pill shrink-0", msgDot)} />
                                                             <MsgIcon className={cn("h-3.5 w-3.5 shrink-0", msgIconColor)} />
                                                             <Badge variant="outline" className="text-micro font-mono px-1.5 py-0 shrink-0">
                                                               {roleLabel}
@@ -1397,7 +1397,7 @@ export function TaskDetailPage() {
                                                               {msg.toolCalls && msg.toolCalls.length > 0 && (
                                                                 <div className="space-y-1 mb-1.5">
                                                                   {msg.toolCalls.map((tc, tci) => (
-                                                                    <div key={tci} className="rounded border border-border/30 bg-muted/20 px-2.5 py-1.5">
+                                                                    <div key={tci} className="rounded-xs border border-border/30 bg-muted/20 px-2.5 py-1.5">
                                                                       <span className="text-micro font-mono font-semibold text-warning/90">{tc.name}</span>
                                                                       <pre className="text-micro text-muted-foreground/60 font-mono whitespace-pre-wrap break-words mt-0.5 max-h-24 overflow-y-auto">
                                                                         {JSON.stringify(tc.arguments, null, 2)}
@@ -1408,11 +1408,11 @@ export function TaskDetailPage() {
                                                               )}
                                                               {msg.content && (
                                                                 <div className={cn(
-                                                                  "rounded px-2.5 py-2 max-h-56 overflow-y-auto border",
+                                                                  "rounded-xs px-2.5 py-2 max-h-56 overflow-y-auto border",
                                                                   isError ? "bg-destructive/5 border-destructive/20" : "bg-muted/20 border-border/30"
                                                                 )}>
                                                                   <MessageResponse mode="static" className={cn(
-                                                                    "text-caption leading-[1.6] [&_p]:mb-1.5 [&_ul]:mb-1.5 [&_ol]:mb-1.5 [&_li]:text-caption [&_code]:text-micro [&_pre]:text-micro [&_pre]:max-h-32 [&_pre]:overflow-y-auto [&_h1]:text-xs [&_h2]:text-xs [&_h3]:text-caption",
+                                                                    "text-caption leading-relaxed [&_p]:mb-1.5 [&_ul]:mb-1.5 [&_ol]:mb-1.5 [&_li]:text-caption [&_code]:text-micro [&_pre]:text-micro [&_pre]:max-h-32 [&_pre]:overflow-y-auto [&_h1]:text-xs [&_h2]:text-xs [&_h3]:text-caption",
                                                                     isError ? "text-destructive/80" : "text-muted-foreground"
                                                                   )}>
                                                                     {msg.content.length > 2000 ? msg.content.slice(0, 2000) + "\n...truncated" : msg.content}
@@ -1455,7 +1455,7 @@ export function TaskDetailPage() {
                                                 <div className="space-y-1.5">
                                                   {r.scoringAttemptErrors!.map((err, ei) => (
                                                     <div key={ei} className="rounded-md bg-warning/5 border border-warning/15 px-3 py-2">
-                                                      <p className="text-micro font-mono text-warning/70 leading-[1.6] break-words">{err}</p>
+                                                      <p className="text-micro font-mono text-warning/70 leading-relaxed break-words">{err}</p>
                                                     </div>
                                                   ))}
                                                 </div>
@@ -1531,7 +1531,7 @@ export function TaskDetailPage() {
               {/* Assessment compact summary (when not in dedicated tab) */}
               {assessment && !showAssessmentTab && (
                 <Card className={cn(
-                  "bg-card/80 backdrop-blur-sm border-border/40 overflow-hidden py-0 gap-0",
+                  "bg-card/80 backdrop-blur-surface border-border/40 overflow-hidden py-0 gap-0",
                   assessment.passed ? "border-l-2 border-l-success" : "border-l-2 border-l-destructive"
                 )}>
                   <CardContent className="pt-3 pb-3">
@@ -1713,7 +1713,7 @@ export function TaskDetailPage() {
                                     <Link
                                       key={j}
                                       to={fileTarget}
-                                      className="text-caption bg-muted/40 rounded px-2 py-0.5 font-mono text-primary/90 break-all hover:bg-muted/70 hover:text-primary transition-colors"
+                                      className="text-caption bg-muted/40 rounded-xs px-2 py-0.5 font-mono text-primary/90 break-all hover:bg-muted/70 hover:text-primary transition-colors"
                                       title="Open in file editor"
                                     >
                                       {p}
@@ -1721,7 +1721,7 @@ export function TaskDetailPage() {
                                   );
                                 }
                                 return (
-                                  <code key={j} className="text-caption bg-muted/40 rounded px-2 py-0.5 font-mono text-muted-foreground break-all">{p}</code>
+                                  <code key={j} className="text-caption bg-muted/40 rounded-xs px-2 py-0.5 font-mono text-muted-foreground break-all">{p}</code>
                                 );
                               })}
                             </div>
@@ -2077,7 +2077,7 @@ export function TaskDetailPage() {
                               <button
                                 key={dep}
                                 onClick={() => navigate(`/tasks/${dep}`)}
-                                className="flex items-center gap-2 text-left text-xs hover:bg-muted/50 rounded px-2 py-1.5 transition-colors"
+                                className="flex items-center gap-2 text-left text-xs hover:bg-muted/50 rounded-xs px-2 py-1.5 transition-colors"
                               >
                                 <GitBranch className="h-3 w-3 text-muted-foreground shrink-0" />
                                 <span className="min-w-0 break-words">{depTitle || dep}</span>

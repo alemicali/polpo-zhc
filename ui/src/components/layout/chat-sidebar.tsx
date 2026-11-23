@@ -63,9 +63,9 @@ function SidebarSkeleton() {
       <div className="flex items-center gap-2 px-4 py-2 border-b border-border/40 shrink-0">
         <Skeleton className="h-7 w-7 rounded-md" />
         <Skeleton className="h-7 w-7 rounded-md" />
-        <Skeleton className="h-4 w-32 rounded" />
+        <Skeleton className="h-4 w-32 rounded-xs" />
         <div className="flex-1" />
-        <Skeleton className="h-5 w-20 rounded-full" />
+        <Skeleton className="h-5 w-20 rounded-pill" />
       </div>
 
       {/* Messages skeleton */}
@@ -75,32 +75,32 @@ function SidebarSkeleton() {
             <Skeleton className="h-10 w-48 rounded-2xl rounded-br-sm" />
           </div>
           <div className="flex gap-3">
-            <Skeleton className="h-7 w-7 rounded-full shrink-0" />
+            <Skeleton className="h-7 w-7 rounded-pill shrink-0" />
             <div className="flex-1 space-y-2">
-              <Skeleton className="h-3 w-16 rounded" />
-              <Skeleton className="h-4 w-full rounded" />
-              <Skeleton className="h-4 w-3/4 rounded" />
-              <Skeleton className="h-4 w-5/6 rounded" />
+              <Skeleton className="h-3 w-16 rounded-xs" />
+              <Skeleton className="h-4 w-full rounded-xs" />
+              <Skeleton className="h-4 w-3/4 rounded-xs" />
+              <Skeleton className="h-4 w-5/6 rounded-xs" />
             </div>
           </div>
           <div className="flex justify-end">
             <Skeleton className="h-10 w-36 rounded-2xl rounded-br-sm" />
           </div>
           <div className="flex gap-3">
-            <Skeleton className="h-7 w-7 rounded-full shrink-0" />
+            <Skeleton className="h-7 w-7 rounded-pill shrink-0" />
             <div className="flex-1 space-y-2">
-              <Skeleton className="h-3 w-16 rounded" />
-              <Skeleton className="h-4 w-full rounded" />
-              <Skeleton className="h-4 w-2/3 rounded" />
+              <Skeleton className="h-3 w-16 rounded-xs" />
+              <Skeleton className="h-4 w-full rounded-xs" />
+              <Skeleton className="h-4 w-2/3 rounded-xs" />
             </div>
           </div>
         </div>
       </div>
 
       {/* Real prompt input — disabled during loading */}
-      <div className="bg-background/80 backdrop-blur-md px-4 pt-2 pb-1.5 shrink-0">
+      <div className="bg-background/80 backdrop-blur-surface px-4 pt-2 pb-1.5 shrink-0">
         <div className="mx-auto max-w-3xl">
-          <PromptInput onSubmit={() => {}} className="[&_[data-slot=input-group]]:rounded-[calc(var(--radius)+8px)]">
+          <PromptInput onSubmit={() => {}} className="[&_[data-slot=input-group]]:rounded-2xl">
             <PromptInputTextarea placeholder={`Message ${orchestratorName}...`} disabled />
             <PromptInputFooter>
               <div className="flex items-center gap-1" />
@@ -162,9 +162,9 @@ export function ChatSidebar() {
         type="button"
         aria-label="Resize chat sidebar"
         onPointerDown={startResize}
-        className="absolute inset-y-0 -left-1 z-20 w-2 cursor-col-resize rounded-full outline-none focus-visible:ring-2 focus-visible:ring-primary/40 group"
+        className="absolute inset-y-0 -left-1 z-20 w-2 cursor-col-resize rounded-pill outline-none focus-visible:ring-2 focus-visible:ring-primary/40 group"
       >
-        <span className="absolute inset-y-2 left-1/2 w-px -translate-x-1/2 rounded-full bg-border transition-all group-hover:w-[3px] group-hover:bg-primary/40" />
+        <span className="absolute inset-y-2 left-1/2 w-px -translate-x-1/2 rounded-pill bg-border transition-all group-hover:w-[3px] group-hover:bg-primary/40" />
       </button>
       <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
         <ErrorBoundary area="la chat">

@@ -81,7 +81,7 @@ function ChatHeaderCenter() {
           />
         </div>
 
-        <div className="flex min-w-0 max-w-44 items-center gap-1.5 rounded-full bg-muted/45 px-2 py-1">
+        <div className="flex min-w-0 max-w-44 items-center gap-1.5 rounded-pill bg-muted/45 px-2 py-1">
           {inGroup ? (
             <UsersRound className="h-3.5 w-3.5 shrink-0 text-primary" />
           ) : agentConfig ? (
@@ -105,7 +105,7 @@ function ChatHeaderCenter() {
 
       <div className="flex shrink-0 items-center justify-end gap-1">
         {!inGroup && messages.length > 0 && (
-          <span className="rounded-full bg-muted px-2 py-0.5 text-micro font-medium leading-4 text-muted-foreground">
+          <span className="rounded-pill bg-muted px-2 py-0.5 text-micro font-medium leading-4 text-muted-foreground">
             {messages.length}
           </span>
         )}
@@ -145,7 +145,7 @@ export function Header() {
 
   return (
     <>
-    <header className="relative flex min-h-12 shrink-0 items-center justify-between border-b border-border/50 bg-background/80 px-4 pt-0 backdrop-blur-md max-lg:min-h-safe-head max-lg:pt-safe-head sm:px-5 lg:min-h-14 lg:px-8">
+    <header className="relative flex min-h-12 shrink-0 items-center justify-between border-b border-border/50 bg-background/80 px-4 pt-0 backdrop-blur-surface max-lg:min-h-safe-head max-lg:pt-safe-head sm:px-5 lg:min-h-14 lg:px-8">
       {/* Mobile: hamburger + logo + title */}
       <div className="flex min-w-0 items-center gap-1.5 lg:hidden">
         <MobileNavSheet>
@@ -221,7 +221,7 @@ export function Header() {
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="end"
-            className="min-w-[220px] bg-popover/95 backdrop-blur-lg border-border/50"
+            className="min-w-[220px] bg-popover/95 backdrop-blur-surface border-border/50"
           >
             <DropdownMenuLabel className="text-label text-muted-foreground/70">
               Mode
@@ -252,9 +252,9 @@ export function Header() {
                 >
                   {/* Three-stop swatch — bg, primary, accent — overlapping discs */}
                   <span className="relative inline-flex shrink-0 h-4 w-4 items-center justify-center">
-                    <span className="absolute inset-0 rounded-full ring-1 ring-border/60" style={{ backgroundColor: swatch[0] }} />
-                    <span className="absolute h-3 w-3 rounded-full" style={{ backgroundColor: swatch[1], left: "30%", top: "10%" }} />
-                    <span className="absolute h-2 w-2 rounded-full" style={{ backgroundColor: swatch[2], left: "55%", top: "50%" }} />
+                    <span className="absolute inset-0 rounded-pill ring-1 ring-border/60" style={{ backgroundColor: swatch[0] }} />
+                    <span className="absolute h-3 w-3 rounded-pill" style={{ backgroundColor: swatch[1], left: "30%", top: "10%" }} />
+                    <span className="absolute h-2 w-2 rounded-pill" style={{ backgroundColor: swatch[2], left: "55%", top: "50%" }} />
                   </span>
                   <span className="flex-1 min-w-0">
                     <span className="block leading-tight">{p.name}</span>
