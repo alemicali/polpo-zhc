@@ -44,6 +44,27 @@ export interface DataColumn {
   type: "string" | "number" | "boolean" | "date" | "datetime" | "json" | "unknown";
   nullable?: boolean;
   primaryKey?: boolean;
+  /** The database's own type name (varchar(255), timestamptz, INTEGER…), when known. */
+  nativeType?: string;
+  /** The column's default expression, when the database reports one. */
+  defaultValue?: string | null;
+}
+
+/** An index on a SQL dataset. */
+export interface DataIndex {
+  name: string;
+  columns: string[];
+  unique: boolean;
+  primary?: boolean;
+}
+
+/** A foreign key: these columns reference another dataset's columns. */
+export interface DataForeignKey {
+  name?: string;
+  columns: string[];
+  references: { dataset: string; columns: string[] };
+  onUpdate?: string;
+  onDelete?: string;
 }
 
 export interface DataDataset {
@@ -53,6 +74,12 @@ export interface DataDataset {
   namespace?: string;
   kind: "table" | "view" | "endpoint" | "file";
   columns: DataColumn[];
+  /** Rows in the dataset (exact for SQLite, the planner's estimate for PostgreSQL), when known. */
+  rowCount?: number;
+  /** Indexes (SQL sources). */
+  indexes?: DataIndex[];
+  /** Foreign keys to other datasets (SQL sources). */
+  foreignKeys?: DataForeignKey[];
 }
 
 export type DataFilterOperator = "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "contains" | "startsWith" | "in" | "isNull";
@@ -84,6 +111,8 @@ export interface DataQuery {
   aggregates?: DataAggregate[];
   limit?: number;
   offset?: number;
+  /** Also count every row the filters match (ignoring limit and offset): meta.totalCount. */
+  includeTotal?: boolean;
 }
 
 export interface DataFrame {
@@ -97,6 +126,8 @@ export interface DataFrame {
     truncated: boolean;
     durationMs: number;
     fetchedAt: string;
+    /** Rows the filters match in total, when the query asked for includeTotal and the source can count. */
+    totalCount?: number;
   };
 }
 
@@ -107,8 +138,10 @@ export type DataWidgetType =
   | "radar" | "heatmap" | "funnel" | "histogram" | "treemap";
 
 export type DataViewBinding =
-  | { id: string; query: DataQuery; inline?: never }
-  | { id: string; inline: { label?: string; rows: Record<string, unknown>[] }; query?: never };
+  | { id: string; query: DataQuery; inline?: never; sql?: never }
+  | { id: string; inline: { label?: string; rows: Record<string, unknown>[] }; query?: never; sql?: never }
+  /** A read-only SQL statement on a SQLite or PostgreSQL source, run live like a query. */
+  | { id: string; sql: { sourceId: string; statement: string }; query?: never; inline?: never };
 
 export interface DataViewWidget {
   id: string;

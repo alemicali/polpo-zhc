@@ -50,6 +50,7 @@ const QuerySchema = z.object({
   })).optional(),
   limit: z.number().int().positive().max(1000).optional(),
   offset: z.number().int().nonnegative().optional(),
+  includeTotal: z.boolean().optional(),
 });
 
 export function dataRoutes(getDeps: () => { runtime: DataRuntime; store: DataRegistryStore; vaultStore?: VaultStore }): OpenAPIHono {
