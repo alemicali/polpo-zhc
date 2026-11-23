@@ -20,6 +20,27 @@ type Computer = {
   lastSnapshot?: { at: string; diskBytes?: number; memoryBytes?: number }; notice?: string;
 };
 
+/** A provider webhook delivery, as the event log keeps it (sandbox/computer-webhook-events.ts). */
+type WebhookEvent = {
+  id: string; receivedAt: string; outcome: string; reason?: string; httpStatus: number; signature: string; eventType?: string;
+  deliveryId?: string; sandboxId?: string; snapshotName?: string; computerId?: string; providerState?: { from?: string; to?: string };
+  statusChange?: { from?: string; to?: string; error?: string; appliedAt?: string }; action?: string; processingMs: number; bytes: number;
+  payload?: unknown; payloadTruncated?: boolean;
+};
+
+/** "2026-11-23T10:00:00Z accepted sandbox.state.updated sandbox abc (started → stopped) → computer nina: running → stopped" */
+function eventLine(e: WebhookEvent): string {
+  const states = e.providerState ? [e.providerState.from, e.providerState.to].filter(Boolean).join(" → ") : "";
+  const status = e.statusChange?.to && e.statusChange.to !== e.statusChange.from ? `: ${e.statusChange.from ?? "?"} → ${e.statusChange.to}` : "";
+  return [
+    e.receivedAt, e.outcome, e.eventType ?? "(no type)",
+    e.sandboxId ? `sandbox ${e.sandboxId}` : e.snapshotName ? `snapshot ${e.snapshotName}` : "",
+    states ? `(${states})` : "",
+    e.computerId ? `→ computer ${e.computerId}${status}` : "",
+    e.reason ? `— ${e.reason}` : "",
+  ].filter(Boolean).join(" ");
+}
+
 const gb = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(bytes >= 10 * 1024 ** 3 ? 0 : 1)} GB`;
 
 /** "snapshot 2026-11-21T22:18:55Z (0.2 GB memory + 1.4 GB disk)" */
@@ -97,18 +118,60 @@ export function registerComputerTools(tool: Register, deps: McpDeps): void {
   tool("computers", "polpo_computer_webhooks", {
     title: "Computer provider webhooks",
     description: "Whether the computers' providers push their machines' state to Polpo (webhooks), so a machine deleted, stopped or paused "
-      + "outside Polpo shows at once (without them, a check every 5 minutes; with them, every 20). action status (default): per provider "
+      + "outside Polpo shows at once (without them, or while a provider sends nothing, a check every 5 minutes; with events arriving, every 20). action status (default): per provider "
       + "(daytona, e2b) the state (receiving / configured / not-configured), last event, the URL to give the provider. Daytona: the person "
       + "adds the endpoint in Daytona's dashboard (Webhooks → Add Endpoint) and enters its signing secret in the dashboard (setup_url; never in chat). "
       + "E2B: action register (Polpo registers the endpoint with its own secret) or unregister. Needs POLPO_PUBLIC_URL, and behind Tailscale Funnel "
-      + "the /<instance>/api/v1/computers/webhooks/ path exposed.",
+      + "the /<instance>/api/v1/computers/webhooks/ path exposed. events: true (with provider): the provider's event log, newest first: every delivery "
+      + "with its outcome (accepted / ignored / rejected / error), reason, sandbox, matched computer and status change; event_id: one delivery with its redacted payload.",
     inputSchema: {
       action: z.enum(["status", "register", "unregister"]).optional().describe("status (default), or register / unregister (E2B)"),
-      provider: z.enum(["daytona", "e2b"]).optional().describe("One provider (register and unregister: e2b)"),
+      provider: z.enum(["daytona", "e2b"]).optional().describe("One provider (register and unregister: e2b; events: required)"),
+      events: z.boolean().optional().describe("true: the provider's recent deliveries (its event log) instead of the status"),
+      outcome: z.array(z.enum(["accepted", "ignored", "rejected", "error"])).optional().describe("events: only these outcomes"),
+      limit: z.number().int().min(1).max(200).optional().describe("events: how many (default 20)"),
+      cursor: z.string().optional().describe("events: next_cursor of the previous call"),
+      event_id: z.string().optional().describe("One delivery (from events) with its redacted payload and headers"),
     },
-    outputSchema: { providers: z.array(z.object({ provider: z.string(), state: z.string() }).passthrough()) },
+    outputSchema: {
+      providers: z.array(z.object({ provider: z.string(), state: z.string() }).passthrough()).optional(),
+      provider: z.string().optional(),
+      events: z.array(z.object({ id: z.string(), outcome: z.string() }).passthrough()).optional(),
+      counts: z.record(z.string(), z.number()).optional(),
+      next_cursor: z.string().optional(),
+      event: z.object({ id: z.string(), outcome: z.string() }).passthrough().optional(),
+    },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  }, async ({ action = "status", provider }) => {
+  }, async ({ action = "status", provider, events, outcome, limit, cursor, event_id }) => {
+    if (event_id || events) {
+      if (!provider) return fail("Say which provider's events: provider daytona or e2b.");
+      if (event_id) {
+        const r = await apiGet(deps, `/computer-webhooks/${enc(provider)}/events/${enc(event_id)}`);
+        if (!r.ok) return apiError(r, "Reading the webhook delivery");
+        const e = r.data as WebhookEvent;
+        const lines = [eventLine(e)];
+        if (e.statusChange) lines.push(`Polpo: ${e.action ?? ""}${e.statusChange.error ? ` (error: ${e.statusChange.error})` : ""}`);
+        if (e.deliveryId) lines.push(`Delivery ${e.deliveryId}; signature ${e.signature}; HTTP ${e.httpStatus}; ${e.processingMs} ms; ${e.bytes} bytes`);
+        if (e.payload !== undefined) lines.push(`Payload (redacted${e.payloadTruncated ? ", truncated" : ""}):\n${typeof e.payload === "string" ? e.payload : JSON.stringify(e.payload, null, 2)}`);
+        return ok(lines.join("\n"), { provider, event: e });
+      }
+      const q = new URLSearchParams({ limit: String(limit ?? 20) });
+      if (cursor) q.set("cursor", cursor);
+      if (outcome?.length) q.set("outcome", outcome.join(","));
+      const r = await apiGet(deps, `/computer-webhooks/${enc(provider)}/events?${q}`);
+      if (!r.ok) return apiError(r, "Reading the webhook events");
+      const d = r.data as { events: WebhookEvent[]; nextCursor?: string; total: number; counts: Record<string, number> };
+      const label = provider === "daytona" ? "Daytona" : "E2B";
+      const lines = [`${label} webhook deliveries (${d.total} kept: ${Object.entries(d.counts).map(([k, v]) => `${v} ${k}`).join(", ")})${outcome?.length ? `, showing ${outcome.join(" / ")}` : ""}:`];
+      if (!d.events.length) {
+        const s = await apiGet(deps, "/computer-webhooks");
+        const st = s.ok ? (s.data as { providers: Array<{ provider: string; state: string; waitingNote?: string }> }).providers.find((p) => p.provider === provider) : undefined;
+        lines.push(st?.state === "not-configured" ? `  none: ${label} webhooks are not configured (call without events for the setup).` : `  none.${st?.waitingNote ? ` ${st.waitingNote}` : ""}`);
+      }
+      for (const e of d.events) lines.push(`- ${eventLine(e)} [${e.id}]`);
+      if (d.nextCursor) lines.push(`More: cursor ${d.nextCursor}`);
+      return ok(lines.join("\n"), { provider, events: d.events, counts: d.counts, ...(d.nextCursor ? { next_cursor: d.nextCursor } : {}) });
+    }
     if (action !== "status") {
       if (provider && provider !== "e2b") return fail("Only E2B webhooks are registered by Polpo; Daytona's endpoint is added in Daytona's dashboard (see status for the URL).");
       const r = await apiSend(deps, action === "register" ? "POST" : "DELETE", "/computer-webhooks/e2b/register");
@@ -116,12 +179,14 @@ export function registerComputerTools(tool: Register, deps: McpDeps): void {
     }
     const r = await apiGet(deps, "/computer-webhooks");
     if (!r.ok) return apiError(r, "Reading the computer webhooks");
-    const d = r.data as { providers: Array<Record<string, unknown> & { provider: string; label: string; state: string; url?: string; secretSet: boolean; lastEventAt?: string; registration: string; lastError?: string }>; note: string };
+    const d = r.data as { providers: Array<Record<string, unknown> & { provider: string; label: string; state: string; url?: string; secretSet: boolean; lastEventAt?: string; registration: string; lastError?: string; waitingNote?: string; received: number; rejected: number; ignored: number; errors?: number }>; note: string };
     const providers = d.providers.filter((p) => !provider || p.provider === provider);
     const lines: string[] = [];
     const extra: Record<string, unknown> = {};
     for (const p of providers) {
-      lines.push(`- ${p.label}: ${p.state}${p.lastEventAt ? `, last event ${p.lastEventAt}` : ""}${p.url ? `; URL ${p.url}` : "; no URL (POLPO_PUBLIC_URL is not set)"}${p.lastError ? `; last error: ${p.lastError}` : ""}`);
+      lines.push(`- ${p.label}: ${p.state}${p.lastEventAt ? `, last event ${p.lastEventAt}` : ""}${p.url ? `; URL ${p.url}` : "; no URL (POLPO_PUBLIC_URL is not set)"}`
+        + `; ${p.received} received (${p.ignored} ignored), ${p.rejected} rejected${p.errors ? `, ${p.errors} errors` : ""}${p.lastError ? `; last error: ${p.lastError}` : ""}`);
+      if (p.waitingNote) lines.push(`  ${p.waitingNote}`);
       if (p.provider === "daytona" && !p.secretSet) {
         const h = setupHandoff(deps, { kind: "computer-webhook", item: "daytona", field: "secret" }, "Daytona webhook signing secret (whsec_…, from Daytona's dashboard → Webhooks → the endpoint)");
         Object.assign(extra, h);
@@ -129,6 +194,7 @@ export function registerComputerTools(tool: Register, deps: McpDeps): void {
       }
       if (p.provider === "e2b" && p.state === "not-configured") lines.push("  E2B: call again with action register.");
     }
+    lines.push("Each provider's deliveries: call with events: true and provider.");
     lines.push(d.note);
     return ok(lines.join("\n"), { providers, ...extra });
   });

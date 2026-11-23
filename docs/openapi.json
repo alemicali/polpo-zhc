@@ -274,6 +274,316 @@
             "additionalProperties": false
           }
         }
+      },
+      "ComputerWebhookProviderStatus": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "daytona",
+              "e2b"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "registration": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "api"
+            ]
+          },
+          "secretSet": {
+            "type": "boolean"
+          },
+          "registered": {
+            "type": "boolean"
+          },
+          "webhookId": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "inUse": {
+            "type": "boolean"
+          },
+          "lastEventAt": {
+            "type": "string"
+          },
+          "lastEventType": {
+            "type": "string"
+          },
+          "received": {
+            "type": "number"
+          },
+          "rejected": {
+            "type": "number"
+          },
+          "ignored": {
+            "type": "number"
+          },
+          "errors": {
+            "type": "number"
+          },
+          "lastError": {
+            "type": "string"
+          },
+          "lastErrorAt": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "receiving",
+              "configured",
+              "not-configured"
+            ]
+          },
+          "waitingNote": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "label",
+          "registration",
+          "secretSet",
+          "inUse",
+          "received",
+          "rejected",
+          "ignored",
+          "errors",
+          "state"
+        ]
+      },
+      "ComputerWebhookEventSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "receivedAt": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "ignored",
+              "rejected",
+              "error"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "httpStatus": {
+            "type": "number"
+          },
+          "signature": {
+            "type": "string",
+            "enum": [
+              "valid",
+              "invalid",
+              "missing",
+              "not-checked"
+            ]
+          },
+          "eventType": {
+            "type": "string"
+          },
+          "providerEventId": {
+            "type": "string"
+          },
+          "deliveryId": {
+            "type": "string"
+          },
+          "sandboxId": {
+            "type": "string"
+          },
+          "snapshotName": {
+            "type": "string"
+          },
+          "computerId": {
+            "type": "string"
+          },
+          "providerState": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              }
+            }
+          },
+          "statusChange": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "error": {
+                "type": "string"
+              },
+              "appliedAt": {
+                "type": "string"
+              }
+            }
+          },
+          "action": {
+            "type": "string"
+          },
+          "events": {
+            "type": "number"
+          },
+          "processingMs": {
+            "type": "number"
+          },
+          "bytes": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "receivedAt",
+          "outcome",
+          "httpStatus",
+          "signature",
+          "processingMs",
+          "bytes"
+        ]
+      },
+      "ComputerWebhookEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "receivedAt": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "ignored",
+              "rejected",
+              "error"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "httpStatus": {
+            "type": "number"
+          },
+          "signature": {
+            "type": "string",
+            "enum": [
+              "valid",
+              "invalid",
+              "missing",
+              "not-checked"
+            ]
+          },
+          "eventType": {
+            "type": "string"
+          },
+          "providerEventId": {
+            "type": "string"
+          },
+          "deliveryId": {
+            "type": "string"
+          },
+          "sandboxId": {
+            "type": "string"
+          },
+          "snapshotName": {
+            "type": "string"
+          },
+          "computerId": {
+            "type": "string"
+          },
+          "providerState": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              }
+            }
+          },
+          "statusChange": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "error": {
+                "type": "string"
+              },
+              "appliedAt": {
+                "type": "string"
+              }
+            }
+          },
+          "action": {
+            "type": "string"
+          },
+          "events": {
+            "type": "number"
+          },
+          "processingMs": {
+            "type": "number"
+          },
+          "bytes": {
+            "type": "number"
+          },
+          "payload": {
+            "nullable": true,
+            "description": "The redacted payload (JSON), or a redacted text preview; capped at 4 KB"
+          },
+          "payloadTruncated": {
+            "type": "boolean"
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Safe headers only (never a signature or an authorization)"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "receivedAt",
+          "outcome",
+          "httpStatus",
+          "signature",
+          "processingMs",
+          "bytes"
+        ]
       }
     },
     "parameters": {}
@@ -18130,6 +18440,333 @@
                   "required": [
                     "ok",
                     "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/computer-webhooks": {
+      "get": {
+        "tags": [
+          "Computers"
+        ],
+        "summary": "Computer provider webhooks: each provider's status",
+        "description": "Per provider (daytona, e2b): the signing secret is set, registered (E2B), the URL to give the provider, the last event, the counters (they follow the event log), the last problem since it was configured, and the state (receiving / configured / not-configured). `waitingNote`: configured but no delivery ever arrived. Never a secret.",
+        "responses": {
+          "200": {
+            "description": "Status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "providers": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/ComputerWebhookProviderStatus"
+                          }
+                        },
+                        "note": {
+                          "type": "string"
+                        },
+                        "reconcileOnly": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "providers",
+                        "note",
+                        "reconcileOnly"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/computer-webhooks/{provider}/events": {
+      "get": {
+        "tags": [
+          "Computers"
+        ],
+        "summary": "A provider's webhook event log",
+        "description": "Every delivery the provider sent (the last 200), newest first: accepted (a computer was checked at its provider), ignored (not about one of this instance's computers, a duplicate, an event Polpo does not act on), rejected (signature, replay, size, rate, not configured) or error (Polpo could not apply it). Without payloads (GET /{provider}/events/{id}). `counts`: entries kept per outcome.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "daytona",
+              "description": "daytona or e2b"
+            },
+            "required": true,
+            "description": "daytona or e2b",
+            "name": "provider",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "description": "Default 50"
+            },
+            "required": false,
+            "description": "Default 50",
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "nextCursor of the previous page"
+            },
+            "required": false,
+            "description": "nextCursor of the previous page",
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated outcomes: accepted, ignored, rejected, error",
+              "example": "rejected,error"
+            },
+            "required": false,
+            "description": "Comma-separated outcomes: accepted, ignored, rejected, error",
+            "name": "outcome",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "provider": {
+                          "type": "string"
+                        },
+                        "events": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/ComputerWebhookEventSummary"
+                          }
+                        },
+                        "nextCursor": {
+                          "type": "string"
+                        },
+                        "total": {
+                          "type": "number"
+                        },
+                        "counts": {
+                          "type": "object",
+                          "properties": {
+                            "accepted": {
+                              "type": "number"
+                            },
+                            "ignored": {
+                              "type": "number"
+                            },
+                            "rejected": {
+                              "type": "number"
+                            },
+                            "error": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "accepted",
+                            "ignored",
+                            "rejected",
+                            "error"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "provider",
+                        "events",
+                        "total",
+                        "counts"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown outcome",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown provider",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/computer-webhooks/{provider}/events/{id}": {
+      "get": {
+        "tags": [
+          "Computers"
+        ],
+        "summary": "One webhook delivery",
+        "description": "A recorded delivery with what Polpo did (the computer it matched, its status before and after, the reason it was ignored or rejected), its redacted payload (secrets, tokens, keys and signatures replaced; at most 4 KB) and its safe headers.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "daytona",
+              "description": "daytona or e2b"
+            },
+            "required": true,
+            "description": "daytona or e2b",
+            "name": "provider",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The delivery",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/ComputerWebhookEvent"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown provider or delivery (no longer kept)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
                   ]
                 }
               }
