@@ -830,6 +830,30 @@ describe("catalog and Client ID Metadata Documents", () => {
       { label: "Default", url: "https://mcp.intercom.com/mcp" },
       { label: "EU", url: "https://mcp.eu.intercom.com/mcp" },
     ]);
+    // vendor-hosted servers added later: sign in only (DCR / CIMD), region variants from the notes
+    for (const [id, url, registration] of [
+      ["ovhcloud", "https://mcp.eu.ovhcloud.com/mcp", "dcr"],
+      ["whatsapp-business", "https://mcp.facebook.com/whatsapp_business_tools", "dcr"],
+      ["zernio", "https://mcp.zernio.com/mcp", "dcr"],
+      ["v0", "https://v0.app/api/mcp", "dcr"],
+      ["expo", "https://mcp.expo.dev/mcp", "dcr+cimd"],
+      ["autumn", "https://mcp.useautumn.com/mcp", "dcr"],
+      ["aws", "https://aws-mcp.us-east-1.api.aws/mcp", "dcr"],
+      ["agentphone", "https://mcp.agentphone.ai/mcp", "dcr"],
+    ] as const) {
+      expect(byId(id)).toMatchObject({ url, transport: "http", auth: "oauth", oauthRegistration: registration, verified: true });
+      expect(byId(id).oauth).toBeUndefined();
+      expect(byId(id).docs).toMatch(/^https:\/\//);
+    }
+    expect(byId("ovhcloud").variants).toEqual([
+      { label: "EU", url: "https://mcp.eu.ovhcloud.com/mcp" },
+      { label: "US", url: "https://mcp.us.ovhcloud.com/mcp" },
+      { label: "CA", url: "https://mcp.ca.ovhcloud.com/mcp" },
+    ]);
+    expect(byId("aws").variants).toEqual([
+      { label: "US", url: "https://aws-mcp.us-east-1.api.aws/mcp" },
+      { label: "EU", url: "https://aws-mcp.eu-central-1.api.aws/mcp" },
+    ]);
     expect(byId("azure-devops")).toMatchObject({ urlTemplate: "https://mcp.dev.azure.com/{organization}" });
     expect(byId("azure-devops").url).toBeUndefined();
     await expect(buildConnector({ catalogId: "azure-devops" }, ctx)).rejects.toThrow(/URL/);

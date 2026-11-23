@@ -113,7 +113,7 @@ function googleScopes(raw: RawCatalogEntry): string[] {
   return [...new Set(scopes)].map((s) => `${G}${s}`);
 }
 
-const VARIANT = /\b(US\d?|EU\d?|AU|IN|SG|AP\d|Sandbox|Demo)\s*:?\s+((?:https?:\/\/)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[\w/.-]*)?)/g;
+const VARIANT = /\b(US\d?|EU\d?|CA|AU|IN|SG|AP\d|Sandbox|Demo)\s*:?\s+((?:https?:\/\/)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[\w/.-]*)?)/g;
 
 /** Region / sandbox endpoints mentioned in the notes ("EU: mcp.eu.intercom.com/mcp", "US1 mcp.datadoghq.com"). */
 function variants(raw: RawCatalogEntry): Array<{ label: string; url: string }> | undefined {
