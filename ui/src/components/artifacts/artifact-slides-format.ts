@@ -72,7 +72,7 @@ export function slideTableFontSize(element: SlideElement): number {
   return Math.max(0.32, Math.min(1.7, element.h / rows / 2.8, element.w / columns / 7));
 }
 
-function isElement(value: unknown): value is SlideElement {
+export function isSlideElement(value: unknown): value is SlideElement {
   if (!isRecord(value) || typeof value.id !== "string" || !value.id) return false;
   if (!isPercent(value.x) || !isPercent(value.y) || !isPercent(value.w) || !isPercent(value.h) || value.x + value.w > 100.001 || value.y + value.h > 100.001) return false;
   if (value.type === "table") {
@@ -87,12 +87,12 @@ function isElement(value: unknown): value is SlideElement {
     && (value.fontSize === undefined || (isPercent(value.fontSize) && value.fontSize >= 1 && value.fontSize <= 12));
 }
 
-function isSlide(value: unknown): value is Slide {
+export function isSlide(value: unknown): value is Slide {
   return isRecord(value) && typeof value.id === "string" && LAYOUTS.includes(value.layout as Layout)
     && (value.theme === undefined || (typeof value.theme === "string" && Object.hasOwn(THEMES, value.theme)))
     && typeof value.title === "string" && typeof value.body === "string" && isText(value.secondary) && isText(value.notes)
     && (value.hidden === undefined || typeof value.hidden === "boolean")
-    && (value.elements === undefined || (Array.isArray(value.elements) && value.elements.every(isElement)
+    && (value.elements === undefined || (Array.isArray(value.elements) && value.elements.every(isSlideElement)
       && new Set(value.elements.map((element) => element.id)).size === value.elements.length));
 }
 

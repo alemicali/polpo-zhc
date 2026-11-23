@@ -195,6 +195,9 @@ describe("artifact tools", () => {
     expect(await executeArtifactTool("artifact_get", { id, version: 1 }, polpo)).toContain("--- content of v1 ---\n# Plan\n\n- step one");
     await expect(executeArtifactTool("artifact_update", { id, content: "x", edits: [{ find: "a", replace: "b" }] }, polpo)).rejects.toThrow(/either content or edits/);
 
+    await expect(executeArtifactTool("artifact_update", { id, expectedVersion: 1, content: "outdated draft" }, polpo)).rejects.toThrow();
+    expect((await store.get(id))?.version).toBe(2);
+
     const analyst = { store, author: "analyst" };
     await expect(executeArtifactTool("artifact_update", { id, content: "hijack" }, analyst)).rejects.toThrow(/belongs to polpo/);
     await expect(executeArtifactTool("artifact_delete", { id }, analyst)).rejects.toThrow(/belongs to polpo/);

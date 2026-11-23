@@ -14,7 +14,7 @@ export function createBoard(id: string, name: string, html = BLANK_BOARD, x = 0,
 const MARKER = "data-polpo-design-workspace";
 type Element = DefaultTreeAdapterTypes.Element;
 
-function designMetadata(html: string) {
+export function findDesignMetadata(html: string) {
   if (!html.includes(MARKER)) return;
   const pending: DefaultTreeAdapterTypes.Node[] = [parse(html, { sourceCodeLocationInfo: true })];
   while (pending.length) {
@@ -27,7 +27,7 @@ function designMetadata(html: string) {
 
 export function readDesign(html: string): DesignWorkspace {
   const standard = { pages: [{ id: "page-1", name: "Page 1", boards: [createBoard("board-1", "Artboard 1", html)] }] };
-  const node = designMetadata(html);
+  const node = findDesignMetadata(html);
   const range = node?.sourceCodeLocation;
   const text = node?.childNodes[0];
   if (!range || !text || !("value" in text)) return standard;

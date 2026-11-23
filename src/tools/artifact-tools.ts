@@ -34,7 +34,7 @@ const editsParam = Type.Optional(Type.Array(Type.Object({
 export const ARTIFACT_TOOLS: Tool[] = [
   {
     name: "artifact_create",
-    description: "Create an artifact that opens in the dashboard. Also supports drawings (svg) and diagrams (mermaid). Returns the id and link.\n"
+    description: "Create an artifact that opens in the dashboard. Also supports drawings (svg) and diagrams (mermaid). Returns the id and link. Put type, kind and title before content so the workspace can open while writing.\n"
       + ARTIFACT_WORKSPACE_GUIDE + "\n" + ARTIFACT_BRIDGE_DOC,
     parameters: Type.Object({
       title: Type.String(),
@@ -50,9 +50,10 @@ export const ARTIFACT_TOOLS: Tool[] = [
   {
     name: "artifact_update",
     description: "Change an artifact: new content (whole, or edits that find and replace parts), title, description, sources, refresh. "
-      + "The previous content is kept as a version (people can go back to it).",
+      + "Read the artifact first. Put id and expectedVersion before content or edits. For a localized change, send its exact unique find before replace. The previous content is kept as a version.",
     parameters: Type.Object({
       id: Type.String({ description: "Artifact id (art_…)" }),
+      expectedVersion: Type.Optional(Type.Integer({ minimum: 1, description: "Version read before preparing the change. A concurrent change requires reading again." })),
       content: Type.Optional(Type.String({ description: "The whole new content" })),
       edits: editsParam,
       title: Type.Optional(Type.String()),
@@ -145,7 +146,7 @@ export async function executeArtifactTool(name: string, args: Record<string, unk
       if (typeof args.content === "string" && edits?.length) throw new Error("Give either content or edits, not both");
       const content = typeof args.content === "string" ? args.content : edits?.length ? applyArtifactEdits(current.content, edits) : undefined;
       const artifact = await ctx.store.update(current.id, {
-        ...(edits?.length ? { expectedVersion: current.version } : {}),
+        expectedVersion: typeof args.expectedVersion === "number" ? args.expectedVersion : current.version,
         ...(content !== undefined ? { content } : {}),
         ...(typeof args.title === "string" ? { title: args.title } : {}),
         ...(typeof args.description === "string" ? { description: args.description } : {}),

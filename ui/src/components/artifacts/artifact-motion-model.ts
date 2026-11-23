@@ -42,7 +42,7 @@ export const MAX_SCENES = 24;
 export const MAX_LAYERS = 40;
 export const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
-const dimension = (value: unknown): value is number => finite(value) && Number.isInteger(value) && value >= 64 && value <= 1920;
+export const isMotionDimension = (value: unknown): value is number => finite(value) && Number.isInteger(value) && value >= 64 && value <= 1920;
 const color = (value: unknown) => typeof value === "string" && /^#[\da-f]{6}$/i.test(value);
 export const MAX_MOTION_AUDIO_BYTES = 700_000;
 const audioTypes = "aac|flac|mp4|mpeg|ogg|wav|wave|webm|x-m4a|x-wav";
@@ -60,33 +60,34 @@ export function motionAudioMime(file: File): string | undefined {
 const animations: readonly unknown[] = ["none", "fade", "rise", "slide"];
 const record = (value: unknown) => value && typeof value === "object" ? value as Record<string, unknown> : null;
 
+export function isMotionLayer(value: unknown): value is MotionLayer {
+  const layer = record(value);
+  if (!layer || typeof layer.id !== "string" || !layer.id) return false;
+  if (layer.type !== "text" && layer.type !== "rect" && layer.type !== "ellipse") return false;
+  if (!finite(layer.x) || !finite(layer.y) || !finite(layer.width) || !finite(layer.height) || layer.width < 1 || layer.height < 1 || !color(layer.color)) return false;
+  if (layer.text !== undefined && typeof layer.text !== "string") return false;
+  if (layer.fontSize !== undefined && (!finite(layer.fontSize) || layer.fontSize < 1 || layer.fontSize > 1000)) return false;
+  if (layer.delay !== undefined && (!finite(layer.delay) || layer.delay < 0 || layer.delay > 60)) return false;
+  if (layer.animationDuration !== undefined && (!finite(layer.animationDuration) || layer.animationDuration < 0.05 || layer.animationDuration > 60)) return false;
+  return layer.animation === undefined || animations.includes(layer.animation);
+}
+
+export function isMotionScene(value: unknown): value is MotionScene {
+  const scene = record(value);
+  if (!scene || typeof scene.id !== "string" || !scene.id || typeof scene.name !== "string") return false;
+  if (!finite(scene.duration) || scene.duration < 0.25 || scene.duration > 60 || !color(scene.background)) return false;
+  if (scene.transition !== undefined && scene.transition !== "cut" && scene.transition !== "fade") return false;
+  if (!Array.isArray(scene.layers) || scene.layers.length > MAX_LAYERS) return false;
+  if (!scene.layers.every(isMotionLayer)) return false;
+  return new Set(scene.layers.map(layer => layer.id)).size === scene.layers.length;
+}
+
 export function parseMotion(content: string): MotionProject | null {
   try {
     const model = record(JSON.parse(content));
-    if (!model || model.version !== 1 || !dimension(model.width) || !dimension(model.height)) return null;
+    if (!model || model.version !== 1 || !isMotionDimension(model.width) || !isMotionDimension(model.height)) return null;
     if (!Array.isArray(model.scenes) || !model.scenes.length || model.scenes.length > MAX_SCENES) return null;
-    const sceneIds = new Set<string>();
-    for (const value of model.scenes) {
-      const scene = record(value);
-      if (!scene || typeof scene.id !== "string" || !scene.id || sceneIds.has(scene.id) || typeof scene.name !== "string") return null;
-      sceneIds.add(scene.id);
-      if (!finite(scene.duration) || scene.duration < 0.25 || scene.duration > 60 || !color(scene.background)) return null;
-      if (scene.transition !== undefined && scene.transition !== "cut" && scene.transition !== "fade") return null;
-      if (!Array.isArray(scene.layers) || scene.layers.length > MAX_LAYERS) return null;
-      const layerIds = new Set<string>();
-      for (const candidate of scene.layers) {
-        const layer = record(candidate);
-        if (!layer || typeof layer.id !== "string" || !layer.id || layerIds.has(layer.id)) return null;
-        layerIds.add(layer.id);
-        if (layer.type !== "text" && layer.type !== "rect" && layer.type !== "ellipse") return null;
-        if (!finite(layer.x) || !finite(layer.y) || !finite(layer.width) || !finite(layer.height) || layer.width < 1 || layer.height < 1 || !color(layer.color)) return null;
-        if (layer.text !== undefined && typeof layer.text !== "string") return null;
-        if (layer.fontSize !== undefined && (!finite(layer.fontSize) || layer.fontSize < 1 || layer.fontSize > 1000)) return null;
-        if (layer.delay !== undefined && (!finite(layer.delay) || layer.delay < 0 || layer.delay > 60)) return null;
-        if (layer.animationDuration !== undefined && (!finite(layer.animationDuration) || layer.animationDuration < 0.05 || layer.animationDuration > 60)) return null;
-        if (layer.animation !== undefined && !animations.includes(layer.animation)) return null;
-      }
-    }
+    if (!model.scenes.every(isMotionScene) || new Set(model.scenes.map(scene => scene.id)).size !== model.scenes.length) return null;
     if (model.audio !== undefined) {
       const audio = record(model.audio);
       if (!audio || typeof audio.name !== "string" || !audio.name || typeof audio.src !== "string") return null;
