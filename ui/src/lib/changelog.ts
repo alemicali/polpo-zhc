@@ -44,6 +44,8 @@ export const CHANGELOG: ChangelogEntry[] = [
       "- Vale per i comandi sul server, nei sandbox locali (bubblewrap, Docker) e per gli harness degli agenti eseguiti sul server. I messaggi di timeout e «(no output)» restano come prima.",
     ].join("\n"),
     highlight: false,
+  },
+  {
     id: "2026-11-23-data-ui",
     date: "2026-11-23",
     kind: "improved",
