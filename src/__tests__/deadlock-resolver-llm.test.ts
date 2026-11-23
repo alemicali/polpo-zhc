@@ -1,7 +1,12 @@
-import { describe, it, expect } from "vitest";
-import { analyzeBlockedTasks } from "../core/deadlock-resolver.js";
+import { describe, it, expect, vi } from "vitest";
+import { analyzeBlockedTasks, resolveDeadlock } from "../core/deadlock-resolver.js";
 import { createTestTask } from "./fixtures.js";
 import type { Task } from "../core/types.js";
+import type { Orchestrator } from "../core/orchestrator.js";
+
+vi.mock("../llm/query.js", () => ({
+  queryOrchestratorText: vi.fn().mockResolvedValue({ text: '{"action":"retry","reason":"might be transient"}' }),
+}));
 
 describe("analyzeBlockedTasks", () => {
   it("follows cascade chains to find root failure", () => {
@@ -81,5 +86,51 @@ describe("analyzeBlockedTasks", () => {
     expect(analysis.resolvable).toHaveLength(1);
     expect(analysis.resolvable[0].failedDeps[0].id).toBe("f2");
     expect(analysis.resolvable[0].missingDeps).toContain("missing-id");
+  });
+});
+
+describe("resolveDeadlock", () => {
+  function fakeOrchestrator(tasks: Task[]) {
+    const byId = new Map(tasks.map((t) => [t.id, t]));
+    const transitions: Array<[string, string]> = [];
+    const events: string[] = [];
+    const store = {
+      getAllTasks: async () => [...byId.values()],
+      getTask: async (id: string) => byId.get(id),
+      transition: async (id: string, to: string) => { transitions.push([id, to]); byId.get(id)!.status = to as Task["status"]; },
+      unsafeSetStatus: async () => {},
+      updateTask: async () => {},
+    };
+    const orchestrator = {
+      getConfig: () => ({ settings: {} }),
+      getMemory: async () => "",
+      getStore: () => store,
+      emit: (e: string) => { events.push(e); },
+    } as unknown as Orchestrator;
+    return { orchestrator, transitions, events };
+  }
+
+  it("does not retry a failed dependency whose error is not retryable (the LLM asked for a retry)", async () => {
+    const dep = createTestTask({ id: "dep", status: "failed", retries: 0, maxRetries: 3,
+      result: { exitCode: 1, stdout: "", stderr: "Bedrock: model not enabled for this account", duration: 1, retryable: false } });
+    const blocked = createTestTask({ id: "blocked", status: "pending", dependsOn: ["dep"] });
+    const { orchestrator, transitions, events } = fakeOrchestrator([dep, blocked]);
+
+    await resolveDeadlock(analyzeBlockedTasks([blocked], [dep, blocked]), orchestrator);
+
+    expect(transitions.some(([id]) => id === "dep")).toBe(false);
+    expect(blocked.status).toBe("failed");
+    expect(events).toContain("deadlock:unresolvable");
+  });
+
+  it("retries a failed dependency whose error is retryable", async () => {
+    const dep = createTestTask({ id: "dep", status: "failed", retries: 0, maxRetries: 3,
+      result: { exitCode: 1, stdout: "", stderr: "ECONNRESET", duration: 1 } });
+    const blocked = createTestTask({ id: "blocked", status: "pending", dependsOn: ["dep"] });
+    const { orchestrator, transitions } = fakeOrchestrator([dep, blocked]);
+
+    await resolveDeadlock(analyzeBlockedTasks([blocked], [dep, blocked]), orchestrator);
+
+    expect(transitions).toContainEqual(["dep", "pending"]);
   });
 });

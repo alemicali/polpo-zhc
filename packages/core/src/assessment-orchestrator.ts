@@ -338,6 +338,13 @@ export class AssessmentOrchestrator {
    * Standard assessment flow: run expectations/metrics, then mark done/failed/fix/retry.
    */
   private async proceedToAssessment(taskId: string, task: Task, result: TaskResult): Promise<void> {
+    // A failed run that a re-run cannot fix (model not enabled, credentials refused): no review
+    // (it would only spend on judging a run that did nothing), no fix loop, no retry
+    if (result.exitCode !== 0 && result.retryable === false) {
+      await this.ctx.registry.updateTask(taskId, { result });
+      await this.retryOrFail(taskId, task, result);
+      return;
+    }
     if (task.expectations.length > 0 || task.metrics.length > 0) {
       // Run before:assessment:run hook (async — assessment is already async)
       this.ctx.hooks.runBefore("assessment:run", { taskId, task }).then(async hookResult => {
@@ -787,8 +794,13 @@ export class AssessmentOrchestrator {
     const current = await this.ctx.registry.getTask(taskId);
     if (!current) return;
 
+    // A configuration or access failure (model not enabled, credentials refused): the same agent
+    // would fail the same way, so no automatic retry (and no approval to re-run it); escalation
+    // still gets the final failure. A manual retry still works.
+    const nonRetryable = result.retryable === false && result.exitCode !== 0;
+
     // Side-effects guard: block automatic retry for tasks with irreversible actions.
-    if (current.sideEffects) {
+    if (current.sideEffects && !nonRetryable) {
       const reason = "Task has sideEffects — automatic retry blocked. Awaiting human approval.";
       this.ctx.emitter.emit("task:retry:blocked", { taskId, reason });
       this.ctx.emitter.emit("log", { level: "warn", message: `[${taskId}] ${reason}` });
@@ -816,9 +828,6 @@ export class AssessmentOrchestrator {
       }
     }
 
-    // A configuration or access failure (model not enabled, credentials refused): the same agent
-    // would fail the same way, so no automatic retry; escalation still gets the final failure
-    const nonRetryable = result.retryable === false;
     if (nonRetryable) {
       this.ctx.emitter.emit("log", { level: "warn", message: `[${taskId}] Not retried: ${(result.stderr || "non-retryable failure").split("\n")[0].slice(0, 300)}` });
     }

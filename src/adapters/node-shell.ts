@@ -1,38 +1,42 @@
 /**
- * Node.js Shell implementation — wraps execa.
+ * Node.js Shell implementation — commands on this machine.
  *
  * Default implementation for self-hosted mode. Executes real shell commands.
  * Drop-in replacement pattern: swap with JustBashShell, SandboxProxyShell, etc.
+ *
+ * A timeout or an abort stops the command with everything it started (process-tree.ts): a
+ * server or a `sleep` it left behind neither keeps running nor keeps the call waiting.
+ *
+ * Commands get the filtered environment (safe-env.ts) plus the variables the caller passes on
+ * purpose (vault-granted credentials), never the server's own: no provider keys, no tokens.
  */
-import { execa, execaCommand } from "execa";
+import { execaCommand } from "execa";
 import type { Shell, ShellOptions, ShellResult } from "@polpo-ai/core/shell";
-import { bashSafeEnv } from "../tools/safe-env.js";
-import { killProcessTree, localShell } from "../sandbox/local-shell.js";
+import { commandEnv } from "../tools/safe-env.js";
+import { localShell } from "../sandbox/local-shell.js";
+import { runCommand } from "../sandbox/process-tree.js";
 
 export class NodeShell implements Shell {
   async execute(command: string, options?: ShellOptions): Promise<ShellResult> {
     try {
-      const opts = {
-        cwd: options?.cwd,
-        env: { ...bashSafeEnv(), ...options?.env },
-        timeout: options?.timeout,
-        reject: false,
-      } as const;
+      // the safe system set and the caller's variables, nothing else of this server's environment
+      const env = commandEnv(options?.env);
       // On Windows, the bash agents' commands run in (local-shell.ts), so a check written for it
-      // works there too; without Git's bash, and on every other platform, the system shell as before.
-      const bash = process.platform === "win32" && localShell().name !== "cmd.exe" ? localShell().argv(command) : undefined;
-      if (bash) return await this.executeInBash(bash, opts);
-      const result = await execaCommand(command, { shell: true, ...opts });
-      // execa leaves exitCode undefined when the process never exited normally
-      // (timeout, killed by a signal, canceled, spawn error). That is a failure,
-      // never a success: report exit code 1 and surface the reason.
-      const abnormal = result.exitCode === undefined
-        && (result.failed || result.timedOut || result.isTerminated || result.isCanceled);
+      // works there too; without it, cmd.exe as before. Everywhere else the system shell.
+      if (process.platform === "win32" && localShell().name === "cmd.exe") return await this.executeInCmd(command, env, options);
+      const argv = process.platform === "win32" ? localShell().argv(command) : ["/bin/sh", "-c", command];
+      const r = await runCommand(argv, { cwd: options?.cwd, env, timeoutMs: options?.timeout, signal: options?.signal });
+      let stderr = stripFinalNewline(r.stderr);
+      // a command that never exited normally is a failure with a reason, never a silent one
+      if (!stderr && !r.timedOut) {
+        if (options?.signal?.aborted) stderr = "Command was aborted";
+        else if (r.signal) stderr = `Command was killed with ${r.signal}`;
+      }
       return {
-        stdout: result.stdout,
-        stderr: abnormal ? (result.stderr || result.shortMessage || "Command failed") : result.stderr,
-        exitCode: result.exitCode ?? (abnormal ? 1 : 0),
-        ...(result.timedOut ? { timedOut: true } : {}),
+        stdout: stripFinalNewline(r.stdout),
+        stderr,
+        exitCode: r.exitCode,
+        ...(r.timedOut ? { timedOut: true } : {}),
       };
     } catch (err: any) {
       return {
@@ -43,21 +47,28 @@ export class NodeShell implements Shell {
     }
   }
 
-  /**
-   * Windows with Git's bash: a timeout ends bash and every program it started (execa would end
-   * bash alone, and the command it runs keeps the output open until it finishes by itself).
-   */
-  private async executeInBash(argv: string[], opts: { cwd?: string; env: Record<string, string | undefined>; timeout?: number }): Promise<ShellResult> {
-    const sub = execa(argv[0]!, argv.slice(1), { cwd: opts.cwd, env: opts.env, reject: false });
-    let timedOut = false;
-    const timer = opts.timeout
-      ? setTimeout(() => { timedOut = true; if (sub.pid) killProcessTree(sub.pid); }, opts.timeout)
-      : undefined;
-    const result = await sub;
-    if (timer) clearTimeout(timer);
-    if (timedOut) {
-      return { stdout: result.stdout, stderr: result.stderr || `Command timed out after ${opts.timeout} milliseconds`, exitCode: result.exitCode || 1, timedOut: true };
-    }
-    return { stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode ?? 1 };
+  /** Windows without a bash: cmd.exe through execa, as before. */
+  private async executeInCmd(command: string, env: Record<string, string>, options?: ShellOptions): Promise<ShellResult> {
+    const result = await execaCommand(command, {
+      // extendEnv: false, or execa would add the whole of process.env back
+      shell: true, cwd: options?.cwd, env, extendEnv: false, timeout: options?.timeout, reject: false,
+      ...(options?.signal ? { cancelSignal: options.signal } : {}),
+    });
+    // execa leaves exitCode undefined when the process never exited normally
+    // (timeout, killed by a signal, canceled, spawn error). That is a failure,
+    // never a success: report exit code 1 and surface the reason.
+    const abnormal = result.exitCode === undefined
+      && (result.failed || result.timedOut || result.isTerminated || result.isCanceled);
+    return {
+      stdout: result.stdout,
+      stderr: abnormal ? (result.stderr || result.shortMessage || "Command failed") : result.stderr,
+      exitCode: result.exitCode ?? (abnormal ? 1 : 0),
+      ...(result.timedOut ? { timedOut: true } : {}),
+    };
   }
+}
+
+/** One trailing newline off, as execa did. */
+function stripFinalNewline(s: string): string {
+  return s.endsWith("\r\n") ? s.slice(0, -2) : s.endsWith("\n") ? s.slice(0, -1) : s;
 }

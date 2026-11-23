@@ -19,12 +19,13 @@
  * headers) with the same semantics. Without a broker the methods are absent and the SDK forwards
  * the credential into the VM (the fallback).
  */
-import { spawn as spawnChild } from "node:child_process";
 import { createServer } from "node:net";
 import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, posix } from "node:path";
 import { Readable } from "node:stream";
 import type { RemoteDriver, RemotePortEndpoint, RemoteProcess } from "../sandbox/remote-adapters.js";
+import { killTree, spawnTree } from "../sandbox/process-tree.js";
+import { PROXY_VARS, pickEnv } from "../tools/safe-env.js";
 import type { HarnessSandbox, RequestTransformation } from "./types.js";
 import { presentCredential, type HarnessRelayLease } from "./relay.js";
 
@@ -62,10 +63,15 @@ function streamOf(bytes: Uint8Array): ReadableStream<Uint8Array> {
   return new ReadableStream({ start(c) { c.enqueue(bytes); c.close(); } });
 }
 
-async function bytesOf(stream: ReadableStream<Uint8Array> | AsyncIterable<Uint8Array>): Promise<Uint8Array> {
+/** All of `stream`; with `partial`, what arrived before it broke off (a stopped command's output). */
+async function bytesOf(stream: ReadableStream<Uint8Array> | AsyncIterable<Uint8Array>, partial = false): Promise<Uint8Array> {
   const chunks: Uint8Array[] = [];
   let n = 0;
-  for await (const c of stream as AsyncIterable<Uint8Array>) { chunks.push(c); n += c.length; }
+  try {
+    for await (const c of stream as AsyncIterable<Uint8Array>) { chunks.push(c); n += c.length; }
+  } catch (err) {
+    if (!partial) throw err;
+  }
   const out = new Uint8Array(n);
   let o = 0;
   for (const c of chunks) { out.set(c, o); o += c.length; }
@@ -168,10 +174,13 @@ export function remoteHarnessMachine(o: {
  * The environment a harness process gets on this server: a minimal one, HOME (and every config,
  * cache and data directory the runtimes read) inside `home`. Nothing else of the server's env
  * (no ANTHROPIC_*, AWS_*, CLAUDE_*, OPENAI_*, CODEX_*, no tokens) — the runtime's credentials come
- * from the harness auth, explicitly.
+ * from the harness auth, explicitly. From the server's env it takes only what safe-env.ts passes to
+ * every command and is not about the user's home: PATH, the locale, the timezone, the proxy
+ * settings (with this machine always reached directly: the bridge listens on 127.0.0.1).
  */
 export function isolatedHostEnv(home: string, base: NodeJS.ProcessEnv = process.env): Record<string, string> {
   const env: Record<string, string> = {
+    ...pickEnv(base, ["LANG", "LANGUAGE", "TZ", ...PROXY_VARS], ["LC_"]),
     HOME: home,
     USER: "polpo-harness",
     PATH: base.PATH ?? "/usr/local/bin:/usr/bin:/bin",
@@ -189,14 +198,27 @@ export function isolatedHostEnv(home: string, base: NodeJS.ProcessEnv = process.
     COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
   };
   if (base.NODE_EXTRA_CA_CERTS) env.NODE_EXTRA_CA_CERTS = base.NODE_EXTRA_CA_CERTS;
+  if (PROXY_VARS.some((k) => k in env && !/no_proxy/i.test(k))) {
+    for (const k of ["NO_PROXY", "no_proxy"]) env[k] = [env[k], "localhost,127.0.0.1,::1"].filter(Boolean).join(",");
+  }
   return env;
 }
 
-function hostProcess(command: string, cwd: string, env: Record<string, string>): RemoteProcess {
-  const child = spawnChild("bash", ["-c", command], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+/**
+ * A command on this server, in its own process group: kill() stops it with everything it started
+ * (SIGTERM, SIGKILL after a grace) and returns once the shell is gone; `release()` then lets go of
+ * output a program that escaped the group may still hold open.
+ */
+function hostProcess(command: string, cwd: string, env: Record<string, string>): RemoteProcess & { release(): void } {
+  const child = spawnTree("bash", ["-c", command], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+  let killed = false;
   const exited = new Promise<{ exitCode: number }>((resolve) => {
+    const end = (code: number | null, signal: NodeJS.Signals | null) =>
+      resolve({ exitCode: code ?? (signal === "SIGKILL" ? 137 : signal === "SIGTERM" ? 143 : 1) });
     child.on("error", () => resolve({ exitCode: 127 }));
-    child.on("close", (code, signal) => resolve({ exitCode: code ?? (signal === "SIGKILL" ? 137 : signal === "SIGTERM" ? 143 : 1) }));
+    child.on("close", end);
+    // stopped: done when the shell exits, not when the last holder of its output does
+    child.on("exit", (code, signal) => { if (killed) end(code, signal); });
   });
   return {
     id: String(child.pid ?? "0"),
@@ -204,13 +226,13 @@ function hostProcess(command: string, cwd: string, env: Record<string, string>):
     stderr: Readable.toWeb(child.stderr!) as unknown as ReadableStream<Uint8Array>,
     wait: () => exited,
     kill: async () => {
-      if (child.exitCode !== null) return;
-      child.kill("SIGTERM");
-      const t = setTimeout(() => child.kill("SIGKILL"), 3000);
+      if (child.exitCode !== null || child.signalCode !== null) return;
+      killed = true;
+      killTree(child);
       await exited;
-      clearTimeout(t);
     },
     detach: () => { /* the child is ours: nothing to stop following */ },
+    release: () => { child.stdout!.destroy(); child.stderr!.destroy(); },
   };
 }
 
@@ -230,11 +252,17 @@ export function hostHarnessMachine(o: { workDir: string; home: string; label?: s
     exec: async (command, x) => {
       await ready;
       const p = hostProcess(command, x.cwd ? abs(x.cwd) : o.workDir, { ...env, ...(x.env ?? {}) });
-      const onAbort = () => void p.kill();
-      x.signal?.addEventListener("abort", onAbort, { once: true });
+      let stopped = false;
+      const onAbort = () => { stopped = true; void p.kill(); };
+      if (x.signal?.aborted) onAbort();
+      else x.signal?.addEventListener("abort", onAbort, { once: true });
       const timer = x.timeoutMs ? setTimeout(onAbort, x.timeoutMs) : undefined;
       try {
-        const [stdout, stderr, r] = await Promise.all([bytesOf(p.stdout), bytesOf(p.stderr), p.wait()]);
+        const out = bytesOf(p.stdout, true);
+        const err = bytesOf(p.stderr, true);
+        const r = await p.wait();
+        if (stopped) p.release();
+        const [stdout, stderr] = await Promise.all([out, err]);
         return { exitCode: r.exitCode, stdout: Buffer.from(stdout).toString("utf8"), stderr: Buffer.from(stderr).toString("utf8") };
       } finally {
         if (timer) clearTimeout(timer);

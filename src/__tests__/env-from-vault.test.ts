@@ -176,6 +176,25 @@ describe("bash with env_from_vault on the host (no sandbox)", () => {
       expect(textOf(r)).not.toContain(NPM_TOKEN);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
+
+  test.skipIf(process.platform === "win32")("only the granted variable: none of the server's secrets", async () => {
+    const root = mkdtempSync(join(tmpdir(), "polpo-envvault-local-"));
+    const server = { ANTHROPIC_API_KEY: "sk-ant-server-only", AWS_BEARER_TOKEN_BEDROCK: "bedrock-server-only", POLPO_MCP_KEY: "mcp-server-only" };
+    Object.assign(process.env, server);
+    try {
+      const bash = createSystemTools(root, ["bash"], undefined, undefined, vault).find((t) => t.name === "bash")!;
+      const r = await bash.execute("t", { command: 'env; echo "len=${#NPM_TOKEN}"', env_from_vault: { NPM_TOKEN: "npm.token" } } as any);
+      const out = textOf(r);
+      for (const [k, v] of Object.entries(server)) { expect(out).not.toContain(v); expect(out).not.toContain(`${k}=`); }
+      expect(out).not.toContain("POLPO_VAULT_KEY=");
+      expect(out).toMatch(/^PATH=/m);
+      expect(out).toMatch(/^HOME=/m);
+      expect(out).toContain(`len=${NPM_TOKEN.length}`);
+    } finally {
+      for (const k of Object.keys(server)) delete process.env[k];
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 const bwrapSandbox: EffectiveSandbox = { provider: "bwrap", network: { mode: "deny" }, resources: {}, providerOptions: {}, denied: [] };

@@ -4,7 +4,14 @@ import { apiUrl, config } from "@/lib/config";
 
 export type DataSourceKind = "sqlite" | "postgres" | "rest" | "json" | "csv";
 export type DataCapability = "read" | "write" | "admin";
-export type DataColumn = { name: string; type: "string" | "number" | "boolean" | "date" | "datetime" | "json" | "unknown"; nullable?: boolean; primaryKey?: boolean };
+export type DataColumn = {
+  name: string; type: "string" | "number" | "boolean" | "date" | "datetime" | "json" | "unknown"; nullable?: boolean; primaryKey?: boolean;
+  /** The database's own type (varchar(255), timestamptz…). */
+  nativeType?: string;
+  defaultValue?: string | null;
+};
+export type DataIndex = { name: string; columns: string[]; unique: boolean; primary?: boolean };
+export type DataForeignKey = { name?: string; columns: string[]; references: { dataset: string; columns: string[] }; onUpdate?: string; onDelete?: string };
 export type DataGrant = { id: string; agent: string; capabilities: DataCapability[]; datasets: string[]; excludedFields?: string[] };
 export type DataSource = {
   id: string; name: string; slug: string; description?: string; kind: DataSourceKind;
@@ -13,15 +20,26 @@ export type DataSource = {
   tags: string[]; grants: DataGrant[]; createdAt: string; updatedAt: string;
 };
 export type DataSourceInput = Omit<DataSource, "id" | "createdAt" | "updatedAt"> & { credentials?: Record<string, string> };
-export type DataDataset = { id: string; sourceId: string; name: string; namespace?: string; kind: "table" | "view" | "endpoint" | "file"; columns: DataColumn[] };
+export type DataDataset = {
+  id: string; sourceId: string; name: string; namespace?: string; kind: "table" | "view" | "endpoint" | "file"; columns: DataColumn[];
+  /** Exact for SQLite, the planner's estimate for PostgreSQL. */
+  rowCount?: number; indexes?: DataIndex[]; foreignKeys?: DataForeignKey[];
+};
 export type DataFilter = { field: string; operator: "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "contains" | "startsWith" | "in" | "isNull"; value?: unknown };
 export type DataQuery = {
   sourceId: string; dataset: string; fields?: string[]; filters?: DataFilter[];
   sort?: Array<{ field: string; direction: "asc" | "desc" }>;
   groupBy?: string[]; aggregates?: Array<{ field: string; operation: "count" | "sum" | "avg" | "min" | "max"; as?: string }>;
   limit?: number; offset?: number;
+  /** Also count every matching row: meta.totalCount. */
+  includeTotal?: boolean;
 };
-export type DataFrame = { columns: DataColumn[]; rows: Record<string, unknown>[]; meta: { sourceId: string; dataset: string; queryId: string; rowCount: number; truncated: boolean; durationMs: number; fetchedAt: string } };
+export type DataFrame = { columns: DataColumn[]; rows: Record<string, unknown>[]; meta: { sourceId: string; dataset: string; queryId: string; rowCount: number; truncated: boolean; durationMs: number; fetchedAt: string; totalCount?: number } };
+export type DataMutationInput = { sourceId: string; dataset: string; operation: "insert" | "update" | "delete"; values?: Record<string, unknown>; filters?: DataFilter[] };
+export type DataViewBinding =
+  | { id: string; query: DataQuery; inline?: never; sql?: never }
+  | { id: string; inline: { label?: string; rows: Record<string, unknown>[] }; query?: never; sql?: never }
+  | { id: string; sql: { sourceId: string; statement: string }; query?: never; inline?: never };
 export type DataWidget = {
   id: string; type: "metric" | "table" | "record" | "bar" | "line" | "area" | "pie" | "timeline" | "status" | "markdown" | "list" | "progress" | "gauge" | "sparkline" | "comparison" | "ranking" | "scatter" | "donut" | "radar" | "heatmap" | "funnel" | "histogram" | "treemap";
   title?: string; description?: string; binding?: string; field?: string; x?: string; y?: string;
@@ -32,9 +50,10 @@ export type DataWidget = {
 export type DataView = {
   id: string; name: string; description?: string; persistence: "ephemeral" | "saved" | "pinned";
   sessionId?: string; createdBy?: string; refreshSeconds?: number;
-  bindings: Array<{ id: string; query: DataQuery; inline?: never } | { id: string; inline: { label?: string; rows: Record<string, unknown>[] }; query?: never }>; widgets: DataWidget[]; createdAt: string; updatedAt: string;
+  bindings: DataViewBinding[]; widgets: DataWidget[]; createdAt: string; updatedAt: string;
 };
 export type DataViewInput = Omit<DataView, "id" | "createdAt" | "updatedAt">;
+export type DataSourceDetail = DataSource & { credentialKeys: string[] };
 export type DataActivity = { id: string; sourceId: string; agent?: string; action: string; dataset?: string; status: "succeeded" | "failed"; rowCount?: number; durationMs: number; error?: string; createdAt: string };
 
 async function apiRequest<T>(resource: "data" | "views", path: string, init?: RequestInit): Promise<T> {
@@ -93,8 +112,9 @@ export function useDataSources() {
   const sourceActivity = useCallback((id: string) => request<DataActivity[]>(`/${encodeURIComponent(id)}/activity`), []);
   const query = useCallback((input: DataQuery) => request<DataFrame>("/query", { method: "POST", body: JSON.stringify(input) }), []);
   const rawSql = useCallback((sourceId: string, sql: string) => request<DataFrame>("/sql", { method: "POST", body: JSON.stringify({ sourceId, sql }) }), []);
-  const mutate = useCallback((input: { sourceId: string; dataset: string; operation: "insert" | "update" | "delete"; values?: Record<string, unknown>; filters?: DataFilter[] }) => request<{ affectedRows: number }>("/mutate", { method: "POST", body: JSON.stringify(input) }), []);
-  return { sources, loading, error, refetch, createSource, updateSource, deleteSource, testSource, describeSource, sourceActivity, query, rawSql, mutate };
+  const mutate = useCallback((input: DataMutationInput) => request<{ affectedRows: number }>("/mutate", { method: "POST", body: JSON.stringify(input) }), []);
+  const getSource = useCallback((id: string) => request<DataSourceDetail>(`/${encodeURIComponent(id)}`), []);
+  return { sources, loading, error, refetch, createSource, updateSource, deleteSource, testSource, describeSource, sourceActivity, query, rawSql, mutate, getSource };
 }
 
 export function useDataViews() {
@@ -125,3 +145,6 @@ export function useDataViews() {
 
 export const dataRequest = request;
 export const dataViewRequest = viewRequest;
+
+export type DataRegistry = ReturnType<typeof useDataSources>;
+export type DataViewRegistry = ReturnType<typeof useDataViews>;

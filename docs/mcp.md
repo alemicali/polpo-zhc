@@ -82,7 +82,7 @@ A failed task carries `failure` on every surface (`GET /tasks/:id`, the slim lis
 | Tool | What it does |
 |---|---|
 | `polpo_artifacts_list`, `polpo_artifact_get`, `polpo_artifact_create` | Documents, html dashboards and designs, diagrams. |
-| `polpo_data_sources_list`, `polpo_data_query` | Structured data: the sources (with the agents that may use them) and rows of a dataset (fields, filters, sort, limit). |
+| `polpo_data_sources_list`, `polpo_data_query` | Structured data: the sources (with the agents that may use them) and rows of a dataset (fields, filters, sort, limit, `offset`; `includeTotal` also counts every matching row as `meta.totalCount`, not for REST sources). |
 | `polpo_files_list`, `polpo_files_search`, `polpo_file_read` | Browse and read the instance's files (the agents' workspace, `.polpo`, volumes): text by line ranges, images and PDFs as they are. |
 | `polpo_file_write`, `polpo_file_manage` | Create a file (text or base64; replacing one needs `overwrite: true`), make folders, rename, delete (`confirm: true`). |
 
@@ -92,7 +92,7 @@ Everything on the dashboard's Data and Views pages, as direct tools. Sources are
 
 | Tool | What it does | Kind |
 |---|---|---|
-| `polpo_data_source_get` | One source by id, slug or name: connection settings (a password or token in the location masked as `***`), which credentials are stored (field names, never values), which agents may use it (`grants`), and its schema (datasets and columns, `schema_limit` at most 200; `schema: false` skips it). A missing secret comes with `setup_url`. | read-only, open world |
+| `polpo_data_source_get` | One source by id, slug or name: connection settings (a password or token in the location masked as `***`), which credentials are stored (field names, never values), which agents may use it (`grants`), and its schema (datasets and columns with types, the database's own type, defaults and primary keys; row counts — exact on SQLite, the planner's estimate on PostgreSQL — and, for SQL sources, indexes and foreign keys; `schema_limit` at most 200; `schema: false` skips it). A missing secret comes with `setup_url`. | read-only, open world |
 | `polpo_data_source_save` | Create a source (`name`, `kind`: postgres, sqlite, rest, json, csv, `location`; port, database, username, ssl, default dataset, environment, tags) or change one (`id`; only the fields given change). `grants` (`agent`, `capabilities` read/write/admin, `datasets`, `excluded_fields`) replace who may use it. | write (admin) |
 | `polpo_data_source_test` | Connect and count the datasets; on failure, what to fix. | read-only, open world |
 | `polpo_data_source_delete` | Remove a source and its stored credentials (`confirm: true`; without it, it names the views it would break). The data itself stays where it is. | destructive (admin) |
@@ -100,7 +100,7 @@ Everything on the dashboard's Data and Views pages, as direct tools. Sources are
 | `polpo_data_sql` | One read-only statement (`SELECT`, `WITH`, `EXPLAIN`) on PostgreSQL or SQLite; `max_rows` (default 200, at most 1000; rows are also cut at about 200 KB) with `truncated` and a `note`. Anything that writes is refused (the server refuses it too): rows change with `polpo_data_mutate`; schema changes (`CREATE`, `ALTER`, `DROP`, `TRUNCATE`) are not possible through Polpo. | read-only, open world |
 | `polpo_data_mutate` | `insert` a row (`values`), `update` or `delete` rows (`filters` required: never a whole table). Update and delete need `confirm: true`; without it they say how many rows would change. | destructive, open world |
 | `polpo_data_views_list`, `polpo_data_view_get` | Data views (live dashboards): widgets, bindings, the sources they read, the link; one view in full. | read-only |
-| `polpo_data_view_save`, `polpo_data_view_delete` | Create a view (`name`, `bindings`: a query or inline rows, `widgets`) or change one (`id`; a list given replaces it); delete one (`confirm: true`). | write / destructive |
+| `polpo_data_view_save`, `polpo_data_view_delete` | Create a view (`name`, `bindings`: a query, a read-only SQL statement `{ sql: { sourceId, statement } }` run live, or inline rows, `widgets`) or change one (`id`; a list given replaces it); delete one (`confirm: true`). | write / destructive |
 
 **Connection secrets never go through MCP** (a database password, a REST API's `Authorization` header): there is no parameter for them, and a location with a password or token in it (`postgres://user:pass@…`, `?api_key=…`) is refused. `polpo_data_source_save` returns the hand-off (`setup_url` opens the source's settings on the Data page with the field focused, `setup_id` `data:<source id>:password` — or `:authorization` for a REST API saved with `requires_auth: true` — and `next_step`); `polpo_setup_wait` waits for it, then `polpo_data_source_test` checks the connection.
 

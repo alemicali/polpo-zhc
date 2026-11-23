@@ -698,8 +698,8 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
       const inTranscript = state.messages[0]?.role === "system";
       return estimateContextTokens({ systemPrompt: inTranscript ? undefined : state.systemPrompt, messages: [], tools: state.tools });
     },
-    summarize: async ({ messages, previousSummary, focus, signal }) => {
-      const { systemPrompt, prompt } = buildSummaryPrompt({ messages, previousSummary, focus });
+    summarize: async ({ messages, previousSummary, focus, signal, kind }) => {
+      const { systemPrompt, prompt } = buildSummaryPrompt({ messages, previousSummary, focus, kind });
       // a cheaper sibling of the agent's model unless one is configured (see resolveSummaryModel)
       const summaryModel = resolveSummaryModel(model, compactionSettings.model, Math.ceil((systemPrompt.length + prompt.length) / 3));
       const response = await completeSimpleWithAuth(summaryModel, {

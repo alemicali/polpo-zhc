@@ -7,6 +7,8 @@ import type { VaultStore } from "../core/vault-store.js";
 import type {
   DataColumn,
   DataDataset,
+  DataForeignKey,
+  DataIndex,
   DataFilter,
   DataFrame,
   DataGrant,
@@ -104,6 +106,7 @@ export class DataRuntime {
       const requestedLimit = clampLimit(query.limit);
       const truncated = rows.length > requestedLimit;
       const visibleRows = rows.slice(0, requestedLimit);
+      const totalCount = query.includeTotal ? await this.countSource(source, safeQuery) : undefined;
       const frame: DataFrame = {
         columns: inferColumns(visibleRows),
         rows: visibleRows,
@@ -115,6 +118,7 @@ export class DataRuntime {
           truncated,
           durationMs: Date.now() - started,
           fetchedAt: new Date().toISOString(),
+          ...(totalCount !== undefined ? { totalCount } : {}),
         },
       };
       await this.record(source.id, principal, "query", "succeeded", started, { dataset: query.dataset, rowCount: frame.rows.length });
@@ -231,6 +235,26 @@ export class DataRuntime {
     if (source.kind === "postgres") return this.withPostgres(source, (sql) => executePostgresQuery(sql, query));
     if (source.kind === "rest") return this.queryRest(source, query);
     return this.queryFile(source, query);
+  }
+
+  /**
+   * Every row the query's filters match, ignoring limit and offset (one row per group when it
+   * groups). SQL sources count in the database; files count in memory; a REST API cannot: undefined.
+   */
+  private async countSource(source: DataSource, query: DataQuery): Promise<number | undefined> {
+    if (source.kind === "sqlite") return this.withSqlite(source, (db) => {
+      const compiled = countSql(query, "sqlite");
+      return Number((db.prepare(compiled.text).get(...compiled.values) as { total?: number | bigint } | undefined)?.total ?? 0);
+    });
+    if (source.kind === "postgres") return this.withPostgres(source, async (sql) => {
+      const compiled = countSql(query, "postgres");
+      const rows = await sql.unsafe(compiled.text, compiled.values) as Array<{ total?: string | number }>;
+      return Number(rows[0]?.total ?? 0);
+    });
+    if (source.kind === "rest") return undefined;
+    const text = await readFile(this.resolveLocation(source.config.location), "utf8");
+    const rows = source.kind === "csv" ? parseCsv(text) : normalizeRows(JSON.parse(text));
+    return rows.filter((row) => (query.filters ?? []).every((filter) => matchFilter(row[filter.field], filter))).length;
   }
 
   /**
@@ -397,6 +421,23 @@ function selectSql(query: DataQuery, dialect: "sqlite" | "postgres"): { text: st
   return { text, values };
 }
 
+/** SELECT COUNT(*) of what a query matches (its filters and grouping; never its limit or offset). */
+function countSql(query: DataQuery, dialect: "sqlite" | "postgres"): { text: string; values: unknown[] } {
+  const values: unknown[] = [];
+  const param = (value: unknown) => {
+    values.push(value);
+    return dialect === "postgres" ? `$${values.length}` : "?";
+  };
+  const where = filterSql(query.filters ?? [], dialect, param);
+  const group = query.groupBy ?? [];
+  const base = [
+    `SELECT ${group.length ? group.map((field) => quoteIdentifier(field, dialect)).join(", ") : "1"} FROM ${tableSql(query.dataset, dialect)}`,
+    where ? `WHERE ${where}` : "",
+    group.length ? `GROUP BY ${group.map((field) => quoteIdentifier(field, dialect)).join(", ")}` : "",
+  ].filter(Boolean).join(" ");
+  return { text: `SELECT COUNT(*) AS total FROM (${base}) AS counted`, values };
+}
+
 function filterSql(filters: DataFilter[], dialect: "sqlite" | "postgres", param: (value: unknown) => string): string {
   return filters.map((filter) => {
     const field = quoteIdentifier(filter.field, dialect);
@@ -466,34 +507,135 @@ function grantAllows(grant: DataGrant, capability: DataCapability): boolean {
 function discoverSqlite(db: any, source: DataSource): DataDataset[] {
   const tables = db.prepare("SELECT name, type FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as Array<{ name: string; type: string }>;
   return tables.map((table) => {
-    const columns = db.prepare(`PRAGMA table_info(${quoteIdentifier(table.name, "sqlite")})`).all() as Array<{ name: string; type: string; notnull: number; pk: number }>;
+    const quoted = quoteSqliteName(table.name);
+    const columns = db.prepare(`PRAGMA table_info(${quoted})`).all() as Array<{ name: string; type: string; notnull: number; pk: number; dflt_value: string | null }>;
+    const isView = table.type === "view";
+    const indexes: DataIndex[] = [];
+    const foreignKeys: DataForeignKey[] = [];
+    let rowCount: number | undefined;
+    if (!isView) {
+      for (const index of db.prepare(`PRAGMA index_list(${quoted})`).all() as Array<{ name: string; unique: number; origin: string }>) {
+        const indexColumns = (db.prepare(`PRAGMA index_info(${quoteSqliteName(index.name)})`).all() as Array<{ name: string | null }>).map((column) => column.name ?? "(expression)");
+        indexes.push({ name: index.name, columns: indexColumns, unique: Boolean(index.unique), ...(index.origin === "pk" ? { primary: true } : {}) });
+      }
+      const keys = db.prepare(`PRAGMA foreign_key_list(${quoted})`).all() as Array<{ id: number; table: string; from: string; to: string | null; on_update: string; on_delete: string }>;
+      const grouped = new Map<number, DataForeignKey>();
+      for (const key of keys) {
+        const current = grouped.get(key.id) ?? { columns: [], references: { dataset: key.table, columns: [] }, onUpdate: key.on_update, onDelete: key.on_delete };
+        current.columns.push(key.from);
+        current.references.columns.push(key.to ?? "(primary key)");
+        grouped.set(key.id, current);
+      }
+      foreignKeys.push(...grouped.values());
+      try { rowCount = Number((db.prepare(`SELECT COUNT(*) AS total FROM ${quoted}`).get() as { total: number }).total); } catch { /* unreadable table: no count */ }
+    }
     return {
       id: `${source.id}:${table.name}`,
       sourceId: source.id,
       name: table.name,
-      kind: table.type === "view" ? "view" : "table",
-      columns: columns.map((column) => ({ name: column.name, type: sqlType(column.type), nullable: !column.notnull, primaryKey: Boolean(column.pk) })),
-    };
+      kind: isView ? "view" : "table",
+      columns: columns.map((column) => ({
+        name: column.name, type: sqlType(column.type), nullable: !column.notnull, primaryKey: Boolean(column.pk),
+        ...(column.type ? { nativeType: column.type } : {}), defaultValue: column.dflt_value,
+      })),
+      ...(rowCount !== undefined ? { rowCount } : {}),
+      ...(!isView ? { indexes, foreignKeys } : {}),
+    } satisfies DataDataset;
   });
+}
+
+/** A SQLite name in a PRAGMA or FROM (any name the database holds, quotes doubled). */
+function quoteSqliteName(name: string): string {
+  return `"${name.replaceAll('"', '""')}"`;
 }
 
 async function discoverPostgres(sql: any, source: DataSource): Promise<DataDataset[]> {
   const rows = await sql`
-    SELECT table_schema, table_name, table_type, column_name, data_type, is_nullable, ordinal_position
+    SELECT table_schema, table_name, table_type, column_name, data_type, udt_name, character_maximum_length, column_default, is_nullable, ordinal_position
     FROM information_schema.columns
     JOIN information_schema.tables USING (table_schema, table_name)
     WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
     ORDER BY table_schema, table_name, ordinal_position
-  ` as Array<Record<string, string>>;
+  ` as Array<Record<string, string | number | null>>;
+  // Keys, indexes, relations and row estimates from the catalog: best effort (a role may not see them)
+  const primaryKeys = await sql`
+    SELECT n.nspname AS table_schema, c.relname AS table_name, a.attname AS column_name
+    FROM pg_index i
+    JOIN pg_class c ON c.oid = i.indrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY(i.indkey)
+    WHERE i.indisprimary AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+  `.catch(() => []) as Array<{ table_schema: string; table_name: string; column_name: string }>;
+  const indexes = await sql`
+    SELECT n.nspname AS table_schema, t.relname AS table_name, ic.relname AS index_name, i.indisunique AS is_unique, i.indisprimary AS is_primary,
+      array_agg(a.attname ORDER BY k.ord) AS columns
+    FROM pg_index i
+    JOIN pg_class t ON t.oid = i.indrelid
+    JOIN pg_class ic ON ic.oid = i.indexrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
+    LEFT JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+    WHERE n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+    GROUP BY n.nspname, t.relname, ic.relname, i.indisunique, i.indisprimary
+    ORDER BY ic.relname
+  `.catch(() => []) as Array<{ table_schema: string; table_name: string; index_name: string; is_unique: boolean; is_primary: boolean; columns: Array<string | null> }>;
+  const foreignKeys = await sql`
+    SELECT con.conname AS name, n.nspname AS table_schema, c.relname AS table_name, fn.nspname AS ref_schema, fc.relname AS ref_table,
+      con.confupdtype AS on_update, con.confdeltype AS on_delete,
+      array(SELECT a.attname FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord) JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum ORDER BY k.ord) AS columns,
+      array(SELECT a.attname FROM unnest(con.confkey) WITH ORDINALITY AS k(attnum, ord) JOIN pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.attnum ORDER BY k.ord) AS ref_columns
+    FROM pg_constraint con
+    JOIN pg_class c ON c.oid = con.conrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    JOIN pg_class fc ON fc.oid = con.confrelid
+    JOIN pg_namespace fn ON fn.oid = fc.relnamespace
+    WHERE con.contype = 'f' AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+  `.catch(() => []) as Array<{ name: string; table_schema: string; table_name: string; ref_schema: string; ref_table: string; on_update: string; on_delete: string; columns: string[]; ref_columns: string[] }>;
+  const estimates = await sql`
+    SELECT n.nspname AS table_schema, c.relname AS table_name, c.reltuples::bigint AS estimate
+    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE c.relkind IN ('r', 'p') AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+  `.catch(() => []) as Array<{ table_schema: string; table_name: string; estimate: string | number }>;
+
+  const key = (schema: string, table: string) => `${schema}.${table}`;
+  const pkColumns = new Set(primaryKeys.map((row) => `${key(row.table_schema, row.table_name)}.${row.column_name}`));
   const grouped = new Map<string, DataDataset>();
   for (const row of rows) {
-    const name = `${row.table_schema}.${row.table_name}`;
+    const name = key(String(row.table_schema), String(row.table_name));
     const dataset = grouped.get(name) ?? {
-      id: `${source.id}:${name}`, sourceId: source.id, namespace: row.table_schema, name,
+      id: `${source.id}:${name}`, sourceId: source.id, namespace: String(row.table_schema), name,
       kind: row.table_type === "VIEW" ? "view" : "table", columns: [],
     } satisfies DataDataset;
-    dataset.columns.push({ name: row.column_name, type: sqlType(row.data_type), nullable: row.is_nullable === "YES" });
+    const native = row.data_type === "USER-DEFINED" || row.data_type === "ARRAY" ? String(row.udt_name ?? row.data_type) : String(row.data_type);
+    dataset.columns.push({
+      name: String(row.column_name), type: sqlType(native), nullable: row.is_nullable === "YES",
+      ...(pkColumns.has(`${name}.${row.column_name}`) ? { primaryKey: true } : {}),
+      nativeType: row.character_maximum_length ? `${native}(${row.character_maximum_length})` : native,
+      defaultValue: row.column_default == null ? null : String(row.column_default),
+    });
     grouped.set(name, dataset);
+  }
+  for (const index of indexes) {
+    const dataset = grouped.get(key(index.table_schema, index.table_name));
+    if (!dataset) continue;
+    (dataset.indexes ??= []).push({ name: index.index_name, columns: index.columns.map((column) => column ?? "(expression)"), unique: index.is_unique, ...(index.is_primary ? { primary: true } : {}) });
+  }
+  const action: Record<string, string> = { a: "NO ACTION", r: "RESTRICT", c: "CASCADE", n: "SET NULL", d: "SET DEFAULT" };
+  for (const fk of foreignKeys) {
+    const dataset = grouped.get(key(fk.table_schema, fk.table_name));
+    if (!dataset) continue;
+    (dataset.foreignKeys ??= []).push({
+      name: fk.name, columns: fk.columns, references: { dataset: key(fk.ref_schema, fk.ref_table), columns: fk.ref_columns },
+      onUpdate: action[fk.on_update] ?? fk.on_update, onDelete: action[fk.on_delete] ?? fk.on_delete,
+    });
+  }
+  for (const estimate of estimates) {
+    const dataset = grouped.get(key(estimate.table_schema, estimate.table_name));
+    // -1 (never analyzed) is no estimate
+    if (dataset && Number(estimate.estimate) >= 0) dataset.rowCount = Number(estimate.estimate);
+  }
+  for (const dataset of grouped.values()) {
+    if (dataset.kind === "table") { dataset.indexes ??= []; dataset.foreignKeys ??= []; }
   }
   return [...grouped.values()];
 }

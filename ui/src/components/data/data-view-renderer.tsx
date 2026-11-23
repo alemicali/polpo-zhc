@@ -27,7 +27,7 @@ export function DataViewRenderer({ view, sessionId }: { view: DataView; sessionI
   // refresh has settled, without a synchronous setState inside the effects.
   const [loading, startLoading] = useTransition();
   const [search, setSearch] = useState("");
-  const hasLiveData = view.bindings.some((binding) => Boolean(binding.query));
+  const hasLiveData = view.bindings.some((binding) => Boolean(binding.query || binding.sql));
   const hasInlineData = view.bindings.some((binding) => Boolean(binding.inline));
 
   const refresh = useCallback(() => {
@@ -35,6 +35,7 @@ export function DataViewRenderer({ view, sessionId }: { view: DataView; sessionI
       const results = await Promise.all(view.bindings.map(async (binding) => {
         try {
           if (binding.inline) return { id: binding.id, frame: inlineFrame(binding.id, binding.inline.label, binding.inline.rows) };
+          if (binding.sql) return { id: binding.id, frame: await dataRequest<DataFrame>("/sql", { method: "POST", body: JSON.stringify({ sourceId: binding.sql.sourceId, sql: binding.sql.statement }) }) };
           return { id: binding.id, frame: await dataRequest<DataFrame>("/query", { method: "POST", body: JSON.stringify(binding.query) }) };
         } catch (error) {
           return { id: binding.id, error: error instanceof Error ? error.message : String(error) };
@@ -57,13 +58,13 @@ export function DataViewRenderer({ view, sessionId }: { view: DataView; sessionI
     const data = latestEvent.data as { sourceId?: string; action?: string; tool?: string } | undefined;
     const mayHaveMutatedData = latestEvent.event === "agent:activity"
       && (data?.tool === "data_mutate" || data?.tool === "data_sql");
-    if (latestEvent.event === "agent:finished" || mayHaveMutatedData || (data?.action === "data" && view.bindings.some((binding) => binding.query?.sourceId === data.sourceId))) refresh();
+    if (latestEvent.event === "agent:finished" || mayHaveMutatedData || (data?.action === "data" && view.bindings.some((binding) => (binding.query?.sourceId ?? binding.sql?.sourceId) === data.sourceId))) refresh();
   }, [latestEvent, refresh, view.bindings]);
 
   const addView = () => {
     const first = view.bindings[0];
     if (!first) return;
-    addDataPromptItem(sessionId, { sourceId: first.query?.sourceId ?? "inline", dataset: first.query?.dataset ?? first.inline?.label ?? first.id, viewId: view.id, label: view.name });
+    addDataPromptItem(sessionId, { sourceId: first.query?.sourceId ?? first.sql?.sourceId ?? "inline", dataset: first.query?.dataset ?? first.inline?.label ?? first.id, viewId: view.id, label: view.name });
     sidebarActions.setSidebarOpen(true);
   };
 

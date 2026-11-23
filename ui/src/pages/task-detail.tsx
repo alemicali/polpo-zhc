@@ -2012,6 +2012,11 @@ export function TaskDetailPage() {
                     <div>
                       <span className="text-xs text-muted-foreground block mb-0.5">Retries</span>
                       <span>{task.retries} / {task.maxRetries}</span>
+                      {task.status === "failed" && task.result?.retryable === false && (
+                        <span className="text-xs text-muted-foreground block mt-0.5" data-testid="task-not-retried">
+                          Not retried: the error is not retryable (a re-run would fail the same way)
+                        </span>
+                      )}
                     </div>
                     {task.maxDuration != null && task.maxDuration > 0 && (
                       <div>
