@@ -1,4 +1,5 @@
 import { useLocation } from "react-router-dom";
+import { InkHubButton } from "@/components/layout/ink-hub-button";
 import { Sun, Moon, Monitor, MessageCircle, Github, Columns2, Menu, Palette as PaletteIcon, Check, History, Trash2, ChevronsLeft, UsersRound } from "lucide-react";
 import { useProjectInfo } from "@/hooks/use-polpo";
 import { useChatActions, useChatPageSessionsOpen, useChatState, useSidebarOpen, sidebarActions, chatPageSessionActions } from "@/hooks/chat-context";
@@ -188,6 +189,7 @@ export function Header() {
           <PwaInstallQrButton />
         </div>
         <LogoutButton />
+        <InkHubButton />
         {/* GitHub — desktop only */}
         <Tooltip>
           <TooltipTrigger asChild>
