@@ -96,7 +96,7 @@ function AgentNode({ data, selected }: NodeProps<Node<AgentNodeData>>) {
       <div className="px-4 py-3 space-y-1.5">
         <div className="flex items-center gap-2.5">
           <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", tc.bg)}>
-            <AgentAvatar avatar={agent.identity?.avatar} name={agent.name} size="md" iconClassName={tc.text} />
+            <AgentAvatar avatar={agent.identity?.avatar} name={agent.name} size="md" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5">

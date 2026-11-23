@@ -107,7 +107,7 @@ function AgentCard({
       )}>
         <div className="flex items-center gap-2 p-3 sm:gap-3 sm:p-4">
           <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-lg", teamColor?.bg ?? "bg-primary/10")}>
-            <AgentAvatar avatar={agent.identity?.avatar} name={agent.name} size="lg" iconClassName={teamColor?.text ?? "text-primary"} />
+            <AgentAvatar avatar={agent.identity?.avatar} name={agent.name} size="lg" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex min-w-0 items-center gap-2">

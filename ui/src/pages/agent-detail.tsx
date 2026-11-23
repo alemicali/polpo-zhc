@@ -91,7 +91,7 @@ function MobileIdentitySummary() {
     <div className="lg:hidden mb-4 space-y-3">
       <div className="flex items-start gap-3">
         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10">
-          <AgentAvatar avatar={identity?.avatar} name={agent.name} size="lg" iconClassName="text-primary" />
+          <AgentAvatar avatar={identity?.avatar} name={agent.name} size="lg" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
