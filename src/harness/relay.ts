@@ -374,7 +374,7 @@ export async function openRelayLease(o: RelayLeaseOptions): Promise<HarnessRelay
 // ── The server side (the public route: a pipe to the lease's socket) ────
 
 /** Request headers the server does not pass to the lease. */
-const DROP_FORWARD = /^(host|connection|keep-alive|transfer-encoding|te|trailer|upgrade|proxy-.*|x-polpo-relay-token)$/i;
+const DROP_FORWARD = /^(host|connection|keep-alive|transfer-encoding|content-length|te|trailer|upgrade|proxy-.*|x-polpo-relay-token)$/i;
 
 /**
  * The public route's handler: `path` is the request path from the relay prefix on
