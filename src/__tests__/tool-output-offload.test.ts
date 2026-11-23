@@ -187,7 +187,7 @@ describe("system tools offload", () => {
 
     const read = tools.find((t) => t.name === "read")!;
     const page = await read.execute("id", { path, offset: 10001, limit: 3 });
-    expect(textOf(page)).toBe("10001\t10001\n10002\t10002\n10003\t10003\n... (9997 more lines)");
+    expect(textOf(page)).toBe("10001\t10001\n10002\t10002\n10003\t10003\n... (9997 more lines; continue with offset=10004)");
 
     const grep = tools.find((t) => t.name === "grep")!;
     const hit = await grep.execute("id", { pattern: "^12345$", path });
@@ -205,7 +205,7 @@ describe("system tools offload", () => {
     expect(path.startsWith(join(polpoDir, "tmp", "tool-output", "bob"))).toBe(true);
 
     const read = tools.find((t) => t.name === "read")!;
-    expect(textOf(await read.execute("id", { path, limit: 1 }))).toBe("1\t1\n... (19999 more lines)");
+    expect(textOf(await read.execute("id", { path, limit: 1 }))).toBe("1\t1\n... (19999 more lines; continue with offset=2)");
     const write = tools.find((t) => t.name === "write")!;
     await expect(write.execute("id", { path: join(polpoDir, "tmp", "tool-output", "bob", "x.txt"), content: "x" }))
       .rejects.toThrow(/sandbox/);

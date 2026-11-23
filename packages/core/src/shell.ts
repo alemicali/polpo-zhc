@@ -30,4 +30,6 @@ export interface ShellResult {
   stdout: string;
   stderr: string;
   exitCode: number;
+  /** True when the command was stopped because it ran past `timeout`. */
+  timedOut?: boolean;
 }
