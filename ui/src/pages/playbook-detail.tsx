@@ -13,7 +13,6 @@ import {
   Asterisk,
   ListChecks,
   FileJson,
-  Bot,
   Play,
 } from "lucide-react";
 import { RunPlaybookDialog } from "@/pages/playbooks";
@@ -31,6 +30,7 @@ import {
   TaskStepCard,
 } from "@/pages/mission-detail";
 import { parseMissionData, type MissionTaskDef } from "@/lib/mission-data";
+import { AgentAvatar } from "@/components/shared/agent-avatar";
 
 // ── Parameter detail card ──
 
@@ -295,7 +295,7 @@ export function PlaybookDetailPage() {
                   <div className="space-y-2">
                     {volatileTeam.map((member, i) => (
                       <div key={i} className="flex items-center gap-3 rounded-lg border border-border/40 bg-card/60 px-3 py-2">
-                        <Bot className="h-4 w-4 text-primary/60 shrink-0" />
+                        <AgentAvatar name={member.name} size="md" iconClassName="shrink-0" />
                         <div className="min-w-0">
                           <span className="text-xs font-semibold">{member.name}</span>
                           {member.role && <p className="text-micro text-muted-foreground mt-0.5 line-clamp-2">{member.role}</p>}

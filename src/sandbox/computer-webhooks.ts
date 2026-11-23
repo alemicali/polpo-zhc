@@ -25,13 +25,18 @@
  * Replays: a delivery id (Svix) or event id (E2B) is accepted once (kept 24 h); Svix timestamps
  * older than 5 minutes and E2B events older than 24 h are refused. Each provider is rate limited
  * and bodies over 256 KB refused. The status (secret set, registered, last event, counts) is kept
- * in .polpo/computer-webhooks.json.
+ * in .polpo/computer-webhooks.json; every delivery, whatever came of it, is in the provider's event
+ * log (computer-webhook-events.ts: accepted / ignored / rejected / error, with what Polpo did).
  */
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { COMPUTER_LABEL, isRemoteComputer, type ComputerConfig, type VaultStore } from "@polpo-ai/core";
+import { COMPUTER_LABEL, isRemoteComputer, type ComputerConfig, type PolpoEventMap, type VaultStore } from "@polpo-ai/core";
 import { isComputerSnapshotName, type ComputerManager } from "./computers.js";
+import {
+  ComputerWebhookEventLog, newWebhookEventId, safeWebhookHeaders, webhookPayloadPreview,
+  type ComputerWebhookEventPage, type ComputerWebhookEventRecord, type ComputerWebhookOutcome, type ComputerWebhookSignature,
+} from "./computer-webhook-events.js";
 
 export type ComputerWebhookProviderId = "daytona" | "e2b";
 
@@ -209,20 +214,48 @@ export interface ComputerWebhookProviderStatus {
   inUse: boolean;
   lastEventAt?: string;
   lastEventType?: string;
+  /** Deliveries that passed the signature check (accepted, ignored or failed while applied). */
   received: number;
   rejected: number;
   ignored: number;
+  /** Deliveries Polpo could not apply (the computer's check failed). */
+  errors: number;
+  /** The last problem since the provider was (re)configured; an error from before (e.g. "not configured") is not shown. */
   lastError?: string;
   lastErrorAt?: string;
   /** "receiving": events arrived in the last 24 h; "configured": ready, nothing received yet (or not lately); "not-configured". */
   state: "receiving" | "configured" | "not-configured";
+  /** Configured but no delivery ever arrived: what to expect (e.g. Daytona v2 VMs send none). */
+  waitingNote?: string;
+}
+
+interface ProviderCounters {
+  lastEventAt?: string; lastEventType?: string;
+  received: number; rejected: number; ignored: number; errors?: number;
+  lastError?: string; lastErrorAt?: string;
+  /** What kind of problem lastError is ("not-configured" disappears once the provider is configured). */
+  lastErrorCode?: "not-configured" | "signature" | "body" | "rate" | "apply" | "register" | "internal";
+  /** When the secret was saved or the endpoint registered: errors from before are stale. */
+  configuredAt?: string;
+  registerFailedAt?: string;
 }
 
 interface StatusFile {
   version: 1;
-  providers: Partial<Record<ComputerWebhookProviderId, { lastEventAt?: string; lastEventType?: string; received: number; rejected: number; ignored: number; lastError?: string; lastErrorAt?: string; registerFailedAt?: string }>>;
+  providers: Partial<Record<ComputerWebhookProviderId, ProviderCounters>>;
   seen: Record<string, number>;
 }
+
+/** Shown while a configured provider has never sent a delivery. */
+export const COMPUTER_WEBHOOK_WAITING_NOTES: Record<ComputerWebhookProviderId, string> = {
+  daytona: "Waiting for the first event. Daytona currently sends webhooks only for its classic sandboxes (containers), not for Daytona v2 VMs, "
+    + "so v2 computers may never produce one. Polpo also checks every computer at its provider every 5 minutes and whenever it is used.",
+  e2b: "Waiting for the first event. E2B sends one when a sandbox is created, paused, resumed or killed. "
+    + "Polpo also checks every computer at its provider every 5 minutes and whenever it is used.",
+};
+
+/** Legacy status files kept no error code: their "not configured" errors are recognised by text. */
+const NOT_CONFIGURED_ERROR = /webhooks are not configured on this instance/;
 
 export interface ComputerWebhooksOptions {
   polpoDir: () => string;
@@ -236,10 +269,12 @@ export interface ComputerWebhooksOptions {
   fetch?: typeof fetch;
   now?: () => number;
   log?: (level: "info" | "warn", message: string) => void;
+  /** Announces each recorded delivery (the server emits computer:webhook). */
+  emit?: (payload: PolpoEventMap["computer:webhook"]) => void;
 }
 
 export interface WebhookHandleResult {
-  status: 200 | 202 | 400 | 401 | 404 | 413 | 429 | 503;
+  status: 200 | 202 | 400 | 401 | 404 | 413 | 429 | 500 | 503;
   body: Record<string, unknown>;
 }
 
@@ -248,7 +283,10 @@ export const computerWebhookPath = (p: ComputerWebhookProviderId) => `/api/v1/co
 
 export class ComputerWebhooks {
   private readonly buckets = new Map<string, { at: number; count: number }>();
-  constructor(private readonly o: ComputerWebhooksOptions) {}
+  private readonly log: ComputerWebhookEventLog;
+  constructor(private readonly o: ComputerWebhooksOptions) {
+    this.log = new ComputerWebhookEventLog(o.polpoDir);
+  }
 
   private now(): number { return (this.o.now ?? Date.now)(); }
   private get file(): string { return join(this.o.polpoDir(), "computer-webhooks.json"); }
@@ -273,12 +311,17 @@ export class ComputerWebhooks {
     renameSync(tmp, this.file);
   }
 
-  private bump(p: ComputerWebhookProviderId, fn: (s: NonNullable<StatusFile["providers"][ComputerWebhookProviderId]>) => void): void {
+  private bump(p: ComputerWebhookProviderId, fn: (s: ProviderCounters) => void): void {
     const f = this.read();
     const s = f.providers[p] ?? { received: 0, rejected: 0, ignored: 0 };
     fn(s);
     f.providers[p] = s;
     this.write(f);
+  }
+
+  /** The provider was (re)configured: earlier problems are history (they stay in the event log). */
+  private configured(p: ComputerWebhookProviderId): void {
+    this.bump(p, (s) => { delete s.lastError; delete s.lastErrorAt; delete s.lastErrorCode; s.configuredAt = new Date(this.now()).toISOString(); });
   }
 
   private async secretEntry(p: ComputerWebhookProviderId): Promise<Record<string, string> | undefined> {
@@ -291,7 +334,7 @@ export class ComputerWebhooks {
     return base ? `${base}${computerWebhookPath(p)}` : undefined;
   }
 
-  /** Every provider's webhook status (never a secret). */
+  /** Every provider's webhook status (never a secret), from the current configuration. */
   async status(): Promise<ComputerWebhookProviderStatus[]> {
     const f = this.read();
     const kinds = new Set(this.o.computers().filter(isRemoteComputer).map((c) => c.kind));
@@ -303,27 +346,34 @@ export class ComputerWebhooks {
       const ready = secretSet && (prov.registration === "manual" || !!registered);
       const recent = !!s.lastEventAt && this.now() - Date.parse(s.lastEventAt) < 24 * 3_600_000;
       const url = this.url(prov.id);
+      // an error is shown only while it still says something: not "not configured" once configured, nothing from before the configuration
+      const notConfiguredError = s.lastErrorCode === "not-configured" || (!s.lastErrorCode && !!s.lastError && NOT_CONFIGURED_ERROR.test(s.lastError));
+      const beforeConfig = !!s.configuredAt && !!s.lastErrorAt && Date.parse(s.lastErrorAt) < Date.parse(s.configuredAt);
+      const showError = !!s.lastError && !(ready && notConfiguredError) && !beforeConfig;
+      const state = ready ? (recent ? "receiving" : "configured") : "not-configured";
       return {
         provider: prov.id, label: prov.label, registration: prov.registration, secretSet,
         ...(registered !== undefined ? { registered } : {}), ...(creds?.webhookId ? { webhookId: creds.webhookId } : {}),
         ...(url ? { url } : {}), inUse: kinds.has(prov.id),
         ...(s.lastEventAt ? { lastEventAt: s.lastEventAt } : {}), ...(s.lastEventType ? { lastEventType: s.lastEventType } : {}),
-        received: s.received, rejected: s.rejected, ignored: s.ignored,
-        ...(s.lastError ? { lastError: s.lastError, lastErrorAt: s.lastErrorAt } : {}),
-        state: ready ? (recent ? "receiving" : "configured") : "not-configured",
+        received: s.received, rejected: s.rejected, ignored: s.ignored, errors: s.errors ?? 0,
+        ...(showError ? { lastError: s.lastError, lastErrorAt: s.lastErrorAt } : {}),
+        state,
+        ...(state === "configured" && !s.lastEventAt ? { waitingNote: COMPUTER_WEBHOOK_WAITING_NOTES[prov.id] } : {}),
       } satisfies ComputerWebhookProviderStatus;
     }));
   }
 
   /**
-   * Whether every provider this instance's computers use pushes their state (its webhook is set
-   * up): the reconcile can then run less often.
+   * Whether every provider this instance's computers use pushes their state (events arrived in the
+   * last 24 h): the reconcile can then run less often. A provider configured but silent (e.g.
+   * Daytona, which sends nothing for v2 VMs) keeps the 5-minute check.
    */
   async pushing(): Promise<boolean> {
     const kinds = [...new Set(this.o.computers().filter(isRemoteComputer).map((c) => c.kind))];
     if (!kinds.length) return false;
     const all = await this.status();
-    return kinds.every((k) => all.find((s) => s.provider === k)?.state !== "not-configured");
+    return kinds.every((k) => all.find((s) => s.provider === k)?.state === "receiving");
   }
 
   /** The person's signing secret (Daytona), into the vault; null removes it. */
@@ -331,10 +381,15 @@ export class ComputerWebhooks {
     const vault = this.o.vault();
     if (!vault) throw new Error("This instance has no vault: the signing secret cannot be stored");
     const service = computerWebhookVaultService(p);
-    if (secret === null) { await vault.remove(COMPUTER_WEBHOOK_VAULT_OWNER, service); return; }
+    if (secret === null) {
+      await vault.remove(COMPUTER_WEBHOOK_VAULT_OWNER, service);
+      this.bump(p, (s) => { delete s.lastError; delete s.lastErrorAt; delete s.lastErrorCode; delete s.configuredAt; });
+      return;
+    }
     const value = secret.trim();
     if (value.length < 16 || /\s/.test(value)) throw new Error("That does not look like a signing secret (Daytona's start with whsec_)");
     await vault.set(COMPUTER_WEBHOOK_VAULT_OWNER, service, { type: "custom", label: `${COMPUTER_WEBHOOK_PROVIDERS[p].label} webhook signing secret (computers)`, credentials: { secret: value } });
+    this.configured(p);
   }
 
   /** E2B: register this instance's endpoint with a fresh secret (kept in the vault). */
@@ -356,7 +411,7 @@ export class ComputerWebhooks {
     });
     const text = await res.text();
     if (!res.ok) {
-      this.bump("e2b", (s) => { s.registerFailedAt = new Date(this.now()).toISOString(); s.lastError = `Registration refused (${res.status}): ${text.slice(0, 200)}`; s.lastErrorAt = s.registerFailedAt; });
+      this.bump("e2b", (s) => { s.registerFailedAt = new Date(this.now()).toISOString(); s.lastError = `Registration refused (${res.status}): ${text.slice(0, 200)}`; s.lastErrorAt = s.registerFailedAt; s.lastErrorCode = "register"; });
       throw new Error(`E2B refused the webhook (${res.status}): ${text.slice(0, 200)}`);
     }
     let webhookId = "";
@@ -365,7 +420,8 @@ export class ComputerWebhooks {
     await vault.set(COMPUTER_WEBHOOK_VAULT_OWNER, computerWebhookVaultService("e2b"), {
       type: "custom", label: "E2B webhook (computers): signing secret and id", credentials: { secret, webhookId, url },
     });
-    this.bump("e2b", (s) => { delete s.registerFailedAt; delete s.lastError; delete s.lastErrorAt; });
+    this.bump("e2b", (s) => { delete s.registerFailedAt; });
+    this.configured("e2b");
     this.o.log?.("info", `E2B webhook registered (${url})`);
     return (await this.status()).find((s) => s.provider === "e2b")!;
   }
@@ -399,12 +455,12 @@ export class ComputerWebhooks {
     }
   }
 
-  private limited(p: string): boolean {
+  /** Requests in the provider's current minute (above WEBHOOK_RATE_PER_MINUTE: refused). */
+  private hit(p: string): number {
     const now = this.now();
     const b = this.buckets.get(p);
-    if (!b || now - b.at >= 60_000) { this.buckets.set(p, { at: now, count: 1 }); return false; }
-    b.count++;
-    return b.count > WEBHOOK_RATE_PER_MINUTE;
+    if (!b || now - b.at >= 60_000) { this.buckets.set(p, { at: now, count: 1 }); return 1; }
+    return ++b.count;
   }
 
   /** The computer an event is about, if it is one of this instance's. */
@@ -421,38 +477,150 @@ export class ComputerWebhooks {
     return undefined;
   }
 
-  /** One delivery: limits, signature, replay, then each event to its computer. */
+  // ── The event log ─────────────────────────────────────────────────
+
+  /** A page of a provider's recorded deliveries (newest first, no payloads). */
+  events(p: ComputerWebhookProviderId, o: { limit?: number; cursor?: string; outcomes?: readonly ComputerWebhookOutcome[] } = {}): ComputerWebhookEventPage {
+    return this.log.list(p, o);
+  }
+
+  /** One recorded delivery, with its redacted payload and safe headers. */
+  event(p: ComputerWebhookProviderId, id: string): ComputerWebhookEventRecord | undefined {
+    return this.log.get(p, id);
+  }
+
+  /**
+   * Record a delivery in the provider's log and count it (the status' counters follow the log):
+   * rejected → rejected (and the last error); anything that passed the signature → received (and
+   * the last event); ignored → ignored; accepted clears the last error.
+   */
+  private record(
+    p: ComputerWebhookProviderId,
+    d: { raw: string; header: HeaderGet; receivedAt: number; t0: number; keepPayload?: boolean },
+    r: Omit<ComputerWebhookEventRecord, "id" | "provider" | "receivedAt" | "processingMs" | "bytes" | "payload" | "payloadTruncated" | "headers">,
+    code?: ProviderCounters["lastErrorCode"],
+  ): ComputerWebhookEventRecord {
+    const receivedAt = new Date(d.receivedAt).toISOString();
+    const preview = d.keepPayload === false ? {} : webhookPayloadPreview(d.raw);
+    const rec: ComputerWebhookEventRecord = {
+      id: newWebhookEventId(d.receivedAt), provider: p, receivedAt, ...r,
+      processingMs: Math.max(0, Math.round(performance.now() - d.t0)), bytes: Buffer.byteLength(d.raw),
+      ...(preview.payload !== undefined ? { payload: preview.payload } : {}), ...(preview.truncated ? { payloadTruncated: true } : {}),
+      headers: safeWebhookHeaders(d.header),
+    };
+    try {
+      this.log.add(rec);
+      this.bump(p, (s) => {
+        if (rec.outcome === "rejected") {
+          s.rejected++;
+          s.lastError = rec.reason ?? "Rejected";
+          s.lastErrorAt = receivedAt;
+          s.lastErrorCode = code ?? "internal";
+          return;
+        }
+        s.received++;
+        s.lastEventAt = receivedAt;
+        if (rec.eventType) s.lastEventType = rec.eventType;
+        if (rec.outcome === "ignored") s.ignored++;
+        if (rec.outcome === "error") {
+          s.errors = (s.errors ?? 0) + 1;
+          s.lastError = rec.reason ?? "Error";
+          s.lastErrorAt = receivedAt;
+          s.lastErrorCode = code ?? "internal";
+        }
+        if (rec.outcome === "accepted") { delete s.lastError; delete s.lastErrorAt; delete s.lastErrorCode; }
+      });
+    } catch (err) {
+      this.o.log?.("warn", `${COMPUTER_WEBHOOK_PROVIDERS[p].label} webhook: the delivery could not be recorded: ${(err as Error).message}`);
+    }
+    this.announce(rec, "recorded");
+    return rec;
+  }
+
+  private announce(rec: ComputerWebhookEventRecord, action: "recorded" | "updated"): void {
+    try {
+      this.o.emit?.({ provider: rec.provider, id: rec.id, action, outcome: rec.outcome, ...(rec.eventType ? { eventType: rec.eventType } : {}), ...(rec.computerId ? { computerId: rec.computerId } : {}) });
+    } catch { /* listeners never change the delivery */ }
+  }
+
+  /** A body over the limit, refused before it is read (the route checks content-length). */
+  refuseTooLarge(provider: string, bytes: number, header: HeaderGet): WebhookHandleResult {
+    const prov = COMPUTER_WEBHOOK_PROVIDERS[provider as ComputerWebhookProviderId];
+    if (prov) {
+      this.record(prov.id, { raw: "", header, receivedAt: this.now(), t0: performance.now(), keepPayload: false },
+        { outcome: "rejected", httpStatus: 413, signature: "not-checked", reason: tooLarge(bytes) }, "body");
+    }
+    return { status: 413, body: { ok: false, error: "Body too large" } };
+  }
+
+  /** One delivery: limits, signature, replay, then each event to its computer; every delivery is recorded. */
   async handle(provider: string, raw: string, header: HeaderGet): Promise<WebhookHandleResult> {
     const prov = COMPUTER_WEBHOOK_PROVIDERS[provider as ComputerWebhookProviderId];
+    // an unknown provider is not recorded (anyone can post to any path)
     if (!prov) return { status: 404, body: { ok: false, error: `No webhooks for provider "${provider}"` } };
-    if (Buffer.byteLength(raw) > WEBHOOK_MAX_BODY_BYTES) return { status: 413, body: { ok: false, error: "Body too large" } };
-    if (this.limited(prov.id)) return { status: 429, body: { ok: false, error: "Too many requests" } };
-    const reject = (status: 400 | 401 | 503, error: string): WebhookHandleResult => {
-      this.bump(prov.id, (s) => { s.rejected++; s.lastError = error; s.lastErrorAt = new Date(this.now()).toISOString(); });
+    const d = { raw, header, receivedAt: this.now(), t0: performance.now() };
+    const bytes = Buffer.byteLength(raw);
+    if (bytes > WEBHOOK_MAX_BODY_BYTES) {
+      this.record(prov.id, { ...d, keepPayload: false }, { outcome: "rejected", httpStatus: 413, signature: "not-checked", reason: tooLarge(bytes) }, "body");
+      return { status: 413, body: { ok: false, error: "Body too large" } };
+    }
+    const hits = this.hit(prov.id);
+    if (hits > WEBHOOK_RATE_PER_MINUTE) {
+      // a flood is recorded once a minute, not once a request
+      if (hits === WEBHOOK_RATE_PER_MINUTE + 1) {
+        this.record(prov.id, { ...d, keepPayload: false }, { outcome: "rejected", httpStatus: 429, signature: "not-checked", reason: `Too many requests (over ${WEBHOOK_RATE_PER_MINUTE} a minute: the rest of this minute's are refused without being recorded)` }, "rate");
+      }
+      return { status: 429, body: { ok: false, error: "Too many requests" } };
+    }
+    try {
+      return await this.receive(prov, d);
+    } catch (err) {
+      this.record(prov.id, d, { outcome: "error", httpStatus: 500, signature: "not-checked", reason: `Internal error: ${(err as Error).message}` }, "internal");
+      return { status: 500, body: { ok: false, error: "Internal error" } };
+    }
+  }
+
+  private async receive(prov: ComputerWebhookProvider, d: { raw: string; header: HeaderGet; receivedAt: number; t0: number }): Promise<WebhookHandleResult> {
+    const { raw, header } = d;
+    const deliveryHeader = header("svix-id") ?? header("webhook-id") ?? undefined;
+    const reject = (status: 400 | 401 | 503, error: string, signature: ComputerWebhookSignature, code: ProviderCounters["lastErrorCode"]): WebhookHandleResult => {
+      this.record(prov.id, d, { outcome: "rejected", httpStatus: status, signature, reason: error, ...(deliveryHeader ? { deliveryId: deliveryHeader } : {}), ...typeOf(raw) }, code);
       return { status, body: { ok: false, error } };
     };
     const secret = (await this.secretEntry(prov.id))?.secret;
-    if (!secret) return reject(503, `${prov.label} webhooks are not configured on this instance`);
+    if (!secret) return reject(503, `${prov.label} webhooks are not configured on this instance`, "not-checked", "not-configured");
     const v = prov.verify(raw, header, secret, this.now());
-    if (!v.ok) return reject(401, `Signature refused: ${v.reason}`);
+    if (!v.ok) return reject(401, `Signature refused: ${v.reason}`, /missing/.test(v.reason) ? "missing" : "invalid", "signature");
     let body: unknown;
-    try { body = JSON.parse(raw); } catch { return reject(400, "Not JSON"); }
+    try { body = JSON.parse(raw); } catch { return reject(400, "Not JSON", "valid", "body"); }
     const events = prov.parse(body);
+    const first = events[0];
+    const type = first?.type ?? str((body as Record<string, unknown>)?.event) ?? str((body as Record<string, unknown>)?.type);
+    const base = {
+      httpStatus: 200, signature: "valid" as const, events: events.length,
+      ...(type ? { eventType: type } : {}), ...(v.deliveryId ? { deliveryId: v.deliveryId } : {}),
+      ...(first ? describeEvent(first) : {}),
+    };
     const f = this.read();
     const deliveryKey = v.deliveryId ? `${prov.id}:delivery:${v.deliveryId}` : undefined;
-    if (deliveryKey && f.seen[deliveryKey]) return { status: 200, body: { ok: true, duplicate: true } };
+    if (deliveryKey && f.seen[deliveryKey]) {
+      this.record(prov.id, d, { ...base, outcome: "ignored", reason: "Duplicate delivery: already received (the provider retried it)", action: "Nothing: it was handled the first time" });
+      return { status: 200, body: { ok: true, duplicate: true } };
+    }
     const now = this.now();
     const fresh = events.filter((e) => !f.seen[`${prov.id}:${e.id}`]);
     for (const e of events) f.seen[`${prov.id}:${e.id}`] = now;
     if (deliveryKey) f.seen[deliveryKey] = now;
-    const s = f.providers[prov.id] ?? { received: 0, rejected: 0, ignored: 0 };
-    s.received++;
-    s.lastEventAt = new Date(now).toISOString();
-    const type = events[0]?.type ?? str((body as Record<string, unknown>)?.event) ?? str((body as Record<string, unknown>)?.type);
-    if (type) s.lastEventType = type;
-    f.providers[prov.id] = s;
     this.write(f);
-    if (events.length && !fresh.length) return { status: 200, body: { ok: true, duplicate: true } };
+    if (events.length && !fresh.length) {
+      this.record(prov.id, d, { ...base, outcome: "ignored", reason: "Duplicate event: the same event already came in another delivery", action: "Nothing: it was handled the first time" });
+      return { status: 200, body: { ok: true, duplicate: true } };
+    }
+    if (!events.length) {
+      this.record(prov.id, d, { ...base, outcome: "ignored", reason: type ? `Not an event Polpo acts on (${type})` : "No event Polpo recognises in the body", action: "Nothing" });
+      return { status: 200, body: { ok: true, matched: [], ignored: 1 } };
+    }
+    const manager = this.o.manager();
     const matched: Array<{ c: ComputerConfig; e: ComputerProviderEvent }> = [];
     let ignored = 0;
     for (const e of fresh) {
@@ -460,15 +628,48 @@ export class ComputerWebhooks {
       if (!c) { ignored++; continue; }
       matched.push({ c, e });
     }
-    if (ignored || !events.length) this.bump(prov.id, (x) => { x.ignored += ignored || 1; });
+    if (!matched.length) {
+      const what = first?.snapshotName ? `snapshot ${first.snapshotName}` : first?.remoteId ? `sandbox ${first.remoteId}` : "the machine";
+      this.record(prov.id, d, { ...base, outcome: "ignored", reason: `Not about one of this instance's computers (${what})`, action: "Nothing: Polpo only follows its own computers" });
+      return { status: 200, body: { ok: true, matched: [], ignored } };
+    }
+    const target = matched[0]!;
+    const from = manager.live(target.c.id).status;
+    const ids = [...new Set(matched.map((m) => m.c.id))];
+    const rec = this.record(prov.id, d, {
+      ...base, ...describeEvent(target.e), eventType: target.e.type, outcome: "accepted", computerId: target.c.id,
+      statusChange: { from },
+      action: `Checking computer "${ids.join('", "')}" at ${prov.label}${ignored ? ` (${ignored} other event${ignored === 1 ? "" : "s"} not about a computer)` : ""}`,
+    });
     // answered at once (providers retry slow endpoints); each computer is then checked at its provider
     const work = (async () => {
+      let to: string | undefined;
+      let failure: string | undefined;
       for (const { c, e } of matched) {
-        await this.o.manager().providerEvent(c, e).catch((err) => this.o.log?.("warn", `Computer "${c.id}": ${prov.label} event ${e.type} could not be applied: ${(err as Error).message}`));
+        try {
+          const live = await manager.providerEvent(c, e);
+          if (c.id === target.c.id) to = live?.status;
+        } catch (err) {
+          failure = (err as Error).message;
+          this.o.log?.("warn", `Computer "${c.id}": ${prov.label} event ${e.type} could not be applied: ${failure}`);
+        }
+      }
+      const appliedAt = new Date(this.now()).toISOString();
+      const statusChange = { from, ...(to ? { to } : {}), ...(failure ? { error: failure } : {}), appliedAt };
+      const patch: Partial<ComputerWebhookEventRecord> = failure
+        ? { outcome: "error", reason: `Could not apply it: ${failure}`, statusChange, action: `Checked computer "${ids.join('", "')}" at ${prov.label}: failed` }
+        : { statusChange, action: `Checked computer "${target.c.id}" at ${prov.label}: ${to && to !== from ? `${from} → ${to}` : `no change (${to ?? from})`}` };
+      try {
+        if (this.log.update(prov.id, rec.id, patch)) {
+          if (failure) this.bump(prov.id, (s) => { s.errors = (s.errors ?? 0) + 1; s.lastError = patch.reason; s.lastErrorAt = appliedAt; s.lastErrorCode = "apply"; });
+          this.announce({ ...rec, ...patch }, "updated");
+        }
+      } catch (err) {
+        this.o.log?.("warn", `${prov.label} webhook: the delivery's result could not be recorded: ${(err as Error).message}`);
       }
     })();
     this.inflight = Promise.all([this.inflight, work]).then(() => undefined);
-    return { status: 200, body: { ok: true, matched: [...new Set(matched.map((m) => m.c.id))], ignored } };
+    return { status: 200, body: { ok: true, matched: ids, ignored } };
   }
 
   private inflight: Promise<void> = Promise.resolve();
@@ -479,11 +680,36 @@ export class ComputerWebhooks {
   }
 }
 
+const tooLarge = (bytes: number) => `Body too large (${Math.round(bytes / 1024)} KB; at most ${WEBHOOK_MAX_BODY_BYTES / 1024} KB)`;
+
+/** The fields of the log entry an event gives. */
+function describeEvent(e: ComputerProviderEvent): Partial<ComputerWebhookEventRecord> {
+  return {
+    providerEventId: e.id,
+    ...(e.remoteId ? { sandboxId: e.remoteId } : {}),
+    ...(e.snapshotName ? { snapshotName: e.snapshotName } : {}),
+    ...(e.from || e.state ? { providerState: { ...(e.from ? { from: e.from } : {}), ...(e.state ? { to: e.state } : {}) } } : {}),
+  };
+}
+
+/** The event type of a body not (yet) trusted, for a rejected delivery's entry. */
+function typeOf(raw: string): { eventType?: string } {
+  try {
+    const b = JSON.parse(raw) as Record<string, unknown>;
+    const t = str(b?.event) ?? str(b?.type);
+    return t ? { eventType: t.slice(0, 100) } : {};
+  } catch {
+    return {};
+  }
+}
+
 /** What the server gives the webhooks (the orchestrator, structurally). */
 export interface ComputerWebhooksHost {
   getPolpoDir(): string;
   getConfig(): { settings?: { computers?: ComputerConfig[] } } | null | undefined;
   getVaultStore?(): VaultStore | null | undefined;
+  /** The orchestrator's bus: each recorded delivery is announced as computer:webhook (SSE). */
+  emit?(event: "computer:webhook", payload: PolpoEventMap["computer:webhook"]): unknown;
 }
 
 const instances = new Map<string, ComputerWebhooks>();
@@ -504,6 +730,7 @@ export function computerWebhooksFor(host: ComputerWebhooksHost, manager: () => C
       publicBase: () => process.env.POLPO_PUBLIC_URL?.trim() || undefined,
       e2bApiKey: async () => (await import("./remote-providers.js")).remoteProviderCredentials("e2b").then((c) => c?.apiKey),
       log,
+      emit: (payload) => { host.emit?.("computer:webhook", payload); },
     });
     instances.set(dir, w);
   }
