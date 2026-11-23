@@ -21,7 +21,6 @@ import {
   Code2,
   AppWindow,
   Boxes,
-  Store,
   ExternalLink,
   Database,
   Shapes,
@@ -40,7 +39,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { config } from "@/lib/config";
 import { openWhatsNew } from "@/hooks/use-whats-new-drawer";
 
 type NavItem = { to: string; icon: typeof LayoutDashboard; label: string; external?: boolean };
@@ -74,7 +72,6 @@ const nav: NavSection[] = [
       { to: "/memory", icon: Brain, label: "Memory" },
       { to: "/playbooks", icon: Workflow, label: "Playbooks" },
       { to: "/brain", icon: BrainCircuit, label: "Company Brain" },
-      { to: config.inkHubUrl, icon: Store, label: "Polpo Ink Hub", external: true },
     ],
   },
   {
