@@ -1,4 +1,5 @@
-import { createContext, useContext, useState } from "react";
+import { useContext, useState } from "react";
+import { DocChoiceEditContext } from "./artifact-doc-choice-context";
 import { NodeViewWrapper, type NodeViewProps } from "@tiptap/react";
 import { Check, ChevronDown, Pencil, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -10,8 +11,6 @@ import {
 import { DocChoiceDialog } from "./artifact-doc-choice-picker";
 
 const chipClass = "inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 align-baseline text-xs font-medium leading-tight";
-
-export const DocChoiceEditContext = createContext<((definition: DocChoiceDefinition) => void) | null>(null);
 
 export function DocChoiceChip({ node, updateAttributes }: NodeViewProps) {
   const choice = decodeDocChoice(node.attrs.choice);

@@ -17,7 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { embeddedDocImage } from "./artifact-doc-assets";
 import { artifactDocExtensions, artifactDocUrl, docFontFamilies } from "./artifact-doc-format";
 import { ArtifactDocMarkdown } from "./artifact-doc-preview";
-import { DocChoiceEditContext } from "./artifact-doc-choice-chip";
+import { DocChoiceEditContext } from "./artifact-doc-choice-context";
 import { DocChoicePicker } from "./artifact-doc-choice-picker";
 import { encodeDocChoice, readChoiceDefinitions, updateChoiceDefinition, type DocChoiceDefinition } from "./artifact-doc-choices";
 import { DocTabNavigation, type DocTabAction } from "./artifact-doc-tab-navigation";
