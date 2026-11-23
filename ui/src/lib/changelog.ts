@@ -32,6 +32,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-23-artifacts-table-preview",
+    date: "2026-11-23",
+    kind: "improved",
+    title: "Artefatti: tabella e anteprima al posto delle schede",
+    summary: "La pagina Artefatti è una tabella ordinabile (nome, tipo, chi l'ha creato, da quale task o missione, dimensione, ultima modifica); con Anteprima vedi l'elenco a sinistra e l'artefatto aperto a destra.",
+    body: [
+      "- **Tabella (predefinita)**: nome con l'icona del tipo, tipo e versione, creato da (agente o persona), **da** (il task e la sua missione, o la chat), dimensione e ultima modifica (relativa, con data e ora al passaggio del mouse). Clicca un'intestazione per ordinare, di nuovo per invertire.",
+      "- **Azioni su ogni riga** (menu ⋯): apri, scarica, copia link, elimina (con conferma).",
+      "- **Anteprima**: elenco compatto raggruppato per tipo a sinistra, l'artefatto vivo a destra con i suoi dati e le stesse azioni della pagina di dettaglio (versioni, sorgente, ricarica dati, schermo intero, apri da solo).",
+      "- **Da tastiera**: frecce su e giù per muoversi, Invio per aprire; in Anteprima le frecce cambiano l'artefatto mostrato.",
+      "- La scelta Tabella / Anteprima resta in questo browser. Sul telefono la tabella diventa un elenco (nome, tipo, data) e in Anteprima un tocco apre l'artefatto.",
+      "- Gli artefatti creati da un agente mentre lavora a un task ricordano il task e la missione (anche in REST `GET /api/v1/artifacts`, `taskId` / `missionId`, e in MCP `polpo_artifacts_list`).",
+    ].join("\n"),
+    highlight: false,
+    cta: { label: "Apri gli artefatti", to: "/artifacts" },
+  },
+  {
     id: "2026-11-23-command-safe-env",
     date: "2026-11-23",
     kind: "fixed",

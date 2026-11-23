@@ -168,6 +168,16 @@ describe("artifact tools", () => {
     expect(emit.mock.calls.map(([p]) => p.action)).toEqual(["created", "updated"]);
   });
 
+  it("what an agent makes while working on a task records the task and its mission", async () => {
+    const { store } = await fixture();
+    const agent = { store, author: "analyst", taskId: "task-9", missionId: "m-2" };
+    const created = await executeArtifactTool("artifact_create", { title: "Findings", type: "doc", content: "# Findings" }, agent);
+    const id = /art_[\w-]+/.exec(created)![0];
+    expect(await store.get(id)).toMatchObject({ taskId: "task-9", missionId: "m-2" });
+    expect((await store.list()).find((a) => a.id === id)).toMatchObject({ taskId: "task-9", missionId: "m-2", size: 10 });
+    expect(await executeArtifactTool("artifact_list", {}, agent)).toContain("from task task-9");
+  });
+
   it("agents get the tools with artifact_* (or some of them) in allowedTools", async () => {
     const { store } = await fixture();
     const ctx = () => ({ store, author: "analyst" });

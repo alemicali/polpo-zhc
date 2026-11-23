@@ -207,7 +207,10 @@ export function registerApprovalTools(tool: Register, deps: McpDeps): void {
   });
 }
 
-const artifactItem = z.object({ id: z.string(), title: z.string(), type: z.string(), kind: z.string().optional(), createdBy: z.string().optional(), version: z.number().optional() }).passthrough();
+const artifactItem = z.object({
+  id: z.string(), title: z.string(), type: z.string(), kind: z.string().optional(), createdBy: z.string().optional(), version: z.number().optional(),
+  taskId: z.string().optional(), missionId: z.string().optional(), size: z.number().optional(), updatedAt: z.string().optional(),
+}).passthrough();
 
 export function registerArtifactTools(tool: Register, deps: McpDeps): void {
   tool("artifacts", "polpo_artifacts_list", {
@@ -227,8 +230,10 @@ export function registerArtifactTools(tool: Register, deps: McpDeps): void {
     const all = ((r.data as Array<Record<string, unknown>>) ?? []).map(({ content: _c, ...rest }) => rest);
     const p = page(all, limit ?? 20, cursor);
     if (!p) return fail(BAD_CURSOR);
-    const lines = (p.items as Array<{ id: string; title: string; type: string; kind?: string; createdBy?: string; version?: number }>)
-      .map((a) => `- ${a.id} [${a.type}${a.kind ? `/${a.kind}` : ""}] ${a.title}${a.createdBy ? ` — by ${a.createdBy}` : ""}${a.version ? `, v${a.version}` : ""}`);
+    const lines = (p.items as Array<{ id: string; title: string; type: string; kind?: string; createdBy?: string; version?: number; taskId?: string; missionId?: string; size?: number; updatedAt?: string }>)
+      .map((a) => `- ${a.id} [${a.type}${a.kind ? `/${a.kind}` : ""}] ${a.title}${a.createdBy ? ` — by ${a.createdBy}` : ""}${a.version ? `, v${a.version}` : ""}`
+        + `${a.taskId ? `, from task ${a.taskId}${a.missionId ? ` (mission ${a.missionId})` : ""}` : ""}`
+        + `${typeof a.size === "number" ? `, ${a.size} bytes` : ""}${a.updatedAt ? `, updated ${a.updatedAt.slice(0, 16).replace("T", " ")}` : ""}`);
     return ok(`${lines.join("\n") || "No artifacts."}${p.next_cursor ? `\n(more: cursor ${p.next_cursor})` : ""}`, p);
   });
 

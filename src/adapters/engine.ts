@@ -1048,7 +1048,11 @@ export async function buildAgentToolset(o: {
   if (ctx?.polpoDir) {
     allTools.push(...createDataAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
     const artifactPolpoDir = ctx.polpoDir;
-    allTools.push(...createArtifactAgentTools(agentConfig.allowedTools, () => ({ store: getArtifactStore(artifactPolpoDir), author: agentConfig.name })));
+    allTools.push(...createArtifactAgentTools(agentConfig.allowedTools, () => ({
+      store: getArtifactStore(artifactPolpoDir),
+      author: agentConfig.name,
+      ...(o.task ? { taskId: o.task.id, ...(o.task.missionId ? { missionId: o.task.missionId } : {}) } : {}),
+    })));
     allTools.push(...createCompanyBrainAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
     allTools.push(...createStorageAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, { vaultStore: ctx.vaultStore as any, cwd, allowedPaths: effectiveAllowedPaths, outputDir, fs: remoteFs }));
     // the results of the tasks it depends on and of its mission's tasks (read fresh from the task store)
