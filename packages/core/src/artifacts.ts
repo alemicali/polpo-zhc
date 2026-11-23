@@ -56,6 +56,9 @@ export interface Artifact {
   createdBy: string;
   /** The chat it was made in. */
   sessionId?: string;
+  /** The task it was made in (an agent working on a task), and that task's mission. */
+  taskId?: string;
+  missionId?: string;
   /** Data sources the content reads (declared by the author, for listing and refresh). */
   sources?: string[];
   /** Re-run the data every N seconds while open (html). */
@@ -77,6 +80,8 @@ export interface NewArtifact {
   content: string;
   createdBy: string;
   sessionId?: string;
+  taskId?: string;
+  missionId?: string;
   sources?: string[];
   refreshSeconds?: number;
   pinned?: boolean;
@@ -203,6 +208,8 @@ export function buildArtifact(id: string, input: NewArtifact, now = new Date().t
     versions: [],
     createdBy: input.createdBy,
     ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+    ...(input.taskId ? { taskId: input.taskId } : {}),
+    ...(input.missionId ? { missionId: input.missionId } : {}),
     ...(input.sources?.length ? { sources: input.sources } : {}),
     ...(input.refreshSeconds ? { refreshSeconds: input.refreshSeconds } : {}),
     ...(input.pinned ? { pinned: true } : {}),
