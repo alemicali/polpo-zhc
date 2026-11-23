@@ -32,6 +32,20 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-23-bash-process-tree",
+    date: "2026-11-23",
+    kind: "fixed",
+    title: "Un comando fermato non lascia più processi attivi",
+    summary: "Quando un comando bash di un agente va in timeout o l'agente viene fermato, Polpo chiude anche tutto ciò che il comando aveva avviato, e lo strumento risponde subito.",
+    body: [
+      "- **Prima**: a un timeout veniva chiusa solo la shell. Server di sviluppo, `sleep` e altri programmi avviati dal comando restavano attivi sul server e tenevano aperto l'output, e lo strumento poteva restare in attesa.",
+      "- **Ora**: il comando e tutto quello che ha avviato vengono fermati insieme (prima con SIGTERM, dopo 2,5 secondi con SIGKILL se qualcosa è ancora vivo; su Windows con `taskkill /T`). Lo strumento risponde appena la shell è chiusa.",
+      "- **Fermare un task ferma anche il comando in corso**, e i comandi ancora attivi quando Polpo si chiude vengono chiusi.",
+      "- Vale per i comandi sul server, nei sandbox locali (bubblewrap, Docker) e per gli harness degli agenti eseguiti sul server. I messaggi di timeout e «(no output)» restano come prima.",
+    ].join("\n"),
+    highlight: false,
+  },
+  {
     id: "2026-11-23-webhook-events",
     date: "2026-11-23",
     kind: "improved",

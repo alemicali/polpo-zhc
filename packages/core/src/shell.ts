@@ -24,6 +24,8 @@ export interface ShellOptions {
   env?: Record<string, string>;
   /** Timeout in milliseconds. */
   timeout?: number;
+  /** Stops the command (and what it started) when aborted. */
+  signal?: AbortSignal;
 }
 
 export interface ShellResult {
