@@ -3,8 +3,10 @@
  *
  *   GET    /artifacts                          list (?type, kind, createdBy, sessionId, q); former data views included as type "view"
  *   POST   /artifacts                          create { title, type, content, kind?, description?, sources?, refreshSeconds?, pinned?, tags? }
- *   GET    /artifacts/:id                      one artifact, with its content and versions
- *   PATCH  /artifacts/:id                      change it; a new content keeps the previous one as a version
+ *   GET    /artifacts/:id                      one artifact, with its content and versions (?preview=1 for a compact preview)
+ *   PATCH  /artifacts/:id                      change it (title, pinned, content…); a new content keeps the previous one as a version;
+ *                                              expectedVersion: 409 when it changed meanwhile
+ *   POST   /artifacts/:id/duplicate            a copy of it, or of one of its versions { version? }
  *   POST   /artifacts/:id/restore/:version     make an earlier version current (as a new version)
  *   DELETE /artifacts/:id                      delete it
  *   POST   /artifacts/:id/data                 the data bridge of an html artifact: { method: sources|describe|query|sql, params }
@@ -12,7 +14,8 @@
  * Former data views ("view:<id>") are read-only here: they change with the data tools or on the Data page.
  */
 import { OpenAPIHono } from "@hono/zod-openapi";
-import { isArtifactType, matchesArtifactFilter, type ArtifactFilter, type ArtifactStore } from "@polpo-ai/core/artifacts";
+import { bodyLimit } from "hono/body-limit";
+import { ArtifactEditConflictError, isArtifactType, MAX_ARTIFACT_BYTES, matchesArtifactFilter, type Artifact, type ArtifactFilter, type ArtifactStore } from "@polpo-ai/core/artifacts";
 import type { DataRuntime } from "../data-runtime.js";
 import { isViewArtifactId, runArtifactDataCall, viewAsArtifact, viewAsSummary, VIEW_ARTIFACT_PREFIX, type ArtifactDataMethod } from "../artifact-runtime.js";
 
@@ -26,9 +29,98 @@ export interface ArtifactRoutesDeps {
 
 const DATA_METHODS: readonly ArtifactDataMethod[] = ["sources", "describe", "query", "sql"];
 
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+const previewText = (value: unknown, limit: number) => typeof value === "string" ? value.slice(0, limit) : undefined;
+const previewNumber = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : undefined;
+
+/** Keep thumbnails independent of history and cap the excerpt sent per card. */
+function artifactPreview(artifact: Artifact): { content: string } {
+  const { content, kind, type } = artifact;
+  if (type !== "html" || !content.trimStart().startsWith("{") || !["slides", "sheets", "motion"].includes(kind ?? "")) {
+    return { content: content.slice(0, type === "svg" ? 48_000 : 32_000) };
+  }
+
+  let model: Record<string, unknown> | undefined;
+  try {
+    model = objectValue(JSON.parse(content));
+  } catch {
+    return { content: "" };
+  }
+  if (model?.version !== 1) return { content: "" };
+
+  if (kind === "sheets" && Array.isArray(model.sheets)) {
+    const first = objectValue(model.sheets[0]);
+    const cells = objectValue(first?.cells);
+    const excerpt: Record<string, string> = {};
+    for (let row = 1; row <= 5; row += 1) {
+      for (const column of "ABCD") {
+        const address = column + row;
+        const value = previewText(cells?.[address], 80);
+        if (value !== undefined) excerpt[address] = value;
+      }
+    }
+    return { content: JSON.stringify({ version: 1, sheets: [{ name: previewText(first?.name, 31), cells: excerpt }] }) };
+  }
+
+  if (kind === "slides" && Array.isArray(model.slides)) {
+    const slide = objectValue(model.slides.find((item) => {
+      const candidate = objectValue(item);
+      return candidate && candidate.hidden !== true;
+    })) ?? objectValue(model.slides[0]);
+    if (!slide) return { content: "" };
+    let imageBudget = 16_000;
+    const elements = Array.isArray(slide.elements) ? slide.elements.slice(0, 20).flatMap((item, index) => {
+      const element = objectValue(item);
+      if (!element) return [];
+      const src = typeof element.src === "string" && element.src.length <= imageBudget &&
+        /^data:image\/(png|jpeg);base64,[a-z0-9+/=]+$/i.test(element.src) ? element.src : undefined;
+      if (element.type === "image" && !src) return [];
+      imageBudget -= src?.length ?? 0;
+      return [{
+        id: String(index), type: previewText(element.type, 16), color: previewText(element.color, 16),
+        src, alt: previewText(element.alt, 180),
+        x: previewNumber(element.x), y: previewNumber(element.y), w: previewNumber(element.w), h: previewNumber(element.h),
+        fontSize: previewNumber(element.fontSize), text: previewText(element.text, 180),
+      }];
+    }) : undefined;
+    return { content: JSON.stringify({ version: 1, slides: [{
+      id: "preview", layout: previewText(slide.layout, 16), theme: previewText(slide.theme, 16), elements,
+      title: previewText(slide.title, 180), body: previewText(slide.body, 440), secondary: previewText(slide.secondary, 240),
+    }] }) };
+  }
+
+  if (kind === "motion" && Array.isArray(model.scenes)) {
+    const first = objectValue(model.scenes[0]);
+    if (!first || !Array.isArray(first.layers)) return { content: "" };
+    const layers = first.layers.slice(0, 40).flatMap((item, index) => {
+      const layer = objectValue(item);
+      if (!layer) return [];
+      return [{
+        id: String(index), type: previewText(layer.type, 16), color: previewText(layer.color, 16),
+        x: previewNumber(layer.x), y: previewNumber(layer.y), width: previewNumber(layer.width), height: previewNumber(layer.height),
+        fontSize: previewNumber(layer.fontSize), text: previewText(layer.text, 180),
+      }];
+    });
+    return { content: JSON.stringify({
+      version: 1, width: previewNumber(model.width), height: previewNumber(model.height),
+      scenes: [{
+        id: "preview", name: previewText(first.name, 180), duration: previewNumber(first.duration),
+        background: previewText(first.background, 16), layers,
+      }],
+    }) };
+  }
+
+  return { content: "" };
+}
+
 export function artifactRoutes(getDeps: () => ArtifactRoutesDeps): OpenAPIHono {
   const app = new OpenAPIHono();
   const fail = (c: any, status: number, error: string) => c.json({ ok: false, error }, status);
+  // A content is at most MAX_ARTIFACT_BYTES; JSON escaping (quotes, newlines, \u…) can triple it on the wire.
+  app.use("*", bodyLimit({ maxSize: 4 * MAX_ARTIFACT_BYTES, onError: (c) => fail(c, 413, `The request is over ${(4 * MAX_ARTIFACT_BYTES) / 1_000_000} MB`) }));
   const emit = (artifactId: string, action: "created" | "updated" | "deleted", type: string, title: string) =>
     getDeps().emit?.({ artifactId, action, type, title, timestamp: new Date().toISOString() });
 
@@ -41,10 +133,11 @@ export function artifactRoutes(getDeps: () => ArtifactRoutesDeps): OpenAPIHono {
     const { store, data } = getDeps();
     const type = c.req.query("type");
     if (type && !isArtifactType(type)) return fail(c, 400, `Unknown type "${type}"`);
+    const creator = c.req.query("mine") === "true" ? (getDeps().author?.(c) ?? "person:dashboard") : c.req.query("createdBy");
     const filter: ArtifactFilter = {
       ...(type ? { type: type as ArtifactFilter["type"] } : {}),
       ...(c.req.query("kind") ? { kind: c.req.query("kind") } : {}),
-      ...(c.req.query("createdBy") ? { createdBy: c.req.query("createdBy") } : {}),
+      ...(creator ? { createdBy: creator } : {}),
       ...(c.req.query("sessionId") ? { sessionId: c.req.query("sessionId") } : {}),
       ...(c.req.query("q") ? { q: c.req.query("q") } : {}),
     };
@@ -86,18 +179,25 @@ export function artifactRoutes(getDeps: () => ArtifactRoutesDeps): OpenAPIHono {
     const id = c.req.param("id");
     if (isViewArtifactId(id)) {
       const view = await findView(id);
-      return view ? c.json({ ok: true, data: viewAsArtifact(view) }) : fail(c, 404, "Artifact not found");
+      if (!view) return fail(c, 404, "Artifact not found");
+      const artifact = viewAsArtifact(view);
+      return c.json({ ok: true, data: c.req.query("preview") === "1" ? artifactPreview(artifact) : artifact });
     }
     const artifact = await getDeps().store.get(id);
-    return artifact ? c.json({ ok: true, data: artifact }) : fail(c, 404, "Artifact not found");
+    if (!artifact) return fail(c, 404, "Artifact not found");
+    return c.json({ ok: true, data: c.req.query("preview") === "1" ? artifactPreview(artifact) : artifact });
   });
 
   app.patch("/:id", async (c) => {
     const id = c.req.param("id");
     if (isViewArtifactId(id)) return fail(c, 409, "A view changes with the data tools or on the Data page");
     const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+    if (body.expectedVersion !== undefined && (typeof body.expectedVersion !== "number" || !Number.isSafeInteger(body.expectedVersion) || body.expectedVersion < 1)) {
+      return fail(c, 400, "expectedVersion must be a positive integer");
+    }
     try {
       const artifact = await getDeps().store.update(id, {
+        ...(typeof body.expectedVersion === "number" ? { expectedVersion: body.expectedVersion } : {}),
         ...(typeof body.title === "string" ? { title: body.title } : {}),
         ...(typeof body.kind === "string" ? { kind: body.kind } : {}),
         ...(typeof body.description === "string" ? { description: body.description } : {}),
@@ -113,8 +213,33 @@ export function artifactRoutes(getDeps: () => ArtifactRoutesDeps): OpenAPIHono {
       emit(artifact.id, "updated", artifact.type, artifact.title);
       return c.json({ ok: true, data: artifact });
     } catch (err) {
-      return fail(c, 400, err instanceof Error ? err.message : String(err));
+      return fail(c, err instanceof ArtifactEditConflictError ? 409 : 400, err instanceof Error ? err.message : String(err));
     }
+  });
+
+  app.post("/:id/duplicate", async (c) => {
+    const { store } = getDeps();
+    const original = await store.get(c.req.param("id"));
+    if (!original) return fail(c, 404, "Artifact not found");
+    const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+    if (body.version !== undefined && (typeof body.version !== "number" || !Number.isSafeInteger(body.version) || body.version < 1)) {
+      return fail(c, 400, "version must be a positive integer");
+    }
+    const snapshot = body.version === undefined || body.version === original.version
+      ? original : original.versions.find(item => item.version === body.version);
+    if (!snapshot) return fail(c, 409, "That version is no longer available");
+    const { type, kind, sources, refreshSeconds, tags, description, createdBy } = original;
+    try {
+      // The copy keeps the original's author (createdBy): an html artifact reads data with its
+      // author's rights, so it keeps the same grants — never the duplicator's, which could be wider.
+      // Who duplicated it, and from which version, is recorded on the copy's first version.
+      const by = getDeps().author?.(c) ?? "person:dashboard";
+      const copy = await store.create({ type, kind, sources, refreshSeconds, tags, description, createdBy,
+        content: snapshot.content, title: original.title + " (copy)",
+        author: by, note: `Duplicated from ${original.id} v${snapshot.version} by ${by}` });
+      emit(copy.id, "created", type, copy.title);
+      return c.json({ ok: true, data: copy }, 201);
+    } catch (err) { return fail(c, 400, (err as Error).message); }
   });
 
   app.post("/:id/restore/:version", async (c) => {
@@ -126,7 +251,7 @@ export function artifactRoutes(getDeps: () => ArtifactRoutesDeps): OpenAPIHono {
       emit(artifact.id, "updated", artifact.type, artifact.title);
       return c.json({ ok: true, data: artifact });
     } catch (err) {
-      return fail(c, 400, err instanceof Error ? err.message : String(err));
+      return fail(c, err instanceof ArtifactEditConflictError ? 409 : 400, err instanceof Error ? err.message : String(err));
     }
   });
 

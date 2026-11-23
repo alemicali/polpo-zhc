@@ -37,7 +37,8 @@ async function fixture() {
   const app = new OpenAPIHono();
   app.route("/artifacts", artifactRoutes(() => ({ store, data, author: () => "person:ada@example.com", emit: (p) => emitted.push(p) })));
   const call = async (method: string, path: string, body?: unknown) => {
-    const res = await app.request(`/artifacts${path}`, { method, ...(body ? { body: JSON.stringify(body), headers: { "content-type": "application/json" } } : {}) });
+    const json = body ? JSON.stringify(body) : undefined;
+    const res = await app.request(`/artifacts${path}`, { method, ...(json ? { body: json, headers: { "content-type": "application/json", "content-length": String(Buffer.byteLength(json)) } } : {}) });
     return { status: res.status, body: await res.json() as { ok: boolean; data: any; error?: string } };
   };
   return { polpoDir, data, source, store, call, emitted };
@@ -47,7 +48,8 @@ const page = (title: string) => `<!doctype html><html><body><h1>${title}</h1></b
 
 describe("artifact model", () => {
   it("validates content by type", () => {
-    expect(artifactContentProblem("doc", "  ")).toBe("The content is empty");
+    expect(artifactContentProblem("doc", "")).toBeUndefined();
+    expect(artifactContentProblem("html", "  ")).toBe("The content is empty");
     expect(artifactContentProblem("svg", "<div/>")).toMatch(/<svg>/);
     expect(artifactContentProblem("svg", '<svg viewBox="0 0 1 1"></svg>')).toBeUndefined();
     expect(artifactContentProblem("view", "{")).toMatch(/valid JSON/);
@@ -107,6 +109,40 @@ describe("artifacts API", () => {
     expect(emitted.map((e: any) => e.action)).toEqual(["created", "updated", "updated", "deleted"]);
   });
 
+  it("keeps a saved workspace version when another editor submits a stale draft", async () => {
+    const { call, emitted } = await fixture();
+    const original = JSON.stringify({ version: 1, sheets: [{ name: "Sheet 1", cells: {} }] });
+    const edited = JSON.stringify({ version: 1, sheets: [{ name: "Sheet 1", cells: { A1: "Budget" } }] });
+    const created = await call("POST", "", { title: "Budget", type: "html", kind: "sheets", content: original });
+    const path = `/${created.body.data.id}`;
+
+    expect((await call("PATCH", path, { content: edited, expectedVersion: 1 })).body.data).toMatchObject({ version: 2, content: edited });
+    expect((await call("PATCH", path, { content: original, expectedVersion: 1 })).status).toBe(409);
+    expect((await call("PATCH", path, { content: "{}", expectedVersion: 2 })).status).toBe(400);
+    expect((await call("GET", path)).body.data).toMatchObject({ version: 2, content: edited, versions: [{ version: 1, content: original }] });
+    expect(emitted.map((event) => event.action)).toEqual(["created", "updated"]);
+  });
+
+  it("limits workbook thumbnails to a current excerpt without version history", async () => {
+    const { call } = await fixture();
+    const title = "Workbook with history";
+    const initial = JSON.stringify({ version: 1, sheets: [{ name: "Original", cells: { A1: "Old" } }] });
+    const { body: created } = await call("POST", "", { title, type: "html", kind: "sheets", content: initial });
+    const path = `/${created.data.id}`;
+    const current = JSON.stringify({
+      version: 1,
+      sheets: [{ name: "Current", cells: { A1: "New", B4: "a".repeat(120), Z50: "outside" } }],
+    });
+    await call("PATCH", path, { content: current });
+    const preview = await call("GET", `${path}?preview=1`);
+    expect(preview.status).toBe(200);
+    expect(Object.keys(preview.body.data)).toEqual(["content"]);
+    expect(JSON.parse(preview.body.data.content)).toEqual({
+      version: 1,
+      sheets: [{ name: "Current", cells: { A1: "New", B4: "a".repeat(80) } }],
+    });
+  });
+
   it("shows the former data views as read-only artifacts of type view", async () => {
     const { call, data, source } = await fixture();
     const view = await data.store.createView({
@@ -160,6 +196,9 @@ describe("artifact tools", () => {
     expect(await executeArtifactTool("artifact_get", { id, version: 1 }, polpo)).toContain("--- content of v1 ---\n# Plan\n\n- step one");
     await expect(executeArtifactTool("artifact_update", { id, content: "x", edits: [{ find: "a", replace: "b" }] }, polpo)).rejects.toThrow(/either content or edits/);
 
+    await expect(executeArtifactTool("artifact_update", { id, expectedVersion: 1, content: "outdated draft" }, polpo)).rejects.toThrow();
+    expect((await store.get(id))?.version).toBe(2);
+
     const analyst = { store, author: "analyst" };
     await expect(executeArtifactTool("artifact_update", { id, content: "hijack" }, analyst)).rejects.toThrow(/belongs to polpo/);
     await expect(executeArtifactTool("artifact_delete", { id }, analyst)).rejects.toThrow(/belongs to polpo/);
@@ -189,4 +228,49 @@ describe("artifact tools", () => {
     const bad = await create!.execute("t2", { title: "Broken", type: "svg", content: "<div/>" });
     expect(bad.content[0]!.text).toMatch(/^Error: An svg artifact must contain/);
   });
+});
+
+it("duplicates the selected version with its original source grants and filters the current person's items", async () => {
+  const { call, store } = await fixture();
+  const original = await store.create({ title: "Agent report", type: "html", kind: "report",
+    content: "<p>First</p>", createdBy: "analyst", sources: ["sales"], refreshSeconds: 60 });
+  await store.update(original.id, { content: "<p>Second</p>" });
+  const copy = await call("POST", `/${original.id}/duplicate`, { version: 1 });
+  expect(copy.status).toBe(201);
+  expect(copy.body.data).toMatchObject({ createdBy: "analyst", content: "<p>First</p>", version: 1, sources: ["sales"], refreshSeconds: 60 });
+  expect((await call("POST", `/${original.id}/duplicate`, { version: 75 })).status).toBe(409);
+  const blank = await call("POST", "", { title: "Untitled document", type: "doc", content: "" });
+  expect(blank.status).toBe(201);
+  const mine = await call("GET", "?mine=true");
+  expect(mine.body.data.map((a: { id: string }) => a.id)).toEqual([blank.body.data.id]);
+});
+
+it("duplicating records who made the copy, refuses a malformed version, and a too large body", async () => {
+  const { call, store } = await fixture();
+  const original = await store.create({ title: "Deck", type: "doc", content: "# One", createdBy: "analyst" });
+  const copy = await call("POST", `/${original.id}/duplicate`, {});
+  expect(copy.body.data).toMatchObject({ createdBy: "analyst", author: "person:ada@example.com", note: `Duplicated from ${original.id} v1 by person:ada@example.com` });
+  expect((await call("POST", `/${original.id}/duplicate`, { version: "1" })).status).toBe(400);
+  const huge = await call("PATCH", `/${original.id}`, { content: "x".repeat(4_100_000) });
+  expect(huge.status).toBe(413);
+});
+
+it("a new kind must still fit the current content", async () => {
+  const { call } = await fixture();
+  const created = await call("POST", "", { title: "Page", type: "html", content: "{\"hello\":1}" });
+  const changed = await call("PATCH", `/${created.body.data.id}`, { kind: "sheets" });
+  expect(changed.status).toBe(400);
+  expect(changed.body.error).toMatch(/sheets workspace/);
+});
+
+it("artifact_update with expectedVersion refuses a change made since, and a whole rewrite of a long artifact needs it", async () => {
+  const { store } = await fixture();
+  const polpo = { store, author: "polpo" };
+  const doc = await store.create({ title: "Notes", type: "doc", content: "# Notes", createdBy: "polpo" });
+  await store.update(doc.id, { content: "# Notes\n\nby a person", author: "person:ada@example.com" });
+  await expect(executeArtifactTool("artifact_update", { id: doc.id, expectedVersion: 1, content: "# Mine" }, polpo)).rejects.toThrow(/changed since v1 \(now v2\)/);
+  expect(await executeArtifactTool("artifact_update", { id: doc.id, expectedVersion: 2, content: "# Mine" }, polpo)).toMatch(/now v3/);
+  const long = await store.create({ title: "Long", type: "doc", content: "a".repeat(70_000), createdBy: "polpo" });
+  await expect(executeArtifactTool("artifact_update", { id: long.id, content: "short" }, polpo)).rejects.toThrow(/longer than artifact_get shows/);
+  expect(await executeArtifactTool("artifact_update", { id: long.id, expectedVersion: 1, content: "short" }, polpo)).toMatch(/now v2/);
 });

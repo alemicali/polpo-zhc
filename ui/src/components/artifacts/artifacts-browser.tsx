@@ -7,8 +7,7 @@
 import { Fragment, useEffect, useMemo, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
-  ArrowDown, ArrowUp, BarChart3, Download, ExternalLink, FileText, GitBranch, Image as ImageIcon, LayoutDashboard,
-  Link2, MoreHorizontal, Palette, Sparkles, Trash2,
+  ArrowDown, ArrowUp, Download, ExternalLink, Link2, MoreHorizontal, Trash2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,16 +22,7 @@ import {
   ARTIFACT_GROUP_LABEL, absoluteTime, formatArtifactSize, groupArtifactsByType, relativeTime, type ArtifactSort, type ArtifactSortKey,
 } from "@/lib/artifacts-list";
 import { artifactPath, type ArtifactActions } from "@/hooks/use-artifact-actions";
-
-export function ArtifactIcon({ artifact, className = "h-4 w-4" }: { artifact: Pick<ArtifactSummary, "type" | "kind">; className?: string }) {
-  if (artifact.type === "doc") return <FileText className={className} />;
-  if (artifact.type === "mermaid") return <GitBranch className={className} />;
-  if (artifact.type === "svg") return <ImageIcon className={className} />;
-  if (artifact.type === "view") return <BarChart3 className={className} />;
-  if (artifact.kind === "dashboard") return <LayoutDashboard className={className} />;
-  if (artifact.kind === "design") return <Palette className={className} />;
-  return <Sparkles className={className} />;
-}
+import { ArtifactIcon } from "./artifact-icon";
 
 export function LegacyBadge() {
   return <Badge variant="outline" className="border-warning/40 text-micro text-warning">Legacy</Badge>;
@@ -126,7 +116,7 @@ export function ArtifactsTable({ items, info, sort, onSort, active, setActive, a
 
   return (
     <div ref={ref} tabIndex={0} onKeyDown={onKeyDown} aria-label="Artifacts"
-      className="min-h-0 flex-1 overflow-auto rounded-lg border border-border/50 bg-card/80 pb-bottom-nav outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      className="min-h-0 flex-1 overflow-auto rounded-lg border border-border/60 bg-background pb-bottom-nav outline-none focus-visible:ring-2 focus-visible:ring-ring">
       <Table>
         <TableHeader className="sticky top-0 z-10 bg-card">
           <TableRow className="hover:bg-transparent">
@@ -151,7 +141,7 @@ export function ArtifactsTable({ items, info, sort, onSort, active, setActive, a
             const { author, origin } = info(a);
             return (
               <TableRow key={a.id} data-row-index={i} data-state={i === active ? "selected" : undefined} aria-selected={i === active}
-                className="cursor-pointer"
+                className="h-[52px] cursor-pointer"
                 onClick={(e) => { if (!fromInteractive(e.target)) { setActive(i); actions.open(a); } }}>
                 <TableCell className="w-full max-w-0">
                   <div className="flex min-w-0 items-center gap-2">

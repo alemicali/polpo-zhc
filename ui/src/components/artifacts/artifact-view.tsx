@@ -3,7 +3,7 @@
  * an image (svg, so its scripts never run), a diagram (mermaid), or a data view (the former Views).
  */
 import { useMemo } from "react";
-import { RichStreamdown } from "@/components/ai-elements/rich-streamdown";
+import { ArtifactDocPreview } from "./artifact-doc-preview";
 import { MermaidFilePreview } from "@/components/shared/mermaid-file-preview";
 import { DataViewRenderer } from "@/components/data/data-view-renderer";
 import type { DataView } from "@/hooks/use-data";
@@ -33,7 +33,7 @@ export function ArtifactView({ artifact, content, refreshKey }: {
       return (
         <div className="h-full overflow-auto">
           <article className="prose prose-sm dark:prose-invert mx-auto max-w-3xl px-4 py-6 sm:px-8">
-            <RichStreamdown>{content}</RichStreamdown>
+            <ArtifactDocPreview content={content} />
           </article>
         </div>
       );

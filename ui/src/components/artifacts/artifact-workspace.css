@@ -1,0 +1,82 @@
+@keyframes artifact-preparation-spin {
+  to { transform: rotate(1turn); }
+}
+
+@keyframes artifact-preparation-reveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes artifact-preparation-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .6; }
+}
+
+.artifact-preparation-stage {
+  animation:
+    artifact-preparation-reveal 150ms linear 1255ms backwards,
+    artifact-preparation-breathe 2s linear 1405ms infinite;
+}
+
+.artifact-preparation-spinner {
+  border: 2px solid color-mix(in oklch, var(--primary) 26%, transparent);
+  border-top-color: var(--primary);
+  animation: artifact-preparation-spin 1s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .artifact-preparation-stage,
+  .artifact-preparation-spinner {
+    animation: none;
+  }
+}
+
+.artifact-template-art {
+  --template-tone: var(--primary);
+  border-color: color-mix(in oklch, var(--template-tone) 22%, var(--border));
+}
+
+.artifact-template-art[data-template="slides"] { --template-tone: var(--chart-2); }
+.artifact-template-art[data-template="sheets"] { --template-tone: var(--chart-3); }
+.artifact-template-art[data-template="design"] { --template-tone: var(--chart-5); }
+.artifact-template-art[data-template="motion"] { --template-tone: var(--chart-4); }
+
+.artifact-template-art:hover,
+.artifact-template-pending {
+  border-color: color-mix(in oklch, var(--template-tone) 60%, var(--border));
+}
+
+.artifact-template-glyph::before {
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(145deg, transparent 0 15px, color-mix(in oklch, var(--template-tone) 12%, transparent) 15px 16px);
+  mask-image: linear-gradient(90deg, transparent 35%, black);
+  content: "";
+  pointer-events: none;
+}
+
+.artifact-template-glyph {
+  background: radial-gradient(ellipse at 30% 15%, color-mix(in oklch, var(--template-tone) 8%, var(--card)), color-mix(in oklch, var(--template-tone) 23%, var(--background)));
+  border-color: color-mix(in oklch, var(--template-tone) 23%, var(--border));
+  color: color-mix(in oklch, var(--template-tone) 67%, var(--foreground));
+}
+
+.artifact-doc-tab-sidebar {
+  top: 68px;
+  left: max(24px, calc((100% - 1552px) / 2));
+  width: clamp(176px, calc((100% - 924px) / 2), 320px);
+  max-height: calc(100% - 8rem);
+}
+
+@container (max-width: 1120px) {
+  .artifact-doc-tab-sidebar {
+    left: 12px;
+    top: 54px;
+    padding: 8px;
+    background: var(--background);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-raised);
+  }
+}

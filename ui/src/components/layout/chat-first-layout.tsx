@@ -634,7 +634,8 @@ function RightPanelContent() {
   const title = resolvePageTitle(pathname);
   // Tool surfaces keep the platform tab strip but meet its edges so their
   // dense, resizable work areas get every available pixel.
-  const fullBleed = pathname === "/coding"
+  const artifactEditor = pathname.startsWith("/artifacts/");
+  const fullBleed = artifactEditor || pathname === "/coding"
     || pathname.startsWith("/coding/")
     || pathname === "/terminal"
     || pathname === "/browser"
@@ -644,9 +645,9 @@ function RightPanelContent() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <PagesPanelHeader />
+      {!artifactEditor && <PagesPanelHeader />}
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-        {showMoreNavigation && (
+        {!artifactEditor && showMoreNavigation && (
           <div className="flex min-h-0 shrink-0 max-lg:hidden">
             <MoreNavigation pathname={pathname} />
           </div>

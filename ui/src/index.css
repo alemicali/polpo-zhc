@@ -111,6 +111,9 @@
   --color-overlay: var(--overlay);
   --color-canvas: var(--canvas);
   --color-canvas-foreground: var(--canvas-foreground);
+  /* the dark stage behind videos, motion previews and full-screen presentations */
+  --color-stage: var(--stage);
+  --color-stage-foreground: var(--stage-foreground);
   /* backdrop blur: glassy bars and panels (backdrop-blur-surface), the dialog scrim (backdrop-blur-overlay) */
   --blur-surface: var(--surface-blur);
   --blur-overlay: var(--overlay-blur);
@@ -318,6 +321,10 @@
   --overlay: oklch(0 0 0 / 50%);
   --canvas: oklch(1 0 0);
   --canvas-foreground: oklch(0.15 0 0);
+  /* The stage behind videos, motion previews and full-screen presentations (near-black: what
+     letterboxed media expects) */
+  --stage: oklch(0.145 0 0);
+  --stage-foreground: oklch(0.985 0 0);
 
   /*
    * The agent colours: ten hues, spread so neighbours differ, at one lightness and chroma per

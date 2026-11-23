@@ -4,28 +4,35 @@
  * viewer with the artifact running live, its versions (go back to any), its source, and download. The
  * former data views are here too, as artifacts of type "view".
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useSearchParams } from "react-router-dom";
 import {
-  ArrowLeft, Code2, Download, ExternalLink, History, Link2, List, Loader2, Maximize2, PanelRight, RefreshCw, RotateCcw, Search, Sparkles, Trash2,
+  LayoutGrid, List, ListFilter, PanelRight, Search, Sparkles, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useEvents, useMissions, useTasks } from "@polpo-ai/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem,
+  DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
+import { ArtifactPreparation } from "@/components/artifacts/artifact-preparation";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { ArtifactView } from "@/components/artifacts/artifact-view";
+import { ArtifactTemplates } from "@/components/artifacts/artifact-templates";
+import { ArtifactsGrid } from "@/components/artifacts/artifacts-grid";
+import { ArtifactDetail } from "@/components/artifacts/artifact-detail";
 import {
-  ArtifactIcon, ArtifactsPreviewLayout, ArtifactsTable, LegacyBadge, type ArtifactRowInfo,
+  ArtifactsPreviewLayout, ArtifactsTable, type ArtifactRowInfo,
 } from "@/components/artifacts/artifacts-browser";
-import { artifactPath, useArtifactActions } from "@/hooks/use-artifact-actions";
+import { useArtifactActions } from "@/hooks/use-artifact-actions";
 import {
-  artifactLabel, artifactLink, artifactsApi, saveArtifactFile,
-  type Artifact, type ArtifactSummary, type ArtifactType,
+  artifactLabel, artifactsApi, type ArtifactSummary, type ArtifactType,
 } from "@/lib/artifacts-api";
 import {
-  DEFAULT_ARTIFACT_SORT, absoluteTime, artifactAuthor, groupArtifactsByType, artifactOrigin, nextArtifactSort, readArtifactsLayout, sortArtifacts,
+  DEFAULT_ARTIFACT_SORT, artifactAuthor, groupArtifactsByType, artifactOrigin, nextArtifactSort, readArtifactsLayout, sortArtifacts,
   writeArtifactsLayout, type ArtifactSort, type ArtifactsLayout,
 } from "@/lib/artifacts-list";
 import { useNow } from "@/hooks/use-now";
@@ -39,32 +46,87 @@ const FILTERS: { value: "all" | ArtifactType; label: string }[] = [
   { value: "svg", label: "Drawings" },
 ];
 
+const SORTS: { key: ArtifactSort["key"]; dir: ArtifactSort["dir"]; label: string }[] = [
+  { key: "updatedAt", dir: "desc", label: "Newest updated" },
+  { key: "updatedAt", dir: "asc", label: "Oldest updated" },
+  { key: "title", dir: "asc", label: "Name (A–Z)" },
+  { key: "createdBy", dir: "asc", label: "Created by" },
+  { key: "type", dir: "asc", label: "Artifact type" },
+  { key: "size", dir: "desc", label: "Largest first" },
+];
+
+const WORKSPACE_FILTERS = [
+  { value: "slides", label: "Slides" },
+  { value: "sheets", label: "Sheets" },
+  { value: "design", label: "Design" },
+  { value: "motion", label: "Motion" },
+] as const;
+
+const DATE_FILTERS = [
+  { days: 0, label: "Any time" },
+  { days: 7, label: "Last 7 days" },
+  { days: 30, label: "Last 30 days" },
+] as const;
+const DAY_MS = 86_400_000;
+
 export function ArtifactsPage() {
   const { artifactId } = useParams();
-  return artifactId ? <ArtifactDetail id={artifactId} /> : <ArtifactGallery />;
+  return artifactId ? <ArtifactDetail key={artifactId} id={artifactId} /> : <ArtifactGallery />;
 }
 
 function ArtifactGallery() {
   const product = productName(useInstanceBranding());
   const now = useNow();
   const [params, setParams] = useSearchParams();
-  const filter = (params.get("type") as ArtifactType | null) ?? "all";
-  // the former views have no tab of their own: they show in All (marked Legacy), or with ?type=view
-  const tab = FILTERS.some((f) => f.value === filter) ? filter : "all";
+  const requestedType = params.get("type");
+  const filter = requestedType === "view" ? "view" : FILTERS.find((f) => f.value === requestedType)?.value ?? "all";
+  const format = filter === "html" ? WORKSPACE_FILTERS.find((item) => item.value === params.get("kind"))?.value : undefined;
+  const mine = params.get("owner") === "me";
   const [q, setQ] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const search = useRef<HTMLInputElement>(null);
+  const searchTrigger = useRef<HTMLButtonElement>(null);
+  const [pinnedOnly, setPinnedOnly] = useState(false);
+  const [days, setDays] = useState(0);
   const [items, setItems] = useState<ArtifactSummary[] | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const requestIndex = useRef(0);
   const [layout, setLayoutState] = useState<ArtifactsLayout>(readArtifactsLayout);
   const [sort, setSort] = useState<ArtifactSort>(DEFAULT_ARTIFACT_SORT);
   const [active, setActive] = useState(-1);
-  const { events } = useEvents(["artifact:changed", "data-view:changed"], 1);
+  const { events: [lastEvent] } = useEvents(["artifact:changed", "data-view:changed"], 1);
   const { tasks } = useTasks();
   const { missions } = useMissions();
 
-  const load = useCallback(() => artifactsApi.list(filter === "all" ? {} : { type: filter }).then(setItems, (e: Error) => toast.error(e.message)), [filter]);
-  useEffect(() => { void load(); }, [load, events.length]);
+  const load = useCallback(() => {
+    const request = ++requestIndex.current;
+    return artifactsApi.list({ ...(filter === "all" ? {} : { type: filter }), ...(mine ? { mine: true } : {}) }).then((result) => {
+      if (requestIndex.current === request) {
+        setItems(result);
+        setLoadError(false);
+      }
+    }, (error: Error) => {
+      if (requestIndex.current === request) {
+        setLoadError(true);
+        toast.error(error.message);
+      }
+    });
+  }, [filter, mine]);
+  useEffect(() => { void load(); }, [load, lastEvent]);
   const actions = useArtifactActions(() => void load());
 
   const setLayout = (next: ArtifactsLayout) => { setLayoutState(next); writeArtifactsLayout(next); };
+
+  useEffect(() => {
+    if (searchOpen) search.current?.focus();
+  }, [searchOpen]);
+
+  const closeSearch = () => {
+    setSearchOpen(false);
+    setQ("");
+    setActive(-1);
+    searchTrigger.current?.focus();
+  };
 
   const info = useMemo(() => {
     const taskTitle = new Map((tasks ?? []).map((t) => [t.id, t.title]));
@@ -78,10 +140,16 @@ function ArtifactGallery() {
 
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    const list = items ?? [];
-    const filtered = needle ? list.filter((a) => a.title.toLowerCase().includes(needle) || (a.description ?? "").toLowerCase().includes(needle)) : list;
+    const since = days ? now - days * DAY_MS : undefined;
+    const filtered = (items ?? []).filter((artifact) =>
+      (filter === "all" || artifact.type === filter) &&
+      (!format || artifact.kind === format) &&
+      (!pinnedOnly || artifact.pinned) &&
+      (since === undefined || Date.parse(artifact.updatedAt) >= since) &&
+      (!needle || [artifact.title, artifact.description ?? "", artifactLabel(artifact)].some((value) => value.toLowerCase().includes(needle))),
+    );
     return sortArtifacts(filtered, sort, { author: (a) => info(a).author, origin: (a) => info(a).origin?.label ?? "" });
-  }, [items, q, sort, info]);
+  }, [items, q, sort, info, filter, format, pinnedOnly, days, now]);
 
   // the preview layout shows one artifact: the one picked (kept in the address), else the first
   const picked = params.get("selected");
@@ -91,33 +159,112 @@ function ArtifactGallery() {
     next.set("selected", id);
     setParams(next, { replace: true });
   };
-  const changeTab = (v: string) => setParams(v === "all" ? {} : { type: v });
+  const changeTab = (value: string) => {
+    setActive(-1);
+    setParams({ ...(mine ? { owner: "me" } : {}), ...(value === "all" ? {} : { type: value }) });
+  };
+  const changeFormat = (value: string) => {
+    const workspace = WORKSPACE_FILTERS.find((item) => item.value === value);
+    if (!workspace) { changeTab(value); return; }
+    setActive(-1);
+    setParams({ ...(mine ? { owner: "me" } : {}), type: "html", kind: workspace.value });
+  };
+  const filtered = q.trim() !== "" || filter !== "all" || pinnedOnly || days !== 0;
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
+    <div className={cn("mx-auto flex h-full min-h-0 w-full flex-col gap-3", layout === "preview" ? "max-w-[86rem]" : "max-w-5xl")}>
+      <h1 className="mb-1 font-heading text-2xl font-semibold tracking-tight">Artifacts</h1>
       <div className="flex flex-wrap items-center gap-2">
-        <Tabs value={tab} onValueChange={changeTab} className="max-w-full overflow-x-auto">
-          <TabsList>{FILTERS.map((f) => <TabsTrigger key={f.value} value={f.value}>{f.label}</TabsTrigger>)}</TabsList>
+        <Tabs value={mine ? "mine" : "all"} onValueChange={value => {
+          const next = new URLSearchParams(params);
+          next.delete("selected");
+          if (value === "mine") next.set("owner", "me"); else next.delete("owner");
+          setActive(-1);
+          setParams(next);
+        }} className="max-w-full overflow-x-auto">
+          <TabsList><TabsTrigger value="all">All</TabsTrigger><TabsTrigger value="mine">Yours</TabsTrigger></TabsList>
         </Tabs>
-        <div className="ml-auto flex w-full items-center gap-2 sm:w-auto">
-          <div className="relative min-w-0 flex-1 sm:w-64 sm:flex-none">
-            <Search className="absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-            <Input value={q} onChange={(e) => { setQ(e.target.value); setActive(-1); }} placeholder="Search artifacts" className="h-8 pl-7 text-sm" />
-          </div>
+        <div className="ml-auto flex items-center gap-1.5">
+          <Button ref={searchTrigger} size="icon-sm" variant="ghost" aria-label="Search artifacts" title="Search artifacts"
+            aria-expanded={searchOpen} aria-controls={searchOpen ? "artifact-search" : undefined} onClick={() => searchOpen ? closeSearch() : setSearchOpen(true)}>
+            <Search className="size-4" />
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="icon-sm" variant={filter === "all" && !pinnedOnly && !days ? "ghost" : "secondary"} aria-label="Filter and sort" title="Filter and sort">
+                <ListFilter className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44">
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>Sort by</DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  <DropdownMenuRadioGroup value={`${sort.key}:${sort.dir}`} onValueChange={(value) => {
+                    const next = SORTS.find((option) => `${option.key}:${option.dir}` === value);
+                    if (next) { setSort({ key: next.key, dir: next.dir }); setActive(-1); }
+                  }}>
+                    {SORTS.map(({ key, dir, label }) => <DropdownMenuRadioItem key={`${key}:${dir}`} value={`${key}:${dir}`}>{label}</DropdownMenuRadioItem>)}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>Type</DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  <DropdownMenuRadioGroup value={format ?? filter} onValueChange={changeFormat}>
+                    {FILTERS.map(({ value, label }) => <DropdownMenuRadioItem key={value} value={value}>{label}</DropdownMenuRadioItem>)}
+                    {WORKSPACE_FILTERS.map(({ value, label }) => <DropdownMenuRadioItem key={value} value={value}>{label}</DropdownMenuRadioItem>)}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>Updated</DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  <DropdownMenuRadioGroup value={String(days)} onValueChange={(value) => { setDays(Number(value)); setActive(-1); }}>
+                    {DATE_FILTERS.map(({ days, label }) => <DropdownMenuRadioItem key={days} value={String(days)}>{label}</DropdownMenuRadioItem>)}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              <DropdownMenuSeparator />
+              <DropdownMenuCheckboxItem checked={pinnedOnly} onCheckedChange={(checked) => { setPinnedOnly(checked); setActive(-1); }}>
+                Pinned only
+              </DropdownMenuCheckboxItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <SegmentedControl value={layout} onValueChange={setLayout} size="sm" aria-label="Layout">
-            <ToggleGroupItem value="table" aria-label="Table" title="Table"><List className="h-3.5 w-3.5" /><span className="hidden sm:inline">Table</span></ToggleGroupItem>
-            <ToggleGroupItem value="preview" aria-label="Preview" title="Preview"><PanelRight className="h-3.5 w-3.5" /><span className="hidden sm:inline">Preview</span></ToggleGroupItem>
+            <ToggleGroupItem value="table" aria-label="List" title="List view"><List className="size-3.5" /></ToggleGroupItem>
+            <ToggleGroupItem value="grid" aria-label="Grid" title="Grid view"><LayoutGrid className="size-3.5" /></ToggleGroupItem>
+            <ToggleGroupItem value="preview" aria-label="Preview" title="Split preview"><PanelRight className="size-3.5" /></ToggleGroupItem>
           </SegmentedControl>
         </div>
+        {searchOpen && (
+          <div id="artifact-search" className="relative w-full sm:ml-auto sm:w-72">
+            <Search className="pointer-events-none absolute left-2.5 top-2.5 size-3.5 text-muted-foreground" aria-hidden="true" />
+            <Input ref={search} type="search" value={q}
+              onChange={(event) => { setQ(event.target.value); setActive(-1); }}
+              onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); closeSearch(); } }}
+              aria-label="Find an artifact" placeholder="Search by name or type" className="h-8 min-w-0 pl-8 pr-9 text-sm [&::-webkit-search-cancel-button]:hidden" />
+            <Button type="button" size="icon-sm" variant="ghost" className="absolute right-0.5 top-0.5 size-7" aria-label="Close search" onClick={closeSearch}>
+              <X className="size-3.5" />
+            </Button>
+          </div>
+        )}
       </div>
-      {items === null ? (
-        <div className="flex flex-1 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+      <ArtifactTemplates />
+      {loadError ? (
+        <div role="status" className="flex flex-1 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
+          <p>Couldn't load artifacts.</p>
+          <Button size="sm" variant="outline" onClick={() => { setLoadError(false); void load(); }}>Retry</Button>
+        </div>
+      ) : items === null ? (
+        <div className="min-h-0 flex-1"><ArtifactPreparation /></div>
       ) : shown.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center text-sm text-muted-foreground">
           <Sparkles className="h-6 w-6" />
-          <p>{q.trim() ? "No artifacts match." : "No artifacts yet."}</p>
-          {!q.trim() && <p className="max-w-sm text-xs">Ask {product} or an agent for a dashboard on your data, a document, a design or a diagram: it appears here.</p>}
+          <p>{filtered ? "No artifacts match." : "No artifacts yet."}</p>
+          {!filtered && <p className="max-w-sm text-xs">Choose a template above or ask {product} to create an artifact.</p>}
         </div>
+      ) : layout === "grid" ? (
+        <ArtifactsGrid items={shown} info={info} actions={actions} now={now} />
       ) : layout === "table" ? (
         <ArtifactsTable items={shown} info={info} sort={sort} now={now} actions={actions}
           onSort={(key) => setSort((s) => nextArtifactSort(s, key))} active={active} setActive={setActive} />
@@ -125,131 +272,6 @@ function ArtifactGallery() {
         <ArtifactsPreviewLayout items={shown} selectedId={selectedId} onSelect={select} info={info} actions={actions} now={now}
           preview={selectedId ? <ArtifactDetail key={selectedId} id={selectedId} embedded onDeleted={() => void load()} /> : null} />
       )}
-    </div>
-  );
-}
-
-function ArtifactDetail({ id, embedded = false, onDeleted }: {
-  id: string;
-  /** Shown beside the list (the preview layout): no way back, a way to open it on its own page. */
-  embedded?: boolean;
-  onDeleted?: () => void;
-}) {
-  const product = productName(useInstanceBranding());
-  const navigate = useNavigate();
-  const [artifact, setArtifact] = useState<Artifact | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  /** The version shown: the current one (undefined) or an earlier one. */
-  const [version, setVersion] = useState<number | undefined>();
-  const [showSource, setShowSource] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [busy, setBusy] = useState(false);
-  const { events } = useEvents(["artifact:changed"], 1);
-
-  const load = useCallback(() => artifactsApi.get(id).then((a) => { setArtifact(a); setError(null); }, (e: Error) => setError(e.message)), [id]);
-  useEffect(() => { void load(); }, [load, events.length]);
-
-  if (error) return <div className="p-4 text-sm text-destructive">{error} {!embedded && <Link to="/artifacts" className="underline">Back to artifacts</Link>}</div>;
-  if (!artifact) return <div className="flex h-full items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
-
-  const shownVersion = version !== undefined ? artifact.versions.find((v) => v.version === version) : undefined;
-  const content = shownVersion?.content ?? artifact.content;
-  const legacyView = artifact.type === "view";
-  const stageId = embedded ? "artifact-preview-stage" : "artifact-stage";
-
-  const restore = async () => {
-    if (version === undefined) return;
-    setBusy(true);
-    try {
-      await artifactsApi.restore(artifact.id, version);
-      setVersion(undefined);
-      await load();
-      toast.success(`Version ${version} restored`);
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const remove = async () => {
-    if (!window.confirm(`Delete "${artifact.title}" and its versions?`)) return;
-    try {
-      await artifactsApi.remove(artifact.id);
-      if (embedded) onDeleted?.(); else navigate("/artifacts");
-    } catch (e) {
-      toast.error((e as Error).message);
-    }
-  };
-
-  const copyLink = async () => {
-    try {
-      await navigator.clipboard.writeText(artifactLink(artifact.id));
-      toast.success("Link copied");
-    } catch {
-      toast.error("Could not copy the link");
-    }
-  };
-
-  const fullscreen = () => document.getElementById(stageId)?.requestFullscreen?.().catch(() => {});
-
-  return (
-    <div className="flex h-full min-h-0 flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2">
-        {!embedded && <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => navigate("/artifacts")} aria-label="Back to artifacts"><ArrowLeft className="h-4 w-4" /></Button>}
-        <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-primary"><ArtifactIcon artifact={artifact} className="h-3.5 w-3.5" /></span>
-        <div className="min-w-0">
-          <h1 className="flex items-center gap-2 truncate font-heading text-h3">{artifact.title}{legacyView && <LegacyBadge />}</h1>
-          <p className="text-caption text-muted-foreground">
-            {artifactLabel(artifact)} · by {artifactAuthor(artifact.createdBy, product)}{legacyView ? "" : ` · v${artifact.version}`} · {absoluteTime(artifact.updatedAt)}
-          </p>
-        </div>
-        <div className="ml-auto flex flex-wrap items-center gap-1">
-          {!legacyView && artifact.versions.length > 0 && (
-            <label className="flex items-center gap-1 text-xs text-muted-foreground">
-              <History className="h-3.5 w-3.5" />
-              <select className="h-8 rounded-md border border-border bg-background px-2 text-xs" value={version ?? ""}
-                onChange={(e) => setVersion(e.target.value ? Number(e.target.value) : undefined)} aria-label="Version">
-                <option value="">v{artifact.version} (current)</option>
-                {artifact.versions.map((v) => <option key={v.version} value={v.version}>v{v.version} · {absoluteTime(v.at)}{v.note ? ` · ${v.note}` : ""}</option>)}
-              </select>
-            </label>
-          )}
-          {version !== undefined && (
-            <Button size="sm" variant="outline" className="h-8" disabled={busy} onClick={() => void restore()}>
-              <RotateCcw className="h-3.5 w-3.5" /> Restore v{version}
-            </Button>
-          )}
-          {(artifact.type === "html" || legacyView) && (
-            <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setRefreshKey((k) => k + 1)} aria-label="Reload data"><RefreshCw className="h-3.5 w-3.5" /></Button>
-          )}
-          {!legacyView && (
-            <Button size="icon" variant={showSource ? "secondary" : "ghost"} className="h-8 w-8" onClick={() => setShowSource((s) => !s)} aria-label="Source"><Code2 className="h-3.5 w-3.5" /></Button>
-          )}
-          <Button size="icon" variant="ghost" className="h-8 w-8" onClick={fullscreen} aria-label="Full screen"><Maximize2 className="h-3.5 w-3.5" /></Button>
-          <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => saveArtifactFile(artifact, content)} aria-label="Download"><Download className="h-3.5 w-3.5" /></Button>
-          <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => void copyLink()} aria-label="Copy link"><Link2 className="h-3.5 w-3.5" /></Button>
-          {embedded && <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => navigate(artifactPath(artifact.id))} aria-label="Open"><ExternalLink className="h-3.5 w-3.5" /></Button>}
-          {!legacyView && <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={() => void remove()} aria-label="Delete"><Trash2 className="h-3.5 w-3.5" /></Button>}
-        </div>
-      </div>
-      {legacyView && (
-        <p className="rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning">
-          A legacy view, from before artifacts. It still works, but it can no longer be edited here: ask {product} or an agent to remake it as an html dashboard.
-        </p>
-      )}
-      {(artifact.description || artifact.sources?.length || shownVersion) && (
-        <p className="text-xs text-muted-foreground">
-          {shownVersion ? `Showing v${shownVersion.version}${shownVersion.author ? ` by ${artifactAuthor(shownVersion.author, product)}` : ""}. ` : ""}
-          {artifact.description}
-          {artifact.sources?.length ? ` Reads: ${artifact.sources.join(", ")}.` : ""}
-        </p>
-      )}
-      <div id={stageId} className="min-h-0 flex-1 overflow-hidden rounded-lg border border-border/50 bg-background">
-        {showSource
-          ? <pre className="h-full overflow-auto p-4 text-xs"><code>{content}</code></pre>
-          : <ArtifactView artifact={artifact} content={content} refreshKey={refreshKey} />}
-      </div>
     </div>
   );
 }

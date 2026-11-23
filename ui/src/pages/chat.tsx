@@ -1,3 +1,4 @@
+import { Link, useLocation } from "react-router-dom";
 import { ChatAttachments } from "@/components/chat-attachments";
 import {
   Fragment,
@@ -130,6 +131,7 @@ import { useChatState, useChatActions, useChatInputDisabled } from "@/hooks/chat
 import { setChatPageSessionsOpen, useChatPageSessionsOpen } from "@/hooks/chat-context";
 import { WidgetCard, WidgetPendingCard } from "@/components/widget-card";
 import { ArtifactChatCard } from "@/components/artifacts/artifact-chat-card";
+import { ArtifactGeneration } from "@/components/artifacts/artifact-generation";
 import { budgetText } from "@/lib/mission-preview";
 import { artifactIdOf } from "@/lib/artifacts-api";
 import { WhatsAppPreviewCard, EmailPreviewCard } from "@/components/send-preview-card";
@@ -164,6 +166,7 @@ import {
   setAppPreviewContext,
   useAppPreviewContext,
 } from "@/hooks/use-app-preview-context";
+import { clearArtifactQuote, useArtifactQuote } from "@/hooks/use-artifact-quote";
 import { clearDataPromptContext, formatDataPromptContext, removeDataPromptItem, useDataPromptContext } from "@/hooks/use-data-context";
 import { GroupConversation } from "@/components/groups/group-conversation";
 import { GroupSettingsDialog, NewGroupDialog } from "@/components/groups/group-dialogs";
@@ -3433,6 +3436,7 @@ function ChatMessages() {
                               | { type: "widget"; widget: WidgetRenderData; key: string }
                               | { type: "widget-pending"; tool: ToolCallInfo }
                               | { type: "artifact"; artifactId: string; updated: boolean; key: string }
+                              | { type: "artifact-pending"; tool: ToolCallInfo }
                             > = [];
                             const widgetsArr = msg.widgets ?? [];
                             let widgetCounter = 0;
@@ -3452,6 +3456,10 @@ function ChatMessages() {
                                   ? artifactIdOf(seg.tool.result) : undefined;
                                 if (madeArtifact) {
                                   groups.push({ type: "artifact", artifactId: madeArtifact, updated: seg.tool.name === "artifact_update", key: seg.tool.id });
+                                } else if ((seg.tool.name === "artifact_create" || seg.tool.name === "artifact_update") &&
+                                  (seg.tool.state === "preparing" || seg.tool.state === "calling")) {
+                                  if (isStreaming) groups.push({ type: "artifact-pending", tool: seg.tool });
+                                  else groups.push({ type: "tools", tools: [{ ...seg.tool, state: "interrupted" }] });
                                 } else if (seg.tool.name === "render_widget") {
                                   // Inline widget: trova il widget corrispondente
                                   // in widgets[] (per-occorrenza) e renderizzalo
@@ -3502,6 +3510,9 @@ function ChatMessages() {
                               }
                               if (g.type === "artifact") {
                                 return <ArtifactChatCard key={`a-${g.key}`} artifactId={g.artifactId} updated={g.updated} />;
+                              }
+                              if (g.type === "artifact-pending") {
+                                return <ArtifactGeneration key={`a-${g.tool.id}`} tool={g.tool} />;
                               }
                               if (g.type === "widget-pending") {
                                 // Loader skeleton dedicato — il modello
@@ -3669,8 +3680,13 @@ function ChatMessages() {
 
 function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
   const orchestratorName = useOrchestratorName();
+  const location = useLocation();
+  const routeId = /^\/artifacts\/(art_[\w-]+)\/?$/.exec(location.pathname)?.[1];
+  const mobileId = location.pathname === "/chat" ? new URLSearchParams(location.search).get("artifact") : null;
+  const artifactId = routeId ?? (mobileId && /^art_[\w-]+$/.test(mobileId) ? mobileId : undefined);
   const { messages, isLoading, pendingQuestions, pendingMission, pendingVault, pendingWhatsApp, pendingEmail, pendingSetDesign, sessionId, selectedAgent, sessions, activeSessionKey } = useChatState();
   const { send, stop, steer, cancelSteer } = useChatActions();
+  const quote = useArtifactQuote(artifactId, sessionId);
   const steersPending = usePendingSteers(activeSessionKey);
   const inputDisabled = useChatInputDisabled({ includeLoading: false });
   const { client } = usePolpo();
@@ -3703,6 +3719,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
   const attachmentCountRef = useRef(0);
   const setAttachmentCount = useCallback((count: number) => { attachmentCountRef.current = count; }, []);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => { if (quote) textareaRef.current?.focus(); }, [quote]);
   const mentionRef = useRef<MentionPopoverHandle>(null);
   const [isRecording, setIsRecording] = useState(false);
   // Tracks whether the composer textarea currently has a non-empty draft.
@@ -3812,6 +3829,8 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
         if (!images.some((image) => image.url === url)) images.push({ url, mimeType: "image/png", filename: undefined });
       }
       const context = [
+        artifactId ? `The open artifact is ${artifactId}. Use artifact_get to read its current version and artifact_update to apply requested changes to it.` : undefined,
+        quote?.text ? `Selected document text: ${JSON.stringify(quote.text)}` : undefined,
         activePreviewContext ? formatAppPreviewContext(activePreviewContext) : undefined,
         activeDataContext ? formatDataPromptContext(activeDataContext) : undefined,
       ].filter(Boolean).join("\n\n");
@@ -3823,13 +3842,14 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
           const key = sessionId ?? NEW_SESSION_DRAFT_KEY;
           // A switched-away draft may have been edited independently.
           if (chatInputDrafts.get(key) === message.text) chatInputDrafts.delete(key);
+          if (quote) clearArtifactQuote(quote);
           acknowledge();
         } },
       );
       if (activePreviewContext) clearAppPreviewContext();
       if (activeDataContext) clearDataPromptContext();
     },
-    [activeDataContext, activePreviewContext, isLoading, send, sessionId]
+    [activeDataContext, activePreviewContext, artifactId, isLoading, quote, send, sessionId]
   );
 
   // Set the uncontrolled textarea value from speech recognition
@@ -4086,6 +4106,11 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
             />
           </div>
         )}
+        {quote?.text && <div className="mb-2 flex items-center gap-2 rounded-md border-l-2 border-primary bg-muted px-2 py-1">
+          <blockquote className="min-w-0 flex-1 truncate text-xs" title={quote.text}>{quote.text}</blockquote>
+          <Button size="icon-xs" variant="ghost" aria-label="Remove selected text" onClick={() => clearArtifactQuote(quote)}><X /></Button>
+        </div>}
+        {mobileId && artifactId && <Link to={`/artifacts/${artifactId}`} className="mb-1 inline-block text-xs text-muted-foreground underline">Return to artifact</Link>}
         {/* Messages joining the running response, then prompts queued after it. */}
         <PendingSteers className="mb-2" steers={steersPending} onCancel={(id) => { void cancelSteer(id); }} />
         {queue.items.length > 0 && (
