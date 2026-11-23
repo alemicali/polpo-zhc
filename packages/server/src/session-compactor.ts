@@ -5,6 +5,7 @@
  */
 import {
   buildSummaryPrompt,
+  checkpointSummaryText,
   ContextCompactor,
   contextBudgetForModel,
   estimateContextTokens,
@@ -59,8 +60,8 @@ export async function createSessionCompaction(opts: SessionCompactorOptions): Pr
     settings: opts.settings,
     pinned: () => 0,
     baseTokens: () => estimateContextTokens({ systemPrompt: opts.systemPrompt(), messages: [], tools: opts.tools() }),
-    summarize: opts.completeLLM ? async ({ messages, previousSummary, focus, signal }) => {
-      const { systemPrompt, prompt } = buildSummaryPrompt({ messages, previousSummary, focus });
+    summarize: opts.completeLLM ? async ({ messages, previousSummary, focus, signal, kind }) => {
+      const { systemPrompt, prompt } = buildSummaryPrompt({ messages, previousSummary, focus, kind });
       const model = opts.summaryModel?.(Math.ceil((systemPrompt.length + prompt.length) / 3)) ?? opts.model;
       const response = await opts.completeLLM!(model, {
         systemPrompt,
@@ -93,10 +94,12 @@ export async function createSessionCompaction(opts: SessionCompactorOptions): Pr
       if (!info) return { messages, info: null };
       // Persist the summary for the caller-visible history it covers (redacted). A storage
       // failure must not fail the conversation.
+      // The saved text is the whole checkpoint (history, file lists, the turn in progress): when it
+      // is restored the turn has ended and belongs to the history; the file lists are read back.
       const state = compactor.getState();
-      if (state.summary && state.covered > 0) {
+      if ((state.summary || state.turnSummary) && state.covered > 0) {
         await saveContextCheckpoint(opts.store, opts.sessionId, opts.scope, opts.original,
-          Math.min(state.covered, opts.original.length), redactSecrets(state.summary), state.count, revision)
+          Math.min(state.covered, opts.original.length), redactSecrets(checkpointSummaryText(state)), state.count, revision)
           .then((next) => { if (next) revision = next; })
           .catch((error) => console.warn("[context-checkpoint] save failed:", error instanceof Error ? error.name : "unknown"));
       }
