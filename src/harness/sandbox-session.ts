@@ -25,6 +25,7 @@ import { dirname, join, posix } from "node:path";
 import { Readable } from "node:stream";
 import type { RemoteDriver, RemotePortEndpoint, RemoteProcess } from "../sandbox/remote-adapters.js";
 import { killTree, spawnTree } from "../sandbox/process-tree.js";
+import { PROXY_VARS, pickEnv } from "../tools/safe-env.js";
 import type { HarnessSandbox, RequestTransformation } from "./types.js";
 import { presentCredential, type HarnessRelayLease } from "./relay.js";
 
@@ -173,10 +174,13 @@ export function remoteHarnessMachine(o: {
  * The environment a harness process gets on this server: a minimal one, HOME (and every config,
  * cache and data directory the runtimes read) inside `home`. Nothing else of the server's env
  * (no ANTHROPIC_*, AWS_*, CLAUDE_*, OPENAI_*, CODEX_*, no tokens) — the runtime's credentials come
- * from the harness auth, explicitly.
+ * from the harness auth, explicitly. From the server's env it takes only what safe-env.ts passes to
+ * every command and is not about the user's home: PATH, the locale, the timezone, the proxy
+ * settings (with this machine always reached directly: the bridge listens on 127.0.0.1).
  */
 export function isolatedHostEnv(home: string, base: NodeJS.ProcessEnv = process.env): Record<string, string> {
   const env: Record<string, string> = {
+    ...pickEnv(base, ["LANG", "LANGUAGE", "TZ", ...PROXY_VARS], ["LC_"]),
     HOME: home,
     USER: "polpo-harness",
     PATH: base.PATH ?? "/usr/local/bin:/usr/bin:/bin",
@@ -194,6 +198,9 @@ export function isolatedHostEnv(home: string, base: NodeJS.ProcessEnv = process.
     COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
   };
   if (base.NODE_EXTRA_CA_CERTS) env.NODE_EXTRA_CA_CERTS = base.NODE_EXTRA_CA_CERTS;
+  if (PROXY_VARS.some((k) => k in env && !/no_proxy/i.test(k))) {
+    for (const k of ["NO_PROXY", "no_proxy"]) env[k] = [env[k], "localhost,127.0.0.1,::1"].filter(Boolean).join(",");
+  }
   return env;
 }
 

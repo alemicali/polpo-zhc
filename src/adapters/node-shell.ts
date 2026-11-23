@@ -6,19 +6,21 @@
  *
  * A timeout or an abort stops the command with everything it started (process-tree.ts): a
  * server or a `sleep` it left behind neither keeps running nor keeps the call waiting.
+ *
+ * Commands get the filtered environment (safe-env.ts) plus the variables the caller passes on
+ * purpose (vault-granted credentials), never the server's own: no provider keys, no tokens.
  */
 import { execaCommand } from "execa";
 import type { Shell, ShellOptions, ShellResult } from "@polpo-ai/core/shell";
-import { bashSafeEnv } from "../tools/safe-env.js";
+import { commandEnv } from "../tools/safe-env.js";
 import { localShell } from "../sandbox/local-shell.js";
 import { runCommand } from "../sandbox/process-tree.js";
 
 export class NodeShell implements Shell {
   async execute(command: string, options?: ShellOptions): Promise<ShellResult> {
     try {
-      // the environment execa gave these commands: this process's, the safe set, the caller's
-      const env: Record<string, string> = {};
-      for (const [k, v] of Object.entries({ ...process.env, ...bashSafeEnv(), ...options?.env })) if (v !== undefined) env[k] = v;
+      // the safe system set and the caller's variables, nothing else of this server's environment
+      const env = commandEnv(options?.env);
       // On Windows, the bash agents' commands run in (local-shell.ts), so a check written for it
       // works there too; without it, cmd.exe as before. Everywhere else the system shell.
       if (process.platform === "win32" && localShell().name === "cmd.exe") return await this.executeInCmd(command, env, options);
@@ -48,7 +50,8 @@ export class NodeShell implements Shell {
   /** Windows without a bash: cmd.exe through execa, as before. */
   private async executeInCmd(command: string, env: Record<string, string>, options?: ShellOptions): Promise<ShellResult> {
     const result = await execaCommand(command, {
-      shell: true, cwd: options?.cwd, env, timeout: options?.timeout, reject: false,
+      // extendEnv: false, or execa would add the whole of process.env back
+      shell: true, cwd: options?.cwd, env, extendEnv: false, timeout: options?.timeout, reject: false,
       ...(options?.signal ? { cancelSignal: options.signal } : {}),
     });
     // execa leaves exitCode undefined when the process never exited normally

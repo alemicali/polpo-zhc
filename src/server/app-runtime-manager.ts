@@ -12,6 +12,7 @@ import type {
 } from "@polpo-ai/core/app-registry";
 import { FileAppRegistryStore } from "../stores/file-app-registry-store.js";
 import { databaseStoresFor } from "../core/storage.js";
+import { bashSafeEnv } from "../tools/safe-env.js";
 
 type Runtime = AppRuntimeStatus & { process: ChildProcessWithoutNullStreams };
 const MAX_LOGS = 600;
@@ -120,7 +121,8 @@ export class AppRuntimeManager {
     const child = spawn("bash", ["-lc", command], {
       cwd,
       detached: process.platform !== "win32",
-      env: { ...process.env, PATH: appRuntimePath(), POLPO_APP_ID: app.id, POLPO_APP_SLUG: app.slug },
+      // the filtered environment (safe-env.ts), never the server's own: no provider keys, no tokens
+      env: appRuntimeEnv(app),
       stdio: ["pipe", "pipe", "pipe"],
     });
     child.stdin.end();
@@ -239,6 +241,11 @@ export function resolveAppCwd(root: string, requested?: string): string {
   const rel = relative(absoluteRoot, candidate);
   if (rel === ".." || rel.startsWith(`..${sep}`)) throw new Error("Working directory must stay inside the app root");
   return candidate;
+}
+
+/** The environment of an app's service or deployment command: the safe system set, its PATH, the app's ids. */
+export function appRuntimeEnv(app: Pick<RegisteredApp, "id" | "slug">): Record<string, string> {
+  return { ...bashSafeEnv(), PATH: appRuntimePath(), POLPO_APP_ID: app.id, POLPO_APP_SLUG: app.slug };
 }
 
 export function appRuntimePath(home = process.env.HOME || homedir(), current = process.env.PATH || ""): string {
