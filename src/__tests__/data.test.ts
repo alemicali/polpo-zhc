@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
@@ -214,5 +214,91 @@ describe("structured data runtime", () => {
     const views = JSON.parse(await executeDataTool("data_list_views", {}, polpoDir, { agent: "analyst" })) as Array<{ id: string; bindings: Array<{ inline?: unknown }> }>;
     expect(views[0]?.id).toBe(created.id);
     expect(views[0]?.bindings[0]?.inline).toBeDefined();
+  });
+
+  it("counts every matching row for paging (includeTotal), ignoring limit and offset", async () => {
+    const { runtime, source } = await fixture();
+    const page = await runtime.query({ sourceId: source.id, dataset: "customers", filters: [{ field: "region", operator: "eq", value: "US" }], sort: [{ field: "id", direction: "asc" }], limit: 1, offset: 1, includeTotal: true });
+    expect(page.rows.map((row) => row.name)).toEqual(["Grace"]);
+    expect(page.meta.totalCount).toBe(2);
+    const grouped = await runtime.query({ sourceId: source.id, dataset: "customers", groupBy: ["region"], aggregates: [{ field: "*", operation: "count" }], includeTotal: true });
+    expect(grouped.meta.totalCount).toBe(2);
+    // without includeTotal no count is run
+    expect((await runtime.query({ sourceId: source.id, dataset: "customers", limit: 1 })).meta.totalCount).toBeUndefined();
+    // the REST route passes it through
+    const app = new OpenAPIHono();
+    app.route("/data", dataRoutes(() => ({ runtime, store: runtime.store })));
+    const response = await app.request("/data/query", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sourceId: source.id, dataset: "customers", limit: 2, includeTotal: true }) });
+    expect((await response.json()).data.meta.totalCount).toBe(3);
+  });
+
+  it("counts JSON and CSV rows in memory with the same filters", async () => {
+    const root = await mkdtemp(join(tmpdir(), "polpo-data-file-"));
+    roots.push(root);
+    const path = join(root, "orders.json");
+    await writeFile(path, JSON.stringify([{ id: 1, status: "open" }, { id: 2, status: "open" }, { id: 3, status: "closed" }]));
+    const runtime = new DataRuntime(join(root, ".polpo"));
+    const source = await runtime.store.createSource({ name: "Orders", slug: "orders", kind: "json", environment: "development", config: { location: path }, tags: [], grants: [] });
+    const frame = await runtime.query({ sourceId: source.id, dataset: "orders", filters: [{ field: "status", operator: "eq", value: "open" }], limit: 1, includeTotal: true });
+    expect(frame.rows).toHaveLength(1);
+    expect(frame.meta.totalCount).toBe(2);
+  });
+
+  it("describes indexes, foreign keys, defaults, native types and row counts of SQLite tables", async () => {
+    const root = await mkdtemp(join(tmpdir(), "polpo-data-schema-"));
+    roots.push(root);
+    const path = join(root, "shop.sqlite");
+    const db = new Database(path);
+    db.exec(`
+      CREATE TABLE customers (id INTEGER PRIMARY KEY, email VARCHAR(120) NOT NULL UNIQUE, created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE, total REAL DEFAULT 0);
+      CREATE INDEX orders_by_customer ON orders(customer_id);
+      CREATE VIEW big_orders AS SELECT * FROM orders WHERE total > 100;
+      INSERT INTO customers (email) VALUES ('a@x.io'), ('b@x.io');
+      INSERT INTO orders (customer_id, total) VALUES (1, 50), (1, 150), (2, 10);
+    `);
+    db.close();
+    const runtime = new DataRuntime(join(root, ".polpo"));
+    const source = await runtime.store.createSource({ name: "Shop", slug: "shop", kind: "sqlite", environment: "development", config: { location: path }, tags: [], grants: [] });
+    const datasets = await runtime.discover(source.id);
+    const customers = datasets.find((item) => item.name === "customers")!;
+    const orders = datasets.find((item) => item.name === "orders")!;
+    const view = datasets.find((item) => item.name === "big_orders")!;
+    expect(customers.rowCount).toBe(2);
+    expect(orders.rowCount).toBe(3);
+    expect(customers.columns.find((column) => column.name === "id")).toMatchObject({ primaryKey: true, type: "number", nativeType: "INTEGER" });
+    expect(customers.columns.find((column) => column.name === "email")).toMatchObject({ nullable: false, nativeType: "VARCHAR(120)", type: "string" });
+    expect(customers.columns.find((column) => column.name === "created_at")?.defaultValue).toBe("CURRENT_TIMESTAMP");
+    expect(customers.indexes?.some((index) => index.unique && index.columns.includes("email"))).toBe(true);
+    expect(orders.indexes).toContainEqual({ name: "orders_by_customer", columns: ["customer_id"], unique: false });
+    expect(orders.foreignKeys).toEqual([{ columns: ["customer_id"], references: { dataset: "customers", columns: ["id"] }, onUpdate: "NO ACTION", onDelete: "CASCADE" }]);
+    expect(view.kind).toBe("view");
+    expect(view.indexes).toBeUndefined();
+  });
+
+  it("saves views bound to a read-only SQL statement (REST and agent tools)", async () => {
+    const { runtime, source } = await fixture();
+    const app = new OpenAPIHono();
+    app.route("/views", dataViewRoutes(() => runtime.store));
+    const created = await app.request("/views", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
+      name: "US revenue", bindings: [{ id: "q", sql: { sourceId: source.id, statement: "SELECT region, SUM(revenue) AS revenue FROM customers GROUP BY region" } }],
+      widgets: [{ type: "table", binding: "q" }],
+    }) });
+    expect(created.status).toBe(201);
+    expect((await created.json()).data.bindings[0].sql.statement).toContain("SUM(revenue)");
+    const empty = await app.request("/views", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Bad", bindings: [{ id: "q", sql: { sourceId: source.id, statement: " " } }] }) });
+    expect(empty.status).toBe(400);
+
+    // an agent may bind SQL only on a source it can read
+    const view = JSON.parse(await executeDataTool("data_create_view", {
+      name: "By region", bindings: [{ id: "q", sql: { sourceId: source.id, statement: "SELECT region FROM customers" } }], widgets: [{ type: "table", binding: "q" }],
+    }, runtime.polpoDir, { agent: "analyst" })) as { bindings: Array<{ sql?: { statement: string } }> };
+    expect(view.bindings[0]?.sql?.statement).toBe("SELECT region FROM customers");
+    await expect(executeDataTool("data_create_view", {
+      name: "Nope", bindings: [{ id: "q", sql: { sourceId: source.id, statement: "SELECT 1" } }], widgets: [],
+    }, runtime.polpoDir, { agent: "stranger" })).rejects.toThrow("not available");
+    await expect(executeDataTool("data_create_view", {
+      name: "Both", bindings: [{ id: "q", sql: { sourceId: source.id, statement: "SELECT 1" }, inline: { rows: [] } }], widgets: [],
+    }, runtime.polpoDir, {})).rejects.toThrow("exactly one");
   });
 });

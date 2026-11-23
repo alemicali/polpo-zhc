@@ -42,7 +42,7 @@ export function viewAsArtifact(view: DataView): Artifact {
     versions: [],
     createdBy: view.createdBy ?? "polpo",
     ...(view.sessionId ? { sessionId: view.sessionId } : {}),
-    sources: [...new Set(view.bindings.flatMap((b) => (b.query ? [b.query.sourceId] : [])))],
+    sources: [...new Set(view.bindings.flatMap((b) => (b.query ? [b.query.sourceId] : b.sql ? [b.sql.sourceId] : [])))],
     ...(view.refreshSeconds ? { refreshSeconds: view.refreshSeconds } : {}),
     ...(view.persistence === "pinned" ? { pinned: true } : {}),
     createdAt: view.createdAt,

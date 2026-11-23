@@ -30,6 +30,7 @@ const Query = Type.Object({
   }))),
   limit: Type.Optional(Type.Number({ minimum: 1, maximum: 1000 })),
   offset: Type.Optional(Type.Number({ minimum: 0 })),
+  includeTotal: Type.Optional(Type.Boolean({ description: "Also count all matching rows (meta.totalCount), for paging" })),
 });
 
 const Widget = Type.Object({
@@ -55,6 +56,7 @@ const Widget = Type.Object({
 const Binding = Type.Union([
   Type.Object({ id: Type.String(), query: Query }),
   Type.Object({ id: Type.String(), inline: Type.Object({ label: Type.Optional(Type.String()), rows: Type.Array(Type.Record(Type.String(), Type.Any()), { maxItems: 500 }) }) }),
+  Type.Object({ id: Type.String(), sql: Type.Object({ sourceId: Type.String(), statement: Type.String({ description: "One read-only SELECT/WITH statement (SQLite or PostgreSQL)" }) }) }),
 ]);
 
 const SourceKind = Type.Union([Type.Literal("sqlite"), Type.Literal("postgres"), Type.Literal("rest"), Type.Literal("json"), Type.Literal("csv")]);
@@ -114,7 +116,7 @@ export const DATA_ORCHESTRATOR_TOOLS: Tool[] = [
   },
   {
     name: "data_describe",
-    description: "Discover datasets and typed columns in a registered data source.",
+    description: "Discover datasets in a registered data source: typed columns (primary keys, native types, defaults), row counts, and for SQL sources indexes and foreign keys.",
     parameters: Type.Object({ sourceId: Type.String() }),
   },
   {
@@ -287,7 +289,7 @@ export async function executeDataTool(
 async function visibleViews(runtime: ReturnType<typeof getDataRegistryRuntime>, principal: DataPrincipal) {
   if (principal.admin || !principal.agent) return runtime.store.listViews();
   const sources = new Set((await runtime.listSources(principal)).map((source) => source.id));
-  return (await runtime.store.listViews()).filter((view) => view.bindings.every((binding) => !binding.query || sources.has(binding.query.sourceId)));
+  return (await runtime.store.listViews()).filter((view) => view.bindings.every((binding) => !bindingSource(binding) || sources.has(bindingSource(binding)!)));
 }
 
 async function requireVisibleView(
@@ -297,7 +299,7 @@ async function requireVisibleView(
 ): Promise<void> {
   if (principal.admin || !principal.agent) return;
   const sources = new Set((await runtime.listSources(principal)).map((source) => source.id));
-  if (!view.bindings.every((binding) => !binding.query || sources.has(binding.query.sourceId))) {
+  if (!view.bindings.every((binding) => !bindingSource(binding) || sources.has(bindingSource(binding)!))) {
     throw new Error(`Access denied to data view "${view.name}"`);
   }
 }
@@ -327,12 +329,18 @@ export function createDataAgentTools(
 
 async function validateViewSources(runtime: ReturnType<typeof getDataRegistryRuntime>, bindings: DataViewBinding[], principal: DataPrincipal): Promise<void> {
   for (const binding of bindings) {
-    if (!binding.query) continue;
+    const sourceId = bindingSource(binding);
+    if (!sourceId) continue;
     const sources = await runtime.listSources(principal);
-    if (!sources.some((source) => source.id === binding.query.sourceId || source.slug === binding.query.sourceId)) {
-      throw new Error(`Data source "${binding.query.sourceId}" is not available to this agent`);
+    if (!sources.some((source) => source.id === sourceId || source.slug === sourceId)) {
+      throw new Error(`Data source "${sourceId}" is not available to this agent`);
     }
   }
+}
+
+/** The source a live binding reads (a query or SQL); undefined for inline rows. */
+function bindingSource(binding: DataViewBinding): string | undefined {
+  return binding.query?.sourceId ?? binding.sql?.sourceId;
 }
 
 function normalizeBindings(value: unknown): DataViewBinding[] {
@@ -341,9 +349,15 @@ function normalizeBindings(value: unknown): DataViewBinding[] {
     const binding = raw as Record<string, any>;
     const id = String(binding.id ?? "").trim();
     if (!id) throw new Error("Every data view binding requires an ID");
-    if (binding.query && binding.inline) throw new Error(`Binding "${id}" cannot be both source-backed and inline`);
+    if ([binding.query, binding.inline, binding.sql].filter(Boolean).length > 1) throw new Error(`Binding "${id}" must be exactly one of query, sql or inline`);
     if (binding.query) return { id, query: { ...binding.query } } as DataViewBinding;
-    if (!binding.inline || !Array.isArray(binding.inline.rows)) throw new Error(`Binding "${id}" requires query or inline rows`);
+    if (binding.sql) {
+      const sourceId = optionalString(binding.sql.sourceId);
+      const statement = optionalString(binding.sql.statement);
+      if (!sourceId || !statement) throw new Error(`SQL binding "${id}" requires sourceId and statement`);
+      return { id, sql: { sourceId, statement } } as DataViewBinding;
+    }
+    if (!binding.inline || !Array.isArray(binding.inline.rows)) throw new Error(`Binding "${id}" requires query, sql or inline rows`);
     if (binding.inline.rows.length > 500) throw new Error(`Inline binding "${id}" exceeds the 500-row limit`);
     const inline = { label: optionalString(binding.inline.label), rows: binding.inline.rows as Record<string, unknown>[] };
     if (Buffer.byteLength(JSON.stringify(inline), "utf8") > 512 * 1024) throw new Error(`Inline binding "${id}" exceeds the 512 KB limit`);
