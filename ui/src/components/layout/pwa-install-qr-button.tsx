@@ -41,12 +41,17 @@ function luminance(hex: string): number {
 /**
  * The QR's colours from the look: the darker of foreground/background for the modules, the lighter
  * for the quiet zone, so it is always dark on light (what every phone camera reads) in both themes.
- * Falls back to near-black on white when the tokens can't be resolved.
+ * Too little contrast between them: the look's canvas (--canvas-foreground on --canvas, dark on
+ * light by default); unresolvable: the encoder's own black on white.
  */
-function qrColors(): { dark: string; light: string } {
+function qrColors(): { dark: string; light: string } | undefined {
   const fg = tokenHex("--foreground");
   const bg = tokenHex("--background");
-  if (!fg || !bg || Math.abs(luminance(fg) - luminance(bg)) < 100) return { dark: "#0a0e1a", light: "#ffffff" };
+  if (!fg || !bg || Math.abs(luminance(fg) - luminance(bg)) < 100) {
+    const ink = tokenHex("--canvas-foreground");
+    const sheet = tokenHex("--canvas");
+    return ink && sheet ? { dark: ink, light: sheet } : undefined;
+  }
   return luminance(fg) < luminance(bg) ? { dark: fg, light: bg } : { dark: bg, light: fg };
 }
 
@@ -79,12 +84,12 @@ export function PwaInstallQrButton({ className }: PwaInstallQrButtonProps) {
       try {
         const { default: QRCode } = await import("qrcode");
         const colors = qrColors();
-        if (!cancelled) setQrLight(colors.light);
+        if (!cancelled) setQrLight(colors?.light);
         const url = await QRCode.toDataURL(installUrl, {
           errorCorrectionLevel: "M",
           margin: 1,
           width: 260,
-          color: colors,
+          ...(colors ? { color: colors } : {}),
         });
         if (!cancelled) setQrDataUrl(url);
       } catch {
@@ -135,7 +140,7 @@ export function PwaInstallQrButton({ className }: PwaInstallQrButtonProps) {
 
           <div className="px-5 pb-5 pt-4 space-y-4">
             <div className="flex justify-center">
-              <div className="flex h-[276px] w-[276px] items-center justify-center rounded-lg border border-border/50 p-2 shadow-card" style={{ background: qrLight ?? "var(--background)" }}>
+              <div className="flex h-[276px] w-[276px] items-center justify-center rounded-lg border border-border/50 p-2 shadow-card" style={{ background: qrLight ?? "var(--canvas)" }}>
                 {qrDataUrl ? (
                   <img src={qrDataUrl} alt="PWA install QR code" className="h-[260px] w-[260px]" />
                 ) : (

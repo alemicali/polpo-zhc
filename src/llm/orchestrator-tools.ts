@@ -1206,6 +1206,7 @@ const setIdentityTool: Tool = {
     tone: Type.Optional(Type.String({ description: "Communication tone — HOW the agent communicates (e.g. 'Professional but warm', 'Concise and data-driven')" })),
     personality: Type.Optional(Type.String({ description: "Personality traits — WHO the agent IS (e.g. 'Detail-oriented and empathetic')" })),
     avatar: Type.Optional(Type.String({ description: "Avatar image path relative to project root (e.g. '.polpo/avatars/alice.png'). Upload via POST /agents/:name/avatar endpoint." })),
+    color: Type.Optional(Type.String({ description: "Its colour on screen (avatar, badges): an agent colour token of the instance's look, 'agent1' … 'agent10'. Empty string: back to the one picked from its name." })),
     socials: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "Social & web accounts — keys are platform names, values are handles/URLs (e.g. { x: '@alice', github: 'alice', linkedin: '...', website: 'https://...' })" })),
     responsibilities: Type.Optional(Type.Array(
       Type.Union([
@@ -5342,6 +5343,12 @@ async function execSetIdentity(polpo: Orchestrator, args: Record<string, unknown
   if (args.tone !== undefined) updated.tone = args.tone as string;
   if (args.personality !== undefined) updated.personality = args.personality as string;
   if (args.avatar !== undefined) updated.avatar = args.avatar as string;
+  if (args.color !== undefined) {
+    const color = String(args.color).trim();
+    if (color === "") delete updated.color;
+    else if (/^agent(?:[1-9]|10)$/.test(color)) updated.color = color;
+    else return `Error: color must be an agent colour token, agent1 … agent10 (got "${color}")`;
+  }
   if (args.socials !== undefined) updated.socials = args.socials as Record<string, string>;
   if (args.responsibilities !== undefined) {
     updated.responsibilities = (args.responsibilities as (string | AgentResponsibility)[]);

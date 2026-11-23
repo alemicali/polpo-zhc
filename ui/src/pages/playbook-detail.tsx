@@ -53,7 +53,7 @@ function ParamCard({ param }: { param: PlaybookParameter }) {
         <p className="text-caption text-muted-foreground mt-1">{param.description}</p>
         <div className="flex items-center gap-3 mt-1.5 text-micro text-muted-foreground">
           {param.default !== undefined && (
-            <span>Default: <code className="font-mono bg-muted/40 px-1 rounded">{String(param.default)}</code></span>
+            <span>Default: <code className="font-mono bg-muted/40 px-1 rounded-xs">{String(param.default)}</code></span>
           )}
           {param.enum && param.enum.length > 0 && (
             <span>Values: {param.enum.map(String).join(", ")}</span>
@@ -218,7 +218,7 @@ export function PlaybookDetailPage() {
             <div className="flex items-center gap-2 px-4 py-2 border-b border-border/30 bg-muted/20">
               <Workflow className="h-3.5 w-3.5 text-primary/60" />
               <span className="text-caption text-muted-foreground">
-                Playbook preview — placeholders shown as <code className="text-micro bg-muted/50 px-1 rounded">{`{{param}}`}</code>
+                Playbook preview — placeholders shown as <code className="text-micro bg-muted/50 px-1 rounded-xs">{`{{param}}`}</code>
               </span>
             </div>
             <div className="h-[calc(100%-36px)]">

@@ -60,10 +60,10 @@ function TeamNameEditor({
           className="h-6 text-sm font-semibold w-40 px-1.5" autoFocus
           onKeyDown={(e) => { if (e.key === "Escape") { setValue(teamName); setEditing(false); } }}
         />
-        <button type="submit" disabled={isSaving || !value.trim()} className="p-0.5 rounded text-primary hover:bg-primary/10 transition-colors disabled:opacity-50">
+        <button type="submit" disabled={isSaving || !value.trim()} className="p-0.5 rounded-xs text-primary hover:bg-primary/10 transition-colors disabled:opacity-50">
           {isSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
         </button>
-        <button type="button" onClick={() => { setValue(teamName); setEditing(false); }} className="p-0.5 rounded text-muted-foreground hover:bg-muted/30 transition-colors">
+        <button type="button" onClick={() => { setValue(teamName); setEditing(false); }} className="p-0.5 rounded-xs text-muted-foreground hover:bg-muted/30 transition-colors">
           <X className="h-3 w-3" />
         </button>
       </form>
@@ -103,7 +103,7 @@ function AgentCard({
     <Link to={`/agents/${encodeURIComponent(agent.name)}`} className="group block max-w-full min-w-0">
       <div className={cn(
         "max-w-full overflow-hidden rounded-lg border bg-card/80 transition-all hover:bg-accent/5",
-        process ? "border-primary/30 shadow-[0_0_20px_color-mix(in_oklch,var(--primary)_8%,transparent)]" : "border-border/40 hover:border-primary/20",
+        process ? "border-primary/30 shadow-glow" : "border-border/40 hover:border-primary/20",
       )}>
         <div className="flex items-center gap-2 p-3 sm:gap-3 sm:p-4">
           <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-lg", teamColor?.bg ?? "bg-primary/10")}>
@@ -142,7 +142,7 @@ function AgentCard({
           <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
             {process && (
               <div className="flex items-center gap-1.5">
-                <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+                <div className="h-2 w-2 rounded-pill bg-primary animate-pulse" />
                 <span className="text-micro text-primary font-medium">Working</span>
               </div>
             )}
@@ -153,7 +153,7 @@ function AgentCard({
         </div>
         {process && (
           <div className="flex items-center gap-3 px-4 py-1.5 bg-primary/5 border-t border-primary/10">
-            <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse shrink-0" />
+            <div className="h-1.5 w-1.5 rounded-pill bg-primary animate-pulse shrink-0" />
             {process.activity.lastTool && (
               <Badge variant="outline" className="text-micro font-mono px-1.5 py-0 text-primary border-primary/30 shrink-0">
                 <Wrench className="h-2 w-2 mr-0.5" />{process.activity.lastTool}
@@ -195,7 +195,7 @@ export function ListView() {
             <section key={team.name} className="space-y-2">
               {/* Team section header */}
               <div className={cn("flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg border px-3 py-2 sm:gap-x-3", tc.border, tc.bg)}>
-                <div className={cn("h-2 w-2 shrink-0 rounded-full", tc.dot)} />
+                <div className={cn("h-2 w-2 shrink-0 rounded-pill", tc.dot)} />
                 <TeamNameEditor teamName={team.name} teamDescription={team.description} />
                 <Badge variant="secondary" className="shrink-0 text-micro">{team.agents.length} agent{team.agents.length !== 1 ? "s" : ""}</Badge>
                 {team.description && <span className="text-micro text-muted-foreground truncate hidden md:inline">{team.description}</span>}

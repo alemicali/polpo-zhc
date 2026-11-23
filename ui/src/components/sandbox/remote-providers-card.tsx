@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { sandboxApi, type DaytonaApiVersion, type RemoteProviderId, type RemoteProviderSettings, type RemoteProviderStatus } from "@/lib/sandbox-api";
 import { sameVaultRef, type VaultRef } from "@/lib/vault-ref";
 import { productName, useInstanceBranding } from "@/lib/branding";
+import { BrandIcon } from "@/components/shared/brand-icon";
 
 type TextField = Exclude<keyof RemoteProviderSettings, "credential" | "api">;
 type FieldMeta = { key: TextField; label: string; placeholder: string; hint?: string };
@@ -28,17 +29,15 @@ const DAYTONA_V2 = {
   keyUrl: "https://app.daytona.io/dashboard",
 };
 
-/** The providers' own brand hues (tile, glow, tagline): kept fixed on purpose. */
+/** The providers: their official mark (BrandIcon) on a tile of the look; the accents are the look's primary. */
 const META: Record<RemoteProviderId, {
-  name: string; tagline: string; mark: string; hue: { tile: string; ring: string; glow: string; line: string; text: string; hover: string };
+  name: string; tagline: string;
   fields: FieldMeta[];
   keyUrl: string;
 }> = {
   daytona: {
     name: "Daytona",
     tagline: "Remote VMs that start in seconds",
-    mark: "D",
-    hue: { tile: "from-violet-500 to-indigo-600", ring: "ring-violet-500/30", glow: "bg-violet-500/25", line: "via-violet-400/70", text: "text-violet-300", hover: "hover:border-violet-500/40" },
     fields: [
       { key: "apiUrl", label: "API URL", placeholder: "https://app.daytona.io/api" },
       { key: "target", label: "Region", placeholder: "eu", hint: "eu or us" },
@@ -49,8 +48,6 @@ const META: Record<RemoteProviderId, {
   e2b: {
     name: "E2B",
     tagline: "Firecracker micro-VMs with domain allowlists",
-    mark: "E2B",
-    hue: { tile: "from-orange-500 to-amber-500", ring: "ring-orange-500/30", glow: "bg-orange-500/25", line: "via-orange-400/70", text: "text-orange-300", hover: "hover:border-orange-500/40" },
     fields: [
       { key: "template", label: "Template", placeholder: "base", hint: "Optional: your own image" },
       { key: "domain", label: "Domain", placeholder: "e2b.app", hint: "Only for self-hosted E2B" },
@@ -139,28 +136,24 @@ function ProviderCard({ status, onChanged }: { status: RemoteProviderStatus; onC
   return (
     <Card className={cn(
       "group relative overflow-hidden border border-border/40 bg-card py-0 gap-0",
-      "transition-all duration-300 hover:-translate-y-0.5 hover:shadow-raised",
-      meta.hue.hover,
+      "transition-all duration-300 hover:-translate-y-0.5 hover:shadow-raised hover:border-primary/40",
     )}>
-      <div className={cn("absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent to-transparent", meta.hue.line)} aria-hidden />
-      <div className={cn("absolute -top-16 -left-10 h-40 w-40 rounded-full blur-3xl opacity-60 transition-opacity duration-300 group-hover:opacity-100", meta.hue.glow)} aria-hidden />
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/70 to-transparent" aria-hidden />
+      <div className="absolute -top-16 -left-10 h-40 w-40 rounded-pill bg-primary/15 blur-glow opacity-60 transition-opacity duration-300 group-hover:opacity-100" aria-hidden />
 
       <CardContent className="relative p-0">
         <div className="flex items-start gap-3.5 px-4 pt-4">
-          <div className={cn(
-            "h-12 w-12 shrink-0 rounded-2xl bg-gradient-to-br ring-1 flex items-center justify-center shadow-lg",
-            meta.hue.tile, meta.hue.ring,
-          )}>
-            <span className={cn("font-bold text-white tracking-tight", meta.mark.length > 1 ? "text-small" : "text-lg")}>{meta.mark}</span>
+          <div className="h-12 w-12 shrink-0 rounded-2xl bg-card ring-1 ring-border flex items-center justify-center shadow-card">
+            <BrandIcon name={status.id} size={28} />
           </div>
           <div className="flex-1 min-w-0 pt-0.5">
             <div className="text-h3 font-semibold tracking-tight">{meta.name}</div>
-            <p className={cn("text-caption mt-0.5 font-medium", meta.hue.text)}>{meta.tagline}</p>
+            <p className="text-caption mt-0.5 font-medium text-primary">{meta.tagline}</p>
           </div>
-          <span className={cn("inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-caption font-medium", pill.cls)}>
+          <span className={cn("inline-flex shrink-0 items-center gap-1.5 rounded-pill border px-2 py-0.5 text-caption font-medium", pill.cls)}>
             <span className="relative flex h-1.5 w-1.5">
-              {pill.ping && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-60" />}
-              <span className={cn("relative inline-flex h-1.5 w-1.5 rounded-full", pill.dot)} />
+              {pill.ping && <span className="absolute inline-flex h-full w-full animate-ping rounded-pill bg-success opacity-60" />}
+              <span className={cn("relative inline-flex h-1.5 w-1.5 rounded-pill", pill.dot)} />
             </span>
             {pill.label}
           </span>
@@ -220,7 +213,7 @@ function ProviderCard({ status, onChanged }: { status: RemoteProviderStatus; onC
           </div>
           {!status.configured && (
             <p className="text-caption text-muted-foreground">
-              Create {v2 ? "a project API key" : "a key"} in the <a href={v2 ? DAYTONA_V2.keyUrl : meta.keyUrl} target="_blank" rel="noreferrer" className={cn("underline", meta.hue.text)}>{meta.name} dashboard</a>,
+              Create {v2 ? "a project API key" : "a key"} in the <a href={v2 ? DAYTONA_V2.keyUrl : meta.keyUrl} target="_blank" rel="noreferrer" className="underline text-primary">{meta.name} dashboard</a>,
               save it in an agent's vault (Credentials tab, shared with others if needed), then choose that entry here. {product} can do it for you.
             </p>
           )}
@@ -230,12 +223,12 @@ function ProviderCard({ status, onChanged }: { status: RemoteProviderStatus; onC
         </div>
 
         <div className="mt-3 flex items-center gap-1.5 border-t border-border/30 bg-muted/10 px-3 py-2">
-          <Button size="sm" className="h-7 rounded-full text-caption gap-1 px-3" disabled={!dirty || busy !== null} onClick={() => void save()}>
+          <Button size="sm" className="h-7 rounded-pill text-caption gap-1 px-3" disabled={!dirty || busy !== null} onClick={() => void save()}>
             {busy === "save" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />} Save
           </Button>
           <Button
             variant="ghost" size="sm"
-            className={cn("h-7 rounded-full text-caption gap-1 px-3", test?.ok && "text-success bg-success/10 hover:bg-success/15")}
+            className={cn("h-7 rounded-pill text-caption gap-1 px-3", test?.ok && "text-success bg-success/10 hover:bg-success/15")}
             disabled={!status.configured || busy !== null}
             onClick={() => void runTest()}
           >
@@ -245,7 +238,7 @@ function ProviderCard({ status, onChanged }: { status: RemoteProviderStatus; onC
           {status.configured && (
             <Button
               variant="ghost" size="icon"
-              className="ml-auto h-7 w-7 rounded-full text-muted-foreground/60 hover:text-destructive"
+              className="ml-auto h-7 w-7 rounded-pill text-muted-foreground/60 hover:text-destructive"
               disabled={busy !== null}
               onClick={() => void remove()}
               aria-label={`Disconnect ${meta.name}`}

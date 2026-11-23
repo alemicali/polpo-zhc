@@ -19,7 +19,9 @@ import {
   Brain,
   Cake,
   RefreshCw,
+  Palette,
 } from "lucide-react";
+import { AgentColorPicker } from "./agent-color-picker";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { cn } from "@/lib/utils";
 import { useAgentDetail } from "./agent-detail-context";
@@ -41,7 +43,7 @@ export function AgentHeroCard() {
         {/* Avatar + name */}
         <div className="flex items-center gap-3">
           <div className={cn("relative flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-card border-2 shadow-raised z-10", tc.border)}>
-            <AgentAvatar avatar={identity?.avatar} name={agent.name} size="xl" iconClassName={tc.text} />
+            <AgentAvatar avatar={identity?.avatar} name={agent.name} color={(identity as { color?: unknown } | undefined)?.color} size="xl" />
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
@@ -49,7 +51,7 @@ export function AgentHeroCard() {
                 {identity?.displayName ?? agent.name}
               </h1>
               {process && (
-                <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+                <div className="h-2 w-2 rounded-pill bg-primary animate-pulse" />
               )}
             </div>
             {identity?.displayName && identity.displayName !== agent.name && (
@@ -96,6 +98,11 @@ export function AgentHeroCard() {
             <MapPin className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <span className="text-muted-foreground shrink-0">Timezone</span>
             <span className={cn("ml-auto", identity?.timezone ? "text-foreground" : "text-muted-foreground/60 italic")}>{identity?.timezone || "not set"}</span>
+          </div>
+          <div className="flex items-center gap-2 py-1.5">
+            <Palette className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <span className="text-muted-foreground shrink-0">Colour</span>
+            <AgentColorPicker agent={agent} onChanged={refetch} />
           </div>
           <div className="flex items-center gap-2 py-1.5">
             <Zap className="h-3.5 w-3.5 text-muted-foreground shrink-0" />

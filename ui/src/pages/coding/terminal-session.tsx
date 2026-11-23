@@ -5,7 +5,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import "@xterm/xterm/css/xterm.css";
 import { config, websocketUrl } from "@/lib/config";
 import { cn } from "@/lib/utils";
-import { followAppearance, terminalFontFamily, terminalTheme } from "./xterm-theme";
+import { followAppearance, terminalFontFamily, terminalFontSize, terminalTheme } from "./xterm-theme";
 import type { ConnectionState } from "./types";
 
 type Props = {
@@ -55,7 +55,7 @@ export function TerminalSession({ sessionId, revision, cwd, active, agent, agent
 
     const term = new Terminal({
       fontFamily: terminalFontFamily(),
-      fontSize: 13,
+      fontSize: terminalFontSize(),
       cursorBlink: true,
       allowProposedApi: true,
       scrollback: 5_000,

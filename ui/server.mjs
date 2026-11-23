@@ -367,6 +367,63 @@ async function serveStatic(req, res, path, pathname, metadata) {
   createReadStream(path).pipe(res);
 }
 
+// The PWA manifest with the instance's look and name: theme_color and background_color are its page
+// background (the custom one, else its palette's, from dist/theme-colors.json; light theme: light,
+// else dark), name and short_name its product name. Without them: the build's manifest as is.
+const MANIFEST_COLOR = /^(#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|(?:oklch|oklab|lab|lch|hsla?|rgba?)\(\s*[0-9a-zA-Z.%\s,/+-]{1,80}\))$/;
+let themeColorsCache = null;
+
+async function themeColors() {
+  if (themeColorsCache === null) {
+    try {
+      const parsed = JSON.parse(await readFile(join(root, "theme-colors.json"), "utf8"));
+      themeColorsCache = parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      themeColorsCache = {};
+    }
+  }
+  return themeColorsCache;
+}
+
+function manifestLook(appearance, colors) {
+  const a = appearance && typeof appearance === "object" ? appearance : {};
+  const dark = a.theme !== "light";
+  const custom = a.custom && a.custom.enabled ? a.custom[dark ? "dark" : "light"] : undefined;
+  const background = custom && typeof custom.background === "string" ? custom.background.trim() : "";
+  if (MANIFEST_COLOR.test(background)) return background;
+  const palette = Array.isArray(colors[a.palette]) ? colors[a.palette] : colors.tide;
+  const color = Array.isArray(palette) ? palette[dark ? 1 : 0] : undefined;
+  return typeof color === "string" && MANIFEST_COLOR.test(color) ? color : undefined;
+}
+
+async function serveManifest(req, res, path) {
+  const [appearance, branding, colors, raw] = await Promise.all([instanceAppearance(), instanceBranding(), themeColors(), readFile(path, "utf8")]);
+  let manifest;
+  try { manifest = JSON.parse(raw); } catch { manifest = null; }
+  if (!manifest || typeof manifest !== "object") {
+    await serveStatic(req, res, path, "/manifest.webmanifest", await stat(path));
+    return;
+  }
+  const color = manifestLook(appearance, colors);
+  if (color) {
+    manifest.theme_color = color;
+    manifest.background_color = color;
+  }
+  const name = branding && typeof branding.productName === "string" ? branding.productName.trim() : "";
+  if (name) {
+    manifest.name = name;
+    manifest.short_name = name.slice(0, 30);
+  }
+  const body = Buffer.from(JSON.stringify(manifest));
+  res.writeHead(200, {
+    "Cache-Control": "no-cache",
+    "Content-Type": "application/manifest+json; charset=utf-8",
+    "Content-Length": body.length,
+    "X-Content-Type-Options": "nosniff",
+  });
+  res.end(req.method === "HEAD" ? undefined : body);
+}
+
 const server = createServer(async (req, res) => {
   try {
     if (req.method !== "GET" && req.method !== "HEAD") {
@@ -394,6 +451,10 @@ const server = createServer(async (req, res) => {
     const requestedPath = safePath(url.pathname === "/" ? "/index.html" : url.pathname);
     if (requestedPath) {
       const metadata = await stat(requestedPath).catch(() => null);
+      if (metadata?.isFile() && url.pathname === "/manifest.webmanifest") {
+        await serveManifest(req, res, requestedPath);
+        return;
+      }
       if (metadata?.isFile()) {
         await serveFile(req, res, requestedPath, url.pathname === "/" ? "/index.html" : url.pathname);
         return;

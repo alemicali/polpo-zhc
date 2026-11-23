@@ -284,7 +284,7 @@ function ConnectorScopeRow({
             aria-label={`Use ${name}`}
             onChange={(e) => onChange(e.target.checked ? "*" : undefined)}
           />
-          <ConnectorIcon catalogId={connector.catalogId} name={connector.name} color={connector.icon?.color} iconUrl={connector.iconUrl} iconDarkUrl={connector.iconDarkUrl} size="sm" className="h-5 w-5 rounded p-0.5" />
+          <ConnectorIcon catalogId={connector.catalogId} name={connector.name} color={connector.icon?.color} iconUrl={connector.iconUrl} iconDarkUrl={connector.iconDarkUrl} size="sm" className="h-5 w-5 rounded-xs p-0.5" />
           <span className="min-w-0 truncate text-sm">{name}</span>
           <span className="shrink-0 font-mono text-caption text-muted-foreground">{connector.id}</span>
         </label>

@@ -226,9 +226,9 @@ export function SchedulesPage() {
             <Calendar className="h-12 w-12 mb-4 text-primary/30" />
             <p className="text-sm font-medium">No schedules</p>
             <p className="text-xs mt-1 text-center max-w-xs">
-              Schedules are created when you add a <code className="bg-muted px-1 rounded">schedule</code> field to a mission definition.
+              Schedules are created when you add a <code className="bg-muted px-1 rounded-xs">schedule</code> field to a mission definition.
             </p>
-            <kbd className="mt-3 rounded border border-border bg-muted px-2 py-1 font-mono text-micro">
+            <kbd className="mt-3 rounded-xs border border-border bg-muted px-2 py-1 font-mono text-micro">
               {"{ \"schedule\": \"0 9 * * 1\", \"recurring\": true }"}
             </kbd>
           </CardContent>

@@ -163,12 +163,12 @@ export function NewTerminalDialog({ workspaceCwd, trigger, forceMode, onCreate }
                   agent === a.kind ? "bg-muted ring-1 ring-primary/30" : "hover:bg-muted/30",
                 )}
               >
-                <span className="flex h-6 w-6 items-center justify-center rounded text-foreground">{a.icon}</span>
+                <span className="flex h-6 w-6 items-center justify-center rounded-xs text-foreground">{a.icon}</span>
                 <div className="min-w-0 flex-1">
                   <div className="text-small font-medium text-foreground">{a.label}</div>
                   <div className="text-micro text-muted-foreground truncate">{a.description}</div>
                 </div>
-                {agent === a.kind && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
+                {agent === a.kind && <span className="h-1.5 w-1.5 rounded-pill bg-primary" />}
               </button>
             ))}
             {capabilities && availableAgents.length < AGENTS.length && (

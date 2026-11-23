@@ -96,7 +96,7 @@ function MobileIdentitySummary() {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <h1 className="font-heading text-h2 truncate">{identity?.displayName ?? agent.name}</h1>
-            {process && <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />}
+            {process && <div className="h-2 w-2 rounded-pill bg-primary animate-pulse" />}
           </div>
           {identity?.title && <p className="text-xs text-muted-foreground">{identity.title}</p>}
           {agent.model && <p className="mt-0.5 truncate text-micro font-mono text-muted-foreground">{agent.model}</p>}

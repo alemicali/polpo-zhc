@@ -32,6 +32,22 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-22-theme-everything",
+    date: "2026-11-22",
+    kind: "improved",
+    title: "Tutto sotto tema, anche i colori degli agenti",
+    summary: "Niente più colori, angoli, ombre o dimensioni fissi: ogni agente ha un colore del tema (sceglibile dalla sua pagina) e l'aspetto si configura tutto da Configurazione → Aspetto.",
+    body: [
+      "- **Colori degli agenti**: dieci colori nel tema (gruppo **Agenti** in Configurazione → Aspetto, con anteprima), definiti per chiaro e scuro in ogni palette e ben distinguibili. Ogni agente ne prende uno stabile dal nome, oppure scegli tu quale dalla sua pagina (**Colore** nella scheda dell'agente). Li usano avatar, badge, colori dei team e i tipi di strumento.",
+      "- **Angoli, ombre e sfocature**: nuovi token per badge, pillole, avatar e finestre di dialogo (999 = tondo), l'ombra dei campi, i bagliori, la sfocatura di barre e sfondi.",
+      "- **Testo**: anche le dimensioni piccole (xs … 3xl) e i pesi (normale, medio, semibold, bold) sono token.",
+      "- **Il resto**: lo sfondo dietro le finestre, il foglio dietro le pagine web e i codici QR, i grafici, il terminale, il riquadro dell'ispettore nell'anteprima delle app, i loghi dei fornitori (le immagini ufficiali, non colori a mano), il colore dell'app installata e le schede MCP (che prendono i colori dell'istanza e rispettano il tema chiaro o scuro di chi le mostra).",
+      "- **Da MCP**: `polpo_branding_update` accetta tutti i nuovi token; un agente cambia colore con `identity.color` (`agent1` … `agent10`).",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri l'aspetto", to: "/config?section=appearance" },
+  },
+  {
     id: "2026-11-22-opencode",
     date: "2026-11-22",
     kind: "new",

@@ -152,7 +152,7 @@ export function GroupComposer({ members, onSend, placeholder, autoFocus }: {
             onSubmit={handleSubmit}
             maxFiles={0}
             onError={() => toast.info("Attachments aren't supported in groups yet")}
-            className="[&_[data-slot=input-group]]:rounded-[calc(var(--radius)+8px)] [&_[data-slot=input-group]]:focus-within:ring-0 [&_[data-slot=input-group]]:focus-within:border-input"
+            className="[&_[data-slot=input-group]]:rounded-2xl [&_[data-slot=input-group]]:focus-within:ring-0 [&_[data-slot=input-group]]:focus-within:border-input"
           >
             <PromptInputTextarea
               ref={textareaRef}
@@ -177,7 +177,7 @@ export function GroupComposer({ members, onSend, placeholder, autoFocus }: {
                   onClick={openMentions}
                   aria-label="Mention an agent"
                   title="Mention an agent"
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-pill text-muted-foreground hover:bg-accent/60 hover:text-foreground"
                 >
                   <span className="font-mono text-sm font-semibold">@</span>
                 </button>
@@ -238,11 +238,11 @@ export function GroupComposer({ members, onSend, placeholder, autoFocus }: {
           ))}
         </div>
         <div className="flex shrink-0 items-center gap-2 border-t border-border bg-muted/30 px-3 py-1.5 text-caption text-muted-foreground">
-          <span className="font-mono text-micro uppercase tracking-[0.12em]">↑↓</span>
+          <span className="font-mono text-micro uppercase tracking-widest">↑↓</span>
           <span>move</span>
-          <span className="font-mono text-micro uppercase tracking-[0.12em]">Enter</span>
+          <span className="font-mono text-micro uppercase tracking-widest">Enter</span>
           <span>insert</span>
-          <span className="ml-auto font-mono text-micro uppercase tracking-[0.12em]">Esc</span>
+          <span className="ml-auto font-mono text-micro uppercase tracking-widest">Esc</span>
         </div>
       </PopoverContent>
     </Popover>

@@ -177,7 +177,7 @@ function ProcessRow({
           type="button"
           disabled={!hasTree}
           onClick={() => setExpanded((v) => !v)}
-          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
+          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
         >
           {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
         </button>
@@ -195,18 +195,18 @@ function ProcessRow({
               <span className="text-caption text-muted-foreground">{agentLabel(item.agentKind)}</span>
             )}
             {workspaceName && (
-              <span className="rounded bg-muted/40 px-1.5 py-px text-micro text-muted-foreground" title={workspaceCwd}>
+              <span className="rounded-xs bg-muted/40 px-1.5 py-px text-micro text-muted-foreground" title={workspaceCwd}>
                 {workspaceName}
               </span>
             )}
             <span className="font-mono text-caption tabular-nums text-muted-foreground/80">pid {item.pid ?? "—"}</span>
             {item.kind === "terminal" && item.clients > 0 && (
-              <span className="rounded bg-success/10 px-1.5 py-px text-micro font-medium text-success">
+              <span className="rounded-xs bg-success/10 px-1.5 py-px text-micro font-medium text-success">
                 {item.clients} client{item.clients === 1 ? "" : "s"}
               </span>
             )}
             {descendants > 0 && (
-              <span className="rounded bg-muted/50 px-1.5 py-px text-micro text-muted-foreground">
+              <span className="rounded-xs bg-muted/50 px-1.5 py-px text-micro text-muted-foreground">
                 +{descendants} child{descendants === 1 ? "" : "ren"}
               </span>
             )}
@@ -227,7 +227,7 @@ function ProcessRow({
             variant="ghost"
             disabled={killing}
             onClick={onKill}
-            className="mt-1 h-6 gap-1 rounded px-1.5 text-micro font-medium text-destructive/80 hover:bg-destructive/10 hover:text-destructive"
+            className="mt-1 h-6 gap-1 rounded-xs px-1.5 text-micro font-medium text-destructive/80 hover:bg-destructive/10 hover:text-destructive"
           >
             {killing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
             Kill

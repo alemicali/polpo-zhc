@@ -288,7 +288,7 @@ function VsCodeTab({ workspaceId, cwd }: { workspaceId: string | undefined; cwd:
             target="_blank"
             rel="noreferrer"
             title="Open in new tab"
-            className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+            className="inline-flex h-6 w-6 items-center justify-center rounded-xs text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <ExternalLink className="h-3.5 w-3.5" />
           </a>
@@ -300,7 +300,7 @@ function VsCodeTab({ workspaceId, cwd }: { workspaceId: string | undefined; cwd:
             size="sm"
             disabled={busy}
             onClick={stop}
-            className="h-6 rounded px-2 text-micro font-medium text-muted-foreground disabled:opacity-60"
+            className="h-6 rounded-xs px-2 text-micro font-medium text-muted-foreground disabled:opacity-60"
           >
             <Square className="h-3 w-3" />
             Stop
@@ -312,7 +312,7 @@ function VsCodeTab({ workspaceId, cwd }: { workspaceId: string | undefined; cwd:
           size="sm"
           disabled={busy}
           onClick={start}
-          className="h-6 rounded px-2 text-micro font-medium disabled:opacity-60"
+          className="h-6 rounded-xs px-2 text-micro font-medium disabled:opacity-60"
         >
           {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
           {url ? "Restart" : "Start"}
@@ -322,7 +322,7 @@ function VsCodeTab({ workspaceId, cwd }: { workspaceId: string | undefined; cwd:
         <iframe
           key={url}
           src={url}
-          className="flex-1 w-full border-0 bg-white"
+          className="flex-1 w-full border-0 bg-canvas"
           title="VS Code"
           allow="clipboard-read; clipboard-write"
         />

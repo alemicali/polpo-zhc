@@ -873,7 +873,7 @@ export function ApiKeyStep({
           </h2>
           <p className="text-sm text-muted-foreground mt-0.5">
             Your key is stored locally in{" "}
-            <code className="text-xs bg-muted px-1.5 py-0.5 rounded">.polpo/.env</code>
+            <code className="text-xs bg-muted px-1.5 py-0.5 rounded-xs">.polpo/.env</code>
           </p>
         </div>
       </div>

@@ -157,7 +157,7 @@ export function CustomConnectorDialog({
                         <span className="min-w-0">
                           <span className="flex flex-wrap items-center gap-1.5 font-medium">
                             {DETECTED_AUTH_LABELS[option.auth]}
-                            {option.recommended && <span className="rounded bg-primary/10 px-1.5 py-0.5 text-caption font-medium text-primary">Recommended</span>}
+                            {option.recommended && <span className="rounded-xs bg-primary/10 px-1.5 py-0.5 text-caption font-medium text-primary">Recommended</span>}
                           </span>
                           <span className="block text-caption leading-tight text-muted-foreground">{option.description}</span>
                         </span>

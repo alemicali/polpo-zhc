@@ -12,6 +12,7 @@ import { useDocumentTitle } from "@/lib/branding";
 import { resolveTitle } from "@/lib/page-titles";
 import { WhatsNewBar } from "@/components/whats-new/whats-new-bar";
 import { WhatsNewDrawer } from "@/components/whats-new/whats-new-drawer";
+import { AgentColorsSync } from "@/components/agents/agent-colors-sync";
 
 /** Tool surfaces that should meet the surrounding pane edges. */
 function hasNoPagePadding(pathname: string): boolean {
@@ -37,6 +38,7 @@ export function AppLayout() {
   if (layoutMode === "chat-first") {
     return (
       <div className="flex h-[100dvh] w-full max-w-full flex-col overflow-hidden bg-background text-foreground">
+        <AgentColorsSync />
         <WhatsNewBar />
         <div className="flex min-h-0 w-full flex-1 overflow-hidden">
           <ChatFirstLayout />
@@ -54,6 +56,7 @@ export function AppLayout() {
         <Sidebar />
       </div>
       <div className="flex flex-1 flex-col overflow-hidden min-w-0">
+        <AgentColorsSync />
         <WhatsNewBar />
         <Header />
         <div className="flex flex-1 min-h-0 overflow-hidden">
