@@ -7,6 +7,7 @@ import { useState } from "react";
 import { Loader2, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import { useAgents } from "@polpo-ai/react";
+import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -66,7 +67,7 @@ export function AccessTab({ source, registry, datasets }: { source: DataSource; 
             const scope = !grant ? "No access" : grant.datasets.length === 0 || grant.datasets.includes("*") ? "All datasets" : `${grant.datasets.length} dataset${grant.datasets.length === 1 ? "" : "s"}: ${grant.datasets.join(", ")}`;
             return (
               <li key={name} className="flex flex-wrap items-center gap-3 px-3 py-3 sm:flex-nowrap">
-                <span className="flex size-8 shrink-0 items-center justify-center rounded-avatar bg-muted text-xs font-semibold" aria-hidden="true">{name.slice(0, 1).toUpperCase()}</span>
+                <AgentAvatar avatar={agent?.identity?.avatar} name={name} color={agent?.identity?.color} size="md" fallbackVariant="circle" shape="circle" />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium">{agent?.identity?.displayName ?? name}{!agent && <span className="ml-2 text-micro font-normal text-warning">agent not found</span>}</div>
                   <div className="truncate text-micro text-muted-foreground">{scope}{grant?.excludedFields?.length ? ` · ${grant.excludedFields.length} hidden field${grant.excludedFields.length === 1 ? "" : "s"}` : ""}</div>
