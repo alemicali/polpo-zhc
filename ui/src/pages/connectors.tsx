@@ -377,6 +377,7 @@ export function ConnectorsPage() {
         onChanged={upsert}
         onRemoved={(id) => { drop(id); setSelectedId(null); }}
         onReconnect={(c) => { setSelectedId(null); flow.open({ connector: c, entry: selectedEntry }); }}
+        onSetupApp={(c, appId) => { setSelectedId(null); flow.open({ connector: c, entry: selectedEntry, oauthApp: appId }); }}
         accountCount={selectedEntry ? catalogCardState(selectedEntry, connectors, oauthApps).accounts.length : 0}
         onAddAccount={selectedEntry ? () => addAccount(selectedEntry) : undefined}
       />

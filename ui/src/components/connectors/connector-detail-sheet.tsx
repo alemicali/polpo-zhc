@@ -4,7 +4,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, Bot, Check, ExternalLink, Image as ImageIcon, Link2, Loader2, Pencil, Plug, RefreshCw, RotateCw, Terminal, Trash2, Undo2, Unplug, UserPlus, Users, Wrench, X } from "lucide-react";
+import { AlertTriangle, Bot, Check, ExternalLink, KeyRound, Image as ImageIcon, Link2, Loader2, Pencil, Plug, RefreshCw, RotateCw, Terminal, Trash2, Undo2, Unplug, UserPlus, Users, Wrench, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -12,7 +12,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import {
-  MAX_ICON_BYTES, agentHasAccess, connectorState, connectorsApi, iconSourceLabel, toggleAgentAccess, toolLabel,
+  MAX_ICON_BYTES, agentHasAccess, connectorState, connectorsApi, iconSourceLabel, oauthAppFor, registrationRefused, toggleAgentAccess, toolLabel,
   type CatalogEntry, type Connector, type ConnectorAccess, type ConnectorTool, type ConnectorToolPolicy,
 } from "@/lib/connectors-api";
 import { cn } from "@/lib/utils";
@@ -280,7 +280,7 @@ export function ConnectorIconEditor({ connector, onChanged, disabled }: { connec
 }
 
 export function ConnectorDetailSheet({
-  connector, entry, agents, open, onOpenChange, onChanged, onRemoved, onReconnect, accountCount = 0, onAddAccount,
+  connector, entry, agents, open, onOpenChange, onChanged, onRemoved, onReconnect, onSetupApp, accountCount = 0, onAddAccount,
 }: {
   connector: Connector | null;
   entry?: CatalogEntry;
@@ -291,6 +291,8 @@ export function ConnectorDetailSheet({
   onRemoved: (id: string) => void;
   /** Start sign-in again (a click: opens the sign-in window). */
   onReconnect: (connector: Connector) => void;
+  /** The vendor refused the dynamic registration: set up its OAuth app (`appId`), then sign in (a click). */
+  onSetupApp?: (connector: Connector, appId: string) => void;
   /** How many accounts of this catalog app are connected (this one included). */
   accountCount?: number;
   /** Connect another account of the same catalog app. */
@@ -385,6 +387,11 @@ export function ConnectorDetailSheet({
               <span className="min-w-0 space-y-1">
                 <span className="block break-words">{connector.lastError}</span>
                 <FixItLink message={connector.lastError} />
+                {oauth && onSetupApp && registrationRefused(connector.lastError) && (
+                  <Button size="sm" className="mt-1 h-7" onClick={() => onSetupApp(connector, oauthAppFor(connector, entry))} disabled={!!busy}>
+                    <KeyRound className="h-3.5 w-3.5" /> Set up OAuth app
+                  </Button>
+                )}
               </span>
             </div>
           )}

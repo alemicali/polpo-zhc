@@ -35,6 +35,8 @@ export interface VaultOAuthProviderOptions {
    * get a dynamic registration.
    */
   clientMetadataUrl?: string;
+  /** The HTTP client underneath (default: the global fetch); the catalog health check injects its own. */
+  fetch?: typeof fetch;
 }
 
 function parse<T>(raw: string | undefined): T | undefined {
@@ -51,6 +53,10 @@ export class VaultOAuthProvider implements OAuthClientProvider {
   readonly clientMetadataUrl?: string;
   refreshError?: OAuthHttpError;
   private discoveryError?: OAuthHttpError;
+  /** Token endpoint auth methods the authorization server takes (from discovery, before registering). */
+  private tokenAuthMethods?: string[];
+  /** Set (returning no resource) when the connector's authorization server rejects RFC 8707 resource indicators. */
+  readonly validateResourceURL?: (serverUrl: string | URL, resource?: string) => Promise<URL | undefined>;
 
   constructor(
     private readonly connector: ConnectorConfig,
@@ -60,11 +66,12 @@ export class VaultOAuthProvider implements OAuthClientProvider {
     if (options.clientMetadataUrl && !options.preregistered && /^https:\/\/[^/]+\/.+/.test(options.clientMetadataUrl)) {
       this.clientMetadataUrl = options.clientMetadataUrl;
     }
+    if (connector.auth.oauth?.resourceIndicator === false) this.validateResourceURL = async () => undefined;
   }
 
   /** The transports use the same fetch for MCP traffic and OAuth. Leave MCP challenges to the SDK. */
   readonly fetch: typeof fetch = async (input, init) => {
-    const response = await globalThis.fetch(input, init);
+    const response = await (this.options.fetch ?? globalThis.fetch)(input, init);
     if (response.status < 400) return response;
     const body = init?.body;
     let step: OAuthStep;
@@ -152,9 +159,25 @@ export class VaultOAuthProvider implements OAuthClientProvider {
       redirect_uris: this.options.redirectUrl ? [this.options.redirectUrl] : [],
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
-      token_endpoint_auth_method: "none",
+      token_endpoint_auth_method: this.tokenAuthMethod(),
       ...(scopes?.length ? { scope: scopes.join(" ") } : {}),
     };
+  }
+
+  /**
+   * A public client ("none", with PKCE) unless the authorization server only takes confidential
+   * clients (e.g. Gong): then the registration asks for a client secret, which the SDK keeps with the
+   * client information and sends to the token endpoint.
+   */
+  private tokenAuthMethod(): string {
+    const methods = this.tokenAuthMethods;
+    if (!methods?.length || methods.includes("none")) return "none";
+    return methods.includes("client_secret_basic") ? "client_secret_basic" : methods.includes("client_secret_post") ? "client_secret_post" : "none";
+  }
+
+  private remember(state: OAuthDiscoveryState | undefined): void {
+    const methods = state?.authorizationServerMetadata?.token_endpoint_auth_methods_supported;
+    if (Array.isArray(methods)) this.tokenAuthMethods = methods;
   }
 
   async state(): Promise<string> {
@@ -224,6 +247,7 @@ export class VaultOAuthProvider implements OAuthClientProvider {
     const error = this.discoveryError;
     this.discoveryError = undefined;
     if (!state.authorizationServerMetadata && error) throw error;
+    this.remember(state);
     await this.save({ [SECRET_KEYS.discovery]: JSON.stringify(state) });
   }
 
@@ -236,7 +260,10 @@ export class VaultOAuthProvider implements OAuthClientProvider {
 
   async discoveryState(): Promise<OAuthDiscoveryState | undefined> {
     const saved = parse<OAuthDiscoveryState>((await this.creds())[SECRET_KEYS.discovery]);
-    if (saved) return saved;
+    if (saved) {
+      this.remember(saved);
+      return saved;
+    }
     // servers without protected-resource metadata (Google): the configured authorization server
     const issuer = this.connector.auth.oauth?.authorizationServer;
     return issuer ? { authorizationServerUrl: issuer } : undefined;

@@ -171,7 +171,8 @@ export function useConnectFlow({
 
   /** Start (from a click): asks for setup / details first, else connects right away. */
   const open = useCallback((target: ConnectTarget) => {
-    const missingApp = target.entry && missingOAuthApp(target.entry, oauthApps, target.connector);
+    // an explicit app (the registration was refused: "Set up OAuth app") or one the catalog entry still needs
+    const missingApp = target.oauthApp ?? (target.entry && missingOAuthApp(target.entry, oauthApps, target.connector));
     if (missingApp) {
       setState({ phase: "setup", target: { ...target, oauthApp: missingApp } });
       return;
