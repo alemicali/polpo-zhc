@@ -1,9 +1,20 @@
 export const SHEET_ROWS = 500;
 export const SHEET_COLUMNS = 52;
 export const WORKBOOK_SHEETS = 20;
+export const MAX_CELL_DECIMALS = 8;
 
 export type CellAddress = { row: number; col: number };
-export type Sheet = { name: string; cells: Record<string, string> };
+export type CellStyle = {
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  align?: "left" | "center" | "right";
+  color?: string;
+  fill?: string;
+  numberFormat?: "currency" | "percent";
+  decimals?: number;
+};
+export type Sheet = { name: string; cells: Record<string, string>; styles?: Record<string, CellStyle> };
 export type Workbook = { version: 1; sheets: Sheet[] };
 export type CellValue = string | number | boolean | null;
 export type SheetValue = { value: CellValue; error?: string };
@@ -34,6 +45,15 @@ export function cellAddress(key: string): CellAddress | null {
   return row <= SHEET_ROWS && col <= SHEET_COLUMNS ? { row, col } : null;
 }
 
+function isCellStyle(style: CellStyle | null): boolean {
+  if (!style || typeof style !== "object" || Array.isArray(style)) return false;
+  return ([style.bold, style.italic, style.underline].every((flag) => flag === undefined || typeof flag === "boolean"))
+    && (style.align === undefined || ["left", "center", "right"].includes(style.align))
+    && [style.color, style.fill].every((color) => color === undefined || (typeof color === "string" && /^#[a-f0-9]{6}$/i.test(color)))
+    && (style.numberFormat === undefined || ["currency", "percent"].includes(style.numberFormat))
+    && (style.decimals === undefined || (Number.isInteger(style.decimals) && style.decimals >= 0 && style.decimals <= MAX_CELL_DECIMALS));
+}
+
 export function readWorkbook(content: string): Workbook | null {
   try {
     const workbook = JSON.parse(content) as Workbook;
@@ -47,6 +67,8 @@ export function readWorkbook(content: string): Workbook | null {
         || !sheet.cells || typeof sheet.cells !== "object" || Array.isArray(sheet.cells)) return null;
       names.add(sheet.name.toLowerCase());
       if (Object.entries(sheet.cells).some(([key, raw]) => !cellAddress(key) || typeof raw !== "string")) return null;
+      if (sheet.styles !== undefined && (!sheet.styles || typeof sheet.styles !== "object" || Array.isArray(sheet.styles)
+        || Object.entries(sheet.styles).some(([key, style]) => !cellAddress(key) || !isCellStyle(style)))) return null;
     }
     return workbook;
   } catch {
@@ -69,10 +91,40 @@ export function displaySheetValue({ value, error }: SheetValue) {
   return value === null ? "" : String(value);
 }
 
-export function sheetBounds(sheet: Sheet): CellAddress {
+const numberFormats = new Map<string, Intl.NumberFormat>();
+
+export function formattedSheetValue(result: SheetValue, style?: CellStyle): string {
+  if (typeof result.value !== "number" || (!style?.numberFormat && style?.decimals === undefined)) return displaySheetValue(result);
+  const decimals = style.decimals ?? 2;
+  const mode = style.numberFormat ?? "decimal";
+  const key = mode + decimals;
+  let formatter = numberFormats.get(key);
+  if (!formatter) {
+    formatter = new Intl.NumberFormat(undefined, {
+      style: mode,
+      ...(mode === "currency" ? { currency: "EUR" } : {}),
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    });
+    numberFormats.set(key, formatter);
+  }
+  return formatter.format(result.value);
+}
+
+export function xlsxNumberFormat(style: CellStyle): string | undefined {
+  if (style.numberFormat === undefined && style.decimals === undefined) return;
+  const decimals = style.decimals ?? 2;
+  const number = "#,##0" + (decimals > 0 ? "." + "0".repeat(decimals) : "");
+  if (style.numberFormat === "currency") return number + ' "€"';
+  return number + (style.numberFormat === "percent" ? "%" : "");
+}
+
+export function sheetBounds(sheet: Sheet, includeStyles = true): CellAddress {
   let row = 1;
   let col = 1;
-  for (const key of Object.keys(sheet.cells)) {
+  const keys = Object.keys(sheet.cells);
+  if (includeStyles && sheet.styles) keys.push(...Object.keys(sheet.styles));
+  for (const key of keys) {
     const address = cellAddress(key);
     if (!address) continue;
     row = Math.max(row, address.row);
@@ -82,7 +134,7 @@ export function sheetBounds(sheet: Sheet): CellAddress {
 }
 
 export function sheetCsv(sheet: Sheet, get: (sheetName: string, key: string) => SheetValue): string {
-  const { row, col } = sheetBounds(sheet);
+  const { row, col } = sheetBounds(sheet, false);
   return Array.from({ length: row }, (_, rowIndex) =>
     Array.from({ length: col }, (_, colIndex) => {
       const result = get(sheet.name, cellKey({ row: rowIndex + 1, col: colIndex + 1 }));

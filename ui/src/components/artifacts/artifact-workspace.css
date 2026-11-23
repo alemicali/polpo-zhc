@@ -1,0 +1,25 @@
+@keyframes artifact-preparation-scan {
+  0%, 100% { opacity: 0; transform: translateY(-55%); }
+  18% { opacity: .55; }
+  70% { opacity: .45; transform: translateY(55%); }
+  78% { opacity: 0; transform: translateY(55%); }
+}
+
+.artifact-preparation-scan {
+  animation: artifact-preparation-scan 1.8s ease-in-out infinite;
+  stroke-width: 1;
+}
+
+.artifact-template-art {
+  background-image: radial-gradient(circle at right, color-mix(in oklch, var(--primary) 17%, transparent), transparent 72%);
+}
+
+.artifact-template-art::after {
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(90deg, color-mix(in oklch, var(--primary) 10%, transparent) 1px, transparent 1px),
+    linear-gradient(color-mix(in oklch, var(--primary) 10%, transparent) 1px, transparent 1px);
+  background-size: .7rem .7rem;
+  mask-image: linear-gradient(90deg, transparent, black);
+  content: "";
+}

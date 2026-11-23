@@ -1,16 +1,19 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, Code2, Download, Eye, ExternalLink, FileDown, History, Link2, Loader2, Maximize2, Pencil, Printer, RefreshCw, RotateCcw, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, Cloud, Code2, Download, ExternalLink, FileDown, History, Link2, Maximize2, MoreHorizontal, Printer, RefreshCw, RotateCcw, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useEvents } from "@polpo-ai/react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { artifactDownload, artifactLabel, artifactWorkspace, artifactsApi, downloadArtifactFile, saveArtifactFile, type Artifact } from "@/lib/artifacts-api";
 import { absoluteTime, artifactAuthor } from "@/lib/artifacts-list";
 import { artifactPath, useArtifactActions } from "@/hooks/use-artifact-actions";
 import { productName, useInstanceBranding } from "@/lib/branding";
 import { ArtifactIcon } from "./artifact-icon";
+import { ArtifactPreparation } from "./artifact-preparation";
 import { ArtifactView } from "./artifact-view";
 
 const DocEditor = lazy(() => import("./artifact-doc-editor").then((m) => ({ default: m.ArtifactDocEditor })));
@@ -19,15 +22,10 @@ const SlidesEditor = lazy(() => import("./artifact-slides-editor").then((m) => (
 const SheetsEditor = lazy(() => import("./artifact-sheets-editor").then((m) => ({ default: m.ArtifactSheetsEditor })));
 const MotionEditor = lazy(() => import("./artifact-motion-editor").then((m) => ({ default: m.ArtifactMotionEditor })));
 
-type Mode = "preview" | "edit" | "source";
 interface Draft {
   base: Pick<Artifact, "version" | "title" | "content">;
   title: string;
   content: string;
-}
-
-function Working() {
-  return <div className="flex h-full items-center justify-center"><Loader2 className="size-5 animate-spin text-muted-foreground" aria-label="Loading" /></div>;
 }
 
 export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string; embedded?: boolean; onDeleted?: () => void }) {
@@ -36,9 +34,13 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
   const { copyLink, remove: deleteArtifact } = useArtifactActions(onDeleted);
   const product = productName(useInstanceBranding());
   const stage = useRef<HTMLDivElement>(null);
-  const [artifact, setArtifact] = useState<Artifact | null>(null);
+  const [artifact, setArtifact] = useState<Artifact | null>(() =>
+    location.state?.createdArtifact?.id === id ? location.state.createdArtifact : null);
   const [error, setError] = useState<string | null>(null);
-  const [mode, setMode] = useState<Mode>(!embedded && location.state?.edit ? "edit" : "preview");
+  const [source, setSource] = useState<{ value: string; version: number }>();
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const [saveError, setSaveError] = useState<string>();
   const [version, setVersion] = useState<number>();
   const [draft, setDraft] = useState<Draft>();
   const [refreshKey, setRefreshKey] = useState(0);
@@ -66,8 +68,9 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
   }, [dirty]);
 
   const save = useCallback(async () => {
-    if (!dirty || !draft || busy) return;
-    setBusy(true);
+    if (!dirty || !draft || busy || savingRef.current || artifact?.version !== draft.base.version) return;
+    savingRef.current = true;
+    setSaving(true);
     try {
       const title = draft.title.trim();
       if (!title) throw new Error("Enter an artifact title.");
@@ -83,15 +86,26 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
         ...(draft.content !== draft.base.content ? { content: draft.content, note: "Edited in the artifact workspace" } : {}),
         expectedVersion: draft.base.version,
       });
-      setArtifact(updated);
-      setDraft(undefined);
-      toast.success(`Saved ${updated.title}`);
+      setArtifact((current) => current && current.updatedAt > updated.updatedAt ? current : updated);
+      setDraft((current) => !current || current === draft ? undefined : {
+        base: updated,
+        title: current.title === draft.title ? updated.title : current.title,
+        content: current.content === draft.content ? updated.content : current.content,
+      });
+      setSaveError(undefined);
     } catch (err) {
-      toast.error((err as Error).message);
+      setSaveError((err as Error).message);
     } finally {
-      setBusy(false);
+      savingRef.current = false;
+      setSaving(false);
     }
   }, [artifact, busy, dirty, draft, id]);
+
+  useEffect(() => {
+    if (!dirty || saving || saveError || version !== undefined || embedded || artifact?.version !== draft?.base.version) return;
+    const timer = window.setTimeout(() => { void save(); }, 1200);
+    return () => window.clearTimeout(timer);
+  }, [artifact?.version, dirty, draft?.base.version, embedded, save, saveError, saving, version]);
 
   useEffect(() => {
     if (!dirty || version !== undefined) return;
@@ -108,7 +122,7 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
   if (!artifact) {
     return error
       ? <div className="p-4 text-sm text-destructive">{error} {!embedded && <Link to="/artifacts" className="underline">Back to artifacts</Link>}</div>
-      : <Working />;
+      : <ArtifactPreparation />;
   }
 
   const shownVersion = artifact.versions.find((item) => item.version === version);
@@ -116,11 +130,13 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
   const workspace = artifactWorkspace(artifact, shownVersion?.content ?? draft?.base.content ?? content);
   const legacy = artifact.type === "view";
   const editable = !legacy && !shownVersion && !embedded;
-  const visualEditor = !!workspace || artifact.type === "doc" || (artifact.type === "html" && artifact.kind === "design");
-  const activeMode = legacy || (!editable && mode === "edit") ? "preview" : mode === "edit" && !visualEditor ? "source" : mode;
+  const versionChanged = !!draft && artifact.version !== draft.base.version && !saving;
+  const autoSaveStatus = saving ? "Saving…" : versionChanged ? "A newer version is available" :
+    saveError ? "Changes could not be saved" : dirty ? "Changes pending" : "Saved";
 
   function updateDraft(patch: Partial<Pick<Draft, "title" | "content">>) {
     if (!artifact) return;
+    if (!versionChanged) setSaveError(undefined);
     setDraft((current) => ({
       ...(current ?? { base: artifact, title: artifact.title, content: artifact.content }),
       ...patch,
@@ -128,7 +144,7 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
   }
 
   async function restore() {
-    if (!shownVersion || !artifact || busy) return;
+    if (!shownVersion || !artifact || busy || saving) return;
     setBusy(true);
     try {
       setArtifact(await artifactsApi.restore(artifact.id, shownVersion.version));
@@ -143,7 +159,7 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
   }
 
   async function remove() {
-    if (!artifact || busy) return;
+    if (!artifact || busy || saving) return;
     setBusy(true);
     try {
       if (await deleteArtifact(artifact) && !embedded) navigate("/artifacts");
@@ -166,109 +182,132 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
     }
   }
 
-  const switchMode = (next: Mode) => setMode(next === "edit" && !visualEditor ? "source" : next);
-  const onChange = activeMode === "edit" && editable && !busy ? (value: string) => updateDraft({ content: value }) : undefined;
+  const onChange = editable ? (value: string) => updateDraft({ content: value }) : undefined;
+  const canUseSource = !legacy;
   const goBack = () => {
-    if (!dirty || window.confirm("Discard your unsaved changes?")) navigate("/artifacts");
+    if (!saving && (!dirty || window.confirm("Discard your unsaved changes?"))) navigate("/artifacts");
   };
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2">
-      <header className="flex flex-wrap items-center gap-2">
+      <header className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-border/70 bg-card/70 px-2 py-1.5">
         {!embedded && <Button size="icon" variant="ghost" className="size-8" onClick={goBack} aria-label="Back to artifacts"><ArrowLeft className="size-4" /></Button>}
-        <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary"><ArtifactIcon artifact={artifact} /></span>
+        <span className="grid size-8 shrink-0 place-items-center rounded-md bg-primary/10 text-primary"><ArtifactIcon artifact={artifact} /></span>
         <div className="min-w-0 flex-1">
-          {editable && activeMode !== "preview" ? (
+          {editable ? (
             <Input aria-label="Artifact title" value={draft?.title ?? artifact.title} disabled={busy}
-              className="h-8 max-w-sm font-heading text-base" onChange={(event) => updateDraft({ title: event.target.value })} />
+              className="h-7 max-w-md border-transparent bg-transparent px-1 font-heading text-sm font-semibold shadow-none hover:border-border focus-visible:bg-background"
+              onChange={(event) => updateDraft({ title: event.target.value })} />
           ) : (
-            <h1 className="flex items-center gap-2 truncate font-heading text-h3">{artifact.title}{legacy && <Badge variant="outline">Legacy</Badge>}</h1>
+            <h1 className="flex items-center gap-2 truncate font-heading text-sm font-semibold">{artifact.title}{legacy && <Badge variant="outline">Legacy</Badge>}</h1>
           )}
-          <p className="truncate text-caption text-muted-foreground">
+          <p className="truncate px-1 text-caption text-muted-foreground">
             {artifactLabel(artifact)} · {artifactAuthor(artifact.createdBy, product)}{legacy ? "" : ` · v${artifact.version}`}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-1">
-          {!legacy && artifact.versions.length > 0 && (
-            <label className="flex items-center gap-1 rounded-md border px-1.5 text-xs text-muted-foreground">
-              <History className="size-3.5" />
-              <select className="h-8 max-w-40 rounded bg-background text-xs" value={shownVersion?.version ?? ""}
-                onChange={(event) => {
-                  if (dirty && !window.confirm("Discard your unsaved changes?")) return;
-                  setDraft(undefined);
-                  setVersion(event.target.value ? Number(event.target.value) : undefined);
-                  setMode("preview");
-                }} aria-label="Version" disabled={busy}>
-                <option value="">v{artifact.version} (current)</option>
-                {artifact.versions.map((item) => <option key={item.version} value={item.version}>v{item.version} · {absoluteTime(item.at)}{item.note ? ` · ${item.note}` : ""}</option>)}
-              </select>
-            </label>
-          )}
-          {shownVersion && <Button size="sm" variant="outline" disabled={busy} onClick={() => void restore()}><RotateCcw className="size-3.5" /> Restore</Button>}
-          {artifact.type === "doc" && (
-            <>
-              <Button size="icon" variant="ghost" aria-label="Download Word document" title="Download Word document" onClick={() => void exportDoc("word")}><FileDown className="size-4" /></Button>
-              <Button size="icon" variant="ghost" aria-label="Print or save PDF" title="Print or save PDF" onClick={() => void exportDoc("print")}><Printer className="size-4" /></Button>
-            </>
-          )}
-          {!workspace && (artifact.type === "html" || legacy) && (
-            <Button size="icon" variant="ghost" aria-label="Reload data" title="Reload data" onClick={() => setRefreshKey((key) => key + 1)}><RefreshCw className="size-4" /></Button>
-          )}
-          <Button size="icon" variant="ghost" aria-label="Full screen" title="Full screen" onClick={() => void stage.current?.requestFullscreen?.().catch(() => {})}><Maximize2 className="size-4" /></Button>
-          <Button size="icon" variant="ghost" aria-label="Download source" title="Download source" onClick={() => saveArtifactFile(artifact, content)}><Download className="size-4" /></Button>
-          <Button size="icon" variant="ghost" aria-label="Copy link" title="Copy link" onClick={() => void copyLink(artifact)}><Link2 className="size-4" /></Button>
-          {embedded && <Button size="icon" variant="ghost" aria-label="Open" title="Open in workspace" onClick={() => navigate(artifactPath(id))}><ExternalLink className="size-4" /></Button>}
-          {!legacy && <Button size="icon" variant="ghost" className="text-destructive" aria-label="Delete" title="Delete" disabled={busy} onClick={() => void remove()}><Trash2 className="size-4" /></Button>}
-        </div>
+        {editable && <span role="status" title={saveError || autoSaveStatus} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+          {autoSaveStatus === "Saved" ? <Check className="size-3.5" /> : <Cloud className="size-3.5" />}
+          <span className="hidden sm:inline">{autoSaveStatus}</span>
+        </span>}
+        {!legacy && artifact.versions.length > 0 && (
+          <label className="flex items-center gap-1 rounded-md border border-border px-1.5 text-xs text-muted-foreground">
+            <History className="size-3.5" />
+            <select className="h-7 max-w-28 rounded bg-transparent text-xs sm:max-w-36" value={shownVersion?.version ?? ""}
+              onChange={(event) => {
+                if (dirty && !window.confirm("Discard your unsaved changes?")) return;
+                setDraft(undefined);
+                setSaveError(undefined);
+                setVersion(event.target.value ? Number(event.target.value) : undefined);
+              }} aria-label="Version history" disabled={busy || saving}>
+              <option value="">v{artifact.version} (current)</option>
+              {artifact.versions.map((item) => <option key={item.version} value={item.version}>v{item.version} · {absoluteTime(item.at)}</option>)}
+            </select>
+          </label>
+        )}
+        {shownVersion && <Button size="sm" variant="outline" disabled={busy} onClick={() => void restore()}><RotateCcw className="size-3.5" /> Restore</Button>}
+        {embedded && <Button size="sm" variant="outline" onClick={() => navigate(artifactPath(id))} aria-label="Open"><ExternalLink className="size-3.5" /> Open</Button>}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm" variant="outline" aria-label="Export artifact"><Download className="size-3.5" /> <span className="hidden sm:inline">Export</span><ChevronDown className="size-3" /></Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {artifact.type === "doc" && <>
+              <DropdownMenuItem onSelect={() => void exportDoc("word")}><FileDown /> Word document</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void exportDoc("print")}><Printer /> Print or save PDF</DropdownMenuItem>
+            </>}
+            <DropdownMenuItem onSelect={() => saveArtifactFile(artifact, content)}><Download /> Download source</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="icon" variant="ghost" className="size-8" aria-label="Artifact actions"><MoreHorizontal className="size-4" /></Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {canUseSource && <DropdownMenuItem onSelect={() => setSource({ value: content, version: artifact.version })}><Code2 /> View source</DropdownMenuItem>}
+            {editable && <DropdownMenuItem disabled={!dirty || saving || versionChanged} onSelect={() => void save()}><Save /> Save now</DropdownMenuItem>}
+            {!workspace && (artifact.type === "html" || legacy) && <DropdownMenuItem onSelect={() => setRefreshKey((key) => key + 1)}><RefreshCw /> Reload data</DropdownMenuItem>}
+            <DropdownMenuItem onSelect={() => void stage.current?.requestFullscreen?.().catch(() => {})}><Maximize2 /> Full screen</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void copyLink(artifact)}><Link2 /> Copy link</DropdownMenuItem>
+            {!legacy && <><DropdownMenuSeparator /><DropdownMenuItem variant="destructive" disabled={busy || saving} onSelect={() => void remove()}><Trash2 /> Delete</DropdownMenuItem></>}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </header>
       {(artifact.description || artifact.sources?.length || shownVersion || error) && (
-        <p className="text-xs text-muted-foreground">
+        <p className="px-1 text-xs text-muted-foreground">
           {shownVersion && `Showing v${shownVersion.version}${shownVersion.author ? ` by ${artifactAuthor(shownVersion.author, product)}` : ""}. `}
           {artifact.description}
           {!!artifact.sources?.length && ` Reads ${artifact.sources.join(", ")}.`}
           {error && <span className="text-destructive"> {error}</span>}
         </p>
       )}
-      {legacy && <p className="rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning">Edit this view on the Data page.</p>}
-      <div ref={stage} className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border/70 bg-background">
-        {!legacy && (
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 bg-card px-2 py-1.5">
-            <div className="flex items-center gap-0.5" aria-label="Workspace mode">
-              <Button size="sm" variant={activeMode === "preview" ? "secondary" : "ghost"} aria-pressed={activeMode === "preview"} onClick={() => switchMode("preview")}><Eye className="size-3.5" /> Preview</Button>
-              {editable && visualEditor && <Button size="sm" variant={activeMode === "edit" ? "secondary" : "ghost"} aria-pressed={activeMode === "edit"} onClick={() => switchMode("edit")}><Pencil className="size-3.5" /> Edit</Button>}
-              <Button size="sm" variant={activeMode === "source" ? "secondary" : "ghost"} aria-pressed={activeMode === "source"} onClick={() => switchMode("source")}><Code2 className="size-3.5" /> Source</Button>
-            </div>
-            {editable && (dirty || activeMode !== "preview") && (
-              <div className="flex items-center gap-2">
-                {dirty && <span className="text-caption text-muted-foreground" role="status">{artifact.version === draft.base.version ? "Unsaved changes" : "A newer version is available"}</span>}
-                {dirty && <Button size="sm" variant="ghost" disabled={busy} onClick={() => setDraft(undefined)}>Discard</Button>}
-                <Button size="sm" disabled={!dirty || busy} onClick={() => void save()}><Save className="size-3.5" /> Save version</Button>
-              </div>
-            )}
+      {editable && (saveError || versionChanged) && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-warning/40 bg-warning/5 px-3 py-1.5 text-xs" role="alert">
+          <span>{versionChanged ? "A newer version was saved. Download your draft or open the latest version." : saveError}</span>
+          <div className="flex gap-1">
+            {versionChanged ? <>
+              <Button size="sm" variant="ghost" onClick={() => saveArtifactFile(artifact, content)}>Download draft</Button>
+              <Button size="sm" variant="outline" onClick={() => {
+                if (window.confirm("Open the latest version and discard these local changes?")) { setDraft(undefined); setSaveError(undefined); }
+              }}>Open latest</Button>
+            </> : <Button size="sm" variant="ghost" disabled={saving} onClick={() => void save()}>Try saving again</Button>}
           </div>
-        )}
-        <div className="min-h-0 flex-1 overflow-hidden" inert={busy}>
-          <Suspense fallback={<Working />}>
-            {activeMode === "source" ? (
-              <textarea aria-label="Artifact source" spellCheck={false} readOnly={!editable || busy} value={content}
-                className="h-full w-full resize-none bg-muted/20 p-4 font-mono text-xs leading-relaxed outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                onChange={(event) => updateDraft({ content: event.target.value })} />
-            ) : workspace === "slides" ? (
-              <SlidesEditor content={content} onChange={onChange} title={artifact.title} />
-            ) : workspace === "sheets" ? (
-              <SheetsEditor content={content} onChange={onChange} />
-            ) : workspace === "motion" ? (
-              <MotionEditor content={content} onChange={onChange} title={artifact.title} />
-            ) : onChange && artifact.type === "doc" ? (
-              <DocEditor content={content} onChange={onChange} />
-            ) : onChange && artifact.type === "html" && artifact.kind === "design" ? (
-              <DesignEditor artifact={artifact} content={content} onChange={onChange} refreshKey={refreshKey} />
-            ) : (
-              <ArtifactView artifact={artifact} content={content} refreshKey={refreshKey} />
-            )}
-          </Suspense>
         </div>
+      )}
+      {legacy && <p className="rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning">Edit this view on the Data page.</p>}
+      <div ref={stage} className="min-h-0 flex-1 overflow-hidden rounded-lg border border-border/70 bg-background" inert={busy}>
+        <Suspense fallback={<ArtifactPreparation kind={artifact.kind} />}>
+          {workspace === "slides" ? (
+            <SlidesEditor content={content} onChange={onChange} title={artifact.title} />
+          ) : workspace === "sheets" ? (
+            <SheetsEditor content={content} onChange={onChange} appearanceVersion={shownVersion?.version ?? artifact.version} />
+          ) : workspace === "motion" ? (
+            <MotionEditor content={content} onChange={onChange} title={artifact.title} />
+          ) : onChange && artifact.type === "doc" ? (
+            <DocEditor content={content} onChange={onChange} />
+          ) : onChange && artifact.type === "html" && artifact.kind === "design" ? (
+            <DesignEditor artifact={artifact} content={content} onChange={onChange} refreshKey={refreshKey} />
+          ) : (
+            <ArtifactView artifact={artifact} content={content} refreshKey={refreshKey} />
+          )}
+        </Suspense>
       </div>
+      <Dialog open={!!source} onOpenChange={(open) => { if (!open) setSource(undefined); }}>
+        <DialogContent className="max-h-[90dvh] sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Artifact source</DialogTitle>
+            <DialogDescription>{artifact.title}</DialogDescription>
+          </DialogHeader>
+          <textarea aria-label="Source code" spellCheck={false} readOnly={!editable} value={source?.value ?? ""}
+            className="h-[55dvh] w-full resize-none rounded-md border border-input bg-muted/20 p-3 font-mono text-xs leading-relaxed focus-visible:outline-2 focus-visible:outline-ring"
+            onChange={(event) => { if (source) setSource({ ...source, value: event.target.value }); }} />
+          {editable && source && source.version !== artifact.version && <p className="text-xs text-warning" role="status">The source changed. Reopen this window to see the latest version.</p>}
+          {editable && <Button className="justify-self-end" disabled={!source || source.value === content || source.version !== artifact.version}
+            onClick={() => {
+              if (source) updateDraft({ content: source.value });
+              setSource(undefined);
+            }}>Apply source</Button>}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

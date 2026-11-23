@@ -121,6 +121,26 @@ describe("artifacts API", () => {
     expect(emitted.map((event) => event.action)).toEqual(["created", "updated"]);
   });
 
+  it("limits workbook thumbnails to a current excerpt without version history", async () => {
+    const { call } = await fixture();
+    const title = "Workbook with history";
+    const initial = JSON.stringify({ version: 1, sheets: [{ name: "Original", cells: { A1: "Old" } }] });
+    const { body: created } = await call("POST", "", { title, type: "html", kind: "sheets", content: initial });
+    const path = `/${created.data.id}`;
+    const current = JSON.stringify({
+      version: 1,
+      sheets: [{ name: "Current", cells: { A1: "New", B4: "a".repeat(120), Z50: "outside" } }],
+    });
+    await call("PATCH", path, { content: current });
+    const preview = await call("GET", `${path}?preview=1`);
+    expect(preview.status).toBe(200);
+    expect(Object.keys(preview.body.data)).toEqual(["content"]);
+    expect(JSON.parse(preview.body.data.content)).toEqual({
+      version: 1,
+      sheets: [{ name: "Current", cells: { A1: "New", B4: "a".repeat(80) } }],
+    });
+  });
+
   it("shows the former data views as read-only artifacts of type view", async () => {
     const { call, data, source } = await fixture();
     const view = await data.store.createView({

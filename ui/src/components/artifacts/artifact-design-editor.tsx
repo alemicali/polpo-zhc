@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Monitor, MousePointer2, Smartphone, Tablet } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Circle, Frame, Hand, Monitor, MousePointer2, Pencil, Shapes, Smartphone, Square, StickyNote, Tablet, Type } from "lucide-react";
 import { parse, type DefaultTreeAdapterTypes } from "parse5";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ArtifactFrame } from "./artifact-frame";
 import type { Artifact } from "@/lib/artifacts-api";
 
@@ -78,7 +79,7 @@ function updateStyle(source: string, element: Element, values: Record<string, st
     : { start: at, end: at, value }]);
 }
 
-function instrumentCanvas(content: string, elements: Element[], selected: number | null) {
+function instrumentCanvas(content: string, elements: Element[]) {
   const patches = elements.map((element, i) => {
     const tag = element.sourceCodeLocation!.startTag!;
     const attribute = element.sourceCodeLocation!.attrs?.[NODE_ATTRIBUTE];
@@ -89,16 +90,54 @@ function instrumentCanvas(content: string, elements: Element[], selected: number
   });
   return applyPatches(content, patches) + `<style>
 [${NODE_ATTRIBUTE}] { cursor: crosshair !important; }
-[${NODE_ATTRIBUTE}="${selected}"] { outline: 2px solid #147d64 !important; outline-offset: -2px; }
+[data-polpo-design-active] { outline: 2px solid var(--polpo-design-highlight, #147d64) !important; outline-offset: -2px; }
+html[data-polpo-design-tool="pan"], html[data-polpo-design-tool="pan"] * { cursor: grab !important; }
 </style><script>
 (() => {
   const attribute = ${JSON.stringify(NODE_ATTRIBUTE)};
   const channel = ${JSON.stringify(DESIGN_CHANNEL)};
-  let drag;
+  let drag, pan, drawing, active, tool = "select";
+  const svgNS = "http://www.w3.org/2000/svg";
+  const line = (points) => points.map(([x, y], index) => (index ? "L" : "M") + x + " " + y).join(" ");
+  window.addEventListener("message", (event) => {
+    const { data } = event;
+    if (event.source !== parent || data?.channel !== channel || data.type !== "canvas-options") return;
+    active?.removeAttribute("data-polpo-design-active");
+    active = Number.isSafeInteger(data.selected) ? document.querySelector("[" + attribute + '="' + data.selected + '"]') : null;
+    active?.setAttribute("data-polpo-design-active", "");
+    tool = ["pan", "draw"].includes(data.tool) ? data.tool : "select";
+    document.documentElement.setAttribute("data-polpo-design-tool", tool);
+    if (typeof data.color === "string" && CSS.supports("color", data.color)) document.documentElement.style.setProperty("--polpo-design-highlight", data.color);
+  });
   const send = (node, dx, dy) => parent.postMessage({ channel, node, dx, dy }, "*");
   window.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    if (tool === "draw") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const overlay = document.createElementNS(svgNS, "svg");
+      overlay.style.cssText = "position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:2147483647";
+      const path = document.createElementNS(svgNS, "path");
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", "#416a9b");
+      path.setAttribute("stroke-width", "3");
+      path.setAttribute("stroke-linecap", "round");
+      path.setAttribute("stroke-linejoin", "round");
+      overlay.append(path);
+      document.body.append(overlay);
+      drawing = { overlay, path, left: scrollX, top: scrollY, points: [[event.clientX, event.clientY]] };
+      event.target.setPointerCapture?.(event.pointerId);
+      return;
+    }
+    if (tool === "pan") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      pan = { x: event.clientX, y: event.clientY, left: scrollX, top: scrollY };
+      event.target.setPointerCapture?.(event.pointerId);
+      return;
+    }
     const target = event.target.closest?.("[" + attribute + "]");
-    if (!target || event.button !== 0) return;
+    if (!target) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     const node = Number(target.getAttribute(attribute));
@@ -107,6 +146,15 @@ function instrumentCanvas(content: string, elements: Element[], selected: number
     target.setPointerCapture?.(event.pointerId);
   }, true);
   window.addEventListener("pointermove", (event) => {
+    if (drawing) {
+      if (drawing.points.length < 900) drawing.points.push([event.clientX, event.clientY]);
+      drawing.path.setAttribute("d", line(drawing.points));
+      return;
+    }
+    if (pan) {
+      scrollTo(pan.left + pan.x - event.clientX, pan.top + pan.y - event.clientY);
+      return;
+    }
     if (!drag) return;
     const dx = event.clientX - drag.x;
     const dy = event.clientY - drag.y;
@@ -114,6 +162,16 @@ function instrumentCanvas(content: string, elements: Element[], selected: number
     drag.target.style.translate = ((drag.base[0] || 0) + dx) + "px " + ((drag.base[1] || 0) + dy) + "px";
   }, true);
   function release(event, cancelled) {
+    if (drawing) {
+      const { overlay, points, left, top } = drawing;
+      drawing = undefined;
+      overlay.remove();
+      if (!cancelled && points.length > 1) parent.postMessage({
+        channel, type: "stroke", points: points.map(([x, y]) => [Math.round(x + left), Math.round(y + top)])
+      }, "*");
+      return;
+    }
+    pan = undefined;
     if (!drag) return;
     const { node, x, y, target, translate, base } = drag;
     drag = undefined;
@@ -131,6 +189,47 @@ function instrumentCanvas(content: string, elements: Element[], selected: number
   }, true);
 })();
 </script>`;
+}
+
+const INSERT_ITEMS = {
+  text: { tag: "p", body: "New text", style: "margin: 1rem; font-size: 20px;" },
+  section: { tag: "section", body: "<h2>New section</h2>", style: "padding: 2rem; margin: 1rem; min-height: 12rem; border: 1px solid currentColor; border-radius: .5rem;" },
+  note: { tag: "aside", body: "Add a note", style: "width: min(100%, 14rem); margin: 1rem; padding: 1rem; border-radius: .4rem; background: #fff2bd; color: #342608;" },
+  rectangle: { tag: "div", body: "", style: "width: 8rem; height: 5rem; margin: 1rem; background: #6186b4;" },
+  circle: { tag: "div", body: "", style: "width: 6rem; height: 6rem; margin: 1rem; border-radius: 50%; background: #6186b4;" },
+} as const;
+
+function appendMarkup(content: string, markup: string) {
+  const document = parse(content, { sourceCodeLocationInfo: true });
+  const root = document.childNodes.find((node) => "tagName" in node && node.tagName === "html") as Element | undefined;
+  const body = root?.childNodes.find((node) => "tagName" in node && node.tagName === "body") as Element | undefined;
+  const offset = body?.sourceCodeLocation?.endTag?.startOffset ?? root?.sourceCodeLocation?.endTag?.startOffset ?? content.length;
+  return applyPatches(content, [{ start: offset, end: offset, value: `
+${markup}
+` }]);
+}
+
+function insertElement(content: string, tag: keyof typeof INSERT_ITEMS) {
+  const spec = INSERT_ITEMS[tag];
+  const identity = `design-${crypto.randomUUID()}`;
+  const next = appendMarkup(content, `<${spec.tag} id="${identity}" style="${spec.style}">${spec.body}</${spec.tag}>`);
+  const index = collectElements(next).findIndex((node) => node.attrs.some((attr) => attr.name === "id" && attr.value === identity));
+  return { next, index };
+}
+
+function addStroke(content: string, points: unknown): string | undefined {
+  if (!Array.isArray(points) || points.length < 2 || points.length > 900) return;
+  const coordinates = points.filter((point): point is [number, number] =>
+    Array.isArray(point) && point.length === 2 && point.every((n) => Number.isSafeInteger(n) && Math.abs(n) < 32768));
+  if (coordinates.length !== points.length) return;
+  const xs = coordinates.map(([x]) => x);
+  const ys = coordinates.map(([, y]) => y);
+  const left = Math.min(...xs) - 2;
+  const top = Math.min(...ys) - 2;
+  const width = Math.max(...xs) - left + 2;
+  const height = Math.max(...ys) - top + 2;
+  const path = coordinates.map(([x, y], index) => `${index ? "L" : "M"}${x - left} ${y - top}`).join(" ");
+  return appendMarkup(content, `<svg role="img" aria-label="Freehand line" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" style="position:absolute;left:${left}px;top:${top}px"><path d="${path}" fill="none" stroke="#416a9b" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`);
 }
 
 const VIEWPORTS = [
@@ -160,9 +259,25 @@ export function ArtifactDesignEditor({ artifact, content, onChange, refreshKey }
 }) {
   const canvas = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState<number | null>(null);
+  const [tool, setTool] = useState<"select" | "pan" | "draw">("select");
   const [viewport, setViewport] = useState<(typeof VIEWPORTS)[number]>(VIEWPORTS[0]);
   const elements = useMemo(() => collectElements(content), [content]);
-  const html = useMemo(() => instrumentCanvas(content, elements, selected), [content, elements, selected]);
+  const html = useMemo(() => instrumentCanvas(content, elements), [content, elements]);
+  const syncCanvas = useCallback(() => {
+    canvas.current?.querySelector("iframe")?.contentWindow?.postMessage({
+      channel: DESIGN_CHANNEL, type: "canvas-options", selected, tool,
+      color: getComputedStyle(document.documentElement).getPropertyValue("--ring").trim(),
+    }, "*");
+  }, [selected, tool]);
+  useEffect(() => { syncCanvas(); }, [syncCanvas]);
+
+  function insert(kind: keyof typeof INSERT_ITEMS) {
+    const { next, index } = insertElement(content, kind);
+    setTool("select");
+    setSelected(index >= 0 ? index : null);
+    onChange(next);
+  }
+
   const element = selected === null ? undefined : elements[selected];
   const textRange = element?.childNodes.every((child) => child.nodeName === "#text") && element.sourceCodeLocation?.endTag
     ? { start: element.sourceCodeLocation.startTag!.endOffset, end: element.sourceCodeLocation.endTag.startOffset }
@@ -173,7 +288,15 @@ export function ArtifactDesignEditor({ artifact, content, onChange, refreshKey }
     function onMessage(event: MessageEvent) {
       if (event.source !== canvas.current?.querySelector("iframe")?.contentWindow) return;
       const data = event.data;
-      if (data?.channel !== DESIGN_CHANNEL || !Number.isSafeInteger(data.node) || !elements[data.node]) return;
+      if (data?.channel !== DESIGN_CHANNEL) return;
+      if (data.type === "stroke") {
+        if (tool === "draw") {
+          const next = addStroke(content, data.points);
+          if (next) onChange(next);
+        }
+        return;
+      }
+      if (tool !== "select" || !Number.isSafeInteger(data.node) || !elements[data.node]) return;
       setSelected(data.node);
       if (Number.isSafeInteger(data.dx) && Number.isSafeInteger(data.dy) && Math.abs(data.dx) <= 32768 && Math.abs(data.dy) <= 32768) {
         onChange(updateStyle(content, elements[data.node], { translate: `${data.dx}px ${data.dy}px` }));
@@ -181,14 +304,30 @@ export function ArtifactDesignEditor({ artifact, content, onChange, refreshKey }
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [content, elements, onChange]);
+  }, [content, elements, onChange, tool]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
-        <span className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-          <MousePointer2 className="size-3.5" /> Canvas
-        </span>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-card px-2 py-1.5 sm:px-3">
+        <div className="flex items-center gap-1" role="toolbar" aria-label="Canvas tools">
+          <Button size="icon" variant={tool === "select" ? "secondary" : "ghost"} className="size-8" onClick={() => setTool("select")}
+            aria-label="Select elements" title="Select elements" aria-pressed={tool === "select"}><MousePointer2 /></Button>
+          <Button size="icon" variant={tool === "pan" ? "secondary" : "ghost"} className="size-8" onClick={() => setTool("pan")}
+            aria-label="Pan canvas" title="Pan canvas" aria-pressed={tool === "pan"}><Hand /></Button>
+          <Button size="icon" variant={tool === "draw" ? "secondary" : "ghost"} className="size-8" onClick={() => setTool("draw")}
+            aria-label="Draw freehand" title="Draw freehand" aria-pressed={tool === "draw"}><Pencil /></Button>
+          <span className="mx-1 h-5 border-l border-border" aria-hidden="true" />
+          <Button size="icon" variant="ghost" className="size-8" onClick={() => insert("text")} aria-label="Insert text" title="Insert text"><Type /></Button>
+          <Button size="icon" variant="ghost" className="size-8" onClick={() => insert("section")} aria-label="Insert section" title="Insert section"><Frame /></Button>
+          <Button size="icon" variant="ghost" className="size-8" onClick={() => insert("note")} aria-label="Insert note" title="Insert note"><StickyNote /></Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild><Button size="icon" variant="ghost" className="size-8" aria-label="Insert shape" title="Insert shape"><Shapes /></Button></DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onSelect={() => insert("rectangle")}><Square /> Rectangle</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => insert("circle")}><Circle /> Circle</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
         <div className="flex gap-1" aria-label="Canvas viewport">
           {VIEWPORTS.map((option) => (
             <Button key={option.name} size="icon" variant={option === viewport ? "secondary" : "ghost"}
@@ -200,7 +339,7 @@ export function ArtifactDesignEditor({ artifact, content, onChange, refreshKey }
       </div>
       <div className="grid min-h-0 flex-1 grid-rows-[minmax(12rem,1fr)_minmax(0,auto)] overflow-auto md:grid-cols-[minmax(0,1fr)_15rem] md:grid-rows-1">
         <div className="min-h-0 overflow-hidden bg-muted/50 p-2 md:p-4">
-          <div ref={canvas} className="mx-auto h-full max-w-full overflow-hidden rounded-md border bg-background shadow-sm" style={{ width: viewport.width }}>
+          <div ref={canvas} onLoadCapture={syncCanvas} className="mx-auto h-full max-w-full overflow-hidden rounded-md border bg-background shadow-sm" style={{ width: viewport.width }}>
             <ArtifactFrame artifactId={artifact.id} title={artifact.title} html={html} refreshSeconds={artifact.refreshSeconds} refreshKey={refreshKey} />
           </div>
         </div>
@@ -221,10 +360,8 @@ export function ArtifactDesignEditor({ artifact, content, onChange, refreshKey }
                 <label className="grid gap-1.5 text-xs font-medium">
                   Text
                   <textarea className="min-h-16 resize-y rounded-md border border-input bg-background px-2 py-1.5 text-sm"
-                    key={elementText} defaultValue={elementText}
-                    onBlur={(event) => {
-                      if (event.target.value !== elementText) onChange(applyPatches(content, [{ ...textRange, value: escapeText(event.target.value) }]));
-                    }} />
+                    value={elementText}
+                    onChange={(event) => onChange(applyPatches(content, [{ ...textRange, value: escapeText(event.target.value) }]))} />
                 </label>
               )}
               {STYLE_FIELDS.map(({ property, label, placeholder }) => {

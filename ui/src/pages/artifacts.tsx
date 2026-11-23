@@ -7,14 +7,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import {
-  List, Loader2, PanelRight, Search, Sparkles,
+  LayoutGrid, List, Loader2, PanelRight, Search, Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useEvents, useMissions, useTasks } from "@polpo-ai/react";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { ArtifactCreateButton } from "@/components/artifacts/artifact-create-button";
+import { ArtifactTemplates } from "@/components/artifacts/artifact-templates";
+import { ArtifactsGrid } from "@/components/artifacts/artifacts-grid";
 import { ArtifactDetail } from "@/components/artifacts/artifact-detail";
 import {
   ArtifactsPreviewLayout, ArtifactsTable, type ArtifactRowInfo,
@@ -94,6 +95,7 @@ function ArtifactGallery() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
+      <ArtifactTemplates />
       <div className="flex flex-wrap items-center gap-2">
         <Tabs value={tab} onValueChange={changeTab} className="max-w-full overflow-x-auto">
           <TabsList>{FILTERS.map((f) => <TabsTrigger key={f.value} value={f.value}>{f.label}</TabsTrigger>)}</TabsList>
@@ -104,10 +106,10 @@ function ArtifactGallery() {
             <Input value={q} onChange={(e) => { setQ(e.target.value); setActive(-1); }} placeholder="Search artifacts" className="h-8 pl-7 text-sm" />
           </div>
           <SegmentedControl value={layout} onValueChange={setLayout} size="sm" aria-label="Layout">
-            <ToggleGroupItem value="table" aria-label="Table" title="Table"><List className="h-3.5 w-3.5" /><span className="hidden sm:inline">Table</span></ToggleGroupItem>
+            <ToggleGroupItem value="table" aria-label="List" title="List"><List className="size-3.5" /><span className="hidden sm:inline">List</span></ToggleGroupItem>
+            <ToggleGroupItem value="grid" aria-label="Grid" title="Grid"><LayoutGrid className="size-3.5" /><span className="hidden sm:inline">Grid</span></ToggleGroupItem>
             <ToggleGroupItem value="preview" aria-label="Preview" title="Preview"><PanelRight className="h-3.5 w-3.5" /><span className="hidden sm:inline">Preview</span></ToggleGroupItem>
           </SegmentedControl>
-          <ArtifactCreateButton />
         </div>
       </div>
       {items === null ? (
@@ -116,8 +118,10 @@ function ArtifactGallery() {
         <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center text-sm text-muted-foreground">
           <Sparkles className="h-6 w-6" />
           <p>{q.trim() ? "No artifacts match." : "No artifacts yet."}</p>
-          {!q.trim() && <p className="max-w-sm text-xs">Ask {product} or an agent for a dashboard on your data, a document, a design or a diagram: it appears here.</p>}
+          {!q.trim() && <p className="max-w-sm text-xs">Choose a template above or ask {product} to create an artifact.</p>}
         </div>
+      ) : layout === "grid" ? (
+        <ArtifactsGrid items={shown} info={info} actions={actions} now={now} />
       ) : layout === "table" ? (
         <ArtifactsTable items={shown} info={info} sort={sort} now={now} actions={actions}
           onSort={(key) => setSort((s) => nextArtifactSort(s, key))} active={active} setActive={setActive} />

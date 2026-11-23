@@ -14,6 +14,60 @@ export function artifactDocUrl(value: string, image: boolean): boolean {
   }
 }
 
+const escapeAttribute = (text: string) => text.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+
+const docVideoBlock = /^ {0,3}<video\b[^>\n]*>[ \t]*<\/video>[ \t]*(?:\r?\n|$)/i;
+
+const DocVideo = Node.create({
+  name: "docVideo",
+  group: "block",
+  atom: true,
+  draggable: true,
+  addAttributes() {
+    return { src: { default: "" }, title: { default: "Video" } };
+  },
+  parseHTML() {
+    return [{
+      tag: "video[src]",
+      getAttrs: (element) => {
+        const src = element.getAttribute("src") ?? "";
+        return artifactDocUrl(src, true) ? { src, title: element.getAttribute("title") || "Video" } : false;
+      },
+    }];
+  },
+  renderHTML({ node }) {
+    return ["video", {
+      src: node.attrs.src,
+      title: node.attrs.title,
+      "aria-label": node.attrs.title,
+      controls: "",
+      playsinline: "",
+      preload: "none",
+    }];
+  },
+  markdownTokenizer: {
+    name: "docVideo",
+    level: "block",
+    start: (source) => source.search(/^ {0,3}<video\b/im),
+    tokenize(source) {
+      const block = docVideoBlock.exec(source)?.[0];
+      if (!block) return;
+      const parsed = new DOMParser().parseFromString(block, "text/html").querySelector("video[src]");
+      const src = parsed?.getAttribute("src") ?? "";
+      if (!artifactDocUrl(src, true)) return;
+      return { type: "docVideo", raw: block, src, title: parsed?.getAttribute("title") || "Video" };
+    },
+  },
+  parseMarkdown(token, helpers) {
+    return helpers.createNode("docVideo", { src: token.src, title: token.title });
+  },
+  renderMarkdown(node) {
+    const src = escapeAttribute(String(node.attrs?.src ?? ""));
+    const title = escapeAttribute(String(node.attrs?.title ?? "Video"));
+    return `<video controls playsinline preload="none" src="${src}" title="${title}"></video>`;
+  },
+});
+
 const alertName = /^(?:NOTE|TIP|IMPORTANT|WARNING|CAUTION)$/;
 
 const DocAlert = Node.create({
@@ -79,6 +133,7 @@ export const artifactDocExtensions = [
     underline: false,
   }),
   DocAlert,
+  DocVideo,
   Image.configure({ inline: true, allowBase64: true, HTMLAttributes: { referrerpolicy: "no-referrer" } }),
   TaskList,
   TaskItem.configure({ nested: true }),

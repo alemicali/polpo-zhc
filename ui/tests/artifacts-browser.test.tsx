@@ -8,6 +8,7 @@ vi.mock("@polpo-ai/react", () => ({
   useTasks: () => ({ tasks: [{ id: "task-1", title: "Write the Q4 report", missionId: "m-1" }] }),
   useMissions: () => ({ missions: [{ id: "m-1", name: "Quarter close" }] }),
 }));
+vi.mock("@/hooks/use-polpo", () => ({ useProjectInfo: () => ({ info: { project: "Polpo" } }) }));
 vi.mock("@/lib/branding", () => ({ productName: () => "Polpo", useInstanceBranding: () => ({}) }));
 // the live renderer is tested on its own: here only which artifact it is given matters
 vi.mock("@/components/artifacts/artifact-view", () => ({

@@ -67,6 +67,7 @@ export const artifactsApi = {
     return request<ArtifactSummary[]>(`/artifacts${params.size ? `?${params}` : ""}`);
   },
   get: (id: string) => request<Artifact>(one(id)),
+  preview: (id: string, signal?: AbortSignal) => request<{ content: string }>(`${one(id)}?preview=1`, { signal }),
   create: (input: Pick<Artifact, "title" | "type" | "content" | "kind">) =>
     request<Artifact>("/artifacts", { method: "POST", body: JSON.stringify(input) }),
   update: (id: string, patch: Partial<Pick<Artifact, "title" | "description" | "content" | "pinned">> & { note?: string; expectedVersion?: number }) =>

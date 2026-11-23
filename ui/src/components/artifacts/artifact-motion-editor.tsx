@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Circle, Copy, Download, Film, Pause, Pencil, Play, Plus, SkipBack, Square, Trash2, Type } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Circle, Copy, Download, Film, Maximize2, Minimize2, Pause, Pencil, Play, Plus, Repeat, RotateCcw, Square, Trash2, Type } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -61,9 +61,14 @@ export function ArtifactMotionEditor({ content, onChange, title }: ArtifactMotio
 
 function MotionWorkspace({ project, onChange, title }: { project: MotionProject; onChange?: (content: string) => void; title?: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
+  const fullscreenButtonRef = useRef<HTMLButtonElement>(null);
+  const exitFullscreenButtonRef = useRef<HTMLButtonElement>(null);
   const exportRef = useRef<AbortController>(null);
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [loop, setLoop] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
   const [editingCanvas, setEditingCanvas] = useState(true);
   const [selection, setSelection] = useState<{ sceneId: string; layerId: string }>();
   const [drag, setDrag] = useState<Drag | null>(null);
@@ -75,7 +80,7 @@ function MotionWorkspace({ project, onChange, title }: { project: MotionProject;
   const scene = project.scenes[active];
   const selected = scene.id === selection?.sceneId ? scene.layers.find((item) => item.id === selection.layerId) : undefined;
   const showLayout = !playing && editingCanvas;
-  const editing = Boolean(onChange && showLayout);
+  const editing = Boolean(onChange && showLayout && !fullscreen);
 
   useEffect(() => {
     const ctx = canvasRef.current?.getContext("2d");
@@ -89,16 +94,40 @@ function MotionWorkspace({ project, onChange, title }: { project: MotionProject;
     const tick = (now: number) => {
       const advance = Math.max(0, (now - previous) / 1000);
       previous = now;
-      setTime((seconds) => Math.min(seconds + advance, total));
+      setTime((seconds) => loop ? (seconds + advance) % total : Math.min(seconds + advance, total));
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [playing, total]);
+  }, [playing, loop, total]);
   useEffect(() => {
-    if (playing && time >= total) setPlaying(false);
-  }, [playing, time, total]);
+    if (playing && !loop && time >= total) setPlaying(false);
+  }, [playing, loop, time, total]);
   useEffect(() => () => exportRef.current?.abort(), []);
+  useEffect(() => {
+    let wasFullscreen = false;
+    const updateFullscreen = () => {
+      const isFullscreen = document.fullscreenElement === previewRef.current;
+      setFullscreen(isFullscreen);
+      if (wasFullscreen && !isFullscreen) fullscreenButtonRef.current?.focus();
+      wasFullscreen = isFullscreen;
+    };
+    document.addEventListener("fullscreenchange", updateFullscreen);
+    return () => document.removeEventListener("fullscreenchange", updateFullscreen);
+  }, []);
+
+  useEffect(() => { if (fullscreen) exitFullscreenButtonRef.current?.focus(); }, [fullscreen]);
+
+  const toggleFullscreen = async () => {
+    try {
+      const preview = previewRef.current;
+      if (document.fullscreenElement === preview) await document.exitFullscreen();
+      else if (preview?.requestFullscreen) await preview.requestFullscreen();
+      else throw new Error("Full screen is unavailable in this browser.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Full screen is unavailable.");
+    }
+  };
 
   const saveScenes = (scenes: MotionScene[]) => onChange?.(JSON.stringify({ ...project, scenes }, null, 2));
   const patchScene = (patch: Partial<MotionScene>) => saveScenes(project.scenes.map((item, index) => index === active ? { ...item, ...patch } : item));
@@ -123,6 +152,17 @@ function MotionWorkspace({ project, onChange, title }: { project: MotionProject;
       setPlaying(true);
     }
   };
+
+  const restart = () => {
+    setTime(0);
+    setEditingCanvas(false);
+    setPlaying(true);
+  };
+  const playbackButtons = <>
+    <Button type="button" size="icon-sm" aria-label={playing ? "Pause" : "Play"} title={playing ? "Pause" : "Play"} onClick={togglePlay}>{playing ? <Pause /> : <Play />}</Button>
+    <Button type="button" size="icon-sm" variant="ghost" aria-label="Restart playback" title="Restart playback" onClick={restart}><RotateCcw /></Button>
+    <Button type="button" size="icon-sm" variant={loop ? "secondary" : "ghost"} aria-label="Loop playback" title="Loop playback" aria-pressed={loop} onClick={() => setLoop((enabled) => !enabled)}><Repeat /></Button>
+  </>;
 
   const addScene = (duplicate: boolean) => {
     const id = newId();
@@ -230,6 +270,7 @@ function MotionWorkspace({ project, onChange, title }: { project: MotionProject;
       </div>
       <div className="ml-auto flex items-center gap-2">
         {onChange && !editing && <Button type="button" size="sm" variant="ghost" onClick={() => { setPlaying(false); setEditingCanvas(true); }}><Pencil /> Edit canvas</Button>}
+        <Button ref={fullscreenButtonRef} type="button" size="icon-sm" variant="ghost" aria-label="Full screen preview" title="Full screen preview" onClick={() => void toggleFullscreen()}><Maximize2 /></Button>
         {exportProgress !== null ? <>
           <span role="status" className="text-xs tabular-nums text-muted-foreground">Encoding {Math.round(exportProgress * 100)}%</span>
           <Button type="button" size="sm" variant="outline" onClick={cancelDownload}>Cancel export</Button>
@@ -238,7 +279,7 @@ function MotionWorkspace({ project, onChange, title }: { project: MotionProject;
     </header>
     <div className="contents md:flex md:min-h-48 md:flex-1">
       <div className="order-1 grid min-h-44 min-w-0 shrink-0 place-items-center overflow-hidden bg-muted/35 p-3 md:order-none md:flex-1 md:p-6">
-        <div className="relative grid size-full min-h-0 min-w-0 place-items-center overflow-hidden">
+        <div ref={previewRef} className="relative grid size-full min-h-0 min-w-0 place-items-center overflow-hidden [&:fullscreen]:bg-black">
           <canvas ref={canvasRef} width={project.width} height={project.height}
             className={cn("max-h-full max-w-full rounded-sm bg-black object-contain shadow-md", editing && "touch-none cursor-crosshair", drag && "cursor-grabbing")}
             aria-label={`${scene.name} animation preview`} tabIndex={0}
@@ -252,6 +293,12 @@ function MotionWorkspace({ project, onChange, title }: { project: MotionProject;
               const amount = event.shiftKey ? 10 : 1;
               patchLayer(selected.id, { x: selected.x + movement[0] * amount, y: selected.y + movement[1] * amount });
             }} />
+          {fullscreen && <div className="absolute inset-x-0 bottom-0 flex items-center justify-center p-4">
+            <div className="flex items-center gap-1 rounded-lg border bg-background p-1 shadow-md">
+              {playbackButtons}
+              <Button ref={exitFullscreenButtonRef} type="button" size="icon-sm" variant="ghost" aria-label="Exit full screen preview" title="Exit full screen preview" onClick={() => void toggleFullscreen()}><Minimize2 /></Button>
+            </div>
+          </div>}
         </div>
       </div>
       {onChange && <aside aria-label="Motion properties" className="order-3 min-h-0 shrink-0 border-t p-3 md:order-none md:w-60 md:overflow-y-auto md:border-l md:border-t-0 2xl:w-72">
@@ -310,8 +357,7 @@ function MotionWorkspace({ project, onChange, title }: { project: MotionProject;
     </div>
     <div aria-label="Timeline" className="order-2 shrink-0 border-t bg-card p-2.5 md:order-none">
       <div className="flex flex-wrap items-center gap-1">
-        <Button type="button" size="icon-sm" variant="ghost" aria-label="Go to start" title="Go to start" onClick={() => seek(0)}><SkipBack /></Button>
-        <Button type="button" size="icon-sm" aria-label={playing ? "Pause" : "Play"} title={playing ? "Pause" : "Play"} onClick={togglePlay}>{playing ? <Pause /> : <Play />}</Button>
+        {!fullscreen && playbackButtons}
         <span className="ml-1 font-mono text-xs tabular-nums text-muted-foreground">{formatTime(currentTime)} / {formatTime(total)}</span>
         <div className="ml-auto flex items-center gap-1">
           {onChange && <>

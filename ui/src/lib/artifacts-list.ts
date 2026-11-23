@@ -1,7 +1,7 @@
-/** The artifacts list: how it sorts, reads sizes and times, and which layout (table or preview) a person chose. */
+/** The artifacts list: how it sorts, reads sizes and times, and which layout (list, grid or split preview) a person chose. */
 import { artifactLabel, type ArtifactSummary, type ArtifactType } from "@/lib/artifacts-api";
 
-export type ArtifactsLayout = "table" | "preview";
+export type ArtifactsLayout = "table" | "grid" | "preview";
 export type ArtifactSortKey = "title" | "type" | "createdBy" | "origin" | "size" | "updatedAt";
 export interface ArtifactSort { key: ArtifactSortKey; dir: "asc" | "desc" }
 
@@ -11,7 +11,8 @@ export const ARTIFACTS_LAYOUT_KEY = "polpo:artifacts:layout";
 /** The layout remembered in this browser (table when nothing is stored, or storage is blocked). */
 export function readArtifactsLayout(): ArtifactsLayout {
   try {
-    return window.localStorage.getItem(ARTIFACTS_LAYOUT_KEY) === "preview" ? "preview" : "table";
+    const saved = window.localStorage.getItem(ARTIFACTS_LAYOUT_KEY);
+    return saved === "grid" || saved === "preview" ? saved : "table";
   } catch {
     return "table";
   }

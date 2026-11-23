@@ -130,6 +130,7 @@ import { useChatState, useChatActions, useChatInputDisabled } from "@/hooks/chat
 import { setChatPageSessionsOpen, useChatPageSessionsOpen } from "@/hooks/chat-context";
 import { WidgetCard, WidgetPendingCard } from "@/components/widget-card";
 import { ArtifactChatCard } from "@/components/artifacts/artifact-chat-card";
+import { ArtifactPreparation } from "@/components/artifacts/artifact-preparation";
 import { budgetText } from "@/lib/mission-preview";
 import { artifactIdOf } from "@/lib/artifacts-api";
 import { WhatsAppPreviewCard, EmailPreviewCard } from "@/components/send-preview-card";
@@ -3433,6 +3434,7 @@ function ChatMessages() {
                               | { type: "widget"; widget: WidgetRenderData; key: string }
                               | { type: "widget-pending"; tool: ToolCallInfo }
                               | { type: "artifact"; artifactId: string; updated: boolean; key: string }
+                              | { type: "artifact-pending"; tool: ToolCallInfo }
                             > = [];
                             const widgetsArr = msg.widgets ?? [];
                             let widgetCounter = 0;
@@ -3452,6 +3454,9 @@ function ChatMessages() {
                                   ? artifactIdOf(seg.tool.result) : undefined;
                                 if (madeArtifact) {
                                   groups.push({ type: "artifact", artifactId: madeArtifact, updated: seg.tool.name === "artifact_update", key: seg.tool.id });
+                                } else if ((seg.tool.name === "artifact_create" || seg.tool.name === "artifact_update") &&
+                                  (seg.tool.state === "preparing" || seg.tool.state === "calling")) {
+                                  groups.push({ type: "artifact-pending", tool: seg.tool });
                                 } else if (seg.tool.name === "render_widget") {
                                   // Inline widget: trova il widget corrispondente
                                   // in widgets[] (per-occorrenza) e renderizzalo
@@ -3502,6 +3507,13 @@ function ChatMessages() {
                               }
                               if (g.type === "artifact") {
                                 return <ArtifactChatCard key={`a-${g.key}`} artifactId={g.artifactId} updated={g.updated} />;
+                              }
+                              if (g.type === "artifact-pending") {
+                                const kind = g.tool.arguments?.kind ??
+                                  /"kind"\s*:\s*"([a-z]+)"/.exec(g.tool.argumentsText ?? "")?.[1];
+                                return <ArtifactPreparation key={`a-${g.tool.id}`}
+                                  phase={g.tool.state === "calling" ? "Saving" : "Preparing"}
+                                  kind={typeof kind === "string" ? kind : undefined} compact />;
                               }
                               if (g.type === "widget-pending") {
                                 // Loader skeleton dedicato — il modello

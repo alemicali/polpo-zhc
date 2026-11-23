@@ -9,13 +9,15 @@ export type Layout = typeof LAYOUTS[number];
 export type Shape = "text" | "rect" | "ellipse";
 export type SlideElement = {
   id: string;
-  type: Shape;
+  type: Shape | "image";
   x: number;
   y: number;
   w: number;
   h: number;
   text?: string;
   color?: string;
+  src?: string;
+  alt?: string;
   fontSize?: number;
 };
 export type Slide = {
@@ -40,11 +42,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 const isHex = (value: unknown): value is string => typeof value === "string" && /^#[a-f0-9]{6}$/i.test(value);
 const isText = (value: unknown): boolean => value === undefined || typeof value === "string";
+const imageData = /^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/]+={0,2}$/;
 const isPercent = (value: unknown): value is number => typeof value === "number" && value >= 0 && value <= 100;
 
 function isElement(value: unknown): value is SlideElement {
-  return isRecord(value) && typeof value.id === "string" && (value.type === "text" || value.type === "rect" || value.type === "ellipse")
+  return isRecord(value) && typeof value.id === "string" && (value.type === "text" || value.type === "rect" || value.type === "ellipse" || value.type === "image")
     && isPercent(value.x) && isPercent(value.y) && isPercent(value.w) && isPercent(value.h) && value.x + value.w <= 100.001 && value.y + value.h <= 100.001
+    && (value.type !== "image" || (value.w > 0 && value.h > 0 && typeof value.src === "string" && imageData.test(value.src) && isText(value.alt)))
     && isText(value.text) && (value.color === undefined || isHex(value.color))
     && (value.fontSize === undefined || (isPercent(value.fontSize) && value.fontSize >= 1 && value.fontSize <= 12));
 }

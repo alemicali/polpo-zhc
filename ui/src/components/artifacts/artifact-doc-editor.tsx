@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
 import {
-  Bold, Code, FileImage, Link2, List, ListChecks, ListOrdered, Minus, Quote,
-  Redo2, SquareCode, Strikethrough, Table2, Undo2, Italic,
+  Bold, ChevronDown, Code, FileImage, Italic, Link2, List, ListChecks, ListOrdered,
+  Minus, MoreHorizontal, PanelLeft, Plus, Quote, Redo2, SquareCode, Strikethrough, Table2, Undo2,
+  Video,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { embeddedDocImage } from "./artifact-doc-assets";
@@ -30,6 +31,7 @@ const docTypography = [
   "[&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_hr]:my-6 [&_pre]:my-4 [&_pre]:overflow-auto",
   "[&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:font-mono [&_code]:text-[0.88em]",
   "[&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-4 [&_pre_code]:px-0",
+  "[&_video]:my-4 [&_video]:max-h-130 [&_video]:w-full [&_video]:rounded-md [&_video]:bg-black",
   "[&_img]:inline-block [&_img]:max-h-130 [&_img]:max-w-full [&_img]:rounded-md",
   "[&_.tableWrapper]:overflow-x-auto [&_table]:my-4 [&_table]:w-full [&_table]:border-collapse",
   "[&_td]:min-w-16 [&_td]:border [&_td]:border-border [&_td]:p-2 [&_td]:align-top",
@@ -38,7 +40,7 @@ const docTypography = [
 ].join(" ");
 
 interface DocInsertion {
-  kind: "link" | "image";
+  kind: "link" | "image" | "video";
   url: string;
   label: string;
   error?: string;
@@ -68,6 +70,7 @@ export function ArtifactDocEditor({ content, onChange }: {
 }) {
   const emitted = useRef(content);
   const imageReader = useRef<FileReader | null>(null);
+  const [outlineOpen, setOutlineOpen] = useState(false);
   const [insertion, setInsertion] = useState<DocInsertion | null>(null);
   const editor = useEditor({
     extensions: artifactDocExtensions,
@@ -116,6 +119,22 @@ export function ArtifactDocEditor({ content, onChange }: {
     }),
   });
 
+  const outline = useEditorState({
+    editor,
+    selector: ({ editor: active }) => {
+      const headings: { position: number; level: number; title: string }[] = [];
+      if (!active) return headings;
+      active.state.doc.descendants((node, position) => {
+        if (node.type.name === "heading") {
+          const title = node.textContent.trim();
+          if (title) headings.push({ position: position + 1, level: Number(node.attrs.level), title });
+          return false;
+        }
+      });
+      return headings;
+    },
+  }) ?? [];
+
   if (!editor || !format) return null;
 
   const hasAttachment = insertion ? !!embeddedDocImage(insertion.url) : false;
@@ -124,13 +143,15 @@ export function ArtifactDocEditor({ content, onChange }: {
     if (!insertion) return;
     const url = insertion.url.trim();
     const { kind, label } = insertion;
-    if (!artifactDocUrl(url, kind === "image") && !(kind === "image" && embeddedDocImage(url))) {
-      setInsertion({ ...insertion, error: kind === "image" ? "Enter an HTTP or HTTPS image address." : "Enter an HTTP, HTTPS, or mailto link." });
+    if (!artifactDocUrl(url, kind !== "link") && !(kind === "image" && embeddedDocImage(url))) {
+      setInsertion({ ...insertion, error: kind === "link" ? "Enter an HTTP, HTTPS, or mailto link." : "Enter an HTTP or HTTPS media address." });
       return;
     }
 
     if (kind === "image") {
       editor.chain().focus().setImage({ src: url, alt: label }).run();
+    } else if (kind === "video") {
+      editor.chain().focus().insertContent({ type: "docVideo", attrs: { src: url, title: label.trim() || "Video" } }).run();
     } else if (format.link || format.selected) {
       editor.chain().focus().extendMarkRange("link").setLink({ href: url }).run();
     } else {
@@ -166,60 +187,109 @@ export function ArtifactDocEditor({ content, onChange }: {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-muted/25">
-      <div role="group" aria-label="Document formatting" className="flex flex-wrap items-center gap-x-0.5 gap-y-1 border-b bg-background px-2 py-1.5 sm:px-4">
-        <FormatButton label="Undo" disabled={!format.undo} onClick={() => editor.chain().focus().undo().run()}><Undo2 /></FormatButton>
-        <FormatButton label="Redo" disabled={!format.redo} onClick={() => editor.chain().focus().redo().run()}><Redo2 /></FormatButton>
+      <div role="group" aria-label="Document formatting" className="flex flex-wrap items-center gap-x-1 gap-y-1 border-b bg-background px-2 py-1.5 sm:px-4">
+        <div role="group" aria-label="Document view and history" className="flex items-center gap-0.5 border-r pr-1.5">
+          <FormatButton label="Document outline" active={outlineOpen} aria-controls="doc-outline" aria-expanded={outlineOpen} onClick={() => setOutlineOpen((value) => !value)}><PanelLeft /></FormatButton>
+          <FormatButton label="Undo" disabled={!format.undo} onClick={() => editor.chain().focus().undo().run()}><Undo2 /></FormatButton>
+          <FormatButton label="Redo" disabled={!format.redo} onClick={() => editor.chain().focus().redo().run()}><Redo2 /></FormatButton>
+        </div>
 
-        <select
-          className="mx-1 h-8 rounded-control border border-border bg-background px-2 text-xs"
-          aria-label="Paragraph style"
-          value={format.heading}
-          onChange={(event) => {
-            const level = headingLevels.find((candidate) => String(candidate) === event.target.value);
-            if (level) editor.chain().focus().setHeading({ level }).run();
-            else editor.chain().focus().setParagraph().run();
-          }}
-        >
-          <option value={0}>Paragraph</option>
-          {headingLevels.map((level) => <option key={level} value={level}>Heading {level}</option>)}
-        </select>
+        <div role="group" aria-label="Text format" className="flex items-center gap-0.5 border-r px-1.5">
+          <select
+            className="mr-1 h-8 rounded-control border border-border bg-background px-2 text-xs font-medium focus-visible:outline-2 focus-visible:outline-ring"
+            aria-label="Paragraph style"
+            value={format.heading}
+            onChange={(event) => {
+              const level = headingLevels.find((candidate) => String(candidate) === event.target.value);
+              if (level) editor.chain().focus().setHeading({ level }).run();
+              else editor.chain().focus().setParagraph().run();
+            }}
+          >
+            <option value={0}>Normal text</option>
+            {headingLevels.map((level) => <option key={level} value={level}>Heading {level}</option>)}
+          </select>
+          <FormatButton label="Bold" active={format.bold} onClick={() => editor.chain().focus().toggleBold().run()}><Bold /></FormatButton>
+          <FormatButton label="Italic" active={format.italic} onClick={() => editor.chain().focus().toggleItalic().run()}><Italic /></FormatButton>
+          <FormatButton label="Strikethrough" active={format.strike} onClick={() => editor.chain().focus().toggleStrike().run()}><Strikethrough /></FormatButton>
+        </div>
 
-        <FormatButton label="Bold" active={format.bold} onClick={() => editor.chain().focus().toggleBold().run()}><Bold /></FormatButton>
-        <FormatButton label="Italic" active={format.italic} onClick={() => editor.chain().focus().toggleItalic().run()}><Italic /></FormatButton>
-        <FormatButton label="Strikethrough" active={format.strike} onClick={() => editor.chain().focus().toggleStrike().run()}><Strikethrough /></FormatButton>
-        <FormatButton label="Inline code" active={format.code} onClick={() => editor.chain().focus().toggleCode().run()}><Code /></FormatButton>
-        <span className="mx-1 h-5 border-l" aria-hidden="true" />
-        <FormatButton label="Bulleted list" active={format.bulletList} onClick={() => editor.chain().focus().toggleBulletList().run()}><List /></FormatButton>
-        <FormatButton label="Numbered list" active={format.orderedList} onClick={() => editor.chain().focus().toggleOrderedList().run()}><ListOrdered /></FormatButton>
-        <FormatButton label="Checklist" active={format.taskList} onClick={() => editor.chain().focus().toggleTaskList().run()}><ListChecks /></FormatButton>
-        <FormatButton label="Quote" active={format.blockquote} onClick={() => editor.chain().focus().toggleBlockquote().run()}><Quote /></FormatButton>
-        <FormatButton label="Code block" active={format.codeBlock} onClick={() => editor.chain().focus().toggleCodeBlock().run()}><SquareCode /></FormatButton>
-        <FormatButton label="Horizontal rule" onClick={() => editor.chain().focus().setHorizontalRule().run()}><Minus /></FormatButton>
-        <span className="mx-1 h-5 border-l" aria-hidden="true" />
-        <FormatButton label="Link" active={format.link} onClick={() => setInsertion({ kind: "link", url: editor.getAttributes("link").href ?? "", label: "" })}><Link2 /></FormatButton>
-        <FormatButton label="Insert image" onClick={() => setInsertion({ kind: "image", url: "", label: "" })}><FileImage /></FormatButton>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button type="button" size="icon-sm" variant={format.table ? "secondary" : "ghost"} aria-label="Table" title="Table"><Table2 /></Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            <DropdownMenuItem onSelect={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}>Insert 3 × 3 table</DropdownMenuItem>
-            {format.table && <>
+        <div role="group" aria-label="Lists" className="flex items-center gap-0.5 border-r px-1.5">
+          <FormatButton label="Bulleted list" active={format.bulletList} onClick={() => editor.chain().focus().toggleBulletList().run()}><List /></FormatButton>
+          <FormatButton label="Numbered list" active={format.orderedList} onClick={() => editor.chain().focus().toggleOrderedList().run()}><ListOrdered /></FormatButton>
+          <FormatButton label="Checklist" active={format.taskList} onClick={() => editor.chain().focus().toggleTaskList().run()}><ListChecks /></FormatButton>
+        </div>
+
+        <div role="group" aria-label="Insert and more formatting" className="flex items-center gap-0.5 pl-1.5">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" size="sm" variant="ghost"><Plus /> Insert <ChevronDown className="size-3.5 text-muted-foreground" /></Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onSelect={() => setInsertion({ kind: "link", url: editor.getAttributes("link").href ?? "", label: "" })}><Link2 />{format.link ? "Edit link" : "Link"}</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setInsertion({ kind: "image", url: "", label: "" })}><FileImage /> Image</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setInsertion({ kind: "video", url: "", label: "" })}><Video /> Video</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}><Table2 /> Table (3 × 3)</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => editor.chain().focus().setHorizontalRule().run()}><Minus /> Divider</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {format.table && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button type="button" size="icon-sm" variant="secondary" aria-label="Table properties" title="Table properties"><Table2 /></Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuLabel>Table</DropdownMenuLabel>
+                <DropdownMenuItem onSelect={() => editor.chain().focus().addRowBefore().run()}>Add row above</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => editor.chain().focus().addRowAfter().run()}>Add row below</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => editor.chain().focus().addColumnBefore().run()}>Add column to the left</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => editor.chain().focus().addColumnAfter().run()}>Add column to the right</DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => editor.chain().focus().deleteRow().run()}>Delete row</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => editor.chain().focus().deleteColumn().run()}>Delete column</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => editor.chain().focus().deleteTable().run()}>Delete table</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" size="icon-sm" variant="ghost" aria-label="More document formatting" title="More document formatting"><MoreHorizontal /></Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onSelect={() => editor.chain().focus().toggleCode().run()}><Code /> Inline code{format.code && " ✓"}</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => editor.chain().focus().toggleCodeBlock().run()}><SquareCode /> Code block{format.codeBlock && " ✓"}</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => editor.chain().focus().toggleBlockquote().run()}><Quote /> Quote{format.blockquote && " ✓"}</DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => editor.chain().focus().addRowAfter().run()}>Add row below</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => editor.chain().focus().addColumnAfter().run()}>Add column to the right</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => editor.chain().focus().deleteRow().run()}>Delete row</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => editor.chain().focus().deleteColumn().run()}>Delete column</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => editor.chain().focus().deleteTable().run()}>Delete table</DropdownMenuItem>
-            </>}
-          </DropdownMenuContent>
-        </DropdownMenu>
+              <DropdownMenuItem onSelect={() => editor.chain().focus().unsetAllMarks().clearNodes().run()}>Clear formatting</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-6 sm:py-6">
-        <EditorContent
-          editor={editor}
-          className="mx-auto min-h-full w-full max-w-3xl rounded-lg border bg-background px-5 pb-10 pt-4 shadow-sm sm:px-12 sm:pt-8"
-        />
+
+      <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
+        {outlineOpen && (
+          <nav id="doc-outline" aria-label="Document headings" className="max-h-38 shrink-0 overflow-auto border-b bg-background px-3 py-3 sm:max-h-none sm:w-52 sm:border-b-0 sm:border-r">
+            <h2 className="mb-2 px-2 text-sm font-semibold">Outline</h2>
+            {outline.length === 0 && <p className="px-2 text-xs leading-5 text-muted-foreground">Headings appear here as you add them.</p>}
+            <ul className="grid gap-0.5">
+              {outline.map(({ position, level, title }) => (
+                <li key={position} style={{ paddingInlineStart: (level - 1) * 9 }}>
+                  <button
+                    type="button"
+                    className="block w-full truncate rounded-control px-2 py-1.5 text-start text-xs text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                    title={title}
+                    onClick={() => editor.chain().focus().setTextSelection(position).scrollIntoView().run()}
+                  >{title}</button>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        )}
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-3 py-4 sm:px-8 sm:py-7">
+          <EditorContent
+            editor={editor}
+            className="mx-auto min-h-full w-full max-w-3xl rounded-lg border bg-background px-5 pb-12 pt-4 shadow-sm sm:px-12 sm:pt-8"
+          />
+        </div>
       </div>
 
       <Dialog open={insertion !== null} onOpenChange={(open) => {
@@ -231,8 +301,8 @@ export function ArtifactDocEditor({ content, onChange }: {
         {insertion && (
           <DialogContent onCloseAutoFocus={(event) => { event.preventDefault(); editor.commands.focus(); }}>
             <DialogHeader>
-              <DialogTitle>{insertion.kind === "image" ? "Insert image" : format.link ? "Edit link" : "Insert link"}</DialogTitle>
-              <DialogDescription>{insertion.kind === "image" ? "Use an image URL or select an image from your device." : "Add the destination address."}</DialogDescription>
+              <DialogTitle>{insertion.kind === "image" ? "Insert image" : insertion.kind === "video" ? "Insert video" : format.link ? "Edit link" : "Insert link"}</DialogTitle>
+              <DialogDescription>{insertion.kind === "image" ? "Use an image URL or select an image from your device." : insertion.kind === "video" ? "Use a direct link to an MP4 or other browser-playable video." : "Add the destination address."}</DialogDescription>
             </DialogHeader>
             <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); saveInsertion(); }}>
               <label className="block space-y-1 text-sm">
@@ -258,9 +328,9 @@ export function ArtifactDocEditor({ content, onChange }: {
                 </label>
               )}
               {insertion.error && <p className="text-sm text-destructive" role="alert">{insertion.error}</p>}
-              {(insertion.kind === "image" || (!format.link && !format.selected)) && (
+              {(insertion.kind !== "link" || (!format.link && !format.selected)) && (
                 <label className="block space-y-1 text-sm">
-                  <span>{insertion.kind === "image" ? "Alternative text" : "Link text"}</span>
+                  <span>{insertion.kind === "image" ? "Alternative text" : insertion.kind === "video" ? "Video title" : "Link text"}</span>
                   <Input
                     value={insertion.label}
                     onChange={(event) => setInsertion({ ...insertion, label: event.target.value })}

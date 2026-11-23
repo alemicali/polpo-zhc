@@ -8,7 +8,8 @@ const printStyles = `
   body { color: #182033; max-width: 760px; margin: 24px auto; padding: 0 1rem; font: 12pt/1.55 system-ui, sans-serif; }
   h1,h2,h3,h4,h5,h6 { line-height: 1.2; break-after: avoid; }
   p { orphans: 3; widows: 3; }
-  img { max-width: 100%; max-height: 70vh; }
+  img, video { max-width: 100%; max-height: 70vh; }
+  video { display: none; }
   table { width: 100%; border-collapse: collapse; margin: 1em 0; }
   thead { display: table-header-group; }
   th,td { text-align: left; padding: .4em; border: 1px solid #cbd5e1; }
@@ -38,6 +39,13 @@ export function printArtifactDoc(content: string, title: string): void {
   page.head.prepend(policy);
   // Only schema-generated markup reaches the print window. Markdown HTML is parsed into editor nodes first.
   page.body.innerHTML = html;
+  for (const video of page.querySelectorAll("video")) {
+    const href = video.getAttribute("src") ?? "";
+    const link = page.createElement("a");
+    link.textContent = video.title || "Video";
+    if (artifactDocUrl(href, true)) link.href = href;
+    video.replaceWith(link);
+  }
   const images = Array.from(page.images);
   const ready = Promise.allSettled(images.map((image) => image.decode()));
   void Promise.race([ready, new Promise((resolve) => setTimeout(resolve, 2500))]).then(() => {
@@ -131,6 +139,14 @@ export async function artifactDocToWord(content: string, title?: string): Promis
     switch (node.type) {
       case "image":
         return [new Paragraph({ children: await inline(node) })];
+      case "docVideo": {
+        const link = String(node.attrs?.src ?? "");
+        const title = String(node.attrs?.title || "Video");
+        const children = artifactDocUrl(link, true)
+          ? [new ExternalHyperlink({ link, children: [new TextRun({ text: title, style: "Hyperlink" })] })]
+          : [new TextRun(title)];
+        return [new Paragraph({ children })];
+      }
       case "heading":
         return [await paragraph({ heading: headings[Number(node.attrs?.level) - 1] ?? HeadingLevel.HEADING_1 })];
       case "codeBlock":

@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Circle, Copy, Download, Maximize, Play, Plus, Printer, Redo2, Square, Trash2, Type, Undo2, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Circle, Copy, Download, ImagePlus, Maximize, Play, Plus, Printer, Redo2, Square, Trash2, Type, Undo2, X } from "lucide-react";
+import { MAX_ARTIFACT_BYTES } from "@polpo-ai/core/artifacts";
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -28,7 +29,7 @@ function SlideCanvas({ slide, onField, onElement, selected, onSelect, onDrag, th
   onElement?: (patch: Partial<SlideElement>) => void;
   selected?: string;
   onSelect?: (id: string) => void;
-  onDrag?: (event: PointerEvent<HTMLButtonElement>, element: SlideElement) => void;
+  onDrag?: (event: PointerEvent<HTMLButtonElement>, element: SlideElement, resize?: boolean) => void;
   thumbnail?: boolean;
 }) {
   const { bg, fg, accent } = THEMES[slide.theme ?? "light"];
@@ -46,19 +47,23 @@ function SlideCanvas({ slide, onField, onElement, selected, onSelect, onDrag, th
       })}
       {slide.elements?.map((element) => {
         const isTextBox = element.type === "text";
+        const isImage = element.type === "image";
         const color = element.color ?? (isTextBox ? fg : accent);
-        const style = { ...rectStyle(element), color, fontSize: `${element.fontSize ?? 3}cqw`, lineHeight: 1.2, borderRadius: element.type === "ellipse" ? "50%" : undefined, backgroundColor: isTextBox ? undefined : color };
+        const style = { ...rectStyle(element), color, fontSize: `${element.fontSize ?? 3}cqw`, lineHeight: 1.2, borderRadius: element.type === "ellipse" ? "50%" : undefined, backgroundColor: isTextBox || isImage ? undefined : color };
         const active = selected === element.id;
         const outline = active ? " outline-2 outline-offset-2 outline-primary" : "";
-        if (!onSelect) return <div key={element.id} className={textClass} style={style}>{isTextBox ? element.text : undefined}</div>;
+        const drawing = isImage ? <img src={element.src} alt={element.alt ?? ""} draggable={false} className="size-full" /> : null;
+        if (!onSelect) return <div key={element.id} className={textClass} style={style}>{isTextBox ? element.text : drawing}</div>;
         return (
           <div key={element.id} className={`absolute ${outline}`} style={style}>
             {isTextBox ? <textarea aria-label="Text box" className={`size-full ${editableClass}`} value={element.text ?? ""}
               onFocus={() => onSelect(element.id)} onChange={(event) => onElement?.({ id: element.id, text: event.target.value })} />
-              : <button type="button" aria-label={element.type === "ellipse" ? "Ellipse" : "Rectangle"} className="size-full cursor-move touch-none rounded-[inherit] focus-visible:outline-2 focus-visible:outline-offset-2"
-                onFocus={() => onSelect(element.id)} onPointerDown={(event) => onDrag?.(event, element)} />}
+              : <button type="button" aria-label={isImage ? element.alt || "Image" : element.type === "ellipse" ? "Ellipse" : "Rectangle"} className="size-full cursor-move touch-none rounded-[inherit] focus-visible:outline-2 focus-visible:outline-offset-2"
+                onFocus={() => onSelect(element.id)} onPointerDown={(event) => onDrag?.(event, element)}>{drawing}</button>}
             {active && isTextBox && <button type="button" aria-label="Drag text box" className="absolute -right-2 -top-2 size-4 cursor-move touch-none rounded-full border border-background bg-primary outline-none focus-visible:ring-2 focus-visible:ring-ring"
               onPointerDown={(event) => onDrag?.(event, element)} />}
+            {active && isImage && <button type="button" aria-label="Resize image" className="absolute -bottom-2 -right-2 size-4 cursor-nwse-resize touch-none rounded-full border border-background bg-primary outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onPointerDown={(event) => onDrag?.(event, element, true)} />}
           </div>
         );
       })}
@@ -118,7 +123,7 @@ function Presentation({ slides, initial, onClose }: { slides: Slide[]; initial: 
   );
 }
 
-function printSlides(slides: Slide[], title: string) {
+async function printSlides(slides: Slide[], title: string) {
   const popup = window.open("", "_blank");
   if (!popup) throw new Error("Allow Pop-ups to print this deck.");
   popup.opener = null;
@@ -133,6 +138,7 @@ function printSlides(slides: Slide[], title: string) {
     section>div{position:absolute;overflow:hidden;overflow-wrap:anywhere;white-space:pre-wrap}
     @media print{section{width:13.333in;height:7.5in}}`;
   doc.head.append(style);
+  const images: Promise<void>[] = [];
   for (const slide of slides) {
     const theme = THEMES[slide.theme ?? "light"];
     const page = doc.createElement("section");
@@ -141,11 +147,21 @@ function printSlides(slides: Slide[], title: string) {
     const boxes = [
       ...slideFields(slide).map((field) => ({ ...field, text: slide[field.key] ?? "", color: theme.fg, radius: false, fill: false })),
       { x: 8, y: 8, w: 5, h: 0.7, text: "", fontSize: 1, bold: false, color: theme.accent, radius: false, fill: true },
-      ...(slide.elements ?? []).map((element) => ({ ...element, text: element.type === "text" ? element.text ?? "" : "", fontSize: element.fontSize ?? 3, bold: false, color: element.color ?? (element.type === "text" ? theme.fg : theme.accent), radius: element.type === "ellipse", fill: element.type !== "text" })),
+      ...(slide.elements ?? []).map((element) => ({ ...element, text: element.type === "text" ? element.text ?? "" : "", fontSize: element.fontSize ?? 3, bold: false, color: element.color ?? (element.type === "text" ? theme.fg : theme.accent), radius: element.type === "ellipse", fill: element.type === "rect" || element.type === "ellipse", src: element.type === "image" ? element.src : undefined, alt: element.alt })),
     ];
     for (const box of boxes) {
       const node = doc.createElement("div");
-      node.textContent = box.text;
+      if ("src" in box && box.src) {
+        const img = doc.createElement("img");
+        img.alt = box.alt ?? "";
+        img.style.width = "100%";
+        img.style.height = "100%";
+        img.src = box.src;
+        node.append(img);
+        images.push(img.decode());
+      } else {
+        node.textContent = box.text;
+      }
       Object.assign(node.style, rectStyle(box), {
         fontSize: `${box.fontSize}cqw`, fontWeight: box.bold ? "650" : "400", lineHeight: box.bold ? "1.04" : "1.3",
         fontFamily: box.bold ? "Georgia, serif" : "inherit", color: box.color,
@@ -155,6 +171,7 @@ function printSlides(slides: Slide[], title: string) {
     }
     doc.body.append(page);
   }
+  await Promise.all(images);
   popup.focus();
   popup.print();
 }
@@ -180,6 +197,8 @@ async function exportSlides(slides: Slide[], title: string) {
       if (element.type === "text") {
         page.addText(element.text ?? "", { ...position(element), margin: 0, valign: "top", color: color(element.color ?? theme.fg),
           fontFace: "Arial", fontSize: (element.fontSize ?? 3) * 9.6, fit: "shrink" });
+      } else if (element.type === "image") {
+        page.addImage({ data: element.src, ...position(element), altText: element.alt });
       } else {
         page.addShape(element.type === "ellipse" ? pptx.ShapeType.ellipse : pptx.ShapeType.rect,
           { ...position(element), line: { transparency: 100 }, fill: { color: color(element.color ?? theme.accent) } });
@@ -191,13 +210,53 @@ async function exportSlides(slides: Slide[], title: string) {
   await pptx.writeFile({ fileName: `${filename}.pptx` });
 }
 
+const imageTypes = new Set(["image/png", "image/jpeg"]);
+const utf8Bytes = (content: string) => new TextEncoder().encode(content).length;
+const maxImageWidth = (image: SlideElement) => Math.min(100 - image.x, (100 - image.y) * image.w / image.h);
+const imageSize = (image: SlideElement, width: number) => ({ w: width, h: width * image.h / image.w });
+
+async function prepareImage(file: File, availableBytes: number): Promise<SlideElement> {
+  if (!imageTypes.has(file.type)) throw new Error("Choose a PNG or JPEG image.");
+  const bitmap = await createImageBitmap(file).catch(() => { throw new Error("The image could not be opened."); });
+  try {
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("The image could not be opened.");
+    let scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+    let src: string;
+    for (;;) {
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      src = canvas.toDataURL(file.type, 0.88);
+      if (src.length <= availableBytes) break;
+      if (Math.max(canvas.width, canvas.height) <= 240) throw new Error("There is not enough space left in this deck for the image.");
+      scale *= 0.72;
+    }
+    const ratio = (canvas.height / canvas.width) * (16 / 9);
+    const w = Math.min(48, 45 / ratio);
+    const h = w * ratio;
+    return { id: nanoid(), type: "image", x: (100 - w) / 2, y: (100 - h) / 2, w, h, src, alt: file.name.replace(/\.[^.]+$/, "") };
+  } finally {
+    bitmap.close();
+  }
+}
+
 export function ArtifactSlidesEditor({ content, onChange, title = "Slides" }: { content: string; onChange?: (content: string) => void; title?: string }) {
   const deck = useMemo(() => parseSlides(content), [content]);
   const [selectedSlide, setSelectedSlide] = useState<string>();
   const [selected, setSelected] = useState("");
   const [presenting, setPresenting] = useState<number>();
   const [exporting, setExporting] = useState(false);
-  const [dragPreview, setDragPreview] = useState<{ id: string; x: number; y: number }>();
+  const [dragPreview, setDragPreview] = useState<Pick<SlideElement, "id"> & Partial<Pick<SlideElement, "x" | "y" | "w" | "h">>>();
+  const [importing, setImporting] = useState(false);
+  const imageInput = useRef<HTMLInputElement>(null);
+  const editable = Boolean(onChange);
+  const currentContent = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    currentContent.current = editable ? content : null;
+    return () => { currentContent.current = null; };
+  }, [content, editable]);
   const presentButton = useRef<HTMLButtonElement>(null);
   const [history, setHistory] = useState({ past: [] as string[], future: [] as string[] });
   if (!deck) return <p role="status" className="p-4 text-sm text-muted-foreground">This deck cannot be opened in the slide editor. Check its source.</p>;
@@ -210,10 +269,11 @@ export function ArtifactSlidesEditor({ content, onChange, title = "Slides" }: { 
     setSelectedSlide(slides[next].id);
     setSelected("");
   };
-  function update(slides: Slide[]) {
+  function update(slides: Slide[], checkBudget = false) {
     if (!onChange) return;
     const next = JSON.stringify({ version: 1, slides }, null, 2);
     if (next === content) return;
+    if (checkBudget && utf8Bytes(next) > MAX_ARTIFACT_BYTES) throw new Error("There is not enough space left in this deck for the image.");
     setHistory({ past: [...history.past.slice(-49), content], future: [] });
     onChange(next);
   }
@@ -223,7 +283,7 @@ export function ArtifactSlidesEditor({ content, onChange, title = "Slides" }: { 
     setHistory(redo ? { past: [...history.past, content], future: history.future.slice(0, -1) } : { past: history.past.slice(0, -1), future: [...history.future, content] });
     onChange(next);
   }
-  const patchSlide = (patch: Partial<Slide>) => update(slides.map((item) => item.id === slide.id ? { ...item, ...patch } : item));
+  const patchSlide = (patch: Partial<Slide>, checkBudget?: boolean) => update(slides.map((item) => item.id === slide.id ? { ...item, ...patch } : item), checkBudget);
   const patchElement = (patch: Partial<SlideElement>) => patchSlide({
     elements: slide.elements?.map((item) => item.id === (patch.id ?? selected) ? { ...item, ...patch } : item),
   });
@@ -254,12 +314,26 @@ export function ArtifactSlidesEditor({ content, onChange, title = "Slides" }: { 
     patchSlide({ elements: [...(slide.elements ?? []), next] });
     setSelected(id);
   }
+  async function addImage(file: File) {
+    setImporting(true);
+    try {
+      const item = await prepareImage(file, MAX_ARTIFACT_BYTES - utf8Bytes(content) - 512);
+      if (currentContent.current === null) return;
+      if (currentContent.current !== content) throw new Error("The deck changed while the image was loading. Add the image again.");
+      patchSlide({ elements: [...(slide.elements ?? []), item] }, true);
+      setSelected(item.id);
+    } catch (error) {
+      if (currentContent.current !== null) toast.error((error as Error).message);
+    } finally {
+      setImporting(false);
+    }
+  }
   function removeElement() {
     patchSlide({ elements: slide.elements?.filter((item) => item.id !== selected) });
     setSelected("");
   }
 
-  function drag(event: PointerEvent<HTMLButtonElement>, item: SlideElement) {
+  function drag(event: PointerEvent<HTMLButtonElement>, item: SlideElement, resize = false) {
     const target = event.currentTarget;
     const canvas = target.closest("[data-slide-canvas]");
     if (!canvas || event.button !== 0) return;
@@ -271,10 +345,17 @@ export function ArtifactSlidesEditor({ content, onChange, title = "Slides" }: { 
     const pointer = event.pointerId;
     target.setPointerCapture(pointer);
     setSelected(item.id);
-    const coordinates = (next: globalThis.PointerEvent) => ({
-      x: Math.max(0, Math.min(100 - item.w, item.x + 100 * (next.clientX - startX) / bounds.width)),
-      y: Math.max(0, Math.min(100 - item.h, item.y + 100 * (next.clientY - startY) / bounds.height)),
-    });
+    const coordinates = (next: globalThis.PointerEvent) => {
+      const deltaX = 100 * (next.clientX - startX) / bounds.width;
+      if (resize) {
+        const maxWidth = maxImageWidth(item);
+        return imageSize(item, Math.min(maxWidth, Math.max(Math.min(2, maxWidth), item.w + deltaX)));
+      }
+      return {
+        x: Math.max(0, Math.min(100 - item.w, item.x + deltaX)),
+        y: Math.max(0, Math.min(100 - item.h, item.y + 100 * (next.clientY - startY) / bounds.height)),
+      };
+    };
     const change = (next: globalThis.PointerEvent) => {
       if (next.pointerId === pointer) setDragPreview({ id: item.id, ...coordinates(next) });
     };
@@ -338,6 +419,12 @@ export function ArtifactSlidesEditor({ content, onChange, title = "Slides" }: { 
           <Button size="icon-sm" variant="ghost" aria-label="Undo" title="Undo" disabled={!history.past.length} onClick={() => undo()}><Undo2 /></Button>
           <Button size="icon-sm" variant="ghost" aria-label="Redo" title="Redo" disabled={!history.future.length} onClick={() => undo(true)}><Redo2 /></Button>
           <span className="mx-1 h-5 border-l border-border/60" />
+          <input type="file" ref={imageInput} accept="image/png,image/jpeg" hidden onChange={(event) => {
+            const file = event.currentTarget.files?.[0];
+            event.currentTarget.value = "";
+            if (file) void addImage(file);
+          }} />
+          <Button size="icon-sm" variant="ghost" aria-label="Add image" title="Add image (PNG or JPEG)" disabled={importing} onClick={() => imageInput.current?.click()}><ImagePlus /></Button>
           <Button size="icon-sm" variant="ghost" aria-label="Add text box" title="Add text box" onClick={() => addElement("text")}><Type /></Button>
           <Button size="icon-sm" variant="ghost" aria-label="Add rectangle" title="Add rectangle" onClick={() => addElement("rect")}><Square /></Button>
           <Button size="icon-sm" variant="ghost" aria-label="Add ellipse" title="Add ellipse" onClick={() => addElement("ellipse")}><Circle /></Button>
@@ -350,7 +437,7 @@ export function ArtifactSlidesEditor({ content, onChange, title = "Slides" }: { 
             finally { setExporting(false); }
           }}><Download /> PowerPoint</Button>
           <Button size="sm" variant="ghost" disabled={!visibleSlides.length} onClick={() => {
-            try { printSlides(visibleSlides, title); } catch (error) { toast.error((error as Error).message); }
+            void printSlides(visibleSlides, title).catch((error: Error) => toast.error(error.message));
           }}><Printer /> Print / PDF</Button>
           <Button ref={presentButton} size="sm" disabled={!visibleSlides.length} onClick={() => setPresenting(Math.max(0, visibleSlides.findIndex((item) => item.id === slide.id)))}><Play /> Present</Button>
         </div>
@@ -397,9 +484,20 @@ export function ArtifactSlidesEditor({ content, onChange, title = "Slides" }: { 
             <input type="checkbox" checked={slide.hidden ?? false} onChange={(event) => patchSlide({ hidden: event.target.checked })} /> Skip slide
           </label>
           {element && <div className="flex flex-wrap items-center gap-2 @4xl:w-full @4xl:border-t @4xl:border-border/60 @4xl:pt-2">
-            <label className="flex items-center gap-1 text-xs text-muted-foreground">Color
+            {element.type === "image" ? <>
+              <label className="flex w-full flex-col gap-1 text-xs text-muted-foreground">Alt text
+                <Input className="h-7" value={element.alt ?? ""} onChange={(event) => patchElement({ alt: event.target.value })} />
+              </label>
+              <label className="flex items-center gap-1 text-xs text-muted-foreground">Width %
+                <Input className="h-7 w-16" type="number" min={Math.min(2, maxImageWidth(element))} max={maxImageWidth(element)} step="any" value={Number(element.w.toFixed(2))}
+                  onChange={(event) => {
+                    const width = event.target.valueAsNumber;
+                    if (width > 0 && width <= maxImageWidth(element)) patchElement(imageSize(element, width));
+                  }} />
+              </label>
+            </> : <label className="flex items-center gap-1 text-xs text-muted-foreground">Color
               <input className="size-7" type="color" value={element.color ?? (element.type === "text" ? theme.fg : theme.accent)} onChange={(event) => patchElement({ color: event.target.value })} />
-            </label>
+            </label>}
             {element.type === "text" && <label className="flex items-center gap-1 text-xs text-muted-foreground">Size
               <Input className="h-7 w-16" type="number" min={1} max={12} step={0.25} value={element.fontSize ?? 3}
                 onChange={(event) => {
