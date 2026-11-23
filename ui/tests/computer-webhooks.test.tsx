@@ -169,10 +169,14 @@ test("a provider's row opens its events: outcome badges, sandbox → computer li
   await flush();
   // live: a new delivery for this provider reloads the list (another provider's does not)
   log.unshift(ev("e4", { outcome: "error", eventType: "sandbox.state.updated", reason: "Could not apply it: Daytona is down", receivedAt: ago(0) }));
-  const before = calls.length;
+  const lists = () => calls.filter((c) => c.path === "/computer-webhooks/daytona/events").length;
+  const statuses = () => calls.filter((c) => c.path === "/computer-webhooks").length;
+  const [beforeLists, beforeStatuses] = [lists(), statuses()];
   await act(async () => { sse.push("computer:webhook", { provider: "e2b", id: "x", action: "recorded", outcome: "ignored" }); });
   await flush();
-  expect(calls.length).toBe(before);
+  expect(lists()).toBe(beforeLists);
+  // the cards' counters reload on any delivery
+  expect(statuses()).toBe(beforeStatuses + 1);
   await act(async () => { sse.push("computer:webhook", { provider: "daytona", id: "e4", action: "recorded", outcome: "error" }); });
   await flush();
   rows = $$('[data-testid="webhook-event-row"]');

@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Check, ChevronRight, Copy, Info, Loader2, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { useEvents } from "@polpo-ai/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -68,7 +69,7 @@ function ProviderCard({ s, onChanged }: { s: ComputerWebhookStatus; onChanged: (
           <dd>{s.lastEventAt ? `${formatLastUsed(s.lastEventAt)}${s.lastEventType ? ` · ${s.lastEventType}` : ""}` : "none yet"}</dd>
           <dt className="text-muted-foreground">Deliveries</dt>
           <dd className="tabular-nums" data-testid="webhook-counts">
-            {s.received - s.ignored - (s.errors ?? 0)} accepted · {s.ignored} ignored · {s.rejected} rejected{s.errors ? ` · ${s.errors} errors` : ""}
+            {Math.max(0, s.received - s.ignored - (s.errors ?? 0))} accepted · {s.ignored} ignored · {s.rejected} rejected{s.errors ? ` · ${s.errors} errors` : ""}
           </dd>
           {s.lastError && (<><dt className="text-muted-foreground">Last problem</dt><dd className="text-destructive" data-testid="webhook-last-error">{s.lastError}</dd></>)}
         </dl>
@@ -117,12 +118,17 @@ function ProviderCard({ s, onChanged }: { s: ComputerWebhookStatus; onChanged: (
   );
 }
 
+const WEBHOOK_EVENTS = ["computer:webhook"];
+
 export function ComputerWebhooksSection() {
   const [data, setData] = useState<{ providers: ComputerWebhookStatus[]; note: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   // bumped by the refresh button: the effect below loads again
   const [version, setVersion] = useState(0);
   const load = useCallback(() => setVersion((v) => v + 1), []);
+  // live: a delivery recorded or applied (computer:webhook) reloads the counters and the state
+  const { events } = useEvents(WEBHOOK_EVENTS, 5);
+  const latest = events.at(-1)?.id;
   useEffect(() => {
     let alive = true;
     computerWebhooksApi.status().then(
@@ -130,7 +136,7 @@ export function ComputerWebhooksSection() {
       (e: unknown) => { if (alive) setError((e as Error).message); },
     );
     return () => { alive = false; };
-  }, [version]);
+  }, [version, latest]);
   return (
     <div className="space-y-4" data-testid="computer-webhooks">
       <div className="flex items-start justify-between gap-2">
