@@ -201,10 +201,10 @@ export function ArtifactDocEditor({ content, onChange, readOnly = false, streami
         </aside>
         <div className="min-h-0 min-w-0 flex-1">
           {showEditor ? (
-            <DocChoiceEditContext.Provider value={(definition) => onChange?.(writeDocTabs({
+            <DocChoiceEditContext.Provider value={editing ? (definition) => onChange?.(writeDocTabs({
               ...book,
               tabs: book.tabs.map((tab) => ({ ...tab, content: updateChoiceDefinition(tab.content, definition) })),
-            }))}>
+            })) : null}>
               <DocTabEditor key={activeTab.id} content={activeTab.content} choices={choices} instanceName={instanceName} streaming={streaming}
                 onAskAssistant={onAskAssistant} onChange={editing ? (text) => updateTab(activeTab.id, { content: text }) : undefined} />
             </DocChoiceEditContext.Provider>
