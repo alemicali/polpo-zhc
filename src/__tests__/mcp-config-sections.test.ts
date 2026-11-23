@@ -186,6 +186,31 @@ describe("appearance and the dark-mode logo", () => {
     expect((await (await app.request("/api/v1/config/appearance")).json()).data).toEqual({});
   });
 
+  it("takes the primary button's glow and the dialogs' shadow per mode, and refuses unsafe ones (MCP and REST)", async () => {
+    const r = await tool("polpo_branding_update", { tokens: {
+      light: { shadowButtonPrimary: "0 0 20px oklch(0.6 0.2 290 / 40%)", shadowDialog: "0 10px 15px -3px rgb(0 0 0 / 10%), 0 4px 6px -4px rgb(0 0 0 / 10%)" },
+      dark: { shadowButtonPrimary: "none" },
+    } });
+    expect(r.isError).toBeFalsy();
+    expect(r.structuredContent.changed).toEqual(expect.arrayContaining([
+      "appearance.custom.light.shadowButtonPrimary", "appearance.custom.light.shadowDialog", "appearance.custom.dark.shadowButtonPrimary",
+    ]));
+    expect(r.structuredContent.appearance.custom).toMatchObject({
+      light: { shadowButtonPrimary: "0 0 20px oklch(0.6 0.2 290 / 40%)" }, dark: { shadowButtonPrimary: "none" },
+    });
+    expect((await tool("polpo_branding_get")).structuredContent.tokens).toEqual(expect.arrayContaining(["shadowButtonPrimary", "shadowDialog"]));
+    for (const tokens of [{ light: { shadowButtonPrimary: "0 0 20px red; color: red" } }, { dark: { shadowDialog: "0 0 1px url(https://evil)" } }]) {
+      const bad = await tool("polpo_branding_update", { tokens });
+      expect(bad.isError, JSON.stringify(tokens)).toBe(true);
+    }
+    const rest = await app.request("/api/v1/config/settings", {
+      method: "PATCH", headers: { authorization: `Bearer ${MCP_KEY}`, "content-type": "application/json" },
+      body: JSON.stringify({ appearance: { custom: { enabled: true, light: { shadowDialog: "0 0 0 1px url(x)" } } } }),
+    });
+    expect(rest.status).toBe(400);
+    expect((await tool("polpo_branding_update", { reset_appearance: true })).isError).toBeFalsy();
+  });
+
   it("takes the bundled Inter Tight as a font token", async () => {
     const r = await tool("polpo_branding_update", { tokens: { light: { fontFamily: "\"Inter Tight\", sans-serif", headingFont: "Inter Tight" } } });
     expect(r.isError).toBeFalsy();

@@ -12,7 +12,7 @@ const twMerge = extendTailwindMerge({
       text: ["display", "h1", "h2", "h3", "body", "small", "caption", "micro"],
       leading: ["display", "h1", "h2", "h3", "body", "small", "caption", "micro"],
       tracking: ["heading", "label"],
-      shadow: ["control", "card", "raised", "glow", "glow-strong"],
+      shadow: ["control", "card", "raised", "dialog", "glow", "glow-strong", "button-primary", "button-primary-hover"],
       radius: ["card", "control", "badge", "pill", "avatar", "dialog"],
       blur: ["surface", "overlay", "glow"],
     },

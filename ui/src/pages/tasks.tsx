@@ -186,7 +186,7 @@ const TaskRow = memo(function TaskRow({
               {hasAvatar
                 ? <AgentAvatar avatar={identity?.avatar} name={task.assignTo} size="xs" />
                 : <div className="flex items-center justify-center rounded-lg size-5 bg-muted/50">
-                    <Bot className="h-3 w-3 text-muted-foreground/60" />
+                    <AgentAvatar name={task.assignTo} size="xs" />
                   </div>
               }
             </div>
@@ -484,7 +484,7 @@ const TaskCard = memo(function TaskCard({
                   {hasAvatar
                     ? <AgentAvatar avatar={identity?.avatar} name={task.assignTo} size="xs" />
                     : <div className="flex items-center justify-center rounded-lg size-5 bg-muted/50">
-                        <Bot className="h-3 w-3 text-muted-foreground/60" />
+                        <AgentAvatar name={task.assignTo} size="xs" />
                       </div>
                   }
                 </div>

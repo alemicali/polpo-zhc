@@ -41,6 +41,7 @@ import { taskStatusStyles, taskPhaseStyles } from "@/lib/status-tokens";
 import { Eyebrow } from "@/components/shared/eyebrow";
 import { StatValue, type StatTone } from "@/components/shared/stat-value";
 import { useTokenUsage, type TokenUsageRange } from "@/hooks/use-token-usage";
+import { AgentAvatar } from "@/components/shared/agent-avatar";
 
 const DASHBOARD_RANGES: { value: TokenUsageRange; label: string; shortLabel: string }[] = [
   { value: "today", label: "Today", shortLabel: "Today" },
@@ -587,8 +588,8 @@ const ActiveAgents = memo(function ActiveAgents({ processes }: { processes: Agen
           return (
             <div key={`${p.agentName}-${p.taskId}`} className="rounded-lg border border-border/40 bg-card/60 backdrop-blur-surface p-3">
               <div className="flex items-center gap-3 mb-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10">
-                  <Bot className="h-4 w-4 text-primary" />
+                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-muted/50">
+                  <AgentAvatar name={p.agentName} size="md" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium">{p.agentName}</p>

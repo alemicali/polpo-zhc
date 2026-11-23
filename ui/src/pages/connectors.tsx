@@ -171,7 +171,7 @@ export function ConnectorsPage() {
   }, [connectedParam, params, setParams]);
 
   const agentOptions = useMemo<AgentOption[]>(
-    () => agents.map((a) => ({ name: a.name, label: a.identity?.displayName?.trim() || a.name })).sort((a, b) => a.label.localeCompare(b.label)),
+    () => agents.map((a) => ({ name: a.name, label: a.identity?.displayName?.trim() || a.name, avatar: a.identity?.avatar })).sort((a, b) => a.label.localeCompare(b.label)),
     [agents],
   );
   const agentLabel = (name: string) => agentOptions.find((a) => a.name === name)?.label ?? name;
