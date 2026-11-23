@@ -82,8 +82,8 @@ function SourcesList({ registry, views, onOpen, onAdd }: { registry: DataRegistr
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="mb-4 flex flex-wrap items-end gap-3">
         <div className="min-w-0 flex-1">
-          <h1 className="font-heading text-h1">Data</h1>
-          <p className="mt-1 max-w-2xl text-xs text-muted-foreground">Databases, APIs and files your agents can query. Open one to browse its tables, run SQL, save views, and decide which agents may use it.</p>
+          <h1 className="sr-only">Data sources</h1>
+          <p className="max-w-2xl text-xs text-muted-foreground">Databases, APIs and files your agents can query. Open one to browse its tables, run SQL, save views, and decide which agents may use it.</p>
         </div>
         <Button size="sm" onClick={onAdd}><Plus /> Add source</Button>
       </header>
@@ -133,6 +133,11 @@ function SourceCard({ source, registry, views, onOpen }: { source: DataSource; r
         <EnvironmentBadge environment={source.environment} />
       </div>
       {source.description && <p className="line-clamp-2 text-xs text-muted-foreground">{source.description}</p>}
+      {source.tags.length > 0 && (
+        <ul className="flex flex-wrap gap-1.5" aria-label="Categories">
+          {source.tags.map((tag) => <li key={tag} className="rounded-badge border border-border bg-muted/40 px-1.5 py-0.5 text-micro text-muted-foreground">{tag}</li>)}
+        </ul>
+      )}
       <div className="mt-auto flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
         <HealthPill health={health} loading={activity.loading && !checked} />
         <span className="text-muted-foreground">{agents.length === 0 ? "No agents" : <AgentStack agents={agents} />}</span>
