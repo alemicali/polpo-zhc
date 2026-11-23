@@ -44,6 +44,7 @@ import { describeMissionCost, isValidBudgetUsd, type MissionCostSummary } from "
 import { computeTaskCost, describeTaskCost, usdText } from "@polpo-ai/core/task-cost";
 import { describeTaskRun } from "@polpo-ai/core/run-context";
 import { describeTaskFailure, taskFailure } from "@polpo-ai/core/task-failure";
+import { parseSince } from "@polpo-ai/core/iso-duration";
 import { resolveDependencies } from "@polpo-ai/core";
 import { createCliStores } from "../cli/stores.js";
 import { detectProviders } from "../setup/providers.js";
@@ -252,11 +253,17 @@ const captureAppScreenshotTool: Tool = {
 
 const listTasksTool: Tool = {
   name: "list_tasks",
-  description: "List all tasks, with what each cost in all (every run: retries and continuations included). Optionally filter by status, group, or assigned agent.",
+  description: "List tasks, most recently updated first: status, agent, when it was created and last updated, what each cost in all (every run: retries and continuations included) "
+    + "and, for a failed one, why (the labelled reason; whether it was retried) — no get_task per task needed for \"why did they fail\". "
+    + "Optionally filter by status, group, assigned agent, or time (updatedSince: \"24h\", \"7d\" or an ISO date, for \"in the last 24 hours\").",
   parameters: Type.Object({
-    status: Type.Optional(Type.String({ description: "Filter by status: pending, assigned, in_progress, review, done, failed" })),
+    status: Type.Optional(Type.String({ description: "Filter by status: draft, pending, assigned, in_progress, review, done, failed" })),
     group: Type.Optional(Type.String({ description: "Filter by mission group name" })),
     assignTo: Type.Optional(Type.String({ description: "Filter by agent name" })),
+    updatedSince: Type.Optional(Type.String({ description: "Only tasks updated since then: relative (\"30m\", \"24h\", \"7d\", \"2w\") or an ISO date/time" })),
+    since: Type.Optional(Type.String({ description: "Alias of updatedSince" })),
+    createdSince: Type.Optional(Type.String({ description: "Only tasks created since then (same format as updatedSince)" })),
+    limit: Type.Optional(Type.Number({ description: "At most this many (newest first; default 100)" })),
   }),
 };
 
@@ -353,7 +360,8 @@ const toolScopeParam = Type.Object({
   connectors: Type.Optional(Type.Union([Type.Literal("none"), Type.Array(Type.String())], { description: "Connector ids the run may use (each account is its own connector, e.g. gmail-2), or \"none\". Omit: every connector the agent has." })),
   connectorTools: Type.Optional(Type.Record(Type.String(), Type.Union([Type.Literal("*"), Type.Array(Type.String())]), { description: "Per connector id: \"*\" or the raw tool names (connectors_list shows them). Narrows the agent's connectorTools." })),
   allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Built-in tools or patterns (read, bash, browser_*), not connector tools. Narrows the agent's allowedTools." })),
-}, { description: "Optional: only for runs that must be deterministic (e.g. use only Gmail 2 to send, or only 2 Linear tools). It only narrows what the agent has (never grants); omit it to inherit everything from the agent." });
+}, { description: "Set it whenever the person limits the task's connectors or tools (\"only Linear\", \"only send from Gmail 2\", \"no connectors\"), and for runs that must be deterministic. "
+  + "It only narrows what the agent has (never grants: check connectors_list { agent } first; a connector the agent has no access to must be granted first). Omit it to inherit everything from the agent." });
 
 const createTaskTool: Tool = {
   name: "create_task",
@@ -372,15 +380,17 @@ const createTaskTool: Tool = {
       threshold: Type.Optional(Type.Number()),
     }), { description: "Acceptance criteria for this task" })),
     sideEffects: Type.Optional(Type.Boolean({ description: "True if this task produces irreversible external effects (email sends, API calls, etc.). Blocks automatic retry — requires human approval." })),
+    draft: Type.Optional(Type.Boolean({ description: "True to create it as a draft (\"in bozza\", \"don't start it yet\"): saved, not started, until update_task start: true starts it — use this, not a mission, for one task to keep as a draft" })),
     toolScope: Type.Optional(toolScopeParam),
   }),
 };
 
 const updateTaskTool: Tool = {
   name: "update_task",
-  description: "Update a task's description, assignment, expectations or tool scope.",
+  description: "Update a task's description, assignment, expectations or tool scope, or start a draft task (start: true).",
   parameters: Type.Object({
     taskId: Type.String({ description: "Task ID to update" }),
+    start: Type.Optional(Type.Boolean({ description: "True to start a draft task (it becomes pending and runs)" })),
     description: Type.Optional(Type.String({ description: "New description" })),
     assignTo: Type.Optional(Type.String({ description: "New agent assignment" })),
     expectations: Type.Optional(Type.Array(Type.Object({
@@ -940,8 +950,10 @@ async function execAgentDrive(polpo: Orchestrator, toolName: string, args: Recor
 const agentEngineParam = Type.Optional(Type.Union([
   Type.Literal("polpo"),
   Type.Object({
-    harness: Type.Union([Type.Literal("claude-code"), Type.Literal("codex")], { description: "The official agent runtime: Claude Code or Codex (it must be enabled: harnesses_get / harnesses_update)" }),
-    model: Type.Optional(Type.String({ description: "Model id for the runtime (Bedrock: an inference profile id); omit for the harness setting's" })),
+    harness: Type.Union([Type.Literal("claude-code"), Type.Literal("codex"), Type.Literal("opencode")], {
+      description: "The official agent runtime: Claude Code, Codex or OpenCode (any model, open-weight ones included) — it must be enabled: harnesses_get / harnesses_update",
+    }),
+    model: Type.Optional(Type.String({ description: "Model id for the runtime (Bedrock: an inference profile id; OpenCode: the provider's id, e.g. global.moonshotai.kimi-k3.1 on Bedrock); omit for the harness setting's" })),
     permissionMode: Type.Optional(Type.Union([Type.Literal("allow-all"), Type.Literal("allow-edits"), Type.Literal("allow-reads")], { description: "What the runtime may do without asking (default allow-all: it works unattended in its computer)" })),
     effort: Type.Optional(Type.Union([Type.Literal("low"), Type.Literal("medium"), Type.Literal("high"), Type.Literal("xhigh"), Type.Literal("max")], { description: "Reasoning effort" })),
     maxBudgetUsd: Type.Optional(Type.Number({ description: "Stop a run when its estimated spend passes this (USD)" })),
@@ -950,7 +962,7 @@ const agentEngineParam = Type.Optional(Type.Union([
     })),
   }),
 ], {
-  description: "Its engine: \"polpo\" (Polpo's own, the default) or { harness: \"claude-code\" | \"codex\", ... }: an official harness that runs the agent's TASKS "
+  description: "Its engine: \"polpo\" (Polpo's own, the default) or { harness: \"claude-code\" | \"codex\" | \"opencode\", ... }: an official harness that runs the agent's TASKS "
     + "inside its computer (a remote Daytona v2 computer set as defaultComputer, unless the harness settings allow this server). Credentials come from the "
     + "harness settings (harnesses_update: an API key, Bedrock or Vertex via a setup link; a Claude subscription is not allowed), never from here.",
 }));
@@ -967,7 +979,7 @@ const agentProgressiveToolsParam = Type.Optional(Type.Union([Type.Literal("auto"
 
 const addAgentTool: Tool = {
   name: "add_agent",
-  description: "Add a new agent to a team. If no team is specified, adds to the default (first) team. It can get its engine (a Claude Code / Codex harness: engine + a remote computer as defaultComputer), computers, per-connector tools (connectorTools) and browser egress right here. Use allowedTools to grant extended tool access (e.g. ['browser_*', 'email_*', 'artifact_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*', 'whatsapp_*', 'phone_*']); artifact_* lets it make artifacts (docs, html dashboards, diagrams) people open in Polpo, also on a Claude Code / Codex harness (Polpo tools run on the Polpo server). phone_* grants the agent the VAPI phone tools and requires VAPI credentials in that agent's vault or environment. Core tools (including vault_get/vault_list) are always available. Use allowedTools to restrict to specific tool names.",
+  description: "Add a new agent to a team. If no team is specified, adds to the default (first) team. It can get its engine (a Claude Code / Codex / OpenCode harness: engine + a remote computer as defaultComputer), computers, per-connector tools (connectorTools) and browser egress right here. Use allowedTools to grant extended tool access (e.g. ['browser_*', 'email_*', 'artifact_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*', 'whatsapp_*', 'phone_*']); artifact_* lets it make artifacts (docs, html dashboards, diagrams) people open in Polpo, also on a Claude Code / Codex / OpenCode harness (Polpo tools run on the Polpo server). phone_* grants the agent the VAPI phone tools and requires VAPI credentials in that agent's vault or environment. Core tools (including vault_get/vault_list) are always available. Use allowedTools to restrict to specific tool names.",
   parameters: Type.Object({
     name: Type.String({ description: "Agent name (unique identifier, must be globally unique across all teams)" }),
     role: Type.Optional(Type.String({ description: "Agent role description (e.g. 'Frontend developer')" })),
@@ -1036,7 +1048,7 @@ const agentSandboxParam = Type.Optional(Type.Object({
 
 const updateAgentTool: Tool = {
   name: "update_agent",
-  description: "Update an existing agent's configuration or move it to another team: role, model, prompt, tools, skills, engine (polpo or a Claude Code / Codex harness), "
+  description: "Update an existing agent's configuration or move it to another team: role, model, prompt, tools, skills, engine (polpo or a Claude Code / Codex / OpenCode harness), "
     + "computers and defaultComputer, per-connector tool selection (connectorTools), browser egress proxy, progressive tools, sandbox, learning, drive. "
     + "Changes are applied immediately; do not reload config. Only provided fields are changed; omitted fields keep their current value. Use empty string for reportsTo to remove hierarchy.",
   parameters: Type.Object({
@@ -1194,6 +1206,7 @@ const setIdentityTool: Tool = {
     tone: Type.Optional(Type.String({ description: "Communication tone — HOW the agent communicates (e.g. 'Professional but warm', 'Concise and data-driven')" })),
     personality: Type.Optional(Type.String({ description: "Personality traits — WHO the agent IS (e.g. 'Detail-oriented and empathetic')" })),
     avatar: Type.Optional(Type.String({ description: "Avatar image path relative to project root (e.g. '.polpo/avatars/alice.png'). Upload via POST /agents/:name/avatar endpoint." })),
+    color: Type.Optional(Type.String({ description: "Its colour on screen (avatar, badges): an agent colour token of the instance's look, 'agent1' … 'agent10'. Empty string: back to the one picked from its name." })),
     socials: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "Social & web accounts — keys are platform names, values are handles/URLs (e.g. { x: '@alice', github: 'alice', linkedin: '...', website: 'https://...' })" })),
     responsibilities: Type.Optional(Type.Array(
       Type.Union([
@@ -2900,6 +2913,7 @@ export async function executeOrchestratorTool(
           settings: polpo.getConfig()?.settings,
           redirectUri: connectorRedirectUri(),
           agentNames: async () => (await polpo.getAgents()).map((a) => a.name),
+          agentConnectorTools: async (name) => (await polpo.getAgents()).find((a) => a.name === name),
         });
 
       // ── Task ──
@@ -3209,6 +3223,8 @@ export async function formatToolDetails(
       if (args.group) main.push(["Group", String(args.group)]);
       if (args.description) extra.push(["Description", trunc(args.description, 200)]);
       if (args.dependsOn) extra.push(["Depends on", trunc(args.dependsOn)]);
+      if (args.draft === true) main.push(["Draft", "yes (not started)"]);
+      if (args.toolScope) extra.push(["Tools", describeTaskToolScope(args.toolScope as Parameters<typeof describeTaskToolScope>[0])]);
       break;
     case "update_task":
       main.push(["Task", await resolveTask(args.taskId)]);
@@ -3743,15 +3759,36 @@ async function execListTasks(polpo: Orchestrator, args: Record<string, unknown>)
   if (args.status) tasks = tasks.filter(t => t.status === args.status);
   if (args.group) tasks = tasks.filter(t => t.group === args.group);
   if (args.assignTo) tasks = tasks.filter(t => t.assignTo === args.assignTo);
-  if (tasks.length === 0) return "No tasks found.";
-  const lines = tasks.map(t => {
+  const now = Date.now();
+  const window: string[] = [];
+  const updatedArg = args.updatedSince ?? args.since;
+  if (updatedArg !== undefined && updatedArg !== null && updatedArg !== "") {
+    const since = parseSince(String(updatedArg), now);
+    if (since === undefined) return `Error: updatedSince "${updatedArg}" is neither a relative time (30m, 24h, 7d, 2w) nor an ISO date.`;
+    tasks = tasks.filter(t => Date.parse(t.updatedAt ?? t.createdAt) >= since);
+    window.push(`updated since ${new Date(since).toISOString()}`);
+  }
+  if (args.createdSince !== undefined && args.createdSince !== null && args.createdSince !== "") {
+    const since = parseSince(String(args.createdSince), now);
+    if (since === undefined) return `Error: createdSince "${args.createdSince}" is neither a relative time (30m, 24h, 7d, 2w) nor an ISO date.`;
+    tasks = tasks.filter(t => Date.parse(t.createdAt) >= since);
+    window.push(`created since ${new Date(since).toISOString()}`);
+  }
+  if (tasks.length === 0) return `No tasks found${window.length ? ` (${window.join(", ")})` : ""}.`;
+  // newest activity first: "what happened lately" reads from the top
+  tasks = [...tasks].sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
+  const limit = typeof args.limit === "number" && args.limit > 0 ? Math.floor(args.limit) : 100;
+  const shown = tasks.slice(0, limit);
+  const lines = shown.map(t => {
     const failure = taskFailure(t);
     const cost = t.runs?.length ? computeTaskCost(t) : undefined;
     return `[${t.id}] ${t.status.toUpperCase().padEnd(11)} ${t.title} → ${t.assignTo}${t.group ? ` (${t.group})` : ""}`
+      + ` · created ${t.createdAt} · updated ${t.updatedAt}`
+      + (t.toolScope ? " · tools restricted" : "")
       + (cost && cost.usd > 0 ? ` · ${usdText(cost.usd)}${cost.partial ? "+" : ""}${cost.runs > 1 ? ` over ${cost.runs} runs` : ""}` : "")
-      + (failure ? ` — ${failure.reason.slice(0, 160)}${failure.retryable ? "" : " (not retried)"}` : "");
+      + (failure ? ` — failed (${failure.kind}): ${failure.reason.slice(0, 300)}${failure.retryable ? "" : " (not retried)"}` : "");
   });
-  return `${tasks.length} task(s):\n${lines.join("\n")}`;
+  return `${tasks.length} task(s)${window.length ? ` ${window.join(", ")}` : ""}${shown.length < tasks.length ? `, newest ${shown.length} shown` : ""} (now ${new Date(now).toISOString()}):\n${lines.join("\n")}`;
 }
 
 async function execGetTask(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
@@ -3932,11 +3969,27 @@ async function execCreateTask(polpo: Orchestrator, args: Record<string, unknown>
     group: args.group as string | undefined,
     expectations: args.expectations as any[] | undefined,
     sideEffects: args.sideEffects as boolean | undefined,
+    ...(args.draft === true ? { draft: true } : {}),
     ...(args.toolScope !== undefined && args.toolScope !== null ? { toolScope: args.toolScope } : {}),
   }).catch((err: unknown) => err instanceof TaskToolScopeError ? err : Promise.reject(err));
-  if (task instanceof TaskToolScopeError) return `Error: ${task.message}. The scope may only narrow what ${agentName} has: check connectors_list({ agent: "${agentName}" }) and its allowedTools.`;
-  const scoped = task.toolScope ? ` (tools ${describeTaskToolScope(task.toolScope, connectorManagerFor(polpo).store.list())})` : "";
-  return `Task created: [${task.id}] "${task.title}" → ${task.assignTo}${scoped}`;
+  if (task instanceof TaskToolScopeError) return `Error: ${task.message}. ${toolScopeFix(task, agentName)} The task was NOT created: do not tell the person it was, nor that it is limited.`;
+  const scoped = task.toolScope
+    ? ` — tools ${describeTaskToolScope(task.toolScope, connectorManagerFor(polpo).store.list())}`
+    : " — tools: everything the agent has (no toolScope set)";
+  return `Task created: [${task.id}] "${task.title}" → ${task.assignTo}${task.status === "draft" ? " (draft: not started; update_task with start: true starts it)" : ""}${scoped}`;
+}
+
+/** How to fix a rejected tool scope: grant the connectors first (a scope never grants), else narrow less. */
+function toolScopeFix(err: TaskToolScopeError, agentName?: string): string {
+  const grants = err.missingGrants ?? [];
+  if (grants.length) {
+    const byAgent = new Map<string, string[]>();
+    for (const g of grants) byAgent.set(g.agent, [...(byAgent.get(g.agent) ?? []), g.id]);
+    const lines = [...byAgent].map(([agent, ids]) => `agent "${agent}" has no access to ${ids.map((id) => grants.find((g) => g.id === id)!.label).join(", ")}`
+      + ` (connector_update_access ${ids.map((id) => `{ id: "${id}", addAgents: ["${agent}"] }`).join(", ")})`);
+    return `A tool scope never grants: ${lines.join("; ")}. Offer the person to grant the access first; once they agree and it is granted, set the scope again.`;
+  }
+  return `The scope may only narrow what ${agentName ? `"${agentName}"` : "the agent"} has: check connectors_list({ agent${agentName ? `: "${agentName}"` : ""} }) and its allowedTools.`;
 }
 
 async function execUpdateTask(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
@@ -3969,9 +4022,15 @@ async function execUpdateTask(polpo: Orchestrator, args: Record<string, unknown>
       const updated = await polpo.updateTaskToolScope(taskId, args.toolScope);
       changes.push(`tools → ${describeTaskToolScope(updated.toolScope, connectorManagerFor(polpo).store.list())}`);
     } catch (err) {
-      if (err instanceof TaskToolScopeError) return `Error: ${err.message}. The scope may only narrow what the agent has.${changes.length ? ` (Already changed: ${changes.join(", ")}.)` : ""}`;
+      if (err instanceof TaskToolScopeError) return `Error: ${err.message}. ${toolScopeFix(err, task.assignTo)} The tool scope was NOT changed.${changes.length ? ` (Already changed: ${changes.join(", ")}.)` : ""}`;
       throw err;
     }
+  }
+  if (args.start === true) {
+    if (task.status !== "draft") return `Error: Task ${taskId} is ${task.status}, not a draft: only drafts can be started.${changes.length ? ` (Already changed: ${changes.join(", ")}.)` : ""}`;
+    const started = await polpo.getStore().transition(taskId, "pending");
+    polpo.emit("task:updated", { taskId, task: started, fields: ["status"] });
+    changes.push("started (draft → pending)");
   }
   if (changes.length === 0) return "No changes specified.";
   return `Task ${taskId} updated: ${changes.join(", ")}`;
@@ -4057,7 +4116,8 @@ async function execCreateMission(polpo: Orchestrator, args: Record<string, unkno
     prompt: args.prompt as string | undefined,
     status: "draft",
     ...(budget !== undefined ? { budgetUsd: budget } : {}),
-  });
+  }).catch((err: unknown) => err instanceof TaskToolScopeError ? err : Promise.reject(err));
+  if (mission instanceof TaskToolScopeError) return `Error: ${mission.message}. ${toolScopeFix(mission)} The mission was NOT created.`;
   return `Mission created: [${mission.id}] "${mission.name}" (draft)${mission.budgetUsd !== undefined ? `, budget $${mission.budgetUsd}` : ""}`;
 }
 
@@ -5283,6 +5343,12 @@ async function execSetIdentity(polpo: Orchestrator, args: Record<string, unknown
   if (args.tone !== undefined) updated.tone = args.tone as string;
   if (args.personality !== undefined) updated.personality = args.personality as string;
   if (args.avatar !== undefined) updated.avatar = args.avatar as string;
+  if (args.color !== undefined) {
+    const color = String(args.color).trim();
+    if (color === "") delete updated.color;
+    else if (/^agent(?:[1-9]|10)$/.test(color)) updated.color = color;
+    else return `Error: color must be an agent colour token, agent1 … agent10 (got "${color}")`;
+  }
   if (args.socials !== undefined) updated.socials = args.socials as Record<string, string>;
   if (args.responsibilities !== undefined) {
     updated.responsibilities = (args.responsibilities as (string | AgentResponsibility)[]);

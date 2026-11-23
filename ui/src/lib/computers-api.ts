@@ -7,6 +7,7 @@
  */
 import { apiUrl, config } from "@/lib/config";
 import type { HarnessSession } from "@/lib/harnesses-api";
+import type { ComputerWebhookEvent, ComputerWebhookEventPage, ComputerWebhookOutcome, ComputerWebhookStatus } from "@polpo-ai/react";
 
 // ── Types (mirror @polpo-ai/core computers.ts and src/server/routes/computers.ts) ──
 
@@ -399,25 +400,31 @@ export function computerInput(form: ComputerForm, editing = false): Record<strin
 
 // ── Provider webhooks (Settings → Computers) ─────────────────────────────
 
-export interface ComputerWebhookStatus {
-  provider: "daytona" | "e2b";
-  label: string;
-  registration: "manual" | "api";
-  secretSet: boolean;
-  registered?: boolean;
-  url?: string;
-  inUse: boolean;
-  lastEventAt?: string;
-  lastEventType?: string;
-  received: number;
-  rejected: number;
-  ignored: number;
-  lastError?: string;
-  lastErrorAt?: string;
-  state: "receiving" | "configured" | "not-configured";
+export type {
+  ComputerWebhookStatus, ComputerWebhookOutcome, ComputerWebhookEvent, ComputerWebhookEventSummary, ComputerWebhookEventPage,
+} from "@polpo-ai/react";
+
+export const COMPUTER_WEBHOOK_OUTCOMES: ComputerWebhookOutcome[] = ["accepted", "ignored", "rejected", "error"];
+
+/** "7 ignored, 1 rejected": the deliveries counted before the event log existed (the non-zero ones). */
+export function formatWebhookCountsBefore(b: NonNullable<ComputerWebhookStatus["before"]>): string {
+  const accepted = Math.max(0, b.received - b.ignored - b.errors);
+  return ([[accepted, "accepted"], [b.ignored, "ignored"], [b.rejected, "rejected"], [b.errors, b.errors === 1 ? "error" : "errors"]] as const)
+    .filter(([n]) => n > 0).map(([n, what]) => `${n} ${what}`).join(", ");
 }
 
 export const computerWebhooksApi = {
+  /** A provider's event log, newest first (no payloads); `outcome`: only these. */
+  events: (provider: string, o: { limit?: number; cursor?: string; outcome?: ComputerWebhookOutcome[] } = {}) => {
+    const q = new URLSearchParams();
+    if (o.limit) q.set("limit", String(o.limit));
+    if (o.cursor) q.set("cursor", o.cursor);
+    if (o.outcome?.length) q.set("outcome", o.outcome.join(","));
+    const qs = q.toString();
+    return request<ComputerWebhookEventPage>(`/computer-webhooks/${encodeURIComponent(provider)}/events${qs ? `?${qs}` : ""}`);
+  },
+  /** One delivery with its redacted payload and safe headers. */
+  event: (provider: string, id: string) => request<ComputerWebhookEvent>(`/computer-webhooks/${encodeURIComponent(provider)}/events/${encodeURIComponent(id)}`),
   status: () => request<{ providers: ComputerWebhookStatus[]; note: string; reconcileOnly: string[] }>("/computer-webhooks"),
   setSecret: (provider: string, secret: string) => request<ComputerWebhookStatus>(`/computer-webhooks/${encodeURIComponent(provider)}/secret`, json("PUT", { secret })),
   removeSecret: (provider: string) => request<ComputerWebhookStatus>(`/computer-webhooks/${encodeURIComponent(provider)}/secret`, json("DELETE")),

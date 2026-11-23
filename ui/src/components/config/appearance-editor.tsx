@@ -23,15 +23,16 @@ import { parseImportedAppearance } from "@/lib/appearance-import";
 import { FONT_PRESETS } from "@/lib/font-presets";
 
 const GROUPS: Array<{ id: TokenGroup; label: string; hint: string }> = [
-  { id: "brand", label: "Brand", hint: "Buttons (solid or gradient), links, highlights" },
-  { id: "surfaces", label: "Surfaces", hint: "Page, cards, menus, quiet areas" },
+  { id: "brand", label: "Brand", hint: "Buttons (solid or gradient, with an optional glow), links, highlights" },
+  { id: "surfaces", label: "Surfaces", hint: "Page, cards, menus, quiet areas; the dialog scrim; the sheet behind web pages and QR codes" },
   { id: "text", label: "Text", hint: "On the page and on each surface" },
   { id: "borders", label: "Borders & focus", hint: "Lines, inputs, focus ring" },
   { id: "sidebar", label: "Sidebar", hint: "The navigation column; its opacity and backdrop blur" },
   { id: "charts", label: "Charts", hint: "Series colours" },
+  { id: "agents", label: "Agents", hint: "Ten colours that tell agents apart (avatars, badges, teams, tool kinds), each with its text colour; an agent picks one on its page" },
   { id: "status", label: "Status", hint: "Success, warning, info, errors (and text on them); task states" },
-  { id: "typography", label: "Typography", hint: "Fonts (and web fonts to load); the type scale (rem or px); heading weight; label tracking and case" },
-  { id: "shape", label: "Shape", hint: "Corners (global, cards, controls) and shadows" },
+  { id: "typography", label: "Typography", hint: "Fonts (and web fonts to load); the type scale and the small sizes xs … 3xl (rem or px); the weights; label tracking and case" },
+  { id: "shape", label: "Shape", hint: "Corners (global, cards, controls, badges, pills, avatars, dialogs; 999 = round), shadows (cards, popovers, dialogs and sheets) and glows, blurs" },
 ];
 
 function label(name: string): string {
@@ -349,6 +350,8 @@ export function AppearanceEditor({ onSaveInstanceDefault }: {
     "--pv-button": typeof withDerived.buttonGradient === "object" ? kit.gradientCss(withDerived.buttonGradient)
       : String(withDerived.buttonPrimaryBg ?? withDerived.primary ?? "var(--button-primary-bg)"),
     "--pv-button-fg": String(withDerived.buttonPrimaryForeground ?? withDerived.primaryForeground ?? "var(--button-primary-foreground)"),
+    "--pv-button-shadow": String(withDerived.shadowButtonPrimary ?? "var(--shadow-button-primary)"),
+    "--pv-dialog-shadow": String(withDerived.shadowDialog ?? withDerived.shadowRaised ?? "var(--shadow-dialog)"),
     "--pv-radius-card": typeof withDerived.radiusCard === "number" ? `${withDerived.radiusCard}px`
       : typeof withDerived.radius === "number" ? `${withDerived.radius + 4}px` : "var(--radius-card)",
     "--pv-radius-control": typeof withDerived.radiusControl === "number" ? `${withDerived.radiusControl}px`
@@ -520,6 +523,20 @@ export function AppearanceEditor({ onSaveInstanceDefault }: {
                         onChange={(value) => setToken(name, value)} />
                     );
                   })}
+                  {group.id === "agents" && (
+                    <div className="mt-2 flex flex-wrap gap-1.5" data-testid="agent-colors-preview" aria-label="Agent colours preview">
+                      {Array.from({ length: 10 }, (_, i) => i + 1).map((i) => (
+                        <span key={i} title={`agent${i}`}
+                          className="flex size-7 items-center justify-center rounded-avatar text-caption font-semibold"
+                          style={{
+                            background: String(withDerived[`agent${i}`] ?? `var(--agent-${i})`),
+                            color: String(withDerived[`agent${i}Foreground`] ?? `var(--agent-${i}-foreground)`),
+                          }}>
+                          {String.fromCharCode(64 + i)}{i}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   {group.id === "typography" && (
                     <WebFonts fonts={webFonts} onChange={setWebFonts}
                       onUse={(family) => setToken("fontFamily", `"${family}", ui-sans-serif, system-ui, sans-serif`)} />
@@ -539,19 +556,25 @@ export function AppearanceEditor({ onSaveInstanceDefault }: {
               <div className="text-micro font-semibold" style={{ letterSpacing: "var(--pv-label-tracking)", textTransform: "var(--pv-label-case)" as CSSProperties["textTransform"] }}>Label</div>
               <div style={{ fontFamily: "var(--pv-heading)", fontWeight: "var(--pv-heading-weight)" as CSSProperties["fontWeight"], fontSize: "var(--pv-heading-size)" }}>Heading</div>
               <button type="button" className="h-9 w-full rounded-[var(--pv-radius-control)] px-3 text-sm font-medium"
-                style={{ background: "var(--pv-button)", color: "var(--pv-button-fg)" }}>Primary action</button>
+                data-testid="appearance-preview-button"
+                style={{ background: "var(--pv-button)", color: "var(--pv-button-fg)", boxShadow: "var(--pv-button-shadow)" }}>Primary action</button>
               <div className="rounded-[var(--pv-radius-card)] border p-3 text-xs" style={{ background: "var(--pv-card)", borderColor: "var(--pv-border)" }}>
                 Card surface
                 <div className="mt-1" style={{ color: "var(--pv-muted-fg)" }}>Muted text</div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <span className="rounded-full px-2 py-0.5 text-xs" style={{ background: "var(--pv-secondary)" }}>Secondary</span>
-                <span className="rounded-full px-2 py-0.5 text-xs" style={{ background: "var(--pv-success)", color: "var(--pv-success-fg)" }}>Done</span>
-                <span className="rounded-full px-2 py-0.5 text-xs" style={{ background: "var(--pv-warning)", color: "var(--pv-warning-fg)" }}>Waiting</span>
-                <span className="rounded-full px-2 py-0.5 text-xs" style={{ background: "var(--pv-info)", color: "var(--pv-info-fg)" }}>Running</span>
-                <span className="rounded-full px-2 py-0.5 text-xs" style={{ background: "var(--pv-destructive)", color: "var(--pv-destructive-fg)" }}>Error</span>
+              <div className="rounded-[var(--pv-radius)] border p-3 text-xs" data-testid="appearance-preview-dialog"
+                style={{ background: "var(--pv-bg)", borderColor: "var(--pv-border)", boxShadow: "var(--pv-dialog-shadow)" }}>
+                Dialog
+                <div className="mt-1" style={{ color: "var(--pv-muted-fg)" }}>Dialogs and sheets float with their own shadow</div>
               </div>
-              <div className="flex h-4 overflow-hidden rounded">
+              <div className="flex flex-wrap gap-2">
+                <span className="rounded-pill px-2 py-0.5 text-xs" style={{ background: "var(--pv-secondary)" }}>Secondary</span>
+                <span className="rounded-pill px-2 py-0.5 text-xs" style={{ background: "var(--pv-success)", color: "var(--pv-success-fg)" }}>Done</span>
+                <span className="rounded-pill px-2 py-0.5 text-xs" style={{ background: "var(--pv-warning)", color: "var(--pv-warning-fg)" }}>Waiting</span>
+                <span className="rounded-pill px-2 py-0.5 text-xs" style={{ background: "var(--pv-info)", color: "var(--pv-info-fg)" }}>Running</span>
+                <span className="rounded-pill px-2 py-0.5 text-xs" style={{ background: "var(--pv-destructive)", color: "var(--pv-destructive-fg)" }}>Error</span>
+              </div>
+              <div className="flex h-4 overflow-hidden rounded-xs">
                 {["chart1", "chart2", "chart3", "chart4", "chart5"].map((c, i) => (
                   <span key={c} className="flex-1" style={{ background: String(withDerived[c] ?? `var(--chart-${i + 1})`) }} />
                 ))}

@@ -14,6 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { ACTION_META, actionLabel } from "@/components/computers/computer-actions";
 import { StatusBadge } from "@/components/computers/status-badge";
 import { BrandIcon } from "@/components/shared/brand-icon";
+import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { EngineBadge } from "@/components/shared/run-context";
 import { HARNESS_NAMES, type HarnessSession } from "@/lib/harnesses-api";
 import { computerBrand } from "@/lib/run-context";
@@ -42,6 +43,7 @@ function AgentsCell({ computer, agentEngines }: { computer: Computer; agentEngin
     <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5" data-testid="computer-agents">
       {shown.map((a, i) => (
         <span key={a.name} className="inline-flex min-w-0 items-center gap-1" title={a.isDefault || computer.builtin ? `${a.name} (default)` : `${a.name} may use it`}>
+          <AgentAvatar name={a.name} size="xs" />
           <EngineBadge engine={agentEngines?.[a.name]} size={12} />
           <span className={cn("truncate", !a.isDefault && !computer.builtin && "text-muted-foreground")}>{a.name}{i < shown.length - 1 ? "," : ""}</span>
         </span>
@@ -69,7 +71,7 @@ export interface ComputersTableProps {
   computers: Computer[];
   busy: string | null;
   agentEngines?: Record<string, string | undefined>;
-  /** Harness sessions (Claude Code, Codex), all computers. */
+  /** Harness sessions (Claude Code, Codex, OpenCode), all computers. */
   sessions: HarnessSession[];
   onOpen: (computer: Computer) => void;
   onAction: (computer: Computer, action: ComputerAction) => void;

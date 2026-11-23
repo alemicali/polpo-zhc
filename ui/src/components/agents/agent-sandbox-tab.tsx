@@ -154,7 +154,7 @@ function ToolPlacementCard({ tools, provider, chatProvider }: { tools?: string[]
               <p className="mt-0.5 text-micro leading-tight text-muted-foreground">{PLACEMENT_INFO[placement].description}</p>
               <div className="mt-2 flex flex-wrap gap-1">
                 {groups[placement].length
-                  ? groups[placement].map((t) => <code key={t} className="rounded bg-muted/40 px-1 py-0.5 text-micro">{t}</code>)
+                  ? groups[placement].map((t) => <code key={t} className="rounded-xs bg-muted/40 px-1 py-0.5 text-micro">{t}</code>)
                   : <span className="text-micro text-muted-foreground/60">none</span>}
               </div>
             </div>

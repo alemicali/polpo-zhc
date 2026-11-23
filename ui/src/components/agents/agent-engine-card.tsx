@@ -1,5 +1,5 @@
 /**
- * The agent's engine: Polpo's own, or an official harness (Claude Code, Codex) running in its
+ * The agent's engine: Polpo's own, or an official harness (Claude Code, Codex, OpenCode) running in its
  * computer. Only harnesses enabled in Settings → Harnesses are offered; the server refuses an
  * engine the agent's computer cannot run (shown as the error). Model, permission mode, effort, a
  * per-run budget and the agent's own key (a vault reference that replaces the harness's API key or
@@ -16,7 +16,8 @@ import { Input } from "@/components/ui/input";
 import { BrandIcon } from "@/components/shared/brand-icon";
 import { VaultRefPicker } from "@/components/vault/vault-ref-picker";
 import { HarnessTestLine } from "@/components/config/harness-test-line";
-import { authBrand, AUTH_LABELS, engineBrand, engineLabel } from "@/lib/run-context";
+import { ProviderIcon } from "@/components/shared/provider-icon";
+import { authBrand, AUTH_LABELS, engineBrand, engineLabel, openCodeProviderIcon } from "@/lib/run-context";
 import {
   HARNESS_NAMES, harnessesApi,
   type AgentHarnessEngine, type HarnessEffort, type HarnessesOverview, type HarnessId, type HarnessPermissionMode, type HarnessSession, type HarnessTestResult,
@@ -69,7 +70,7 @@ export function AgentEngineCard() {
   };
 
   return (
-    <Card className="gap-0 border-border/40 bg-card/80 py-0 backdrop-blur-sm" data-testid="agent-engine-card">
+    <Card className="gap-0 border-border/40 bg-card/80 py-0 backdrop-blur-surface" data-testid="agent-engine-card">
       <CardContent className="space-y-3 px-4 py-3 text-xs">
         <div className="flex items-center gap-1.5 text-label text-muted-foreground"><Cpu className="h-3 w-3" /> Engine</div>
         {/* the engine it runs on now, with its mark (and how the harness authenticates) */}
@@ -78,10 +79,13 @@ export function AgentEngineCard() {
           <span className="font-medium">{engineLabel(current?.harness)}</span>
           {current?.model && <span className="text-muted-foreground">{current.model}</span>}
           {(() => {
-            const auth = current ? overview.harnesses.find((h) => h.id === current.harness)?.auth : undefined;
+            const item = current ? overview.harnesses.find((h) => h.id === current.harness) : undefined;
+            const auth = item?.auth;
+            const ocProvider = openCodeProviderIcon(current?.harness, { kind: auth, provider: item?.provider });
             return auth ? (
-              <span className="inline-flex items-center gap-1 text-muted-foreground" title={`Authenticates with ${AUTH_LABELS[auth] ?? auth}`}>
-                <BrandIcon name={authBrand(auth, current?.harness)} size={14} /> {AUTH_LABELS[auth] ?? auth}
+              <span className="inline-flex items-center gap-1 text-muted-foreground" title={`Authenticates with ${AUTH_LABELS[auth] ?? auth}${item?.provider ? ` (${item.provider})` : ""}`}>
+                {ocProvider ? <ProviderIcon name={ocProvider} size={14} /> : <BrandIcon name={authBrand(auth, current?.harness, item?.provider)} size={14} />}
+                {AUTH_LABELS[auth] ?? auth}{item?.provider && auth === "api-key" ? ` · ${item.provider}` : ""}
               </span>
             ) : null;
           })()}
@@ -95,9 +99,10 @@ export function AgentEngineCard() {
             <option value="polpo">Polpo</option>
             {enabled.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
           </select>
+          {harness && <BrandIcon name={harness.harness} size={16} />}
           {harness && (
             <>
-              <Input className="h-8 w-56 text-xs" placeholder={`Model (default: ${overview.harnesses.find((h) => h.id === harness.harness)?.model ?? "the runtime's"})`}
+              <Input className="h-8 w-56 text-xs" placeholder={`Model (default: ${overview.harnesses.find((h) => h.id === harness.harness)?.model ?? (harness.harness === "opencode" ? "the setting's" : "the runtime's")})`}
                 value={harness.model ?? ""} onChange={(e) => set({ model: e.target.value.trim() || undefined })} aria-label="Harness model" />
               <select aria-label="Permission mode" className={selectClass} value={harness.permissionMode ?? "allow-all"} onChange={(e) => set({ permissionMode: e.target.value as HarnessPermissionMode })}>
                 <option value="allow-all">Works unattended (allow all)</option>
@@ -108,12 +113,15 @@ export function AgentEngineCard() {
                 <option value="">Default effort</option>
                 {(["low", "medium", "high", "xhigh", "max"] as const).map((x) => <option key={x} value={x}>{x}</option>)}
               </select>
-              <Input className="h-8 w-32 text-xs" type="number" min={0} step={0.5} placeholder="Budget $/run" value={harness.maxBudgetUsd ?? ""}
-                onChange={(e) => set({ maxBudgetUsd: e.target.value ? Number(e.target.value) : undefined })} aria-label="Budget per run (USD)" />
+              {harness.harness === "claude-code" || harness.maxBudgetUsd ? (
+                <Input className="h-8 w-32 text-xs" type="number" min={0} step={0.5} placeholder="Budget $/run" value={harness.maxBudgetUsd ?? ""}
+                  onChange={(e) => set({ maxBudgetUsd: e.target.value ? Number(e.target.value) : undefined })} aria-label="Budget per run (USD)" />
+              ) : null}
               {(() => {
                 const s = overview.harnesses.find((h) => h.id === harness.harness);
-                // its own key replaces an API key or a gateway key (not Bedrock / Vertex, not a keyless gateway)
-                const can = s?.auth && s.auth !== "bedrock" && s.auth !== "vertex" && s.gateway?.authScheme !== "none";
+                // its own key replaces an API key or a gateway key (not Bedrock / Vertex, not a keyless gateway;
+                // OpenCode's Bedrock API key is a key too)
+                const can = s?.auth && (s.auth !== "bedrock" || harness.harness === "opencode") && s.auth !== "vertex" && s.gateway?.authScheme !== "none";
                 return can || harness.credentialRef ? (
                   <div className="w-64" title="This agent's own key (cost separation): replaces the harness's key for its runs">
                     <VaultRefPicker value={harness.credentialRef} onChange={(ref) => set({ credentialRef: ref ?? undefined })} requiredKeys={["apiKey"]}

@@ -3,6 +3,7 @@ import { CreateTaskSchema, UpdateTaskSchema } from "../schemas.js";
 import { buildETag, handleConditional, quickFingerprint } from "../etag.js";
 import { summarizeTaskRun } from "@polpo-ai/core/run-context";
 import { taskFailure } from "@polpo-ai/core/task-failure";
+import { parseSince } from "@polpo-ai/core/iso-duration";
 import { computeTaskCost, summarizeTaskCost, taskMayHaveDroppedRuns } from "@polpo-ai/core/task-cost";
 
 // ── Route definitions ─────────────────────────────────────────────────
@@ -38,12 +39,19 @@ const listTasksRoute = createRoute({
       q: z.string().optional().openapi({
         description: "Full-text search across task title and description. Uses SQLite FTS5 with prefix matching. When set, results are ranked by relevance and `cursor` is ignored.",
       }),
+      updatedSince: z.string().optional().openapi({
+        description: "Only tasks updated at or after this time: an ISO date/time (`2026-11-21T08:00:00Z`) or a duration back from now (`30m`, `24h`, `7d`, `2w`, `PT24H`). 400 INVALID_SINCE otherwise.",
+      }),
     }),
   },
   responses: {
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
       description: "List of tasks. Returns `{ tasks, nextCursor, hasMore }` when `limit`/`cursor`/`q` is set, otherwise `Task[]` for backwards compat.",
+    },
+    400: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
+      description: "`updatedSince` is neither an ISO date/time nor a duration (INVALID_SINCE)",
     },
     304: {
       description: "Not modified — client has the current list per ETag",
@@ -62,7 +70,7 @@ const getTaskRoute = createRoute({
   responses: {
     200: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.any() }) } },
-      description: "Task details. `runs`: where and with what each run executed (engine polpo / claude-code / codex, model, auth kind, "
+      description: "Task details. `runs`: where and with what each run executed (engine polpo / claude-code / codex / opencode, model, auth kind, "
         + "computer, sandbox, egress, harness session, cost, budget, status, duration), newest last. `result.stderr` of a failed task is its "
         + "labelled reason (a harness error says what to change); `result.retryable: false`: it was not retried automatically "
         + "(model not enabled for the account, credentials refused). `failure` sums it up: `{ reason, retryable, kind }` "
@@ -387,7 +395,11 @@ export function taskRoutes(getDeps: () => {
   /** A tool scope asking for more than the agent has: 400 with the problems. */
   const toolScopeError = (err: unknown) =>
     err instanceof Error && (err.name === "TaskToolScopeError" || (err as { code?: string }).code === "INVALID_TOOL_SCOPE")
-      ? { ok: false as const, error: err.message, code: "INVALID_TOOL_SCOPE", problems: (err as { problems?: string[] }).problems ?? [] }
+      ? {
+          ok: false as const, error: err.message, code: "INVALID_TOOL_SCOPE", problems: (err as { problems?: string[] }).problems ?? [],
+          // connectors the scope names that the agent is not granted: grant them first, then set the scope
+          missingGrants: (err as { missingGrants?: Array<{ agent: string; id: string; label: string }> }).missingGrants ?? [],
+        }
       : undefined;
 
   const app = new OpenAPIHono();
@@ -395,7 +407,17 @@ export function taskRoutes(getDeps: () => {
   // GET /tasks — list all tasks, optional filters
   app.openapi(listTasksRoute, async (c) => {
     const deps = getDeps();
-    const { status, group, assignTo, summary, slim, limit, cursor, q } = c.req.valid("query");
+    const { status, group, assignTo, summary, slim, limit, cursor, q, updatedSince } = c.req.valid("query");
+    let since: string | undefined;
+    if (updatedSince !== undefined && updatedSince !== "") {
+      const at = parseSince(updatedSince);
+      if (at === undefined) {
+        return c.json({ ok: false, error: `updatedSince "${updatedSince}" is neither an ISO date/time nor a duration such as 24h or 7d`, code: "INVALID_SINCE" }, 400);
+      }
+      since = new Date(at).toISOString();
+    }
+    /** Updated at or after `since` (ISO strings compare in time order). */
+    const recent = (t: any) => !since || (t.updatedAt ?? t.createdAt ?? "") >= since;
 
     // ── Paginated path ────────────────────────────────────────────────
     // Triggered by *any* of `limit`, `cursor`, or `q`. Uses the store's
@@ -444,6 +466,13 @@ export function taskRoutes(getDeps: () => {
         };
       }
 
+      // updatedSince: newest-updated first, so the first older task ends the list (no more pages)
+      if (since) {
+        const kept = page.tasks.filter(recent);
+        if (kept.length < page.tasks.length && !q) page = { tasks: kept, nextCursor: null, hasMore: false };
+        else page = { ...page, tasks: kept };
+      }
+
       // Same slim projection used in the legacy path.
       const wantSlim = summary === "true" || slim === "true";
       const projected = wantSlim ? page.tasks.map((t: any) => projectSlim(t)) : page.tasks;
@@ -462,6 +491,7 @@ export function taskRoutes(getDeps: () => {
     if (status) tasks = tasks.filter((t: any) => t.status === status);
     if (group) tasks = tasks.filter((t: any) => t.group === group);
     if (assignTo) tasks = tasks.filter((t: any) => t.assignTo === assignTo);
+    if (since) tasks = tasks.filter(recent);
 
     // `slim=true` is an alias for `summary=true`. Slim projection kicks in
     // only when the client opts in. Keeps every field the list rows render;

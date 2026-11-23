@@ -535,7 +535,7 @@ function EventRow({ event }: { event: EventRowData }) {
             {/* Category icon */}
             <div
               className={cn(
-                "flex h-7 w-7 shrink-0 items-center justify-center rounded-md mt-0.5 backdrop-blur-sm",
+                "flex h-7 w-7 shrink-0 items-center justify-center rounded-md mt-0.5 backdrop-blur-surface",
                 catCfg.bg,
               )}
             >
@@ -568,7 +568,7 @@ function EventRow({ event }: { event: EventRowData }) {
 
             {/* Severity dot + expand */}
             <div className="flex items-center gap-2 shrink-0 mt-1">
-              <div className={cn("h-1.5 w-1.5 rounded-full", sevStyle.dot)} />
+              <div className={cn("h-1.5 w-1.5 rounded-pill", sevStyle.dot)} />
               <ChevronDown
                 className={cn(
                   "h-3.5 w-3.5 text-muted-foreground transition-transform",
@@ -632,7 +632,7 @@ function CategoryStats({ events }: { events: EventRowData[] }) {
               <div className="flex items-center gap-1.5 cursor-help">
                 <div
                   className={cn(
-                    "h-2 w-2 rounded-full",
+                    "h-2 w-2 rounded-pill",
                     severityStyles[sev].dot,
                   )}
                 />
@@ -1048,7 +1048,7 @@ function HistoryView() {
  * Events: what polpo-zhc emits (tasks, agents, missions, approvals, notifications, system
  * messages…), live as it happens or from the history kept per server start.
  */
-/** Each agent's engine ("polpo", "claude-code", "codex"): run events show the harness's mark. */
+/** Each agent's engine ("polpo", "claude-code", "codex", "opencode"): run events show the harness's mark. */
 const AgentEnginesContext = createContext<Record<string, string>>({});
 
 /** The engine mark of a run event: the engine it reports (agent:spawned), else its agent's. */
@@ -1119,8 +1119,8 @@ function EventsPageInner() {
               Live
               {mode === "live" && connected && (
                 <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-success" />
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-pill bg-success opacity-75" />
+                  <span className="relative inline-flex rounded-pill h-2 w-2 bg-success" />
                 </span>
               )}
             </ToggleGroupItem>

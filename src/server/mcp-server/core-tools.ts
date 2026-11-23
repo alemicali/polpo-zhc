@@ -6,6 +6,7 @@ import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from "@model
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { agentCardText, buildAgentCard, type AgentCard } from "../mcp-agent-card.js";
 import { AGENT_CARD_HTML } from "../mcp-widgets.generated.js";
+import { cardAppearance } from "./card-appearance.js";
 import {
   BAD_CURSOR, DESTRUCTIVE, READ, WRITE, allowed, apiError, apiGet, apiSend, clip, cursorParam, enc, fail, formatBytes, limitParam,
   looseObject, ok, page, pageOutput, qs, short, unwrap,
@@ -28,10 +29,11 @@ async function loadAgentCard(deps: McpDeps, name: string): Promise<{ ok: true; c
   const list = (agents.data as AgentCardAgent[]) ?? [];
   const agent = list.find((a) => a.name === name) ?? list.find((a) => a.name.toLowerCase() === name.toLowerCase() || a.identity?.displayName?.toLowerCase() === name.toLowerCase());
   if (!agent) return { ok: false, error: `No agent "${name}". Agents: ${list.map((a) => a.name).join(", ") || "none"}` };
-  const [tasks, drive, connectors] = await Promise.all([
+  const [tasks, drive, connectors, appearance] = await Promise.all([
     deps.api("GET", "/api/v1/tasks").then(unwrap),
     deps.api("GET", `/api/v1/drive/${enc(agent.name)}`).then(unwrap),
     deps.api("GET", "/api/v1/connectors").then(unwrap),
+    cardAppearance(deps),
   ]);
   const card = buildAgentCard({
     agent,
@@ -41,7 +43,7 @@ async function loadAgentCard(deps: McpDeps, name: string): Promise<{ ok: true; c
     now: new Date(),
     key: { createdAt: Date.now(), seq: ++cardSeq },
   });
-  return { ok: true, card };
+  return { ok: true, card: appearance ? { ...card, appearance } : card };
 }
 
 /**
@@ -116,7 +118,7 @@ export function registerAgentTools(tool: Register, deps: McpDeps, server: McpSer
 
   registerAppTool(server, "polpo_agent_show", {
     title: "Show an agent",
-    description: "Show one agent's card: whether it is working, its engine (Polpo, Claude Code, Codex) and computer, the task at hand "
+    description: "Show one agent's card: whether it is working, its engine (Polpo, Claude Code, Codex, OpenCode) and computer, the task at hand "
       + "(with the engine, model, computer and cost of its latest run, or why it failed), today's results, what it plans next, "
       + "its main goal and the connectors it may use; it opens to its tasks, goals and routine. Use it when the person asks how an agent is doing (polpo_agents_list for names).",
     inputSchema: { agent: z.string().min(1).describe("The agent's name or display name") },
@@ -205,7 +207,10 @@ export function registerApprovalTools(tool: Register, deps: McpDeps): void {
   });
 }
 
-const artifactItem = z.object({ id: z.string(), title: z.string(), type: z.string(), kind: z.string().optional(), createdBy: z.string().optional(), version: z.number().optional() }).passthrough();
+const artifactItem = z.object({
+  id: z.string(), title: z.string(), type: z.string(), kind: z.string().optional(), createdBy: z.string().optional(), version: z.number().optional(),
+  taskId: z.string().optional(), missionId: z.string().optional(), size: z.number().optional(), updatedAt: z.string().optional(),
+}).passthrough();
 
 export function registerArtifactTools(tool: Register, deps: McpDeps): void {
   tool("artifacts", "polpo_artifacts_list", {
@@ -225,8 +230,10 @@ export function registerArtifactTools(tool: Register, deps: McpDeps): void {
     const all = ((r.data as Array<Record<string, unknown>>) ?? []).map(({ content: _c, ...rest }) => rest);
     const p = page(all, limit ?? 20, cursor);
     if (!p) return fail(BAD_CURSOR);
-    const lines = (p.items as Array<{ id: string; title: string; type: string; kind?: string; createdBy?: string; version?: number }>)
-      .map((a) => `- ${a.id} [${a.type}${a.kind ? `/${a.kind}` : ""}] ${a.title}${a.createdBy ? ` — by ${a.createdBy}` : ""}${a.version ? `, v${a.version}` : ""}`);
+    const lines = (p.items as Array<{ id: string; title: string; type: string; kind?: string; createdBy?: string; version?: number; taskId?: string; missionId?: string; size?: number; updatedAt?: string }>)
+      .map((a) => `- ${a.id} [${a.type}${a.kind ? `/${a.kind}` : ""}] ${a.title}${a.createdBy ? ` — by ${a.createdBy}` : ""}${a.version ? `, v${a.version}` : ""}`
+        + `${a.taskId ? `, from task ${a.taskId}${a.missionId ? ` (mission ${a.missionId})` : ""}` : ""}`
+        + `${typeof a.size === "number" ? `, ${a.size} bytes` : ""}${a.updatedAt ? `, updated ${a.updatedAt.slice(0, 16).replace("T", " ")}` : ""}`);
     return ok(`${lines.join("\n") || "No artifacts."}${p.next_cursor ? `\n(more: cursor ${p.next_cursor})` : ""}`, p);
   });
 

@@ -4,10 +4,12 @@
 import type { TaskRunContext, TaskRunEngine, TaskRunSummary } from "@polpo-ai/react";
 import type { BrandName } from "@/lib/brand-icons";
 
-export const ENGINE_LABELS: Record<TaskRunEngine, string> = { polpo: "Polpo", "claude-code": "Claude Code", codex: "Codex" };
+export const ENGINE_LABELS: Record<TaskRunEngine, string> = { polpo: "Polpo", "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode" };
+
+const HARNESS_ENGINES = new Set<string>(["claude-code", "codex", "opencode"]);
 
 export function engineBrand(engine: string | undefined): BrandName {
-  return engine === "claude-code" ? "claude-code" : engine === "codex" ? "codex" : "polpo";
+  return engine && HARNESS_ENGINES.has(engine) ? (engine as BrandName) : "polpo";
 }
 
 export function engineLabel(engine: string | undefined): string {
@@ -16,21 +18,32 @@ export function engineLabel(engine: string | undefined): string {
 
 /** The engine of an agent's config (`"polpo"` or `{ harness }`). */
 export function agentEngineId(engine: unknown): TaskRunEngine {
-  if (engine === "claude-code" || engine === "codex") return engine;
+  if (typeof engine === "string" && HARNESS_ENGINES.has(engine)) return engine as TaskRunEngine;
   if (engine && typeof engine === "object") {
     const h = (engine as { harness?: unknown }).harness;
-    if (h === "claude-code" || h === "codex") return h;
+    if (typeof h === "string" && HARNESS_ENGINES.has(h)) return h as TaskRunEngine;
   }
   return "polpo";
 }
 
 export const AUTH_LABELS: Record<string, string> = { bedrock: "Bedrock", vertex: "Vertex AI", "api-key": "API key", "ai-gateway": "Vercel AI Gateway", gateway: "model gateway" };
 
-export function authBrand(kind: string | undefined, engine?: string): BrandName {
+export function authBrand(kind: string | undefined, engine?: string, provider?: string): BrandName {
   if (kind === "bedrock") return "bedrock";
   if (kind === "vertex") return "vertex";
-  if (kind === "api-key") return engine === "codex" ? "openai" : engine === "claude-code" ? "anthropic" : "api-key";
+  if (kind === "api-key") {
+    // OpenCode: its provider's mark when there is one here (others: ProviderIcon, see openCodeProviderIcon)
+    if (engine === "opencode") return provider === "anthropic" ? "anthropic" : provider === "openai" ? "openai" : "api-key";
+    return engine === "codex" ? "openai" : engine === "claude-code" ? "anthropic" : "api-key";
+  }
   return "api-key";
+}
+
+/** OpenCode's model provider with a ProviderIcon of its own (Google, xAI, Moonshot, Z.ai, the Vercel AI Gateway…), else undefined. */
+export function openCodeProviderIcon(engine: string | undefined, auth: { kind?: string; provider?: string } | undefined): string | undefined {
+  if (engine !== "opencode" || !auth?.provider) return undefined;
+  if (auth.kind === "bedrock" || auth.provider === "anthropic" || auth.provider === "openai" || auth.provider === "polpo-gateway") return undefined;
+  return auth.provider;
 }
 
 /**

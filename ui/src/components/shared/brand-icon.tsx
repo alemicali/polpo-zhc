@@ -1,6 +1,6 @@
 /**
  * BrandIcon — the official mark of what a run executes with or on: engines (Claude Code, Codex,
- * Polpo), auth providers (Amazon Bedrock, Vertex AI, an API key), computers (Daytona, E2B, this
+ * OpenCode, Polpo), auth providers (Amazon Bedrock, Vertex AI, an API key), computers (Daytona, E2B, this
  * server) and egress (Tailscale).
  *
  * The marks are bundled, never hotlinked (scripts/fetch-brand-icons.mjs): simple-icons vectors
@@ -34,6 +34,8 @@ const VECTOR: Partial<Record<BrandName, { key: keyof typeof BRAND_VECTORS; mono?
   anthropic: { key: "anthropic", mono: true },
   tailscale: { key: "tailscale", mono: true },
   "google-cloud": { key: "google-cloud" },
+  // OpenCode's mark is black: drawn in the text colour so it shows in dark mode
+  opencode: { key: "opencode", mono: true },
 };
 
 const asset = (file: string) => `${import.meta.env.BASE_URL ?? "/"}brand-icons/${file}`.replace(/\/{2,}/g, "/");

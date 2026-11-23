@@ -978,3 +978,68 @@ describe("empty replies (non-streaming, what channels use)", () => {
     await orchestrator.removeAgent("agent-2");
   });
 });
+
+describe("live verification fixes", () => {
+  const tasks = [{ title: "Raccogli dati", description: "Scrivi dati.md", assignTo: "agent-1" }];
+
+  test("non-streaming: the create_mission preview keeps its budget, and approving it creates the mission with it", async () => {
+    setStreamImpl(mockTurnSequence([mockToolCallResponse("create_mission", { name: "budgeted", data: JSON.stringify({ tasks }), budgetUsd: 20 })]));
+    const body = await parseJson(await postCompletions({ messages: [{ role: "user", content: "a mission, at most $20" }], stream: false }));
+    const choice = (body.choices as any[])[0];
+    expect(choice.finish_reason).toBe("mission_preview");
+    expect(choice.mission_preview).toEqual({ name: "budgeted", data: { tasks }, budgetUsd: 20 });
+
+    // the dashboard's approval (respondToMission) creates exactly the proposal
+    const { missionRequestOf } = await import("../../ui/src/lib/mission-preview.js");
+    const created = await app.request("/api/v1/missions", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(missionRequestOf(choice.mission_preview, JSON.stringify(choice.mission_preview.data))),
+    });
+    expect(created.status).toBe(201);
+    const mission = (await created.json()).data;
+    expect(mission.budgetUsd).toBe(20);
+    expect((await orchestrator.getMission(mission.id))?.budgetUsd).toBe(20);
+  });
+
+  test("streaming: the mission_preview chunk keeps the budget", async () => {
+    setStreamImpl(() => {
+      const msg = mockToolCallResponse("create_mission", { name: "budgeted-stream", data: JSON.stringify({ tasks }), budgetUsd: 7.5 });
+      return mockStream(mockToolCallStreamEvents(msg), msg);
+    });
+    const chunks = await parseSSE(await postCompletions({ messages: [{ role: "user", content: "mission" }], stream: true }));
+    const preview = chunks.map((c) => (c.choices as any[])?.[0]).find((ch) => ch?.finish_reason === "mission_preview");
+    expect(preview?.mission_preview).toEqual({ name: "budgeted-stream", data: { tasks }, budgetUsd: 7.5 });
+  });
+
+  test("non-streaming: set_session_title renames the session (no \"Unknown tool\")", async () => {
+    setStreamImpl(mockTurnSequence([
+      mockToolCallResponse("set_session_title", { title: "Weather Report" }),
+      mockTextResponse("Here it is."),
+    ]));
+    const res = await postCompletions({ messages: [{ role: "user", content: "weather report please" }], stream: false }, { "x-session-id": "new" });
+    expect(res.status).toBe(200);
+    const sid = res.headers.get("x-session-id")!;
+    expect((await parseJson(res)).choices).toEqual([expect.objectContaining({ message: expect.objectContaining({ content: "Here it is." }) })]);
+    const sessions = (await (await app.request("/api/v1/chat/sessions")).json()).data;
+    const list = Array.isArray(sessions) ? sessions : sessions.sessions;
+    expect(list.find((s: any) => s.id === sid)?.title).toBe("Weather Report");
+    const history = (await (await app.request(`/api/v1/chat/sessions/${sid}/messages`)).json()).data.messages;
+    const call = history.flatMap((m: any) => m.toolCalls ?? []).find((t: any) => t.name === "set_session_title");
+    expect(call).toMatchObject({ state: "completed", result: 'Session title set to: "Weather Report".' });
+  });
+
+  test("non-streaming usage is this request's provider usage, summed over its steps (not a constant estimate)", async () => {
+    setStreamImpl(mockTurnSequence([mockTextResponse("one step")]));
+    const one = (await parseJson(await postCompletions({ messages: [{ role: "user", content: "a" }], stream: false }))).usage;
+    expect(one).toEqual({ prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 });
+
+    setStreamImpl(mockTurnSequence([mockToolCallResponse("list_agents", {}), mockTextResponse("two steps")]));
+    const two = (await parseJson(await postCompletions({ messages: [{ role: "user", content: "b" }], stream: false }))).usage;
+    expect(two).toEqual({ prompt_tokens: 200, completion_tokens: 100, total_tokens: 300 });
+
+    // cache reads count as prompt tokens
+    setStreamImpl(mockTurnSequence([mockTextResponse("cached", { usage: { input: 10, output: 5, cacheRead: 90, cacheWrite: 0, totalTokens: 105, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } })]));
+    const cached = (await parseJson(await postCompletions({ messages: [{ role: "user", content: "c" }], stream: false }))).usage;
+    expect(cached).toEqual({ prompt_tokens: 100, completion_tokens: 5, total_tokens: 105 });
+  });
+});

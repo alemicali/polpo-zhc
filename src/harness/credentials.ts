@@ -9,11 +9,14 @@
  * transformer): the VM gets a placeholder and the base URL of Polpo's relay, never the key.
  * Bedrock and Vertex sign their requests (SigV4, Google OAuth), so they are not brokered.
  */
+import { randomBytes } from "node:crypto";
 import {
-  CLAUDE_SUBSCRIPTION_REFUSAL, CREDENTIAL_NAMES, DEFAULT_AI_GATEWAY_BASE_URL, HARNESS_NAMES, harnessCredentialRef, pickCredential, resolveVaultRef,
-  type AgentHarnessEngine, type GatewayAuthScheme, type HarnessesSettings, type HarnessGatewaySettings, type VaultRef, type VaultStore,
+  CLAUDE_SUBSCRIPTION_REFUSAL, CREDENTIAL_NAMES, DEFAULT_AI_GATEWAY_BASE_URL, HARNESS_NAMES, OPENCODE_AI_GATEWAY_PROVIDER, OPENCODE_BEDROCK_PROVIDER,
+  OPENCODE_GATEWAY_PROVIDER, OPENCODE_PROVIDERS, harnessCredentialRef, openCodeModelId, pickCredential, resolveVaultRef,
+  type AgentHarnessEngine, type GatewayAuthScheme, type HarnessesSettings, type HarnessGatewaySettings, type OpenCodeHarnessSettings, type OpenCodeKeyHeader,
+  type OpenCodeWireFormat, type VaultRef, type VaultStore,
 } from "@polpo-ai/core";
-import type { HarnessAuth } from "./types.js";
+import type { HarnessAuth, RequestTransformation } from "./types.js";
 
 export class HarnessCredentialError extends Error {
   constructor(message: string) { super(message); this.name = "HarnessCredentialError"; }
@@ -30,14 +33,16 @@ export interface HarnessCredentialFile { envVar: string; name: string; content: 
  * - `baseUrlEnv`: the auth variable that holds the base URL (the relay URL replaces it).
  */
 export interface HarnessModelRoute {
-  format: "anthropic" | "openai-responses";
+  /** The wire format (OpenCode: also Chat Completions, Gemini, Bedrock Converse, the AI Gateway's own). */
+  format: "anthropic" | "openai-responses" | "openai-chat" | "google" | "bedrock" | "ai-gateway";
   mode: "direct" | "ai-gateway" | "gateway";
   upstream: string;
   scheme?: GatewayAuthScheme;
   /** The key itself (the connection test; never into the VM when brokered). Undefined for scheme "none". */
   key?: string;
   headers: Record<string, string>;
-  baseUrlEnv: "ANTHROPIC_BASE_URL" | "AI_GATEWAY_BASE_URL" | "OPENAI_BASE_URL";
+  /** Claude Code / Codex: the auth variable with the base URL. OpenCode has none (its provider config holds it). */
+  baseUrlEnv?: "ANTHROPIC_BASE_URL" | "AI_GATEWAY_BASE_URL" | "OPENAI_BASE_URL";
   /** Non-Claude models behind the Anthropic format. */
   nonClaude?: boolean;
 }
@@ -55,7 +60,41 @@ export interface ResolvedHarnessAuth extends HarnessAuth {
   /** Bedrock / Vertex details for the connection test. */
   cloud?: { kind: "bedrock"; region: string; bearer?: string; accessKeyId?: string; secretAccessKey?: string; sessionToken?: string } | { kind: "vertex"; region: string; projectId: string; serviceAccountJson: string };
   /** Where the model runs (error messages name it; gateways: the harness's provider format). */
-  provider: "anthropic" | "bedrock" | "vertex" | "openai";
+  provider: "anthropic" | "bedrock" | "vertex" | "openai" | "other";
+  /** The provider's name in messages ("Moonshot AI", "Vercel AI Gateway", "Gateway llm.example.com"). */
+  providerLabel?: string;
+  /** OpenCode: how Polpo writes its provider config (the provider, model, key option, region). */
+  openCode?: OpenCodeProviderPlan;
+  /** OpenCode, after brokering: the config handed to the runtime (provider section, model). */
+  openCodeConfig?: Record<string, unknown>;
+  /** OpenCode, brokered: Polpo's own credential rules (placeholder → key), for the relay or the provider. */
+  credentialRules?: RequestTransformation[];
+}
+
+/**
+ * OpenCode's provider for a run. Polpo writes OpenCode's provider config itself (never the
+ * adapter's environment lookup): the key option holds the key, or a placeholder when brokered,
+ * and the base URL is Polpo's relay when it is the relay that brokers.
+ */
+export interface OpenCodeProviderPlan {
+  /** OpenCode's provider id: the model's prefix (anthropic, openai, amazon-bedrock, vercel, polpo-gateway…). */
+  provider: string;
+  /** The provider's model id. */
+  modelId: string;
+  /** The AI SDK package of a custom gateway provider (OpenCode's catalog knows the others). */
+  npm?: string;
+  /** A name for a custom provider. */
+  name?: string;
+  /** The header OpenCode's provider SDK sends the key in (the placeholder's header). */
+  sends: OpenCodeKeyHeader;
+  /** The header the upstream wants it in ("none": the gateway takes no key). */
+  keyHeader: OpenCodeKeyHeader | "none";
+  /** The provider option with the key (@ai-sdk/anthropic: authToken sends it as a Bearer token). */
+  keyOption: "apiKey" | "authToken";
+  /** Bedrock's region. */
+  region?: string;
+  /** Write the base URL even when nothing is relayed (gateways). */
+  explicitBaseUrl: boolean;
 }
 
 /** Claude subscription OAuth tokens (Pro/Max): refused by policy. */
@@ -71,7 +110,7 @@ const CLAUDE_CODE_BASE_ENV: Record<string, string> = {
   DISABLE_AUTOUPDATER: "1",
 };
 
-const where = (h: "claude-code" | "codex") => (h === "claude-code" ? 'settings.harnesses["claude-code"]' : "settings.harnesses.codex");
+const where = (h: "claude-code" | "codex" | "opencode") => (h === "claude-code" ? 'settings.harnesses["claude-code"]' : `settings.harnesses.${h}`);
 
 /** The secret headers of a gateway, resolved from the vault, and the literal ones. */
 async function gatewayHeaders(g: HarnessGatewaySettings | undefined, vault: VaultStore | undefined, w: string, secrets: string[]): Promise<Record<string, string>> {
@@ -117,6 +156,146 @@ function claudeModelEnv(model: string | undefined, g: HarnessGatewaySettings | u
   return env;
 }
 
+/** The header an AI SDK provider package sends its key in. */
+function sendsOf(format: OpenCodeWireFormat): OpenCodeKeyHeader {
+  return format === "anthropic" ? "x-api-key" : format === "google" ? "x-goog-api-key" : "bearer";
+}
+
+/**
+ * OpenCode's credential, explicitly from the vault: a provider API key, a Bedrock API key (bearer
+ * token: SigV4 access keys are refused, they cannot be brokered), the Vercel AI Gateway key or a
+ * custom gateway's key. Everything goes in OpenCode's provider config (resolveOpenCodeConfig).
+ */
+async function resolveOpenCodeAuth(engine: AgentHarnessEngine, h: OpenCodeHarnessSettings, vault: VaultStore | undefined): Promise<ResolvedHarnessAuth> {
+  const w = "settings.harnesses.opencode";
+  const mainRef = engine.credentialRef ?? harnessCredentialRef(h);
+  const refWhere = engine.credentialRef ? "the agent's engine.credentialRef" : h.gateway ? `${w}.gateway.credentialRef` : `${w}.credentialRef`;
+  const g = h.gateway;
+  const secrets: string[] = [];
+  const provider = h.auth === "api-key" ? h.provider! : h.auth === "bedrock" ? OPENCODE_BEDROCK_PROVIDER : h.auth === "ai-gateway" ? OPENCODE_AI_GATEWAY_PROVIDER : OPENCODE_GATEWAY_PROVIDER;
+  const rawModel = engine.model ?? g?.models?.main ?? h.model;
+  if (!rawModel) throw new HarnessCredentialError(`OpenCode needs a model: set ${w}.model${h.gateway ? " (or gateway.models.main)" : ""} or the agent's engine.model (e.g. ${h.auth === "api-key" ? OPENCODE_PROVIDERS[h.provider!].example : h.auth === "bedrock" ? "global.moonshotai.kimi-k3.1" : "moonshotai/kimi-k2"})`);
+  const modelId = openCodeModelId(rawModel, provider);
+  const model = `${provider}/${modelId}`;
+  const what = `OpenCode (${refWhere})`;
+
+  if (h.auth === "api-key") {
+    const p = OPENCODE_PROVIDERS[h.provider!];
+    const key = await keyFrom(mainRef, vault, [...p.keyNames, ...CREDENTIAL_NAMES.apiKey], what);
+    if (h.provider === "anthropic" && CLAUDE_OAUTH_TOKEN.test(key)) throw new HarnessCredentialError(`OpenCode: that vault entry holds a Claude subscription token. ${CLAUDE_SUBSCRIPTION_REFUSAL}`);
+    return {
+      auth: {}, env: {}, secrets: [key], files: [], model,
+      provider: h.provider === "anthropic" ? "anthropic" : h.provider === "openai" ? "openai" : "other", providerLabel: p.name,
+      route: { format: p.format, mode: "direct", upstream: p.baseUrl, key, headers: {} },
+      openCode: { provider, modelId, sends: sendsOf(p.format), keyHeader: p.keyHeader, keyOption: "apiKey", explicitBaseUrl: false },
+    };
+  }
+
+  if (h.auth === "bedrock") {
+    const region = h.bedrock?.region;
+    if (!region) throw new HarnessCredentialError(`OpenCode on Bedrock needs ${w}.bedrock.region`);
+    if (!mainRef) throw new HarnessCredentialError(`${what}: no credential (credentialRef)`);
+    const creds = await resolveVaultRef(vault, mainRef);
+    if (!creds) throw new HarnessCredentialError(`${what}: the vault entry ${mainRef.owner} / ${mainRef.service} is missing`);
+    const bearer = pickCredential(creds, ["AWS_BEARER_TOKEN_BEDROCK", "bearerToken", "bedrockApiKey", ...CREDENTIAL_NAMES.apiKey]);
+    if (!bearer) {
+      const sigv4 = pickCredential(creds, [...CREDENTIAL_NAMES.accessKeyId]) && pickCredential(creds, [...CREDENTIAL_NAMES.secretAccessKey]);
+      throw new HarnessCredentialError(`OpenCode on Bedrock: the vault entry ${mainRef.owner} / ${mainRef.service} needs a Bedrock API key (a field named apiKey or AWS_BEARER_TOKEN_BEDROCK)${sigv4 ? ": AWS access keys sign every request (SigV4) and cannot be kept out of the VM, so OpenCode takes a Bedrock API key only" : ""}`);
+    }
+    const upstream = `https://bedrock-runtime.${region}.amazonaws.com`;
+    return {
+      auth: {}, env: {}, secrets: [bearer], files: [], model, provider: "bedrock", providerLabel: "Bedrock",
+      cloud: { kind: "bedrock", region, bearer },
+      route: { format: "bedrock", mode: "direct", upstream, key: bearer, headers: {} },
+      openCode: { provider, modelId, sends: "bearer", keyHeader: "bearer", keyOption: "apiKey", region, explicitBaseUrl: false },
+    };
+  }
+
+  // gateways
+  const scheme: GatewayAuthScheme = h.auth === "ai-gateway" ? "bearer" : (g?.authScheme ?? "bearer");
+  const key = scheme === "none" ? undefined : await keyFrom(mainRef, vault, ["AI_GATEWAY_API_KEY", ...CREDENTIAL_NAMES.apiKey], what);
+  if (key) {
+    if (CLAUDE_OAUTH_TOKEN.test(key)) throw new HarnessCredentialError(`OpenCode: that vault entry holds a Claude subscription token. ${CLAUDE_SUBSCRIPTION_REFUSAL}`);
+    secrets.push(key);
+  }
+  const headers = await gatewayHeaders(g, vault, w, secrets);
+  if (h.auth === "ai-gateway") {
+    const base = (g?.baseUrl ?? DEFAULT_AI_GATEWAY_BASE_URL).replace(/\/+$/, "");
+    return {
+      auth: {}, env: {}, secrets, files: [], model, provider: "other", providerLabel: "Vercel AI Gateway",
+      route: { format: "ai-gateway", mode: "ai-gateway", upstream: `${base}/v1/ai`, ...(key ? { key } : {}), headers },
+      openCode: { provider, modelId, sends: "bearer", keyHeader: "bearer", keyOption: "apiKey", explicitBaseUrl: true },
+    };
+  }
+  const format = g!.format ?? "openai-chat";
+  const upstream = format === "anthropic" ? `${g!.baseUrl!}/v1` : g!.baseUrl!;
+  // @ai-sdk/anthropic sends apiKey as x-api-key and authToken as a Bearer token; the OpenAI ones send Bearer
+  const keyOption = format === "anthropic" && scheme === "bearer" ? "authToken" : "apiKey";
+  const sends: OpenCodeKeyHeader = format === "anthropic" ? (keyOption === "authToken" ? "bearer" : "x-api-key") : "bearer";
+  return {
+    auth: {}, env: {}, secrets, files: [], model, provider: "other", providerLabel: `Gateway ${new URL(g!.baseUrl!).host}`,
+    route: { format, mode: "gateway", upstream, scheme, ...(key ? { key } : {}), headers },
+    openCode: {
+      provider, modelId, sends, keyHeader: scheme === "none" ? "none" : scheme, keyOption, explicitBaseUrl: true, name: "Polpo gateway",
+      npm: format === "anthropic" ? "@ai-sdk/anthropic" : format === "openai-responses" ? "@ai-sdk/openai" : "@ai-sdk/openai-compatible",
+    },
+  };
+}
+
+/** Polpo's credential rules for OpenCode: requests carrying the placeholder get the key (as the upstream wants it). */
+export function openCodeCredentialRules(o: { upstream: string; placeholder: string; sends: OpenCodeKeyHeader; keyHeader: OpenCodeKeyHeader | "none"; key?: string }): RequestTransformation[] {
+  const host = new URL(o.upstream).hostname;
+  const match = o.sends === "x-api-key" ? { key: { exact: "x-api-key" }, value: { exact: o.placeholder } }
+    : o.sends === "x-goog-api-key" ? { key: { exact: "x-goog-api-key" }, value: { exact: o.placeholder } }
+      : { key: { exact: "authorization" }, value: { exact: `Bearer ${o.placeholder}` } };
+  const transform: Record<string, string> = o.keyHeader === "none" || !o.key ? { authorization: "", "x-api-key": "" }
+    : o.keyHeader === "x-api-key" ? { "x-api-key": o.key, authorization: "" }
+      : o.keyHeader === "x-goog-api-key" ? { "x-goog-api-key": o.key }
+        : { authorization: `Bearer ${o.key}`, "x-api-key": "" };
+  return [{ match: { host, headers: [match] }, transform: { headers: transform } }];
+}
+
+/**
+ * OpenCode's config for one run: only the chosen provider (no other provider, no OpenCode Zen, no
+ * login), the model (also the small model: titles and summaries stay on it), the key (or the
+ * placeholder), the base URL (Polpo's relay when it brokers), gateway headers when not brokered.
+ */
+function brokeredOpenCodeAuth(a: ResolvedHarnessAuth, mode: HarnessBrokering, relayBaseUrl?: string): ResolvedHarnessAuth {
+  const oc = a.openCode!;
+  const route = a.route!;
+  if (mode === "relay" && !relayBaseUrl) throw new Error("brokeredHarnessAuth: the relay base URL is required");
+  if (mode === "none" && oc.keyHeader !== "none" && oc.keyHeader !== oc.sends && !(oc.keyHeader === "x-api-key" && oc.sends === "x-api-key")) {
+    throw new HarnessCredentialError(`OpenCode sends this provider's key as ${oc.sends === "bearer" ? "Authorization: Bearer" : oc.sends}; a gateway that wants ${oc.keyHeader} needs Polpo's model relay (set POLPO_PUBLIC_URL and expose its relay path)`);
+  }
+  const placeholder = mode === "none" ? undefined : `polpo-placeholder-${randomBytes(24).toString("base64url")}`;
+  const credential = placeholder ?? route.key ?? NO_KEY_PLACEHOLDER;
+  const options: Record<string, unknown> = {};
+  if (oc.region) options.region = oc.region;
+  options[oc.keyOption] = credential;
+  const base = mode === "relay" ? relayBaseUrl : oc.explicitBaseUrl ? route.upstream : undefined;
+  if (base) options[oc.provider === OPENCODE_BEDROCK_PROVIDER ? "endpoint" : "baseURL"] = base;
+  if (mode === "none" && Object.keys(route.headers).length) options.headers = { ...route.headers };
+  const config: Record<string, unknown> = {
+    enabled_providers: [oc.provider],
+    model: a.model,
+    small_model: a.model,
+    provider: {
+      [oc.provider]: {
+        ...(oc.npm ? { npm: oc.npm } : {}),
+        ...(oc.name ? { name: oc.name } : {}),
+        options,
+        // listed: a model OpenCode's catalog does not know yet still resolves (catalog data is kept)
+        models: { [oc.modelId]: {} },
+      },
+    },
+  };
+  const credentialRules = placeholder
+    ? openCodeCredentialRules({ upstream: route.upstream, placeholder, sends: oc.sends, keyHeader: oc.keyHeader, ...(route.key ? { key: route.key } : {}) })
+    : undefined;
+  const { headers: _unbrokered, ...rest } = a;
+  return { ...rest, openCodeConfig: config, ...(credentialRules ? { credentialRules } : {}) };
+}
+
 export async function resolveHarnessAuth(
   engine: AgentHarnessEngine,
   settings: HarnessesSettings | undefined,
@@ -127,6 +306,8 @@ export async function resolveHarnessAuth(
   const w = where(engine.harness);
   const h = settings[engine.harness];
   if (!h) throw new HarnessCredentialError(`${name} has no settings (${w})`);
+  if (engine.harness === "opencode") return resolveOpenCodeAuth(engine, h as OpenCodeHarnessSettings, vault);
+  if (h.auth === "bedrock" && engine.harness !== "claude-code") throw new HarnessCredentialError(`${name} has no Bedrock authentication`);
   // the agent's own credential (cost separation) replaces the main one
   const mainRef = engine.credentialRef ?? harnessCredentialRef(h);
   const refWhere = engine.credentialRef ? "the agent's engine.credentialRef" : h.gateway ? `${w}.gateway.credentialRef` : `${w}.credentialRef`;
@@ -254,6 +435,7 @@ export type HarnessBrokering = "relay" | "native" | "none";
  * Unbrokered ("none"): the gateway headers go with the model requests from the VM.
  */
 export function brokeredHarnessAuth(a: ResolvedHarnessAuth, mode: HarnessBrokering, relayBaseUrl?: string): ResolvedHarnessAuth {
+  if (a.openCode) return brokeredOpenCodeAuth(a, mode, relayBaseUrl);
   if (!a.route || mode === "none") {
     const headers = a.route && Object.keys(a.route.headers).length ? a.route.headers : undefined;
     if (a.route?.scheme === "x-api-key" && a.route.format === "openai-responses") {
@@ -261,14 +443,14 @@ export function brokeredHarnessAuth(a: ResolvedHarnessAuth, mode: HarnessBrokeri
     }
     // the direct Anthropic / OpenAI routes keep the runtime's own base URL (none in the environment)
     const auth = { ...a.auth };
-    if (a.route?.mode === "direct") delete auth[a.route.baseUrlEnv];
+    if (a.route?.mode === "direct" && a.route.baseUrlEnv) delete auth[a.route.baseUrlEnv];
     return { ...a, auth, ...(headers ? { headers } : {}) };
   }
   const auth = { ...a.auth };
   if (mode === "relay") {
     if (!relayBaseUrl) throw new Error("brokeredHarnessAuth: the relay base URL is required");
-    auth[a.route.baseUrlEnv] = relayBaseUrl;
-  } else if (a.route.mode === "direct") {
+    if (a.route.baseUrlEnv) auth[a.route.baseUrlEnv] = relayBaseUrl;
+  } else if (a.route.mode === "direct" && a.route.baseUrlEnv) {
     // native: the VM calls the upstream itself (the provider swaps the placeholder on the way out)
     auth[a.route.baseUrlEnv] = a.route.upstream;
   }

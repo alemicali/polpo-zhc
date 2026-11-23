@@ -154,8 +154,8 @@ function TabItem({ id, title, active, streaming, starred, onSelect, onClose, onR
               aria-label="Streaming"
               className="relative inline-flex h-2 w-2 shrink-0"
             >
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-60" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-pill bg-primary opacity-60" />
+              <span className="relative inline-flex h-2 w-2 rounded-pill bg-primary" />
             </span>
           )}
           {starred && (

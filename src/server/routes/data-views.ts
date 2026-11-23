@@ -21,6 +21,7 @@ const QuerySchema = z.object({
   })).optional(),
   limit: z.number().int().positive().max(1000).optional(),
   offset: z.number().int().nonnegative().optional(),
+  includeTotal: z.boolean().optional(),
 });
 
 const WidgetSchema = z.object({
@@ -40,6 +41,8 @@ const WidgetSchema = z.object({
 const BindingSchema = z.union([
   z.object({ id: z.string().min(1), query: QuerySchema }),
   z.object({ id: z.string().min(1), inline: z.object({ label: z.string().optional(), rows: z.array(z.record(z.string(), z.unknown())).max(500) }) }),
+  // a read-only statement on a SQLite / PostgreSQL source, run live (the runtime refuses anything that writes)
+  z.object({ id: z.string().min(1), sql: z.object({ sourceId: z.string().min(1), statement: z.string().trim().min(1).max(20_000) }) }),
 ]);
 
 const ViewSchema = z.object({

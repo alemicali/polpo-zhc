@@ -6,6 +6,7 @@ import type { Task, TaskResult, AssessmentResult, PolpoConfig } from "../core/ty
 import { TypedEmitter } from "../core/events.js";
 import { InMemoryTaskStore, InMemoryRunStore, createTestActivity, createMockStores } from "./fixtures.js";
 import type { RunRecord } from "../core/run-store.js";
+import { TaskManager } from "../core/task-manager.js";
 
 // Mock external LLM modules — these must be mocked before importing the class
 vi.mock("../llm/query.js", () => ({
@@ -615,6 +616,73 @@ describe("AssessmentOrchestrator", () => {
       expect(retryEvents).toHaveLength(0);
       expect(t.retries).toBe(0);
       expect(t.result).toMatchObject({ exitCode: 1, stderr, retryable: false });
+    });
+
+    it("a non-retryable failure skips the review and the fix loop: failed after 1 attempt with the classified message", async () => {
+      const h = createHarness();
+      const task = await addReviewTask(h, { maxRetries: 3, expectations: [{ type: "test", command: "npm test" }] });
+      const events: string[] = [];
+      for (const e of ["task:retry", "task:fix", "assessment:started", "task:maxRetries"] as const) h.emitter.on(e, () => events.push(e));
+      const stderr = 'Anthropic: authentication failed — check the credentials in the vault entry of Settings → Harnesses. Claude Code: Invalid API key';
+
+      h.ao.handleResult(task.id, { ...createFailResult(), stderr, retryable: false });
+
+      await vi.waitFor(async () => {
+        expect((await h.store.getTask(task.id))!.status).toBe("failed");
+      });
+      const t = (await h.store.getTask(task.id))!;
+      expect(h.assessFn).not.toHaveBeenCalled();
+      expect(events).toEqual([]);
+      expect(t.retries).toBe(0);
+      expect(t.fixAttempts ?? 0).toBe(0);
+      expect(t.result).toMatchObject({ exitCode: 1, stderr, retryable: false });
+    });
+
+    it("a non-retryable failure of a task with side effects fails instead of waiting for approval to re-run", async () => {
+      const h = createHarness();
+      const task = await addReviewTask(h, { maxRetries: 3, sideEffects: true });
+      const blocked: any[] = [];
+      h.emitter.on("task:retry:blocked", (e) => blocked.push(e));
+
+      h.ao.handleResult(task.id, { ...createFailResult(), stderr: "Bedrock: model not enabled for this account", retryable: false });
+
+      await vi.waitFor(async () => {
+        expect((await h.store.getTask(task.id))!.status).toBe("failed");
+      });
+      expect(blocked).toHaveLength(0);
+    });
+
+    it("a retryable failure with expectations is still reviewed and retried", async () => {
+      const h = createHarness();
+      const task = await addReviewTask(h, { maxRetries: 3, expectations: [{ type: "test", command: "npm test" }] });
+      h.assessFn.mockResolvedValue({ passed: false, checks: [{ type: "test", passed: false, message: "tests failed" }], metrics: [], timestamp: new Date().toISOString() } as AssessmentResult);
+      const retryEvents: any[] = [];
+      h.emitter.on("task:retry", (e) => retryEvents.push(e));
+
+      h.ao.handleResult(task.id, createFailResult({ stderr: "ECONNRESET" }));
+
+      await vi.waitFor(async () => {
+        expect((await h.store.getTask(task.id))!.status).toBe("pending");
+      });
+      expect(h.assessFn).toHaveBeenCalledTimes(1);
+      expect(retryEvents).toHaveLength(1);
+      expect((await h.store.getTask(task.id))!.retries).toBe(1);
+    });
+
+    it("a task failed by a non-retryable error can still be retried by hand", async () => {
+      const h = createHarness();
+      const task = await addReviewTask(h, { maxRetries: 3 });
+      h.ao.handleResult(task.id, { ...createFailResult(), stderr: "Bedrock: model not enabled for this account", retryable: false });
+      await vi.waitFor(async () => {
+        expect((await h.store.getTask(task.id))!.status).toBe("failed");
+      });
+      const retried: any[] = [];
+      h.emitter.on("task:retried", (e) => retried.push(e));
+
+      await new TaskManager(h.ctx).retryTask(task.id);
+
+      expect((await h.store.getTask(task.id))!.status).toBe("pending");
+      expect(retried).toHaveLength(1);
     });
 
     it("preserves originalDescription on first retry", async () => {

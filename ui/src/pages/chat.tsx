@@ -130,6 +130,7 @@ import { useChatState, useChatActions, useChatInputDisabled } from "@/hooks/chat
 import { setChatPageSessionsOpen, useChatPageSessionsOpen } from "@/hooks/chat-context";
 import { WidgetCard, WidgetPendingCard } from "@/components/widget-card";
 import { ArtifactChatCard } from "@/components/artifacts/artifact-chat-card";
+import { budgetText } from "@/lib/mission-preview";
 import { artifactIdOf } from "@/lib/artifacts-api";
 import { WhatsAppPreviewCard, EmailPreviewCard } from "@/components/send-preview-card";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
@@ -350,7 +351,7 @@ function MicButton({
           variant="ghost"
           size="icon"
           className={cn(
-            "h-8 w-8 rounded-[calc(var(--radius)+999px)] transition-all",
+            "h-8 w-8 rounded-pill transition-all",
             isListening
               ? "bg-destructive/15 text-destructive hover:bg-destructive/25 ring-2 ring-destructive/30 animate-pulse"
               : "text-muted-foreground hover:text-foreground hover:bg-accent",
@@ -398,7 +399,7 @@ function AttachmentPreview({ onCount }: { onCount?: (count: number) => void }) {
           )}
           <button
             type="button"
-            className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover/thumb:opacity-100 transition-opacity"
+            className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-pill bg-destructive text-destructive-foreground flex items-center justify-center opacity-0 group-hover/thumb:opacity-100 transition-opacity"
             onClick={() => remove(file.id)}
           >
             <X className="h-2.5 w-2.5" />
@@ -421,7 +422,7 @@ function AttachButton({ disabled }: { disabled?: boolean }) {
           type="button"
           variant="ghost"
           size="icon"
-          className="h-8 w-8 rounded-[calc(var(--radius)+999px)] text-muted-foreground hover:text-foreground hover:bg-accent"
+          className="h-8 w-8 rounded-pill text-muted-foreground hover:text-foreground hover:bg-accent"
           onClick={openFileDialog}
           disabled={disabled}
         >
@@ -576,6 +577,9 @@ function MissionPreviewCard({
             {tasks.length} task{tasks.length !== 1 ? "s" : ""}
             {mission?.team && mission.team.length > 0 && (
               <> &middot; {mission.team.length} agent{mission.team.length !== 1 ? "s" : ""}</>
+            )}
+            {preview.budgetUsd !== undefined && (
+              <> &middot; budget {budgetText(preview.budgetUsd)}</>
             )}
           </p>
         </div>
@@ -889,7 +893,7 @@ function MissionPreviewCard({
               className="gap-1.5"
             >
               {submitting ? (
-                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                <span className="h-3.5 w-3.5 animate-spin rounded-pill border-2 border-current border-t-transparent" />
               ) : (
                 <Send className="h-3.5 w-3.5" />
               )}
@@ -941,7 +945,7 @@ function MissionPreviewCard({
             className="w-full gap-1.5 sm:w-auto"
           >
             {submitting ? (
-              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              <span className="h-3.5 w-3.5 animate-spin rounded-pill border-2 border-current border-t-transparent" />
             ) : (
               <Play className="h-3.5 w-3.5" />
             )}
@@ -1076,7 +1080,7 @@ function VaultPreviewCard({
           className="gap-1.5"
         >
           {submitting ? (
-            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            <span className="h-3.5 w-3.5 animate-spin rounded-pill border-2 border-current border-t-transparent" />
           ) : (
             <ShieldCheck className="h-3.5 w-3.5" />
           )}
@@ -1268,7 +1272,7 @@ function DesignPreviewCard({
           className="gap-1.5"
         >
           {submitting ? (
-            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            <span className="h-3.5 w-3.5 animate-spin rounded-pill border-2 border-current border-t-transparent" />
           ) : (
             <Check className="h-3.5 w-3.5" />
           )}
@@ -1471,7 +1475,7 @@ function QuestionCard({
               >
                 <span
                   className={cn(
-                    "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors",
+                    "flex h-4 w-4 shrink-0 items-center justify-center rounded-pill border transition-colors",
                     isSelected
                       ? "border-primary bg-primary"
                       : "border-muted-foreground/40"
@@ -1657,7 +1661,7 @@ function AskUserCards({
           >
             {submitting ? (
               <>
-                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                <span className="h-3.5 w-3.5 animate-spin rounded-pill border-2 border-current border-t-transparent" />
                 Sending...
               </>
             ) : (
@@ -1693,7 +1697,7 @@ function AskUserCards({
               )}
             >
               <span className={cn(
-                "h-2 w-2 rounded-full shrink-0",
+                "h-2 w-2 rounded-pill shrink-0",
                 status === "answered" ? "bg-success"
                   : isActive ? "bg-primary" : "bg-border",
               )} />
@@ -1746,7 +1750,7 @@ function AskUserCards({
                     className="flex items-start gap-2 w-full text-left rounded-lg px-3 py-2 hover:bg-muted/50 transition-colors"
                   >
                     <span className={cn(
-                      "h-2 w-2 rounded-full shrink-0 mt-1.5",
+                      "h-2 w-2 rounded-pill shrink-0 mt-1.5",
                       status === "answered" ? "bg-success" : "bg-border",
                     )} />
                     <div className="flex-1 min-w-0">
@@ -1811,7 +1815,7 @@ function AskUserCards({
               >
                 {submitting ? (
                   <>
-                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                    <span className="h-3.5 w-3.5 animate-spin rounded-pill border-2 border-current border-t-transparent" />
                     Sending...
                   </>
                 ) : (
@@ -2073,8 +2077,8 @@ function SessionRow({
               {isStreaming ? (
                 <span className="flex items-center gap-1 font-medium text-primary/70">
                   <span className="relative flex h-2 w-2 shrink-0">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-pill bg-primary opacity-75" />
+                    <span className="relative inline-flex rounded-pill h-2 w-2 bg-primary" />
                   </span>
                   Streaming...
                 </span>
@@ -2470,7 +2474,7 @@ function SessionSidebar({
                   shape="circle"
                 />
               ) : (
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-base">
+                <div className="flex h-8 w-8 items-center justify-center rounded-pill bg-primary/10 text-base">
                   🐙
                 </div>
               )}
@@ -2526,7 +2530,7 @@ function SessionSidebar({
                     shape="circle"
                   />
                 ) : (
-                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-xs">
+                  <div className="flex h-6 w-6 items-center justify-center rounded-pill bg-primary/10 text-xs">
                     🐙
                   </div>
                 )}
@@ -2536,7 +2540,7 @@ function SessionSidebar({
                   <span className="whitespace-normal break-words text-small font-bold tracking-tight text-foreground leading-tight">
                     {displayName}
                   </span>
-                  <span className="shrink-0 text-micro font-bold tracking-[0.12em] uppercase text-muted-foreground/55 border border-border/60 rounded-sm px-1 py-px leading-none">
+                  <span className="shrink-0 text-micro font-bold tracking-widest uppercase text-muted-foreground/55 border border-border/60 rounded-sm px-1 py-px leading-none">
                     {agent ? "Agent" : "Orchestrator"}
                   </span>
                 </div>
@@ -2675,11 +2679,11 @@ function SessionSidebar({
           aria-label="Resize Agent Chats sidebar"
           onPointerDown={startResize}
           className={cn(
-            "absolute inset-y-0 -right-1 z-20 w-2 cursor-col-resize rounded-full outline-none focus-visible:ring-2 focus-visible:ring-primary/40 group",
+            "absolute inset-y-0 -right-1 z-20 w-2 cursor-col-resize rounded-pill outline-none focus-visible:ring-2 focus-visible:ring-primary/40 group",
             mobileFullWidth && "hidden lg:block"
           )}
         >
-          <span className="absolute inset-y-3 left-1/2 w-px -translate-x-1/2 rounded-full bg-border transition-all group-hover:w-[3px] group-hover:bg-primary/40" />
+          <span className="absolute inset-y-3 left-1/2 w-px -translate-x-1/2 rounded-pill bg-border transition-all group-hover:w-[3px] group-hover:bg-primary/40" />
         </button>
       )}
       {renderHeader()}
@@ -2722,12 +2726,12 @@ function ChatMessagesSkeleton() {
       </div>
       {/* Assistant message skeleton */}
       <div className="flex gap-3">
-        <Skeleton className="h-7 w-7 rounded-full shrink-0" />
+        <Skeleton className="h-7 w-7 rounded-pill shrink-0" />
         <div className="flex-1 space-y-2">
-          <Skeleton className="h-3 w-16 rounded" />
-          <Skeleton className="h-4 w-full rounded" />
-          <Skeleton className="h-4 w-3/4 rounded" />
-          <Skeleton className="h-4 w-5/6 rounded" />
+          <Skeleton className="h-3 w-16 rounded-xs" />
+          <Skeleton className="h-4 w-full rounded-xs" />
+          <Skeleton className="h-4 w-3/4 rounded-xs" />
+          <Skeleton className="h-4 w-5/6 rounded-xs" />
         </div>
       </div>
       {/* User message skeleton */}
@@ -2736,11 +2740,11 @@ function ChatMessagesSkeleton() {
       </div>
       {/* Assistant message skeleton */}
       <div className="flex gap-3">
-        <Skeleton className="h-7 w-7 rounded-full shrink-0" />
+        <Skeleton className="h-7 w-7 rounded-pill shrink-0" />
         <div className="flex-1 space-y-2">
-          <Skeleton className="h-3 w-16 rounded" />
-          <Skeleton className="h-4 w-full rounded" />
-          <Skeleton className="h-4 w-2/3 rounded" />
+          <Skeleton className="h-3 w-16 rounded-xs" />
+          <Skeleton className="h-4 w-full rounded-xs" />
+          <Skeleton className="h-4 w-2/3 rounded-xs" />
         </div>
       </div>
     </div>
@@ -2771,7 +2775,7 @@ function ChatToolbar({
 
   if (compact) {
     return (
-      <div className="grid shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-b border-border/40 bg-background/80 px-2 py-1.5 backdrop-blur-md">
+      <div className="grid shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-b border-border/40 bg-background/80 px-2 py-1.5 backdrop-blur-surface">
         <div className="flex shrink-0 items-center gap-1">
             <Tooltip>
               <TooltipTrigger asChild>
@@ -2834,7 +2838,7 @@ function ChatToolbar({
 
         <div className="flex shrink-0 items-center justify-end gap-1">
           {messages.length > 0 && (
-            <span className="hidden rounded-full bg-muted/70 px-2 py-0.5 text-micro font-medium leading-4 text-muted-foreground min-[430px]:inline-flex">
+            <span className="hidden rounded-pill bg-muted/70 px-2 py-0.5 text-micro font-medium leading-4 text-muted-foreground min-[430px]:inline-flex">
               {messages.length}
             </span>
           )}
@@ -2862,7 +2866,7 @@ function ChatToolbar({
   }
 
   return (
-    <div className="grid shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-b border-border/40 bg-background/80 px-2 py-1.5 backdrop-blur-md sm:px-3">
+    <div className="grid shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-b border-border/40 bg-background/80 px-2 py-1.5 backdrop-blur-surface sm:px-3">
       <div className="flex shrink-0 items-center gap-1">
         <Tooltip>
           <TooltipTrigger asChild>
@@ -3380,7 +3384,7 @@ function ChatMessages() {
                           key={fork.id}
                           type="button"
                           onClick={() => { void loadSession(fork.id); }}
-                          className="mt-1 ml-auto flex max-w-full items-center gap-1 rounded px-1 text-caption text-muted-foreground hover:bg-accent hover:text-foreground"
+                          className="mt-1 ml-auto flex max-w-full items-center gap-1 rounded-xs px-1 text-caption text-muted-foreground hover:bg-accent hover:text-foreground"
                           title="Open the branch started here"
                         >
                           <GitBranch className="h-3 w-3 shrink-0" />
@@ -3396,7 +3400,7 @@ function ChatMessages() {
                 <div className="mx-auto max-w-3xl">
                   <Message from="assistant">
                     <div className="flex gap-3">
-                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 mt-0.5 text-sm">
+                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-pill bg-primary/10 mt-0.5 text-sm">
                         {assistantAvatar ? (
                           <AgentAvatar avatar={assistantAvatar} name={assistantName} size="sm" />
                         ) : currentAgent ? (
@@ -3565,7 +3569,7 @@ function ChatMessages() {
                             key={fork.id}
                             type="button"
                             onClick={() => { void loadSession(fork.id); }}
-                            className="mt-1 flex max-w-full items-center gap-1 rounded px-1 text-caption text-muted-foreground hover:bg-accent hover:text-foreground"
+                            className="mt-1 flex max-w-full items-center gap-1 rounded-xs px-1 text-caption text-muted-foreground hover:bg-accent hover:text-foreground"
                             title="Open the thread started from this reply"
                           >
                             <GitBranch className="h-3 w-3 shrink-0" />
@@ -3645,7 +3649,7 @@ function ChatMessages() {
       {/* Scroll to bottom button */}
       {!atBottom && !isEmpty && (
         <Button
-          className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full shadow-raised"
+          className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-pill shadow-raised"
           size="icon"
           variant="outline"
           onClick={() => virtuosoRef.current?.scrollToIndex({ index: messages.length - 1, align: "end", behavior: "smooth" })}
@@ -4059,7 +4063,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
           // safe area at the bottom — no nav-height reservation. Add a small
           // `pb-2` on top of the safe-area so the composer is not glued to
           // the bezel on phones without a home indicator.
-          : "bg-background/80 backdrop-blur-md px-4 pt-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] lg:pb-1.5",
+          : "bg-background/80 backdrop-blur-surface px-4 pt-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] lg:pb-1.5",
       )}
       ref={inputWrapperRef}
     >
@@ -4236,7 +4240,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
             maxFiles={5}
             maxFileSize={15 * 1024 * 1024}
             onError={(err) => toast.error(err.message)}
-            className="[&_[data-slot=input-group]]:rounded-[calc(var(--radius)+8px)] [&_[data-slot=input-group]]:focus-within:ring-0 [&_[data-slot=input-group]]:focus-within:border-input"
+            className="[&_[data-slot=input-group]]:rounded-2xl [&_[data-slot=input-group]]:focus-within:ring-0 [&_[data-slot=input-group]]:focus-within:border-input"
           >
             <AttachmentPreview onCount={setAttachmentCount} />
             <PromptInputTextarea
@@ -4283,7 +4287,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                   onClick={() => mentionRef.current?.toggle("@")}
                   disabled={inputDisabled}
                   aria-label="Insert mention"
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-accent/60 hover:text-foreground disabled:opacity-40 lg:hidden"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-pill text-muted-foreground hover:bg-accent/60 hover:text-foreground disabled:opacity-40 lg:hidden"
                 >
                   <span className="font-mono text-sm font-semibold">@</span>
                 </button>
@@ -4292,7 +4296,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                   onClick={() => mentionRef.current?.toggle("/")}
                   disabled={inputDisabled}
                   aria-label="Insert skill"
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-accent/60 hover:text-foreground disabled:opacity-40 lg:hidden"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-pill text-muted-foreground hover:bg-accent/60 hover:text-foreground disabled:opacity-40 lg:hidden"
                 >
                   <span className="font-mono text-sm font-semibold">/</span>
                 </button>
@@ -4309,13 +4313,13 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                       type="button"
                       variant="ghost"
                       size="icon"
-                      className="relative h-8 w-8 rounded-[calc(var(--radius)+999px)] text-muted-foreground hover:bg-accent hover:text-foreground"
+                      className="relative h-8 w-8 rounded-pill text-muted-foreground hover:bg-accent hover:text-foreground"
                       onClick={() => setBackgroundWaitsOpen((value) => !value)}
                       aria-label="Background waits"
                     >
                       <ClockArrowUp className="h-4 w-4" />
                       {backgroundWaits.activeCount > 0 && (
-                        <span className="pointer-events-none absolute -right-0.5 -top-0.5 inline-flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-warning px-1 text-micro font-semibold leading-none text-warning-foreground">
+                        <span className="pointer-events-none absolute -right-0.5 -top-0.5 inline-flex h-3.5 min-w-[14px] items-center justify-center rounded-pill bg-warning px-1 text-micro font-semibold leading-none text-warning-foreground">
                           {backgroundWaits.activeCount}
                         </span>
                       )}
@@ -4330,10 +4334,10 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                     the tight gap-1 of the parent container. */}
                 <div className="ml-2 flex items-center">
                   {isRecording ? (
-                    <div className="inline-flex h-8 items-center gap-2 rounded-[calc(var(--radius)+999px)] border border-destructive/30 bg-destructive/10 px-3 text-xs font-medium text-destructive">
+                    <div className="inline-flex h-8 items-center gap-2 rounded-pill border border-destructive/30 bg-destructive/10 px-3 text-xs font-medium text-destructive">
                       <span className="relative flex h-2 w-2">
-                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-destructive opacity-75" />
-                        <span className="relative inline-flex h-2 w-2 rounded-full bg-destructive" />
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-pill bg-destructive opacity-75" />
+                        <span className="relative inline-flex h-2 w-2 rounded-pill bg-destructive" />
                       </span>
                       Recording
                     </div>
@@ -4348,7 +4352,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8 rounded-[calc(var(--radius)+999px)] text-muted-foreground hover:text-foreground"
+                            className="h-8 w-8 rounded-pill text-muted-foreground hover:text-foreground"
                             onClick={enqueueCurrentDraft}
                             aria-label="Queue instead"
                           >
@@ -4365,7 +4369,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
                             type="button"
                             variant="default"
                             size="icon"
-                            className="h-8 w-8 rounded-[calc(var(--radius)+999px)]"
+                            className="h-8 w-8 rounded-pill"
                             onClick={steerCurrentDraft}
                             aria-label="Send now"
                           >
@@ -4401,7 +4405,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
               <button
                 type="button"
                 onClick={copySessionId}
-                className="inline-flex min-w-0 items-center gap-1 rounded px-1 py-0.5 font-mono text-micro text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                className="inline-flex min-w-0 items-center gap-1 rounded-xs px-1 py-0.5 font-mono text-micro text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                 title="Copy session ID"
               >
                 <span className="truncate">session:{sessionId.slice(0, 8)}</span>
@@ -4426,9 +4430,9 @@ function ChatLoadingSkeleton() {
         <div className="flex items-center gap-2 px-4 py-2 border-b border-border/40 shrink-0">
           <Skeleton className="h-7 w-7 rounded-md" />
           <Skeleton className="h-7 w-7 rounded-md" />
-          <Skeleton className="h-4 w-32 rounded" />
+          <Skeleton className="h-4 w-32 rounded-xs" />
           <div className="flex-1" />
-          <Skeleton className="h-5 w-20 rounded-full" />
+          <Skeleton className="h-5 w-20 rounded-pill" />
         </div>
 
         {/* Skeleton messages */}
@@ -4437,9 +4441,9 @@ function ChatLoadingSkeleton() {
         </div>
 
         {/* Disabled prompt input */}
-        <div className="bg-background/80 backdrop-blur-md px-4 pt-2 pb-1.5 shrink-0">
+        <div className="bg-background/80 backdrop-blur-surface px-4 pt-2 pb-1.5 shrink-0">
           <div className="mx-auto max-w-3xl">
-            <PromptInput onSubmit={() => {}} className="[&_[data-slot=input-group]]:rounded-[calc(var(--radius)+8px)]">
+            <PromptInput onSubmit={() => {}} className="[&_[data-slot=input-group]]:rounded-2xl">
               <PromptInputTextarea placeholder={`Message ${orchestratorName}...`} disabled />
               <PromptInputFooter>
                 <div className="flex items-center gap-1" />
@@ -4856,9 +4860,9 @@ function ChatWorkingIndicator({ isLoading }: { isLoading: boolean }) {
       <div className="mx-auto max-w-3xl">
         <div className="flex items-center gap-2.5 pl-10 py-1.5">
           <span className="relative flex h-4 w-4 items-center justify-center">
-            <span className="absolute h-4 w-4 rounded-full border border-primary/20" />
-            <span className="absolute h-4 w-4 animate-spin rounded-full border-2 border-transparent border-r-primary/70 border-t-primary" />
-            <span className="h-1.5 w-1.5 rounded-full bg-primary/70" />
+            <span className="absolute h-4 w-4 rounded-pill border border-primary/20" />
+            <span className="absolute h-4 w-4 animate-spin rounded-pill border-2 border-transparent border-r-primary/70 border-t-primary" />
+            <span className="h-1.5 w-1.5 rounded-pill bg-primary/70" />
           </span>
           <span className="text-caption text-muted-foreground">
             Agent is working

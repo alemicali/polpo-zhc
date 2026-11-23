@@ -16,6 +16,7 @@ import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, Dia
 import { Input } from "@/components/ui/input";
 import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ConnectorIcon } from "@/components/connectors/connector-icon";
+import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { connectorsApi, filterConnectorTools, toolLabel, type AgentConnectorTools, type Connector, type ConnectorTool } from "@/lib/connectors-api";
 import {
   agentBuiltinTools, agentConnectorSelection, agentConnectors, connectorScopeName, describeToolScope, draftFromScope, draftProblems,
@@ -25,6 +26,8 @@ import { cn } from "@/lib/utils";
 
 export interface ScopeAgent {
   name: string;
+  /** identity.avatar: shown with the agent's colour in the dialog. */
+  identity?: { avatar?: string } | null;
   allowedTools?: string[];
   connectorTools?: AgentConnectorTools;
 }
@@ -144,7 +147,13 @@ export function TaskToolScopeDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex flex-col gap-0 overflow-hidden p-0 sm:max-w-xl" data-testid="task-tool-scope-dialog">
         <DialogHeader className="px-6 pt-6">
-          <DialogTitle>Tools for this task</DialogTitle>
+          <DialogTitle className="flex flex-wrap items-center gap-2">
+            Tools for this task
+            <span className="inline-flex items-center gap-1.5 text-small font-normal text-muted-foreground" data-testid="task-tool-scope-agent">
+              <AgentAvatar avatar={agent.identity?.avatar ?? undefined} name={agent.name} size="xs" fallbackVariant="circle" shape="circle" />
+              {agent.name}
+            </span>
+          </DialogTitle>
           <DialogDescription>
             By default the task gets every tool {agent.name} has. Restrict it to make the run more predictable: it can only narrow what {agent.name} has.
           </DialogDescription>
@@ -284,7 +293,7 @@ function ConnectorScopeRow({
             aria-label={`Use ${name}`}
             onChange={(e) => onChange(e.target.checked ? "*" : undefined)}
           />
-          <ConnectorIcon catalogId={connector.catalogId} name={connector.name} color={connector.icon?.color} iconUrl={connector.iconUrl} iconDarkUrl={connector.iconDarkUrl} size="sm" className="h-5 w-5 rounded p-0.5" />
+          <ConnectorIcon catalogId={connector.catalogId} name={connector.name} color={connector.icon?.color} iconUrl={connector.iconUrl} iconDarkUrl={connector.iconDarkUrl} size="sm" className="h-5 w-5 rounded-xs p-0.5" />
           <span className="min-w-0 truncate text-sm">{name}</span>
           <span className="shrink-0 font-mono text-caption text-muted-foreground">{connector.id}</span>
         </label>

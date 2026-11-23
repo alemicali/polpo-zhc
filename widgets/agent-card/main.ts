@@ -21,6 +21,7 @@ import {
 } from "@modelcontextprotocol/ext-apps";
 import type { AgentCard, AgentCardRoutineItem, AgentCardTask } from "../../src/server/mcp-agent-card.js";
 import { brandMark } from "../shared/brand.js";
+import { applyInstanceAppearance } from "../shared/theme.js";
 
 // ── Text ─────────────────────────────────────────────────────────────────
 
@@ -136,7 +137,7 @@ function progressBar(value: number | undefined, label: string): HTMLElement {
 function header(c: AgentCard, s: Strings): HTMLElement {
   const name = c.agent.displayName ?? c.agent.name;
   return h("div", { class: "head" },
-    h("div", { class: "avatar", "aria-hidden": "true" }, initials(name)),
+    h("div", { class: "avatar", "data-color": c.agent.color, "aria-hidden": "true" }, initials(name)),
     h("div", { class: "who" },
       h("div", { class: "name" }, name),
       h("div", { class: "role" }, [c.agent.role, c.agent.displayName ? c.agent.name : undefined].filter(Boolean).join(" · ")),
@@ -322,6 +323,7 @@ function adopt(next: unknown): void {
   if (!c || typeof c !== "object" || !c.agent) return;
   // keep this card's place in the order: refreshes carry newer keys
   card = card ? { ...c, key: card.key } : c;
+  applyInstanceAppearance(c.appearance);
   error = undefined;
 }
 

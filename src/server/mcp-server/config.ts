@@ -514,8 +514,8 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
     description: "Change what everyone sees in the dashboard: the product name, the tagline, the logo, the dark-mode logo, how the logo is framed, and the default look "
       + "(theme, palette, custom design tokens per mode). Only the fields given change; an empty string restores a default name or tagline. "
       + "A logo comes from a public https URL (fetched by the server), a file of the instance, or base64 data; PNG, JPEG, WebP or GIF up to 4 MB; "
-      + "null removes it. Tokens: colours (#rrggbb, oklch(…), hsl(…), rgb(…)), fonts (a CSS font stack, e.g. \"Inter Tight\", sans-serif), radius (0–24 px; radiusCard for cards and tiles, radiusControl for buttons, inputs, selects: 0–32 px, default from radius), shadows (shadowCard on cards, shadowRaised on popovers, menus, dialogs); "
-      + "the primary button: buttonPrimaryBg (a solid fill, default primary) or buttonGradient { from, to, angle } (a linear gradient), buttonPrimaryForeground (its text, derived readable); hover is derived; "
+      + "null removes it. Tokens: colours (#rrggbb, oklch(…), hsl(…), rgb(…)), fonts (a CSS font stack, e.g. \"Inter Tight\", sans-serif), radius (0–24 px; radiusCard for cards and tiles, radiusControl for buttons, inputs, selects: 0–32 px, default from radius), shadows (shadowCard on cards, shadowRaised on popovers, menus, tooltips, shadowDialog on dialogs and sheets: default shadowRaised); "
+      + "the primary button: buttonPrimaryBg (a solid fill, default primary) or buttonGradient { from, to, angle } (a linear gradient), buttonPrimaryForeground (its text, derived readable), shadowButtonPrimary (its box-shadow, e.g. a glow 0 0 20px oklch(0.6 0.2 290 / 40%); default none; on hover the shadowGlowStrong glow in the primary adds to it); hover is derived; "
       + "the sidebar: sidebarOpacity (0.5–1) and sidebarBlur (0–24 px backdrop blur); "
       + "FONTS: Inter Tight is bundled (self-hosted, no download setup needed); Satoshi, Inter, IBM Plex Sans, JetBrains Mono and Newsreader are preloaded; "
       + `any other family must be added to fonts (at most ${APPEARANCE_MAX_WEB_FONTS}): { family, source: "google", weights: "400;600;700" } loads it from Google Fonts, `
@@ -523,6 +523,12 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
       + "status colours (success, warning, info, destructive and their *Foreground; statusRunning, statusQueued, statusAssigned for task states); "
       + "the type scale (textDisplay, textH1, textH2, textH3, textBody, textSmall, textCaption, textMicro: rem 0.5–6 or px 8–96), headingWeight (100–900), "
       + "headingTracking and labelTracking (em -0.1–0.3), labelCase (uppercase, none, capitalize, lowercase); "
+      + "the small sizes textXs, textSm, textBase, textLg, textXl, text2xl, text3xl and the weights fontWeightNormal, fontWeightMedium, fontWeightSemibold, fontWeightBold (100–900); "
+      + "AGENT COLOURS agent1 … agent10 (avatars, badges, team colours, tool kinds) and agent1Foreground … agent10Foreground (their text, derived readable): keep them distinct; an agent picks one with polpo_agent_update identity.color \"agent3\"; "
+      + "surfaces: overlay (the dialog scrim), canvas and canvasForeground (the sheet behind embedded web pages and QR codes); "
+      + "shape: radiusBadge, radiusPill, radiusAvatar (0–999 px, 999 = round), radiusDialog (0–32 px), shadowControl (inputs), shadowGlow and shadowGlowStrong (a glow's geometry, e.g. 0 0 20px: the colour is the element's), "
+      + "surfaceBlur and overlayBlur (0–24 px backdrop blur of glassy bars and the dialog scrim), glowBlur (0–96 px, the soft halos); "
+      + "nothing in the dashboard is fixed: every colour, size, weight, corner, shadow and blur is one of these tokens; "
       + "a token set to null goes back to the palette's; with derive on (default) the dashboard fills the rest (text on primary, ring, sidebar…). "
       + "The result lists what changed. Needs the admin scope.",
     inputSchema: {

@@ -171,7 +171,7 @@ export function ConnectorsPage() {
   }, [connectedParam, params, setParams]);
 
   const agentOptions = useMemo<AgentOption[]>(
-    () => agents.map((a) => ({ name: a.name, label: a.identity?.displayName?.trim() || a.name })).sort((a, b) => a.label.localeCompare(b.label)),
+    () => agents.map((a) => ({ name: a.name, label: a.identity?.displayName?.trim() || a.name, avatar: a.identity?.avatar })).sort((a, b) => a.label.localeCompare(b.label)),
     [agents],
   );
   const agentLabel = (name: string) => agentOptions.find((a) => a.name === name)?.label ?? name;
@@ -220,7 +220,7 @@ export function ConnectorsPage() {
           className="pl-9 pr-9"
         />
         {query && (
-          <button type="button" aria-label="Clear search" onClick={() => setQuery("")} className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground">
+          <button type="button" aria-label="Clear search" onClick={() => setQuery("")} className="absolute right-2 top-1/2 -translate-y-1/2 rounded-xs p-1 text-muted-foreground hover:text-foreground">
             <X className="h-4 w-4" />
           </button>
         )}
@@ -377,6 +377,7 @@ export function ConnectorsPage() {
         onChanged={upsert}
         onRemoved={(id) => { drop(id); setSelectedId(null); }}
         onReconnect={(c) => { setSelectedId(null); flow.open({ connector: c, entry: selectedEntry }); }}
+        onSetupApp={(c, appId) => { setSelectedId(null); flow.open({ connector: c, entry: selectedEntry, oauthApp: appId }); }}
         accountCount={selectedEntry ? catalogCardState(selectedEntry, connectors, oauthApps).accounts.length : 0}
         onAddAccount={selectedEntry ? () => addAccount(selectedEntry) : undefined}
       />
@@ -391,7 +392,7 @@ function CategoryChip({ active, onClick, label, count }: { active: boolean; onCl
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        "shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-xs transition-colors",
+        "shrink-0 whitespace-nowrap rounded-pill border px-3 py-1 text-xs transition-colors",
         active ? "border-primary bg-primary text-primary-foreground" : "text-muted-foreground hover:border-foreground/30 hover:text-foreground",
       )}
     >

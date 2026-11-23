@@ -96,6 +96,9 @@ export interface ArtifactToolContext {
   author: string;
   /** The chat this turn belongs to. */
   sessionId?: string;
+  /** The task the agent is working on, and its mission: where what it makes came from. */
+  taskId?: string;
+  missionId?: string;
   emit?: (payload: { artifactId: string; action: "created" | "updated" | "deleted"; type: string; title: string; timestamp: string }) => void;
 }
 
@@ -103,8 +106,8 @@ const MAX_CONTENT_IN_RESULT = 60_000;
 const openPath = (id: string) => `/artifacts/${id}`;
 const str = (v: unknown): string | undefined => (typeof v === "string" && v.trim() ? v : undefined);
 
-function line(a: Pick<Artifact, "id" | "type" | "kind" | "title" | "createdBy" | "version" | "updatedAt">): string {
-  return `- ${a.id} [${a.type}${a.kind ? `/${a.kind}` : ""}] ${a.title} — by ${a.createdBy}, v${a.version}, ${a.updatedAt.slice(0, 16).replace("T", " ")}`;
+function line(a: Pick<Artifact, "id" | "type" | "kind" | "title" | "createdBy" | "version" | "updatedAt" | "taskId">): string {
+  return `- ${a.id} [${a.type}${a.kind ? `/${a.kind}` : ""}] ${a.title} — by ${a.createdBy}, v${a.version}, ${a.updatedAt.slice(0, 16).replace("T", " ")}${a.taskId ? `, from task ${a.taskId}` : ""}`;
 }
 
 async function ownArtifact(ctx: ArtifactToolContext, id: string): Promise<Artifact> {
@@ -126,6 +129,8 @@ export async function executeArtifactTool(name: string, args: Record<string, unk
         content: String(args.content ?? ""),
         createdBy: ctx.author,
         ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}),
+        ...(ctx.taskId ? { taskId: ctx.taskId } : {}),
+        ...(ctx.missionId ? { missionId: ctx.missionId } : {}),
         ...(str(args.kind) ? { kind: str(args.kind) } : {}),
         ...(str(args.description) ? { description: str(args.description) } : {}),
         ...(Array.isArray(args.sources) ? { sources: args.sources.map(String) } : {}),

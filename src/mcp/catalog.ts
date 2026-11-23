@@ -76,9 +76,52 @@ export const SLACK_SETUP = [
   "4. From Basic Information → App Credentials save the Client ID and Client Secret as the \"slack\" OAuth app, then connect.",
 ].join("\n");
 
-/** Setup steps (and an app manifest) of OAuth apps that need more than the generic steps. */
-const VENDOR_SETUP: Record<string, { setup: string; manifest?: string }> = {
+/** Canva's Connect MCP endpoint: a Canva app of your own with the MCP integration turned on. */
+export const CANVA_SETUP = [
+  "Canva's MCP server takes your own Canva app (Canva's public endpoint only accepts approved clients), set up once:",
+  "1. In the Canva Developer Portal (https://www.canva.com/developers/integrations) create an integration and choose \"Outside Canva\" → Start integrating.",
+  "2. Turn on \"Canva MCP\" and give it the scopes it lists (designs, folders, assets, comments, brand templates…).",
+  "3. Under Redirect URLs add this instance's redirect URI: " + REDIRECT_PLACEHOLDER,
+  "4. Under Configuration → Credentials copy the Client ID and generate a client secret; save both as the \"canva\" OAuth app (Connectors → OAuth apps), then connect.",
+].join("\n");
+
+/** Dropbox's MCP server: dynamic registration is for Dropbox's trusted partners only. */
+export const DROPBOX_SETUP = [
+  "Dropbox's MCP server takes your own Dropbox app (dynamic registration is limited to Dropbox's trusted partners), set up once:",
+  "1. In the Dropbox App Console (https://www.dropbox.com/developers/apps) choose Create app → Scoped access → Full Dropbox.",
+  "2. On Permissions tick files.metadata.read, files.content.read, files.content.write, sharing.read, sharing.write, account_info.read, file_requests.read and file_requests.write, then Submit.",
+  "3. On Settings → OAuth 2 → Redirect URIs add this instance's redirect URI: " + REDIRECT_PLACEHOLDER,
+  "4. Save the App key (client id) and App secret as the \"dropbox\" OAuth app (Connectors → OAuth apps), then connect.",
+].join("\n");
+
+/** Setup steps (an app manifest, extra OAuth parameters) of OAuth apps that need more than the generic steps. */
+const VENDOR_SETUP: Record<string, { setup: string; manifest?: string; oauth?: Partial<NonNullable<ConnectorCatalogEntry["oauth"]>> }> = {
   slack: { setup: SLACK_SETUP, manifest: SLACK_APP_MANIFEST },
+  canva: { setup: CANVA_SETUP },
+  // a refresh token comes only with token_access_type=offline
+  dropbox: { setup: DROPBOX_SETUP, oauth: { extraAuthParams: { token_access_type: "offline" } } },
+};
+
+/** API keys sent in a vendor header instead of Authorization: Bearer. */
+const AUTH_HEADERS: Record<string, string> = {
+  newrelic: "Api-Key",
+  pipedrive: "x-api-token",
+};
+
+/**
+ * Removed after the catalog health check (scripts/check-connector-catalog.mjs, 2026-11): their MCP
+ * servers only accept clients the vendor approved (Claude, ChatGPT, Cursor…), with no app or token
+ * route for a self-hosted client: whatsapp-business (Meta: "the server recognizes supported clients
+ * automatically"), zoominfo (approved vendors), mollie (approved client_uri list), airwallex,
+ * pitchbook and gamma (approved redirect URIs), mailchimp (a Claude-only endpoint).
+ */
+
+/**
+ * OAuth quirks found by the catalog health check (scripts/check-connector-catalog.mjs):
+ * semgrep: login.semgrep.dev answers every RFC 8707 resource indicator with invalid_target.
+ */
+const OAUTH_QUIRKS: Record<string, Partial<NonNullable<ConnectorCatalogEntry["oauth"]>>> = {
+  semgrep: { resourceIndicator: false },
 };
 
 /** Fallback scopes when the notes do not list them. */
@@ -113,7 +156,7 @@ function googleScopes(raw: RawCatalogEntry): string[] {
   return [...new Set(scopes)].map((s) => `${G}${s}`);
 }
 
-const VARIANT = /\b(US\d?|EU\d?|AU|IN|SG|AP\d|Sandbox|Demo)\s*:?\s+((?:https?:\/\/)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[\w/.-]*)?)/g;
+const VARIANT = /\b(US\d?|EU\d?|CA|AU|IN|SG|AP\d|Sandbox|Demo)\s*:?\s+((?:https?:\/\/)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[\w/.-]*)?)/g;
 
 /** Region / sandbox endpoints mentioned in the notes ("EU: mcp.eu.intercom.com/mcp", "US1 mcp.datadoghq.com"). */
 function variants(raw: RawCatalogEntry): Array<{ label: string; url: string }> | undefined {
@@ -173,6 +216,8 @@ export function normalizeCatalogEntry(raw: RawCatalogEntry): ConnectorCatalogEnt
   const found = variants(raw);
   if (found) entry.variants = found;
   if (auth === "bearer" && /X-Goog-Api-Key/i.test(raw.authNotes ?? "")) entry.authHeader = "X-Goog-Api-Key";
+  if (auth === "bearer" && AUTH_HEADERS[raw.id]) entry.authHeader = AUTH_HEADERS[raw.id];
+  if (auth === "oauth" && OAUTH_QUIRKS[raw.id]) entry.oauth = { ...OAUTH_QUIRKS[raw.id] };
   if (auth === "oauth_preregistered") {
     if (google) {
       entry.oauth = {
@@ -183,7 +228,7 @@ export function normalizeCatalogEntry(raw: RawCatalogEntry): ConnectorCatalogEnt
       };
       entry.setup = GOOGLE_WORKSPACE_SETUP;
     } else if (VENDOR_SETUP[raw.id]) {
-      entry.oauth = { app: raw.id };
+      entry.oauth = { app: raw.id, ...VENDOR_SETUP[raw.id]!.oauth };
       entry.setup = VENDOR_SETUP[raw.id]!.setup;
       if (VENDOR_SETUP[raw.id]!.manifest) entry.setupManifest = VENDOR_SETUP[raw.id]!.manifest;
     } else {

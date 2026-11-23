@@ -9,7 +9,8 @@
  * for this account. …"), then a finish with no usage and no text; the process exits 0.
  */
 
-export type HarnessProvider = "anthropic" | "bedrock" | "vertex" | "openai";
+/** "other": OpenCode's other providers and gateways (named by providerLabel). */
+export type HarnessProvider = "anthropic" | "bedrock" | "vertex" | "openai" | "other";
 
 export interface HarnessFailure {
   /** The task's error (stderr). */
@@ -30,7 +31,7 @@ export interface HarnessTurnOutcome {
   totalTokens: number;
 }
 
-const PROVIDER_LABEL: Record<HarnessProvider, string> = { anthropic: "Anthropic", bedrock: "Bedrock", vertex: "Vertex AI", openai: "OpenAI" };
+const PROVIDER_LABEL: Record<HarnessProvider, string> = { anthropic: "Anthropic", bedrock: "Bedrock", vertex: "Vertex AI", openai: "OpenAI", other: "The model provider" };
 
 /** The model is not available to the account (Bedrock model access, Vertex Model Garden, unknown model id). */
 const MODEL_ACCESS = new RegExp([
@@ -53,16 +54,16 @@ const BUDGET = /budget|max_budget|spend limit/i;
 
 /** The provider's model id in an error ("API Error: 403 anthropic.claude-sonnet-5-5 is not available …"). */
 function modelInError(raw: string): string | undefined {
-  return raw.match(/\b((?:[a-z]{2,4}\.)?anthropic\.[a-z0-9.:-]+|claude-[a-z0-9.:-]+|gpt-[a-z0-9.:-]+)\b/i)?.[1]?.replace(/[.:]+$/, "");
+  return raw.match(/\b((?:[a-z]{2,6}\.)?(?:anthropic|moonshotai|zai|qwen|deepseek|meta|mistral|openai)\.[a-z0-9.:-]+|claude-[a-z0-9.:-]+|gpt-[a-z0-9.:-]+)\b/i)?.[1]?.replace(/[.:]+$/, "");
 }
 
 /**
  * An error message from a harness, labelled: model access and authentication errors say what to
  * change (and are not retryable); anything else is kept as it is.
  */
-export function classifyHarnessError(raw: string, o: { harnessName: string; provider?: HarnessProvider; model?: string }): HarnessFailure {
+export function classifyHarnessError(raw: string, o: { harnessName: string; provider?: HarnessProvider; providerLabel?: string; model?: string }): HarnessFailure {
   const text = raw.trim() || "unknown error";
-  const provider = o.provider ? PROVIDER_LABEL[o.provider] : o.harnessName;
+  const provider = o.providerLabel ?? (o.provider ? PROVIDER_LABEL[o.provider] : o.harnessName);
   const model = o.model ?? modelInError(text);
   const modelPart = model ? ` "${model}"` : "";
   if (MODEL_ACCESS.test(text)) {

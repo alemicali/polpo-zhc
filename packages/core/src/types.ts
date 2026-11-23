@@ -221,6 +221,10 @@ export interface AgentIdentity {
    *  Served via GET /api/v1/files/read?path=<avatar> */
   avatar?: string;
 
+  /** Its colour on screen (avatars, badges): one of the look's agent colour tokens, "agent1" … "agent10"
+   *  (Configuration → Appearance → Agents). Default: picked from its name. Never a raw colour. */
+  color?: string;
+
   /** Responsibilities — simple strings or structured objects with area/description/priority.
    *  Structured format is preferred for clarity. */
   responsibilities?: (string | AgentResponsibility)[];
@@ -442,7 +446,7 @@ export interface AgentConfig {
   defaultComputer?: string;
   /**
    * The runtime that drives this agent: "polpo" (default, Polpo's own engine) or an official agent
-   * harness (Claude Code, Codex) running inside its computer (see harnesses.ts).
+   * harness (Claude Code, Codex, OpenCode) running inside its computer (see harnesses.ts).
    */
   engine?: import("./harnesses.js").AgentEngine;
   /** Runtime profile used by deterministic loop execution. */
@@ -1029,7 +1033,7 @@ export interface PolpoSettings {
   egressProxies?: Record<string, string>;
   /** Tailscale inside remote computers, so their browser can reach a tailnet-only egress proxy (see tailnet.ts). */
   tailscale?: import("./tailnet.js").TailscaleSettings;
-  /** Official agent harnesses (Claude Code, Codex) agents may run on (agent.engine), with their credentials (vault references). */
+  /** Official agent harnesses (Claude Code, Codex, OpenCode) agents may run on (agent.engine), with their credentials (vault references). */
   harnesses?: import("./harnesses.js").HarnessesSettings;
   /** Connectors (MCP servers): network policy and defaults. */
   connectors?: {

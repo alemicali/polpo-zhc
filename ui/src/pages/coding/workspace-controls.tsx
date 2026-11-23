@@ -72,7 +72,7 @@ export function NewWorkspacePopover({
                     type="button"
                     onClick={() => setActiveRoot(r)}
                     className={cn(
-                      "rounded px-1.5 py-0.5 font-mono text-caption transition-colors",
+                      "rounded-xs px-1.5 py-0.5 font-mono text-caption transition-colors",
                       activeRoot === r
                         ? "bg-primary/15 text-primary"
                         : "bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -215,7 +215,7 @@ function CloneFromUrl({ onDone }: { onDone: (path: string, name: string) => void
                 <div className="flex items-center gap-1.5">
                   <span className="truncate font-mono text-caption text-foreground">{r.nameWithOwner}</span>
                   {r.isPrivate && (
-                    <span className="shrink-0 rounded bg-muted/50 px-1 py-px text-label text-muted-foreground">
+                    <span className="shrink-0 rounded-xs bg-muted/50 px-1 py-px text-label text-muted-foreground">
                       private
                     </span>
                   )}
@@ -296,7 +296,7 @@ function PathBrowser({ root, onConfirm }: { root?: string; onConfirm: (path: str
           type="button"
           disabled={!canGoUp}
           onClick={() => browse?.parent && canGoUp && navigate(browse.parent)}
-          className="inline-flex h-6 w-6 items-center justify-center rounded hover:bg-muted disabled:opacity-30"
+          className="inline-flex h-6 w-6 items-center justify-center rounded-xs hover:bg-muted disabled:opacity-30"
           title="Up"
         >
           <ChevronLeft className="h-4 w-4" />
@@ -326,7 +326,7 @@ function PathBrowser({ root, onConfirm }: { root?: string; onConfirm: (path: str
           type="button"
           onClick={() => browse?.current && onConfirm(browse.current)}
           disabled={!browse?.current}
-          className="inline-flex items-center gap-1 rounded bg-primary/15 px-2 py-1 text-caption font-medium text-primary hover:bg-primary/25 disabled:opacity-40"
+          className="inline-flex items-center gap-1 rounded-xs bg-primary/15 px-2 py-1 text-caption font-medium text-primary hover:bg-primary/25 disabled:opacity-40"
         >
           Use this folder
         </button>

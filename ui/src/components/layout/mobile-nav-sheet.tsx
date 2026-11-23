@@ -1,6 +1,8 @@
 import { type ReactNode, useState } from "react";
+import { config } from "@/lib/config";
 import { NavLink, useLocation } from "react-router-dom";
 import {
+  Store,
   Bell,
   Bot,
   Plug,
@@ -104,7 +106,7 @@ export function MobileNavSheet({ children }: { children: ReactNode }) {
       <SheetTrigger asChild>{children}</SheetTrigger>
       <SheetContent
         side="bottom"
-        className="rounded-t-2xl pb-safe bg-popover/95 backdrop-blur-xl border-border/40 max-h-[85dvh] overflow-y-auto"
+        className="rounded-t-2xl pb-safe bg-popover/95 backdrop-blur-surface border-border/40 max-h-[85dvh] overflow-y-auto"
       >
         <SheetHeader className="px-1">
           <SheetTitle className="text-sm font-bold tracking-tight">Navigate</SheetTitle>
@@ -155,6 +157,17 @@ export function MobileNavSheet({ children }: { children: ReactNode }) {
               </div>
             </div>
           ))}
+
+          {/* Polpo Ink Hub — with the other app-level links, not in a nav section */}
+          <a
+            href={config.inkHubUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 rounded-xl px-2 py-2 text-caption font-medium text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <Store className="h-4 w-4" />
+            Polpo Ink Hub
+          </a>
 
           {/* Theme switcher — segmented control, lives at the bottom of the
               drawer so the most-used nav stays at thumb level. */}

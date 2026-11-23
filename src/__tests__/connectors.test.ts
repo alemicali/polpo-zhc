@@ -826,9 +826,46 @@ describe("catalog and Client ID Metadata Documents", () => {
       expect(byId(id)).toMatchObject({ auth: "oauth_preregistered", oauth: { app: id } });
     }
     expect(byId("vercel")).toMatchObject({ auth: "oauth", oauthRegistration: "cimd" });
+    // fixed after the catalog health check (scripts/check-connector-catalog.mjs)
+    for (const id of ["whatsapp-business", "zoominfo", "mollie", "airwallex", "pitchbook", "gamma", "mailchimp"]) {
+      expect(CONNECTOR_CATALOG.some((e) => e.id === id), id).toBe(false);
+    }
+    expect(byId("canva")).toMatchObject({ url: "https://api.canva.com/connect/v1/mcp", auth: "oauth_preregistered", oauth: { app: "canva" } });
+    expect(byId("canva").setup).toContain("Canva MCP");
+    expect(byId("dropbox")).toMatchObject({ auth: "oauth_preregistered", oauth: { app: "dropbox", extraAuthParams: { token_access_type: "offline" } } });
+    expect(byId("dropbox").setup).toContain("App Console");
+    expect(byId("gusto").url).toBe("https://mcp.api.gusto.com");
+    expect(byId("semgrep").oauth).toEqual({ resourceIndicator: false });
+    for (const id of ["intercom", "brevo", "signeasy"]) expect(byId(id)).toMatchObject({ auth: "bearer" });
+    expect(byId("intercom").authHeader).toBeUndefined();
+    expect(byId("newrelic")).toMatchObject({ auth: "bearer", authHeader: "Api-Key" });
+    expect(byId("pipedrive")).toMatchObject({ auth: "bearer", authHeader: "x-api-token" });
     expect(byId("intercom").variants).toEqual([
       { label: "Default", url: "https://mcp.intercom.com/mcp" },
       { label: "EU", url: "https://mcp.eu.intercom.com/mcp" },
+    ]);
+    // vendor-hosted servers added later: sign in only (DCR / CIMD), region variants from the notes
+    for (const [id, url, registration] of [
+      ["ovhcloud", "https://mcp.eu.ovhcloud.com/mcp", "dcr"],
+      ["zernio", "https://mcp.zernio.com/mcp", "dcr"],
+      ["v0", "https://v0.app/api/mcp", "dcr"],
+      ["expo", "https://mcp.expo.dev/mcp", "dcr+cimd"],
+      ["autumn", "https://mcp.useautumn.com/mcp", "dcr"],
+      ["aws", "https://aws-mcp.us-east-1.api.aws/mcp", "dcr"],
+      ["agentphone", "https://mcp.agentphone.ai/mcp", "dcr"],
+    ] as const) {
+      expect(byId(id)).toMatchObject({ url, transport: "http", auth: "oauth", oauthRegistration: registration, verified: true });
+      expect(byId(id).oauth).toBeUndefined();
+      expect(byId(id).docs).toMatch(/^https:\/\//);
+    }
+    expect(byId("ovhcloud").variants).toEqual([
+      { label: "EU", url: "https://mcp.eu.ovhcloud.com/mcp" },
+      { label: "US", url: "https://mcp.us.ovhcloud.com/mcp" },
+      { label: "CA", url: "https://mcp.ca.ovhcloud.com/mcp" },
+    ]);
+    expect(byId("aws").variants).toEqual([
+      { label: "US", url: "https://aws-mcp.us-east-1.api.aws/mcp" },
+      { label: "EU", url: "https://aws-mcp.eu-central-1.api.aws/mcp" },
     ]);
     expect(byId("azure-devops")).toMatchObject({ urlTemplate: "https://mcp.dev.azure.com/{organization}" });
     expect(byId("azure-devops").url).toBeUndefined();

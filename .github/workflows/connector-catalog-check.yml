@@ -1,0 +1,62 @@
+name: Connector catalog check
+
+# Weekly: does every catalog connector still connect the way the catalog says (dynamic registration
+# accepted, sign-in page reachable, metadata present)? scripts/check-connector-catalog.mjs never
+# signs in; failures open (or update) one issue. No secrets needed.
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: connector-catalog-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - name: Check the catalog
+        id: check
+        run: |
+          set +e
+          node scripts/check-connector-catalog.mjs --quiet --json catalog-check.json > catalog-check.md
+          echo "status=$?" >> "$GITHUB_OUTPUT"
+          cat catalog-check.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: catalog-check
+          path: catalog-check.*
+      - name: Open or update the issue
+        if: steps.check.outputs.status != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Connector catalog check: entries that no longer connect"
+          {
+            echo "The weekly connector catalog check found entries whose sign-in no longer works as the catalog says ([run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}))."
+            echo
+            head -n 2 catalog-check.md
+            grep -F '| fail |' catalog-check.md
+            echo
+            tail -n 1 catalog-check.md
+          } > issue.md
+          number=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number')
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body-file issue.md
+          else
+            gh issue create --title "$title" --body-file issue.md
+          fi

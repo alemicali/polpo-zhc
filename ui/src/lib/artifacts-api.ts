@@ -22,6 +22,9 @@ export interface ArtifactSummary {
   note?: string;
   createdBy: string;
   sessionId?: string;
+  /** The task it was made in (an agent working on a task), and that task's mission. */
+  taskId?: string;
+  missionId?: string;
   sources?: string[];
   refreshSeconds?: number;
   pinned?: boolean;
@@ -96,6 +99,24 @@ export function artifactDownload(a: Pick<Artifact, "title" | "type">): { filenam
     case "mermaid": return { filename: `${base}.mmd`, mime: "text/plain" };
     default: return { filename: `${base}.json`, mime: "application/json" };
   }
+}
+
+/** Save an artifact's content (the current one, or a version's) as a file. */
+export function saveArtifactFile(a: Pick<Artifact, "title" | "type">, content: string): void {
+  const { filename, mime } = artifactDownload(a);
+  const url = URL.createObjectURL(new Blob([content], { type: mime }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** The artifact's address in the dashboard, to share. */
+export function artifactLink(id: string): string {
+  const path = `/artifacts/${encodeURIComponent(id)}`;
+  // the desktop app runs from file:// with hash routes
+  return window.location.protocol === "file:" ? `${window.location.href.split("#")[0]}#${path}` : `${window.location.origin}${path}`;
 }
 
 /** The artifact id in a tool result ("Created artifact art_… …"). */

@@ -178,6 +178,16 @@ async function cropScreenshot(
   }
 }
 
+/** The inspector overlay's look in the previewed page: the dashboard's primary, the text on it, its mono font. */
+function previewOverlayLook(): { accent: string; accentForeground: string; font: string } {
+  const style = getComputedStyle(document.documentElement);
+  return {
+    accent: style.getPropertyValue("--primary").trim(),
+    accentForeground: style.getPropertyValue("--primary-foreground").trim(),
+    font: style.getPropertyValue("--app-mono-font").trim(),
+  };
+}
+
 function screenshotFile(dataUrl: string): File {
   const [metadata, payload] = dataUrl.split(",");
   const mimeType = metadata.match(/^data:([^;]+)/)?.[1] ?? "image/png";
@@ -610,6 +620,7 @@ export function BrowserPage() {
         iframeRef.current?.contentWindow?.postMessage({
           type: "polpo:app-preview-inspector",
           enabled: inspecting,
+          look: previewOverlayLook(),
         }, "*");
         return;
       }
@@ -635,6 +646,7 @@ export function BrowserPage() {
     iframeRef.current?.contentWindow?.postMessage({
       type: "polpo:app-preview-inspector",
       enabled: inspecting,
+      look: previewOverlayLook(),
     }, "*");
   }, [bridgeReady, inspecting]);
 
@@ -940,7 +952,7 @@ export function BrowserPage() {
             <div className={cn("relative", deviceId === "fit" ? "h-full w-full" : "flex min-h-full min-w-full items-start justify-center p-3")}>
             <div
               ref={frameRef}
-              className={cn("relative shrink-0 overflow-hidden bg-white", deviceId === "fit" && "h-full w-full")}
+              className={cn("relative shrink-0 overflow-hidden bg-canvas", deviceId === "fit" && "h-full w-full")}
               style={deviceId === "fit" ? undefined : { width: viewport.width, height: viewport.height }}
             >
               {isLoading && (
@@ -953,7 +965,7 @@ export function BrowserPage() {
                 key={`${currentUrl}-${reloadKey}`}
                 title="App Preview"
                 src={iframeUrl}
-                className="h-full w-full border-0 bg-white"
+                className="h-full w-full border-0 bg-canvas"
                 sandbox="allow-downloads allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
                 referrerPolicy="no-referrer-when-downgrade"
                 style={{ colorScheme: previewTheme === "system" ? undefined : previewTheme }}
@@ -1039,7 +1051,7 @@ export function BrowserPage() {
           <div
             draggable
             onDragStart={handleScreenshotDragStart}
-            className="absolute bottom-3 right-3 z-[70] w-[220px] cursor-grab overflow-hidden rounded-md border border-border bg-background shadow-lg active:cursor-grabbing"
+            className="absolute bottom-3 right-3 z-[70] w-[220px] cursor-grab overflow-hidden rounded-md border border-border bg-background shadow-raised active:cursor-grabbing"
           >
             <button
               type="button"
@@ -1052,7 +1064,7 @@ export function BrowserPage() {
             >
               <img src={capturedScreenshot.dataUrl} alt="Captured App Preview" className="h-full w-full object-contain" draggable={false} />
               <span className="absolute inset-0 flex items-center justify-center bg-background/0 transition-colors group-hover:bg-background/40">
-                <Maximize2 className="h-5 w-5 text-foreground opacity-0 drop-shadow transition-opacity group-hover:opacity-100" />
+                <Maximize2 className="h-5 w-5 text-foreground opacity-0 transition-opacity group-hover:opacity-100" />
               </span>
             </button>
             <Button type="button" variant="secondary" size="icon" className="absolute right-1 top-1 z-10 h-6 w-6" onClick={() => setCapturedScreenshot(null)} aria-label="Close screenshot preview">
@@ -1087,8 +1099,8 @@ export function BrowserPage() {
 
         {toolBusy === "screenshot" && (
           <div className="pointer-events-none absolute inset-0 z-[80] overflow-hidden bg-background/15">
-            <div className="app-preview-scan-line absolute inset-x-0 h-px bg-primary shadow-[0_0_18px_3px_color-mix(in_oklch,var(--primary)_55%,transparent)]" />
-            <div className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 border border-border bg-background/95 px-3 py-2 shadow-lg">
+            <div className="app-preview-scan-line absolute inset-x-0 h-px bg-primary shadow-glow-strong" />
+            <div className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 border border-border bg-background/95 px-3 py-2 shadow-raised">
               <ScanLine className="h-4 w-4 animate-pulse text-primary" />
               <span className="text-xs font-medium">Capturing screenshot...</span>
             </div>
@@ -1118,7 +1130,7 @@ export function BrowserPage() {
                 <img
                   src={expandedScreenshot.dataUrl}
                   alt={`${expandedScreenshot.label} enlarged`}
-                  className="mx-auto block bg-background object-contain shadow-lg"
+                  className="mx-auto block bg-background object-contain shadow-raised"
                   style={screenshotZoom === 1
                     ? { maxWidth: "100%", maxHeight: "calc(88vh - 76px)", width: "auto", height: "auto" }
                     : { width: `${screenshotZoom * 100}%`, maxWidth: "none", height: "auto" }}
@@ -1267,7 +1279,7 @@ function PreviewCodePane({
             key={editorUrl}
             src={editorUrl}
             title={`VS Code - ${session?.workspaceName ?? target.label}`}
-            className="h-full w-full border-0 bg-white"
+            className="h-full w-full border-0 bg-canvas"
             allow="clipboard-read; clipboard-write"
           />
         ) : (

@@ -1,16 +1,20 @@
 /**
  * The ONLY module that touches the experimental AI SDK harness API (`@ai-sdk/harness`,
- * `@ai-sdk/harness-claude-code`, `@ai-sdk/harness-codex`, `ai` 7), pinned exactly in package.json.
+ * `@ai-sdk/harness-claude-code`, `@ai-sdk/harness-codex`, `@ai-sdk/harness-opencode`, `ai` 7),
+ * pinned exactly in package.json.
  * It maps Polpo's HarnessRuntimeSpec to a HarnessAgent and the AI SDK stream parts to
  * HarnessEvents. Imported lazily (instances without harnesses never load the SDK).
  *
  * Authentication is always explicit: an authentication environment object (`auth`) makes the
  * adapters skip process.env, ~/.claude (settings, apiKeyHelper), the subscription lookup and
- * ~/.codex/auth.json on this server. The runtime process gets only what `env` says.
+ * ~/.codex/auth.json on this server. The runtime process gets only what `env` says. OpenCode gets
+ * an empty one (`auth: {}`: no environment lookup, no ~/.local/share/opencode/auth.json, no
+ * subscription) and Polpo's own provider config (`openCodeConfig`) with the key or a placeholder.
  */
 import { HarnessAgent } from "@ai-sdk/harness/agent";
 import { createClaudeCode } from "@ai-sdk/harness-claude-code";
 import { createCodex } from "@ai-sdk/harness-codex";
+import { createOpenCode } from "@ai-sdk/harness-opencode";
 import { jsonSchema, tool, type ToolSet } from "ai";
 import type {
   HarnessEvent, HarnessResumeState, HarnessRuntime, HarnessRuntimeSession, HarnessRuntimeSpec, HarnessSandbox, HarnessTurnResult, HarnessUsage,
@@ -66,6 +70,23 @@ export function finishMetadata(part: any): { costUsd?: number; runtimeSessionId?
 }
 
 /**
+ * OpenCode reports the cost of each model step (USD, from its model catalog's prices) on the
+ * finish-step part (`opencode.cost`, the AI SDK's provider metadata). Not cumulative: a turn's cost
+ * is the sum of its steps.
+ */
+export function stepCostUsd(part: any): number | undefined {
+  const m = part?.providerMetadata?.opencode ?? part?.harnessMetadata?.opencode;
+  const v = m && typeof m === "object" ? (m as { cost?: unknown }).cost : undefined;
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined;
+}
+
+/** Polpo's effort → OpenCode's reasoning variant (the variants every reasoning model has). */
+export function openCodeReasoningVariant(effort: string | undefined): string | undefined {
+  if (!effort) return undefined;
+  return effort === "low" || effort === "medium" || effort === "high" ? effort : "high";
+}
+
+/**
  * Map one fullStream part. Text and reasoning deltas are collected by the caller (they arrive in
  * many small parts); everything else becomes at most one event.
  */
@@ -111,7 +132,7 @@ export function claudeCodeToolSearch(hostTools: number): "false" | "auto" {
   return hostTools <= HOST_TOOLS_EAGER_LIMIT ? "false" : "auto";
 }
 
-function buildHarness(spec: HarnessRuntimeSpec): any {
+export function buildHarness(spec: HarnessRuntimeSpec): any {
   const debug = spec.onDebug ? (e: any) => { try { spec.onDebug!({ ...e, type: String(e?.type ?? "debug") }); } catch { /* never breaks the bridge */ } } : undefined;
   if (spec.harness === "claude-code") {
     // Host tools load with the first request (no ToolSearch round trip). The `alwaysLoad` hint
@@ -131,6 +152,18 @@ function buildHarness(spec: HarnessRuntimeSpec): any {
       ...(spec.maxBudgetUsd ? { maxBudgetUsd: spec.maxBudgetUsd } : {}),
       startupTimeoutMs: 180_000,
       ...(debug ? { onDebug: debug } : {}),
+    });
+  }
+  if (spec.harness === "opencode") {
+    const variant = openCodeReasoningVariant(spec.effort);
+    return createOpenCode({
+      // an explicit, empty authentication environment: the adapter reads nothing on this server
+      // (no process.env, no OpenCode auth.json, no subscription); the key is in openCodeConfig
+      auth: {},
+      ...(spec.auth.openCode?.provider ? { provider: spec.auth.openCode.provider } : {}),
+      ...(spec.auth.openCodeConfig ? { openCodeConfig: structuredClone(spec.auth.openCodeConfig) } : {}),
+      ...(variant ? { reasoningVariant: variant } : {}),
+      startupTimeoutMs: 180_000,
     });
   }
   return createCodex({
@@ -163,6 +196,7 @@ class SdkSession implements HarnessRuntimeSession {
     private readonly session: any,
     private readonly hostTools: ReadonlySet<string>,
     initialCost?: number,
+    private readonly perStepCost = false,
   ) {
     this.costSoFar = initialCost;
   }
@@ -179,6 +213,7 @@ class SdkSession implements HarnessRuntimeSession {
     let text = "";
     let finishReason = "stop";
     let meta: { costUsd?: number; runtimeSessionId?: string } = {};
+    let stepCosts: number | undefined;
     for (;;) {
       const approvals: Array<Extract<HarnessEvent, { type: "tool-approval-request" }>> = [];
       let textBuf = "";
@@ -200,6 +235,10 @@ class SdkSession implements HarnessRuntimeSession {
           meta = { ...meta, ...finishMetadata(part) };
           continue;
         }
+        if (this.perStepCost && part.type === "finish-step") {
+          const c = stepCostUsd(part);
+          if (c !== undefined) stepCosts = (stepCosts ?? 0) + c;
+        }
         const ev = mapStreamPart(part, this.hostTools);
         if (!ev) continue;
         flush();
@@ -216,9 +255,15 @@ class SdkSession implements HarnessRuntimeSession {
       }
       result = await this.agent.continueStream({ session: this.session, toolApprovalContinuations: responses, abortSignal: opts.abortSignal } as any);
     }
-    // Claude Code reports a cumulative cost per session: this turn's share is the difference
+    // Claude Code reports a cumulative cost per session: this turn's share is the difference.
+    // OpenCode reports each step's cost: the turn's is their sum (the session total is kept too).
     let costUsd: number | undefined;
-    if (typeof meta.costUsd === "number") {
+    if (this.perStepCost) {
+      if (stepCosts !== undefined) {
+        costUsd = stepCosts;
+        this.costSoFar = (this.costSoFar ?? 0) + stepCosts;
+      }
+    } else if (typeof meta.costUsd === "number") {
       costUsd = this.costSoFar !== undefined && meta.costUsd >= this.costSoFar ? meta.costUsd - this.costSoFar : meta.costUsd;
       this.costSoFar = meta.costUsd;
     }
@@ -284,7 +329,7 @@ export function createSdkHarnessRuntime(spec: HarnessRuntimeSpec): HarnessRuntim
         sandboxSession: o.sandbox as any,
         ...(o.abortSignal ? { abortSignal: o.abortSignal } : {}),
       });
-      return new SdkSession(agent, session, hostTools, cost);
+      return new SdkSession(agent, session, hostTools, cost, spec.harness === "opencode");
     },
   };
 }

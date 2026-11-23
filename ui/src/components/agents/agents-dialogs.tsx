@@ -253,7 +253,7 @@ export function RemoveAgentDialog({ agentName }: { agentName: string }) {
         <DialogHeader>
           <DialogTitle>Remove Agent</DialogTitle>
           <DialogDescription>
-            Remove <strong>{agentName}</strong> from the team? This updates your <code className="text-caption bg-muted px-1 py-0.5 rounded">polpo.json</code>.
+            Remove <strong>{agentName}</strong> from the team? This updates your <code className="text-caption bg-muted px-1 py-0.5 rounded-xs">polpo.json</code>.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>

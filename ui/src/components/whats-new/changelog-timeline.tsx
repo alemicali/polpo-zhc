@@ -108,7 +108,7 @@ export function ChangelogTimeline({
           const panelId = `changelog-day-${day.date}`;
           return (
             <li key={day.date} className="relative" data-changelog-day={day.date}>
-              <h2 className="sticky top-0 z-10 -mx-1 bg-background/95 px-1 py-1 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+              <h2 className="sticky top-0 z-10 -mx-1 bg-background/95 px-1 py-1 backdrop-blur-surface supports-[backdrop-filter]:bg-background/80">
                 <button
                   type="button"
                   data-changelog-trigger
@@ -120,18 +120,18 @@ export function ChangelogTimeline({
                   <span
                     aria-hidden
                     className={cn(
-                      "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2",
+                      "flex h-4 w-4 shrink-0 items-center justify-center rounded-pill border-2",
                       dayIndex === 0 ? "border-primary bg-primary/20" : "border-border bg-background",
                     )}
                   >
-                    {dayIndex === 0 && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
+                    {dayIndex === 0 && <span className="h-1.5 w-1.5 rounded-pill bg-primary" />}
                   </span>
                   <time dateTime={day.date} className="min-w-0 flex-1 truncate text-sm font-semibold tracking-tight">
                     {formatChangelogDayLong(day.date)}
                   </time>
                   {unread > 0 && (
-                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-primary/15 px-1.5 py-px text-micro font-semibold text-primary">
-                      <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-primary" />
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-pill bg-primary/15 px-1.5 py-px text-micro font-semibold text-primary">
+                      <span aria-hidden className="h-1.5 w-1.5 rounded-pill bg-primary" />
                       {unread === 1 ? "1 non letta" : `${unread} non lette`}
                     </span>
                   )}
@@ -221,25 +221,29 @@ function ChangelogRow({
               compact ? "px-3 py-2" : "px-3.5 py-2.5",
             )}
           >
-            <ChangelogKindBadge kind={entry.kind} className="shrink-0" />
-            <span className={cn("min-w-0 flex-1 text-sm leading-snug", unread ? "font-semibold" : "font-medium")}>
-              {entry.title}
-            </span>
-            {unread && (
-              <span className="shrink-0" title="Non letta">
-                <span aria-hidden className="block h-2 w-2 rounded-full bg-primary" />
-                <span className="sr-only">Non letta</span>
+            <span className="flex min-w-0 flex-1 flex-col gap-1">
+              <span className="flex items-center gap-2">
+                <ChangelogKindBadge kind={entry.kind} className="shrink-0" />
+                {unread && (
+                  <span className="shrink-0" title="Non letta">
+                    <span aria-hidden className="block h-2 w-2 rounded-pill bg-primary" />
+                    <span className="sr-only">Non letta</span>
+                  </span>
+                )}
+                {online && (
+                  <time
+                    dateTime={online.toISOString()}
+                    title={`Online su questa istanza: ${formatChangelogDateTime(online)}`}
+                    className="ml-auto shrink-0 text-caption tabular-nums text-muted-foreground"
+                  >
+                    {formatChangelogTime(online)}
+                  </time>
+                )}
               </span>
-            )}
-            {online && (
-              <time
-                dateTime={online.toISOString()}
-                title={`Online su questa istanza: ${formatChangelogDateTime(online)}`}
-                className="shrink-0 text-caption tabular-nums text-muted-foreground"
-              >
-                {formatChangelogTime(online)}
-              </time>
-            )}
+              <span className={cn("min-w-0 text-sm leading-snug", unread ? "font-semibold" : "font-medium")}>
+                {entry.title}
+              </span>
+            </span>
             <ChevronDown
               aria-hidden
               className={cn(

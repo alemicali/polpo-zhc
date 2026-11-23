@@ -27,7 +27,7 @@ export function DataViewRenderer({ view, sessionId }: { view: DataView; sessionI
   // refresh has settled, without a synchronous setState inside the effects.
   const [loading, startLoading] = useTransition();
   const [search, setSearch] = useState("");
-  const hasLiveData = view.bindings.some((binding) => Boolean(binding.query));
+  const hasLiveData = view.bindings.some((binding) => Boolean(binding.query || binding.sql));
   const hasInlineData = view.bindings.some((binding) => Boolean(binding.inline));
 
   const refresh = useCallback(() => {
@@ -35,6 +35,7 @@ export function DataViewRenderer({ view, sessionId }: { view: DataView; sessionI
       const results = await Promise.all(view.bindings.map(async (binding) => {
         try {
           if (binding.inline) return { id: binding.id, frame: inlineFrame(binding.id, binding.inline.label, binding.inline.rows) };
+          if (binding.sql) return { id: binding.id, frame: await dataRequest<DataFrame>("/sql", { method: "POST", body: JSON.stringify({ sourceId: binding.sql.sourceId, sql: binding.sql.statement }) }) };
           return { id: binding.id, frame: await dataRequest<DataFrame>("/query", { method: "POST", body: JSON.stringify(binding.query) }) };
         } catch (error) {
           return { id: binding.id, error: error instanceof Error ? error.message : String(error) };
@@ -57,13 +58,13 @@ export function DataViewRenderer({ view, sessionId }: { view: DataView; sessionI
     const data = latestEvent.data as { sourceId?: string; action?: string; tool?: string } | undefined;
     const mayHaveMutatedData = latestEvent.event === "agent:activity"
       && (data?.tool === "data_mutate" || data?.tool === "data_sql");
-    if (latestEvent.event === "agent:finished" || mayHaveMutatedData || (data?.action === "data" && view.bindings.some((binding) => binding.query?.sourceId === data.sourceId))) refresh();
+    if (latestEvent.event === "agent:finished" || mayHaveMutatedData || (data?.action === "data" && view.bindings.some((binding) => (binding.query?.sourceId ?? binding.sql?.sourceId) === data.sourceId))) refresh();
   }, [latestEvent, refresh, view.bindings]);
 
   const addView = () => {
     const first = view.bindings[0];
     if (!first) return;
-    addDataPromptItem(sessionId, { sourceId: first.query?.sourceId ?? "inline", dataset: first.query?.dataset ?? first.inline?.label ?? first.id, viewId: view.id, label: view.name });
+    addDataPromptItem(sessionId, { sourceId: first.query?.sourceId ?? first.sql?.sourceId ?? "inline", dataset: first.query?.dataset ?? first.inline?.label ?? first.id, viewId: view.id, label: view.name });
     sidebarActions.setSidebarOpen(true);
   };
 
@@ -244,7 +245,7 @@ function HistogramWidget({ widget, rows }: { widget: DataWidget; rows: Record<st
   const min = Math.min(...values); const max = Math.max(...values); const count = Math.min(12, Math.max(4, Math.ceil(Math.sqrt(values.length)))); const size = Math.max((max - min) / count, 1);
   const bins = Array.from({ length: count }, (_, index) => ({ label: formatValue(min + index * size), count: 0 }));
   values.forEach((value) => { bins[Math.min(count - 1, Math.floor((value - min) / size))]!.count += 1; });
-  return <div className="h-64 p-2"><ResponsiveContainer><BarChart data={bins}><CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} /><XAxis dataKey="label" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} /><YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={34} /><RechartsTooltip /><Bar dataKey="count" fill="var(--chart-1)" /></BarChart></ResponsiveContainer></div>;
+  return <div className="h-64 p-2"><ResponsiveContainer><BarChart data={bins}><CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} /><XAxis dataKey="label" tick={{ className: "text-micro" }} axisLine={false} tickLine={false} /><YAxis tick={{ className: "text-micro" }} axisLine={false} tickLine={false} width={34} /><RechartsTooltip /><Bar dataKey="count" fill="var(--chart-1)" /></BarChart></ResponsiveContainer></div>;
 }
 
 function ChartWidget({ widget, rows }: { widget: DataWidget; rows: Record<string, unknown>[] }) {
@@ -252,13 +253,13 @@ function ChartWidget({ widget, rows }: { widget: DataWidget; rows: Record<string
   const y = widget.y ?? widget.value ?? Object.keys(rows[0] ?? {}).find((field) => typeof rows[0]?.[field] === "number");
   if (!x || !y) return <WidgetError error="Chart needs x/category and y/value fields" />;
   const data = rows.slice(0, 100).map((row) => ({ ...row, [y]: Number(row[y] ?? 0) }));
-  if (widget.type === "pie" || widget.type === "donut") return <div className="h-64 p-2"><ResponsiveContainer><PieChart><Pie data={data} dataKey={y} nameKey={x} innerRadius={widget.type === "donut" ? "45%" : 0} outerRadius="78%">{data.map((_, index) => <Cell key={index} fill={CHART_COLORS[index % CHART_COLORS.length]} />)}</Pie><RechartsTooltip />{widget.showLegend && <Legend wrapperStyle={{ fontSize: 10 }} />}</PieChart></ResponsiveContainer></div>;
+  if (widget.type === "pie" || widget.type === "donut") return <div className="h-64 p-2"><ResponsiveContainer><PieChart><Pie data={data} dataKey={y} nameKey={x} innerRadius={widget.type === "donut" ? "45%" : 0} outerRadius="78%">{data.map((_, index) => <Cell key={index} fill={CHART_COLORS[index % CHART_COLORS.length]} />)}</Pie><RechartsTooltip />{widget.showLegend && <Legend wrapperStyle={{ fontSize: "var(--text-micro)" }} />}</PieChart></ResponsiveContainer></div>;
   if (widget.type === "sparkline") return <div className="h-28 p-2"><ResponsiveContainer><LineChart data={data}><RechartsTooltip /><Line dataKey={y} stroke="var(--chart-1)" strokeWidth={2} dot={false} /></LineChart></ResponsiveContainer></div>;
-  if (widget.type === "scatter") return <div className="h-64 p-2"><ResponsiveContainer><ScatterChart><CartesianGrid stroke="var(--border)" strokeDasharray="3 3" /><XAxis dataKey={x} type="number" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis dataKey={y} type="number" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={42} /><ZAxis range={[30, 180]} /><RechartsTooltip /><Scatter data={data} fill="var(--chart-1)" /></ScatterChart></ResponsiveContainer></div>;
-  if (widget.type === "radar") return <div className="h-64 p-2"><ResponsiveContainer><RadarChart data={data}><PolarGrid stroke="var(--border)" /><PolarAngleAxis dataKey={x} tick={{ fontSize: 10 }} /><Radar dataKey={y} stroke="var(--chart-1)" fill="var(--chart-1)" fillOpacity={0.2} /><RechartsTooltip /></RadarChart></ResponsiveContainer></div>;
-  if (widget.type === "funnel") return <div className="h-64 p-2"><ResponsiveContainer><FunnelChart><RechartsTooltip /><Funnel dataKey={y} nameKey={x} data={data} fill="var(--chart-1)">{data.map((_, index) => <Cell key={index} fill={CHART_COLORS[index % CHART_COLORS.length]} />)}<LabelList position="right" fill="var(--foreground)" stroke="none" dataKey={x} fontSize={10} /></Funnel></FunnelChart></ResponsiveContainer></div>;
+  if (widget.type === "scatter") return <div className="h-64 p-2"><ResponsiveContainer><ScatterChart><CartesianGrid stroke="var(--border)" strokeDasharray="3 3" /><XAxis dataKey={x} type="number" tick={{ className: "text-micro" }} axisLine={false} tickLine={false} /><YAxis dataKey={y} type="number" tick={{ className: "text-micro" }} axisLine={false} tickLine={false} width={42} /><ZAxis range={[30, 180]} /><RechartsTooltip /><Scatter data={data} fill="var(--chart-1)" /></ScatterChart></ResponsiveContainer></div>;
+  if (widget.type === "radar") return <div className="h-64 p-2"><ResponsiveContainer><RadarChart data={data}><PolarGrid stroke="var(--border)" /><PolarAngleAxis dataKey={x} tick={{ className: "text-micro" }} /><Radar dataKey={y} stroke="var(--chart-1)" fill="var(--chart-1)" fillOpacity={0.2} /><RechartsTooltip /></RadarChart></ResponsiveContainer></div>;
+  if (widget.type === "funnel") return <div className="h-64 p-2"><ResponsiveContainer><FunnelChart><RechartsTooltip /><Funnel dataKey={y} nameKey={x} data={data} fill="var(--chart-1)">{data.map((_, index) => <Cell key={index} fill={CHART_COLORS[index % CHART_COLORS.length]} />)}<LabelList position="right" fill="var(--foreground)" stroke="none" dataKey={x} className="text-micro" /></Funnel></FunnelChart></ResponsiveContainer></div>;
   if (widget.type === "treemap") return <div className="h-64 p-2"><ResponsiveContainer><Treemap data={data} dataKey={y} nameKey={x} stroke="var(--background)" fill="var(--chart-1)"><RechartsTooltip /></Treemap></ResponsiveContainer></div>;
-  const common = <><CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} /><XAxis dataKey={x} tick={{ fontSize: 10 }} axisLine={false} tickLine={false} /><YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} width={42} /><RechartsTooltip /></>;
+  const common = <><CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} /><XAxis dataKey={x} tick={{ className: "text-micro" }} axisLine={false} tickLine={false} /><YAxis tick={{ className: "text-micro" }} axisLine={false} tickLine={false} width={42} /><RechartsTooltip /></>;
   if (widget.type === "bar") return <div className="h-64 p-2"><ResponsiveContainer><BarChart data={data}>{common}<Bar dataKey={y} fill="var(--chart-1)" radius={[2, 2, 0, 0]} /></BarChart></ResponsiveContainer></div>;
   if (widget.type === "area") return <div className="h-64 p-2"><ResponsiveContainer><AreaChart data={data}>{common}<Area dataKey={y} stroke="var(--chart-1)" fill="var(--chart-1)" fillOpacity={0.18} /></AreaChart></ResponsiveContainer></div>;
   return <div className="h-64 p-2"><ResponsiveContainer><LineChart data={data}>{common}<Line dataKey={y} stroke="var(--chart-1)" strokeWidth={2} dot={false} /></LineChart></ResponsiveContainer></div>;

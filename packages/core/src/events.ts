@@ -41,7 +41,7 @@ export interface PolpoEventMap {
   "task:direction": { taskId: string; action: TaskDirectionMode; direction: TaskDirection };
 
   // Agent lifecycle
-  /** engine: "polpo", "claude-code" or "codex"; computerId: "host", a computer id or "ephemeral" (see Task.runs). */
+  /** engine: "polpo", "claude-code", "codex" or "opencode"; computerId: "host", a computer id or "ephemeral" (see Task.runs). */
   "agent:spawned": { taskId: string; agentName: string; taskTitle: string; engine?: import("./run-context.js").RunEngine; computerId?: string };
   "agent:finished": { taskId: string; agentName: string; exitCode: number; duration: number; sessionId?: string };
   "agent:activity": { taskId: string; agentName: string; tool?: string; file?: string; summary?: string };
@@ -282,6 +282,19 @@ export interface PolpoEventMap {
     /** Something worth knowing that is not an error (e.g. a Daytona v2 VM that vanished was restored from its snapshot). */
     notice?: string;
   } & EventOrigin;
+  /**
+   * A computer provider's webhook delivery (Daytona, E2B) was recorded in its event log
+   * (`action: "recorded"`), or Polpo finished applying it (`"updated"`: the computer's status change).
+   */
+  "computer:webhook": {
+    provider: string;
+    /** The log entry's id (GET /computer-webhooks/:provider/events/:id). */
+    id: string;
+    action: "recorded" | "updated";
+    outcome: "accepted" | "ignored" | "rejected" | "error";
+    eventType?: string;
+    computerId?: string;
+  };
 
   // Company brain
   "brain:changed": import("./company-brain.js").BrainChangeEvent;

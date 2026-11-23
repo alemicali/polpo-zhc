@@ -87,7 +87,7 @@ export function TimeRangeFilter({
                 })}
               >
                 <div className={cn(
-                  "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border",
+                  "flex h-4 w-4 shrink-0 items-center justify-center rounded-pill border",
                   selected ? "border-primary bg-primary" : "border-muted-foreground/30",
                 )}>
                   {selected && <Check className="h-2.5 w-2.5 text-primary-foreground" />}

@@ -34,6 +34,8 @@ export interface TaskCard {
   kind: "task";
   key: CardKey;
   generatedAt: string;
+  /** The instance look's brand, status and agent colours per mode (only those its custom look sets). */
+  appearance?: { light?: Record<string, string>; dark?: Record<string, string> };
   task: CardTaskRef & {
     phase?: string;
     group?: string;
@@ -80,6 +82,8 @@ export interface MissionCard {
   kind: "mission";
   key: CardKey;
   generatedAt: string;
+  /** The instance look's brand, status and agent colours per mode (only those its custom look sets). */
+  appearance?: { light?: Record<string, string>; dark?: Record<string, string> };
   mission: { id: string; name: string; status: string; pauseReason?: string; goal?: string; updatedAt?: string };
   cost?: {
     usd: number;

@@ -233,4 +233,11 @@ export type {
   AssessmentProgressEntry,
   AssessmentCheckStatus,
   TaskFilter,
+  ComputerWebhookProvider,
+  ComputerWebhookOutcome,
+  ComputerWebhookStatus,
+  ComputerWebhookCountsBefore,
+  ComputerWebhookEventSummary,
+  ComputerWebhookEvent,
+  ComputerWebhookEventPage,
 } from "@polpo-ai/sdk";

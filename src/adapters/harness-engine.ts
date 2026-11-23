@@ -1,5 +1,5 @@
 /**
- * Harness engine: an agent whose `engine` is an official agent harness (Claude Code, Codex) runs
+ * Harness engine: an agent whose `engine` is an official agent harness (Claude Code, Codex, OpenCode) runs
  * its tasks through the AI SDK HarnessAgent, inside its computer, with the same AgentHandle
  * contract as Polpo's own engine (engine.ts):
  *
@@ -132,6 +132,16 @@ async function defaultOpenMachine(o: { agent: AgentConfig; cwd: string; ctx: Spa
   return { machine: hostHarnessMachine({ workDir: o.cwd, home, label: "host" }), computerId: "host", home };
 }
 
+/**
+ * Provider credentials OpenCode's bridge (or OpenCode itself) would pick up from the computer's
+ * environment, blanked for its processes: only Polpo's config chooses the provider and the key.
+ */
+export const OPENCODE_BLANK_ENV: Readonly<Record<string, string>> = Object.freeze(Object.fromEntries([
+  "AI_GATEWAY_API_KEY", "AI_GATEWAY_BASE_URL", "VERCEL_OIDC_TOKEN", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_NAME", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_BASE_URL", "GOOGLE_GENERATIVE_AI_API_KEY", "GEMINI_API_KEY", "XAI_API_KEY", "GITHUB_TOKEN", "GITHUB_COPILOT_TOKEN", "GITLAB_TOKEN", "POE_API_KEY",
+  "OPENCODE_API_KEY", "AWS_BEARER_TOKEN_BEDROCK", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_PROFILE",
+].map((k) => [k, ""])));
+
 async function defaultRuntimeFactory(spec: Parameters<HarnessRuntimeFactory>[0]): Promise<HarnessRuntime> {
   const { createSdkHarnessRuntime } = await import("../harness/sdk.js");
   return createSdkHarnessRuntime(spec);
@@ -227,7 +237,9 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
     /** What the current turn produced (errors, output after them, usage): see harness/errors.ts. */
     let turnOutcome: HarnessTurnOutcome = { errors: [], outputAfterError: false, output: false, totalTokens: 0 };
     const label = (raw: string): HarnessFailure =>
-      classifyHarnessError(raw, { harnessName, ...(auth ? { provider: auth.provider } : {}), ...(auth?.model ? { model: auth.model } : {}) });
+      classifyHarnessError(raw, {
+        harnessName, ...(auth ? { provider: auth.provider } : {}), ...(auth?.providerLabel ? { providerLabel: auth.providerLabel } : {}), ...(auth?.model ? { model: auth.model } : {}),
+      });
     try {
       const settings = deps.settings ? deps.settings() : loadPolpoConfig(polpoDir)?.settings;
       const engine = agentHarness(agentConfig);
@@ -315,6 +327,8 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
         ...(brokering === "native" && resolved.route && Object.keys(resolved.route.headers).length
           ? { rules: [{ match: { host: new URL(resolved.route.upstream).hostname }, transform: { headers: { ...resolved.route.headers } } }] }
           : {}),
+        // OpenCode: Polpo wrote its provider config, so the placeholder's rule is Polpo's own
+        ...(auth.credentialRules?.length ? { credentialRules: auth.credentialRules } : {}),
       };
       if (resolved.route) transcript({ type: "log", message: `${name}: model credential ${brokering === "none" ? "in the computer (not brokered)" : brokering === "relay" ? "brokered by Polpo's model relay (placeholders only in the computer)" : "brokered by the computer's provider (placeholders only in the computer)"}` });
       // where and with what this run executes (the task's run context; no secrets)
@@ -371,7 +385,12 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
       const port = resumeFrom && prior?.bridgePort
         ? prior.bridgePort
         : opened.computerId === "host" ? await freeHostPort() : await freeMachinePort(machine);
-      const sandbox: HarnessSandbox = createHarnessSandboxSession(machine, { port, ...(broker ? { broker } : {}) });
+      const sandbox: HarnessSandbox = createHarnessSandboxSession(machine, {
+        port, ...(broker ? { broker } : {}),
+        // OpenCode's bridge builds a provider from these variables when the computer has them: blank
+        // them, so its config is Polpo's (the chosen provider and credential) and nothing else
+        ...(engine.harness === "opencode" ? { spawnEnv: OPENCODE_BLANK_ENV } : {}),
+      });
       const now = () => new Date().toISOString();
       const status = (patch: Partial<HarnessSessionStatus>) => store.update(key, (cur) => ({
         key, agent: agentConfig.name, harness: engine.harness, computerId: opened!.computerId, scope: "task", taskId: task.id,
@@ -509,6 +528,8 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
         if (gateway > 0) return { usd: gateway, source: "gateway" };
         if (creds.nonClaude || (resolved.route && resolved.route.mode !== "direct" && engine.harness === "codex")) return { source: "tokens-only" };
         if (r.costUsd === undefined) return { source: "tokens-only" };
+        // OpenCode prices steps from its model catalog: a model it has no price for costs "0"
+        if (engine.harness === "opencode" && r.costUsd === 0 && r.usage.totalTokens > 0) return { source: "tokens-only" };
         return { usd: r.costUsd, source: resolved.route && resolved.route.mode !== "direct" ? "runtime-estimate" : "runtime" };
       };
       const account = async (r0: HarnessTurnResult) => {

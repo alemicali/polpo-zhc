@@ -2,7 +2,8 @@
  * A harness's model gateway (Settings → Harnesses): the Vercel AI Gateway (base URL + key), or a
  * custom gateway from a preset (Cloudflare, OpenRouter, LiteLLM, Portkey, Kong, custom) with its
  * base URL, auth scheme, key, extra headers (secret ones from the vault, literal ones that are not
- * secrets), model ids and the non-Claude switch. Keys and secret headers are vault references:
+ * secrets), model ids and the non-Claude switch. OpenCode also picks the gateway's wire format
+ * (Anthropic Messages, OpenAI Responses or OpenAI Chat Completions). Keys and secret headers are vault references:
  * Polpo's model relay injects them outside the computer.
  */
 import { Plus, Trash2 } from "lucide-react";
@@ -11,8 +12,12 @@ import { Input } from "@/components/ui/input";
 import { VaultRefPicker } from "@/components/vault/vault-ref-picker";
 import {
   cloudflareIds, GATEWAY_PRESET_INFO,
-  type GatewayAuthScheme, type GatewayHeader, type GatewayPreset, type HarnessGateway, type HarnessId,
+  type GatewayAuthScheme, type GatewayFormat, type GatewayHeader, type GatewayPreset, type HarnessGateway, type HarnessId,
 } from "@/lib/harnesses-api";
+
+const FORMAT_LABELS: Record<GatewayFormat, string> = {
+  "openai-chat": "OpenAI Chat Completions", "openai-responses": "OpenAI Responses", anthropic: "Anthropic Messages",
+};
 
 const selectClass = "h-8 rounded-md border bg-transparent px-2 text-xs";
 
@@ -24,7 +29,10 @@ export function HarnessGatewayFields({ harness, auth, value, onChange }: {
 }) {
   const g = value ?? {};
   const set = (patch: Partial<HarnessGateway>) => onChange({ ...g, ...patch });
-  const id = harness === "codex" ? "codex" : "claude-code";
+  const id = harness;
+  const format: GatewayFormat = harness === "opencode" ? (g.format ?? "openai-chat") : harness === "codex" ? "openai-responses" : "anthropic";
+  // the presets' base URLs: the Anthropic format's has no /v1 (the runtime adds /v1/messages)
+  const urlFor: HarnessId = harness === "opencode" && format === "anthropic" ? "claude-code" : harness;
 
   if (auth === "ai-gateway") {
     return (
@@ -37,7 +45,7 @@ export function HarnessGatewayFields({ harness, auth, value, onChange }: {
           <span className="text-muted-foreground">Base URL (optional)</span>
           <Input className="h-8 text-xs" placeholder="https://ai-gateway.vercel.sh" value={g.baseUrl ?? ""} onChange={(e) => set({ baseUrl: e.target.value.trim() || undefined })} aria-label={`${id} AI Gateway base URL`} />
         </label>
-        <p className="text-micro text-muted-foreground sm:col-span-2">Model ids are the gateway's: {harness === "codex" ? "openai/gpt-5" : "anthropic/claude-sonnet-4.5"}.</p>
+        <p className="text-micro text-muted-foreground sm:col-span-2">Model ids are the gateway's: {harness === "codex" ? "openai/gpt-5" : harness === "opencode" ? "moonshotai/kimi-k2, zai/glm-4.6, anthropic/claude-sonnet-4.5" : "anthropic/claude-sonnet-4.5"}.</p>
       </div>
     );
   }
@@ -47,8 +55,8 @@ export function HarnessGatewayFields({ harness, auth, value, onChange }: {
   const choosePreset = (p: GatewayPreset) => {
     const info = GATEWAY_PRESET_INFO.find((x) => x.id === p)!;
     onChange({
-      ...g, preset: p, format: harness === "codex" ? "openai-responses" : "anthropic",
-      baseUrl: info.baseUrl(harness, {}), authScheme: info.authScheme,
+      ...g, preset: p, format,
+      baseUrl: info.baseUrl(urlFor, {}), authScheme: info.authScheme,
       headers: info.headers?.(harness) ?? g.headers,
       ...(info.authScheme === "none" ? { credentialRef: undefined } : {}),
     });
@@ -65,6 +73,18 @@ export function HarnessGatewayFields({ harness, auth, value, onChange }: {
             {GATEWAY_PRESET_INFO.filter((p) => p.id !== "vercel").map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
           </select>
         </label>
+        {harness === "opencode" && (
+          <label className="space-y-1">
+            <span className="text-muted-foreground">Format</span>
+            <select className={`${selectClass} w-full`} aria-label={`${id} gateway format`} value={format}
+              onChange={(e) => {
+                const f = e.target.value as GatewayFormat;
+                set({ format: f, baseUrl: preset.baseUrl(f === "anthropic" ? "claude-code" : "opencode", cf) });
+              }}>
+              {(Object.keys(FORMAT_LABELS) as GatewayFormat[]).map((f) => <option key={f} value={f}>{FORMAT_LABELS[f]}</option>)}
+            </select>
+          </label>
+        )}
         <label className="space-y-1">
           <span className="text-muted-foreground">Key sent as</span>
           <select className={`${selectClass} w-full`} aria-label={`${id} gateway auth scheme`} value={g.authScheme ?? "bearer"}
@@ -78,11 +98,13 @@ export function HarnessGatewayFields({ harness, auth, value, onChange }: {
           <label key={f.key} className="space-y-1">
             <span className="text-muted-foreground">{f.label}</span>
             <Input className="h-8 text-xs" value={cf[f.key] ?? ""} aria-label={`${id} Cloudflare ${f.label}`}
-              onChange={(e) => set({ baseUrl: preset.baseUrl(harness, { ...cf, [f.key]: e.target.value.trim() }) })} />
+              onChange={(e) => set({ baseUrl: preset.baseUrl(urlFor, { ...cf, [f.key]: e.target.value.trim() }) })} />
           </label>
         ))}
         <label className="space-y-1 sm:col-span-2">
-          <span className="text-muted-foreground">Base URL ({harness === "codex" ? "Codex calls <base>/responses" : "Claude Code calls <base>/v1/messages"})</span>
+          <span className="text-muted-foreground">Base URL ({harness === "codex" ? "Codex calls <base>/responses"
+            : harness === "opencode" ? `OpenCode calls <base>${format === "anthropic" ? "/v1/messages" : format === "openai-responses" ? "/responses" : "/chat/completions"}`
+              : "Claude Code calls <base>/v1/messages"})</span>
           <Input className="h-8 text-xs" value={g.baseUrl ?? ""} onChange={(e) => set({ baseUrl: e.target.value.trim() || undefined })} aria-label={`${id} gateway base URL`} />
         </label>
         {g.authScheme !== "none" && (

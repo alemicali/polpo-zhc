@@ -13,7 +13,6 @@ import {
   Asterisk,
   ListChecks,
   FileJson,
-  Bot,
   Play,
 } from "lucide-react";
 import { RunPlaybookDialog } from "@/pages/playbooks";
@@ -31,6 +30,7 @@ import {
   TaskStepCard,
 } from "@/pages/mission-detail";
 import { parseMissionData, type MissionTaskDef } from "@/lib/mission-data";
+import { AgentAvatar } from "@/components/shared/agent-avatar";
 
 // ── Parameter detail card ──
 
@@ -53,7 +53,7 @@ function ParamCard({ param }: { param: PlaybookParameter }) {
         <p className="text-caption text-muted-foreground mt-1">{param.description}</p>
         <div className="flex items-center gap-3 mt-1.5 text-micro text-muted-foreground">
           {param.default !== undefined && (
-            <span>Default: <code className="font-mono bg-muted/40 px-1 rounded">{String(param.default)}</code></span>
+            <span>Default: <code className="font-mono bg-muted/40 px-1 rounded-xs">{String(param.default)}</code></span>
           )}
           {param.enum && param.enum.length > 0 && (
             <span>Values: {param.enum.map(String).join(", ")}</span>
@@ -218,7 +218,7 @@ export function PlaybookDetailPage() {
             <div className="flex items-center gap-2 px-4 py-2 border-b border-border/30 bg-muted/20">
               <Workflow className="h-3.5 w-3.5 text-primary/60" />
               <span className="text-caption text-muted-foreground">
-                Playbook preview — placeholders shown as <code className="text-micro bg-muted/50 px-1 rounded">{`{{param}}`}</code>
+                Playbook preview — placeholders shown as <code className="text-micro bg-muted/50 px-1 rounded-xs">{`{{param}}`}</code>
               </span>
             </div>
             <div className="h-[calc(100%-36px)]">
@@ -295,7 +295,7 @@ export function PlaybookDetailPage() {
                   <div className="space-y-2">
                     {volatileTeam.map((member, i) => (
                       <div key={i} className="flex items-center gap-3 rounded-lg border border-border/40 bg-card/60 px-3 py-2">
-                        <Bot className="h-4 w-4 text-primary/60 shrink-0" />
+                        <AgentAvatar name={member.name} size="md" iconClassName="shrink-0" />
                         <div className="min-w-0">
                           <span className="text-xs font-semibold">{member.name}</span>
                           {member.role && <p className="text-micro text-muted-foreground mt-0.5 line-clamp-2">{member.role}</p>}

@@ -5,7 +5,7 @@
  *   lifecycle actions its status allows (Start, Stop / Hibernate / Pause, Restart, Reset, Recreate),
  *   Edit and Delete (Remove from Polpo when its machine was deleted at the provider).
  * - Tiles: last use, uptime, when it stops or hibernates by itself, what was spent on it.
- * - Sessions: the agent harness sessions on it (Claude Code, Codex) and the recent task runs that
+ * - Sessions: the agent harness sessions on it (Claude Code, Codex, OpenCode) and the recent task runs that
  *   used it (from each task's runs), with links; its recent activity (status changes, wakes,
  *   rotations, errors, a machine deleted at the provider).
  * - Aside: the agents using it; lifecycle; snapshots (Daytona v2); machine (image, region, size,
@@ -24,6 +24,7 @@ import { ComputerConfirmDialog } from "@/components/computers/computer-confirm-d
 import { ComputerDialog } from "@/components/computers/computer-dialog";
 import { StatusBadge } from "@/components/computers/status-badge";
 import { BrandIcon } from "@/components/shared/brand-icon";
+import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { EngineBadge } from "@/components/shared/run-context";
 import { StatValue } from "@/components/shared/stat-value";
 import { useComputerActions } from "@/hooks/use-computer-actions";
@@ -366,6 +367,7 @@ export function ComputerDetailPage() {
               <ul className="space-y-1.5 text-xs" data-testid="computer-agents">
                 {c.agents.map((a) => (
                   <li key={a.name} className="flex min-w-0 items-center gap-1.5">
+                    <AgentAvatar name={a.name} size="xs" />
                     <EngineBadge engine={agentEngines[a.name]} size={12} />
                     <Link to={`/agents/${encodeURIComponent(a.name)}`} className="truncate hover:underline">{a.name}</Link>
                     {!c.builtin && <span className="ml-auto shrink-0 text-muted-foreground">{a.isDefault ? "default" : "may use"}</span>}

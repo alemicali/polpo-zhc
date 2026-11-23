@@ -560,15 +560,15 @@ function PaperCard({ ext, accent }: { ext: string; accent: { ink: string; chip: 
         </div>
         {/* faux text lines */}
         <div className="absolute inset-x-2 top-2 space-y-1">
-          <div className="h-0.5 w-3/4 bg-muted/60 rounded-full" />
-          <div className="h-0.5 w-full bg-muted/40 rounded-full" />
-          <div className="h-0.5 w-5/6 bg-muted/40 rounded-full" />
-          <div className="h-0.5 w-2/3 bg-muted/40 rounded-full" />
+          <div className="h-0.5 w-3/4 bg-muted/60 rounded-pill" />
+          <div className="h-0.5 w-full bg-muted/40 rounded-pill" />
+          <div className="h-0.5 w-5/6 bg-muted/40 rounded-pill" />
+          <div className="h-0.5 w-2/3 bg-muted/40 rounded-pill" />
         </div>
         {/* extension chip — center-bottom */}
         <div className="absolute inset-x-0 bottom-2 flex justify-center">
           <span className={cn(
-            "px-1.5 py-px rounded font-mono text-micro font-bold uppercase tracking-wider border",
+            "px-1.5 py-px rounded-xs font-mono text-micro font-bold uppercase tracking-wider border",
             accent.chip,
           )}>
             {ext || "file"}
@@ -586,7 +586,7 @@ function PaperCard({ ext, accent }: { ext: string; accent: { ink: string; chip: 
 function FolderGlyph({ open }: { open?: boolean }) {
   return (
     <div className="relative w-[68%] h-[68%]">
-      <svg viewBox="0 0 64 56" className="w-full h-full drop-shadow-[0_3px_4px_color-mix(in_oklch,var(--foreground)_18%,transparent)]">
+      <svg viewBox="0 0 64 56" className="w-full h-full">
         <defs>
           <linearGradient id="folder-back" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" style={{ stopColor: "color-mix(in oklch, var(--chart-1) 60%, white)" }} />
@@ -665,7 +665,7 @@ function FileThumb({
         )}
         {/* play overlay */}
         <div className="absolute inset-0 flex items-center justify-center bg-background/20 opacity-0 group-hover:opacity-100 transition-opacity">
-          <div className="h-8 w-8 rounded-full bg-background/85 backdrop-blur-sm flex items-center justify-center shadow-md ring-1 ring-border/40">
+          <div className="h-8 w-8 rounded-pill bg-background/85 backdrop-blur-surface flex items-center justify-center shadow-raised ring-1 ring-border/40">
             <Play className="h-3.5 w-3.5 fill-foreground text-foreground translate-x-px" />
           </div>
         </div>
@@ -679,10 +679,10 @@ function FileThumb({
         {/* faux waveform */}
         <div className="flex items-end gap-px h-1/2 px-3">
           {[3, 6, 4, 8, 5, 9, 6, 4, 7, 3, 6, 5, 8, 4, 7].map((h, i) => (
-            <span key={i} className="w-1 rounded-full bg-chart-5/60" style={{ height: `${h * 8}%` }} />
+            <span key={i} className="w-1 rounded-pill bg-chart-5/60" style={{ height: `${h * 8}%` }} />
           ))}
         </div>
-        <div className="absolute top-1.5 left-1.5 h-5 w-5 rounded-full bg-background/85 backdrop-blur-sm flex items-center justify-center ring-1 ring-chart-5/30">
+        <div className="absolute top-1.5 left-1.5 h-5 w-5 rounded-pill bg-background/85 backdrop-blur-surface flex items-center justify-center ring-1 ring-chart-5/30">
           <Music className="h-2.5 w-2.5 text-chart-5" />
         </div>
       </div>
@@ -718,7 +718,7 @@ function FileTile({ entry, path, selected, onClick, onDoubleClick, onContextMenu
         "group flex flex-col items-center gap-1.5 p-2 rounded-xl cursor-pointer select-none",
         "transition-[background-color,box-shadow,transform] duration-150",
         selected
-          ? "bg-primary/10 ring-1 ring-primary/40 shadow-[0_0_20px_color-mix(in_oklch,var(--primary)_22%,transparent)]"
+          ? "bg-primary/10 ring-1 ring-primary/40 shadow-glow"
           : "hover:bg-accent/30",
       )}
     >
@@ -793,7 +793,7 @@ function RootItem({
         </div>
       </button>
       {onSettings && (
-        <button onClick={onSettings} aria-label={`Settings of ${root.name}`} className="shrink-0 rounded p-0.5 opacity-0 transition-opacity hover:bg-accent group-hover:opacity-100 focus:opacity-100">
+        <button onClick={onSettings} aria-label={`Settings of ${root.name}`} className="shrink-0 rounded-xs p-0.5 opacity-0 transition-opacity hover:bg-accent group-hover:opacity-100 focus:opacity-100">
           <Settings2 className="h-3.5 w-3.5" />
         </button>
       )}
@@ -826,7 +826,7 @@ function Breadcrumb({
       <div className="flex min-w-0 items-center gap-0.5 overflow-hidden">
         <button
           onClick={() => onNavigate(-1)}
-          className="shrink-0 p-1 rounded hover:bg-accent/40 transition-colors text-muted-foreground hover:text-foreground"
+          className="shrink-0 p-1 rounded-xs hover:bg-accent/40 transition-colors text-muted-foreground hover:text-foreground"
           aria-label="Workspace root"
         >
           <Home className="h-3.5 w-3.5" />
@@ -839,7 +839,7 @@ function Breadcrumb({
             ) : (
               <button
                 onClick={() => onNavigate(i)}
-                className="truncate px-1 py-0.5 rounded hover:bg-accent/40 transition-colors text-muted-foreground hover:text-foreground"
+                className="truncate px-1 py-0.5 rounded-xs hover:bg-accent/40 transition-colors text-muted-foreground hover:text-foreground"
               >
                 {seg}
               </button>
@@ -852,7 +852,7 @@ function Breadcrumb({
           <button
             type="button"
             onClick={() => void copyFullPath()}
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-accent/40 hover:text-foreground focus-visible:opacity-100 group-hover/path:opacity-100"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-xs text-muted-foreground opacity-0 transition-opacity hover:bg-accent/40 hover:text-foreground focus-visible:opacity-100 group-hover/path:opacity-100"
             aria-label="Copy full path"
           >
             <Copy className="h-3.5 w-3.5" />
@@ -1791,7 +1791,7 @@ export function FilesPage() {
         >
           {/* Drag overlay */}
           {dragging && (
-            <div className="absolute inset-0 z-20 bg-primary/5 border-2 border-dashed border-primary/40 rounded flex items-center justify-center pointer-events-none">
+            <div className="absolute inset-0 z-20 bg-primary/5 border-2 border-dashed border-primary/40 rounded-xs flex items-center justify-center pointer-events-none">
               <div className="flex flex-col items-center gap-2 text-primary">
                 <FolderUp className="h-8 w-8" />
                 <span className="text-sm font-medium">Drop files or folders to upload</span>

@@ -122,8 +122,8 @@ export class WorkspaceShell implements Shell {
     return isRemoteWorkspace(this.workspace);
   }
   async execute(command: string, options: ShellOptions = {}): Promise<ShellResult> {
-    const result = await this.workspace.exec(command, { cwd: options.cwd, env: options.env, timeoutMs: options.timeout });
-    return { stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode };
+    const result = await this.workspace.exec(command, { cwd: options.cwd, env: options.env, timeoutMs: options.timeout, signal: options.signal });
+    return { stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode, ...(result.timedOut ? { timedOut: true } : {}) };
   }
 }
 

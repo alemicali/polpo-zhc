@@ -28,3 +28,26 @@ export function parseISO8601Duration(duration: string): number {
 export function isValidISO8601Duration(duration: string): boolean {
   try { parseISO8601Duration(duration); return true; } catch { return false; }
 }
+
+const RELATIVE_RE = /^(\d+(?:\.\d+)?)\s*(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|wks?|weeks?)$/i;
+const UNIT_MS: Record<string, number> = { s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 };
+
+/**
+ * A point in time for "since" filters (e.g. tasks updated since): a relative duration back from
+ * `now` ("30m", "24h", "7d", "2w", "90 minutes", an ISO 8601 duration such as "PT24H"), or an
+ * ISO date/time ("2026-11-21", "2026-11-21T08:00:00Z"). Epoch milliseconds; undefined when the
+ * text is neither.
+ */
+export function parseSince(value: string, now: number = Date.now()): number | undefined {
+  const text = value.trim();
+  if (!text) return undefined;
+  const rel = RELATIVE_RE.exec(text);
+  if (rel) return now - parseFloat(rel[1]!) * UNIT_MS[rel[2]![0]!.toLowerCase()]!;
+  if (/^P/i.test(text) && isValidISO8601Duration(text)) return now - parseISO8601Duration(text);
+  // a date or a date-time (plain numbers are not dates here)
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) {
+    const at = Date.parse(text);
+    return Number.isNaN(at) ? undefined : at;
+  }
+  return undefined;
+}

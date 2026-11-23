@@ -205,7 +205,7 @@ export function LocalModelStep({
 export function NoToolsBadge() {
   return (
     <span
-      className="shrink-0 rounded border border-warning/40 bg-warning/10 px-1 text-micro font-medium text-warning"
+      className="shrink-0 rounded-xs border border-warning/40 bg-warning/10 px-1 text-micro font-medium text-warning"
       title="This model does not support tool calling: it can chat, but agents using it cannot write files or run commands, so their tasks fail."
     >
       no tools

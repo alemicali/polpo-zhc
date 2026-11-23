@@ -1,7 +1,7 @@
-# Agent harnesses: Claude Code and Codex as an agent's engine
+# Agent harnesses: Claude Code, Codex and OpenCode as an agent's engine
 
 An agent can run its tasks on an official agent runtime instead of Polpo's own engine:
-**Claude Code** (Anthropic) or **Codex** (OpenAI). The runtime runs **inside the agent's computer**
+**Claude Code** (Anthropic), **Codex** (OpenAI) or **OpenCode** (open source, any model). The runtime runs **inside the agent's computer**
 (a Daytona v2 VM), works on the computer's files with its own tools (Bash, Read, Write, Edit,
 search…), and gets **Polpo's tools** as extra tools that run on the Polpo server with the agent's
 permissions: `register_outcome`, email, data sources, artifacts, storage, company brain, connectors
@@ -50,6 +50,49 @@ subscription store or `~/.codex/auth.json`.
 (the Vercel AI Gateway: model ids `openai/…`) or `"gateway"` (a gateway that speaks the OpenAI
 Responses API, `format: "openai-responses"`, base URL ending in `/v1`). Signing in with ChatGPT is not
 supported yet.
+
+### OpenCode: any model, open-weight ones included
+
+[OpenCode](https://opencode.ai) (`opencode-ai`, MIT) runs as a bridge process in the computer like
+Claude Code (`@ai-sdk/harness-opencode`, pinned; it installs `opencode-ai` and ripgrep in the VM).
+It runs **any model** OpenCode supports, so choose it when an agent needs a model the other two
+cannot run: open-weight models (Kimi, GLM, Qwen, DeepSeek…) on Amazon Bedrock, OpenRouter, Groq or a
+gateway; Gemini, Grok, Mistral; or a provider the team already pays. Claude Code stays the choice for
+Claude models, Codex for OpenAI's.
+
+| `auth` | Settings | Vault entry |
+|---|---|---|
+| `api-key` | `provider`: `anthropic`, `openai`, `google`, `xai`, `mistral`, `groq`, `deepseek`, `openrouter`, `moonshotai`, `zai` | the provider's API key (`apiKey`, or its own variable name, e.g. `MOONSHOT_API_KEY`) |
+| `bedrock` | `bedrock.region` | a **Bedrock API key** (`apiKey` or `AWS_BEARER_TOKEN_BEDROCK`) |
+| `ai-gateway` | `gateway: { baseUrl?, credentialRef }` | the Vercel AI Gateway key |
+| `gateway` | `gateway: { format, baseUrl, authScheme, credentialRef?, headers?, models: { main } }`; `format`: `openai-chat` (Chat Completions: OpenRouter, LiteLLM, vLLM, most gateways), `openai-responses` or `anthropic` | the gateway's key |
+
+```json
+"opencode": { "auth": "bedrock", "credentialRef": { "owner": "ops", "service": "bedrock" },
+              "bedrock": { "region": "us-east-1" }, "model": "global.moonshotai.kimi-k3.1" }
+```
+
+- **The model is required** (in the setting, `gateway.models.main`, or the agent's `engine.model`):
+  the provider's id, with or without OpenCode's provider prefix (`amazon-bedrock/global.moonshotai.kimi-k3.1`
+  is stored as `global.moonshotai.kimi-k3.1`). OpenCode's model catalog (models.dev) supplies the
+  model's limits and prices; a model it does not list still runs (Polpo declares it), without a price.
+- **Bedrock** takes a Bedrock API key only: it is a bearer token, so Polpo's relay can keep it out of
+  the VM. AWS access keys (SigV4) sign every request inside the VM and are refused for OpenCode (use
+  Claude Code for SigV4, or create a Bedrock API key). OpenCode adds Bedrock's cross-region prefix
+  (`us.`, `eu.`…) for the models that need it; ids that already carry one (`global.…`) are kept.
+- **Logins are never used**: OpenCode can sign in to ChatGPT/Codex, GitHub Copilot, xAI, OpenCode
+  Zen/Go, GitLab Duo… on a laptop; Polpo refuses those (`auth: "subscription"` and the like, provider
+  `github-copilot`, `opencode`, `opencode-go`, `gitlab`, `poe`).
+- **Polpo writes OpenCode's config** for each run: only the chosen provider (`enabled_providers`), its
+  key option (or a placeholder), its base URL (Polpo's relay when it brokers), the model (also the
+  small model for titles and summaries), gateway headers when not brokered. The adapter gets an
+  empty, explicit authentication (`auth: {}`), so it never reads this server's environment,
+  `~/.local/share/opencode/auth.json` or a subscription; the computer's own provider variables
+  (`OPENAI_API_KEY`, `AWS_*`, `AI_GATEWAY_API_KEY`…) are blanked for OpenCode's processes.
+- Effort maps to OpenCode's reasoning variant (`low`, `medium`, `high`; `xhigh` / `max` → `high`).
+  `maxBudgetUsd` is not enforced by OpenCode. OpenCode compacts the conversation by itself when it
+  nears the model's context window and resumes from its saved session state (the bridge keeps it in
+  the VM), like the other runtimes; it reads the repository's `AGENTS.md` itself.
 
 ## Configuration
 
@@ -226,8 +269,18 @@ returns `relay.available: false` and `brokering: "in-vm"`). Secret gateway heade
 requests from the VM too (`ANTHROPIC_CUSTOM_HEADERS` / Codex `http_headers`); a Codex gateway with
 `authScheme: "x-api-key"` needs the relay.
 
-**Bedrock and Vertex** sign every request (SigV4, Google OAuth) inside the runtime, so their
-credentials cannot be swapped on the way out: they still go into the VM. To keep them out, put a
+**OpenCode** is brokered by Polpo itself: Polpo writes OpenCode's provider config, so the
+placeholder (`polpo-placeholder-…`, in the provider's key option) and its rule are Polpo's
+(`credentialRules`, installed on the run's lease, or on a native provider before the first process
+starts). The adapter registers no rule of its own (its authentication is empty). The base URL in the
+config is the relay's; the upstream is the provider's (e.g. `https://api.moonshot.ai/v1`,
+`https://bedrock-runtime.<region>.amazonaws.com`, `<gateway>/v1/ai` for the AI Gateway). The key
+presented as each provider wants it: `x-api-key` (Anthropic), `x-goog-api-key` (Gemini), a Bearer
+token (the others, Bedrock API keys included). Without the relay the key goes in OpenCode's config in
+the VM.
+
+**Claude Code on Bedrock and Vertex** signs every request (SigV4, Google OAuth) inside the runtime, so
+its credentials cannot be swapped on the way out: they still go into the VM. To keep them out, put a
 gateway in front (e.g. LiteLLM or Portkey with Bedrock/Vertex behind it, or Cloudflare AI Gateway)
 and use `auth: "gateway"`. Runs on this server (`allowHost`) are not brokered: the runtime already
 runs next to Polpo's files (isolated HOME).
@@ -246,6 +299,10 @@ tiny request **from the Polpo server, never the VM**, with the configured authen
   function tool; passes on `response.completed` (or `response.incomplete` at the token limit).
 - Bedrock: a minimal Converse call with the model (Bedrock API key, or SigV4 with access keys).
 - Vertex AI: a minimal `rawPredict` (the service account's OAuth token).
+- OpenCode: its provider's format with its model (required): Chat Completions
+  (`POST {base}/chat/completions`, streamed, one tool) for the OpenAI-compatible providers, OpenAI
+  gateways in that format and the Vercel AI Gateway; Anthropic Messages (`{base}/messages`); OpenAI
+  Responses; Gemini `generateContent` with `x-goog-api-key`; Bedrock Converse with the Bedrock API key.
 
 The result: `{ ok, latencyMs, model, endpoint, status, errorKind?, error?, note? }`, `errorKind` one of
 `config` (settings or vault entry), `auth`, `model` (not available to the account / unknown id),
@@ -351,6 +408,11 @@ sessions that are live and sessions updated in the last 10 minutes.
 
 ## Costs and limits
 
+- **OpenCode's cost**: OpenCode prices each model step from its catalog (models.dev list prices) and
+  reports it on the step (`opencode.cost`, not cumulative); a turn's cost is the sum of its steps
+  (`costSource: "runtime"`, `"runtime-estimate"` through the AI Gateway). A model its catalog has no
+  price for (a custom gateway's) reports 0: Polpo records tokens only. A gateway that reports its cost
+  in a response header still wins.
 - Claude Code sends its own system prompt and tool catalog (about 47k tokens) with every request;
   prompt caching makes later requests cheap (measured on Bedrock: $0.023 for a first 5-tool turn on
   Haiku 4.5, $0.007 for the next). Budget runs with `maxBudgetUsd`.

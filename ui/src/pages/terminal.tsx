@@ -224,7 +224,7 @@ export function TerminalPage() {
 function StatusDot({ state }: { state: ConnectionState }) {
   return (
     <span className={cn(
-      "inline-flex h-2 w-2 shrink-0 rounded-full",
+      "inline-flex h-2 w-2 shrink-0 rounded-pill",
       state === "connected" ? "bg-success" : state === "error" ? "bg-destructive" : state === "closed" ? "bg-muted-foreground" : "bg-warning",
     )} />
   );

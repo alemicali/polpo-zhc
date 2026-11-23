@@ -33,10 +33,14 @@ import { ConnectorIcons } from "./icon-store.js";
 import type { IconFetcher } from "./icons.js";
 import { bridgeMcpTool, connectorToolAllowed, type McpToolInfo } from "./tools.js";
 import { clientMetadataUrlFor } from "./paths.js";
+import { catalogEntry } from "./catalog.js";
 import { accountFromIdToken, connectorLabel } from "./view.js";
+import { accountFromToolResult, pickIdentityTool } from "./account-identity.js";
 
 const VERSION = "1.0.0";
 const CONNECT_TIMEOUT_MS = 20_000;
+/** The one identity call after a connection (whoami / get_me…): short, it only labels the connector. */
+const ACCOUNT_LOOKUP_TIMEOUT_MS = 5_000;
 const DEFAULT_LIST_TTL_MS = 5 * 60_000;
 /** How long a chat waits for one connector's tools before going on without them. */
 const TOOLS_FOR_TIMEOUT_MS = 15_000;
@@ -279,7 +283,8 @@ export class ConnectorManager {
     }
     if ((failure?.step === "registration" && failure.status < 500 && failure.status !== 429)
       || errorMessage(error) === "Incompatible auth server: does not support dynamic client registration") {
-      const app = connector.catalogId ?? connector.id;
+      // the shared app the catalog names (e.g. "meta" for WhatsApp Business), else one for this connector
+      const app = connector.auth.oauth?.app ?? (connector.catalogId ? catalogEntry(connector.catalogId)?.oauth?.app : undefined) ?? connector.catalogId ?? connector.id;
       return new ConnectorError(
         `${failure?.message ?? `${connector.name} does not offer dynamic OAuth client registration.`} Set up an approved, pre-registered client in Connectors → OAuth apps.`,
         "error",
@@ -388,14 +393,44 @@ export class ConnectorManager {
     }
   }
 
-  /** Connect and list the tools (the "Test" button). */
+  /** Connect and list the tools (the "Test" button); then, if still unknown, which account it is signed in as. */
   async test(id: string): Promise<{ ok: boolean; status: ConnectorStatus; tools?: McpToolInfo[]; error?: string }> {
     await this.close(id);
     try {
       const tools = await this.listTools(id, { refresh: true });
+      await this.discoverAccount(id, tools);
       return { ok: true, status: "connected", tools };
     } catch (err) {
       return { ok: false, status: err instanceof ConnectorError ? err.status : "error", error: errorMessage(err) };
+    }
+  }
+
+  /**
+   * Best effort, when the sign-in did not say which account it is (no id_token): call the server's
+   * obvious identity tool once (whoami, get_me, get_current_user… read-only, no arguments; see
+   * account-identity.ts) and keep the email or username as the connector's account. Time-boxed;
+   * any failure leaves the account unknown. Returns the account found, if any.
+   */
+  async discoverAccount(id: string, tools: McpToolInfo[]): Promise<string | undefined> {
+    const connector = this.store.get(id);
+    if (!connector || connector.account) return undefined;
+    const tool = pickIdentityTool(tools.filter((t) => connector.toolPolicy?.[t.name] !== "off"));
+    if (!tool) return undefined;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ACCOUNT_LOOKUP_TIMEOUT_MS);
+    timer.unref?.();
+    try {
+      const account = accountFromToolResult(await this.callTool(id, tool.name, {}, controller.signal));
+      if (!account || this.store.get(id)?.account) return undefined;
+      this.store.update(id, { account });
+      this.announce(id, "updated");
+      this.log(`${id}: signed in as ${account} (from ${tool.name})`);
+      return account;
+    } catch (err) {
+      this.log(`${id}: account lookup with ${tool.name} failed: ${errorMessage(err)}`);
+      return undefined;
+    } finally {
+      clearTimeout(timer);
     }
   }
 

@@ -18,14 +18,14 @@ export type AppearancePalette = (typeof APPEARANCE_PALETTES)[number];
 
 /**
  * How a token's value is checked: colour, font stack, radius (px; 0–24, card and control radius
- * 0–32), box-shadow, font size (rem 0.5–6 / px 8–96), font weight (100–900), letter-spacing (em
+ * 0–32; badge, pill and avatar 0–999, 999 = fully round), box-shadow, font size (rem 0.5–6 / px 8–96), font weight (100–900), letter-spacing (em
  * -0.1–0.3 / px -3–6, 0, normal), text case (uppercase, none, capitalize, lowercase), a gradient
  * ({ from, to, angle }: two colours and 0–360 degrees), an opacity (0.5–1), a blur (px 0–24).
  */
 export type AppearanceTokenKind = "color" | "font" | "radius" | "shadow" | "size" | "weight" | "tracking" | "case" | "gradient" | "opacity" | "blur";
 
 /** Editor groups, in the order the dashboard shows them. */
-export const APPEARANCE_TOKEN_GROUPS = ["brand", "surfaces", "text", "borders", "sidebar", "charts", "status", "typography", "shape"] as const;
+export const APPEARANCE_TOKEN_GROUPS = ["brand", "surfaces", "text", "borders", "sidebar", "charts", "agents", "status", "typography", "shape"] as const;
 export type AppearanceTokenGroup = (typeof APPEARANCE_TOKEN_GROUPS)[number];
 
 /**
@@ -39,10 +39,14 @@ export const APPEARANCE_TOKENS = {
   buttonPrimaryBg: { css: "--button-primary-bg", group: "brand", kind: "color" },
   buttonGradient: { css: "--button-primary-bg", group: "brand", kind: "gradient" },
   buttonPrimaryForeground: { css: "--button-primary-foreground", group: "brand", kind: "color" },
+  shadowButtonPrimary: { css: "--shadow-button-primary", group: "brand", kind: "shadow" },
   background: { css: "--background", group: "surfaces", kind: "color" },
   card: { css: "--card", group: "surfaces", kind: "color" },
   popover: { css: "--popover", group: "surfaces", kind: "color" },
   muted: { css: "--muted", group: "surfaces", kind: "color" },
+  overlay: { css: "--overlay", group: "surfaces", kind: "color" },
+  canvas: { css: "--canvas", group: "surfaces", kind: "color" },
+  canvasForeground: { css: "--canvas-foreground", group: "surfaces", kind: "color" },
   foreground: { css: "--foreground", group: "text", kind: "color" },
   mutedForeground: { css: "--muted-foreground", group: "text", kind: "color" },
   cardForeground: { css: "--card-foreground", group: "text", kind: "color" },
@@ -68,6 +72,26 @@ export const APPEARANCE_TOKENS = {
   chart3: { css: "--chart-3", group: "charts", kind: "color" },
   chart4: { css: "--chart-4", group: "charts", kind: "color" },
   chart5: { css: "--chart-5", group: "charts", kind: "color" },
+  agent1: { css: "--agent-1", group: "agents", kind: "color" },
+  agent2: { css: "--agent-2", group: "agents", kind: "color" },
+  agent3: { css: "--agent-3", group: "agents", kind: "color" },
+  agent4: { css: "--agent-4", group: "agents", kind: "color" },
+  agent5: { css: "--agent-5", group: "agents", kind: "color" },
+  agent6: { css: "--agent-6", group: "agents", kind: "color" },
+  agent7: { css: "--agent-7", group: "agents", kind: "color" },
+  agent8: { css: "--agent-8", group: "agents", kind: "color" },
+  agent9: { css: "--agent-9", group: "agents", kind: "color" },
+  agent10: { css: "--agent-10", group: "agents", kind: "color" },
+  agent1Foreground: { css: "--agent-1-foreground", group: "agents", kind: "color" },
+  agent2Foreground: { css: "--agent-2-foreground", group: "agents", kind: "color" },
+  agent3Foreground: { css: "--agent-3-foreground", group: "agents", kind: "color" },
+  agent4Foreground: { css: "--agent-4-foreground", group: "agents", kind: "color" },
+  agent5Foreground: { css: "--agent-5-foreground", group: "agents", kind: "color" },
+  agent6Foreground: { css: "--agent-6-foreground", group: "agents", kind: "color" },
+  agent7Foreground: { css: "--agent-7-foreground", group: "agents", kind: "color" },
+  agent8Foreground: { css: "--agent-8-foreground", group: "agents", kind: "color" },
+  agent9Foreground: { css: "--agent-9-foreground", group: "agents", kind: "color" },
+  agent10Foreground: { css: "--agent-10-foreground", group: "agents", kind: "color" },
   destructive: { css: "--destructive", group: "status", kind: "color" },
   destructiveForeground: { css: "--destructive-foreground", group: "status", kind: "color" },
   success: { css: "--success", group: "status", kind: "color" },
@@ -90,15 +114,37 @@ export const APPEARANCE_TOKENS = {
   textSmall: { css: "--text-small", group: "typography", kind: "size" },
   textCaption: { css: "--text-caption", group: "typography", kind: "size" },
   textMicro: { css: "--text-micro", group: "typography", kind: "size" },
+  textXs: { css: "--text-xs", group: "typography", kind: "size" },
+  textSm: { css: "--text-sm", group: "typography", kind: "size" },
+  textBase: { css: "--text-base", group: "typography", kind: "size" },
+  textLg: { css: "--text-lg", group: "typography", kind: "size" },
+  textXl: { css: "--text-xl", group: "typography", kind: "size" },
+  text2xl: { css: "--text-2xl", group: "typography", kind: "size" },
+  text3xl: { css: "--text-3xl", group: "typography", kind: "size" },
   headingWeight: { css: "--font-weight-heading", group: "typography", kind: "weight" },
+  fontWeightNormal: { css: "--font-weight-normal", group: "typography", kind: "weight" },
+  fontWeightMedium: { css: "--font-weight-medium", group: "typography", kind: "weight" },
+  fontWeightSemibold: { css: "--font-weight-semibold", group: "typography", kind: "weight" },
+  fontWeightBold: { css: "--font-weight-bold", group: "typography", kind: "weight" },
   headingTracking: { css: "--tracking-heading", group: "typography", kind: "tracking" },
   labelTracking: { css: "--tracking-label", group: "typography", kind: "tracking" },
   labelCase: { css: "--label-transform", group: "typography", kind: "case" },
   radius: { css: "--radius", group: "shape", kind: "radius" },
   radiusCard: { css: "--radius-card", group: "shape", kind: "radius" },
   radiusControl: { css: "--radius-control", group: "shape", kind: "radius" },
+  radiusBadge: { css: "--radius-badge", group: "shape", kind: "radius" },
+  radiusPill: { css: "--radius-pill", group: "shape", kind: "radius" },
+  radiusAvatar: { css: "--radius-avatar", group: "shape", kind: "radius" },
+  radiusDialog: { css: "--radius-dialog", group: "shape", kind: "radius" },
+  shadowControl: { css: "--shadow-control", group: "shape", kind: "shadow" },
   shadowCard: { css: "--shadow-card", group: "shape", kind: "shadow" },
   shadowRaised: { css: "--shadow-raised", group: "shape", kind: "shadow" },
+  shadowDialog: { css: "--shadow-dialog", group: "shape", kind: "shadow" },
+  shadowGlow: { css: "--shadow-glow", group: "shape", kind: "shadow" },
+  shadowGlowStrong: { css: "--shadow-glow-strong", group: "shape", kind: "shadow" },
+  surfaceBlur: { css: "--surface-blur", group: "shape", kind: "blur" },
+  overlayBlur: { css: "--overlay-blur", group: "shape", kind: "blur" },
+  glowBlur: { css: "--glow-blur", group: "shape", kind: "blur" },
 } as const satisfies Record<string, { css: string; group: AppearanceTokenGroup; kind: AppearanceTokenKind }>;
 
 export type AppearanceTokenName = keyof typeof APPEARANCE_TOKENS;
@@ -122,9 +168,20 @@ export const APPEARANCE_NUMBER_RANGES: Record<string, readonly [number, number]>
   radius: [APPEARANCE_RADIUS_MIN, APPEARANCE_RADIUS_MAX],
   radiusCard: [0, 32],
   radiusControl: [0, 32],
+  radiusBadge: [0, 999],
+  radiusPill: [0, 999],
+  radiusAvatar: [0, 999],
+  radiusDialog: [0, 32],
   headingWeight: [100, 900],
+  fontWeightNormal: [100, 900],
+  fontWeightMedium: [100, 900],
+  fontWeightSemibold: [100, 900],
+  fontWeightBold: [100, 900],
   sidebarOpacity: [0.5, 1],
   sidebarBlur: [0, 24],
+  surfaceBlur: [0, 24],
+  overlayBlur: [0, 24],
+  glowBlur: [0, 96],
 };
 /** A gradient's default angle (degrees), when not given. */
 export const APPEARANCE_GRADIENT_ANGLE = 135;
@@ -154,7 +211,59 @@ export const APPEARANCE_FONT_PRESETS: Record<string, string> = {
 
 /** A gradient token (buttonGradient): two colours and an angle in degrees (default 135). */
 export interface AppearanceGradient { from: string; to: string; angle?: number }
-type NumberTokenName = "radius" | "radiusCard" | "radiusControl" | "headingWeight" | "sidebarOpacity" | "sidebarBlur";
+type NumberTokenName = "radius" | "radiusCard" | "radiusControl" | "radiusBadge" | "radiusPill" | "radiusAvatar" | "radiusDialog"
+  | "headingWeight" | "fontWeightNormal" | "fontWeightMedium" | "fontWeightSemibold" | "fontWeightBold"
+  | "sidebarOpacity" | "sidebarBlur" | "surfaceBlur" | "overlayBlur" | "glowBlur";
+/** The agent colours (agent1 … agent10): avatars, badges, team colours, tool kinds. */
+export const AGENT_COLOR_COUNT = 10;
+/** An agent's colour choice (settings → agent identity.color): one of the agent colour tokens. */
+export const AGENT_COLOR_TOKEN = /^agent(?:[1-9]|10)$/;
+
+/** A stable 1…10 from an agent's name (FNV-1a): the same agent, the same colour, everywhere (dashboard, MCP cards). */
+export function agentColorIndexFromName(name: string): number {
+  let h = 0x811c9dc5;
+  const s = name.trim().toLowerCase();
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return ((h >>> 0) % AGENT_COLOR_COUNT) + 1;
+}
+
+/** An agent's colour index (1…10): its chosen colour (identity.color "agent3", or 3) when valid, else from its name. */
+export function agentColorIndex(name: string | undefined, chosen?: unknown): number {
+  if (typeof chosen === "number" && Number.isInteger(chosen) && chosen >= 1 && chosen <= AGENT_COLOR_COUNT) return chosen;
+  if (typeof chosen === "string" && AGENT_COLOR_TOKEN.test(chosen.trim())) return Number(chosen.trim().slice(5));
+  return agentColorIndexFromName(name ?? "");
+}
+
+/**
+ * The tokens an MCP card (a widget in a third-party host) takes from the instance's look, per mode:
+ * the brand and status colours and the agent colours. Only what the instance's custom look sets
+ * (the palettes' own values live in the dashboard's stylesheet); the card falls back to the host's
+ * colours, then its own light/dark defaults.
+ */
+export const WIDGET_TOKEN_NAMES = [
+  "primary", "success", "warning", "info", "destructive",
+  ...Array.from({ length: AGENT_COLOR_COUNT }, (_, i) => `agent${i + 1}`),
+  ...Array.from({ length: AGENT_COLOR_COUNT }, (_, i) => `agent${i + 1}Foreground`),
+] as const;
+
+/** The instance look's tokens for the MCP cards: { light, dark } of WIDGET_TOKEN_NAMES that are colours, or undefined. */
+export function widgetAppearance(a: AppearanceSettings | undefined): { light?: Record<string, string>; dark?: Record<string, string> } | undefined {
+  if (!a?.custom?.enabled) return undefined;
+  const pick = (tokens: AppearanceTokens | undefined) => {
+    const out: Record<string, string> = {};
+    for (const name of WIDGET_TOKEN_NAMES) {
+      const v = (tokens as Record<string, unknown> | undefined)?.[name];
+      if (typeof v === "string" && APPEARANCE_COLOR.test(v)) out[name] = v;
+    }
+    return Object.keys(out).length ? out : undefined;
+  };
+  const light = pick(a.custom.light);
+  const dark = pick(a.custom.dark);
+  return light || dark ? { ...(light ? { light } : {}), ...(dark ? { dark } : {}) } : undefined;
+}
 /** Token values for one mode: any subset of APPEARANCE_TOKENS (radii in px, headingWeight, sidebarOpacity and sidebarBlur numbers; buttonGradient an object; the rest strings). */
 export type AppearanceTokens = Partial<Record<Exclude<AppearanceTokenName, NumberTokenName | "buttonGradient">, string>>
   & Partial<Record<NumberTokenName, number>> & { buttonGradient?: AppearanceGradient };

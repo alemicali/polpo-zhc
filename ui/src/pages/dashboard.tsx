@@ -41,6 +41,7 @@ import { taskStatusStyles, taskPhaseStyles } from "@/lib/status-tokens";
 import { Eyebrow } from "@/components/shared/eyebrow";
 import { StatValue, type StatTone } from "@/components/shared/stat-value";
 import { useTokenUsage, type TokenUsageRange } from "@/hooks/use-token-usage";
+import { AgentAvatar } from "@/components/shared/agent-avatar";
 
 const DASHBOARD_RANGES: { value: TokenUsageRange; label: string; shortLabel: string }[] = [
   { value: "today", label: "Today", shortLabel: "Today" },
@@ -142,10 +143,10 @@ function PhaseIcon({ phase }: { phase?: string }) {
 
 const TICKER_ITEMS = [
   { label: "Pending", key: "pending" as const, color: "bg-status-queued", glow: "" },
-  { label: "Queued", key: "queued" as const, color: "bg-status-assigned", glow: "shadow-[0_0_6px_color-mix(in_oklch,var(--status-assigned)_50%,transparent)]" },
-  { label: "Running", key: "running" as const, color: "bg-status-running", glow: "shadow-[0_0_6px_color-mix(in_oklch,var(--status-running)_60%,transparent)]" },
-  { label: "Done", key: "done" as const, color: "bg-success", glow: "shadow-[0_0_6px_color-mix(in_oklch,var(--success)_50%,transparent)]" },
-  { label: "Failed", key: "failed" as const, color: "bg-destructive", glow: "shadow-[0_0_6px_color-mix(in_oklch,var(--destructive)_50%,transparent)]" },
+  { label: "Queued", key: "queued" as const, color: "bg-status-assigned", glow: "shadow-glow-strong glow-status-assigned" },
+  { label: "Running", key: "running" as const, color: "bg-status-running", glow: "shadow-glow-strong glow-status-running" },
+  { label: "Done", key: "done" as const, color: "bg-success", glow: "shadow-glow-strong glow-success" },
+  { label: "Failed", key: "failed" as const, color: "bg-destructive", glow: "shadow-glow-strong glow-destructive" },
 ] satisfies { label: string; key: keyof PolpoStats; color: string; glow: string }[];
 
 const LiveTicker = memo(function LiveTicker({ stats }: { stats: PolpoStats | null }) {
@@ -159,7 +160,7 @@ const LiveTicker = memo(function LiveTicker({ stats }: { stats: PolpoStats | nul
         return (
           <div key={item.label} className="flex items-center gap-1.5">
             <div className={cn(
-              "h-2 w-2 rounded-full",
+              "h-2 w-2 rounded-pill",
               item.color,
               value > 0 && item.glow,
               value > 0 && item.key === "running" && "animate-pulse",
@@ -203,7 +204,7 @@ const StatCard = memo(function StatCard({
   tone?: StatTone;
 }) {
   return (
-    <Card className="relative overflow-hidden transition-shadow hover:shadow-[0_0_20px_color-mix(in_oklch,var(--primary)_6%,transparent)]">
+    <Card className="relative overflow-hidden transition-shadow hover:shadow-glow">
       <CardContent>
         <StatValue label={title} value={value} hint={description} icon={icon} tone={tone} />
       </CardContent>
@@ -585,10 +586,10 @@ const ActiveAgents = memo(function ActiveAgents({ processes }: { processes: Agen
             : "Working...";
 
           return (
-            <div key={`${p.agentName}-${p.taskId}`} className="rounded-lg border border-border/40 bg-card/60 backdrop-blur-sm p-3">
+            <div key={`${p.agentName}-${p.taskId}`} className="rounded-lg border border-border/40 bg-card/60 backdrop-blur-surface p-3">
               <div className="flex items-center gap-3 mb-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10">
-                  <Bot className="h-4 w-4 text-primary" />
+                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-muted/50">
+                  <AgentAvatar name={p.agentName} size="md" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium">{p.agentName}</p>
@@ -742,7 +743,7 @@ export function DashboardPage() {
   if (tasksLoading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <Loader2 className="h-8 w-8 animate-spin text-primary drop-shadow-[0_0_8px_color-mix(in_oklch,var(--primary)_50%,transparent)]" />
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
   }

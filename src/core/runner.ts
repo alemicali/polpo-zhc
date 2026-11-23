@@ -369,7 +369,7 @@ async function main(): Promise<void> {
       resumeMessages: checkpoint?.messages,
       continuation,
     };
-    // an agent on an official harness (Claude Code, Codex) runs it in its computer; others on Polpo's engine
+    // an agent on an official harness (Claude Code, Codex, OpenCode) runs it in its computer; others on Polpo's engine
     // The task's tool scope narrows the agent's tools for this run: Polpo's engine, progressive
     // tools_search / tools_load and harness host tools all resolve from this config
     const runAgent = scopedAgentForRun(config);

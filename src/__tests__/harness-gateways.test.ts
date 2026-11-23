@@ -342,7 +342,8 @@ describe("model relay", () => {
     // the public route, as mounted on the Polpo server
     const app = new Hono();
     app.all("/api/v1/harness-relay/*", (c) => forwardToRelay({ polpoDir, env, path: c.req.path.slice("/api/v1/harness-relay".length), request: c.req.raw }));
-    const res = await app.request(`/api/v1/harness-relay/${l.token}/v1/messages?beta=true`, { method: "POST", headers: { "x-api-key": "ph", "content-type": "application/json" }, body: '{"a":1}' });
+    // a real Node server receives content-length with the body: it must not reach the lease next to chunked encoding
+    const res = await app.request(`/api/v1/harness-relay/${l.token}/v1/messages?beta=true`, { method: "POST", headers: { "x-api-key": "ph", "content-type": "application/json", "content-length": "7" }, body: '{"a":1}' });
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("event: message_start\n\nevent: message_stop\n\n");
     expect(up.calls[0]).toMatchObject({ url: "https://api.anthropic.com/v1/messages?beta=true", body: '{"a":1}' });

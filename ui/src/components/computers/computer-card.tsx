@@ -10,6 +10,7 @@ import { ACTION_META, actionLabel } from "@/components/computers/computer-action
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/computers/status-badge";
 import { BrandIcon } from "@/components/shared/brand-icon";
+import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { EngineBadge } from "@/components/shared/run-context";
 import { HARNESS_NAMES, type HarnessSession } from "@/lib/harnesses-api";
 import { computerBrand, formatUsd } from "@/lib/run-context";
@@ -29,7 +30,7 @@ export function ComputerCard({
   showAgents?: boolean;
   /** Each agent's engine ("polpo" or { harness }): its mark next to the agent. */
   agentEngines?: Record<string, string | undefined>;
-  /** The agent harness sessions (Claude Code, Codex) bound to this computer. */
+  /** The agent harness sessions (Claude Code, Codex, OpenCode) bound to this computer. */
   harnessSessions?: HarnessSession[];
   /** Trailing buttons after the lifecycle actions (not shown for this server). */
   children?: ReactNode;
@@ -64,6 +65,7 @@ export function ComputerCard({
             <dd className="flex min-w-0 flex-wrap items-center gap-x-1.5" data-testid="computer-agents">
               {computer.agents.length ? computer.agents.map((a, i) => (
                 <span key={a.name} className="inline-flex min-w-0 items-center gap-1">
+                  <AgentAvatar name={a.name} size="xs" />
                   <EngineBadge engine={agentEngines?.[a.name]} size={12} />
                   <span className="truncate">{a.name}{a.isDefault || computer.builtin ? "" : " (may use)"}{i < computer.agents.length - 1 ? "," : ""}</span>
                 </span>

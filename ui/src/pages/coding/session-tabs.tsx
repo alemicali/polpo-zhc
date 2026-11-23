@@ -110,7 +110,7 @@ export function SessionTabs({
               type="button"
               aria-label="New session"
               title="New session in this workspace"
-              className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-background hover:text-foreground"
+              className="inline-flex h-6 w-6 items-center justify-center rounded-xs text-muted-foreground hover:bg-background hover:text-foreground"
             >
               <Plus className="h-3.5 w-3.5" />
             </button>
@@ -192,7 +192,7 @@ function SessionTab({
           onClick={onSelect}
           className={cn(
             "group/tab relative flex h-7 min-w-0 shrink-0 cursor-pointer select-none items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors",
-            active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:bg-background/55 hover:text-foreground",
+            active ? "bg-background text-foreground shadow-card" : "text-muted-foreground hover:bg-background/55 hover:text-foreground",
             dragging && "opacity-40",
           )}
         >
@@ -226,7 +226,7 @@ function SessionTab({
             aria-label="Close tab"
             title="Close tab (session keeps running — find it in History)"
             className={cn(
-              "ml-1 inline-flex h-4 w-4 items-center justify-center rounded transition-opacity",
+              "ml-1 inline-flex h-4 w-4 items-center justify-center rounded-xs transition-opacity",
               active ? "opacity-60 hover:bg-muted hover:opacity-100" : "opacity-0 group-hover/tab:opacity-60 hover:!bg-muted hover:!opacity-100",
             )}
           >
@@ -302,7 +302,7 @@ function OverflowSelector({
                 onClick={(e) => { e.stopPropagation(); onCloseTab(t.id); }}
                 aria-label="Close tab"
                 title="Close tab"
-                className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 hover:bg-background hover:text-foreground group-hover/row:opacity-60"
+                className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-xs text-muted-foreground opacity-0 hover:bg-background hover:text-foreground group-hover/row:opacity-60"
               >
                 <X className="h-3 w-3" />
               </button>
@@ -322,11 +322,11 @@ function HistoryPopover({ hidden, onUnhide }: { hidden: CodingTerminal[]; onUnhi
           type="button"
           aria-label="Reopen hidden tabs"
           title={`History (${hidden.length} hidden)`}
-          className="relative inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+          className="relative inline-flex h-6 w-6 items-center justify-center rounded-xs text-muted-foreground hover:bg-muted hover:text-foreground"
         >
           <History className="h-3.5 w-3.5" />
           {hidden.length > 0 && (
-            <span className="absolute -right-0.5 -top-0.5 inline-flex h-3 min-w-3 items-center justify-center rounded-full bg-success px-1 text-micro font-bold tabular-nums text-success-foreground">
+            <span className="absolute -right-0.5 -top-0.5 inline-flex h-3 min-w-3 items-center justify-center rounded-pill bg-success px-1 text-micro font-bold tabular-nums text-success-foreground">
               {hidden.length}
             </span>
           )}
@@ -379,7 +379,7 @@ function ConnectionDot({ state }: { state: ConnectionState }) {
     <span
       title={state}
       className={cn(
-        "inline-block h-1.5 w-1.5 rounded-full",
+        "inline-block h-1.5 w-1.5 rounded-pill",
         state === "error" ? "bg-destructive"
         : state === "connecting" ? "bg-warning"
         : "bg-muted-foreground",

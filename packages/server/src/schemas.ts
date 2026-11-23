@@ -286,13 +286,15 @@ export const UpdateSettingsSchema = z.object({
     hostnamePrefix: z.string().optional(),
   }).nullable().optional(),
   /**
-   * Official agent harnesses agents may run on (agent.engine): { enabled: ["claude-code" | "codex"],
+   * Official agent harnesses agents may run on (agent.engine): { enabled: ["claude-code" | "codex" | "opencode"],
    * allowHost?, "claude-code"?: { auth: "api-key" | "bedrock" | "vertex" | "ai-gateway" | "gateway", credentialRef: { owner, service },
    * bedrock?: { region }, vertex?: { region, projectId }, gateway?: {...}, model? }, codex?: { auth: "api-key" | "ai-gateway" | "gateway",
-   * credentialRef | gateway, model? } }. gateway: ai-gateway → { baseUrl?, credentialRef }; gateway → { format: "anthropic" |
-   * "openai-responses", baseUrl, credentialRef?, authScheme: "x-api-key" | "bearer" | "none", headers?: [{ name, credentialRef?,
+   * credentialRef | gateway, model? }, opencode?: { auth: "api-key" | "bedrock" | "ai-gateway" | "gateway", provider? (api-key:
+   * anthropic, openai, google, xai, mistral, groq, deepseek, openrouter, moonshotai, zai), credentialRef | gateway, bedrock?: { region },
+   * model } }. gateway: ai-gateway → { baseUrl?, credentialRef }; gateway → { format: "anthropic" | "openai-responses" | "openai-chat"
+   * (OpenCode), baseUrl, credentialRef?, authScheme: "x-api-key" | "bearer" | "none", headers?: [{ name, credentialRef?,
    * field?, prefix?, value? }], models?: { main, haiku?, sonnet?, opus? }, nonClaude? }.
-   * Credentials are vault references only (a Claude subscription is refused). Replaces it; null removes it.
+   * Credentials are vault references only (a Claude subscription and OpenCode logins are refused). Replaces it; null removes it.
    */
   harnesses: z.record(z.string(), z.unknown()).nullable().optional(),
 
@@ -438,6 +440,7 @@ const AgentIdentitySchema = z.object({
   bio: z.string().optional(),
   timezone: z.string().optional(),
   avatar: z.string().optional(),
+  color: z.string().regex(/^agent(?:[1-9]|10)$/, "an agent colour token: agent1 … agent10").optional(),
   responsibilities: z.array(z.union([z.string(), AgentResponsibilitySchema])).optional(),
   tone: z.string().optional(),
   personality: z.string().optional(),
@@ -523,7 +526,7 @@ const AgentDriveSchema = z.object({
 export const AgentEngineSchema = z.union([
   z.literal("polpo"),
   z.object({
-    harness: z.enum(["claude-code", "codex"]),
+    harness: z.enum(["claude-code", "codex", "opencode"]),
     model: z.string().max(200).optional(),
     permissionMode: z.enum(["allow-all", "allow-edits", "allow-reads"]).optional(),
     effort: z.enum(["low", "medium", "high", "xhigh", "max"]).optional(),
@@ -561,7 +564,7 @@ export const AddAgentSchema = z.object({
   computers: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/)).optional(),
   /** Its default machine for chats and tasks: a computer id or "host"; "" (update) clears it. */
   defaultComputer: z.string().regex(/^([a-z0-9][a-z0-9-]{0,39})?$/).optional(),
-  /** Engine: "polpo" (default) or an official harness running in its computer ({ harness: "claude-code" | "codex", model?, permissionMode?, effort?, maxBudgetUsd? }); null clears it. */
+  /** Engine: "polpo" (default) or an official harness running in its computer ({ harness: "claude-code" | "codex" | "opencode", model?, permissionMode?, effort?, maxBudgetUsd? }); null clears it. */
   engine: AgentEngineSchema.nullable().optional(),
   sandbox: z.any().optional(),
   compaction: z.any().optional(),
@@ -622,7 +625,7 @@ export const UpdateAgentSchema = z.object({
   computers: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/)).nullable().optional(),
   /** Its default machine for chats and tasks: a computer id or "host"; "" (update) clears it. */
   defaultComputer: z.string().regex(/^([a-z0-9][a-z0-9-]{0,39})?$/).optional(),
-  /** Engine: "polpo" (default) or an official harness running in its computer ({ harness: "claude-code" | "codex", model?, permissionMode?, effort?, maxBudgetUsd? }); null clears it. */
+  /** Engine: "polpo" (default) or an official harness running in its computer ({ harness: "claude-code" | "codex" | "opencode", model?, permissionMode?, effort?, maxBudgetUsd? }); null clears it. */
   engine: AgentEngineSchema.nullable().optional(),
   emailAllowedDomains: z.array(z.string()).optional(),
   team: z.string().optional(),

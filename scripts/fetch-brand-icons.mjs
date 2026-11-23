@@ -5,7 +5,7 @@
  *
  *   node scripts/fetch-brand-icons.mjs [--force]
  *
- * - Vector marks from `simple-icons` (Claude, Claude Code, Anthropic, Tailscale, Google Cloud)
+ * - Vector marks from `simple-icons` (Claude, Claude Code, Anthropic, Tailscale, Google Cloud, OpenCode)
  *   → ui/src/generated/brand-icons.ts (path + brand colour; rendered inline by <BrandIcon>).
  * - The vendors' own marks where simple-icons has none (Daytona: its light and dark favicons;
  *   E2B: its app icon) → ui/public/brand-icons/<name>.png.
@@ -29,6 +29,7 @@ const VECTOR = {
   anthropic: "anthropic",
   tailscale: "tailscale",
   "google-cloud": "googlecloud",
+  opencode: "opencode",
 };
 
 /** BrandIcon file → the vendor's official mark. */

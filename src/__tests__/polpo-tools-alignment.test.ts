@@ -183,7 +183,7 @@ describe("the bridged tools on a real instance", () => {
       { id: "notion", name: "Notion", kind: "mcp", transport: { type: "http", url: "http://127.0.0.1:1/mcp" }, auth: { type: "none" }, access: { agents: [], polpo: false }, enabled: true, createdAt: "2026-01-01" },
     ] }));
     const made = await run("create_task", { title: "Scoped task", description: "d", assignTo: "agent-1", toolScope: { connectors: ["linear"], allowedTools: ["read"] } });
-    expect(made).toMatch(/Task created: .* \(tools restricted: Linear; built-in: read\)/);
+    expect(made).toMatch(/Task created: .* — tools restricted: Linear; built-in: read/);
     const id = made.match(/\[([^\]]+)\]/)![1]!;
     expect((await polpo.getStore().getTask(id))!.toolScope).toEqual({ connectors: ["linear"], allowedTools: ["read"] });
     expect(await run("create_task", { title: "Grant", description: "d", assignTo: "agent-1", toolScope: { connectors: ["notion"] } }))

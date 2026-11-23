@@ -3,7 +3,7 @@
  * the dashboard's <BrandIcon> (ui/src/components/shared/brand-icon.tsx), bundled into the widget
  * document (inline SVG; Daytona's and E2B's own PNGs as data URIs), so the widgets load nothing.
  *
- * Monochrome marks (Anthropic, OpenAI, Tailscale) take the text colour (visible in dark mode);
+ * Monochrome marks (Anthropic, OpenAI, OpenCode, Tailscale) take the text colour (visible in dark mode);
  * Daytona has a light and a dark variant (the host's data-theme picks one, see style.css).
  */
 import type { BrandMark } from "../../src/server/mcp-run-view.js";
@@ -14,7 +14,7 @@ import daytonaDark from "../../ui/public/brand-icons/daytona-dark.png";
 import e2b from "../../ui/public/brand-icons/e2b.png";
 
 export const BRAND_TITLES: Record<BrandMark, string> = {
-  polpo: "Polpo", "claude-code": "Claude Code", codex: "Codex", anthropic: "Anthropic", openai: "OpenAI",
+  polpo: "Polpo", "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", anthropic: "Anthropic", openai: "OpenAI",
   bedrock: "Amazon Bedrock", vertex: "Google Vertex AI", "api-key": "API key",
   daytona: "Daytona", e2b: "E2B", host: "This server", ephemeral: "Ephemeral sandbox", tailscale: "Tailscale",
 };
@@ -75,7 +75,7 @@ function glyph(text: string, size: number, label: string, mark: string): HTMLEle
 export function brandMark(name: BrandMark | string, size = 16, title?: string): Element {
   const label = title ?? BRAND_TITLES[name as BrandMark] ?? name;
   switch (name) {
-    case "claude-code": case "anthropic": case "tailscale": {
+    case "claude-code": case "anthropic": case "tailscale": case "opencode": {
       const v = BRAND_VECTORS[name];
       const mono = name !== "claude-code";
       const el = svg(size, label, name, mono);

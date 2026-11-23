@@ -55,7 +55,7 @@ export function BrowserTab({ workspaceId, defaultUrl }: { workspaceId?: string; 
           type="submit"
           variant="ghost"
           size="sm"
-          className="h-6 rounded px-2 text-micro font-medium"
+          className="h-6 rounded-xs px-2 text-micro font-medium"
         >
           Go
         </Button>
@@ -64,7 +64,7 @@ export function BrowserTab({ workspaceId, defaultUrl }: { workspaceId?: string; 
             type="button"
             onClick={() => setReloadKey((k) => k + 1)}
             title="Reload"
-            className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+            className="inline-flex h-6 w-6 items-center justify-center rounded-xs text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <RefreshCcw className="h-3.5 w-3.5" />
           </button>
@@ -75,7 +75,7 @@ export function BrowserTab({ workspaceId, defaultUrl }: { workspaceId?: string; 
             target="_blank"
             rel="noreferrer"
             title="Open in new tab"
-            className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+            className="inline-flex h-6 w-6 items-center justify-center rounded-xs text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <ExternalLink className="h-3.5 w-3.5" />
           </a>
@@ -85,7 +85,7 @@ export function BrowserTab({ workspaceId, defaultUrl }: { workspaceId?: string; 
         <iframe
           key={`${url}_${reloadKey}`}
           src={url}
-          className="flex-1 w-full border-0 bg-white"
+          className="flex-1 w-full border-0 bg-canvas"
           title="Browser preview"
           // sandbox is intentionally permissive for dev preview workflows
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"

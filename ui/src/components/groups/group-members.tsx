@@ -23,7 +23,7 @@ export function MemberAvatar({ member, size = "sm", className }: {
 }) {
   if (member.isOrchestrator) {
     return (
-      <div className={cn("flex shrink-0 items-center justify-center rounded-full bg-primary/10", ORCHESTRATOR_SIZE[size], className)}>
+      <div className={cn("flex shrink-0 items-center justify-center rounded-avatar bg-primary/10", ORCHESTRATOR_SIZE[size], className)}>
         🐙
       </div>
     );
@@ -56,7 +56,7 @@ export function MemberAvatarStack({ members, max = 4, size = "xs", className }: 
       ))}
       {hidden > 0 && (
         <div className={cn(
-          "flex shrink-0 items-center justify-center rounded-full bg-muted font-semibold text-muted-foreground ring-2 ring-background tabular-nums",
+          "flex shrink-0 items-center justify-center rounded-avatar bg-muted font-semibold text-muted-foreground ring-2 ring-background tabular-nums",
           size === "xs" ? "h-5 min-w-5 px-1 text-micro" : size === "sm" ? "h-6 min-w-6 px-1 text-micro" : "h-8 min-w-8 px-1 text-micro",
         )}>
           +{hidden}

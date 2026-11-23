@@ -1,5 +1,5 @@
 /**
- * The agent's Polpo tools as harness host tools: the runtime (Claude Code, Codex) calls them, Polpo
+ * The agent's Polpo tools as harness host tools: the runtime (Claude Code, Codex, OpenCode) calls them, Polpo
  * runs them here with the agent's permissions, exactly as its own engine would (vault, connectors,
  * email, data, artifacts, storage, outcomes…).
  *

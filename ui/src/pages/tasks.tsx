@@ -186,7 +186,7 @@ const TaskRow = memo(function TaskRow({
               {hasAvatar
                 ? <AgentAvatar avatar={identity?.avatar} name={task.assignTo} size="xs" />
                 : <div className="flex items-center justify-center rounded-lg size-5 bg-muted/50">
-                    <Bot className="h-3 w-3 text-muted-foreground/60" />
+                    <AgentAvatar name={task.assignTo} size="xs" />
                   </div>
               }
             </div>
@@ -238,7 +238,7 @@ const TaskRow = memo(function TaskRow({
       {/* Live activity (compact) */}
       {process && (
         <div className="flex items-center gap-1.5 shrink-0 min-w-0 max-w-[150px]">
-          <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse shrink-0" />
+          <div className="h-1.5 w-1.5 rounded-pill bg-primary animate-pulse shrink-0" />
           {process.activity.lastTool && (
             <span className="text-micro font-mono text-primary truncate">{process.activity.lastTool}</span>
           )}
@@ -484,7 +484,7 @@ const TaskCard = memo(function TaskCard({
                   {hasAvatar
                     ? <AgentAvatar avatar={identity?.avatar} name={task.assignTo} size="xs" />
                     : <div className="flex items-center justify-center rounded-lg size-5 bg-muted/50">
-                        <Bot className="h-3 w-3 text-muted-foreground/60" />
+                        <AgentAvatar name={task.assignTo} size="xs" />
                       </div>
                   }
                 </div>
@@ -555,7 +555,7 @@ const TaskCard = memo(function TaskCard({
           {process && (
             <div className="mt-1.5 pt-1.5 border-t border-primary/10 space-y-0.5 min-w-0 overflow-hidden">
               <div className="flex items-center gap-1.5 min-w-0">
-                <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse shrink-0" />
+                <div className="h-1.5 w-1.5 rounded-pill bg-primary animate-pulse shrink-0" />
                 {process.activity.lastTool && (
                   <span className="text-micro font-mono text-primary truncate">{process.activity.lastTool}</span>
                 )}
@@ -703,7 +703,7 @@ function GroupBlock({
         <button
           className={cn(
             "w-full max-w-full rounded-lg border border-border bg-card shadow-card transition-all cursor-pointer overflow-hidden box-border",
-            "hover:border-primary/20 hover:shadow-[0_0_15px_color-mix(in_oklch,var(--primary)_8%,transparent)]",
+            "hover:border-primary/20 hover:shadow-glow",
             "p-2.5 text-left",
           )}
         >
@@ -834,9 +834,9 @@ function KanbanColumn({
       {/* Column header */}
       <div className="flex items-center gap-2 px-2 pb-2 shrink-0 border-t-2 border-border/30 pt-2 min-w-0">
         {colCfg ? (
-          <div className={cn("h-2 w-2 rounded-full shrink-0", colCfg.dot)} />
+          <div className={cn("h-2 w-2 rounded-pill shrink-0", colCfg.dot)} />
         ) : (
-          <div className="h-2 w-2 rounded-full bg-muted-foreground/40 shrink-0" />
+          <div className="h-2 w-2 rounded-pill bg-muted-foreground/40 shrink-0" />
         )}
         <span className="text-xs font-medium truncate">{col.label}</span>
         <Badge variant="secondary" className="text-micro ml-auto shrink-0">{colTasks.length}</Badge>
@@ -1107,7 +1107,7 @@ function CardFieldSettings({
               onClick={() => onToggle(key)}
             >
               <div className={cn(
-                "flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors",
+                "flex h-4 w-4 shrink-0 items-center justify-center rounded-xs border transition-colors",
                 fields[key]
                   ? "bg-primary border-primary"
                   : "border-muted-foreground/30",
@@ -1380,7 +1380,7 @@ export function TasksPage() {
               <p className="text-xs mt-1 text-center max-w-xs">
                 Tasks are created when a mission is executed. Use the CLI or Chat to create and run a mission.
               </p>
-              <kbd className="mt-3 rounded border border-border bg-muted px-2 py-1 font-mono text-micro">
+              <kbd className="mt-3 rounded-xs border border-border bg-muted px-2 py-1 font-mono text-micro">
                 polpo mission &lt;prompt&gt;
               </kbd>
             </CardContent>

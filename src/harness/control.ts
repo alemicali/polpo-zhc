@@ -97,10 +97,12 @@ export async function harnessesOverview(settings: PolpoSettings | undefined, vau
       ...(s ? { settings: s } : {}),
       ...(gateway ? { gateway } : {}),
       // how the model credential reaches the model at run time
-      ...(s ? { brokering: s.auth === "bedrock" || s.auth === "vertex" ? "not-brokered" as const : process.env.POLPO_PUBLIC_URL?.trim() ? "relay" as const : "in-vm" as const } : {}),
+      ...(s ? { brokering: s.auth === "vertex" || (s.auth === "bedrock" && id !== "opencode") ? "not-brokered" as const : process.env.POLPO_PUBLIC_URL?.trim() ? "relay" as const : "in-vm" as const } : {}),
       ...(s?.model ? { model: s.model } : {}),
       ...(id === "claude-code" && h?.["claude-code"]?.bedrock ? { bedrock: h["claude-code"].bedrock } : {}),
       ...(id === "claude-code" && h?.["claude-code"]?.vertex ? { vertex: h["claude-code"].vertex } : {}),
+      ...(id === "opencode" && h?.opencode?.bedrock ? { bedrock: h.opencode.bedrock } : {}),
+      ...(id === "opencode" && h?.opencode?.provider ? { provider: h.opencode.provider } : {}),
       agents: agents.filter((a) => agentHarness(a)?.harness === id).map((a) => a.name),
     };
   }));

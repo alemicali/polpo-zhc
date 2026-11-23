@@ -18,7 +18,6 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
-  Bot,
   ListChecks,
   GitBranch,
   Quote,
@@ -80,6 +79,7 @@ import { TaskCostBadge, TaskEngineBadge } from "@/components/shared/run-context"
 import { taskCostSummaryOf } from "@/lib/task-cost";
 import { MissionBudgetBanner, MissionCostButton } from "@/components/missions/mission-cost";
 import { useMissionCost } from "@/hooks/use-mission-cost";
+import { AgentAvatar } from "@/components/shared/agent-avatar";
 
 // ── Copyable ID ──
 
@@ -233,10 +233,10 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
       <Handle type="target" position={Position.Top} className="!bg-muted-foreground/50 !border-none !w-2 !h-2" />
       <div
         className={cn(
-          "rounded-xl border-2 px-4 py-3 shadow-sm backdrop-blur-sm transition-all cursor-pointer overflow-hidden",
+          "rounded-xl border-2 px-4 py-3 shadow-card backdrop-blur-surface transition-all cursor-pointer overflow-hidden",
           expanded ? "min-w-[320px] max-w-[420px]" : "min-w-[200px] max-w-[280px]",
           selected
-            ? "border-primary ring-2 ring-primary/30 shadow-[0_0_24px_color-mix(in_oklch,var(--primary)_18%,transparent)]"
+            ? "border-primary ring-2 ring-primary/30 shadow-glow"
             : borderColor,
           bgColor,
         )}
@@ -302,7 +302,7 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
         <div className="flex items-center gap-1.5 flex-wrap">
           {taskDef.assignTo && (
             <Badge variant="outline" className="text-micro px-1 py-0 gap-0.5">
-              <Bot className="h-2 w-2" />
+              <AgentAvatar name={taskDef.assignTo} size="xs" />
               {taskDef.assignTo}
             </Badge>
           )}
@@ -364,7 +364,7 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
                       <div
                         key={i}
                         className={cn(
-                          "flex items-start gap-1.5 text-micro rounded px-1.5 py-1",
+                          "flex items-start gap-1.5 text-micro rounded-xs px-1.5 py-1",
                           passed === true && "bg-success/8",
                           passed === false && "bg-destructive/8",
                         )}
@@ -376,7 +376,7 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
                             <XCircle className="h-3 w-3 text-destructive shrink-0 mt-px" />
                           )
                         ) : (
-                          <div className="h-3 w-3 rounded-full border border-border/60 shrink-0 mt-px" />
+                          <div className="h-3 w-3 rounded-pill border border-border/60 shrink-0 mt-px" />
                         )}
                         <div className="min-w-0">
                           <div className="flex items-center gap-1">
@@ -397,7 +397,7 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
                                       e.stopPropagation();
                                       if (fileTarget) navigate(fileTarget);
                                     }}
-                                    className="rounded bg-muted/40 px-1.5 py-0.5 font-mono text-micro text-primary/90 hover:bg-muted/70 hover:text-primary transition-colors"
+                                    className="rounded-xs bg-muted/40 px-1.5 py-0.5 font-mono text-micro text-primary/90 hover:bg-muted/70 hover:text-primary transition-colors"
                                     title="Open in file editor"
                                   >
                                     {path}
@@ -426,7 +426,7 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
                   {taskDef.metrics.map((m, i) => (
                     <div key={i} className="flex items-center gap-2 text-micro">
                       <span className="font-medium">{m.name}</span>
-                      <code className="text-micro font-mono text-muted-foreground bg-muted/40 px-1 rounded">{m.command}</code>
+                      <code className="text-micro font-mono text-muted-foreground bg-muted/40 px-1 rounded-xs">{m.command}</code>
                       <span className="text-muted-foreground ml-auto shrink-0">thr: {m.threshold}</span>
                     </div>
                   ))}
@@ -479,10 +479,10 @@ function CheckpointNodeComponent({ data, selected }: NodeProps<Node<CheckpointNo
       <Handle type="target" position={Position.Top} className="!bg-warning/50 !border-none !w-2 !h-2" />
       <div
         className={cn(
-          "rounded-lg border-2 border-dashed backdrop-blur-sm transition-all duration-200",
+          "rounded-lg border-2 border-dashed backdrop-blur-surface transition-all duration-200",
           borderColor,
           bgColor,
-          selected && "ring-2 ring-warning/30 shadow-[0_0_16px_color-mix(in_oklch,var(--warning)_15%,transparent)]",
+          selected && "ring-2 ring-warning/30 shadow-glow glow-warning",
         )}
         style={{ minWidth: CHECKPOINT_WIDTH, maxWidth: CHECKPOINT_WIDTH }}
       >
@@ -587,12 +587,12 @@ function DelayNodeComponent({ data, selected }: NodeProps<Node<DelayNodeData>>) 
       <Handle type="target" position={Position.Top} className="!bg-info/50 !border-none !w-2 !h-2" />
       <div
         className={cn(
-          "rounded-full border-2 border-dashed backdrop-blur-sm transition-all duration-200",
+          "rounded-pill border-2 border-dashed backdrop-blur-surface transition-all duration-200",
           "flex items-center justify-center relative",
           borderColor,
           bgColor,
           isActive && "animate-pulse",
-          selected && "ring-2 ring-info/30 shadow-[0_0_16px_color-mix(in_oklch,var(--info)_15%,transparent)]",
+          selected && "ring-2 ring-info/30 shadow-glow glow-info",
         )}
         style={{ width: DELAY_SIZE, height: DELAY_SIZE }}
       >
@@ -1102,13 +1102,13 @@ export function MissionGraphInner({
       className="rounded-lg"
     >
       <Background gap={20} size={1} className="!bg-background" />
-      <Controls showInteractive={false} className="!bg-card !border-border !shadow-md [&>button]:!bg-card [&>button]:!border-border [&>button]:!text-foreground [&>button:hover]:!bg-accent" />
+      <Controls showInteractive={false} className="!bg-card !border-border !shadow-raised [&>button]:!bg-card [&>button]:!border-border [&>button]:!text-foreground [&>button:hover]:!bg-accent" />
       <Panel position="top-left" className="m-3">
         <Button
           type="button"
           variant="outline"
           size="sm"
-          className="h-8 gap-1.5 bg-background px-2 text-micro shadow-sm"
+          className="h-8 gap-1.5 bg-background px-2 text-micro shadow-card"
           onClick={() => {
             setPreviewNodeId(null);
             setNodes((current: Node[]) => current.map((node) => node.data.expanded
@@ -1138,7 +1138,7 @@ function GraphTaskPreview({ node, onClose }: { node: Node<TaskNodeData>; onClose
   const StatusIcon = status?.icon ?? Clock;
 
   return (
-    <aside className="nodrag nopan nowheel flex h-full w-[min(360px,calc(100vw-32px))] flex-col overflow-hidden border border-border bg-background shadow-xl">
+    <aside className="nodrag nopan nowheel flex h-full w-[min(360px,calc(100vw-32px))] flex-col overflow-hidden border border-border bg-background shadow-raised">
       <div className="flex shrink-0 items-start gap-2 border-b border-border px-3 py-2.5">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 text-micro text-muted-foreground">
@@ -1160,7 +1160,7 @@ function GraphTaskPreview({ node, onClose }: { node: Node<TaskNodeData>; onClose
             </div>
           )}
           <div className="flex flex-wrap gap-1.5">
-            {taskDef.assignTo && <Badge variant="outline" className="gap-1 text-micro"><Bot className="h-2.5 w-2.5" />{taskDef.assignTo}</Badge>}
+            {taskDef.assignTo && <Badge variant="outline" className="gap-1 text-micro"><AgentAvatar name={taskDef.assignTo} size="xs" />{taskDef.assignTo}</Badge>}
             {(taskDef.dependsOn?.length ?? 0) > 0 && <Badge variant="secondary" className="gap-1 text-micro"><GitBranch className="h-2.5 w-2.5" />{taskDef.dependsOn!.length} dependencies</Badge>}
             {(taskDef.expectations?.length ?? 0) > 0 && <Badge variant="secondary" className="gap-1 text-micro"><Wrench className="h-2.5 w-2.5" />{taskDef.expectations!.length} checks</Badge>}
           </div>
@@ -1175,7 +1175,7 @@ function GraphTaskPreview({ node, onClose }: { node: Node<TaskNodeData>; onClose
                       ? <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-success" />
                       : check?.passed === false
                         ? <XCircle className="mt-0.5 h-3 w-3 shrink-0 text-destructive" />
-                        : <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full border border-border" />}
+                        : <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-pill border border-border" />}
                     <span>{expectation.criteria ?? expectation.command ?? expectation.paths?.join(", ") ?? expectation.type}</span>
                   </div>
                 );
@@ -1227,7 +1227,7 @@ export function TaskStepCard({
       <div className="flex flex-col items-center shrink-0 w-8">
         <div
           className={cn(
-            "relative z-10 flex h-8 w-8 items-center justify-center rounded-full border-2 text-xs font-bold transition-all",
+            "relative z-10 flex h-8 w-8 items-center justify-center rounded-pill border-2 text-xs font-bold transition-all",
             isDone && "border-success bg-success/15 text-success",
             isFailed && "border-destructive bg-destructive/15 text-destructive",
             isRunning && "border-info bg-info/15 text-info",
@@ -1246,7 +1246,7 @@ export function TaskStepCard({
             <span>{index + 1}</span>
           )}
           {isRunning && (
-            <span className="absolute inset-0 rounded-full border-2 border-info animate-ping opacity-20" />
+            <span className="absolute inset-0 rounded-pill border-2 border-info animate-ping opacity-20" />
           )}
         </div>
         {!isLast && (
@@ -1264,7 +1264,7 @@ export function TaskStepCard({
         <div
           className={cn(
             "rounded-lg border transition-all",
-            "hover:shadow-[0_0_20px_color-mix(in_oklch,var(--primary)_6%,transparent)] hover:border-primary/20",
+            "hover:shadow-glow hover:border-primary/20",
             isDone && "border-success/20 bg-success/[0.03]",
             isFailed && "border-destructive/20 bg-destructive/[0.03]",
             isRunning && "border-info/25 bg-info/[0.03]",
@@ -1304,7 +1304,7 @@ export function TaskStepCard({
                 {/* Score ring (0-5 scale) */}
                 {score != null && (
                   <div className={cn(
-                    "flex flex-col items-center justify-center h-10 w-10 rounded-full border-2",
+                    "flex flex-col items-center justify-center h-10 w-10 rounded-pill border-2",
                     score >= 3.5 ? "border-success/50 text-success" : "border-destructive/50 text-destructive",
                   )}>
                     <span className="text-xs font-bold leading-none tabular-nums">{score.toFixed(1)}</span>
@@ -1319,7 +1319,7 @@ export function TaskStepCard({
             <div className="flex items-center gap-3 mt-2 text-caption text-muted-foreground">
               {taskDef.assignTo && (
                 <span className="flex items-center gap-1">
-                  <Bot className="h-3 w-3" />
+                  <AgentAvatar name={taskDef.assignTo} size="xs" />
                   {taskDef.assignTo}
                 </span>
               )}
@@ -1411,7 +1411,7 @@ export function TaskStepCard({
                               <XCircle className="h-3.5 w-3.5 text-destructive shrink-0 mt-0.5" />
                             )
                           ) : (
-                            <div className="h-3.5 w-3.5 rounded-full border border-border/60 shrink-0 mt-0.5" />
+                            <div className="h-3.5 w-3.5 rounded-pill border border-border/60 shrink-0 mt-0.5" />
                           )}
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5 mb-0.5">
@@ -1433,7 +1433,7 @@ export function TaskStepCard({
                                         e.stopPropagation();
                                         if (fileTarget) navigate(fileTarget);
                                       }}
-                                      className="rounded bg-muted/50 px-1.5 py-0.5 font-mono text-caption text-primary/90 hover:bg-muted/70 hover:text-primary transition-colors"
+                                      className="rounded-xs bg-muted/50 px-1.5 py-0.5 font-mono text-caption text-primary/90 hover:bg-muted/70 hover:text-primary transition-colors"
                                       title="Open in file editor"
                                     >
                                       {path}
@@ -1473,7 +1473,7 @@ export function TaskStepCard({
                     {taskDef.metrics.map((m, i) => (
                       <div key={i} className="flex items-center gap-2 text-xs">
                         <span className="font-medium">{m.name}</span>
-                        <code className="text-micro font-mono text-muted-foreground bg-muted/40 px-1.5 rounded">{m.command}</code>
+                        <code className="text-micro font-mono text-muted-foreground bg-muted/40 px-1.5 rounded-xs">{m.command}</code>
                         <span className="text-muted-foreground ml-auto">thr: {m.threshold}</span>
                       </div>
                     ))}
@@ -1631,7 +1631,7 @@ function RunsTimeline({
                   return (
                     <div
                       key={task.id}
-                      className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-muted/30 cursor-pointer transition-colors"
+                      className="flex items-center gap-2 py-1.5 px-2 rounded-xs hover:bg-muted/30 cursor-pointer transition-colors"
                       onClick={() => navigate(`/tasks/${task.id}`)}
                     >
                       <TaskIcon className={cn("h-3.5 w-3.5 shrink-0", cfg?.color ?? "text-muted-foreground", task.status === "in_progress" && "animate-spin")} />
@@ -1870,7 +1870,7 @@ export function MissionDetailView({
           )}
           {scheduleEntry && (
             <div className="flex items-center gap-1.5 text-xs">
-              <span className={cn("h-2 w-2 rounded-full", scheduleEntry.enabled ? "bg-success" : "bg-muted-foreground")} />
+              <span className={cn("h-2 w-2 rounded-pill", scheduleEntry.enabled ? "bg-success" : "bg-muted-foreground")} />
               <span className="text-muted-foreground">{scheduleEntry.enabled ? "Enabled" : scheduleEntry.nextRunAt ? "Paused" : "Done"}</span>
             </div>
           )}
@@ -2133,7 +2133,7 @@ export function MissionDetailView({
                             </span>
                             <div className="flex flex-wrap gap-1">
                               {report.filesCreated.map((f: string, i: number) => (
-                                <code key={i} className="text-micro bg-success/10 text-success rounded px-1.5 py-0.5 font-mono">{f}</code>
+                                <code key={i} className="text-micro bg-success/10 text-success rounded-xs px-1.5 py-0.5 font-mono">{f}</code>
                               ))}
                             </div>
                           </div>
@@ -2145,7 +2145,7 @@ export function MissionDetailView({
                             </span>
                             <div className="flex flex-wrap gap-1">
                               {report.filesEdited.map((f: string, i: number) => (
-                                <code key={i} className="text-micro bg-info/10 text-info rounded px-1.5 py-0.5 font-mono">{f}</code>
+                                <code key={i} className="text-micro bg-info/10 text-info rounded-xs px-1.5 py-0.5 font-mono">{f}</code>
                               ))}
                             </div>
                           </div>
@@ -2184,10 +2184,10 @@ export function MissionDetailView({
                           {(t.filesCreated.length > 0 || t.filesEdited.length > 0) && (
                             <div className="flex flex-wrap gap-1 mt-2 ml-5">
                               {t.filesCreated.map((f: string, j: number) => (
-                                <code key={`c-${j}`} className="text-micro bg-success/10 text-success rounded px-1 py-0 font-mono">+{f.split("/").pop()}</code>
+                                <code key={`c-${j}`} className="text-micro bg-success/10 text-success rounded-xs px-1 py-0 font-mono">+{f.split("/").pop()}</code>
                               ))}
                               {t.filesEdited.map((f: string, j: number) => (
-                                <code key={`e-${j}`} className="text-micro bg-info/10 text-info rounded px-1 py-0 font-mono">~{f.split("/").pop()}</code>
+                                <code key={`e-${j}`} className="text-micro bg-info/10 text-info rounded-xs px-1 py-0 font-mono">~{f.split("/").pop()}</code>
                               ))}
                             </div>
                           )}

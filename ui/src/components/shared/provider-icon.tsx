@@ -56,6 +56,9 @@ const LOADERS: Record<string, () => Promise<{ default: LobeIconComponent }>> = {
   minimax: () => import("@lobehub/icons/es/Minimax") as unknown as Promise<{ default: LobeIconComponent }>,
   "minimax-cn": () => import("@lobehub/icons/es/Minimax") as unknown as Promise<{ default: LobeIconComponent }>,
   moonshot: () => import("@lobehub/icons/es/Moonshot") as unknown as Promise<{ default: LobeIconComponent }>,
+  moonshotai: () => import("@lobehub/icons/es/Moonshot") as unknown as Promise<{ default: LobeIconComponent }>,
+  zai: () => import("@lobehub/icons/es/ZAI") as unknown as Promise<{ default: LobeIconComponent }>,
+  vercel: () => import("@lobehub/icons/es/Vercel") as unknown as Promise<{ default: LobeIconComponent }>,
   github: () => import("@lobehub/icons/es/Github") as unknown as Promise<{ default: LobeIconComponent }>,
   "github-copilot": () => import("@lobehub/icons/es/Github") as unknown as Promise<{ default: LobeIconComponent }>,
   copilot: () => import("@lobehub/icons/es/Github") as unknown as Promise<{ default: LobeIconComponent }>,
@@ -76,7 +79,7 @@ export function ProviderIcon({
   /** Polpo provider id, e.g. "anthropic", "google-gemini-cli". */
   name: string;
   size?: number;
-  /** "mono" = currentColor SVG, "avatar" = brand-colour rounded square. */
+  /** "mono" = currentColor SVG, "avatar" = brand-colour rounded-xs square. */
   variant?: "mono" | "avatar";
   className?: string;
 }) {

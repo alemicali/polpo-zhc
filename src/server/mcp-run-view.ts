@@ -9,7 +9,7 @@ import type { TaskRunContext } from "@polpo-ai/core/run-context";
 
 /** The marks the widgets draw (widgets/shared/brand.ts). */
 export type BrandMark =
-  | "polpo" | "claude-code" | "codex" | "anthropic" | "openai" | "bedrock" | "vertex" | "api-key"
+  | "polpo" | "claude-code" | "codex" | "opencode" | "anthropic" | "openai" | "bedrock" | "vertex" | "api-key"
   | "daytona" | "e2b" | "host" | "ephemeral" | "tailscale";
 
 export interface RunView {
@@ -20,14 +20,14 @@ export interface RunView {
   continuation?: boolean;
   agent?: string;
   engine: TaskRunContext["engine"];
-  /** "Claude Code", "Codex", "Polpo". */
+  /** "Claude Code", "Codex", "OpenCode", "Polpo". */
   engineLabel: string;
   engineMark: BrandMark;
   model?: string;
   /** "Sonnet 4.5", "gpt-5-codex". */
   modelLabel?: string;
   /** How the harness authenticated (the kind only, never a secret). */
-  auth?: { kind: string; label: string; mark: BrandMark; region?: string };
+  auth?: { kind: string; label: string; mark: BrandMark; region?: string; provider?: string };
   computer: { id: string; name?: string; label: string; kindLabel: string; mark: BrandMark; remoteId?: string };
   egress: { mode: "direct" | "proxy"; label: string; tailscale?: boolean };
   session?: { resumed: boolean; bootstrapMs?: number };
@@ -38,19 +38,20 @@ export interface RunView {
   durationMs?: number;
 }
 
-export const ENGINE_LABELS: Record<string, string> = { polpo: "Polpo", "claude-code": "Claude Code", codex: "Codex" };
-const AUTH_LABELS: Record<string, string> = { bedrock: "Bedrock", vertex: "Vertex AI", "api-key": "API key" };
+export const ENGINE_LABELS: Record<string, string> = { polpo: "Polpo", "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode" };
+const AUTH_LABELS: Record<string, string> = { bedrock: "Bedrock", vertex: "Vertex AI", "api-key": "API key", "ai-gateway": "Vercel AI Gateway", gateway: "model gateway" };
+const isHarness = (x: unknown): x is "claude-code" | "codex" | "opencode" => x === "claude-code" || x === "codex" || x === "opencode";
 
 export function engineMark(engine: string | undefined): BrandMark {
-  return engine === "claude-code" ? "claude-code" : engine === "codex" ? "codex" : "polpo";
+  return isHarness(engine) ? engine : "polpo";
 }
 
 /** The engine of an agent's config ("polpo" or { harness }). */
 export function agentEngine(engine: unknown): { id: TaskRunContext["engine"]; model?: string } {
-  if (engine === "claude-code" || engine === "codex") return { id: engine };
+  if (isHarness(engine)) return { id: engine };
   if (engine && typeof engine === "object") {
     const e = engine as { harness?: unknown; model?: unknown };
-    if (e.harness === "claude-code" || e.harness === "codex") return { id: e.harness, ...(typeof e.model === "string" && e.model ? { model: e.model } : {}) };
+    if (isHarness(e.harness)) return { id: e.harness, ...(typeof e.model === "string" && e.model ? { model: e.model } : {}) };
   }
   return { id: "polpo" };
 }
@@ -67,9 +68,11 @@ export function modelLabel(model: string | undefined): string | undefined {
   return model.includes(":") && !/^[a-z]+\.anthropic\./.test(model) ? model.slice(model.indexOf(":") + 1) : model;
 }
 
-export function authMark(kind: string | undefined, engine?: string): BrandMark {
+export function authMark(kind: string | undefined, engine?: string, provider?: string): BrandMark {
   if (kind === "bedrock") return "bedrock";
   if (kind === "vertex") return "vertex";
+  if (engine === "opencode") return kind === "api-key" && provider === "anthropic" ? "anthropic" : kind === "api-key" && provider === "openai" ? "openai" : "api-key";
+  if (kind === "ai-gateway" || kind === "gateway") return "api-key";
   return engine === "codex" ? "openai" : engine === "claude-code" ? "anthropic" : "api-key";
 }
 
@@ -136,7 +139,12 @@ export function runView(run: TaskRunContext): RunView {
     engineMark: engineMark(run.engine),
     ...(run.model ? { model: run.model } : {}),
     ...(label ? { modelLabel: label } : {}),
-    ...(run.auth ? { auth: { kind: run.auth.kind, label: AUTH_LABELS[run.auth.kind] ?? run.auth.kind, mark: authMark(run.auth.kind, run.engine), ...(run.auth.region ? { region: run.auth.region } : {}) } } : {}),
+    ...(run.auth ? {
+      auth: {
+        kind: run.auth.kind, label: `${AUTH_LABELS[run.auth.kind] ?? run.auth.kind}${run.auth.provider && run.auth.kind === "api-key" ? ` (${run.auth.provider})` : ""}`,
+        mark: authMark(run.auth.kind, run.engine, run.auth.provider), ...(run.auth.region ? { region: run.auth.region } : {}), ...(run.auth.provider ? { provider: run.auth.provider } : {}),
+      },
+    } : {}),
     computer: {
       id: run.computer.id,
       ...(run.computer.name ? { name: run.computer.name } : {}),

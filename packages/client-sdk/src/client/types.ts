@@ -168,7 +168,7 @@ export interface TaskToolScope {
 }
 
 /** The engine a run used: Polpo's own, or an agent harness. */
-export type TaskRunEngine = "polpo" | "claude-code" | "codex";
+export type TaskRunEngine = "polpo" | "claude-code" | "codex" | "opencode";
 
 /** Where and with what a task run executed (no secrets). */
 export interface TaskRunContext {
@@ -182,8 +182,8 @@ export interface TaskRunContext {
   agent?: string;
   engine: TaskRunEngine;
   model?: string;
-  /** The harness authentication kind (never the credential). */
-  auth?: { kind: "api-key" | "bedrock" | "vertex"; region?: string };
+  /** The harness authentication kind (never the credential); provider: OpenCode's model provider (anthropic, openai, amazon-bedrock, vercel, polpo-gateway…). */
+  auth?: { kind: "api-key" | "bedrock" | "vertex" | "ai-gateway" | "gateway"; region?: string; provider?: string };
   permissionMode?: string;
   effort?: string;
   computer: {
@@ -364,6 +364,8 @@ export interface AgentIdentity {
   timezone?: string;
   /** Avatar image path relative to project root, served via /api/v1/files/read?path=<avatar> */
   avatar?: string;
+  /** Its colour on screen: an agent colour token, "agent1" … "agent10" (default: picked from its name) */
+  color?: string;
   /** Responsibilities — simple strings or structured objects with area/description/priority */
   responsibilities?: (string | AgentResponsibility)[];
   /** Communication tone — HOW the agent communicates */
@@ -606,7 +608,7 @@ export interface Mission {
 /** USD, tokens and runs of a slice of a mission's cost. */
 export interface MissionCostBucket {
   usd: number;
-  /** The harness runtimes' own estimate (Claude Code, Codex). */
+  /** The harness runtimes' own estimate (Claude Code, Codex, OpenCode). */
   harnessUsd: number;
   /** The model cost the provider reported (Polpo's engine). */
   modelUsd: number;
@@ -1866,6 +1868,8 @@ export interface MissionPreviewPayload {
   data: unknown;
   /** Original user prompt that generated this mission */
   prompt?: string;
+  /** Proposed spending limit in USD for the whole mission (create it with this budget) */
+  budgetUsd?: number;
 }
 
 // === Vault Entry Metadata (safe listing — no secret values) ===
@@ -2156,4 +2160,94 @@ export interface ConnectorTool {
   title?: string;
   description?: string;
   policy: ConnectorToolPolicy;
+}
+
+// ── Computer provider webhooks (GET /computer-webhooks, /computer-webhooks/:provider/events) ──
+
+export type ComputerWebhookProvider = "daytona" | "e2b";
+export type ComputerWebhookOutcome = "accepted" | "ignored" | "rejected" | "error";
+
+/** Deliveries a provider's webhooks counted before the event log existed (no detail is kept for them). */
+export interface ComputerWebhookCountsBefore {
+  received: number;
+  ignored: number;
+  rejected: number;
+  errors: number;
+  /** When the event log took over. */
+  until: string;
+}
+
+/** A computer provider's webhook status (never a secret). */
+export interface ComputerWebhookStatus {
+  provider: ComputerWebhookProvider;
+  label: string;
+  /** "manual": the person adds the endpoint at the provider (Daytona); "api": Polpo registers it (E2B). */
+  registration: "manual" | "api";
+  secretSet: boolean;
+  registered?: boolean;
+  webhookId?: string;
+  /** The URL the provider must call. */
+  url?: string;
+  /** This instance has computers on this provider. */
+  inUse: boolean;
+  lastEventAt?: string;
+  lastEventType?: string;
+  /** Deliveries that passed the signature check (the counts are the event log's: the last 200 deliveries kept). */
+  received: number;
+  rejected: number;
+  ignored: number;
+  /** Deliveries Polpo could not apply. */
+  errors: number;
+  /** Deliveries counted before the event log existed: totals only, with no entry in the log. */
+  before?: ComputerWebhookCountsBefore;
+  /** The last problem since the provider was configured. */
+  lastError?: string;
+  lastErrorAt?: string;
+  state: "receiving" | "configured" | "not-configured";
+  /** Configured, but no delivery ever arrived: what to expect. */
+  waitingNote?: string;
+}
+
+/** One webhook delivery, as the provider's event log keeps it (without payload). */
+export interface ComputerWebhookEventSummary {
+  id: string;
+  provider: string;
+  receivedAt: string;
+  outcome: ComputerWebhookOutcome;
+  /** Why it was ignored or rejected, or what went wrong. */
+  reason?: string;
+  /** What Polpo answered the provider. */
+  httpStatus: number;
+  signature: "valid" | "invalid" | "missing" | "not-checked";
+  eventType?: string;
+  providerEventId?: string;
+  deliveryId?: string;
+  sandboxId?: string;
+  snapshotName?: string;
+  /** This instance's computer the event is about. */
+  computerId?: string;
+  /** The provider's states the event reports. */
+  providerState?: { from?: string; to?: string };
+  /** The computer's status in Polpo before and after Polpo applied the event. */
+  statusChange?: { from?: string; to?: string; error?: string; appliedAt?: string };
+  /** What Polpo did, in a line. */
+  action?: string;
+  events?: number;
+  processingMs: number;
+  bytes: number;
+}
+
+/** One webhook delivery with its redacted payload and safe headers. */
+export interface ComputerWebhookEvent extends ComputerWebhookEventSummary {
+  payload?: unknown;
+  payloadTruncated?: boolean;
+  headers?: Record<string, string>;
+}
+
+export interface ComputerWebhookEventPage {
+  provider: string;
+  events: ComputerWebhookEventSummary[];
+  nextCursor?: string;
+  total: number;
+  counts: Record<ComputerWebhookOutcome, number>;
 }

@@ -22,7 +22,7 @@ export function ChangelogKindBadge({ kind, className }: { kind: ChangelogKind; c
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-label",
+        "inline-flex items-center gap-1 rounded-pill border px-2 py-0.5 text-label",
         KIND_BADGE[kind],
         className,
       )}
@@ -41,5 +41,5 @@ const KIND_DOT: Record<ChangelogKind, string> = {
 
 /** The entry's dot on the timeline rail, coloured by kind. */
 export function ChangelogKindDot({ kind, className }: { kind: ChangelogKind; className?: string }) {
-  return <span aria-hidden className={cn("block h-2.5 w-2.5 rounded-full ring-[3px] ring-background", KIND_DOT[kind], className)} />;
+  return <span aria-hidden className={cn("block h-2.5 w-2.5 rounded-pill ring-[3px] ring-background", KIND_DOT[kind], className)} />;
 }
