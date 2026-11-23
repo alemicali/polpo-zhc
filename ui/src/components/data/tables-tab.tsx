@@ -142,7 +142,7 @@ function TableBrowser({ source, registry, dataset, onSchemaChanged, onViewSaved 
     ...(queryFilters.length ? { filters: queryFilters } : {}),
     ...(sort ? { sort: [sort] } : {}),
   }), [dataset.name, limit, offset, queryFilters, sort, source.id]);
-  const rows = useLoader<DataFrame>(`rows:${JSON.stringify(query)}`, () => registry.query(query));
+  const rows = useLoader<DataFrame>(`rows:${JSON.stringify(query)}`, () => registry.query(query), { keepPrevious: true });
   const { reload } = rows;
 
   // rows written elsewhere (an agent, MCP) show up without a manual refresh

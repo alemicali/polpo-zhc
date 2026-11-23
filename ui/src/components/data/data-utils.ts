@@ -238,9 +238,11 @@ export function relativeTime(iso: string, now = Date.now()): string {
 
 /**
  * Data loaded for a key (null: nothing to load). `loading` is true until the current key's data or
- * error arrives; `reload()` fetches it again. No state is set synchronously inside the effect.
+ * error arrives; `reload()` fetches it again, keeping the data meanwhile (and so does a new key with
+ * `keepPrevious`: the grid keeps its rows while the next page or sort loads). No state is set
+ * synchronously inside the effect.
  */
-export function useLoader<T>(key: string | null, load: () => Promise<T>) {
+export function useLoader<T>(key: string | null, load: () => Promise<T>, options?: { keepPrevious?: boolean }) {
   const [nonce, setNonce] = useState(0);
   const full = key === null ? null : `${key}#${nonce}`;
   const [state, setState] = useState<{ key: string | null; data?: T; error?: string }>({ key: null });
@@ -258,7 +260,7 @@ export function useLoader<T>(key: string | null, load: () => Promise<T>) {
   const reload = useCallback(() => setNonce((value) => value + 1), []);
   const fresh = state.key === full;
   return {
-    data: fresh || (state.key?.startsWith(`${key}#`) ?? false) ? state.data : undefined,
+    data: fresh || options?.keepPrevious || (state.key?.startsWith(`${key}#`) ?? false) ? state.data : undefined,
     error: fresh ? state.error : undefined,
     loading: full !== null && !fresh,
     reload,
