@@ -88,6 +88,37 @@ export function grantsTool(agent: AgentConfig, name: string): boolean {
   return expandToolWildcards(agent.allowedTools, ALL_EXTENDED_TOOL_NAMES).some((a) => a.toLowerCase() === name);
 }
 
+/**
+ * Rules for the file tools, naming only tools the agent has (adapted from Pi's tool guidelines,
+ * `@earendil-works/pi-coding-agent`, MIT License, Copyright (c) Mario Zechner).
+ */
+export function codingFileRules(agent: AgentConfig): string[] {
+  const has = (name: string) => grantsTool(agent, name);
+  const rules: string[] = [];
+  if (has("read")) {
+    rules.push(has("bash")
+      ? "- Read files with `read`, not `cat`, `head` or `sed` in bash."
+      : "- Read files with `read`.");
+  }
+  if (has("grep") || has("glob")) {
+    const search = [has("grep") ? "`grep` to search contents" : "", has("glob") ? "`glob` to find files" : ""].filter(Boolean).join(" and ");
+    rules.push(`- Use ${search}${has("bash") ? " rather than grep or find in bash" : ""}.`);
+  }
+  if (has("edit")) {
+    rules.push(
+      "- Change files with `edit`: `old_text` copied exactly from the file (without the line numbers `read` shows), unique and short — the lines that change plus just enough context.",
+      "- Several changes to one file go in one `edit` call with `edits` (a list of `{ old_text, new_text }`), each matched against the original file and not overlapping.",
+    );
+  }
+  if (has("write")) {
+    rules.push(has("edit")
+      ? "- Use `write` only for new files or complete rewrites."
+      : "- `write` replaces the whole file: write the complete content.");
+  }
+  if (rules.length > 0) rules.push("- Be concise, and give file paths when you mention files.");
+  return rules;
+}
+
 export function describeToolsForAgent(agent: AgentConfig): string {
   const lines: string[] = ["## Available Tools", ""];
 
@@ -95,10 +126,10 @@ export function describeToolsForAgent(agent: AgentConfig): string {
   const core: Array<[string, string]> = [
     ["read", "- `read` — read file contents (supports offset/limit for large files)"],
     ["write", "- `write` — create or overwrite files"],
-    ["edit", "- `edit` — surgical string replacement in files (preferred over rewriting entire files)"],
-    ["bash", "- `bash` — execute shell commands (30s default timeout; pass explicit timeout for long commands). `env_from_vault` ({ VAR: \"service.key\" }) gives one command secrets from your vault as environment variables, masked as *** in the output"],
+    ["edit", "- `edit` — surgical string replacement in files, several replacements in one call with `edits` (preferred over rewriting entire files)"],
+    ["bash", "- `bash` — execute shell commands (120 s default timeout; pass an explicit timeout in ms for longer commands). `env_from_vault` ({ VAR: \"service.key\" }) gives one command secrets from your vault as environment variables, masked as *** in the output"],
     ["glob", "- `glob` — find files by pattern (e.g. `**/*.ts`)"],
-    ["grep", "- `grep` — search file contents by regex"],
+    ["grep", "- `grep` — search file contents by regex or literal text (glob, ignore_case, context, limit)"],
     ["ls", "- `ls` — list directory contents"],
     ["http_fetch", "- `http_fetch` — make HTTP requests (GET, POST, PUT, DELETE)"],
     ["http_download", "- `http_download` — download files from URLs"],
@@ -294,6 +325,10 @@ export function describeToolsForAgent(agent: AgentConfig): string {
     );
   }
 
+  // --- Working with files: only rules about tools the agent has ---
+  const fileRules = codingFileRules(agent);
+  if (fileRules.length > 0) lines.push("", "**Working with files:**", ...fileRules);
+
   // --- Guidance ---
   lines.push(
     "",
@@ -426,8 +461,8 @@ export function buildPrompt(task: Task, hasBash = true): string {
   if (hasBash) {
     parts.push(
       `CRITICAL — Bash tool rules:`,
-      `- The bash tool has a default timeout of 30 seconds. Commands that exceed it are killed.`,
-      `- For long commands (npm install, builds, etc.), pass an explicit timeout: {"command": "...", "timeout": 120000}`,
+      `- The bash tool has a default timeout of 120 seconds (2 minutes). Commands that exceed it are killed.`,
+      `- For longer commands (big installs, builds, test suites), pass an explicit timeout in milliseconds: {"command": "...", "timeout": 600000}`,
       `- NEVER run a server or long-lived process in the foreground. It will block forever and kill your session.`,
       `- To start a background server, ALWAYS use this exact pattern:`,
       `  {"command": "nohup python3 server.py > /tmp/server.log 2>&1 & echo \"PID=$!\"", "timeout": 5000}`,
