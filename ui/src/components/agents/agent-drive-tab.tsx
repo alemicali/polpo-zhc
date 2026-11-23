@@ -63,8 +63,8 @@ function PlanRow({ item, depth, busy, onStatus }: { item: PlanItem; depth: numbe
         <p className="text-muted-foreground">{[item.measure && `Measure: ${item.measure}`, item.due && `Due: ${item.due}`].filter(Boolean).join(" · ")}</p>
       )}
       {item.progress !== undefined && !closed && (
-        <div className="h-1.5 w-full max-w-xs rounded bg-muted" title={`${item.progress}%`}>
-          <div className="h-1.5 rounded bg-primary" style={{ width: `${item.progress}%` }} />
+        <div className="h-1.5 w-full max-w-xs rounded-xs bg-muted" title={`${item.progress}%`}>
+          <div className="h-1.5 rounded-xs bg-primary" style={{ width: `${item.progress}%` }} />
         </div>
       )}
       {item.notes && <p className="whitespace-pre-wrap text-muted-foreground">{item.notes}</p>}

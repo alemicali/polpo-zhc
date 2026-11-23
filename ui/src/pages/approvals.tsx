@@ -107,7 +107,7 @@ function StatCard({
 }) {
   return (
     <Card className={cn(
-      "relative overflow-hidden transition-all bg-card/80 backdrop-blur-sm border-border/40",
+      "relative overflow-hidden transition-all bg-card/80 backdrop-blur-surface border-border/40",
       accent && value > 0 && "ring-1 ring-warning/30 glow-warning"
     )}>
       <CardContent className="p-4">
@@ -140,7 +140,7 @@ function RejectDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md bg-popover/95 backdrop-blur-xl border-border/40">
+      <DialogContent className="sm:max-w-md bg-popover/95 backdrop-blur-surface border-border/40">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-sm">
             <ShieldX className="h-4 w-4 text-destructive" />
@@ -212,14 +212,14 @@ function ApprovalCard({
 
   return (
     <Card className={cn(
-      "transition-all bg-card/80 backdrop-blur-sm border-border/40",
+      "transition-all bg-card/80 backdrop-blur-surface border-border/40",
       isPending && "ring-1 ring-warning/20 glow-warning",
     )}>
       <CardContent className="p-4">
         <div className="flex items-start gap-3">
           {/* Status badge */}
           <div className={cn(
-            "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl backdrop-blur-sm",
+            "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl backdrop-blur-surface",
             cfg.bg,
             isPending && "animate-pulse"
           )}>
@@ -502,7 +502,7 @@ export function ApprovalsPage() {
       {/* ── Pending highlight banner ── */}
       {pending.length > 0 && tab !== "pending" && (
         <div
-          className="flex items-center gap-3 rounded-lg border border-warning/20 bg-warning/5 backdrop-blur-sm px-4 py-2.5 cursor-pointer hover:bg-warning/10 transition-colors shrink-0"
+          className="flex items-center gap-3 rounded-lg border border-warning/20 bg-warning/5 backdrop-blur-surface px-4 py-2.5 cursor-pointer hover:bg-warning/10 transition-colors shrink-0"
           onClick={() => setTab("pending")}
         >
           <ShieldAlert className="h-4 w-4 text-warning shrink-0" />

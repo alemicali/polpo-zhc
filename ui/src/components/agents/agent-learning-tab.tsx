@@ -50,11 +50,11 @@ function ChangeRow({ change, onRevert, reverting }: { change: LearningChange; on
       <div className="mt-2 grid gap-2 md:grid-cols-2">
         <div>
           <div className="mb-1 text-label text-muted-foreground">Before</div>
-          <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 font-mono text-caption">{change.before || "(empty)"}</pre>
+          <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-xs bg-muted p-2 font-mono text-caption">{change.before || "(empty)"}</pre>
         </div>
         <div>
           <div className="mb-1 text-label text-muted-foreground">After</div>
-          <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 font-mono text-caption">{change.after || "(empty)"}</pre>
+          <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-xs bg-muted p-2 font-mono text-caption">{change.after || "(empty)"}</pre>
         </div>
       </div>
     </details>

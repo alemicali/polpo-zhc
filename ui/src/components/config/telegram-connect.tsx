@@ -267,7 +267,7 @@ export function TelegramConnect({ api, channel, gatewayRunning, currentChatId, o
 
       {invite?.status === "pending" && (
         <div className="flex gap-3">
-          {qr && <img src={qr} alt="Telegram invite QR code" className="h-28 w-28 rounded bg-white p-1 shrink-0" />}
+          {qr && <img src={qr} alt="Telegram invite QR code" className="h-28 w-28 rounded-xs bg-canvas p-1 shrink-0" />}
           <div className="min-w-0 space-y-1.5 text-caption">
             {invite.link ? (
               <a href={invite.link} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-info hover:underline break-all">
@@ -277,7 +277,7 @@ export function TelegramConnect({ api, channel, gatewayRunning, currentChatId, o
               <p className="text-muted-foreground">Send this to the bot:</p>
             )}
             <div className="flex items-center gap-1">
-              <code className="font-mono text-micro bg-muted/40 rounded px-1.5 py-0.5 truncate">{invite.command}</code>
+              <code className="font-mono text-micro bg-muted/40 rounded-xs px-1.5 py-0.5 truncate">{invite.command}</code>
               <Button type="button" variant="ghost" size="icon" className="h-6 w-6" onClick={() => copy(invite.link ?? invite.command)} aria-label="Copy">
                 {copied ? <Check className="h-3 w-3 text-success" /> : <Copy className="h-3 w-3" />}
               </Button>
@@ -369,7 +369,7 @@ export function ChannelAccessPanel({ api, channel }: { api: PolpoApi; channel: "
         {people.map((id) => (
           <Badge key={id} variant="secondary" className={cn("text-micro gap-1 pr-0.5 h-5")}>
             {peers[id]?.displayName ?? id.split(":")[1]}
-            <button type="button" className="rounded hover:bg-destructive/15 p-0.5" aria-label={`Revoke ${id}`} disabled={busy === id}
+            <button type="button" className="rounded-xs hover:bg-destructive/15 p-0.5" aria-label={`Revoke ${id}`} disabled={busy === id}
               onClick={() => act(id, `/peers/allowlist/${encodeURIComponent(id)}`, "DELETE")}>
               <X className="h-2.5 w-2.5" />
             </button>
@@ -383,7 +383,7 @@ export function ChannelAccessPanel({ api, channel }: { api: PolpoApi; channel: "
             <Badge key={id} variant="secondary" className={cn("text-micro gap-1 pr-0.5 h-5")} title="Everyone in this group can talk to the agents">
               <Users className="h-2.5 w-2.5" />
               {peers[id]?.displayName ?? id.split(":").pop()}
-              <button type="button" className="rounded hover:bg-destructive/15 p-0.5" aria-label={`Disable ${id}`} disabled={busy === id}
+              <button type="button" className="rounded-xs hover:bg-destructive/15 p-0.5" aria-label={`Disable ${id}`} disabled={busy === id}
                 onClick={() => act(id, `/peers/allowlist/${encodeURIComponent(id)}`, "DELETE")}>
                 <X className="h-2.5 w-2.5" />
               </button>

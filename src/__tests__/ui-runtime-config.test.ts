@@ -142,6 +142,29 @@ describe("runtime-config.js", () => {
     orchestrator = { name: "Ada" };
   });
 
+  it("serves the PWA manifest in the instance's look and name (custom background, else its palette's)", async () => {
+    await writeFile(join(root, "manifest.webmanifest"), JSON.stringify({ name: "Polpo ZHC — AI Factory", short_name: "Polpo ZHC", theme_color: "x", background_color: "x", display: "standalone" }));
+    await writeFile(join(root, "theme-colors.json"), JSON.stringify({ tide: ["#f5fafb", "#0a0e1a"], claude: ["#f7f6f2", "#1f1e1b"] }));
+    const apiUrl = `http://127.0.0.1:${(api.address() as AddressInfo).port}`;
+    const base = await startUi({ POLPO_API_URL: apiUrl, POLPO_APPEARANCE_TTL_MS: "0" });
+    const manifest = async () => (await fetch(`${base}/manifest.webmanifest`)).json() as Promise<Record<string, string>>;
+    const before = appearance;
+    // light theme, Claude palette, a custom light primary only: the palette's light background
+    branding = { productName: "Acme Ops" };
+    appearance = { theme: "light", palette: "claude", custom: { enabled: true, light: { primary: "#c96442" } } };
+    let m = await manifest();
+    expect(m.theme_color).toBe("#f7f6f2");
+    expect(m.background_color).toBe("#f7f6f2");
+    expect(m.name).toBe("Acme Ops");
+    expect(m.display).toBe("standalone");
+    appearance = { palette: "claude", custom: { enabled: true, dark: { background: "oklch(0.2 0.02 260)" } } };
+    m = await manifest();
+    expect(m.theme_color).toBe("oklch(0.2 0.02 260)");
+    appearance = { palette: "nope", custom: { enabled: true, dark: { background: "red; x" } } };
+    expect((await manifest()).theme_color).toBe("#0a0e1a");
+    appearance = before;
+  });
+
   it("leaves it out when the API cannot be reached", async () => {
     const base = await startUi({ POLPO_API_URL: "http://127.0.0.1:9", POLPO_APPEARANCE_TTL_MS: "0" });
     const { config } = await runtimeConfig(base);

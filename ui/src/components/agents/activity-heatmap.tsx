@@ -159,7 +159,7 @@ export function ActivityHeatmap({ tasks }: { tasks: Task[] }) {
                   key={cell.key || `empty-${di}`}
                   title={title || undefined}
                   className={cn(
-                    "h-[11px] w-[11px] rounded-[2px] transition-colors",
+                    "h-[11px] w-[11px] rounded-xs transition-colors",
                     getCellColor(cell.data),
                     cell.data && cell.data.count > 0 && "hover:ring-1 hover:ring-primary/50"
                   )}
@@ -173,8 +173,8 @@ export function ActivityHeatmap({ tasks }: { tasks: Task[] }) {
       {/* Legend */}
       <div className="flex items-center gap-1.5 justify-end">
         <span className="text-micro text-muted-foreground/60">Less</span>
-        <div className="h-[9px] w-[9px] rounded-[2px] bg-muted/30" />
-        {HEAT.map((cls) => <div key={cls} className={cn("h-[9px] w-[9px] rounded-[2px]", cls)} />)}
+        <div className="h-[9px] w-[9px] rounded-xs bg-muted/30" />
+        {HEAT.map((cls) => <div key={cls} className={cn("h-[9px] w-[9px] rounded-xs", cls)} />)}
         <span className="text-micro text-muted-foreground/60">More</span>
       </div>
     </div>

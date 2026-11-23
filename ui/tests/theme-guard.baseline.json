@@ -1,59 +1,10 @@
 {
   "totals": {
-    "palette": 121,
+    "palette": 0,
     "literal": 0,
-    "textSize": 1
+    "textSize": 0,
+    "shape": 0,
+    "font": 0
   },
-  "files": {
-    "components/config/telegram-connect.tsx": {
-      "palette": 1,
-      "literal": 0,
-      "textSize": 0
-    },
-    "components/error-boundary.tsx": {
-      "palette": 0,
-      "literal": 0,
-      "textSize": 1
-    },
-    "components/sandbox/remote-providers-card.tsx": {
-      "palette": 15,
-      "literal": 0,
-      "textSize": 0
-    },
-    "components/ui/dialog.tsx": {
-      "palette": 1,
-      "literal": 0,
-      "textSize": 0
-    },
-    "components/ui/sheet.tsx": {
-      "palette": 1,
-      "literal": 0,
-      "textSize": 0
-    },
-    "lib/agent-meta.ts": {
-      "palette": 93,
-      "literal": 0,
-      "textSize": 0
-    },
-    "pages/browser.tsx": {
-      "palette": 3,
-      "literal": 0,
-      "textSize": 0
-    },
-    "pages/coding/browser-tab.tsx": {
-      "palette": 1,
-      "literal": 0,
-      "textSize": 0
-    },
-    "pages/coding/right-panel.tsx": {
-      "palette": 1,
-      "literal": 0,
-      "textSize": 0
-    },
-    "pages/config.tsx": {
-      "palette": 5,
-      "literal": 0,
-      "textSize": 0
-    }
-  }
+  "files": {}
 }

@@ -116,8 +116,44 @@ Every CSS custom property the dashboard's theme uses (`ui/src/index.css`), and w
 | Shape | `radiusControl` | `--radius-control` (`rounded-control`: buttons, inputs, selects, textareas) | no (`radius` − 2px) | yes (default `radius` − 2px) |
 | Shape | `shadowCard` | `--shadow-card` (`shadow-card`: every card) | palette only | yes |
 | Shape | `shadowRaised` | `--shadow-raised` (`shadow-raised`: popovers, menus, selects, dialogs, sheets, tooltips, the mobile nav) | palette only | yes |
+| Surfaces | `overlay` | `--overlay` (`bg-overlay`: the dialog and sheet scrim) | no (fixed black 50%) | yes |
+| Surfaces | `canvas`, `canvasForeground` | `--canvas`, `--canvas-foreground` (`bg-canvas`: the sheet behind embedded web pages and QR codes) | no (fixed white) | yes (foreground derived by contrast) |
+| Agents | `agent1` … `agent10` | `--agent-1` … `--agent-10` (`bg-agent-3`, `text-agent-3`, `bg-agent-3/15`) | no (fixed Tailwind hues, team colours from the chart colours) | yes (every palette, light and dark) |
+| Agents | `agent1Foreground` … `agent10Foreground` | `--agent-1-foreground` … (`text-agent-3-foreground`) | no | yes (derived by contrast) |
+| Typography | `textXs`, `textSm`, `textBase`, `textLg`, `textXl`, `text2xl`, `text3xl` | `--text-xs` … `--text-3xl` (Tailwind's `text-xs` … `text-3xl`) | no (Tailwind's) | yes |
+| Typography | `fontWeightNormal`, `fontWeightMedium`, `fontWeightSemibold`, `fontWeightBold` | `--font-weight-normal` … `--font-weight-bold` (`font-normal` … `font-bold`, `text-label`) | no (400 / 500 / 600 / 700) | yes (100–900) |
+| Shape | `radiusBadge`, `radiusPill`, `radiusAvatar` | `--radius-badge`, `--radius-pill`, `--radius-avatar` (`rounded-badge`: badges; `rounded-pill`: pills, chips, dots, toggles, progress bars; `rounded-avatar`: avatars) | no (`rounded-full`) | yes (0–999 px, 999 = round; default round) |
+| Shape | `radiusDialog` | `--radius-dialog` (`rounded-dialog`: dialogs) | no (`rounded-lg`) | yes (0–32 px; default `radius`) |
+| Shape | — | `--radius-xs` (`rounded-xs`: chips, kbd, tiny cells; was the bare `rounded`) | no (0.25rem) | from `radius` (a third) |
+| Shape | `shadowControl` | `--shadow-control` (`shadow-control`: inputs, small buttons, toggles) | no (`shadow-xs`) | yes |
+| Shape | `shadowGlow`, `shadowGlowStrong` | `--shadow-glow`, `--shadow-glow-strong` (`shadow-glow`: hover and selection halos; `shadow-glow-strong`: live dots, active handles; the colour is the element's: the primary or `glow-success`, `glow-warning`, `glow-info`, `glow-destructive`, `glow-status-running`…) | no (arbitrary `shadow-[0_0_20px_…]`) | yes (the geometry, e.g. `0 0 20px`) |
+| Shape | `surfaceBlur` | `--surface-blur` (`backdrop-blur-surface`: glassy bars, panels, floating toolbars) | no (`backdrop-blur-sm` … `-2xl`) | yes (0–24 px; default 12) |
+| Shape | `overlayBlur` | `--overlay-blur` (`backdrop-blur-overlay`: the dialog scrim) | no | yes (0–24 px; default 0) |
+| Shape | `glowBlur` | `--glow-blur` (`blur-glow`: the soft halos behind hero cards and banners) | no (`blur-3xl`) | yes (0–96 px; default 64) |
 
-Not configurable: palette-only textures (Editorial's paper grain, Cyber's scanlines), spacing and density (no density tokens exist), the line heights of the type scale (`--leading-*`, per palette in CSS only), and the favicon. Palettes with zero letter-spacing (Lovable, ChatGPT, Claude, Redline) set `headingTracking` and `labelTracking` to 0; a custom value still applies.
+Not configurable: palette-only textures (Editorial's paper grain, Cyber's scanlines), spacing and density (no density tokens exist), the line heights of the type scale (`--leading-*`, per palette in CSS only), Tailwind's named letter-spacing and line heights (`tracking-wide`, `leading-relaxed`…: relative to the font size), opacity steps (`opacity-50` for disabled states), and the favicon. Palettes with zero letter-spacing (Lovable, ChatGPT, Claude, Redline) set `headingTracking` and `labelTracking` to 0; a custom value still applies.
+
+## Nothing fixed
+
+The rule: everything that is software — not only the logos — is under the theme. Every colour, corner, shadow, blur, font, font size and weight a screen shows comes from a token above, so every palette and every custom look restyles all of it, and an instance can configure all of it (the editor, REST, MCP). Nothing in a screen's code is a raw colour (`#…`, `rgb(…)`, `oklch(…)`, `white`), a Tailwind palette colour (`bg-zinc-900`, `text-emerald-400`), a fixed corner (`rounded-full`, the bare `rounded`, `rounded-[3px]`), a fixed shadow or blur (`shadow-lg`, `shadow-[…]`, `backdrop-blur-sm`, `blur-3xl`) or an arbitrary type value (`text-[11px]`, `font-[550]`, `tracking-[0.2em]`, `fontSize: 12` in a style). When a screen needs something no token says yet, add a token (packages/core `APPEARANCE_TOKENS`, `lib/appearance-kit.ts` `TOKENS`, `index.css` defaults per palette, the editor group): never a fixed value. The theme guard enforces it (see below).
+
+What legitimately keeps literal values: the token definitions themselves (`index.css`, `lib/palette.ts`, `lib/appearance-kit.ts`, the sandboxed artifact document's stylesheet, the token editor's colour inputs) and vendors' own marks (provider, connector and channel logos, generated brand icons): a brand's logo keeps its colours. Defaults that must work before the look is known (the MCP cards' fallbacks inside a third-party host, the app preview inspector inside someone else's page, the PWA manifest of the build) are written once, in a token block, and replaced by the instance's look as soon as it is known.
+
+### Agent colours
+
+Ten tokens, `agent1` … `agent10`, each with a text colour on it (`agent1Foreground` …, derived readable by contrast when not given). Every palette defines them for light and dark: ten hues spread around the wheel so that neighbours differ (blue, coral, green, magenta, orange, cyan, violet, olive, teal, pink), at one lightness and chroma per palette and mode (`--agent-l`, `--agent-c`, `--agent-h` in `index.css`: brighter and lighter in dark mode, muted on Claude and Editorial, vivid on Brutal and Cyber, greyish on Mono), with white text in light mode and near-black in dark mode (WCAG AA for normal text at the defaults). A custom look sets any of them per mode; keep them distinct.
+
+An agent's colour is picked from its name by a stable hash (FNV-1a modulo 10; `agentColorIndexFromName` in `@polpo-ai/core/appearance`, the same in the dashboard and in the MCP cards), so the same agent has the same colour on every screen, every reload, every device. It can choose one: `identity.color` in its config (`"agent1"` … `"agent10"`: a token, never a raw colour), from the agent page (Colour: ten swatches or Auto), `PATCH /api/v1/agents/:name { identity: { …, color: "agent3" } }`, MCP `polpo_agent_update { identity: { color: "agent3" } }` or Polpo's `set_identity` (`color`, `""` back to automatic). The avatars (initials and fallbacks), the team colours (team N gets agent colour N) and the tool and skill kinds use them.
+
+In code: `useAgentColor(name, chosen?)` / `agentColor(name, chosen?)` / `agentColorClasses(n)` (`ui/src/lib/agent-colors.ts`) give the classes (`solid`: `bg-agent-3 text-agent-3-foreground`, `soft`, `text`, `bg`, `dot`, `border`, `ring`…); `<AgentAvatar name color? />` uses them.
+
+### MCP cards
+
+The agent, task and mission cards (MCP Apps in Claude, ChatGPT and other hosts) write colours in one token block only (`widgets/agent-card/style.css` `:root`): each token is the instance's look first, then the host's own variable, then a `light-dark()` default. The server sends the brand, status and agent colours the instance's custom look sets, per mode, as `card.appearance` (`widgetAppearance`); the card applies them as `light-dark(light, dark)` pairs, so the host's light or dark theme still picks the mode. The agent card's avatar takes the agent's colour (`card.agent.color`, 1–10). Neutrals (text, lines, surfaces) and the type scale stay the host's, so the cards blend into the conversation.
+
+### The installed app and the first paint
+
+`index.html`'s `<meta name="theme-color">` and the build's PWA manifest take the built-in default's page background from `lib/appearance-kit.ts` (`THEME_COLORS`). `ui/server.mjs` serves `/manifest.webmanifest` with the instance's own: its custom background for its theme (light, else dark), else its palette's (`dist/theme-colors.json`, written by the build), and its product name.
 
 ## Using the tokens in the dashboard's code
 
@@ -137,10 +173,23 @@ Not configurable: palette-only textures (Editorial's paper grain, Cyber's scanli
 | Heading font, weight, tracking | `font-heading` |
 | Shadows | `shadow-card`, `shadow-raised` |
 | Sidebar-like chrome | `bg-sidebar text-sidebar-foreground border-sidebar-border`, hover `bg-sidebar-accent`, active `text-sidebar-primary`; the navigation column itself `sidebar-surface` (opacity and blur), the floating bottom nav `sidebar-surface-floating` |
-| Corners | `rounded-card` (cards, tiles), `rounded-control` (buttons, inputs, selects) |
+| Corners | `rounded-card` (cards, tiles), `rounded-control` (buttons, inputs, selects), `rounded-badge`, `rounded-pill` (pills, chips, dots, toggles, bars), `rounded-avatar`, `rounded-dialog`, `rounded-xs` … `rounded-4xl` (from the radius) |
+| Shadows and halos | `shadow-control` (inputs), `shadow-card`, `shadow-raised`, `shadow-glow` / `shadow-glow-strong` with `glow-success`, `glow-warning`, `glow-info`, `glow-destructive`, `glow-status-running`… |
+| Blur | `backdrop-blur-surface` (glassy bars), `backdrop-blur-overlay` (the scrim), `blur-glow` (soft halos) |
+| An agent's colour | `useAgentColor(name)` → `solid`, `soft`, `text`, `dot`…; `<AgentAvatar name />` |
+| Scrim, white sheet | `bg-overlay`; `bg-canvas text-canvas-foreground` (behind web pages and QR codes) |
+| Sizes in a style or a chart | `var(--text-micro)` (`style={{ fontSize: "var(--text-micro)" }}`), `className="text-micro"` on Recharts ticks |
 | A primary call to action of your own | `bg-button-primary text-button-primary-foreground hover:bg-button-primary-hover` (follows the button style, gradient included) |
 
-`ui/tests/theme-guard.test.ts` counts, per file, Tailwind palette colours (`bg-emerald-500`, `text-zinc-400`, `bg-white`…), colour literals (`#…`, `rgb(…)`, `oklch(…)`…) and arbitrary sizes (`text-[10px]`) and fails when a file has more than `ui/tests/theme-guard.baseline.json` allows (files not listed: zero). After removing some, lower the baseline: `UPDATE_THEME_BASELINE=1 npx vitest run --config ui/vitest.config.ts ui/tests/theme-guard.test.ts`, and commit it. Real exceptions (vendor brand colours, the QR code, the appearance preview) are in the test's `ALLOWLIST`.
+`ui/tests/theme-guard.test.ts` counts, per file of `ui/src`, five kinds and fails when a file has more than `ui/tests/theme-guard.baseline.json` allows — which is **zero for every kind** (a test checks the baseline stays at zero):
+
+- `palette`: Tailwind palette colours (`bg-emerald-500`, `text-zinc-400`, `bg-white`…);
+- `literal`: colour literals in code (`#…`, `rgb(…)`, `hsl(…)`, `oklch(…)`, `lab(…)`…, also inside arbitrary classes like `bg-[#…]`) and named colours in styles and SVG attributes (`fill="white"`, `style={{ color: "black" }}`);
+- `textSize`: arbitrary font sizes (`text-[10px]`) and fixed ones in styles and attributes (`fontSize: 12`, `fontSize="10"`);
+- `shape`: `rounded-full`, the bare `rounded`, `rounded-[…]` (except `inherit` and `var(…)`), Tailwind's `shadow`, `shadow-xs` … `shadow-2xl`, `shadow-[…]`, `drop-shadow*`, `backdrop-blur` and its sizes, `blur-sm` … `blur-3xl`, `borderRadius` / `boxShadow` literals in styles;
+- `font`: `font-[…]`, `tracking-[…]`, `leading-[…]`, `font-thin`, `font-extralight`, `font-light`, `font-extrabold`, `font-black`, and `fontFamily` / `fontWeight` / `letterSpacing` / `lineHeight` literals in styles.
+
+Use a token instead (the table above), or add one. The test's `ALLOWLIST` holds only token definitions (`lib/palette.ts`, `lib/appearance-kit.ts`, `lib/artifact-frame-doc.ts`, the token editor) and vendors' marks (`generated/`, the connector, channel and provider icons).
 
 ## Derivation
 

@@ -37,7 +37,7 @@ export function EmptyWorkspaceQuickStart({ branch, projectName, cwd, onStart }: 
             A fresh git worktree is ready. Pick the agent — you can open more sessions in this
             workspace at any time.
           </p>
-          <div className="mt-3 flex items-center gap-1.5 rounded-full border border-border bg-muted/30 px-2.5 py-1 font-mono text-caption text-muted-foreground">
+          <div className="mt-3 flex items-center gap-1.5 rounded-pill border border-border bg-muted/30 px-2.5 py-1 font-mono text-caption text-muted-foreground">
             <span className="text-muted-foreground">{projectName}</span>
             <span className="text-muted-foreground/50">/</span>
             <span className="text-success/85">{branch}</span>

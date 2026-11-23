@@ -8,6 +8,7 @@ import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from "@model
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { buildMissionCard, buildTaskCard, missionCardText, taskCardText, type MissionCard, type TaskCard } from "../mcp-work-card.js";
 import { WORK_CARD_HTML } from "../mcp-widgets.generated.js";
+import { cardAppearance } from "./card-appearance.js";
 import { READ, allowed, enc, fail, looseObject, unwrap, type McpDeps, type McpPrincipal, type ToolScope, type ToolsetName } from "./kit.js";
 
 /** The task and mission cards' UI: one HTML document, served as a ui:// resource. */
@@ -27,22 +28,26 @@ async function loadTaskCard(deps: McpDeps, id: string): Promise<Loaded<TaskCard>
   const r = unwrap(await deps.api("GET", `/api/v1/tasks/${enc(id)}`));
   if (!r.ok) return { ok: false, error: r.status === 404 ? `There is no task ${id}. Find the id with polpo_tasks_list.` : r.error };
   const task = r.data as AnyTask;
-  const [tasks, connectors] = await Promise.all([
+  const [tasks, connectors, appearance] = await Promise.all([
     task.dependsOn?.length ? allTasks(deps) : Promise.resolve([]),
     // a tool scope names connectors: their names and accounts
     task.toolScope ? deps.api("GET", "/api/v1/connectors").then(unwrap).then((c) => (c.ok ? (c.data as { connectors?: Array<{ id: string; name: string; account?: string }> })?.connectors ?? [] : [])) : Promise.resolve([]),
+    cardAppearance(deps),
   ]);
-  return { ok: true, card: buildTaskCard({ task, tasks, connectors, now: new Date(), key: key() }) };
+  const card = buildTaskCard({ task, tasks, connectors, now: new Date(), key: key() });
+  return { ok: true, card: appearance ? { ...card, appearance } : card };
 }
 
 async function loadMissionCard(deps: McpDeps, id: string): Promise<Loaded<MissionCard>> {
   const r = unwrap(await deps.api("GET", `/api/v1/missions/${enc(id)}`));
   if (!r.ok) return { ok: false, error: r.status === 404 ? `There is no mission ${id}. Find the id with polpo_missions_list.` : r.error };
   const mission = r.data as Parameters<typeof buildMissionCard>[0]["mission"];
-  const tasks = (await allTasks(deps))
+  const [all, appearance] = await Promise.all([allTasks(deps), cardAppearance(deps)]);
+  const tasks = all
     .filter((t) => t.missionId === mission.id)
     .sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""));
-  return { ok: true, card: buildMissionCard({ mission, tasks, now: new Date(), key: key() }) };
+  const card = buildMissionCard({ mission, tasks, now: new Date(), key: key() });
+  return { ok: true, card: appearance ? { ...card, appearance } : card };
 }
 
 /** Every field declared and open to new ones (clients validate structuredContent with Ajv: a closed schema breaks them). */

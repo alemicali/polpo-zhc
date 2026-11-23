@@ -409,7 +409,7 @@ export function AgentBrowserLivePage() {
               </DropdownMenuContent>
             </DropdownMenu>
             <span
-              className={cn("h-2 w-2 shrink-0 rounded-full", vncState === "live" ? "bg-success" : vncState === "connecting" || vncState === "reconnecting" ? "animate-pulse bg-warning" : "bg-destructive")}
+              className={cn("h-2 w-2 shrink-0 rounded-pill", vncState === "live" ? "bg-success" : vncState === "connecting" || vncState === "reconnecting" ? "animate-pulse bg-warning" : "bg-destructive")}
               title={vncState === "live" ? "VNC connected" : vncState === "connecting" || vncState === "reconnecting" ? "VNC connecting" : "VNC disconnected"}
             />
             <Button type="button" size="sm" variant="ghost" className="h-7 gap-1.5 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={stopChrome} disabled={chromeBusy} title="Stop Chrome">

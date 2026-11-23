@@ -160,7 +160,7 @@ function SandboxBadge({ toolName }: { toolName: string }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-chart-1/30 bg-chart-1/10 px-1.5 py-0 text-micro leading-4 text-chart-1">
+        <span className="inline-flex shrink-0 items-center gap-1 rounded-pill border border-chart-1/30 bg-chart-1/10 px-1.5 py-0 text-micro leading-4 text-chart-1">
           <Box className="h-2.5 w-2.5" />{label}
         </span>
       </TooltipTrigger>

@@ -108,7 +108,7 @@ export function ChangelogTimeline({
           const panelId = `changelog-day-${day.date}`;
           return (
             <li key={day.date} className="relative" data-changelog-day={day.date}>
-              <h2 className="sticky top-0 z-10 -mx-1 bg-background/95 px-1 py-1 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+              <h2 className="sticky top-0 z-10 -mx-1 bg-background/95 px-1 py-1 backdrop-blur-surface supports-[backdrop-filter]:bg-background/80">
                 <button
                   type="button"
                   data-changelog-trigger
@@ -120,18 +120,18 @@ export function ChangelogTimeline({
                   <span
                     aria-hidden
                     className={cn(
-                      "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2",
+                      "flex h-4 w-4 shrink-0 items-center justify-center rounded-pill border-2",
                       dayIndex === 0 ? "border-primary bg-primary/20" : "border-border bg-background",
                     )}
                   >
-                    {dayIndex === 0 && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
+                    {dayIndex === 0 && <span className="h-1.5 w-1.5 rounded-pill bg-primary" />}
                   </span>
                   <time dateTime={day.date} className="min-w-0 flex-1 truncate text-sm font-semibold tracking-tight">
                     {formatChangelogDayLong(day.date)}
                   </time>
                   {unread > 0 && (
-                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-primary/15 px-1.5 py-px text-micro font-semibold text-primary">
-                      <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-primary" />
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-pill bg-primary/15 px-1.5 py-px text-micro font-semibold text-primary">
+                      <span aria-hidden className="h-1.5 w-1.5 rounded-pill bg-primary" />
                       {unread === 1 ? "1 non letta" : `${unread} non lette`}
                     </span>
                   )}
@@ -227,7 +227,7 @@ function ChangelogRow({
             </span>
             {unread && (
               <span className="shrink-0" title="Non letta">
-                <span aria-hidden className="block h-2 w-2 rounded-full bg-primary" />
+                <span aria-hidden className="block h-2 w-2 rounded-pill bg-primary" />
                 <span className="sr-only">Non letta</span>
               </span>
             )}

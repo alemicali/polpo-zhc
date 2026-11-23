@@ -99,7 +99,7 @@ import { RuleFormDialog, type NotificationRuleDraft } from "@/components/config/
 import { summarizeRule } from "@/lib/rule-summary";
 import { HOOK_EVENT_CATALOG, HOOK_EVENT_GLOBS } from "@polpo-ai/core/hook-events";
 import { GateFormDialog, type ApprovalGateDraft, type LifecycleHook as GateLifecycleHook } from "@/components/config/gate-form-dialog";
-import { followInstanceDefault, setInstanceAppearance, type InstanceAppearance } from "@/lib/appearance";
+import { followInstanceDefault, kit, setInstanceAppearance, useResolvedAppearance, type InstanceAppearance } from "@/lib/appearance";
 import { AppearanceEditor } from "@/components/config/appearance-editor";
 import { toast } from "sonner";
 import { BrandMark } from "@/components/shared/brand-mark";
@@ -272,7 +272,7 @@ function Empty({ text }: { text: string }) {
 function StatusDot({ ok, label }: { ok: boolean; label: string }) {
   return (
     <span className="flex items-center gap-1.5 text-xs">
-      <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", ok ? "bg-success" : "bg-muted-foreground")} />
+      <span className={cn("h-1.5 w-1.5 rounded-pill shrink-0", ok ? "bg-success" : "bg-muted-foreground")} />
       <span className={ok ? "text-foreground" : "text-muted-foreground"}>{label}</span>
     </span>
   );
@@ -313,7 +313,7 @@ function ProviderCard({ name, prov, agentModels, authInfo, onConnect, onDisconne
           {/* Auth-state pip overlapping the brand icon */}
           <span
             className={cn(
-              "absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full flex items-center justify-center ring-2 ring-background",
+              "absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-pill flex items-center justify-center ring-2 ring-background",
               isLocal || isAuthenticated ? "bg-success text-success-foreground" : "bg-muted-foreground text-background",
             )}
           >
@@ -381,7 +381,7 @@ function ProviderCard({ name, prov, agentModels, authInfo, onConnect, onDisconne
             };
             return (
               <div key={profile.id} className="flex items-center gap-2 text-caption min-w-0">
-                <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", dotColor[profile.status] ?? "bg-muted-foreground")} />
+                <span className={cn("h-1.5 w-1.5 rounded-pill shrink-0", dotColor[profile.status] ?? "bg-muted-foreground")} />
                 <span className="truncate text-muted-foreground">{profile.email ?? profile.id}</span>
                 <Badge variant={profile.type === "oauth" ? "secondary" : "outline"} className="text-micro h-4 shrink-0">{profile.type}</Badge>
                 {profile.status !== "active" && (
@@ -642,7 +642,7 @@ function WebhookInboundSetup({ config, onChange, channelName }: {
         <span>3. Show Result or Speak Text — or set <b>Replies go to</b> below (or <code>replyTo</code> in the body) to get the answer on Telegram instead: the request returns at once and the reply arrives there.</span>
         <span>Commands work as on Telegram: /agent NAME, /polpo, /new, /help and the agent's suggestions. Without <code>?format=text</code> the response is JSON with messages, buttons and files (base64).</span>
       </div>
-      <pre className="overflow-x-auto rounded bg-muted/40 px-2 py-1.5 text-micro font-mono leading-relaxed">{example}</pre>
+      <pre className="overflow-x-auto rounded-xs bg-muted/40 px-2 py-1.5 text-micro font-mono leading-relaxed">{example}</pre>
     </div>
   );
 }
@@ -903,7 +903,7 @@ function WhatsAppProfileSetup({ config, onChange }: {
             Open WhatsApp, go to Linked Devices, then scan this QR code.
           </p>
           {qrDataUrl ? (
-            <img src={qrDataUrl} alt="WhatsApp login QR code" className="h-[260px] w-[260px] rounded-md border border-border/40 bg-white p-2" />
+            <img src={qrDataUrl} alt="WhatsApp login QR code" className="h-[260px] w-[260px] rounded-md border border-border/40 bg-canvas p-2" />
           ) : (
             <div className="flex h-[260px] w-[260px] items-center justify-center rounded-md border border-border/40 bg-muted/20">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -1391,14 +1391,14 @@ function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, te
     )}>
       {/* Brand light: a hairline across the top and a soft glow behind the mark */}
       <div className={cn("absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent to-transparent", hue.line)} aria-hidden />
-      <div className={cn("absolute -top-16 -left-10 h-40 w-40 rounded-full blur-3xl opacity-60 transition-opacity duration-300 group-hover:opacity-100", hue.glow)} aria-hidden />
+      <div className={cn("absolute -top-16 -left-10 h-40 w-40 rounded-pill blur-glow opacity-60 transition-opacity duration-300 group-hover:opacity-100", hue.glow)} aria-hidden />
       <div className={cn("absolute inset-0 pointer-events-none bg-gradient-to-br via-transparent to-transparent", hue.gradient)} aria-hidden />
 
       <CardContent className="relative p-0">
         {/* Header */}
         <div className="flex items-start gap-3.5 px-4 pt-4">
           <div className={cn(
-            "relative h-12 w-12 rounded-2xl flex items-center justify-center shrink-0 ring-1 bg-background/60 backdrop-blur-sm",
+            "relative h-12 w-12 rounded-2xl flex items-center justify-center shrink-0 ring-1 bg-background/60 backdrop-blur-surface",
             hue.iconRing,
           )}>
             <ChannelLogo type={ch.type} size={26} />
@@ -1411,14 +1411,14 @@ function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, te
           </div>
           <div className="flex items-center gap-1 shrink-0">
             <span className={cn(
-              "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-caption font-medium",
+              "inline-flex items-center gap-1.5 rounded-pill border px-2 py-0.5 text-caption font-medium",
               failed ? "border-destructive/30 bg-destructive/10 text-destructive"
                 : ready.ok ? "border-success/25 bg-success/10 text-success"
                 : "border-warning/25 bg-warning/10 text-warning",
             )}>
               <span className="relative flex h-1.5 w-1.5">
-                {ready.ok && !failed && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-60" />}
-                <span className={cn("relative inline-flex h-1.5 w-1.5 rounded-full", failed ? "bg-destructive" : ready.ok ? "bg-success" : "bg-warning")} />
+                {ready.ok && !failed && <span className="absolute inline-flex h-full w-full animate-ping rounded-pill bg-success opacity-60" />}
+                <span className={cn("relative inline-flex h-1.5 w-1.5 rounded-pill", failed ? "bg-destructive" : ready.ok ? "bg-success" : "bg-warning")} />
               </span>
               {failed ? "Test failed" : ready.label}
             </span>
@@ -1530,14 +1530,14 @@ function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, te
 
         {/* Actions */}
         <div className="mt-3 flex items-center gap-1.5 border-t border-border/30 bg-muted/10 px-3 py-2">
-          <Button variant="ghost" size="sm" className="h-7 rounded-full text-caption gap-1 px-3" onClick={onEdit}>
+          <Button variant="ghost" size="sm" className="h-7 rounded-pill text-caption gap-1 px-3" onClick={onEdit}>
             <Pencil className="h-3 w-3" /> Edit
           </Button>
           <Button
             variant="ghost"
             size="sm"
             className={cn(
-              "h-7 rounded-full text-caption gap-1 px-3 transition-colors",
+              "h-7 rounded-pill text-caption gap-1 px-3 transition-colors",
               testResult?.success === true && "text-success bg-success/10 hover:bg-success/15",
               failed && "text-destructive hover:bg-destructive/10",
             )}
@@ -2075,6 +2075,15 @@ function AppearanceTab({ branding, onUpdateBranding, onUploadLogo, onRemoveLogo,
   onSaveInstanceAppearance: (appearance: InstanceAppearance | null) => Promise<void>;
 }) {
   const [productName, setProductName] = useState(branding?.productName ?? "");
+  // the logo previews sit on the look's own page background in each mode (custom, else the palette's)
+  const look = useResolvedAppearance();
+  const previewSurface = (variant: "light" | "dark"): React.CSSProperties => {
+    const tokens = look.custom.enabled ? look.custom[variant] : {};
+    const background = typeof tokens.background === "string" ? tokens.background
+      : (kit.THEME_COLORS[look.palette] ?? kit.THEME_COLORS[kit.DEFAULT_PALETTE])[variant === "dark" ? 1 : 0];
+    const color = typeof tokens.foreground === "string" ? tokens.foreground : kit.contrastOn(background) ?? undefined;
+    return { background, color };
+  };
   const [tagline, setTagline] = useState(branding?.tagline ?? "");
   const [logoUrl, setLogoUrl] = useState(branding?.logoUrl ?? "");
   const [logoDarkUrl, setLogoDarkUrl] = useState(branding?.logoDarkUrl ?? "");
@@ -2158,7 +2167,7 @@ function AppearanceTab({ branding, onUpdateBranding, onUploadLogo, onRemoveLogo,
           </div>
           <div className="grid gap-2">
             {(["light", "dark"] as const).map((variant) => (
-              <div key={variant} className={cn("flex min-h-24 items-center justify-center border border-border/50 p-4", variant === "dark" ? "bg-neutral-950 text-neutral-100" : "bg-white text-neutral-900")}>
+              <div key={variant} className="flex min-h-24 items-center justify-center border border-border/50 p-4" style={previewSurface(variant)}>
                 <div className="flex min-w-0 items-center gap-3">
                   <BrandMark branding={draft} variant={variant} className="h-10 w-10 rounded-lg text-xl" />
                   <div className="min-w-0">
@@ -2316,7 +2325,7 @@ function MembersTab() {
             <div className="divide-y divide-border/40 rounded-lg border border-border/40 overflow-hidden">
               {members.map((member) => (
                 <div key={member.email} className="flex items-center gap-3 px-3 py-2.5 bg-background/40">
-                  <div className="h-7 w-7 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                  <div className="h-7 w-7 rounded-pill bg-primary/10 text-primary flex items-center justify-center shrink-0">
                     <Mail className="h-3.5 w-3.5" />
                   </div>
                   <div className="min-w-0 flex-1">
@@ -3555,7 +3564,7 @@ export function ConfigPage() {
                         </div>
                       )}
                       {rule.template && (
-                        <code className="text-caption text-muted-foreground block truncate bg-muted/20 rounded px-2 py-1 mb-2">{rule.template}</code>
+                        <code className="text-caption text-muted-foreground block truncate bg-muted/20 rounded-xs px-2 py-1 mb-2">{rule.template}</code>
                       )}
                       {/* Meta row */}
                       {(rule.cooldownMs || rule.includeOutcomes || rule.actions?.length) && (
@@ -3625,7 +3634,7 @@ export function ConfigPage() {
                             {/* Level indicator */}
                             <div className="flex flex-col items-center shrink-0">
                               <div className={cn(
-                                "flex h-8 w-8 items-center justify-center rounded-full border-2 text-xs font-bold",
+                                "flex h-8 w-8 items-center justify-center rounded-pill border-2 text-xs font-bold",
                                 level.handler === "human" ? "border-destructive text-destructive bg-destructive/10" :
                                 level.handler === "orchestrator" ? "border-warning text-warning bg-warning/10" :
                                 "border-info text-info bg-info/10",
@@ -3803,7 +3812,7 @@ export function ConfigPage() {
                                 </span>
                               )}
                               {gate.condition?.expression && (
-                                <code className="text-micro font-mono bg-muted/30 rounded px-1.5 py-0.5">{gate.condition.expression}</code>
+                                <code className="text-micro font-mono bg-muted/30 rounded-xs px-1.5 py-0.5">{gate.condition.expression}</code>
                               )}
                             </div>
                             {gate.notifyChannels && gate.notifyChannels.length > 0 && (
@@ -4286,7 +4295,7 @@ function CloudSyncPanel() {
                 <button
                   type="button"
                   onClick={() => void cancelSync()}
-                  className="inline-flex items-center gap-1 rounded bg-destructive/15 px-2 py-0.5 text-caption font-medium text-destructive hover:bg-destructive/25"
+                  className="inline-flex items-center gap-1 rounded-xs bg-destructive/15 px-2 py-0.5 text-caption font-medium text-destructive hover:bg-destructive/25"
                 >
                   <X className="h-3 w-3" />
                   Cancel
@@ -4638,9 +4647,9 @@ function SyncHistoryTable({ entries }: { entries: SyncHistoryEntry[] }) {
               <td className="px-2 py-1.5 text-right font-mono tabular-nums">{formatDuration(e.durationMs)}</td>
               <td className="px-2 py-1.5">
                 {e.ok ? (
-                  <span className="inline-flex items-center gap-1 rounded bg-success/15 px-1.5 py-px text-micro font-medium text-success">ok</span>
+                  <span className="inline-flex items-center gap-1 rounded-xs bg-success/15 px-1.5 py-px text-micro font-medium text-success">ok</span>
                 ) : (
-                  <span title={e.error} className="inline-flex items-center gap-1 rounded bg-destructive/15 px-1.5 py-px text-micro font-medium text-destructive">
+                  <span title={e.error} className="inline-flex items-center gap-1 rounded-xs bg-destructive/15 px-1.5 py-px text-micro font-medium text-destructive">
                     failed
                   </span>
                 )}
@@ -4661,7 +4670,7 @@ function SyncTypeBadge({ direction, mode }: { direction: "push" | "pull"; mode: 
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded px-1.5 py-px font-mono text-micro",
+        "inline-flex items-center gap-1 rounded-xs px-1.5 py-px font-mono text-micro",
         replace
           ? "bg-destructive/10 text-destructive/90"
           : isPush
@@ -4748,14 +4757,14 @@ function SyncProgressBar({ progress }: { progress: SyncProgress }) {
     ? Math.min(100, Math.round((progress.bytes ?? 0) / progress.totalBytes * 100))
     : null;
   return (
-    <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
+    <div className="relative h-1.5 w-full overflow-hidden rounded-pill bg-muted">
       {pct != null ? (
         <div
-          className="h-full rounded-full bg-success/80 transition-[width]"
+          className="h-full rounded-pill bg-success/80 transition-[width]"
           style={{ width: `${pct}%` }}
         />
       ) : (
-        <div className="absolute inset-y-0 left-0 h-full w-1/3 animate-pulse rounded-full bg-success/40" />
+        <div className="absolute inset-y-0 left-0 h-full w-1/3 animate-pulse rounded-pill bg-success/40" />
       )}
     </div>
   );

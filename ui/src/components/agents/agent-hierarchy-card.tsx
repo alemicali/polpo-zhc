@@ -36,7 +36,7 @@ export function AgentHierarchyCard() {
               to={`/agents/${manager.name}`}
               className="flex items-center gap-2 rounded-md border border-border/30 bg-muted/10 px-3 py-2 hover:bg-accent/10 transition-colors"
             >
-              <AgentAvatar avatar={manager.identity?.avatar} name={manager.name} size="sm" iconClassName="text-primary" />
+              <AgentAvatar avatar={manager.identity?.avatar} name={manager.name} size="sm" />
               <div className="min-w-0">
                 <p className="text-xs font-medium">{manager.identity?.displayName ?? manager.name}</p>
                 {manager.identity?.title && (
@@ -74,7 +74,7 @@ export function AgentHierarchyCard() {
                   to={`/agents/${sub.name}`}
                   className="flex items-center gap-2 rounded-md border border-border/30 bg-muted/10 px-3 py-2 hover:bg-accent/10 transition-colors"
                 >
-                  <AgentAvatar avatar={sub.identity?.avatar} name={sub.name} size="sm" iconClassName="text-muted-foreground" />
+                  <AgentAvatar avatar={sub.identity?.avatar} name={sub.name} size="sm" />
                   <div className="min-w-0">
                     <p className="text-xs font-medium">{sub.identity?.displayName ?? sub.name}</p>
                     {sub.identity?.title && (

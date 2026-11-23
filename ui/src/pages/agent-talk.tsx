@@ -273,8 +273,8 @@ function EmptyState() {
       <MessagesSquare className="h-10 w-10 text-muted-foreground/60" />
       <div className="text-base font-medium">No agent conversations yet</div>
       <p className="max-w-md text-sm text-muted-foreground">
-        Agents talk to each other with <code className="rounded bg-muted px-1">ask_agent</code> (a quick
-        question, answered while they keep working) and <code className="rounded bg-muted px-1">message_agent</code> (a
+        Agents talk to each other with <code className="rounded-xs bg-muted px-1">ask_agent</code> (a quick
+        question, answered while they keep working) and <code className="rounded-xs bg-muted px-1">message_agent</code> (a
         handoff for real work). Their exchanges show up here live, and you can read each pair's full conversation.
       </p>
     </div>

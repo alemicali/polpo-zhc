@@ -54,7 +54,7 @@ export function BackgroundWaits({
                 {wait.state === "running" ? (
                   <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
                 ) : (
-                  <span className={cn("h-2 w-2 shrink-0 rounded-full", active ? "bg-warning" : wait.state === "completed" ? "bg-success" : "bg-muted-foreground/50")} />
+                  <span className={cn("h-2 w-2 shrink-0 rounded-pill", active ? "bg-warning" : wait.state === "completed" ? "bg-success" : "bg-muted-foreground/50")} />
                 )}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">

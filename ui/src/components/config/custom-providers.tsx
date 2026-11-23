@@ -490,9 +490,9 @@ export function CustomProviderWizard({
             <ArrowLeft className="h-3 w-3" /> Presets
           </button>
         )}
-        <span className={cn("px-2 py-0.5 rounded-full", step === 2 ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>1 · Connection</span>
+        <span className={cn("px-2 py-0.5 rounded-pill", step === 2 ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>1 · Connection</span>
         <ChevronRight className="h-3 w-3 text-muted-foreground" />
-        <span className={cn("px-2 py-0.5 rounded-full", step === 3 ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>2 · Test & models</span>
+        <span className={cn("px-2 py-0.5 rounded-pill", step === 3 ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>2 · Test & models</span>
         {preset && <Badge variant="outline" className="ml-auto text-micro">{preset.label}</Badge>}
       </div>
 
@@ -793,7 +793,7 @@ export function CustomProviderWizard({
                 </div>
                 <div className="max-h-48 overflow-y-auto space-y-0.5 pr-1">
                   {filteredDiscovered.slice(0, 300).map((m) => (
-                    <label key={m.id} className="flex items-center gap-2 rounded px-2 py-1 text-xs hover:bg-accent/40 cursor-pointer">
+                    <label key={m.id} className="flex items-center gap-2 rounded-xs px-2 py-1 text-xs hover:bg-accent/40 cursor-pointer">
                       <input type="checkbox" className="h-3.5 w-3.5 accent-primary" checked={selectedIds.has(m.id)} onChange={() => toggleModel(m)} />
                       <code className="font-mono truncate">{m.id}</code>
                       {m.contextWindow ? <span className="text-micro text-muted-foreground">{Math.round(m.contextWindow / 1000)}k ctx</span> : null}
@@ -1044,7 +1044,7 @@ export function CustomProvidersSection({
                     </div>
                     <div className="flex items-center gap-2 mt-0.5 flex-wrap text-caption">
                       <span className="flex items-center gap-1.5">
-                        <span className={cn("h-1.5 w-1.5 rounded-full", p.configured ? "bg-success" : "bg-muted-foreground")} />
+                        <span className={cn("h-1.5 w-1.5 rounded-pill", p.configured ? "bg-success" : "bg-muted-foreground")} />
                         <span className={p.configured ? "text-foreground" : "text-muted-foreground"}>
                           {p.keySource === "none" ? "No key needed"
                             : p.keySource === "vault" ? `Key in vault${p.keyHint ? ` (…${p.keyHint})` : ""}`

@@ -34,6 +34,9 @@
 @theme inline {
   --font-sans: var(--app-font-family);
   --font-mono: var(--app-mono-font);
+  /* small corners (chips, kbd, tiny cells): a third of the look's radius (4px by default, as
+     Tailwind's bare `rounded` was), 0 when it is square */
+  --radius-xs: calc(var(--radius) / 3);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -83,6 +86,36 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  /* the agent colours (avatars, badges, team colours, tool kinds): bg-agent-3, text-agent-3-foreground */
+  --color-agent-1: var(--agent-1);
+  --color-agent-1-foreground: var(--agent-1-foreground);
+  --color-agent-2: var(--agent-2);
+  --color-agent-2-foreground: var(--agent-2-foreground);
+  --color-agent-3: var(--agent-3);
+  --color-agent-3-foreground: var(--agent-3-foreground);
+  --color-agent-4: var(--agent-4);
+  --color-agent-4-foreground: var(--agent-4-foreground);
+  --color-agent-5: var(--agent-5);
+  --color-agent-5-foreground: var(--agent-5-foreground);
+  --color-agent-6: var(--agent-6);
+  --color-agent-6-foreground: var(--agent-6-foreground);
+  --color-agent-7: var(--agent-7);
+  --color-agent-7-foreground: var(--agent-7-foreground);
+  --color-agent-8: var(--agent-8);
+  --color-agent-8-foreground: var(--agent-8-foreground);
+  --color-agent-9: var(--agent-9);
+  --color-agent-9-foreground: var(--agent-9-foreground);
+  --color-agent-10: var(--agent-10);
+  --color-agent-10-foreground: var(--agent-10-foreground);
+  /* the dialog / sheet scrim; the sheet behind web pages and QR codes */
+  --color-overlay: var(--overlay);
+  --color-canvas: var(--canvas);
+  --color-canvas-foreground: var(--canvas-foreground);
+  /* backdrop blur: glassy bars and panels (backdrop-blur-surface), the dialog scrim (backdrop-blur-overlay) */
+  --blur-surface: var(--surface-blur);
+  --blur-overlay: var(--overlay-blur);
+  /* the soft halos behind hero cards and banners (blur-glow) */
+  --blur-glow: var(--glow-blur);
 }
 
 /*
@@ -122,6 +155,12 @@
      selects): from --radius by default, as rounded-xl / rounded-md were; a look may set them apart. */
   --radius-card: calc(var(--radius) + 4px);
   --radius-control: calc(var(--radius) - 2px);
+  /* Badges (rounded-badge), pills, chips, dots and toggles (rounded-pill), avatars (rounded-avatar):
+     fully round by default; dialogs and sheets (rounded-dialog): the look's radius. */
+  --radius-badge: 9999px;
+  --radius-pill: 9999px;
+  --radius-avatar: 9999px;
+  --radius-dialog: var(--radius);
 }
 
 /*
@@ -177,7 +216,7 @@
   font-family: var(--app-font-family);
   font-size: var(--text-caption);
   line-height: var(--text-caption--line-height);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   text-transform: var(--label-transform);
   letter-spacing: var(--tracking-label);
 }
@@ -193,6 +232,27 @@
 @utility shadow-raised {
   --tw-shadow: var(--shadow-raised);
   box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+}
+/* Inputs, small buttons, toggles (shadow-control). */
+@utility shadow-control {
+  --tw-shadow: var(--shadow-control);
+  box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+}
+/*
+ * A coloured halo: shadow-glow (soft: hover, selection) and shadow-glow-strong (live dots, active
+ * handles). The look sets the geometry (--shadow-glow: 0 0 20px), the element the colour: the
+ * primary, or glow-success / glow-warning / glow-info / glow-destructive / glow-status-running…
+ */
+@utility shadow-glow {
+  --tw-shadow: var(--shadow-glow) color-mix(in oklch, var(--glow-color, var(--primary)) 14%, transparent);
+  box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+}
+@utility shadow-glow-strong {
+  --tw-shadow: var(--shadow-glow-strong) color-mix(in oklch, var(--glow-color, var(--primary)) 55%, transparent);
+  box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+}
+@utility glow-* {
+  --glow-color: --value(--color-*);
 }
 
 /* ─── Light theme: tide pool — Mediterranean shore at midday ───
@@ -224,6 +284,51 @@
   /* Shadows — cards, and what floats (popovers, menus, dialogs, tooltips) */
   --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 8%), 0 1px 2px -1px rgb(0 0 0 / 8%);
   --shadow-raised: 0 10px 15px -3px rgb(0 0 0 / 10%), 0 4px 6px -4px rgb(0 0 0 / 10%);
+  --shadow-control: 0 1px 2px 0 rgb(0 0 0 / 5%);
+  /* glows: the geometry (the colour is the element's: shadow-glow, glow-success…) */
+  --shadow-glow: 0 0 20px;
+  --shadow-glow-strong: 0 0 8px;
+
+  /* Backdrop blur: glassy bars and panels; the dialog scrim (none by default) */
+  --surface-blur: 12px;
+  --overlay-blur: 0px;
+  --glow-blur: 64px;
+
+  /* The dialog / sheet scrim; the sheet behind embedded web pages and QR codes (white: what pages
+     and phone cameras expect) */
+  --overlay: oklch(0 0 0 / 50%);
+  --canvas: oklch(1 0 0);
+  --canvas-foreground: oklch(0.15 0 0);
+
+  /*
+   * The agent colours: ten hues, spread so neighbours differ, at one lightness and chroma per
+   * palette and mode (--agent-l, --agent-c, --agent-h shifts every hue), with a readable text
+   * colour on them (white in light mode, near-black in dark). A custom look sets any of them.
+   */
+  --agent-l: 0.56;
+  --agent-c: 0.15;
+  --agent-h: 0;
+  --agent-1: oklch(var(--agent-l) var(--agent-c) calc(250 + var(--agent-h)));
+  --agent-2: oklch(var(--agent-l) var(--agent-c) calc(25 + var(--agent-h)));
+  --agent-3: oklch(var(--agent-l) var(--agent-c) calc(145 + var(--agent-h)));
+  --agent-4: oklch(var(--agent-l) var(--agent-c) calc(320 + var(--agent-h)));
+  --agent-5: oklch(var(--agent-l) var(--agent-c) calc(60 + var(--agent-h)));
+  --agent-6: oklch(var(--agent-l) var(--agent-c) calc(200 + var(--agent-h)));
+  --agent-7: oklch(var(--agent-l) var(--agent-c) calc(285 + var(--agent-h)));
+  --agent-8: oklch(var(--agent-l) var(--agent-c) calc(95 + var(--agent-h)));
+  --agent-9: oklch(var(--agent-l) var(--agent-c) calc(175 + var(--agent-h)));
+  --agent-10: oklch(var(--agent-l) var(--agent-c) calc(350 + var(--agent-h)));
+  --agent-foreground: oklch(0.99 0 0);
+  --agent-1-foreground: var(--agent-foreground);
+  --agent-2-foreground: var(--agent-foreground);
+  --agent-3-foreground: var(--agent-foreground);
+  --agent-4-foreground: var(--agent-foreground);
+  --agent-5-foreground: var(--agent-foreground);
+  --agent-6-foreground: var(--agent-foreground);
+  --agent-7-foreground: var(--agent-foreground);
+  --agent-8-foreground: var(--agent-foreground);
+  --agent-9-foreground: var(--agent-foreground);
+  --agent-10-foreground: var(--agent-foreground);
 
   /* Surfaces — pearlescent whites with the faintest seawater cast */
   --background: oklch(0.985 0.006 215);
@@ -312,6 +417,10 @@
   --chart-3: oklch(0.68 0.18 330);
   --chart-4: oklch(0.75 0.15 85);
   --chart-5: oklch(0.65 0.2 30);
+  --agent-l: 0.76;
+  --agent-c: 0.13;
+  --agent-h: 0;
+  --agent-foreground: oklch(0.18 0.01 260);
   --sidebar: oklch(0.08 0.025 260);
   --sidebar-foreground: oklch(0.93 0.01 250);
   --sidebar-primary: oklch(0.7 0.15 200);
@@ -369,6 +478,9 @@
   --chart-3: oklch(0.55 0.2 250);
   --chart-4: oklch(0.7 0.2 90);
   --chart-5: oklch(0.55 0.2 320);
+  --agent-l: 0.52;
+  --agent-c: 0.2;
+  --agent-h: 0;
   --sidebar: oklch(0.97 0 0);
   --sidebar-foreground: oklch(0 0 0);
   --sidebar-primary: oklch(0 0 0);
@@ -410,6 +522,9 @@
   --chart-3: oklch(0.7 0.2 250);
   --chart-4: oklch(0.78 0.2 90);
   --chart-5: oklch(0.7 0.2 320);
+  --agent-l: 0.78;
+  --agent-c: 0.18;
+  --agent-h: 0;
   --sidebar: oklch(0.05 0 0);
   --sidebar-foreground: oklch(1 0 0);
   --sidebar-primary: oklch(1 0 0);
@@ -468,6 +583,9 @@
   --chart-3: oklch(0.55 0.1 200);
   --chart-4: oklch(0.55 0.14 145);
   --chart-5: oklch(0.5 0.13 320);
+  --agent-l: 0.52;
+  --agent-c: 0.11;
+  --agent-h: 10;
   --sidebar: oklch(0.94 0.03 70);
   --sidebar-foreground: oklch(0.22 0.05 50);
   --sidebar-primary: oklch(0.42 0.13 25);
@@ -511,6 +629,9 @@
   --chart-3: oklch(0.66 0.13 200);
   --chart-4: oklch(0.7 0.15 145);
   --chart-5: oklch(0.66 0.15 320);
+  --agent-l: 0.74;
+  --agent-c: 0.11;
+  --agent-h: 10;
   --sidebar: oklch(0.13 0.022 50);
   --sidebar-foreground: oklch(0.92 0.022 75);
   --sidebar-primary: oklch(0.7 0.13 35);
@@ -579,6 +700,9 @@
   --chart-3: #39734f;
   --chart-4: #a76818;
   --chart-5: #755192;
+  --agent-l: 0.52;
+  --agent-c: 0.13;
+  --agent-h: 0;
   --sidebar: var(--paper-sunken);
   --sidebar-foreground: var(--ink);
   --sidebar-primary: #e93f33;
@@ -673,6 +797,9 @@
   --chart-3: #77a986;
   --chart-4: #d59a4d;
   --chart-5: #ab8ac4;
+  --agent-l: 0.74;
+  --agent-c: 0.12;
+  --agent-h: 0;
   --sidebar: var(--paper-sunken);
   --sidebar-foreground: var(--ink);
   --sidebar-primary: #ff6257;
@@ -733,6 +860,9 @@
   --chart-3: oklch(0.7 0.2 90);
   --chart-4: oklch(0.55 0.22 280);
   --chart-5: oklch(0.6 0.24 30);
+  --agent-l: 0.55;
+  --agent-c: 0.2;
+  --agent-h: 0;
   --sidebar: oklch(0.94 0.018 235);
   --sidebar-foreground: oklch(0.18 0.04 250);
   --sidebar-primary: oklch(0.5 0.18 200);
@@ -776,6 +906,9 @@
   --chart-3: oklch(0.78 0.2 90);
   --chart-4: oklch(0.65 0.24 280);
   --chart-5: oklch(0.7 0.24 30);
+  --agent-l: 0.78;
+  --agent-c: 0.19;
+  --agent-h: 0;
   --sidebar: oklch(0.07 0.025 250);
   --sidebar-foreground: oklch(0.94 0.04 195);
   --sidebar-primary: oklch(0.78 0.18 195);
@@ -838,6 +971,9 @@
   --chart-3: oklch(0.6 0 0);
   --chart-4: oklch(0.78 0 0);
   --chart-5: oklch(0.55 0.16 250);
+  --agent-l: 0.5;
+  --agent-c: 0.06;
+  --agent-h: 0;
   --sidebar: oklch(0.97 0 0);
   --sidebar-foreground: oklch(0.18 0 0);
   --sidebar-primary: oklch(0.18 0 0);
@@ -881,6 +1017,9 @@
   --chart-3: oklch(0.55 0 0);
   --chart-4: oklch(0.4 0 0);
   --chart-5: oklch(0.65 0.18 250);
+  --agent-l: 0.78;
+  --agent-c: 0.06;
+  --agent-h: 0;
   --sidebar: oklch(0.07 0 0);
   --sidebar-foreground: oklch(0.95 0 0);
   --sidebar-primary: oklch(0.95 0 0);
@@ -927,6 +1066,9 @@
   --chart-3: #f26a2e;
   --chart-4: #15a37d;
   --chart-5: #8a64db;
+  --agent-l: 0.57;
+  --agent-c: 0.17;
+  --agent-h: 0;
   --sidebar: #fbfaf7;
   --sidebar-foreground: #272624;
   --sidebar-primary: #315efb;
@@ -971,6 +1113,9 @@
   --chart-3: #ff8a55;
   --chart-4: #5ccba7;
   --chart-5: #ad8ae8;
+  --agent-l: 0.76;
+  --agent-c: 0.15;
+  --agent-h: 0;
   --sidebar: #121211;
   --sidebar-foreground: #eeeae4;
   --sidebar-primary: #7590ff;
@@ -1017,6 +1162,9 @@
   --chart-3: #6f5bd3;
   --chart-4: #d97706;
   --chart-5: #d00e17;
+  --agent-l: 0.55;
+  --agent-c: 0.13;
+  --agent-h: 0;
   --sidebar: #f9f9f9;
   --sidebar-foreground: #242424;
   --sidebar-primary: #0d0d0d;
@@ -1061,6 +1209,9 @@
   --chart-3: #9988e8;
   --chart-4: #f0a64b;
   --chart-5: #ff676f;
+  --agent-l: 0.76;
+  --agent-c: 0.12;
+  --agent-h: 0;
   --sidebar: #171717;
   --sidebar-foreground: #ececec;
   --sidebar-primary: #ffffff;
@@ -1107,6 +1258,9 @@
   --chart-3: #6d5a9c;
   --chart-4: #a77a2d;
   --chart-5: #b14e67;
+  --agent-l: 0.54;
+  --agent-c: 0.1;
+  --agent-h: 8;
   --sidebar: #f0eee8;
   --sidebar-foreground: #36342f;
   --sidebar-primary: #c96442;
@@ -1153,6 +1307,9 @@
   --chart-3: #aa95d2;
   --chart-4: #d2a65a;
   --chart-5: #d17b8f;
+  --agent-l: 0.74;
+  --agent-c: 0.1;
+  --agent-h: 8;
   --sidebar: #191815;
   --sidebar-foreground: #eeeae3;
   --sidebar-primary: #e08b6c;

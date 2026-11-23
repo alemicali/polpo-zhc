@@ -523,6 +523,12 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
       + "status colours (success, warning, info, destructive and their *Foreground; statusRunning, statusQueued, statusAssigned for task states); "
       + "the type scale (textDisplay, textH1, textH2, textH3, textBody, textSmall, textCaption, textMicro: rem 0.5–6 or px 8–96), headingWeight (100–900), "
       + "headingTracking and labelTracking (em -0.1–0.3), labelCase (uppercase, none, capitalize, lowercase); "
+      + "the small sizes textXs, textSm, textBase, textLg, textXl, text2xl, text3xl and the weights fontWeightNormal, fontWeightMedium, fontWeightSemibold, fontWeightBold (100–900); "
+      + "AGENT COLOURS agent1 … agent10 (avatars, badges, team colours, tool kinds) and agent1Foreground … agent10Foreground (their text, derived readable): keep them distinct; an agent picks one with polpo_agent_update identity.color \"agent3\"; "
+      + "surfaces: overlay (the dialog scrim), canvas and canvasForeground (the sheet behind embedded web pages and QR codes); "
+      + "shape: radiusBadge, radiusPill, radiusAvatar (0–999 px, 999 = round), radiusDialog (0–32 px), shadowControl (inputs), shadowGlow and shadowGlowStrong (a glow's geometry, e.g. 0 0 20px: the colour is the element's), "
+      + "surfaceBlur and overlayBlur (0–24 px backdrop blur of glassy bars and the dialog scrim), glowBlur (0–96 px, the soft halos); "
+      + "nothing in the dashboard is fixed: every colour, size, weight, corner, shadow and blur is one of these tokens; "
       + "a token set to null goes back to the palette's; with derive on (default) the dashboard fills the rest (text on primary, ring, sidebar…). "
       + "The result lists what changed. Needs the admin scope.",
     inputSchema: {

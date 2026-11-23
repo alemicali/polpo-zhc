@@ -352,13 +352,13 @@ function Toggle({
       </div>
       <span
         className={cn(
-          "inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors",
+          "inline-flex h-5 w-9 shrink-0 items-center rounded-pill transition-colors",
           checked ? "bg-primary" : "bg-muted",
         )}
       >
         <span
           className={cn(
-            "inline-block h-4 w-4 rounded-full bg-background shadow transition-transform",
+            "inline-block h-4 w-4 rounded-pill bg-background shadow-control transition-transform",
             checked ? "translate-x-4" : "translate-x-0.5",
           )}
         />
@@ -461,7 +461,7 @@ function VaultEntryCard({
         {entry.keys.map((k: string) => (
           <span
             key={k}
-            className="inline-flex items-center gap-1 rounded bg-muted/50 border border-border/30 px-2 py-0.5 text-caption font-mono text-muted-foreground"
+            className="inline-flex items-center gap-1 rounded-xs bg-muted/50 border border-border/30 px-2 py-0.5 text-caption font-mono text-muted-foreground"
           >
             {k}: <span className="text-micro opacity-60">***</span>
           </span>
@@ -823,7 +823,7 @@ function ShareWithSelector({
                 type="button"
                 onClick={() => toggle(a.name)}
                 className={cn(
-                  "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-caption font-medium border transition-colors",
+                  "inline-flex items-center gap-1 rounded-pill px-2.5 py-1 text-caption font-medium border transition-colors",
                   active
                     ? "bg-primary/15 border-primary/40 text-primary"
                     : "bg-card border-border/40 text-muted-foreground hover:bg-muted hover:text-foreground"

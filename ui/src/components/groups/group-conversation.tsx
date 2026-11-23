@@ -68,11 +68,11 @@ function MessagesSkeleton() {
       </div>
       {[0, 1].map((i) => (
         <div key={i} className="flex gap-3">
-          <Skeleton className="h-7 w-7 shrink-0 rounded-full" />
+          <Skeleton className="h-7 w-7 shrink-0 rounded-pill" />
           <div className="flex-1 space-y-2">
-            <Skeleton className="h-3 w-20 rounded" />
-            <Skeleton className="h-4 w-full rounded" />
-            <Skeleton className="h-4 w-2/3 rounded" />
+            <Skeleton className="h-3 w-20 rounded-xs" />
+            <Skeleton className="h-4 w-full rounded-xs" />
+            <Skeleton className="h-4 w-2/3 rounded-xs" />
           </div>
         </div>
       ))}
@@ -89,7 +89,7 @@ function TypingDots() {
       {[0, 150, 300].map((delay) => (
         <span
           key={delay}
-          className="h-1 w-1 animate-bounce rounded-full bg-primary/70"
+          className="h-1 w-1 animate-bounce rounded-pill bg-primary/70"
           style={{ animationDelay: `${delay}ms` }}
         />
       ))}
@@ -181,7 +181,7 @@ export function GroupConversation({
         type="button"
         disabled={!target}
         onClick={() => target && scrollToMessage(target.id)}
-        className="mb-1 flex max-w-full items-center gap-1 rounded text-left text-caption text-muted-foreground transition-colors enabled:hover:text-foreground"
+        className="mb-1 flex max-w-full items-center gap-1 rounded-xs text-left text-caption text-muted-foreground transition-colors enabled:hover:text-foreground"
         title={target ? "Show the message this replies to" : undefined}
       >
         <CornerDownRight className="h-3 w-3 shrink-0" />
@@ -271,7 +271,7 @@ export function GroupConversation({
   };
 
   const header = (
-    <div className="flex shrink-0 items-center gap-2.5 border-b border-border/40 bg-background/80 px-3 py-2 backdrop-blur-md lg:px-4">
+    <div className="flex shrink-0 items-center gap-2.5 border-b border-border/40 bg-background/80 px-3 py-2 backdrop-blur-surface lg:px-4">
       {leading}
       {!leading && (
         <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 lg:hidden" onClick={onBack} aria-label={backLabel}>
@@ -321,10 +321,10 @@ export function GroupConversation({
         </>
       ) : (
         <div className="flex flex-1 items-center gap-2">
-          <Skeleton className="h-6 w-14 rounded-full" />
+          <Skeleton className="h-6 w-14 rounded-pill" />
           <div className="space-y-1.5">
-            <Skeleton className="h-3.5 w-32 rounded" />
-            <Skeleton className="h-2.5 w-48 rounded" />
+            <Skeleton className="h-3.5 w-32 rounded-xs" />
+            <Skeleton className="h-2.5 w-48 rounded-xs" />
           </div>
         </div>
       )}
@@ -343,7 +343,7 @@ export function GroupConversation({
           <span className="shrink-0">Replying to</span>
           <span className="shrink-0 font-medium text-foreground/80">{nameOf(replyingTo)}</span>
           <span className="min-w-0 truncate italic">“{firstLine(replyingTo.text)}”</span>
-          <button type="button" onClick={() => setReplyingTo(null)} className="ml-auto shrink-0 rounded px-1 hover:text-foreground" aria-label="Cancel reply">
+          <button type="button" onClick={() => setReplyingTo(null)} className="ml-auto shrink-0 rounded-xs px-1 hover:text-foreground" aria-label="Cancel reply">
             <X className="h-3 w-3" />
           </button>
         </div>
@@ -420,7 +420,7 @@ export function GroupConversation({
 
         {!atBottom && messages.length > 0 && (
           <Button
-            className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full shadow-raised"
+            className="absolute bottom-4 left-1/2 -translate-x-1/2 rounded-pill shadow-raised"
             size="icon"
             variant="outline"
             aria-label="Scroll to the latest message"
@@ -438,7 +438,7 @@ export function GroupConversation({
         </div>
       ) : !centerComposer && (
         // Same container as the chat composer (ChatInput).
-        <div className="shrink-0 bg-background/80 px-4 pt-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] backdrop-blur-md lg:pb-1.5">
+        <div className="shrink-0 bg-background/80 px-4 pt-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] backdrop-blur-surface lg:pb-1.5">
           <div className="mx-auto max-w-3xl">{composer}</div>
         </div>
       ))}

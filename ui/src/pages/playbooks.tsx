@@ -200,7 +200,7 @@ export function RunPlaybookDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg max-h-[80vh] overflow-y-auto bg-popover/95 backdrop-blur-xl border-border/40">
+      <DialogContent className="sm:max-w-lg max-h-[80vh] overflow-y-auto bg-popover/95 backdrop-blur-surface border-border/40">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-sm">
             <Play className="h-4 w-4 text-primary" />
@@ -292,7 +292,7 @@ function PlaybookCard({
 
   return (
     <Card
-      className="group transition-all py-0 bg-card/80 backdrop-blur-sm border-border/40 hover:border-primary/20 hover:shadow-[0_0_15px_color-mix(in_oklch,var(--primary)_8%,transparent)] cursor-pointer"
+      className="group transition-all py-0 bg-card/80 backdrop-blur-surface border-border/40 hover:border-primary/20 hover:shadow-glow cursor-pointer"
       onClick={onClick}
     >
       <CardContent className="px-4 py-3">
@@ -462,7 +462,7 @@ export function PlaybooksPage() {
               {playbooks.length === 0 ? (
                 <>
                   Playbooks are parameterized mission definitions.
-                  Create a <code className="text-micro bg-muted rounded px-1">.polpo/playbooks/my-playbook/playbook.json</code> file to get started.
+                  Create a <code className="text-micro bg-muted rounded-xs px-1">.polpo/playbooks/my-playbook/playbook.json</code> file to get started.
                 </>
               ) : (
                 "Try adjusting your search"

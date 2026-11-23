@@ -53,7 +53,7 @@ function GroupRow({ room, active, unread, resolve, onSelect }: {
           )}>
             {room.title || "Untitled group"}
           </p>
-          {unread && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" aria-label="New messages" />}
+          {unread && <span className="h-1.5 w-1.5 shrink-0 rounded-pill bg-primary" aria-label="New messages" />}
         </div>
         <div className="mt-1.5 flex min-w-0 items-center gap-2">
           {members.length > 0 && <MemberAvatarStack members={members} max={4} size="xs" />}
@@ -80,10 +80,10 @@ function ListSkeleton({ rows = 2 }: { rows?: number }) {
     <div className="space-y-0.5">
       {Array.from({ length: rows }).map((_, i) => (
         <div key={i} className="space-y-2 rounded-lg px-3 py-2.5">
-          <Skeleton className="h-3.5 w-2/3 rounded" />
+          <Skeleton className="h-3.5 w-2/3 rounded-xs" />
           <div className="flex items-center gap-2">
-            <Skeleton className="h-5 w-12 rounded-full" />
-            <Skeleton className="h-2.5 w-1/3 rounded" />
+            <Skeleton className="h-5 w-12 rounded-pill" />
+            <Skeleton className="h-2.5 w-1/3 rounded-xs" />
           </div>
         </div>
       ))}
@@ -186,7 +186,7 @@ export function GroupSidebarSection({
               onClick={onNew}
               className="flex w-full items-center gap-2.5 rounded-lg border border-dashed border-border/60 px-3 py-2.5 text-left text-muted-foreground transition-colors hover:border-primary/30 hover:bg-accent/30"
             >
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-pill bg-primary/10 text-primary">
                 <UsersRound className="h-3.5 w-3.5" />
               </span>
               <span className="min-w-0">
@@ -219,7 +219,7 @@ export function GroupSidebarSection({
               <span className="text-label text-muted-foreground">Telegram groups</span>
               <span className="text-micro tabular-nums text-muted-foreground/60">{telegramRooms.length}</span>
               {telegramUnread && !telegramOpen && (
-                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" aria-label="New messages" />
+                <span className="h-1.5 w-1.5 shrink-0 rounded-pill bg-primary" aria-label="New messages" />
               )}
               <span className="ml-auto text-micro text-muted-foreground/60">read-only</span>
             </button>
