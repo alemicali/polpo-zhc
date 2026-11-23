@@ -1,6 +1,6 @@
 import { lazy, Suspense, use, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, Check, ChevronDown, Cloud, Code2, CopyPlus, Download, ExternalLink, FileDown, History, Link2, Maximize2, MessageSquare, Pencil, Pin, Printer, RefreshCw, RotateCcw, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, Cloud, Code2, CopyPlus, Download, ExternalLink, FileDown, History, House, Link2, Maximize2, MessageSquare, Pencil, Pin, Printer, RefreshCw, RotateCcw, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useEvents } from "@polpo-ai/react";
 import { Button } from "@/components/ui/button";
@@ -144,6 +144,8 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
   const content = shownVersion?.content ?? draft?.content ?? artifact.content;
   const workspace = artifactWorkspace(artifact, shownVersion?.content ?? draft?.base.content ?? content);
   const legacy = artifact.type === "view";
+  const docSurface = artifact.type === "doc" ? "artifact-doc-surface" : "";
+  const BackIcon = docSurface ? House : ArrowLeft;
   const editable = !legacy && !shownVersion && !embedded;
   const versionChanged = !!draft && artifact.version !== draft.base.version && !saving;
   const autoSaveStatus = saving ? "Saving…" : versionChanged ? "A newer version is available" :
@@ -234,19 +236,19 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex h-[45px] shrink-0 items-center gap-1.5 border-b bg-background px-2">
-        {!embedded && <Button size="icon" variant="ghost" className="size-8" disabled={busy || saving} onClick={() => void leaveEditor("/artifacts")} aria-label="Back to artifacts"><ArrowLeft className="size-4" /></Button>}
+      <header className={`${docSurface} flex h-[45px] shrink-0 items-center gap-1.5 border-b bg-background px-2 text-foreground`}>
+        {!embedded && <Button size="icon" variant="ghost" className="size-8" disabled={busy || saving} onClick={() => void leaveEditor("/artifacts")} aria-label="Back to artifacts"><BackIcon className="size-4" /></Button>}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button size="sm" variant="ghost" className="h-7 min-w-0 max-w-[58%] gap-1.5 px-1.5" aria-label={`Artifact actions for ${draft?.title ?? artifact.title}`}>
-              <ArtifactIcon artifact={artifact} className="size-4 shrink-0 text-primary" />
+              {!docSurface && <ArtifactIcon artifact={artifact} className="size-4 shrink-0 text-primary" />}
               <span className="truncate">{draft?.title ?? artifact.title}</span><ChevronDown className="size-3 shrink-0" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="min-w-48">
+          <DropdownMenuContent align="start" className={`${docSurface} min-w-48`}>
             <DropdownMenuSub>
               <DropdownMenuSubTrigger><Download /> Export</DropdownMenuSubTrigger>
-              <DropdownMenuSubContent>
+              <DropdownMenuSubContent className={docSurface}>
                 {artifact.type === "doc" && <>
                   <DropdownMenuItem onSelect={() => void exportDoc("word")}><FileDown /> Word document</DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => void exportDoc("print")}><Printer /> Print or save PDF</DropdownMenuItem>
@@ -321,7 +323,7 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
         </Suspense>
       </div>
       <Dialog open={showHistory} onOpenChange={setShowHistory}>
-        <DialogContent className="sm:max-w-sm">
+        <DialogContent className={`${docSurface} sm:max-w-sm`}>
           <DialogHeader><DialogTitle>Version history</DialogTitle><DialogDescription>{artifact.title}</DialogDescription></DialogHeader>
           <div className="max-h-[55dvh] overflow-auto" role="list" aria-label="Artifact versions">
             {[artifact, ...artifact.versions].map(item => <button key={item.version} type="button" disabled={saving || busy}
@@ -339,7 +341,7 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
         </DialogContent>
       </Dialog>
       <Dialog open={rename !== undefined} onOpenChange={open => { if (!open) setRename(undefined); }}>
-        <DialogContent className="sm:max-w-sm">
+        <DialogContent className={`${docSurface} sm:max-w-sm`}>
           <DialogHeader><DialogTitle>Rename artifact</DialogTitle></DialogHeader>
           <form className="grid gap-3" onSubmit={event => {
             event.preventDefault();
@@ -351,7 +353,7 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
         </DialogContent>
       </Dialog>
       <Dialog open={!!source} onOpenChange={(open) => { if (!open) setSource(undefined); }}>
-        <DialogContent className="max-h-[90dvh] sm:max-w-4xl">
+        <DialogContent className={`${docSurface} max-h-[90dvh] sm:max-w-4xl`}>
           <DialogHeader>
             <DialogTitle>Artifact source</DialogTitle>
             <DialogDescription>{artifact.title}</DialogDescription>

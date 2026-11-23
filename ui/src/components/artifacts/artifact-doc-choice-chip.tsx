@@ -50,7 +50,7 @@ export function DocChoiceChip({ node, updateAttributes }: NodeViewProps) {
             <ChevronDown className="size-3" aria-hidden="true" />
           </button>
         </PopoverTrigger>
-        <PopoverContent align="start" className="w-60 p-0">
+        <PopoverContent align="start" className="artifact-doc-surface w-60 p-0">
           <Command shouldFilter={false}>
             <CommandInput aria-label="Find or add an option" placeholder="Find or add an option…" value={query} onValueChange={setQuery} />
             <CommandList>

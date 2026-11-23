@@ -61,3 +61,43 @@
   border-color: color-mix(in oklch, var(--template-tone) 23%, var(--border));
   color: color-mix(in oklch, var(--template-tone) 67%, var(--foreground));
 }
+
+.artifact-doc-surface {
+  color-scheme: light;
+  --background: #fff;
+  --foreground: #1f1e1d;
+  --card: #fff;
+  --card-foreground: var(--foreground);
+  --popover: #fff;
+  --popover-foreground: var(--foreground);
+  --border: #e7e5e3;
+  --input: #e7e5e3;
+  --muted: #f6f5f4;
+  --muted-foreground: #706e6b;
+  --secondary: #f4f3f2;
+  --secondary-foreground: var(--foreground);
+  --accent: #f1f0ef;
+  --accent-foreground: var(--foreground);
+  --primary: #3053a6;
+  --primary-foreground: white;
+  --ring: #516da4;
+}
+
+.artifact-doc-tab-sidebar {
+  top: 68px;
+  left: max(24px, calc((100% - 1552px) / 2));
+  width: clamp(176px, calc((100% - 924px) / 2), 320px);
+  max-height: calc(100% - 8rem);
+}
+
+@container (max-width: 1120px) {
+  .artifact-doc-tab-sidebar {
+    left: 12px;
+    top: 54px;
+    padding: 8px;
+    background: var(--background);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgb(0 0 0 / 8%);
+  }
+}

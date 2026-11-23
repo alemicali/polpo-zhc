@@ -1,6 +1,8 @@
 import { Editor, Mark, Node, type JSONContent } from "@tiptap/core";
 import { Image } from "@tiptap/extension-image";
 import { ReactNodeViewRenderer } from "@tiptap/react";
+import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { TaskItem, TaskList } from "@tiptap/extension-list";
 import { TableKit } from "@tiptap/extension-table";
 import { Markdown } from "@tiptap/markdown";
@@ -8,6 +10,8 @@ import { StarterKit } from "@tiptap/starter-kit";
 import { readDocTabs } from "./artifact-doc-tabs";
 import { choiceToMarkdown, decodeDocChoice, encodeDocChoice, selectedChoice } from "./artifact-doc-choices";
 import { DocChoiceChip } from "./artifact-doc-choice-chip";
+import { DocCommentMarker } from "./artifact-doc-comment-marker";
+import { decodeDocComment } from "./artifact-doc-comments";
 
 export function artifactDocUrl(value: string, image: boolean): boolean {
   try {
@@ -69,6 +73,68 @@ const DocVideo = Node.create({
     const src = escapeAttribute(String(node.attrs?.src ?? ""));
     const title = escapeAttribute(String(node.attrs?.title ?? "Video"));
     return `<video controls playsinline preload="none" src="${src}" title="${title}"></video>`;
+  },
+});
+
+const DocComment = Node.create({
+  name: "docComment",
+  group: "inline",
+  inline: true,
+  atom: true,
+  addAttributes() {
+    return { comment: { default: "", rendered: false } };
+  },
+  parseHTML() {
+    return [{
+      tag: "span[data-polpo-doc-comment]",
+      getAttrs: (element) => {
+        const comment = element.getAttribute("data-polpo-doc-comment");
+        return decodeDocComment(comment) ? { comment } : false;
+      },
+    }];
+  },
+  renderHTML({ node }) {
+    return ["span", { "data-polpo-doc-comment": node.attrs.comment, "aria-hidden": "true" }];
+  },
+  addNodeView() {
+    return ReactNodeViewRenderer(DocCommentMarker);
+  },
+  addProseMirrorPlugins() {
+    return [new Plugin({
+      key: new PluginKey("docCommentHighlights"),
+      props: {
+        decorations(state) {
+          const items: Decoration[] = [];
+          state.doc.descendants((node, position) => {
+            if (node.type.name !== "docComment") return;
+            const comment = decodeDocComment(node.attrs.comment);
+            if (comment?.resolved || !comment?.length || !comment.quote || position < comment.length) return;
+            const start = position - comment.length;
+            if (state.doc.textBetween(start, position, "\n").trim() === comment.quote) {
+              items.push(Decoration.inline(start, position, { class: "rounded-sm bg-amber-100/80" }));
+            }
+          });
+          return DecorationSet.create(state.doc, items);
+        },
+      },
+    })];
+  },
+  markdownTokenizer: {
+    name: "docComment",
+    level: "inline",
+    start: '<span data-polpo-doc-comment="',
+    tokenize(source) {
+      const match = /^<span data-polpo-doc-comment="([^"\r\n]+)"><\/span>/.exec(source);
+      return match && decodeDocComment(match[1])
+        ? { type: "docComment", raw: match[0], comment: match[1] } : undefined;
+    },
+  },
+  parseMarkdown(token, helpers) {
+    return helpers.createNode("docComment", { comment: token.comment });
+  },
+  renderMarkdown(node) {
+    return decodeDocComment(node.attrs?.comment)
+      ? `<span data-polpo-doc-comment="${node.attrs?.comment}"></span>` : "";
   },
 });
 
@@ -268,6 +334,7 @@ export const artifactDocExtensions = [
   DocAlert,
   DocVideo,
   DocChoice,
+  DocComment,
   DocDropdown,
   DocFont,
   Image.configure({ inline: true, allowBase64: true, HTMLAttributes: { referrerpolicy: "no-referrer" } }),

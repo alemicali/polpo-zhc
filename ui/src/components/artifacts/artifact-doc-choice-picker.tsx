@@ -18,7 +18,7 @@ export function DocChoicePicker({ definitions, onInsert }: {
       <DropdownMenuTrigger asChild>
         <Button type="button" size="icon-sm" variant="ghost" aria-label="Dropdown" title="Dropdown"><SquareChevronDown /></Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start">
+      <DropdownMenuContent align="start" className="artifact-doc-surface">
         <DropdownMenuLabel>Document dropdowns</DropdownMenuLabel>
         {definitions.map((definition) => (
           <DropdownMenuItem key={definition.id} onSelect={() => onInsert(definition)}>
@@ -59,7 +59,7 @@ export function DocChoiceDialog({ initial, editing, onClose, onSave }: {
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent>
+      <DialogContent className="artifact-doc-surface">
         <DialogHeader>
           <DialogTitle>{editing ? "Edit dropdown options" : "New dropdown"}</DialogTitle>
           <DialogDescription>Set the available choices for this inline field.</DialogDescription>

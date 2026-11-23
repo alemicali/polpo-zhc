@@ -1,11 +1,12 @@
-import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
-import { TextSelection } from "@tiptap/pm/state";
+import { TextSelection, type EditorState } from "@tiptap/pm/state";
+import { nanoid } from "nanoid";
 import {
   Bold, ChevronDown, Code, Eye, FileImage, Italic, Link2, List, ListChecks, ListOrdered,
-  Minus, MoreHorizontal, PanelLeft, Quote, Redo2, SquareCode, Strikethrough, Table2, Type, Underline, Undo2,
-  Pencil, Sparkles, Video,
+  MessageSquare, Minus, MoreHorizontal, PanelLeft, Quote, Redo2, SquareCode, Strikethrough, Table2, Type, Underline, Undo2,
+  Pencil, Sparkles, TextAlignStart, Video,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,6 +23,7 @@ import { artifactDocExtensions, artifactDocUrl, docFontFamilies } from "./artifa
 import { ArtifactDocMarkdown } from "./artifact-doc-preview";
 import { DocChoiceEditContext } from "./artifact-doc-choice-context";
 import { DocChoicePicker } from "./artifact-doc-choice-picker";
+import { encodeDocComment } from "./artifact-doc-comments";
 import { encodeDocChoice, readChoiceDefinitions, updateChoiceDefinition, type DocChoiceDefinition } from "./artifact-doc-choices";
 import { DocTabNavigation, type DocTabAction } from "./artifact-doc-tab-navigation";
 import { newDocTab, readDocTabs, writeDocTabs, type ArtifactDocTab } from "./artifact-doc-tabs";
@@ -29,21 +31,6 @@ import { newDocTab, readDocTabs, writeDocTabs, type ArtifactDocTab } from "./art
 const headingLevels = [1, 2, 3, 4, 5, 6] as const;
 const fontLabels = { sans: "Sans serif", serif: "Serif", mono: "Monospace" };
 
-const docSurfaceStyle = {
-  colorScheme: "light",
-  "--background": "#fff",
-  "--foreground": "#1e293b",
-  "--card": "#f8fafc",
-  "--card-foreground": "#1e293b",
-  "--border": "#e2e8f0",
-  "--muted": "#f1f5f9",
-  "--muted-foreground": "#526177",
-  "--accent": "#edf2f8",
-  "--accent-foreground": "#1e293b",
-  "--primary": "#3053a6",
-  "--primary-foreground": "#fff",
-  "--ring": "#516da4",
-} as CSSProperties;
 const docScroll = "min-h-0 min-w-0 flex-1 overflow-y-auto px-5 pb-20 pt-16 sm:px-8";
 const docColumn = "mx-auto w-full max-w-[672px]";
 const docTypography = [
@@ -75,6 +62,15 @@ interface DocInsertion {
   url: string;
   label: string;
   error?: string;
+}
+
+function commentDraft({ doc, selection }: EditorState) {
+  const quote = doc.textBetween(selection.from, selection.to, "\n").trim();
+  const length = selection.to - selection.from;
+  return {
+    position: selection.to, body: "", quote: quote.slice(0, 1000) || undefined,
+    ...(length <= 3000 && quote.length <= 1000 ? { length } : {}),
+  };
 }
 
 function FormatButton({ label, active, ...props }: React.ComponentProps<typeof Button> & {
@@ -168,22 +164,22 @@ export function ArtifactDocEditor({ content, onChange, readOnly = false, instanc
   }
 
   return (
-    <div className="@container relative isolate flex h-full min-h-0 flex-col bg-background text-foreground" style={docSurfaceStyle}>
-      <div className="pointer-events-none absolute inset-x-0 top-3 z-20 flex items-center justify-between gap-2 px-3 sm:px-4">
+    <div className="artifact-doc-surface @container relative isolate flex h-full min-h-0 flex-col bg-background text-foreground">
+      <div className="pointer-events-none absolute inset-x-0 top-3 z-20 flex items-center justify-between gap-2 px-3">
         <div role="group" aria-label="Document actions" className="pointer-events-auto">
           <Button type="button" size="icon" variant={tabsOpen ? "secondary" : "outline"} aria-controls={sidebarId}
-            aria-label="Tabs" title={activeTab.title} aria-expanded={tabsOpen} onClick={() => setTabsOpen((open) => !open)}>
-            <PanelLeft />
+            className="h-9 w-[34px] shadow-sm" aria-label="Tabs" title={activeTab.title} aria-expanded={tabsOpen} onClick={() => setTabsOpen((open) => !open)}>
+            <TextAlignStart />
           </Button>
         </div>
         {!readOnly && <div role="group" aria-label="View options" className="pointer-events-auto">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button type="button" size="sm" variant="outline" aria-label={mode === "editing" ? "Editing, mode" : "Reading, mode"}>
+              <Button type="button" size="sm" variant="outline" className="h-9 min-w-[100px] shadow-sm" aria-label={mode === "editing" ? "Editing, mode" : "Reading, mode"}>
                 {mode === "editing" ? <Pencil /> : <Eye />} {mode === "editing" ? "Editing" : "Reading"} <ChevronDown />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
+            <DropdownMenuContent align="end" className="artifact-doc-surface">
               <DropdownMenuItem onSelect={() => setMode("editing")}><Pencil /> Editing</DropdownMenuItem>
               <DropdownMenuItem onSelect={() => setMode("reading")}><Eye /> Reading</DropdownMenuItem>
             </DropdownMenuContent>
@@ -191,7 +187,7 @@ export function ArtifactDocEditor({ content, onChange, readOnly = false, instanc
         </div>}
       </div>
       <div className="relative flex min-h-0 flex-1">
-        <aside id={sidebarId} hidden={!tabsOpen} className="absolute left-3 top-15 z-10 max-h-[calc(100%-8rem)] w-50 overflow-auto rounded-lg border bg-card px-3 py-2 shadow-sm @4xl:left-[max(12px,calc(50%_-_556px))]">
+        <aside id={sidebarId} hidden={!tabsOpen} className="artifact-doc-tab-sidebar absolute z-10 overflow-auto">
           <DocTabNavigation
             tabs={book.tabs}
             activeId={activeTab.id}
@@ -220,7 +216,7 @@ export function ArtifactDocEditor({ content, onChange, readOnly = false, instanc
       </div>
       <Dialog open={tabDialog !== null} onOpenChange={(open) => { if (!open) setTabDialog(null); }}>
         {tabDialog && (
-          <DialogContent>
+          <DialogContent className="artifact-doc-surface">
             <DialogHeader>
               <DialogTitle>{tabDialog.action === "rename" ? "Rename tab" : "Delete tab"}</DialogTitle>
               <DialogDescription>
@@ -261,6 +257,7 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
   const imageReader = useRef<FileReader | null>(null);
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [insertion, setInsertion] = useState<DocInsertion | null>(null);
+  const [comment, setComment] = useState<{ position: number; body: string; quote?: string; length?: number } | null>(null);
   const [dropdown, setDropdown] = useState<{ title: string; body: string; position?: number } | null>(null);
   const editor = useEditor({
     extensions,
@@ -269,8 +266,13 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
     shouldRerenderOnTransaction: false,
     editorProps: {
       handleKeyDown: (view, event) => {
-        if (event.key !== "Tab" || event.metaKey || event.ctrlKey || event.altKey) return false;
         const { doc, selection } = view.state;
+        if (event.key.toLowerCase() === "m" && (event.metaKey || event.ctrlKey) && event.altKey) {
+          event.preventDefault();
+          setComment(commentDraft(view.state));
+          return true;
+        }
+        if (event.key !== "Tab" || event.metaKey || event.ctrlKey || event.altKey) return false;
         const title = doc.firstChild;
         if (!selection.empty || title?.type.name !== "heading" || title.attrs.level !== 1) return false;
         const block = selection.$from.index(0);
@@ -409,6 +411,20 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
     reader.readAsDataURL(file);
   };
 
+  function openComment() {
+    if (!editor) return;
+    setComment(commentDraft(editor.state));
+  }
+
+  function saveComment() {
+    if (!editor || !comment?.body.trim()) return;
+    const position = Math.min(comment.position, editor.state.doc.content.size);
+    const payload = encodeDocComment({ id: nanoid(12), body: comment.body.trim(), quote: comment.quote, length: comment.length });
+    if (editor.chain().focus().insertContentAt(position, { type: "docComment", attrs: { comment: payload } }).run()) {
+      setComment(null);
+    }
+  }
+
   const askWithSelection = () => {
     if (!onAskAssistant) return;
     const { from, to, empty } = editor.state.selection;
@@ -418,7 +434,7 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       <BubbleMenu editor={editor} updateDelay={80} options={{ placement: "top", offset: 7, flip: true, shift: true }}
-        className="z-30 flex max-w-[calc(100vw-1rem)] flex-wrap items-center rounded-lg border bg-background p-1 shadow-lg"
+        className="artifact-doc-surface z-30 flex max-w-[calc(100vw-1rem)] flex-wrap items-center rounded-lg border bg-background p-1 shadow-lg"
         role="group" aria-label="Document formatting">
         <div role="group" aria-label="Text format" className="flex items-center gap-0.5 border-r px-1.5">
           <select
@@ -445,6 +461,7 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
           <FormatButton label="Numbered list" active={format.orderedList} onClick={() => editor.chain().focus().toggleOrderedList().run()}><ListOrdered /></FormatButton>
         </div>
 
+        <FormatButton label="Comment on selection" onClick={openComment}><MessageSquare /></FormatButton>
         {onAskAssistant && <FormatButton label={`Ask ${instanceName} about selection`} onClick={askWithSelection}><Sparkles /></FormatButton>}
       </BubbleMenu>
 
@@ -478,7 +495,7 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
             <DropdownMenuTrigger asChild>
               <FormatButton label="Font"><Type /></FormatButton>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
+            <DropdownMenuContent align="start" className="artifact-doc-surface">
               <DropdownMenuLabel>Typeface</DropdownMenuLabel>
               <DropdownMenuRadioGroup value={format.font} onValueChange={(value) => {
                 if (value === "default") editor.chain().focus().unsetMark("docFont").run();
@@ -493,7 +510,7 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
             <DropdownMenuTrigger asChild>
               <FormatButton label="Table" active={format.table}><Table2 /></FormatButton>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
+            <DropdownMenuContent align="start" className="artifact-doc-surface">
               <DropdownMenuItem onSelect={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}>Insert 3 × 3 table</DropdownMenuItem>
               {format.table && <>
                 <DropdownMenuSeparator />
@@ -512,7 +529,7 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
             <DropdownMenuTrigger asChild>
               <FormatButton label="Image or video"><FileImage /></FormatButton>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
+            <DropdownMenuContent align="start" className="artifact-doc-surface">
               <DropdownMenuItem onSelect={() => setInsertion({ kind: "image", url: "", label: "" })}><FileImage /> Image</DropdownMenuItem>
               <DropdownMenuItem onSelect={() => setInsertion({ kind: "video", url: "", label: "" })}><Video /> Video</DropdownMenuItem>
             </DropdownMenuContent>
@@ -525,7 +542,7 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
             <DropdownMenuTrigger asChild>
               <Button type="button" size="icon-sm" variant="ghost" aria-label="More document formatting" title="More document formatting"><MoreHorizontal /></Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
+            <DropdownMenuContent align="end" className="artifact-doc-surface">
               <DropdownMenuItem onSelect={() => setInsertion({ kind: "link", url: editor.getAttributes("link").href ?? "", label: "" })}><Link2 />{format.link ? "Edit link" : "Link"}</DropdownMenuItem>
               <DropdownMenuItem onSelect={() => editor.chain().focus().setHorizontalRule().run()}><Minus /> Divider</DropdownMenuItem>
               <DropdownMenuSeparator />
@@ -540,15 +557,31 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
               <DropdownMenuItem disabled={!format.redo} onSelect={() => editor.chain().focus().redo().run()}><Redo2 /> Redo</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          <FormatButton label="Comment" onClick={openComment}><MessageSquare /></FormatButton>
           {onAskAssistant && <Button type="button" size="sm" variant="secondary" className="ml-1 max-w-48 gap-1.5" onClick={askWithSelection}>
             <Sparkles className="size-3.5" /> <span className="truncate">Ask {instanceName}</span>
           </Button>}
         </div>
       </div>
 
+      <Dialog open={comment !== null} onOpenChange={(open) => { if (!open) setComment(null); }}>
+        {comment && <DialogContent className="artifact-doc-surface" onCloseAutoFocus={(event) => { event.preventDefault(); editor.commands.focus(); }}>
+          <DialogHeader>
+            <DialogTitle>New comment</DialogTitle>
+            <DialogDescription>Attach a note to this part of the document.</DialogDescription>
+          </DialogHeader>
+          {comment.quote && <blockquote className="max-h-28 overflow-auto whitespace-pre-wrap break-words border-l-2 border-amber-400 pl-3 text-sm text-muted-foreground">{comment.quote}</blockquote>}
+          <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); saveComment(); }}>
+            <Textarea aria-label="Comment text" placeholder="Write a comment…" rows={4} autoFocus required maxLength={2000}
+              value={comment.body} onChange={(event) => setComment({ ...comment, body: event.target.value })} />
+            <DialogFooter><Button type="submit" disabled={!comment.body.trim()}>Add comment</Button></DialogFooter>
+          </form>
+        </DialogContent>}
+      </Dialog>
+
       <Dialog open={dropdown !== null} onOpenChange={(open) => { if (!open) setDropdown(null); }}>
         {dropdown && (
-          <DialogContent onCloseAutoFocus={(event) => { event.preventDefault(); editor.commands.focus(); }}>
+          <DialogContent className="artifact-doc-surface" onCloseAutoFocus={(event) => { event.preventDefault(); editor.commands.focus(); }}>
             <DialogHeader>
               <DialogTitle>{dropdown.position === undefined ? "Insert dropdown" : "Edit dropdown"}</DialogTitle>
               <DialogDescription>Readers can expand the section to see its text.</DialogDescription>
@@ -575,7 +608,7 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
         }
       }}>
         {insertion && (
-          <DialogContent onCloseAutoFocus={(event) => { event.preventDefault(); editor.commands.focus(); }}>
+          <DialogContent className="artifact-doc-surface" onCloseAutoFocus={(event) => { event.preventDefault(); editor.commands.focus(); }}>
             <DialogHeader>
               <DialogTitle>{insertion.kind === "image" ? "Insert image" : insertion.kind === "video" ? "Insert video" : format.link ? "Edit link" : "Insert link"}</DialogTitle>
               <DialogDescription>{insertion.kind === "image" ? "Use an image URL or select an image from your device." : insertion.kind === "video" ? "Use a direct link to an MP4 or other browser-playable video." : "Add the destination address."}</DialogDescription>
