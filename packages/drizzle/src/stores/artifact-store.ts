@@ -1,7 +1,7 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import {
-  applyArtifactPatch, buildArtifact, matchesArtifactFilter, summarizeArtifact,
+  applyArtifactPatch, ArtifactEditConflictError, buildArtifact, matchesArtifactFilter, summarizeArtifact,
   type Artifact, type ArtifactFilter, type ArtifactPatch, type ArtifactStore, type ArtifactSummary, type NewArtifact,
 } from "@polpo-ai/core/artifacts";
 import { deserializeJson, serializeJson, type Dialect } from "../utils.js";
@@ -32,11 +32,17 @@ export class DrizzleArtifactStore implements ArtifactStore {
   }
 
   async update(id: string, patch: ArtifactPatch): Promise<Artifact | undefined> {
-    const current = await this.get(id);
-    if (!current) return undefined;
-    const next = applyArtifactPatch(current, patch);
-    await this.db.update(this.table).set(this.toRow(next)).where(eq(this.table.id, id));
-    return next;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const current = await this.get(id);
+      if (!current) return undefined;
+      const timestamp = new Date(Math.max(Date.now(), Date.parse(current.updatedAt) + 1)).toISOString();
+      const next = applyArtifactPatch(current, patch, timestamp);
+      const changed = await this.db.update(this.table).set(this.toRow(next))
+        .where(and(eq(this.table.id, id), eq(this.table.updatedAt, current.updatedAt)))
+        .returning({ id: this.table.id });
+      if (changed.length) return next;
+    }
+    throw new ArtifactEditConflictError();
   }
 
   async restore(id: string, version: number, author?: string): Promise<Artifact | undefined> {
@@ -44,7 +50,7 @@ export class DrizzleArtifactStore implements ArtifactStore {
     if (!current) return undefined;
     const old = current.versions.find((v) => v.version === version);
     if (!old) throw new Error(`No version ${version} of this artifact`);
-    return this.update(id, { content: old.content, author, note: `restored version ${version}` });
+    return this.update(id, { content: old.content, expectedVersion: current.version, author, note: `restored version ${version}` });
   }
 
   async delete(id: string): Promise<boolean> {

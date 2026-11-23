@@ -1,0 +1,235 @@
+import { MOTION_SCENE_BACKGROUND } from "./artifact-content-palette";
+export type MotionAnimation = "none" | "fade" | "rise" | "slide";
+
+export interface MotionLayer {
+  id: string;
+  type: "text" | "rect" | "ellipse";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  color: string;
+  text?: string;
+  fontSize?: number;
+  animation?: MotionAnimation;
+  delay?: number;
+  animationDuration?: number;
+}
+
+export interface MotionScene {
+  id: string;
+  name: string;
+  duration: number;
+  background: string;
+  transition?: "cut" | "fade";
+  layers: MotionLayer[];
+}
+
+export interface MotionAudio {
+  name: string;
+  src: string;
+  delay?: number;
+}
+
+export interface MotionProject {
+  version: 1;
+  width: number;
+  height: number;
+  scenes: MotionScene[];
+  audio?: MotionAudio;
+}
+
+export const MAX_SCENES = 24;
+export const MAX_LAYERS = 40;
+export const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+const finite = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
+export const isMotionDimension = (value: unknown): value is number => finite(value) && Number.isInteger(value) && value >= 64 && value <= 1920;
+const color = (value: unknown) => typeof value === "string" && /^#[\da-f]{6}$/i.test(value);
+export const MAX_MOTION_AUDIO_BYTES = 700_000;
+const audioTypes = "aac|flac|mp4|mpeg|ogg|wav|wave|webm|x-m4a|x-wav";
+const audioPrefix = new RegExp(`^data:audio/(?:${audioTypes});base64,`, "i");
+const audioMime = new RegExp(`^audio/(?:${audioTypes})$`, "i");
+const audioExtensions: Record<string, string> = { aac: "aac", flac: "flac", m4a: "mp4", mp3: "mpeg", ogg: "ogg", opus: "ogg", wav: "wav", webm: "webm" };
+
+export function motionAudioMime(file: File): string | undefined {
+  const typed = file.type.toLowerCase();
+  if (audioMime.test(typed)) return typed;
+  const extension = audioExtensions[file.name.split(".").pop()?.toLowerCase() ?? ""];
+  return extension ? `audio/${extension}` : undefined;
+}
+
+const animations: readonly unknown[] = ["none", "fade", "rise", "slide"];
+const record = (value: unknown) => value && typeof value === "object" ? value as Record<string, unknown> : null;
+
+export function isMotionLayer(value: unknown): value is MotionLayer {
+  const layer = record(value);
+  if (!layer || typeof layer.id !== "string" || !layer.id) return false;
+  if (layer.type !== "text" && layer.type !== "rect" && layer.type !== "ellipse") return false;
+  if (!finite(layer.x) || !finite(layer.y) || !finite(layer.width) || !finite(layer.height) || layer.width < 1 || layer.height < 1 || !color(layer.color)) return false;
+  if (layer.text !== undefined && typeof layer.text !== "string") return false;
+  if (layer.fontSize !== undefined && (!finite(layer.fontSize) || layer.fontSize < 1 || layer.fontSize > 1000)) return false;
+  if (layer.delay !== undefined && (!finite(layer.delay) || layer.delay < 0 || layer.delay > 60)) return false;
+  if (layer.animationDuration !== undefined && (!finite(layer.animationDuration) || layer.animationDuration < 0.05 || layer.animationDuration > 60)) return false;
+  return layer.animation === undefined || animations.includes(layer.animation);
+}
+
+export function isMotionScene(value: unknown): value is MotionScene {
+  const scene = record(value);
+  if (!scene || typeof scene.id !== "string" || !scene.id || typeof scene.name !== "string") return false;
+  if (!finite(scene.duration) || scene.duration < 0.25 || scene.duration > 60 || !color(scene.background)) return false;
+  if (scene.transition !== undefined && scene.transition !== "cut" && scene.transition !== "fade") return false;
+  if (!Array.isArray(scene.layers) || scene.layers.length > MAX_LAYERS) return false;
+  if (!scene.layers.every(isMotionLayer)) return false;
+  return new Set(scene.layers.map(layer => layer.id)).size === scene.layers.length;
+}
+
+export function parseMotion(content: string): MotionProject | null {
+  try {
+    const model = record(JSON.parse(content));
+    if (!model || model.version !== 1 || !isMotionDimension(model.width) || !isMotionDimension(model.height)) return null;
+    if (!Array.isArray(model.scenes) || !model.scenes.length || model.scenes.length > MAX_SCENES) return null;
+    if (!model.scenes.every(isMotionScene) || new Set(model.scenes.map(scene => scene.id)).size !== model.scenes.length) return null;
+    if (model.audio !== undefined) {
+      const audio = record(model.audio);
+      if (!audio || typeof audio.name !== "string" || !audio.name || typeof audio.src !== "string") return null;
+      const prefix = audioPrefix.exec(audio.src);
+      if (!prefix) return null;
+      const data = audio.src.slice(prefix[0].length);
+      if (!data || data.length > Math.ceil(MAX_MOTION_AUDIO_BYTES / 3) * 4 || data.length % 4 !== 0 || !/^[A-Za-z\d+/]+={0,2}$/.test(data)) return null;
+      if (audio.delay !== undefined && (!finite(audio.delay) || audio.delay < 0 || audio.delay > 180)) return null;
+    }
+    return model as unknown as MotionProject;
+  } catch {
+    return null;
+  }
+}
+
+export function sceneOffsets(project: MotionProject): number[] {
+  const offsets = [0];
+  for (const scene of project.scenes) offsets.push(offsets[offsets.length - 1] + scene.duration);
+  return offsets;
+}
+
+export function sceneAt(offsets: number[], time: number): number {
+  const next = offsets.findIndex((start) => start > time);
+  return next === -1 ? offsets.length - 2 : Math.max(0, next - 1);
+}
+
+function wrapText(ctx: CanvasRenderingContext2D, text: string, width: number): string[] {
+  const lines: string[] = [];
+  for (const paragraph of text.split("\n")) {
+    let line = "";
+    for (const word of paragraph.split(/\s+/)) {
+      const next = line ? `${line} ${word}` : word;
+      if (line && ctx.measureText(next).width > width) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = next;
+      }
+    }
+    lines.push(line);
+  }
+  return lines;
+}
+
+function drawLayer(ctx: CanvasRenderingContext2D, layer: MotionLayer, time: number, staticFrame: boolean) {
+  const delay = layer.delay ?? 0;
+  if (!staticFrame && time < delay) return;
+  const progress = staticFrame ? 1 : clamp((time - delay) / (layer.animationDuration ?? 0.52), 0, 1);
+  const eased = 1 - (1 - progress) ** 3;
+  const dx = layer.animation === "slide" ? (1 - eased) * 48 : 0;
+  const dy = layer.animation === "rise" ? (1 - eased) * 40 : 0;
+  ctx.save();
+  if (layer.animation && layer.animation !== "none") ctx.globalAlpha *= eased;
+  ctx.translate(layer.x + dx, layer.y + dy);
+  ctx.fillStyle = layer.color;
+  if (layer.type === "ellipse") {
+    ctx.beginPath();
+    ctx.ellipse(layer.width / 2, layer.height / 2, layer.width / 2, layer.height / 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (layer.type === "rect") {
+    ctx.fillRect(0, 0, layer.width, layer.height);
+  } else {
+    const size = layer.fontSize ?? 56;
+    const lineHeight = size * 1.16;
+    ctx.font = `600 ${size}px system-ui, sans-serif`;
+    ctx.textBaseline = "top";
+    ctx.beginPath();
+    ctx.rect(0, 0, layer.width, layer.height);
+    ctx.clip();
+    wrapText(ctx, layer.text ?? "", layer.width).forEach((line, index) => {
+      ctx.fillText(line, 0, index * lineHeight, layer.width);
+    });
+  }
+  ctx.restore();
+}
+
+const fadeBuffers = new WeakMap<CanvasRenderingContext2D, CanvasRenderingContext2D>();
+
+export function drawMotionFrame(
+  ctx: CanvasRenderingContext2D,
+  project: MotionProject,
+  offsets: number[],
+  seconds: number,
+  /** The editor's overlay; `outline` is the selection's two colours, resolved from the theme by the caller. */
+  editing?: { selectedId?: string; drag?: Pick<MotionLayer, "id" | "x" | "y">; outline?: { ink: string; paper: string } },
+) {
+  const index = sceneAt(offsets, seconds);
+  const scene = project.scenes[index];
+  const time = seconds - offsets[index];
+  const drawScene = (target: CanvasRenderingContext2D, active: MotionScene, sceneTime: number, editingScene = false) => {
+    target.save();
+    target.fillStyle = active.background;
+    target.fillRect(0, 0, project.width, project.height);
+    for (const layer of active.layers) {
+      const drag = editingScene ? editing?.drag : undefined;
+      drawLayer(target, drag?.id === layer.id ? { ...layer, x: drag.x, y: drag.y } : layer, sceneTime, editingScene && Boolean(editing));
+    }
+    target.restore();
+  };
+  const fadeTime = Math.min(0.4, scene.duration / 3);
+  const previous = project.scenes[index - 1];
+  if (!editing && previous && scene.transition === "fade" && time < fadeTime) {
+    let buffer = fadeBuffers.get(ctx);
+    if (!buffer) {
+      buffer = ctx.canvas.ownerDocument.createElement("canvas").getContext("2d") ?? undefined;
+      if (buffer) fadeBuffers.set(ctx, buffer);
+    }
+    if (!buffer) {
+      drawScene(ctx, scene, time);
+      return;
+    }
+    if (buffer.canvas.width !== project.width) buffer.canvas.width = project.width;
+    if (buffer.canvas.height !== project.height) buffer.canvas.height = project.height;
+    drawScene(ctx, previous, previous.duration);
+    drawScene(buffer, scene, time);
+    ctx.save();
+    ctx.globalAlpha = time / fadeTime;
+    ctx.drawImage(buffer.canvas, 0, 0);
+    ctx.restore();
+  } else {
+    drawScene(ctx, scene, time, true);
+  }
+  if (!editing?.selectedId || !editing.outline) return;
+  const layer = scene.layers.find((item) => item.id === editing.selectedId);
+  if (!layer) return;
+  const position = editing.drag?.id === layer.id ? editing.drag : layer;
+  const stroke = project.width / 410;
+  ctx.save();
+  ctx.strokeStyle = editing.outline.ink;
+  ctx.lineWidth = stroke * 2;
+  ctx.strokeRect(position.x, position.y, layer.width, layer.height);
+  ctx.setLineDash([stroke * 2, stroke]);
+  ctx.strokeStyle = editing.outline.paper;
+  ctx.lineWidth = stroke;
+  ctx.strokeRect(position.x, position.y, layer.width, layer.height);
+  ctx.restore();
+}
+
+export const MOTION_STARTER = JSON.stringify({
+  version: 1,
+  width: 1280,
+  height: 720,
+  scenes: [{ id: "scene-1", name: "Scene 1", duration: 3, background: MOTION_SCENE_BACKGROUND, layers: [] }],
+} satisfies MotionProject, null, 2);

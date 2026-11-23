@@ -22,12 +22,13 @@ function hasNoPagePadding(pathname: string): boolean {
     || pathname === "/terminal"
     || pathname === "/browser"
     || pathname === "/agent-live"
-    || pathname.startsWith("/apps/");
+    || pathname.startsWith("/apps/") || pathname.startsWith("/artifacts/");
 }
 
 export function AppLayout() {
   const layoutMode = useLayoutMode();
   const { pathname } = useLocation();
+  const artifactEditor = pathname.startsWith("/artifacts/");
   const noPagePadding = hasNoPagePadding(pathname);
   // the browser tab: "<product name> · <page>", on every route and branding change
   useDocumentTitle(resolveTitle(pathname));
@@ -39,11 +40,11 @@ export function AppLayout() {
     return (
       <div className="flex h-[100dvh] w-full max-w-full flex-col overflow-hidden bg-background text-foreground">
         <AgentColorsSync />
-        <WhatsNewBar />
+        {!artifactEditor && <WhatsNewBar />}
         <div className="flex min-h-0 w-full flex-1 overflow-hidden">
           <ChatFirstLayout />
         </div>
-        <BottomNav />
+        {!artifactEditor && <BottomNav />}
         <ChatNavigationEffects />
         <WhatsNewDrawer />
       </div>
@@ -52,13 +53,13 @@ export function AppLayout() {
 
   return (
     <div className="flex h-[100dvh] w-full max-w-full overflow-hidden bg-background text-foreground">
-      <div className="hidden lg:flex">
+      <div className={artifactEditor ? "hidden" : "hidden lg:flex"}>
         <Sidebar />
       </div>
       <div className="flex flex-1 flex-col overflow-hidden min-w-0">
         <AgentColorsSync />
-        <WhatsNewBar />
-        <Header />
+        {!artifactEditor && <WhatsNewBar />}
+        {!artifactEditor && <Header />}
         <div className="flex flex-1 min-h-0 overflow-hidden">
           <main
             className={noPagePadding
@@ -70,7 +71,7 @@ export function AppLayout() {
           <ChatSidebar />
         </div>
       </div>
-      <BottomNav />
+      {!artifactEditor && <BottomNav />}
       <ChatNavigationEffects />
       <ChatRoomRouteSync />
       <WhatsNewDrawer />

@@ -37,6 +37,7 @@ const BrowserPage = lazy(() => import("@/pages/browser").then(m => ({ default: m
 const AgentBrowserLivePage = lazy(() => import("@/pages/agent-browser-live").then(m => ({ default: m.AgentBrowserLivePage })));
 const AppsPage = lazy(() => import("@/pages/apps").then(m => ({ default: m.AppsPage })));
 const DataPage = lazy(() => import("@/pages/data").then(m => ({ default: m.DataPage })));
+const ArtifactGenerationPage = lazy(() => import("@/components/artifacts/artifact-generation").then(m => ({ default: m.ArtifactGenerationPage })));
 const ArtifactsPage = lazy(() => import("@/pages/artifacts").then(m => ({ default: m.ArtifactsPage })));
 const CompanyBrainPage = lazy(() => import("@/pages/company-brain").then(m => ({ default: m.CompanyBrainPage })));
 const SetupPage = lazy(() => import("@/pages/setup").then(m => ({ default: m.SetupPage })));
@@ -222,6 +223,7 @@ export function App() {
           {/* volumes (buckets included) are managed in Files */}
           <Route path="storage" element={<Navigate to="/files" replace />} />
           <Route path="artifacts" element={<Suspense fallback={<PageLoader />}><ArtifactsPage /></Suspense>} />
+          <Route path="artifacts/preparing/:toolId" element={<Suspense fallback={<PageLoader />}><ArtifactGenerationPage /></Suspense>} />
           <Route path="artifacts/:artifactId" element={<Suspense fallback={<PageLoader />}><ArtifactsPage /></Suspense>} />
           {/* the former Views are artifacts of type "view" */}
           <Route path="views" element={<ViewsRedirect />} />

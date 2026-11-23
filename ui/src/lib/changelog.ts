@@ -32,6 +32,26 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-23-artifact-workspaces",
+    date: "2026-11-23",
+    kind: "new",
+    title: "Documenti, presentazioni, fogli, design e animazioni da modificare",
+    summary: "Gli artefatti si aprono in un editor tutto loro: Documenti, Presentazioni, Fogli, Design e Animazioni. Cambi quello che ha fatto un agente o ne crei uno da zero con Nuovo, e lo esporti in Word, PowerPoint, Excel, PDF o video.",
+    body: [
+      "- **Documenti**: testo formattato, **schede** (un documento di più pagine), **menu a tendina** nel testo (stato, priorità o liste tue, ognuna col suo colore) e **commenti** su un passaggio. Esporti in Word, stampa o PDF, Markdown.",
+      "- **Presentazioni**: layout e temi, caselle di testo, forme, immagini, tabelle e video, note del relatore, diapositive saltate e la **presentazione a schermo intero**. Esporti in PowerPoint.",
+      "- **Fogli**: più fogli, formule, formati (valuta, percentuale, data), colori e bordi, tendine, caselle di spunta, colori condizionali e **grafici** a barre, linee o torta. Importi CSV o XLSX, esporti in Excel o CSV. Mentre un agente scrive un foglio in chat, vedi le celle comparire.",
+      "- **Design**: una tela di **tavole** su più pagine: selezioni, sposti e ridimensioni, aggiungi testi, note, forme, tratti a mano e nuove tavole; ispettore con proprietà, codice e variabili CSS, livelli. Esporti ogni tavola in HTML.",
+      "- **Animazioni**: scene di testi e forme che entrano con dissolvenza, salita o scorrimento, transizioni, una colonna sonora, la timeline. Esporti il video in MP4 (o WebM).",
+      "- **Galleria**: schede con l'anteprima viva, **rinomina**, **fissa in alto**, **duplica** (anche una versione precedente) e le versioni, da ripristinare quando vuoi.",
+      "- **Chiedi a Polpo o a un agente** «fammi una presentazione», «un foglio», «un'animazione»: la crea nel formato giusto e si apre nel suo editor. Anche da MCP (`polpo_artifact_create`, il nuovo `polpo_artifact_update`) e da REST.",
+      "- **Nessuna modifica persa**: se qualcuno (una persona o un agente) salva una versione più nuova mentre lavori, il salvataggio si ferma e puoi scaricare la bozza o aprire l'ultima versione.",
+      "- Gli editor seguono l'aspetto dell'istanza; i colori che scegli dentro un documento restano i tuoi, anche negli export. Si caricano solo quando apri un artefatto: la dashboard parte veloce come prima.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri gli artefatti", to: "/artifacts" },
+  },
+  {
     id: "2026-11-23-artifacts-table-preview",
     date: "2026-11-23",
     kind: "improved",

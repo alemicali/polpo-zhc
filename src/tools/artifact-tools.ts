@@ -8,7 +8,7 @@
 import { Type } from "typebox";
 import type { Tool } from "@earendil-works/pi-ai";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { applyArtifactEdits, type Artifact, type ArtifactStore, type ArtifactType } from "@polpo-ai/core/artifacts";
+import { applyArtifactEdits, ARTIFACT_WORKSPACE_GUIDE, type Artifact, type ArtifactStore, type ArtifactType } from "@polpo-ai/core/artifacts";
 import { isViewArtifactId } from "../server/artifact-runtime.js";
 
 /** What an html artifact can call, inside its page (documented to the authors). */
@@ -34,14 +34,13 @@ const editsParam = Type.Optional(Type.Array(Type.Object({
 export const ARTIFACT_TOOLS: Tool[] = [
   {
     name: "artifact_create",
-    description: "Make an artifact people keep and open in the Artifacts section: a document (doc, Markdown), a dashboard, design, "
-      + "report or small app (html: one self-contained page), a drawing (svg) or a diagram (mermaid). Returns its id and where to open it.\n"
-      + ARTIFACT_BRIDGE_DOC,
+    description: "Create an artifact that opens in the dashboard. Also supports drawings (svg) and diagrams (mermaid). Returns the id and link. Put type, kind and title before content so the workspace can open while writing.\n"
+      + ARTIFACT_WORKSPACE_GUIDE + "\n" + ARTIFACT_BRIDGE_DOC,
     parameters: Type.Object({
       title: Type.String(),
       type: Type.Union([Type.Literal("doc"), Type.Literal("html"), Type.Literal("svg"), Type.Literal("mermaid")]),
-      content: Type.String({ description: "Markdown, a complete HTML page, an <svg>, or Mermaid source" }),
-      kind: Type.Optional(Type.String({ description: "For html: dashboard, design, app, report, page" })),
+      kind: Type.Optional(Type.String({ description: "For html: slides, sheets, design, motion, dashboard, app, report, page" })),
+      content: Type.String({ description: "Markdown, self-contained HTML, editable-workspace JSON, SVG or Mermaid source" }),
       description: Type.Optional(Type.String({ description: "One line: what it is for" })),
       sources: Type.Optional(Type.Array(Type.String(), { description: "Ids of the data sources it reads (html)" })),
       refreshSeconds: Type.Optional(Type.Number({ minimum: 10, description: "Reload its data every N seconds while open (html)" })),
@@ -51,9 +50,12 @@ export const ARTIFACT_TOOLS: Tool[] = [
   {
     name: "artifact_update",
     description: "Change an artifact: new content (whole, or edits that find and replace parts), title, description, sources, refresh. "
-      + "The previous content is kept as a version (people can go back to it).",
+      + "Read the artifact first. Put id and expectedVersion before content or edits. For a localized change, send its exact unique find before replace. "
+      + "The previous content is kept as a version. People may edit it in the dashboard meanwhile: the change is refused if it changed since expectedVersion. "
+      + "artifact_get shows at most 60,000 characters: change a larger artifact with edits, not a whole content.",
     parameters: Type.Object({
       id: Type.String({ description: "Artifact id (art_…)" }),
+      expectedVersion: Type.Optional(Type.Integer({ minimum: 1, description: "Version read before preparing the change. A concurrent change requires reading again." })),
       content: Type.Optional(Type.String({ description: "The whole new content" })),
       edits: editsParam,
       title: Type.Optional(Type.String()),
@@ -144,8 +146,16 @@ export async function executeArtifactTool(name: string, args: Record<string, unk
       const current = await ownArtifact(ctx, String(args.id ?? ""));
       const edits = Array.isArray(args.edits) ? (args.edits as Array<{ find: string; replace: string }>) : undefined;
       if (typeof args.content === "string" && edits?.length) throw new Error("Give either content or edits, not both");
+      const base = typeof args.expectedVersion === "number" && Number.isSafeInteger(args.expectedVersion) ? args.expectedVersion : undefined;
+      if (base !== undefined && base !== current.version) {
+        throw new Error(`Artifact ${current.id} changed since v${base} (now v${current.version}): read it again with artifact_get and redo the change`);
+      }
+      if (typeof args.content === "string" && base === undefined && current.content.length > MAX_CONTENT_IN_RESULT) {
+        throw new Error(`Artifact ${current.id} is longer than artifact_get shows (${current.content.length} characters): change it with edits, or pass expectedVersion to replace the whole content`);
+      }
       const content = typeof args.content === "string" ? args.content : edits?.length ? applyArtifactEdits(current.content, edits) : undefined;
       const artifact = await ctx.store.update(current.id, {
+        expectedVersion: base ?? current.version,
         ...(content !== undefined ? { content } : {}),
         ...(typeof args.title === "string" ? { title: args.title } : {}),
         ...(typeof args.description === "string" ? { description: args.description } : {}),

@@ -8,10 +8,16 @@ vi.mock("@polpo-ai/react", () => ({
   useTasks: () => ({ tasks: [{ id: "task-1", title: "Write the Q4 report", missionId: "m-1" }] }),
   useMissions: () => ({ missions: [{ id: "m-1", name: "Quarter close" }] }),
 }));
+vi.mock("@/hooks/use-polpo", () => ({ useProjectInfo: () => ({ info: { project: "Polpo" } }) }));
 vi.mock("@/lib/branding", () => ({ productName: () => "Polpo", useInstanceBranding: () => ({}) }));
 // the live renderer is tested on its own: here only which artifact it is given matters
 vi.mock("@/components/artifacts/artifact-view", () => ({
   ArtifactView: ({ artifact, content }: { artifact: { title: string }; content: string }) => <div data-testid="artifact-view">{artifact.title}: {content}</div>,
+}));
+
+vi.mock("@/components/artifacts/artifact-doc-editor", () => ({
+  ArtifactDocEditor: ({ content, readOnly }: { content: string; readOnly?: boolean }) =>
+    <div data-testid="doc-reader" data-read-only={readOnly}>{content}</div>,
 }));
 
 import { TooltipProvider } from "../src/components/ui/tooltip";
@@ -150,7 +156,9 @@ test("the Preview layout: list grouped by type, the selected artifact live, arro
   await act(async () => { listbox.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })); });
   await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
   expect(where()).toContain("selected=art_c");
-  expect(container.querySelector("[data-testid='artifact-view']")!.textContent).toBe("Notes: content of art_c");
+  const doc = container.querySelector("[data-testid='doc-reader']")!;
+  expect(doc.textContent).toBe("content of art_c");
+  expect(doc.getAttribute("data-read-only")).toBe("true");
   expect(container.querySelector("[role='option'][aria-selected='true']")!.textContent).toContain("Notes");
 
   // a new visit opens in Preview

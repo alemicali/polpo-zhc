@@ -47,6 +47,8 @@ export const APPEARANCE_TOKENS = {
   overlay: { css: "--overlay", group: "surfaces", kind: "color" },
   canvas: { css: "--canvas", group: "surfaces", kind: "color" },
   canvasForeground: { css: "--canvas-foreground", group: "surfaces", kind: "color" },
+  stage: { css: "--stage", group: "surfaces", kind: "color" },
+  stageForeground: { css: "--stage-foreground", group: "surfaces", kind: "color" },
   foreground: { css: "--foreground", group: "text", kind: "color" },
   mutedForeground: { css: "--muted-foreground", group: "text", kind: "color" },
   cardForeground: { css: "--card-foreground", group: "text", kind: "color" },
