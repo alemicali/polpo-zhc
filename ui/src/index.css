@@ -171,6 +171,9 @@
   --button-primary-bg: var(--primary);
   --button-primary-hover-bg: color-mix(in oklab, var(--primary) 90%, transparent);
   --button-primary-foreground: var(--primary-foreground);
+  /* its shadow (a glow, e.g. 0 0 20px …): none unless a look sets it; hover adds the strong glow then */
+  --shadow-button-primary: 0 0 #0000;
+  --shadow-button-primary-hover: var(--shadow-button-primary);
   --sidebar-opacity: 1;
   --sidebar-blur: 0px;
   --sidebar-backdrop: none;
@@ -182,6 +185,15 @@
 }
 @utility bg-button-primary-hover {
   background: var(--button-primary-hover-bg);
+}
+/* The primary button's shadow (shadow-button-primary, hover:shadow-button-primary-hover); rings still apply. */
+@utility shadow-button-primary {
+  --tw-shadow: var(--shadow-button-primary);
+  box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+}
+@utility shadow-button-primary-hover {
+  --tw-shadow: var(--shadow-button-primary-hover);
+  box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
 }
 
 /*
@@ -222,8 +234,9 @@
 }
 
 /*
- * The look's shadows: cards (shadow-card) and what floats above the page — popovers, menus,
- * dialogs, tooltips (shadow-raised). Composed like Tailwind's shadow-* (rings still apply).
+ * The look's shadows: cards (shadow-card), what floats above the page — popovers, menus, tooltips
+ * (shadow-raised) — and dialogs and sheets (shadow-dialog: shadow-raised unless a look sets it).
+ * Composed like Tailwind's shadow-* (rings still apply).
  */
 @utility shadow-card {
   --tw-shadow: var(--shadow-card);
@@ -231,6 +244,10 @@
 }
 @utility shadow-raised {
   --tw-shadow: var(--shadow-raised);
+  box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+}
+@utility shadow-dialog {
+  --tw-shadow: var(--shadow-dialog);
   box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
 }
 /* Inputs, small buttons, toggles (shadow-control). */
@@ -281,10 +298,12 @@
   --status-queued: var(--muted-foreground);
   --status-assigned: var(--primary);
 
-  /* Shadows — cards, and what floats (popovers, menus, dialogs, tooltips) */
+  /* Shadows — cards, and what floats (popovers, menus, tooltips; dialogs and sheets via --shadow-dialog) */
   --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 8%), 0 1px 2px -1px rgb(0 0 0 / 8%);
   --shadow-raised: 0 10px 15px -3px rgb(0 0 0 / 10%), 0 4px 6px -4px rgb(0 0 0 / 10%);
   --shadow-control: 0 1px 2px 0 rgb(0 0 0 / 5%);
+  /* dialogs and sheets: what floats, unless a look sets its own (resolved per palette and mode) */
+  --shadow-dialog: var(--shadow-raised);
   /* glows: the geometry (the colour is the element's: shadow-glow, glow-success…) */
   --shadow-glow: 0 0 20px;
   --shadow-glow-strong: 0 0 8px;
@@ -437,7 +456,8 @@
  *   - colour tokens (background / foreground / primary / etc.)
  *   - --radius          (geometric language: 0 sharp, large soft)
  *   - --shadow-card     (cards: the shadow-card utility)
- *   - --shadow-raised   (popovers, menus, dialogs, tooltips: shadow-raised)
+ *   - --shadow-raised   (popovers, menus, tooltips: shadow-raised; dialogs and sheets follow it
+ *                        through --shadow-dialog unless a look sets that)
  *   - --success / --warning / --info (+ -foreground), --destructive-foreground
  *   - type tokens where the palette has its own voice (--app-heading-font,
  *     --font-weight-heading, --tracking-heading, --tracking-label)
@@ -822,7 +842,7 @@
 [data-palette="redline"] {
   --shadow-card: 0 0 #0000;
 }
-[data-palette="redline"] [class*="shadow-"]:not(.shadow-card, .shadow-raised) { box-shadow: none !important; }
+[data-palette="redline"] [class*="shadow-"]:not(.shadow-card, .shadow-raised, .shadow-dialog, .shadow-button-primary) { box-shadow: none !important; }
 [data-palette="redline"] [data-slot="tabs-trigger"][data-state="active"] {
   box-shadow: var(--shadow-raised) !important;
 }

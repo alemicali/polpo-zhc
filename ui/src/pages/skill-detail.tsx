@@ -13,7 +13,6 @@ import {
   ArrowLeft,
   Loader2,
   Sparkles,
-  Bot,
   Users,
   Wrench,
   FolderOpen,
@@ -26,6 +25,7 @@ import { useSkills, useAgents, usePolpo } from "@polpo-ai/react";
 import type { SkillWithAssignment, Team, LoadedSkill } from "@polpo-ai/react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { cn } from "@/lib/utils";
+import { AgentAvatar } from "@/components/shared/agent-avatar";
 
 // ── Copyable text ──
 
@@ -128,7 +128,7 @@ function MetadataCard({
                     <TooltipTrigger asChild>
                       <span>
                         <Badge variant="secondary" className="text-micro gap-1">
-                          <Bot className="h-2.5 w-2.5" />
+                          <AgentAvatar name={agent} size="xs" />
                           {agent}
                         </Badge>
                       </span>
