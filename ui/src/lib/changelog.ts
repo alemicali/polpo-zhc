@@ -32,6 +32,26 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-22-catalog-more",
+    date: "2026-11-22",
+    kind: "new",
+    title: "Otto nuovi connettori nel catalogo",
+    summary: "OVHcloud, WhatsApp Business, Zernio, v0, Expo, Autumn, AWS e AgentPhone si collegano con un clic, con il loro logo ufficiale.",
+    body: [
+      "- **OVHcloud**: istanze, Kubernetes, database gestiti, object storage, reti e firewall IP (endpoint EU, US e CA).",
+      "- **WhatsApp Business** (il server ufficiale di Meta): account, numeri di telefono, modelli di messaggio, webhook e invio di messaggi.",
+      "- **Zernio**: post programmati su più social, statistiche, commenti, menzioni e messaggi.",
+      "- **v0** (Vercel): crea e modifica app da un prompt, vedi l'anteprima e pubblica.",
+      "- **Expo**: build e workflow EAS, invio agli store, recensioni e crash da App Store, Google Play e TestFlight.",
+      "- **Autumn**: piani, clienti, saldi, abbonamenti e fatture.",
+      "- **AWS**: tutte le API AWS con i tuoi permessi IAM, più la documentazione (endpoint US ed EU). L'utente IAM deve avere la policy `AWSMCPSignInOAuthAccessPolicy`.",
+      "- **AgentPhone**: numeri di telefono per gli agenti, chiamate vocali, SMS e contatti.",
+      "- Per tutti basta accedere con il proprio account: nessuna app OAuth da creare.",
+    ].join("\n"),
+    highlight: false,
+    cta: { label: "Apri i connettori", to: "/connectors" },
+  },
+  {
     id: "2026-11-22-opencode",
     date: "2026-11-22",
     kind: "new",

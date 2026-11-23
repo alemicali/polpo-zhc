@@ -5,7 +5,7 @@
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
@@ -20,6 +20,8 @@ import {
 import { firstJsonRpc, probeConnector, resourceMetadataFromChallenge } from "../mcp/probe.js";
 import { ConnectorManager } from "../mcp/manager.js";
 import { connectorIconUrls } from "../mcp/view.js";
+import { CATALOG_ICON_FILES } from "../mcp/catalog-icons.generated.js";
+import { CONNECTOR_CATALOG } from "../mcp/catalog.js";
 import { connectorRoutes } from "../server/routes/connectors.js";
 import type { ConnectorConfig } from "@polpo-ai/core";
 
@@ -496,6 +498,15 @@ describe("icons through the API", () => {
   it("icon URLs: catalog → bundled file; custom → the API, with a dark variant", () => {
     expect(connectorIconUrls({ id: "gmail-2", catalogId: "gmail" })).toEqual({ iconUrl: expect.stringMatching(/^\/connector-icons\/gmail\.(svg|png|ico)$/) });
     expect(connectorIconUrls({ id: "x", catalogId: "not-in-catalog" })).toEqual({});
+    // every bundled icon is a catalog entry's file on disk; recent additions have theirs
+    const iconDir = join(__dirname, "..", "..", "ui", "public", "connector-icons");
+    for (const [id, ext] of Object.entries(CATALOG_ICON_FILES)) {
+      expect(CONNECTOR_CATALOG.some((e) => e.id === id), id).toBe(true);
+      expect(existsSync(join(iconDir, `${id}.${ext}`)), `${id}.${ext}`).toBe(true);
+    }
+    for (const id of ["ovhcloud", "whatsapp-business", "zernio", "v0", "expo", "autumn", "aws", "agentphone"]) {
+      expect(connectorIconUrls({ id, catalogId: id }).iconUrl, id).toMatch(new RegExp(`^/connector-icons/${id}\\.(svg|png)$`));
+    }
     expect(connectorIconUrls({ id: "x" })).toEqual({});
     expect(connectorIconUrls({ id: "x", iconAsset: { source: "mcp", mimeType: "image/png", hash: "abc", fetchedAt: "", dark: { mimeType: "image/svg+xml", hash: "def" } } }))
       .toEqual({ iconUrl: "/api/v1/connectors/x/icon?v=abc", iconDarkUrl: "/api/v1/connectors/x/icon?theme=dark&v=def" });
