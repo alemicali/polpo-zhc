@@ -7,7 +7,7 @@
  */
 import { Type } from "typebox";
 import type { Tool } from "@earendil-works/pi-ai";
-import type { ConnectorConfig } from "@polpo-ai/core";
+import { connectorGrants, type ConnectorConfig } from "@polpo-ai/core";
 import { CONNECTOR_CATALOG } from "../mcp/catalog.js";
 import type { ConnectorManager } from "../mcp/manager.js";
 import { allowPrivateNetwork } from "../mcp/net.js";
@@ -27,6 +27,8 @@ export const CONNECTOR_TOOLS: Tool[] = [
       catalog: Type.Optional(Type.Boolean({ description: "Also list the catalog of well-known apps (ids and names)" })),
       search: Type.Optional(Type.String({ description: "Search the catalog (e.g. \"crm\", \"google\", \"jira\"), with descriptions" })),
       tools: Type.Optional(Type.String({ description: "A connector id: list its tools" })),
+      agent: Type.Optional(Type.String({ description: "An agent's name: which connectors it may use (and which tools it gets), and which it has no access to. "
+        + "Check it before setting a task's toolScope: a scope never grants." })),
     }),
   },
   {
@@ -64,6 +66,14 @@ export interface ConnectorToolContext {
   /** This instance's OAuth redirect URI, when known. */
   redirectUri?: string;
   agentNames: () => Promise<string[]>;
+  /** An agent's per-connector tool selection (connectors_list { agent }); undefined: no such agent. */
+  agentConnectorTools?: (name: string) => Promise<{ connectorTools?: Record<string, "*" | string[]> } | undefined>;
+}
+
+/** What to tell Polpo when `agent` is not granted `connector`: offer the grant first, then the scope. */
+export function noAccessNote(agent: string, c: Pick<ConnectorConfig, "id" | "name" | "account" | "enabled">): string {
+  return `Agent "${agent}" has no access to ${connectorLabel(c)} (${c.id})${c.enabled ? "" : " (it is turned off)"}: a task's toolScope never grants it. `
+    + `Offer the person to grant it first (connector_update_access { id: "${c.id}", addAgents: ["${agent}"]${c.enabled ? "" : ", enabled: true"} }), then set the scope.`;
 }
 
 function describe(c: ConnectorConfig): string {
@@ -92,15 +102,43 @@ export async function executeConnectorTool(name: string, args: Record<string, un
   try {
     switch (name) {
       case "connectors_list": {
+        const agent = typeof args.agent === "string" && args.agent.trim() ? args.agent.trim() : undefined;
+        let selection: Record<string, "*" | string[]> | undefined;
+        if (agent) {
+          const known = await ctx.agentNames();
+          if (!known.includes(agent)) return `No agent "${agent}". Agents: ${known.join(", ") || "none"}.`;
+          selection = (await ctx.agentConnectorTools?.(agent))?.connectorTools ?? {};
+        }
+        const gets = (id: string, tool: string) => {
+          const picked = selection?.[id];
+          return picked === undefined || picked === "*" || picked.includes(tool);
+        };
         if (typeof args.tools === "string" && args.tools) {
           const connector = manager.store.get(args.tools);
           if (!connector) return `No connector "${args.tools}".`;
+          const granted = !agent || connectorGrants(connector, agent);
           const tools = await manager.listTools(connector.id);
-          return tools.length
-            ? tools.map((t) => `- ${mcpToolName(connector.id, t.name)}${connector.toolPolicy?.[t.name] === "off" ? " (off)" : ""}: ${(t.description ?? "").split("\n")[0]!.slice(0, 160)}`).join("\n")
+          const list = tools.length
+            ? tools.map((t) => `- ${mcpToolName(connector.id, t.name)}${connector.toolPolicy?.[t.name] === "off" ? " (off)" : ""}`
+              + `${agent && granted && !gets(connector.id, t.name) ? ` (not selected for ${agent})` : ""}: ${(t.description ?? "").split("\n")[0]!.slice(0, 160)}`).join("\n")
             : `${connector.name} has no tools.`;
+          return agent && !granted ? `${noAccessNote(agent, connector)}\n${list}` : list;
         }
         const list = manager.store.list();
+        if (agent) {
+          const mine = list.filter((c) => connectorGrants(c, agent));
+          const others = list.filter((c) => !connectorGrants(c, agent));
+          const toolsOf = (c: ConnectorConfig) => {
+            const picked = selection?.[c.id];
+            return picked === undefined || picked === "*" ? "all its tools" : picked.length ? `tools: ${picked.join(", ")}` : "no tools (its connectorTools select none)";
+          };
+          return [
+            mine.length ? `Connectors ${agent} may use:\n${mine.map((c) => `${describe(c)}; ${agent} gets ${toolsOf(c)}`).join("\n")}` : `No connector is granted to ${agent}.`,
+            ...(others.length ? [`${agent} has no access to: ${others.map((c) => `${connectorLabel(c)} (${c.id})${c.enabled ? "" : " (turned off)"}`).join(", ")}. `
+              + `A task's toolScope never grants: to scope a task of ${agent} to one of these, offer the person to grant it first `
+              + `(connector_update_access { id, addAgents: ["${agent}"] }), then set the scope.`] : []),
+          ].join("\n");
+        }
         const lines = [list.length ? `Connectors:\n${list.map(describe).join("\n")}` : "No connectors yet."];
         if (args.catalog || typeof args.search === "string") {
           const words = typeof args.search === "string" ? args.search.toLowerCase().split(/\s+/).filter(Boolean) : [];

@@ -19,6 +19,7 @@ import { setAppearanceScope } from "@/lib/appearance";
 import { claimInitialChatSelection } from "@/lib/chat-navigation";
 import { loadInstanceBranding, setInstanceBranding, type InstanceBranding } from "@/lib/branding";
 import { setOrchestratorName } from "@/lib/orchestrator-name";
+import { missionRequestOf } from "@/lib/mission-preview";
 import { toast } from "sonner";
 import { applySteerToTranscript, pendingSteers, requestComposerRestore, newSteerId, resolveSessionKey, settleSteer, type SteerAppliedEvent } from "./use-chat-steering";
 
@@ -87,6 +88,13 @@ export interface MissionPreviewData {
   name: string;
   data: unknown;
   prompt?: string;
+  /** Proposed spending limit in USD: approving creates the mission with it. */
+  budgetUsd?: number;
+}
+
+/** A create_mission budget as the preview keeps it (a positive number), else undefined. */
+function previewBudget(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
 export type MissionPreviewAction = "execute" | "draft" | "refine" | "cancel";
@@ -579,10 +587,12 @@ export function useChat() {
         const args = tc.arguments as Record<string, unknown>;
         let missionData: unknown;
         try { missionData = typeof args.data === "string" ? JSON.parse(args.data) : args.data; } catch { missionData = args.data; }
+        const budgetUsd = previewBudget(args.budgetUsd);
         const preview: MissionPreviewData = {
           name: (args.name as string) ?? "Mission",
           data: missionData,
           prompt: args.prompt as string | undefined,
+          ...(budgetUsd !== undefined ? { budgetUsd } : {}),
         };
         lastMsg.missionPreview = preview;
         setSessionPending(key, { mission: preview });
@@ -1507,10 +1517,12 @@ export function useChat() {
         appendConversation(streamSessionKey, { role: "assistant", content: fullContent });
       } else if (stream.missionPreview) {
         // Mission preview — show interactive card for user to Execute/Draft/Refine/Cancel
+        const budgetUsd = previewBudget(stream.missionPreview.budgetUsd);
         const preview: MissionPreviewData = {
           name: stream.missionPreview.name,
           data: stream.missionPreview.data,
           prompt: stream.missionPreview.prompt ?? undefined,
+          ...(budgetUsd !== undefined ? { budgetUsd } : {}),
         };
         updateSessionMessages(streamSessionKey, (prev) =>
           prev.map((m) =>
@@ -2101,12 +2113,7 @@ export function useChat() {
       if (action === "execute") {
         setSessionPending(activeSessionKeyRef.current, { mission: null });
         try {
-          const mission = await client.createMission({
-            data: dataStr,
-            name: pendingMission.name,
-            prompt: pendingMission.prompt,
-            status: "draft",
-          });
+          const mission = await client.createMission(missionRequestOf(pendingMission, dataStr));
           await client.executeMission(mission.id);
           // Continue conversational flow: tell the orchestrator what happened
           await sendAndStream(
@@ -2131,12 +2138,7 @@ export function useChat() {
       if (action === "draft") {
         setSessionPending(activeSessionKeyRef.current, { mission: null });
         try {
-          const mission = await client.createMission({
-            data: dataStr,
-            name: pendingMission.name,
-            prompt: pendingMission.prompt,
-            status: "draft",
-          });
+          const mission = await client.createMission(missionRequestOf(pendingMission, dataStr));
           // Continue conversational flow: tell the orchestrator what happened
           await sendAndStream(
             `I saved the mission "${mission.name}" (ID: ${mission.id}) as draft. ` +

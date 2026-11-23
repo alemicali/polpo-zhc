@@ -126,7 +126,10 @@ export function taskToolScopeGrantProblems(scope: TaskToolScope | undefined, ctx
   const connectorProblem = (field: string, id: string): string | undefined => {
     const c = byId.get(id);
     if (!c) return `${field}: there is no connector "${id}"`;
-    if (!connectorGrants(c, agent.name)) return `${field}: agent "${agent.name}" has no access to ${connectorScopeLabel(c)}${c.enabled ? "" : " (it is turned off)"}`;
+    if (!connectorGrants(c, agent.name)) {
+      return `${field}: agent "${agent.name}" has no access to ${connectorScopeLabel(c)}${c.enabled ? "" : " (it is turned off)"}`
+        + ` (a tool scope never grants: grant the connector to "${agent.name}" first)`;
+    }
     const own = agent.connectorTools?.[id];
     if (Array.isArray(own) && own.length === 0) return `${field}: agent "${agent.name}" gets no tool of ${connectorScopeLabel(c)}`;
     return undefined;
@@ -172,6 +175,24 @@ export function taskToolScopeGrantProblems(scope: TaskToolScope | undefined, ctx
     }
   }
   return problems;
+}
+
+/**
+ * The connectors a scope names that exist but are not granted to the agent (or are turned off):
+ * a scope never grants, so these must be granted to the agent first (connector access), then the
+ * scope set. Empty when the scope names none, or names only connectors the agent has.
+ */
+export function taskToolScopeMissingGrants(
+  scope: TaskToolScope | undefined, agentName: string, connectors: Array<ConnectorConfig & { account?: string }>,
+): Array<{ id: string; label: string; enabled: boolean }> {
+  if (!scope) return [];
+  const ids = new Set([...(Array.isArray(scope.connectors) ? scope.connectors : []), ...Object.keys(scope.connectorTools ?? {})]);
+  const out: Array<{ id: string; label: string; enabled: boolean }> = [];
+  for (const id of ids) {
+    const c = connectors.find((x) => x.id === id);
+    if (c && !connectorGrants(c, agentName)) out.push({ id, label: connectorScopeLabel(c), enabled: c.enabled });
+  }
+  return out;
 }
 
 /**
