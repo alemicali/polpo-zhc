@@ -34,7 +34,7 @@ interface Source {
 }
 interface View {
   id: string; name: string; description?: string; persistence: string; sessionId?: string; createdBy?: string; refreshSeconds?: number;
-  bindings: Array<{ id: string; query?: { sourceId?: string; dataset?: string }; inline?: { rows?: unknown[] } }>;
+  bindings: Array<{ id: string; query?: { sourceId?: string; dataset?: string }; sql?: { sourceId?: string; statement?: string }; inline?: { rows?: unknown[] } }>;
   widgets: Array<Record<string, unknown>>; createdAt?: string; updatedAt?: string;
 }
 interface Frame { columns: Array<Record<string, unknown>>; rows: Array<Record<string, unknown>>; meta?: Record<string, unknown> }
@@ -158,7 +158,7 @@ const grantInput = z.object({
 const sourceOutput = z.object({ id: z.string(), name: z.string(), kind: z.string() }).passthrough();
 
 function viewSummary(deps: McpDeps, v: View) {
-  const sources = [...new Set(v.bindings.map((b) => b.query?.sourceId).filter((x): x is string => !!x))];
+  const sources = [...new Set(v.bindings.map((b) => b.query?.sourceId ?? b.sql?.sourceId).filter((x): x is string => !!x))];
   return {
     id: v.id, name: v.name, ...(v.description ? { description: v.description } : {}), persistence: v.persistence,
     widgets: v.widgets.length, bindings: v.bindings.length, sources, ...(v.updatedAt ? { updatedAt: v.updatedAt } : {}),
@@ -185,8 +185,8 @@ export function registerDataTools(tool: Register, deps: McpDeps): void {
 
   tool("data", "polpo_data_query", {
     title: "Query data",
-    description: "Read rows from a data source's dataset: choose fields, filter, sort and limit. polpo_data_sources_list gives the source ids; "
-      + "an invalid dataset or field name returns the valid ones.",
+    description: "Read rows from a data source's dataset: choose fields, filter, sort, limit and page (offset; includeTotal counts every matching row "
+      + "as meta.totalCount). polpo_data_sources_list gives the source ids; an invalid dataset or field name returns the valid ones.",
     inputSchema: {
       sourceId: z.string().min(1).describe("The data source's id"),
       dataset: z.string().min(1).describe("The dataset (table, collection, sheet…)"),
@@ -198,6 +198,8 @@ export function registerDataTools(tool: Register, deps: McpDeps): void {
       })).optional().describe("All must match"),
       sort: z.array(z.object({ field: z.string().describe("Field name"), direction: z.enum(["asc", "desc"]).describe("asc or desc") })).optional().describe("Order"),
       limit: z.number().int().min(1).max(1000).optional().describe("Most rows (default the source's, max 1000)"),
+      offset: z.number().int().min(0).optional().describe("Rows to skip first (paging)"),
+      includeTotal: z.boolean().optional().describe("Also count every row the filters match (meta.totalCount; not for REST sources)"),
     },
     outputSchema: { result: z.unknown() },
     annotations: READ,
@@ -210,7 +212,8 @@ export function registerDataTools(tool: Register, deps: McpDeps): void {
   tool("data", "polpo_data_source_get", {
     title: "Get a data source",
     description: "One data source: its connection settings (any password or token in the location masked), which credentials are stored "
-      + "(field names, never values), which agents may use it (grants), and its schema: datasets with their columns. "
+      + "(field names, never values), which agents may use it (grants), and its schema: datasets with their columns (types, primary keys, defaults), "
+      + "row counts and, for SQL sources, indexes and foreign keys. "
       + "When a secret is missing it returns setup_url for the person.",
     inputSchema: {
       id: z.string().min(1).describe("The source's id, slug or name"),
@@ -482,7 +485,8 @@ export function registerDataTools(tool: Register, deps: McpDeps): void {
   tool("data", "polpo_data_view_save", {
     title: "Create or change a data view",
     description: "Make a data view (a live dashboard) or change one (pass id; only the fields given change, a list given replaces it). "
-      + "bindings: { id, query: { sourceId, dataset, fields, filters, sort, groupBy, aggregates, limit } } or { id, inline: { rows } } (at most 500 rows). "
+      + "bindings: { id, query: { sourceId, dataset, fields, filters, sort, groupBy, aggregates, limit } }, { id, sql: { sourceId, statement } } "
+      + "(one read-only SELECT/WITH on SQLite or PostgreSQL, run live) or { id, inline: { rows } } (at most 500 rows). "
       + "widgets: { type (metric, table, bar, line, pie, …), title, binding (a binding id), field, x, y, category, value, aggregate, format, width 1-4 }.",
     inputSchema: {
       id: z.string().min(1).optional().describe("The view to change; omit to create one"),

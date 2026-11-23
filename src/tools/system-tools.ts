@@ -408,7 +408,7 @@ function createBashTool(cwd: string, shell: Shell, toolOutputDir: string, opts: 
       + "{ \"command\": \"gh repo list\", \"env_from_vault\": { \"GH_TOKEN\": \"github.token\" } }: the value is set in that command's "
       + "environment only, never written to files, and replaced with *** in the output (values shorter than 6 characters are not masked).",
     parameters: BashSchema,
-    async execute(_toolCallId, params) {
+    async execute(_toolCallId, params, signal) {
       const timeout = bashTimeoutMs(params.timeout);
       // Secrets are resolved here, on the host, and only the references ("service.key") are kept
       // in details: the values exist in the command's environment and nowhere else.
@@ -424,7 +424,7 @@ function createBashTool(cwd: string, shell: Shell, toolOutputDir: string, opts: 
       const started = Date.now();
       try {
         const result = await shell.execute(params.command, {
-          cwd, timeout, ...(Object.keys(fromVault.env).length > 0 ? { env: fromVault.env } : {}),
+          cwd, timeout, ...(signal ? { signal } : {}), ...(Object.keys(fromVault.env).length > 0 ? { env: fromVault.env } : {}),
         });
         const timedOut = result.timedOut === true
           || (result.exitCode !== 0 && Date.now() - started >= timeout && /timed? ?out/i.test(result.stderr));

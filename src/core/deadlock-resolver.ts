@@ -335,7 +335,8 @@ async function applyDecision(
       // Retry the failed dep (if not already retried in this resolution round)
       if (!retriedDeps.has(failedDep.id)) {
         const fresh = await store.getTask(failedDep.id);
-        if (fresh && fresh.retries < fresh.maxRetries) {
+        // A failure a re-run cannot fix (model not enabled, credentials refused) is not retried
+        if (fresh && fresh.retries < fresh.maxRetries && fresh.result?.retryable !== false) {
           // Use transition to properly increment retries
           await store.transition(failedDep.id, "pending");
           retriedDeps.add(failedDep.id);
@@ -350,7 +351,9 @@ async function applyDecision(
           // No retries left → force-fail the blocked task
           orchestrator.emit("deadlock:unresolvable", {
             taskId: blockedTask.id,
-            reason: `dependency "${failedDep.title}" has no retries remaining`,
+            reason: fresh?.result?.retryable === false
+              ? `dependency "${failedDep.title}" failed with an error a retry cannot fix`
+              : `dependency "${failedDep.title}" has no retries remaining`,
           });
           await forceFailTask(orchestrator, blockedTask.id);
         }
