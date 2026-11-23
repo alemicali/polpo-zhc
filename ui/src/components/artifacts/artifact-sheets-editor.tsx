@@ -1,15 +1,15 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type PointerEvent } from "react";
-import { ChartNoAxesColumn, Download, FileUp, FunctionSquare, MoreHorizontal, MoveLeft, MoveRight, Plus, SheetIcon, Trash2 } from "lucide-react";
+import { ChartNoAxesColumn, ChevronDown, Download, FileUp, FunctionSquare, History, List, MoreHorizontal, MoveLeft, MoveRight, Plus, Trash2, X } from "lucide-react";
 import { MAX_ARTIFACT_BYTES } from "@polpo-ai/core/artifacts";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useProjectInfo } from "@/hooks/use-polpo";
 import { productName, useInstanceBranding } from "@/lib/branding";
 import { cn } from "@/lib/utils";
-import { SheetFormatBar } from "./artifact-sheets-format-bar";
-import { SheetDataTools, type SheetCalculation } from "./artifact-sheets-data-tools";
+import { SheetFontMenu, SheetFormatBar, SheetFormattingMenu } from "./artifact-sheets-format-bar";
+import { SheetDataTools, SheetFunctionMenu, type SheetCalculation, type SheetCellType } from "./artifact-sheets-data-tools";
 import { calculateWorkbook } from "./artifact-sheets-formulas";
 import { revealWorksheet, settleWorksheet, stopSheetAnimations, type SheetAnimations } from "./artifact-sheets-reveal";
 import {
@@ -26,6 +26,7 @@ const FIRST_CELL = { row: 1, col: 1 };
 const EMPTY_STYLE: CellStyle = {};
 const EMPTY_RULES: SheetRule[] = [];
 const EMPTY_CHARTS: SheetChart[] = [];
+const ZOOM_LEVELS = [50, 75, 90, 100, 110, 125, 150, 200];
 const SheetChartPreview = lazy(() => import("./artifact-sheets-chart").then((module) => ({ default: module.ArtifactSheetChart })));
 
 function rowAt(offsets: number[], offset: number): number {
@@ -51,11 +52,11 @@ function worksheetOffsets(styles?: Sheet["styles"]): number[] {
   return offsets;
 }
 
-function worksheetWindow(viewport: HTMLDivElement, offsets: number[]) {
-  const firstVisible = rowAt(offsets, viewport.scrollTop);
+function worksheetWindow(viewport: HTMLDivElement, offsets: number[], scale: number) {
+  const firstVisible = rowAt(offsets, viewport.scrollTop / scale);
   return {
     start: Math.max(1, firstVisible - ROW_OVERSCAN),
-    end: Math.min(SHEET_ROWS, rowAt(offsets, viewport.scrollTop + viewport.clientHeight) + ROW_OVERSCAN),
+    end: Math.min(SHEET_ROWS, rowAt(offsets, (viewport.scrollTop + viewport.clientHeight) / scale) + ROW_OVERSCAN),
   };
 }
 
@@ -68,24 +69,26 @@ function saveFile(blob: Blob, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function ArtifactSheetsEditor({ content, onChange, appearanceVersion, streaming = false }: {
+export function ArtifactSheetsEditor({ content, onChange, appearanceVersion, streaming = false, onShowHistory }: {
   content: string;
   onChange?: (next: string) => void;
   appearanceVersion?: number;
   streaming?: boolean;
+  onShowHistory?: () => void;
 }) {
   const workbook = useMemo(() => readWorkbook(content), [content]);
   if (!workbook) {
     return <p className="p-4 text-sm text-destructive">This workbook could not be read. Check the workbook JSON in Source.</p>;
   }
-  return <WorkbookGrid workbook={workbook} onChange={onChange} appearanceVersion={appearanceVersion} streaming={streaming} />;
+  return <WorkbookGrid workbook={workbook} onChange={onChange} appearanceVersion={appearanceVersion} streaming={streaming} onShowHistory={onShowHistory} />;
 }
 
-function WorkbookGrid({ workbook, onChange, appearanceVersion, streaming }: {
+function WorkbookGrid({ workbook, onChange, appearanceVersion, streaming, onShowHistory }: {
   workbook: Workbook;
   onChange?: (next: string) => void;
   appearanceVersion?: number;
   streaming: boolean;
+  onShowHistory?: () => void;
 }) {
   const { info } = useProjectInfo();
   const brand = productName(useInstanceBranding());
@@ -97,6 +100,8 @@ function WorkbookGrid({ workbook, onChange, appearanceVersion, streaming }: {
   const [formulaDraft, setFormulaDraft] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [zoom, setZoom] = useState(100);
+  const zoomScale = zoom / 100;
   const [chartIndex, setChartIndex] = useState<number | null>(workbook.sheets[0].charts?.length ? 0 : null);
   const [rowWindow, setRowWindow] = useState({ start: 1, end: 32 });
   const selectedRef = useRef<HTMLTableCellElement>(null);
@@ -108,6 +113,7 @@ function WorkbookGrid({ workbook, onChange, appearanceVersion, streaming }: {
   const selectionGesture = useRef(false);
   const formulaCancelled = useRef(false);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const pendingScroll = useRef<{ top: number; left: number }>(null);
   const sweepRef = useRef<HTMLDivElement>(null);
   const badgeRef = useRef<HTMLDivElement>(null);
   const appearance = useRef<{ version?: number; workbook: Workbook; worksheet: string; streaming: boolean }>(null);
@@ -125,6 +131,7 @@ function WorkbookGrid({ workbook, onChange, appearanceVersion, streaming }: {
   const raw = sheet.cells[selectedKey] ?? "";
   const selectedStyle = sheet.styles?.[selectedKey] ?? EMPTY_STYLE;
   const selectedValidation = sheet.validations?.[selectedKey];
+  const cellType = selectedValidation?.type === "checkbox" ? "checkbox" : selectedStyle.numberFormat === "date" ? "date" : "automatic";
   const rules = sheet.rules ?? EMPTY_RULES;
   const charts = sheet.charts ?? EMPTY_CHARTS;
   const chart = chartIndex === null ? undefined : charts[chartIndex];
@@ -140,13 +147,17 @@ function WorkbookGrid({ workbook, onChange, appearanceVersion, streaming }: {
   useEffect(() => () => { importEpoch.current += 1; }, []);
 
   const measureRows = useCallback((viewport: HTMLDivElement) => {
-    const next = worksheetWindow(viewport, rowOffsets);
+    const next = worksheetWindow(viewport, rowOffsets, zoomScale);
     setRowWindow((before) => before.start === next.start && before.end === next.end ? before : next);
-  }, [rowOffsets]);
+  }, [rowOffsets, zoomScale]);
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
+    if (pendingScroll.current) {
+      viewport.scrollTo(pendingScroll.current);
+      pendingScroll.current = null;
+    }
     measureRows(viewport);
     const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => measureRows(viewport)) : undefined;
     observer?.observe(viewport);
@@ -190,20 +201,36 @@ function WorkbookGrid({ workbook, onChange, appearanceVersion, streaming }: {
     else if (focusSelected.current) {
       const viewport = viewportRef.current;
       if (!selectedRef.current && viewport) {
-        viewport.scrollTop = rowOffsets[selected.row - 1];
+        viewport.scrollTop = rowOffsets[selected.row - 1] * zoomScale;
         measureRows(viewport);
         return;
       }
       focusSelected.current = false;
       selectedRef.current?.focus();
     }
-  }, [selected, activeIndex, edit, rowWindow, rowOffsets, measureRows]);
+  }, [selected, activeIndex, edit, rowWindow, rowOffsets, measureRows, zoomScale]);
 
   function resetViewport() {
     const viewport = viewportRef.current;
     if (!viewport) return;
     viewport.scrollTo({ top: 0, left: 0 });
     measureRows(viewport);
+  }
+
+  function changeZoom(next: number) {
+    const viewport = viewportRef.current;
+    if (next === zoom) return;
+    if (viewport) pendingScroll.current = { top: viewport.scrollTop * next / zoom, left: viewport.scrollLeft * next / zoom };
+    setZoom(next);
+  }
+
+  function selectWorksheet(index: number) {
+    if (index === activeIndex) return;
+    setSheetIndex(index);
+    setSelected(FIRST_CELL);
+    setSelectionOrigin(null);
+    setChartIndex(null);
+    resetViewport();
   }
 
   function move(row: number, col: number, extend = false) {
@@ -266,6 +293,27 @@ function WorkbookGrid({ workbook, onChange, appearanceVersion, streaming }: {
       else delete validations[key];
     }
     updateSheet({ ...sheet, validations: Object.keys(validations).length ? validations : undefined });
+  }
+
+  function setCellType(type: SheetCellType) {
+    const styles = { ...sheet.styles };
+    const validations = { ...sheet.validations };
+    for (const key of rangeKeys(selection)) {
+      const style: CellStyle = {
+        ...styles[key],
+        numberFormat: type === "date" ? "date" : undefined,
+        decimals: undefined,
+      };
+      if (Object.values(style).some((value) => value !== undefined)) styles[key] = style;
+      else delete styles[key];
+      if (type === "checkbox") validations[key] = { type: "checkbox" };
+      else delete validations[key];
+    }
+    updateSheet({
+      ...sheet,
+      styles: Object.keys(styles).length ? styles : undefined,
+      validations: Object.keys(validations).length ? validations : undefined,
+    });
   }
 
   function setCheckboxes(checked: boolean) {
@@ -344,7 +392,7 @@ function WorkbookGrid({ workbook, onChange, appearanceVersion, streaming }: {
       else selectColumn(col);
       return;
     }
-    const viewportHeight = viewportRef.current?.clientHeight ?? 520;
+    const viewportHeight = (viewportRef.current?.clientHeight ?? 520) / zoomScale;
     const nextByKey: Record<string, CellAddress> = {
       ArrowUp: { row: row - 1, col },
       ArrowDown: { row: row + 1, col },
@@ -506,50 +554,54 @@ function WorkbookGrid({ workbook, onChange, appearanceVersion, streaming }: {
     setSheetIndex(destination);
   }
 
-  return (
-    <section aria-label="Spreadsheet" className="flex h-full min-h-0 flex-col overflow-hidden bg-background">
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-card px-3 py-2">
-        <span className="flex items-center gap-2.5 text-sm font-semibold">
-          <span className="grid size-7 place-items-center rounded-control bg-primary/10 text-primary">
-            <SheetIcon aria-hidden="true" className="size-4" />
-          </span>
-          Workbook
-        </span>
-        <div className="ml-auto flex items-center gap-1.5">
-          {onChange && <>
-            <input ref={importRef} type="file" accept=".csv,.xlsx" className="hidden" aria-label="Upload worksheet"
-              onChange={(event) => {
-                const file = event.currentTarget.files?.[0];
-                event.currentTarget.value = "";
-                if (file) void importWorkbook(file);
-              }} />
-            <Button type="button" variant="ghost" size="xs" title="Import CSV or XLSX" disabled={importing}
-              onClick={() => importRef.current?.click()}><FileUp aria-hidden="true" /> {importing ? "Importing…" : "Import"}</Button>
+  function downloadCsv() {
+    const filename = sheet.name.trim().replace(/[^a-z0-9 -]/gi, "").replace(/\s+/g, "-") || "sheet";
+    saveFile(new Blob(["\uFEFF", sheetCsv(sheet, getValue)], { type: "text/csv;charset=utf-8" }), `${filename}.csv`);
+  }
+
+  const moreMenu = (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button type="button" size="icon-xs" variant="ghost" aria-label="More" title="More"><MoreHorizontal aria-hidden="true" /></Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" side={onChange ? "top" : "bottom"}>
+        {onChange && <DropdownMenuItem disabled={importing} onSelect={() => importRef.current?.click()}>
+          <FileUp aria-hidden="true" />{importing ? "Importing…" : "Import CSV or XLSX"}
+        </DropdownMenuItem>}
+        <DropdownMenuItem disabled={exporting} onSelect={() => void downloadWorkbook()}>
+          <Download aria-hidden="true" />{exporting ? "Exporting…" : "Export workbook as XLSX"}
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={downloadCsv}><Download aria-hidden="true" />Export worksheet as CSV</DropdownMenuItem>
+        {charts.length > 0 && <DropdownMenuItem onSelect={() => setChartIndex(chart ? null : 0)}>
+          <ChartNoAxesColumn aria-hidden="true" />{chart ? "Hide charts" : "Show charts"}
+        </DropdownMenuItem>}
+        {onChange && <>
+          <DropdownMenuSeparator />
+          <SheetFormattingMenu style={selectedStyle} onChange={setStyle} onClear={() => setStyle(null)} />
+          {workbook.sheets.length > 1 && <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem disabled={activeIndex === 0} onSelect={() => moveWorksheet(-1)}><MoveLeft aria-hidden="true" />Move worksheet left</DropdownMenuItem>
+            <DropdownMenuItem disabled={activeIndex === workbook.sheets.length - 1} onSelect={() => moveWorksheet(1)}><MoveRight aria-hidden="true" />Move worksheet right</DropdownMenuItem>
           </>}
-          <Button type="button" variant="outline" size="xs" title="Download workbook" disabled={exporting} onClick={() => void downloadWorkbook()}>
-            <Download aria-hidden="true" /> {exporting ? "Exporting…" : "XLSX"}
-          </Button>
-          <Button type="button" variant="ghost" size="xs" title="Download active worksheet" onClick={() => {
-            const filename = sheet.name.trim().replace(/[^a-z0-9 -]/gi, "").replace(/\s+/g, "-") || "sheet";
-            saveFile(new Blob(["\uFEFF", sheetCsv(sheet, getValue)], { type: "text/csv;charset=utf-8" }), `${filename}.csv`);
-          }}>
-            <Download aria-hidden="true" /> CSV
-          </Button>
-        </div>
-      </div>
+        </>}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 
-      {onChange && <SheetFormatBar style={selectedStyle} onChange={setStyle} onClear={() => setStyle(null)}>
-        <SheetDataTools range={selectionLabel} validation={selectedValidation} rules={rules} chartCount={charts.length}
-          onValidation={setValidation} onCheckboxes={setCheckboxes} onRules={(next) => updateSheet({ ...sheet, rules: next })}
-          onChart={addChart} onCalculate={insertCalculation} />
-      </SheetFormatBar>}
-
-      <div className="flex shrink-0 items-center gap-2 border-b border-border bg-muted/20 px-3 py-1.5">
-        <span className="min-w-12 border-r border-border pr-2 font-mono text-xs font-semibold text-primary" aria-label="Selected range">{selectionLabel}</span>
-        <FunctionSquare aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+  return (
+    <section aria-label="Spreadsheet" className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background">
+      {onChange && <input ref={importRef} type="file" accept=".csv,.xlsx" className="hidden" aria-label="Upload worksheet"
+        onChange={(event) => {
+          const file = event.currentTarget.files?.[0];
+          event.currentTarget.value = "";
+          if (file) void importWorkbook(file);
+        }} />}
+      <div data-slot="sheet-formula-bar" className="flex h-9 shrink-0 items-center gap-1 border-b border-border bg-card px-2">
+        {onChange ? <SheetFunctionMenu onCalculate={insertCalculation} /> : <FunctionSquare aria-hidden="true" className="mx-2 size-4 shrink-0 text-muted-foreground" />}
+        <span className="sr-only" aria-label="Selected range">{selectionLabel}</span>
         <Input
-          aria-label="Cell value or formula"
-          className="h-7 min-w-0 border-transparent bg-transparent px-2 font-mono text-xs shadow-none"
+          aria-label="Formula bar"
+          className="h-7 min-w-0 flex-1 rounded-sm border-transparent bg-transparent px-2 font-mono text-xs shadow-none"
           readOnly={!onChange}
           value={formulaDraft ?? raw}
           onChange={(event) => setFormulaDraft(event.target.value)}
@@ -564,6 +616,22 @@ function WorkbookGrid({ workbook, onChange, appearanceVersion, streaming }: {
             }
           }}
         />
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button type="button" size="xs" variant="ghost" aria-label={`${zoom}%, Zoom`} title="Zoom" className="h-7 min-w-16 tabular-nums">
+              {zoom}%<ChevronDown aria-hidden="true" className="size-3" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuRadioGroup value={String(zoom)} onValueChange={(value) => changeZoom(Number(value))}>
+              {ZOOM_LEVELS.map((level) => <DropdownMenuRadioItem value={String(level)} key={level}>{level}%</DropdownMenuRadioItem>)}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {onShowHistory && <Button type="button" size="icon-xs" variant="ghost" aria-label="Version history" title="Version history" onClick={onShowHistory}>
+          <History aria-hidden="true" />
+        </Button>}
+        {!onChange && moreMenu}
       </div>
 
       {streaming && <p className="sr-only" role="status">{product} is writing spreadsheet cells.</p>}
@@ -572,9 +640,10 @@ function WorkbookGrid({ workbook, onChange, appearanceVersion, streaming }: {
           onScroll={(event) => updateViewport(event.currentTarget)}>
           <table role="grid" aria-label={sheet.name} aria-rowcount={SHEET_ROWS + 1} aria-colcount={SHEET_COLUMNS + 1}
             aria-readonly={!onChange} aria-multiselectable="true" className="w-max min-w-full select-none border-separate border-spacing-0 text-xs"
+            style={zoom === 100 ? undefined : { zoom: zoomScale, minWidth: `${100 / zoomScale}%` }}
             tabIndex={selected.row < rowsStart || selected.row > rowsEnd ? 0 : undefined}
             onFocus={(event) => {
-              if (event.target === event.currentTarget) move(rowAt(rowOffsets, viewportRef.current?.scrollTop ?? 0), selected.col);
+              if (event.target === event.currentTarget) move(rowAt(rowOffsets, (viewportRef.current?.scrollTop ?? 0) / zoomScale), selected.col);
             }}
             onPointerUp={() => { selectionGesture.current = false; }}>
             <thead className="sticky top-0 z-20 bg-muted">
@@ -704,60 +773,59 @@ function WorkbookGrid({ workbook, onChange, appearanceVersion, streaming }: {
         <div ref={badgeRef} aria-hidden="true" className="pointer-events-none absolute left-0 top-0 z-30 max-w-40 truncate rounded-control bg-primary px-1.5 text-[10px] font-semibold leading-4 text-primary-foreground opacity-0">
           {product}
         </div>
-      </div>
-
-      {chart && (
-        <div className="shrink-0 border-t border-border bg-card" role="region" aria-label="Worksheet chart">
-          <div className="flex items-center gap-2 px-3 pt-1.5">
-            <select aria-label="Active chart" className="min-w-0 flex-1 truncate rounded-control bg-background px-1.5 py-1 text-xs"
-              value={chartIndex ?? 0} onChange={(event) => setChartIndex(Number(event.target.value))}>
-              {charts.map((item, index) => <option key={index} value={index}>{item.title}</option>)}
-            </select>
-            <span className="font-mono text-caption text-muted-foreground">{chart.range}</span>
-            {onChange && <Button type="button" size="icon-xs" variant="ghost" aria-label="Remove chart" title="Remove chart"
-              onClick={() => removeChart(chartIndex ?? 0)}><Trash2 aria-hidden="true" /></Button>}
+        {onChange && <SheetFormatBar style={selectedStyle} onChange={setStyle}>
+          <SheetDataTools range={selectionLabel} validation={selectedValidation} rules={rules} chartCount={charts.length}
+            cellType={cellType} onType={setCellType} onValidation={setValidation} onCheckboxes={setCheckboxes}
+            onRules={(next) => updateSheet({ ...sheet, rules: next })} onChart={addChart}>
+            <SheetFontMenu style={selectedStyle} onChange={setStyle} />
+          </SheetDataTools>
+          <div className="border-l border-border pl-1">{moreMenu}</div>
+        </SheetFormatBar>}
+        {chart && (
+          <div className="absolute inset-x-2 bottom-14 z-40 rounded-control border border-border bg-popover shadow-raised sm:left-auto sm:right-4 sm:w-96"
+            role="region" aria-label="Worksheet chart">
+            <div className="flex items-center gap-2 px-3 pt-1.5">
+              <select aria-label="Active chart" className="min-w-0 flex-1 truncate rounded-control bg-background px-1.5 py-1 text-xs"
+                value={chartIndex ?? 0} onChange={(event) => setChartIndex(Number(event.target.value))}>
+                {charts.map((item, index) => <option key={index} value={index}>{item.title}</option>)}
+              </select>
+              <span className="font-mono text-caption text-muted-foreground">{chart.range}</span>
+              {onChange && <Button type="button" size="icon-xs" variant="ghost" aria-label="Remove chart" title="Remove chart"
+                onClick={() => removeChart(chartIndex ?? 0)}><Trash2 aria-hidden="true" /></Button>}
+              <Button type="button" size="icon-xs" variant="ghost" aria-label="Hide chart" title="Hide chart"
+                onClick={() => setChartIndex(null)}><X aria-hidden="true" /></Button>
+            </div>
+            <Suspense fallback={<p className="p-3 text-sm text-muted-foreground">Loading chart…</p>}>
+              <SheetChartPreview chart={chart} sheetName={sheet.name} getValue={getValue} />
+            </Suspense>
           </div>
-          <Suspense fallback={<p className="p-3 text-sm text-muted-foreground">Loading chart…</p>}>
-            <SheetChartPreview chart={chart} sheetName={sheet.name} getValue={getValue} />
-          </Suspense>
-        </div>
-      )}
-      <div className="flex shrink-0 items-center gap-2 border-t border-border bg-card px-2 py-1">
-        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-auto" role="group" aria-label="Worksheets">
+        )}
+      </div>
+      <div data-slot="sheet-tabs" className="flex h-9 shrink-0 items-center gap-1.5 border-t border-border bg-card px-2">
+        {onChange && (
+          <Button type="button" size="icon-xs" variant="ghost" aria-label="Add worksheet" title="Add worksheet"
+            disabled={workbook.sheets.length >= WORKBOOK_SHEETS} onClick={addSheet}>
+            <Plus aria-hidden="true" />
+          </Button>
+        )}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button type="button" size="xs" variant="ghost" aria-label="All worksheets" title="All worksheets">
+              <List aria-hidden="true" /><ChevronDown aria-hidden="true" className="size-3" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" side="top">
+            <DropdownMenuRadioGroup value={String(activeIndex)} onValueChange={(value) => selectWorksheet(Number(value))}>
+              {workbook.sheets.map((item, index) => <DropdownMenuRadioItem key={item.name} value={String(index)}>{item.name}</DropdownMenuRadioItem>)}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-auto border-l border-border pl-1.5 [scrollbar-width:none]" role="group" aria-label="Worksheets">
           {workbook.sheets.map((item, index) => (
-            <Button key={item.name} type="button" size="xs" className="relative" variant={index === activeIndex ? "secondary" : "ghost"}
-              aria-pressed={index === activeIndex} onClick={() => {
-                setSheetIndex(index);
-                setSelected(FIRST_CELL);
-                setSelectionOrigin(null);
-                setChartIndex(null);
-                resetViewport();
-              }}>{item.name}{streaming && index === activeIndex &&
+            <Button key={item.name} type="button" size="xs" className="relative h-7" variant={index === activeIndex ? "secondary" : "ghost"}
+              aria-pressed={index === activeIndex} onClick={() => selectWorksheet(index)}>{item.name}{streaming && index === activeIndex &&
                 <span aria-hidden="true" className="absolute inset-x-1 bottom-0 h-px bg-primary motion-safe:animate-pulse" />}</Button>
           ))}
-          {onChange && (
-            <Button type="button" size="icon-xs" variant="ghost" aria-label="Add worksheet"
-              disabled={workbook.sheets.length >= WORKBOOK_SHEETS} onClick={addSheet}>
-              <Plus aria-hidden="true" />
-            </Button>
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-1 text-caption text-muted-foreground">
-          {onChange && workbook.sheets.length > 1 && <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button type="button" size="icon-xs" variant="ghost" aria-label="Worksheet actions" title="Worksheet actions">
-                <MoreHorizontal aria-hidden="true" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem disabled={activeIndex === 0} onSelect={() => moveWorksheet(-1)}><MoveLeft aria-hidden="true" /> Move left</DropdownMenuItem>
-              <DropdownMenuItem disabled={activeIndex === workbook.sheets.length - 1} onSelect={() => moveWorksheet(1)}><MoveRight aria-hidden="true" /> Move right</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>}
-          {charts.length > 0 && <Button type="button" size="icon-xs" variant={chart ? "secondary" : "ghost"} aria-label="Show charts"
-            title={chart ? "Hide charts" : "Show charts"} aria-pressed={Boolean(chart)}
-            onClick={() => setChartIndex(chart ? null : 0)}><ChartNoAxesColumn aria-hidden="true" /></Button>}
-          <span className="font-mono tabular-nums">{selectionLabel}</span>
         </div>
       </div>
     </section>

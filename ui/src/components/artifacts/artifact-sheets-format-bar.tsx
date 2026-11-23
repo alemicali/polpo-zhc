@@ -1,23 +1,14 @@
 import type { ReactNode } from "react";
 import {
-  AlignCenter,
-  AlignLeft,
-  AlignRight,
-  Bold,
-  CalendarDays,
-  CaseSensitive,
-  DecimalsArrowLeft,
-  DecimalsArrowRight,
-  Euro,
-  Grid2X2,
-  Italic,
-  PaintBucket,
-  Percent,
-  RemoveFormatting,
-  Underline,
+  AlignCenter, AlignLeft, AlignRight, Bold, CaseSensitive, ChevronDown,
+  DecimalsArrowLeft, DecimalsArrowRight, Euro, Grid2X2, Italic, PaintBucket,
+  Percent, RemoveFormatting, Underline,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
+  DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { MAX_CELL_DECIMALS, type CellStyle } from "./artifact-sheets-model";
 
 const textStyles = [
@@ -43,54 +34,40 @@ const palettes = [
   ] },
 ] as const;
 
-const numberFormats = [
-  { value: "currency", label: "Euro currency", icon: Euro },
-  { value: "percent", label: "Percent", icon: Percent },
-  { value: "date", label: "Date", icon: CalendarDays },
-] as const;
-
 const borders = [
   { label: "All borders", value: "all" }, { label: "Top border", value: "top" },
   { label: "Bottom border", value: "bottom" }, { label: "Left border", value: "left" }, { label: "Right border", value: "right" },
 ] as const;
 
 const fontSizes = [8, 9, 10, 11, 12, 14, 16, 18, 24, 30, 36];
+type Formatting = { style: CellStyle; onChange: (patch: Partial<CellStyle>) => void };
 
-export function SheetFormatBar({ style, onChange, onClear, children }: {
-  style: CellStyle;
-  onChange: (patch: Partial<CellStyle>) => void;
-  onClear: () => void;
-  children?: ReactNode;
-}) {
-  const decimals = style.decimals ?? (style.numberFormat && style.numberFormat !== "date" ? 2 : 0);
+export function SheetFormatBar({ style, onChange, children }: Formatting & { children: ReactNode }) {
+  const AlignmentIcon = alignments.find(({ value }) => value === style.align)?.icon ?? AlignLeft;
   return (
-    <div role="group" aria-label="Cell formatting" className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b border-border bg-card px-3 py-1.5">
-      <div className="flex items-center gap-0.5 border-r border-border pr-1.5">
+    <div role="group" aria-label="Formatting" data-slot="sheet-formatting-dock"
+      className="absolute bottom-4 left-1/2 z-30 flex h-7 max-w-[calc(100%-1rem)] -translate-x-1/2 items-center gap-1 overflow-x-auto rounded-control border border-border bg-popover px-1 shadow-raised [scrollbar-width:none]">
+      <div className="flex items-center gap-1 border-r border-border pr-1">
         {textStyles.map(({ key, label, icon: Icon }) => (
           <Button key={key} type="button" size="icon-xs" variant={style[key] ? "secondary" : "ghost"}
             title={label} aria-label={label} aria-pressed={Boolean(style[key])}
             onClick={() => onChange({ [key]: style[key] ? undefined : true })}><Icon aria-hidden="true" /></Button>
         ))}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button type="button" size="xs" variant={style.fontSize ? "secondary" : "ghost"} aria-label="Font size" title="Font size">
-              {style.fontSize ?? 12}
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            <DropdownMenuItem onSelect={() => onChange({ fontSize: undefined })}>Default size</DropdownMenuItem>
-            {fontSizes.map((fontSize) => <DropdownMenuItem key={fontSize} onSelect={() => onChange({ fontSize })}>{fontSize}</DropdownMenuItem>)}
-          </DropdownMenuContent>
-        </DropdownMenu>
       </div>
-      <div className="flex items-center gap-0.5 border-r border-border pr-1.5">
-        {alignments.map(({ value, label, icon: Icon }) => (
-          <Button key={value} type="button" size="icon-xs" variant={style.align === value ? "secondary" : "ghost"}
-            title={label} aria-label={label} aria-pressed={style.align === value}
-            onClick={() => onChange({ align: style.align === value ? undefined : value })}><Icon aria-hidden="true" /></Button>
-        ))}
-      </div>
-      <div className="flex items-center gap-0.5 border-r border-border pr-1.5">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button type="button" size="xs" variant={style.align ? "secondary" : "ghost"} title="Align" aria-label="Align">
+            <AlignmentIcon aria-hidden="true" /><ChevronDown aria-hidden="true" className="size-3" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" side="top">
+          <DropdownMenuItem onSelect={() => onChange({ align: undefined })}>Automatic alignment</DropdownMenuItem>
+          {alignments.map(({ value, label, icon: Icon }) => <DropdownMenuItem key={value} onSelect={() => onChange({ align: value })}>
+            <Icon aria-hidden="true" />{label}
+          </DropdownMenuItem>)}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <div className="flex items-center gap-1 border-x border-border px-1">
         {palettes.map(({ key, label, icon: Icon, colors }) => (
           <DropdownMenu key={key}>
             <DropdownMenuTrigger asChild>
@@ -98,7 +75,7 @@ export function SheetFormatBar({ style, onChange, onClear, children }: {
                 <Icon aria-hidden="true" style={{ color: style[key] }} />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
+            <DropdownMenuContent align="start" side="top">
               <DropdownMenuItem onSelect={() => onChange({ [key]: undefined })}>Default</DropdownMenuItem>
               {colors.map(([name, color]) => (
                 <DropdownMenuItem key={color} onSelect={() => onChange({ [key]: color })}>
@@ -115,26 +92,51 @@ export function SheetFormatBar({ style, onChange, onClear, children }: {
               <Grid2X2 aria-hidden="true" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
+          <DropdownMenuContent align="start" side="top">
             <DropdownMenuItem onSelect={() => onChange({ border: undefined })}>No borders</DropdownMenuItem>
             {borders.map(({ label, value }) => <DropdownMenuItem key={value} onSelect={() => onChange({ border: value })}>{label}</DropdownMenuItem>)}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      <div className="flex items-center gap-0.5 border-r border-border pr-1.5">
-        {numberFormats.map(({ value, label, icon: Icon }) => (
-          <Button key={value} type="button" size="icon-xs" variant={style.numberFormat === value ? "secondary" : "ghost"}
-            title={label} aria-label={label} aria-pressed={style.numberFormat === value}
-            onClick={() => onChange({ numberFormat: style.numberFormat === value ? undefined : value })}><Icon aria-hidden="true" /></Button>
-        ))}
-        <Button type="button" size="icon-xs" variant="ghost" title="Increase decimals" aria-label="Increase decimals"
-          disabled={decimals >= MAX_CELL_DECIMALS || style.numberFormat === "date"} onClick={() => onChange({ decimals: decimals + 1 })}><DecimalsArrowLeft aria-hidden="true" /></Button>
-        <Button type="button" size="icon-xs" variant="ghost" title="Decrease decimals" aria-label="Decrease decimals"
-          disabled={style.decimals === 0 || style.numberFormat === "date"} onClick={() => onChange({ decimals: Math.max(0, decimals - 1) })}><DecimalsArrowRight aria-hidden="true" /></Button>
-      </div>
-      <Button type="button" size="icon-xs" variant="ghost" title="Clear formatting" aria-label="Clear formatting"
-        disabled={!Object.keys(style).length} onClick={onClear}><RemoveFormatting aria-hidden="true" /></Button>
-      {children && <div className="flex shrink-0 items-center border-l border-border pl-1.5">{children}</div>}
+      {children}
     </div>
+  );
+}
+
+export function SheetFontMenu({ style, onChange }: Formatting) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button type="button" size="xs" variant={style.fontSize ? "secondary" : "ghost"} aria-label="Font size" title="Font size">
+          {style.fontSize ?? 12}<ChevronDown aria-hidden="true" className="size-3" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" side="top">
+        <DropdownMenuItem onSelect={() => onChange({ fontSize: undefined })}>Default size</DropdownMenuItem>
+        {fontSizes.map((fontSize) => <DropdownMenuItem key={fontSize} onSelect={() => onChange({ fontSize })}>{fontSize}</DropdownMenuItem>)}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+export function SheetFormattingMenu({ style, onChange, onClear }: Formatting & { onClear: () => void }) {
+  const decimals = style.decimals ?? (style.numberFormat && style.numberFormat !== "date" ? 2 : 0);
+  return (
+    <>
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger>Number format</DropdownMenuSubTrigger>
+        <DropdownMenuSubContent>
+          <DropdownMenuItem onSelect={() => onChange({ numberFormat: undefined, decimals: undefined })}>Automatic number format</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => onChange({ numberFormat: "currency" })}><Euro aria-hidden="true" />Euro currency</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => onChange({ numberFormat: "percent" })}><Percent aria-hidden="true" />Percent</DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem disabled={style.decimals === 0 || style.numberFormat === "date"}
+            onSelect={() => onChange({ decimals: Math.max(0, decimals - 1) })}><DecimalsArrowRight aria-hidden="true" />Decrease decimals</DropdownMenuItem>
+          <DropdownMenuItem disabled={decimals >= MAX_CELL_DECIMALS || style.numberFormat === "date"}
+            onSelect={() => onChange({ decimals: decimals + 1 })}><DecimalsArrowLeft aria-hidden="true" />Increase decimals</DropdownMenuItem>
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+      <DropdownMenuItem onSelect={onClear}><RemoveFormatting aria-hidden="true" />Clear cell formatting</DropdownMenuItem>
+    </>
   );
 }

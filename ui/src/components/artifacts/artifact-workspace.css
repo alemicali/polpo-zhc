@@ -1,31 +1,34 @@
-@keyframes artifact-preparation-scan {
-  0%, 100% { opacity: 0; transform: translateY(-55%); }
-  18% { opacity: .55; }
-  70% { opacity: .45; transform: translateY(55%); }
-  78% { opacity: 0; transform: translateY(55%); }
+@keyframes artifact-preparation-spin {
+  to { transform: rotate(1turn); }
 }
 
-.artifact-preparation-scan {
-  animation: artifact-preparation-scan 1.8s ease-in-out infinite;
-  stroke-width: 1;
+@keyframes artifact-preparation-reveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
-@keyframes artifact-preparation-track {
-  from { transform: translateX(-125%); }
-  to { transform: translateX(390%); }
+@keyframes artifact-preparation-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .6; }
 }
 
-.artifact-preparation-track {
-  height: 2px;
+.artifact-preparation-stage {
+  animation:
+    artifact-preparation-reveal 150ms linear 1255ms backwards,
+    artifact-preparation-breathe 2s linear 1405ms infinite;
 }
 
-.artifact-preparation-track::after {
-  display: block;
-  width: 32%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--primary) 75%, transparent), transparent);
-  animation: artifact-preparation-track 1.65s ease-in-out infinite;
-  content: "";
+.artifact-preparation-spinner {
+  border: 2px solid color-mix(in oklch, var(--primary) 26%, transparent);
+  border-top-color: var(--primary);
+  animation: artifact-preparation-spin 1s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .artifact-preparation-stage,
+  .artifact-preparation-spinner {
+    animation: none;
+  }
 }
 
 .artifact-template-art {

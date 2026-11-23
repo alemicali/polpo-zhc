@@ -1,9 +1,11 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
 import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
+import { BubbleMenu } from "@tiptap/react/menus";
+import { TextSelection } from "@tiptap/pm/state";
 import {
   Bold, ChevronDown, Code, Eye, FileImage, Italic, Link2, List, ListChecks, ListOrdered,
   Minus, MoreHorizontal, PanelLeft, Quote, Redo2, SquareCode, Strikethrough, Table2, Type, Underline, Undo2,
-  Pencil, Video,
+  Pencil, Sparkles, Video,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +17,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { embeddedDocImage } from "./artifact-doc-assets";
+import { blankDocContent, DocEmptyHints } from "./artifact-doc-empty";
 import { artifactDocExtensions, artifactDocUrl, docFontFamilies } from "./artifact-doc-format";
 import { ArtifactDocMarkdown } from "./artifact-doc-preview";
 import { DocChoiceEditContext } from "./artifact-doc-choice-context";
@@ -26,9 +29,27 @@ import { newDocTab, readDocTabs, writeDocTabs, type ArtifactDocTab } from "./art
 const headingLevels = [1, 2, 3, 4, 5, 6] as const;
 const fontLabels = { sans: "Sans serif", serif: "Serif", mono: "Monospace" };
 
+const docSurfaceStyle = {
+  colorScheme: "light",
+  "--background": "#fff",
+  "--foreground": "#1e293b",
+  "--card": "#f8fafc",
+  "--card-foreground": "#1e293b",
+  "--border": "#e2e8f0",
+  "--muted": "#f1f5f9",
+  "--muted-foreground": "#526177",
+  "--accent": "#edf2f8",
+  "--accent-foreground": "#1e293b",
+  "--primary": "#3053a6",
+  "--primary-foreground": "#fff",
+  "--ring": "#516da4",
+} as CSSProperties;
+const docScroll = "min-h-0 min-w-0 flex-1 overflow-y-auto px-5 pb-20 pt-16 sm:px-8";
+const docColumn = "mx-auto w-full max-w-[672px]";
 const docTypography = [
-  "min-h-[45vh] break-words text-[15px] leading-7 outline-none",
-  "[&>:first-child]:mt-0 [&_p]:my-3 [&_h1]:mb-5 [&_h1]:mt-7 [&_h1]:font-heading [&_h1]:text-3xl [&_h1]:font-semibold",
+  "min-h-[45vh] break-words text-base leading-6 outline-none",
+  "[&_p]:my-2 [&_h1:first-child]:mt-0 [&_h1]:mb-2 [&_h1]:mt-7 [&_h1]:font-serif [&_h1]:text-[32px] [&_h1]:leading-[1.2] [&_h1]:font-normal",
+  "[&_[data-doc-placeholder]]:relative [&_[data-doc-placeholder]::before]:pointer-events-none [&_[data-doc-placeholder]::before]:absolute [&_[data-doc-placeholder]::before]:text-neutral-500 [&_[data-doc-placeholder]::before]:content-[attr(data-doc-placeholder)]",
   "[&_h2]:mb-3 [&_h2]:mt-6 [&_h2]:text-2xl [&_h2]:font-semibold",
   "[&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:text-xl [&_h3]:font-semibold",
   "[&_h4]:my-2 [&_h4]:text-lg [&_h4]:font-semibold [&_h5]:my-2 [&_h5]:font-semibold [&_h6]:my-2 [&_h6]:font-semibold",
@@ -77,9 +98,15 @@ function FormatButton({ label, active, ...props }: React.ComponentProps<typeof B
 interface DocEditorProps {
   content: string;
   onChange: (content: string) => void;
+  instanceName?: string;
+  onAskAssistant?: (selection?: string) => void;
 }
 
-export function ArtifactDocEditor({ content, onChange }: DocEditorProps) {
+interface ArtifactDocEditorProps extends DocEditorProps {
+  readOnly?: boolean;
+}
+
+export function ArtifactDocEditor({ content, onChange, readOnly = false, instanceName = "Polpo", onAskAssistant }: ArtifactDocEditorProps) {
   const book = useMemo(() => readDocTabs(content), [content]);
   const choices = useMemo(() => readChoiceDefinitions(content), [content]);
   const [activeId, setActiveId] = useState(book.tabs[0].id);
@@ -88,6 +115,7 @@ export function ArtifactDocEditor({ content, onChange }: DocEditorProps) {
   const [tabDialog, setTabDialog] = useState<{ action: "rename" | "delete"; tab: ArtifactDocTab; title: string } | null>(null);
   const sidebarId = useId();
   const activeTab = book.tabs.find((tab) => tab.id === activeId) ?? book.tabs[0];
+  const editing = !readOnly && mode === "editing";
 
   function updateTab(tabId: string, patch: Partial<Pick<ArtifactDocTab, "title" | "content">>) {
     onChange(writeDocTabs({
@@ -140,18 +168,18 @@ export function ArtifactDocEditor({ content, onChange }: DocEditorProps) {
   }
 
   return (
-    <div className="@container relative flex h-full min-h-0 flex-col">
-      <div className="flex min-h-10 shrink-0 items-center justify-between gap-2 border-b bg-background px-2 py-1 sm:px-4">
-        <div role="group" aria-label="Document actions">
-          <Button type="button" size="sm" variant={tabsOpen ? "secondary" : "ghost"} aria-controls={sidebarId}
-            aria-expanded={tabsOpen} onClick={() => setTabsOpen((open) => !open)}>
-            <PanelLeft /> Tabs
+    <div className="@container relative isolate flex h-full min-h-0 flex-col bg-background text-foreground" style={docSurfaceStyle}>
+      <div className="pointer-events-none absolute inset-x-0 top-3 z-20 flex items-center justify-between gap-2 px-3 sm:px-4">
+        <div role="group" aria-label="Document actions" className="pointer-events-auto">
+          <Button type="button" size="icon" variant={tabsOpen ? "secondary" : "outline"} aria-controls={sidebarId}
+            aria-label="Tabs" title={activeTab.title} aria-expanded={tabsOpen} onClick={() => setTabsOpen((open) => !open)}>
+            <PanelLeft />
           </Button>
         </div>
-        <div role="group" aria-label="View options">
+        {!readOnly && <div role="group" aria-label="View options" className="pointer-events-auto">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button type="button" size="sm" variant="ghost" aria-label={mode === "editing" ? "Editing, mode" : "Reading, mode"}>
+              <Button type="button" size="sm" variant="outline" aria-label={mode === "editing" ? "Editing, mode" : "Reading, mode"}>
                 {mode === "editing" ? <Pencil /> : <Eye />} {mode === "editing" ? "Editing" : "Reading"} <ChevronDown />
               </Button>
             </DropdownMenuTrigger>
@@ -160,29 +188,30 @@ export function ArtifactDocEditor({ content, onChange }: DocEditorProps) {
               <DropdownMenuItem onSelect={() => setMode("reading")}><Eye /> Reading</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-        </div>
+        </div>}
       </div>
-      <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
-        <aside id={sidebarId} hidden={!tabsOpen} className="max-h-42 shrink-0 overflow-auto border-b bg-card px-3 py-2 sm:max-h-none sm:w-52 sm:border-b-0 sm:border-r">
+      <div className="relative flex min-h-0 flex-1">
+        <aside id={sidebarId} hidden={!tabsOpen} className="absolute left-3 top-15 z-10 max-h-[calc(100%-8rem)] w-50 overflow-auto rounded-lg border bg-card px-3 py-2 shadow-sm @4xl:left-[max(12px,calc(50%_-_556px))]">
           <DocTabNavigation
             tabs={book.tabs}
             activeId={activeTab.id}
             onSelect={setActiveId}
-            onAdd={mode === "editing" ? () => addTab() : undefined}
-            onAction={mode === "editing" ? tabAction : undefined}
+            onAdd={editing ? () => addTab() : undefined}
+            onAction={editing ? tabAction : undefined}
           />
         </aside>
         <div className="min-h-0 min-w-0 flex-1">
-          {mode === "editing" ? (
+          {editing ? (
             <DocChoiceEditContext.Provider value={(definition) => onChange(writeDocTabs({
               ...book,
               tabs: book.tabs.map((tab) => ({ ...tab, content: updateChoiceDefinition(tab.content, definition) })),
             }))}>
-              <DocTabEditor key={activeTab.id} content={activeTab.content} choices={choices} onChange={(text) => updateTab(activeTab.id, { content: text })} />
+              <DocTabEditor key={activeTab.id} content={activeTab.content} choices={choices} instanceName={instanceName}
+                onAskAssistant={onAskAssistant} onChange={(text) => updateTab(activeTab.id, { content: text })} />
             </DocChoiceEditContext.Provider>
           ) : (
-            <div className="h-full overflow-auto bg-muted/25 px-3 py-4 sm:px-8 sm:py-7">
-              <article className="prose prose-sm dark:prose-invert mx-auto min-h-full w-full max-w-3xl rounded-lg border bg-background px-5 py-8 shadow-sm sm:px-12">
+            <div className={`h-full ${docScroll}`}>
+              <article className={`${docColumn} ${docTypography}`}>
                 {activeTab.content ? <ArtifactDocMarkdown content={activeTab.content} /> : <p className="text-muted-foreground">This tab is empty.</p>}
               </article>
             </div>
@@ -220,18 +249,37 @@ export function ArtifactDocEditor({ content, onChange }: DocEditorProps) {
   );
 }
 
-function DocTabEditor({ content, onChange, choices }: DocEditorProps & { choices: DocChoiceDefinition[] }) {
+function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAskAssistant }: DocEditorProps & { choices: DocChoiceDefinition[] }) {
   const emitted = useRef(content);
+  const ask = useRef(onAskAssistant);
+  useEffect(() => { ask.current = onAskAssistant; }, [onAskAssistant]);
+  const hasAssistant = !!onAskAssistant;
+  const extensions = useMemo(() => [
+    ...artifactDocExtensions,
+    DocEmptyHints.configure({ ask: () => ask.current?.(), canAsk: hasAssistant, instanceName }),
+  ], [hasAssistant, instanceName]);
   const imageReader = useRef<FileReader | null>(null);
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [insertion, setInsertion] = useState<DocInsertion | null>(null);
   const [dropdown, setDropdown] = useState<{ title: string; body: string; position?: number } | null>(null);
   const editor = useEditor({
-    extensions: artifactDocExtensions,
-    content,
-    contentType: "markdown",
+    extensions,
+    content: content.trim() ? content : blankDocContent,
+    contentType: content.trim() ? "markdown" : "json",
     shouldRerenderOnTransaction: false,
     editorProps: {
+      handleKeyDown: (view, event) => {
+        if (event.key !== "Tab" || event.metaKey || event.ctrlKey || event.altKey) return false;
+        const { doc, selection } = view.state;
+        const title = doc.firstChild;
+        if (!selection.empty || title?.type.name !== "heading" || title.attrs.level !== 1) return false;
+        const block = selection.$from.index(0);
+        const bodyIsParagraph = doc.maybeChild(1)?.type.name === "paragraph";
+        if (!bodyIsParagraph || (event.shiftKey ? block !== 1 : block !== 0)) return false;
+        event.preventDefault();
+        view.dispatch(view.state.tr.setSelection(TextSelection.create(doc, event.shiftKey ? 1 : title.nodeSize + 1)).scrollIntoView());
+        return true;
+      },
       handleDoubleClickOn: (_view, _pos, node, nodePos, _event, direct) => {
         if (!direct || node.type.name !== "docDropdown") return false;
         setDropdown({ title: String(node.attrs.title), body: String(node.attrs.body), position: nodePos });
@@ -245,7 +293,7 @@ function DocTabEditor({ content, onChange, choices }: DocEditorProps & { choices
       },
     },
     onUpdate: ({ editor }) => {
-      const markdown = editor.getMarkdown();
+      const markdown = editor.isEmpty ? "" : editor.getMarkdown();
       emitted.current = markdown;
       onChange(markdown);
     },
@@ -254,7 +302,10 @@ function DocTabEditor({ content, onChange, choices }: DocEditorProps & { choices
   useEffect(() => {
     if (!editor || content === emitted.current) return;
     emitted.current = content;
-    editor.commands.setContent(content, { contentType: "markdown", emitUpdate: false });
+    editor.commands.setContent(content.trim() ? content : blankDocContent, {
+      contentType: content.trim() ? "markdown" : "json",
+      emitUpdate: false,
+    });
   }, [content, editor]);
 
   const format = useEditorState({
@@ -358,15 +409,17 @@ function DocTabEditor({ content, onChange, choices }: DocEditorProps & { choices
     reader.readAsDataURL(file);
   };
 
-  return (
-    <div className="flex h-full min-h-0 flex-col bg-muted/25">
-      <div role="group" aria-label="Document formatting" className="flex flex-wrap items-center gap-x-1 gap-y-1 border-b bg-background px-2 py-1 @4xl:absolute @4xl:left-1/2 @4xl:top-1 @4xl:z-10 @4xl:w-max @4xl:-translate-x-1/2 @4xl:flex-nowrap @4xl:border-b-0 @4xl:bg-transparent @4xl:py-0">
-        <div role="group" aria-label="Document view and history" className="flex items-center gap-0.5 border-r pr-1.5">
-          <FormatButton label="Document outline" active={outlineOpen} aria-controls="doc-outline" aria-expanded={outlineOpen} onClick={() => setOutlineOpen((value) => !value)}><PanelLeft /></FormatButton>
-          <FormatButton label="Undo" disabled={!format.undo} onClick={() => editor.chain().focus().undo().run()}><Undo2 /></FormatButton>
-          <FormatButton label="Redo" disabled={!format.redo} onClick={() => editor.chain().focus().redo().run()}><Redo2 /></FormatButton>
-        </div>
+  const askWithSelection = () => {
+    if (!onAskAssistant) return;
+    const { from, to, empty } = editor.state.selection;
+    onAskAssistant(empty ? undefined : editor.state.doc.textBetween(from, to, "\n").trim() || undefined);
+  };
 
+  return (
+    <div className="relative flex h-full min-h-0 flex-col">
+      <BubbleMenu editor={editor} updateDelay={80} options={{ placement: "top", offset: 7, flip: true, shift: true }}
+        className="z-30 flex max-w-[calc(100vw-1rem)] flex-wrap items-center rounded-lg border bg-background p-1 shadow-lg"
+        role="group" aria-label="Document formatting">
         <div role="group" aria-label="Text format" className="flex items-center gap-0.5 border-r px-1.5">
           <select
             className="mr-1 h-8 rounded-control border border-border bg-background px-2 text-xs font-medium focus-visible:outline-2 focus-visible:outline-ring"
@@ -392,9 +445,10 @@ function DocTabEditor({ content, onChange, choices }: DocEditorProps & { choices
           <FormatButton label="Numbered list" active={format.orderedList} onClick={() => editor.chain().focus().toggleOrderedList().run()}><ListOrdered /></FormatButton>
         </div>
 
-      </div>
+        {onAskAssistant && <FormatButton label={`Ask ${instanceName} about selection`} onClick={askWithSelection}><Sparkles /></FormatButton>}
+      </BubbleMenu>
 
-      <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
+      <div className="flex min-h-0 flex-1">
         {outlineOpen && (
           <nav id="doc-outline" aria-label="Document headings" className="max-h-38 shrink-0 overflow-auto border-b bg-background px-3 py-3 sm:max-h-none sm:w-52 sm:border-b-0 sm:border-r">
             <h2 className="mb-2 px-2 text-sm font-semibold">Outline</h2>
@@ -413,19 +467,16 @@ function DocTabEditor({ content, onChange, choices }: DocEditorProps & { choices
             </ul>
           </nav>
         )}
-        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-3 py-2 sm:px-8 sm:py-3">
-          <EditorContent
-            editor={editor}
-            className="mx-auto min-h-full w-full max-w-3xl rounded-lg border bg-background px-5 pb-12 pt-3 shadow-sm sm:px-12"
-          />
+        <div className={docScroll}>
+          <EditorContent editor={editor} className={`min-h-full ${docColumn}`} />
         </div>
       </div>
 
-      <div className="shrink-0 px-2 pb-3 pt-1">
-        <div role="group" aria-label="Insert tools" className="mx-auto flex w-fit max-w-full flex-wrap items-center justify-center gap-0.5 rounded-lg border bg-background px-1 py-0.5 shadow-sm">
+      <div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 px-2">
+        <div role="group" aria-label="Insert tools" className="pointer-events-auto mx-auto flex w-fit max-w-full flex-wrap items-center justify-center gap-0.5 rounded-lg border bg-background px-1 py-px shadow-sm">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button type="button" size="sm" variant="ghost" aria-label="Font" title="Font"><Type /> <span className="hidden sm:inline">Font</span> <ChevronDown /></Button>
+              <FormatButton label="Font"><Type /></FormatButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
               <DropdownMenuLabel>Typeface</DropdownMenuLabel>
@@ -440,7 +491,7 @@ function DocTabEditor({ content, onChange, choices }: DocEditorProps & { choices
           </DropdownMenu>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button type="button" size="sm" variant={format.table ? "secondary" : "ghost"} aria-label="Table" title="Table"><Table2 /> <span className="hidden sm:inline">Table</span></Button>
+              <FormatButton label="Table" active={format.table}><Table2 /></FormatButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
               <DropdownMenuItem onSelect={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}>Insert 3 × 3 table</DropdownMenuItem>
@@ -459,7 +510,7 @@ function DocTabEditor({ content, onChange, choices }: DocEditorProps & { choices
           </DropdownMenu>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button type="button" size="sm" variant="ghost" aria-label="Image or video" title="Image or video"><FileImage /> <span className="hidden sm:inline">Media</span></Button>
+              <FormatButton label="Image or video"><FileImage /></FormatButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
               <DropdownMenuItem onSelect={() => setInsertion({ kind: "image", url: "", label: "" })}><FileImage /> Image</DropdownMenuItem>
@@ -483,8 +534,15 @@ function DocTabEditor({ content, onChange, choices }: DocEditorProps & { choices
               <DropdownMenuItem onSelect={() => editor.chain().focus().toggleBlockquote().run()}><Quote /> Quote{format.blockquote && " ✓"}</DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onSelect={() => editor.chain().focus().unsetAllMarks().clearNodes().run()}>Clear formatting</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setOutlineOpen((open) => !open)}><PanelLeft /> {outlineOpen ? "Hide outline" : "Show outline"}</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem disabled={!format.undo} onSelect={() => editor.chain().focus().undo().run()}><Undo2 /> Undo</DropdownMenuItem>
+              <DropdownMenuItem disabled={!format.redo} onSelect={() => editor.chain().focus().redo().run()}><Redo2 /> Redo</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          {onAskAssistant && <Button type="button" size="sm" variant="secondary" className="ml-1 max-w-48 gap-1.5" onClick={askWithSelection}>
+            <Sparkles className="size-3.5" /> <span className="truncate">Ask {instanceName}</span>
+          </Button>}
         </div>
       </div>
 

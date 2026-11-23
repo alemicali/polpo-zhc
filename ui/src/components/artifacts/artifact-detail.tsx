@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, use, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ArrowLeft, Check, ChevronDown, Cloud, Code2, CopyPlus, Download, ExternalLink, FileDown, History, Link2, Maximize2, MessageSquare, Pencil, Pin, Printer, RefreshCw, RotateCcw, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -11,7 +11,9 @@ import { artifactDownload, artifactWorkspace, artifactsApi, downloadArtifactFile
 import { absoluteTime, artifactAuthor } from "@/lib/artifacts-list";
 import { artifactPath, useArtifactActions } from "@/hooks/use-artifact-actions";
 import { productName, useInstanceBranding } from "@/lib/branding";
-import { sidebarActions, useSidebarOpen } from "@/hooks/chat-context";
+import { askAboutArtifact } from "@/hooks/use-artifact-quote";
+import { useProjectInfo } from "@/hooks/use-polpo";
+import { ChatSessionStateContext, sidebarActions, useSidebarOpen } from "@/hooks/chat-context";
 import { useLayoutMode } from "@/hooks/use-layout-mode";
 import { ArtifactIcon } from "./artifact-icon";
 import { ArtifactPreparation } from "./artifact-preparation";
@@ -36,6 +38,8 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
   const product = productName(useInstanceBranding());
   const chatOpen = useSidebarOpen();
   const layout = useLayoutMode();
+  const { info } = useProjectInfo();
+  const sessionId = use(ChatSessionStateContext)?.sessionId ?? null;
   const stage = useRef<HTMLDivElement>(null);
   const [artifact, setArtifact] = useState<Artifact | null>(() =>
     location.state?.createdArtifact?.id === id ? location.state.createdArtifact : null);
@@ -62,6 +66,10 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
     }, (err: Error) => { if (active) setError(err.message); });
     return () => { active = false; };
   }, [id, lastEvent]);
+
+  const acceptCommitted = useCallback((next: Artifact) => {
+    setArtifact(current => current && current.updatedAt > next.updatedAt ? current : next);
+  }, []);
 
   const dirty = !!draft && (draft.content !== draft.base.content || draft.title !== draft.base.title);
 
@@ -218,6 +226,12 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
     navigate(path);
   }
 
+  function askAssistant(selection?: string) {
+    askAboutArtifact(id, sessionId, selection);
+    if (window.matchMedia("(max-width: 1023px)").matches) void leaveEditor(`/chat?artifact=${encodeURIComponent(id)}`);
+    else sidebarActions.setSidebarOpen(true);
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex h-[45px] shrink-0 items-center gap-1.5 border-b bg-background px-2">
@@ -244,7 +258,7 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
             {editable && <DropdownMenuItem onSelect={() => setRename(draft?.title ?? artifact.title)}><Pencil /> Rename</DropdownMenuItem>}
             {!legacy && <DropdownMenuItem disabled={busy || dirty || saving} onSelect={() => void duplicate()}><CopyPlus /> Duplicate</DropdownMenuItem>}
             {!workspace && (artifact.type === "html" || legacy) && <DropdownMenuItem onSelect={() => setRefreshKey(key => key + 1)}><RefreshCw /> Refresh</DropdownMenuItem>}
-            {artifact.versions.length > 0 && <DropdownMenuItem onSelect={() => setShowHistory(true)}><History /> Version history</DropdownMenuItem>}
+            {!legacy && <DropdownMenuItem onSelect={() => setShowHistory(true)}><History /> Version history</DropdownMenuItem>}
             <DropdownMenuSeparator />
             {!legacy && <DropdownMenuItem onSelect={() => setSource({ value: content, version: artifact.version })}><Code2 /> View source</DropdownMenuItem>}
             {editable && dirty && <DropdownMenuItem disabled={saving || versionChanged} onSelect={() => void save()}><Save /> Save now</DropdownMenuItem>}
@@ -263,28 +277,13 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
           {autoSaveStatus === "Saved" ? <Check className="size-3.5" /> : <Cloud className="size-3.5" />}
           <span className={autoSaveStatus === "Saved" ? "sr-only" : "hidden sm:inline"}>{autoSaveStatus}</span>
         </span>}
-        {!legacy && showHistory && artifact.versions.length > 0 && (
-          <label className="flex items-center gap-1 rounded-md border border-border px-1.5 text-xs text-muted-foreground">
-            <History className="size-3.5" />
-            <select className="h-7 max-w-28 rounded bg-transparent text-xs sm:max-w-36" value={shownVersion?.version ?? ""}
-              onChange={(event) => {
-                if (dirty && !window.confirm("Discard your unsaved changes?")) return;
-                setDraft(undefined);
-                setSaveError(undefined);
-                setVersion(event.target.value ? Number(event.target.value) : undefined);
-              }} aria-label="Version history" disabled={busy || saving}>
-              <option value="">v{artifact.version} (current)</option>
-              {artifact.versions.map((item) => <option key={item.version} value={item.version}>v{item.version} · {absoluteTime(item.at)}</option>)}
-            </select>
-          </label>
-        )}
         {shownVersion && <Button size="sm" variant="outline" disabled={busy} onClick={() => void restore()}><RotateCcw className="size-3.5" /> Restore</Button>}
         {embedded && <Button size="sm" variant="outline" onClick={() => navigate(artifactPath(id))} aria-label="Open"><ExternalLink className="size-3.5" /> Open</Button>}
       </header>
-      {(artifact.description || artifact.sources?.length || shownVersion || error) && (
+      {((artifact.type !== "doc" && (artifact.description || artifact.sources?.length)) || shownVersion || error) && (
         <p className="px-1 text-xs text-muted-foreground">
           {shownVersion && `Showing v${shownVersion.version}${shownVersion.author ? ` by ${artifactAuthor(shownVersion.author, product)}` : ""}. `}
-          {artifact.description}
+          {artifact.type !== "doc" && artifact.description}
           {!!artifact.sources?.length && ` Reads ${artifact.sources.join(", ")}.`}
           {error && <span className="text-destructive"> {error}</span>}
         </p>
@@ -308,11 +307,12 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
           {workspace === "slides" ? (
             <SlidesEditor content={content} onChange={onChange} title={artifact.title} />
           ) : workspace === "sheets" ? (
-            <ActiveWorkbook artifactId={id} content={content} onChange={onChange} version={shownVersion?.version ?? artifact.version} follow={!dirty && !shownVersion && !embedded} />
+            <ActiveWorkbook onCommitted={acceptCommitted} onShowHistory={() => setShowHistory(true)} artifactId={id} content={content} onChange={onChange} version={shownVersion?.version ?? artifact.version} follow={!dirty && !shownVersion && !embedded} />
           ) : workspace === "motion" ? (
             <MotionEditor content={content} onChange={onChange} title={artifact.title} />
-          ) : onChange && artifact.type === "doc" ? (
-            <DocEditor content={content} onChange={onChange} />
+          ) : artifact.type === "doc" ? (
+            <DocEditor content={content} readOnly={!editable} onChange={onChange ?? (() => {})}
+              instanceName={info?.project || product} onAskAssistant={editable ? askAssistant : undefined} />
           ) : artifact.type === "html" && artifact.kind === "design" ? (
             <DesignEditor artifact={artifact} content={content} onChange={onChange} refreshKey={refreshKey} />
           ) : (
@@ -320,6 +320,24 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
           )}
         </Suspense>
       </div>
+      <Dialog open={showHistory} onOpenChange={setShowHistory}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader><DialogTitle>Version history</DialogTitle><DialogDescription>{artifact.title}</DialogDescription></DialogHeader>
+          <div className="max-h-[55dvh] overflow-auto" role="list" aria-label="Artifact versions">
+            {[artifact, ...artifact.versions].map(item => <button key={item.version} type="button" disabled={saving || busy}
+              className="flex w-full items-center justify-between gap-3 rounded-md px-2 py-2 text-left hover:bg-accent"
+              onClick={async () => {
+                if (dirty && !(await save())) return;
+                setVersion(item.version === artifact.version ? undefined : item.version);
+                setShowHistory(false);
+              }}>
+              <span className="min-w-0"><span className="block text-sm font-medium">Version {item.version}{item.version === artifact.version ? " · Current" : ""}</span>
+                <span className="block truncate text-xs text-muted-foreground">{absoluteTime("at" in item ? item.at : artifact.updatedAt)}</span></span>
+              {(shownVersion?.version ?? artifact.version) === item.version && <Check className="size-4" />}
+            </button>)}
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog open={rename !== undefined} onOpenChange={open => { if (!open) setRename(undefined); }}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader><DialogTitle>Rename artifact</DialogTitle></DialogHeader>

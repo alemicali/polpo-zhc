@@ -1,6 +1,5 @@
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { artifactsApi, type ArtifactType } from "@/lib/artifacts-api";
 import { artifactPath } from "@/hooks/use-artifact-actions";
@@ -48,9 +47,12 @@ export function ArtifactTemplates() {
 
   return (
     <section aria-labelledby="artifact-templates-heading" className="min-w-0 shrink-0 py-1.5">
-      <h2 id="artifact-templates-heading" className="mb-2.5 font-heading text-sm font-semibold text-foreground">
-        Make something new
-      </h2>
+      <div className="mb-2.5 flex min-h-5 items-center justify-between gap-2">
+        <h2 id="artifact-templates-heading" className="shrink-0 font-heading text-sm font-semibold text-foreground">
+          Make something new
+        </h2>
+        {pending && <ArtifactPreparation phase="Preparing" kind={pending.kind ?? pending.type} compact />}
+      </div>
       <div className="-mx-1 grid auto-cols-[7rem] grid-flow-col gap-2 overflow-x-auto px-1 pb-1 sm:auto-cols-[7.5rem]">
         {TEMPLATES.map((template) => (
           <button key={template.label} type="button" disabled={!!pending} aria-label={`Create ${template.label}`}
@@ -62,15 +64,12 @@ export function ArtifactTemplates() {
             )}
             onClick={() => void create(template)}>
             <span className="artifact-template-glyph relative grid min-h-0 flex-1 place-items-center overflow-hidden rounded-xl border">
-              {pending === template
-                ? <Loader2 className="relative size-6 motion-safe:animate-spin" aria-hidden="true" />
-                : <ArtifactIcon artifact={template} className="relative size-7 sm:size-8" />}
+              <ArtifactIcon artifact={template} className="relative size-7 sm:size-8" />
             </span>
             <span className="truncate px-0.5 pt-1 text-left text-sm font-medium text-foreground">{template.label}</span>
           </button>
         ))}
       </div>
-      {pending && <div className="mt-2"><ArtifactPreparation phase="Preparing" kind={pending.kind ?? pending.type} compact /></div>}
     </section>
   );
 }

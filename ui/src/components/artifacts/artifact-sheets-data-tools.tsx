@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from "react";
-import { ChartNoAxesColumn, ChevronDown, ListChecks, Palette, Sigma, SquareCheck, Trash2 } from "lucide-react";
+import { useState, type FormEvent, type ReactNode } from "react";
+import { CalendarDays, ChartNoAxesColumn, ChevronDown, FunctionSquare, ListChecks, Palette, SquareCheck, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -19,57 +19,27 @@ const chartLabels: Record<SheetChart["kind"], string> = { bar: "Bar", line: "Lin
 const controlClass = "w-full rounded-control border border-border bg-background px-3 py-1.5 text-sm";
 const calculations = { SUM: "Sum", AVERAGE: "Average", COUNT: "Count numbers", MIN: "Minimum", MAX: "Maximum" } as const;
 export type SheetCalculation = keyof typeof calculations;
+export type SheetCellType = "automatic" | "date" | "checkbox";
 
 export function SheetDataTools({
-  range, validation, rules, chartCount, onValidation, onCheckboxes, onRules, onChart, onCalculate,
+  range, validation, rules, chartCount, cellType, onType, onValidation, onCheckboxes, onRules, onChart, children,
 }: {
   range: string;
   validation?: CellValidation;
   rules: SheetRule[];
   chartCount: number;
+  cellType: SheetCellType;
+  onType: (type: SheetCellType) => void;
   onValidation: (validation: CellValidation | null) => void;
   onCheckboxes: (checked: boolean) => void;
   onRules: (rules: SheetRule[]) => void;
   onChart: (chart: SheetChart) => void;
-  onCalculate: (operation: SheetCalculation) => void;
+  children: ReactNode;
 }) {
   const [mode, setMode] = useState<"dropdown" | "rules" | "chart" | null>(null);
   const list = validation?.type === "list" ? validation.options : [];
   return (
-    <div className="flex shrink-0 items-center gap-0.5">
-      <Button type="button" size="icon-xs" variant={validation?.type === "checkbox" ? "secondary" : "ghost"}
-        aria-label="Checkbox" title="Checkbox" aria-pressed={validation?.type === "checkbox"}
-        onClick={() => onValidation(validation?.type === "checkbox" ? null : { type: "checkbox" })}>
-        <SquareCheck aria-hidden="true" />
-      </Button>
-      {validation?.type === "checkbox" && <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button type="button" size="icon-xs" variant="ghost" aria-label="Checkbox actions" title="Checkbox actions">
-            <ChevronDown aria-hidden="true" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start">
-          <DropdownMenuItem onSelect={() => onCheckboxes(true)}>Check all</DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => onCheckboxes(false)}>Uncheck all</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>}
-      <Dialog open={mode === "dropdown"} onOpenChange={(open) => setMode(open ? "dropdown" : null)}>
-        <DialogTrigger asChild>
-          <Button type="button" size="icon-xs" variant={list.length ? "secondary" : "ghost"} aria-label="Dropdown" title="Dropdown">
-            <ListChecks aria-hidden="true" />
-          </Button>
-        </DialogTrigger>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Dropdown options</DialogTitle>
-            <DialogDescription>Choose the values allowed in {range}.</DialogDescription>
-          </DialogHeader>
-          <DropdownForm options={list} onSave={(options) => {
-            onValidation(options ? { type: "list", options } : null);
-            setMode(null);
-          }} />
-        </DialogContent>
-      </Dialog>
+    <div className="flex shrink-0 items-center gap-1">
       <Dialog open={mode === "rules"} onOpenChange={(open) => setMode(open ? "rules" : null)}>
         <DialogTrigger asChild>
           <Button type="button" size="icon-xs" variant="ghost" aria-label="Conditional formatting" title="Conditional formatting">
@@ -98,23 +68,60 @@ export function SheetDataTools({
           <ChartForm range={range} onSave={(chart) => { onChart(chart); setMode(null); }} />
         </DialogContent>
       </Dialog>
-      <div className="ml-1 flex items-center gap-0.5 border-l border-border pl-1.5">
-        <Button type="button" size="icon-xs" variant="ghost" aria-label="Sum" title="Sum" onClick={() => onCalculate("SUM")}>
-          <Sigma aria-hidden="true" />
-        </Button>
+      <div className="flex items-center gap-1 border-x border-border px-1">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button type="button" size="icon-xs" variant="ghost" aria-label="More calculations" title="More calculations">
-              <ChevronDown aria-hidden="true" />
+            <Button type="button" size="xs" variant={cellType === "automatic" ? "ghost" : "secondary"} aria-label="Cell type" title="Cell type">
+              {cellType === "checkbox" ? <SquareCheck aria-hidden="true" /> : cellType === "date" ? <CalendarDays aria-hidden="true" /> : "Auto"}
+              <ChevronDown aria-hidden="true" className="size-3" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            {(Object.keys(calculations) as SheetCalculation[]).map((operation) =>
-              <DropdownMenuItem key={operation} onSelect={() => onCalculate(operation)}>{calculations[operation]}</DropdownMenuItem>)}
+          <DropdownMenuContent align="start" side="top">
+            <DropdownMenuItem onSelect={() => onType("automatic")}>Automatic</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => onType("date")}><CalendarDays aria-hidden="true" />Date</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => onType("checkbox")}><SquareCheck aria-hidden="true" />Checkbox</DropdownMenuItem>
+            {cellType === "checkbox" && <>
+              <DropdownMenuItem onSelect={() => onCheckboxes(true)}>Check all</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => onCheckboxes(false)}>Uncheck all</DropdownMenuItem>
+            </>}
           </DropdownMenuContent>
         </DropdownMenu>
+        {children}
       </div>
+      <Dialog open={mode === "dropdown"} onOpenChange={(open) => setMode(open ? "dropdown" : null)}>
+        <DialogTrigger asChild>
+          <Button type="button" size="icon-xs" variant={list.length ? "secondary" : "ghost"} aria-label="Dropdown" title="Dropdown">
+            <ListChecks aria-hidden="true" />
+          </Button>
+        </DialogTrigger>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Dropdown options</DialogTitle>
+            <DialogDescription>Choose the values allowed in {range}.</DialogDescription>
+          </DialogHeader>
+          <DropdownForm options={list} onSave={(options) => {
+            onValidation(options ? { type: "list", options } : null);
+            setMode(null);
+          }} />
+        </DialogContent>
+      </Dialog>
     </div>
+  );
+}
+
+export function SheetFunctionMenu({ onCalculate }: { onCalculate: (operation: SheetCalculation) => void }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button type="button" size="icon-sm" variant="ghost" aria-label="Functions" title="Functions">
+          <FunctionSquare aria-hidden="true" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start">
+        {(Object.keys(calculations) as SheetCalculation[]).map((operation) =>
+          <DropdownMenuItem key={operation} onSelect={() => onCalculate(operation)}>{calculations[operation]}</DropdownMenuItem>)}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

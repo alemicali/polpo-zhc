@@ -608,9 +608,9 @@ export function ArtifactSlidesEditor({ content, onChange, title = "Slides" }: { 
             </div>
           ) : (<>
             <div className="min-h-0 flex-1 overflow-auto [container-type:size]">
-              <div className={`flex min-h-full items-center justify-center p-3 @4xl:p-6 ${zoom ? "w-max min-w-full" : ""}`}>
-                <div ref={visibleCanvas} style={{ width: zoom ? SLIDE_LOGICAL_WIDTH * zoom / 100 : "min(100%, max(12rem, calc((100cqh - 3rem) * 16 / 9)))" }}
-                  className="shrink-0 overflow-hidden rounded-sm border border-border/70 shadow-sm">
+              <div className={`flex min-h-full items-center justify-center p-3 @4xl:px-6 @4xl:pt-[1.125rem] @4xl:pb-[1.625rem] ${zoom ? "w-max min-w-full" : ""}`}>
+                <div ref={visibleCanvas} style={{ width: zoom ? SLIDE_LOGICAL_WIDTH * zoom / 100 : "min(calc(100% - 2px), max(12rem, calc((100cqh - 3rem) * 16 / 9)))" }}
+                  className="box-content shrink-0 overflow-hidden rounded-sm border border-border/70 shadow-sm">
                   <SlideCanvas slide={shownSlide} onField={onChange ? patchSlide : undefined} onElement={onChange ? patchElement : undefined}
                     selected={selected} onSelect={onChange ? setSelected : undefined} onDrag={onChange ? drag : undefined} />
                 </div>

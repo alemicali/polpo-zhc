@@ -25,21 +25,36 @@ function useSampledTool(tool: ToolCallInfo | undefined) {
   return sample?.id === tool?.id ? sample : undefined;
 }
 
-export function ActiveWorkbook({ artifactId, content, version, onChange, follow }: {
+export function ActiveWorkbook({ artifactId, content, version, onChange, follow, onShowHistory, onCommitted }: {
   artifactId: string; content: string; version: number; follow: boolean; onChange?: (value: string) => void;
+  onShowHistory: () => void; onCommitted: (artifact: Artifact) => void;
 }) {
   const chat = use(ChatStateContext);
   const message = chat?.messages.at(-1);
-  const tool = follow && chat?.isLoading ? message?.toolCalls?.find(call =>
-    call.name === "artifact_update" && (call.state === "preparing" || call.state === "calling") &&
-    (call.arguments?.id === artifactId || /"id"\s*:\s*"(art_[\w-]+)"/.exec(call.argumentsText ?? "")?.[1] === artifactId)) : undefined;
+  const candidate = follow ? message?.toolCalls?.slice().reverse().find(call =>
+    call.name === "artifact_update" && (call.arguments?.id === artifactId ||
+      /"id"\s*:\s*"(art_[\w-]+)"/.exec(call.argumentsText ?? "")?.[1] === artifactId)) : undefined;
+  const committedVersion = candidate?.state === "completed" ? Number(/\(now v(\d+)\)/.exec(candidate.result ?? "")?.[1]) : 0;
+  const awaitingCommit = committedVersion > version;
+  const generating = !!chat?.isLoading && (candidate?.state === "preparing" || candidate?.state === "calling");
+  const [failedFetch, setFailedFetch] = useState<string>();
+  const tool = generating || (awaitingCommit && failedFetch !== candidate?.id) ? candidate : undefined;
+
+  useEffect(() => {
+    if (!awaitingCommit) return;
+    let active = true;
+    void artifactsApi.get(artifactId).then(value => {
+      if (active) onCommitted(value);
+    }, () => { if (active) setFailedFetch(candidate?.id); });
+    return () => { active = false; };
+  }, [artifactId, awaitingCommit, candidate?.id, onCommitted]);
   const sample = useSampledTool(tool);
   const preview = useMemo(() => {
     if (!sample) return;
     const args = artifactStreamArgs(sample);
     return args.id === artifactId ? streamingWorkbook(sample, args, content) : undefined;
   }, [sample, artifactId, content]);
-  return <SheetEditor content={preview ?? content} streaming={!!preview} onChange={preview ? undefined : onChange}
+  return <SheetEditor content={preview ?? content} streaming={generating && !!preview} onShowHistory={onShowHistory} onChange={preview ? undefined : onChange}
     appearanceVersion={preview ? -(sample?.argumentsText?.length ?? 1) : version} />;
 }
 

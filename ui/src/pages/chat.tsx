@@ -166,6 +166,7 @@ import {
   setAppPreviewContext,
   useAppPreviewContext,
 } from "@/hooks/use-app-preview-context";
+import { clearArtifactQuote, useArtifactQuote } from "@/hooks/use-artifact-quote";
 import { clearDataPromptContext, formatDataPromptContext, removeDataPromptItem, useDataPromptContext } from "@/hooks/use-data-context";
 import { GroupConversation } from "@/components/groups/group-conversation";
 import { GroupSettingsDialog, NewGroupDialog } from "@/components/groups/group-dialogs";
@@ -3684,6 +3685,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
   const artifactId = routeId ?? (mobileId && /^art_[\w-]+$/.test(mobileId) ? mobileId : undefined);
   const { messages, isLoading, pendingQuestions, pendingMission, pendingVault, pendingWhatsApp, pendingEmail, pendingSetDesign, sessionId, selectedAgent, sessions, activeSessionKey } = useChatState();
   const { send, stop, steer, cancelSteer } = useChatActions();
+  const quote = useArtifactQuote(artifactId, sessionId);
   const steersPending = usePendingSteers(activeSessionKey);
   const inputDisabled = useChatInputDisabled({ includeLoading: false });
   const { client } = usePolpo();
@@ -3716,6 +3718,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
   const attachmentCountRef = useRef(0);
   const setAttachmentCount = useCallback((count: number) => { attachmentCountRef.current = count; }, []);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => { if (quote) textareaRef.current?.focus(); }, [quote]);
   const mentionRef = useRef<MentionPopoverHandle>(null);
   const [isRecording, setIsRecording] = useState(false);
   // Tracks whether the composer textarea currently has a non-empty draft.
@@ -3826,6 +3829,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
       }
       const context = [
         artifactId ? `The open artifact is ${artifactId}. Use artifact_get to read its current version and artifact_update to apply requested changes to it.` : undefined,
+        quote?.text ? `Selected document text: ${JSON.stringify(quote.text)}` : undefined,
         activePreviewContext ? formatAppPreviewContext(activePreviewContext) : undefined,
         activeDataContext ? formatDataPromptContext(activeDataContext) : undefined,
       ].filter(Boolean).join("\n\n");
@@ -3837,13 +3841,14 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
           const key = sessionId ?? NEW_SESSION_DRAFT_KEY;
           // A switched-away draft may have been edited independently.
           if (chatInputDrafts.get(key) === message.text) chatInputDrafts.delete(key);
+          if (quote) clearArtifactQuote(quote);
           acknowledge();
         } },
       );
       if (activePreviewContext) clearAppPreviewContext();
       if (activeDataContext) clearDataPromptContext();
     },
-    [activeDataContext, activePreviewContext, artifactId, isLoading, send, sessionId]
+    [activeDataContext, activePreviewContext, artifactId, isLoading, quote, send, sessionId]
   );
 
   // Set the uncontrolled textarea value from speech recognition
@@ -4100,6 +4105,10 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
             />
           </div>
         )}
+        {quote?.text && <div className="mb-2 flex items-center gap-2 rounded-md border-l-2 border-primary bg-muted px-2 py-1">
+          <blockquote className="min-w-0 flex-1 truncate text-xs" title={quote.text}>{quote.text}</blockquote>
+          <Button size="icon-xs" variant="ghost" aria-label="Remove selected text" onClick={() => clearArtifactQuote(quote)}><X /></Button>
+        </div>}
         {mobileId && artifactId && <Link to={`/artifacts/${artifactId}`} className="mb-1 inline-block text-xs text-muted-foreground underline">Return to artifact</Link>}
         {/* Messages joining the running response, then prompts queued after it. */}
         <PendingSteers className="mb-2" steers={steersPending} onCancel={(id) => { void cancelSteer(id); }} />
