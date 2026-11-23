@@ -32,6 +32,19 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-23-compaction-split-turn-files",
+    date: "2026-11-23",
+    kind: "improved",
+    title: "Compattazione: il turno in corso e i file toccati non si perdono",
+    summary: "Quando una conversazione lunga viene compattata a metà di un turno, l'inizio del turno ha un riassunto suo subito prima dei passi recenti, e il riassunto elenca i file letti e modificati.",
+    body: [
+      "- **Turno in corso**: se la compattazione taglia a metà di un turno (la tua richiesta e i primi passi dell'agente finiscono nel riassunto, gli ultimi passi restano), l'inizio del turno viene riassunto a parte (cosa hai chiesto, cosa è già stato fatto, a che punto è) e messo subito prima dei passi conservati, invece di confondersi con il resto della storia. Una chiamata a uno strumento e il suo risultato non vengono mai separati.",
+      "- **File letti e modificati**: il riassunto termina con l'elenco dei file letti e di quelli modificati dall'agente nella parte compattata (senza doppioni, al massimo 100 per elenco), e gli elenchi si sommano compattazione dopo compattazione.",
+      "- Sempre attivo, nessuna nuova impostazione: le conversazioni che non vengono compattate non cambiano. Idee prese dall'agente di coding Pi.",
+    ].join("\n"),
+    highlight: false,
+  },
+  {
     id: "2026-11-23-webhook-events",
     date: "2026-11-23",
     kind: "improved",
