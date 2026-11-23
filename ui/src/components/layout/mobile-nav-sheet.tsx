@@ -104,7 +104,7 @@ export function MobileNavSheet({ children }: { children: ReactNode }) {
       <SheetTrigger asChild>{children}</SheetTrigger>
       <SheetContent
         side="bottom"
-        className="rounded-t-2xl pb-safe bg-popover/95 backdrop-blur-xl border-border/40 max-h-[85dvh] overflow-y-auto"
+        className="rounded-t-2xl pb-safe bg-popover/95 backdrop-blur-surface border-border/40 max-h-[85dvh] overflow-y-auto"
       >
         <SheetHeader className="px-1">
           <SheetTitle className="text-sm font-bold tracking-tight">Navigate</SheetTitle>

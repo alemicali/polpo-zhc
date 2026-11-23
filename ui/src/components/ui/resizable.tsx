@@ -56,14 +56,14 @@ function ResizableHandle({
         aria-hidden
         className={cn(
           "pointer-events-none absolute inset-y-0 left-1/2 -translate-x-1/2",
-          "w-px rounded-full bg-border/70",
+          "w-px rounded-pill bg-border/70",
           "transition-[width,background-color,box-shadow] duration-300 ease-out",
           // Hover: thicker, primary, glow halo that fades into the panels
           "group-hover/handle:w-[3px] group-hover/handle:bg-primary",
-          "group-hover/handle:shadow-[0_0_10px_color-mix(in_oklch,var(--primary)_55%,transparent),0_0_28px_color-mix(in_oklch,var(--primary)_22%,transparent)]",
+          "group-hover/handle:shadow-glow-strong",
           // Active (dragging) — same shape as hover, deeper glow
           "[[data-separator=active]_&]:w-[3px] [[data-separator=active]_&]:bg-primary",
-          "[[data-separator=active]_&]:shadow-[0_0_14px_color-mix(in_oklch,var(--primary)_70%,transparent),0_0_36px_color-mix(in_oklch,var(--primary)_30%,transparent)]",
+          "[[data-separator=active]_&]:shadow-glow-strong",
         )}
       />
 
@@ -72,8 +72,8 @@ function ResizableHandle({
         aria-hidden
         className={cn(
           "pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2",
-          "h-9 w-[5px] rounded-full bg-primary",
-          "shadow-[0_0_0_1px_color-mix(in_oklch,var(--primary)_40%,transparent),0_4px_18px_color-mix(in_oklch,var(--primary)_55%,transparent)]",
+          "h-9 w-[5px] rounded-pill bg-primary",
+          "ring-1 ring-primary/40 shadow-glow-strong",
           // Animation: scale in from a hair-line, fade to full opacity
           "scale-y-0 scale-x-0 opacity-0",
           "transition-[transform,opacity] duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)]",
@@ -94,9 +94,9 @@ function ResizableHandle({
           "[[data-separator=active]_&]:opacity-100",
         )}
       >
-        <span className="block h-[3px] w-[3px] rounded-full bg-primary-foreground/85" />
-        <span className="block h-[3px] w-[3px] rounded-full bg-primary-foreground/85" />
-        <span className="block h-[3px] w-[3px] rounded-full bg-primary-foreground/85" />
+        <span className="block h-[3px] w-[3px] rounded-pill bg-primary-foreground/85" />
+        <span className="block h-[3px] w-[3px] rounded-pill bg-primary-foreground/85" />
+        <span className="block h-[3px] w-[3px] rounded-pill bg-primary-foreground/85" />
       </span>
     </Separator>
   );

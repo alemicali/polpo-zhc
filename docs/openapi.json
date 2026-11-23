@@ -7314,6 +7314,10 @@
                       "avatar": {
                         "type": "string"
                       },
+                      "color": {
+                        "type": "string",
+                        "pattern": "^agent(?:[1-9]|10)$"
+                      },
                       "responsibilities": {
                         "type": "array",
                         "items": {
@@ -7810,6 +7814,10 @@
                       },
                       "avatar": {
                         "type": "string"
+                      },
+                      "color": {
+                        "type": "string",
+                        "pattern": "^agent(?:[1-9]|10)$"
                       },
                       "responsibilities": {
                         "type": "array",

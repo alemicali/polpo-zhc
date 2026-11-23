@@ -104,7 +104,7 @@ export function MultiSelectFilter({
                   >
                     <div
                       className={cn(
-                        "flex h-4 w-4 shrink-0 items-center justify-center rounded border",
+                        "flex h-4 w-4 shrink-0 items-center justify-center rounded-xs border",
                         isSelected
                           ? "bg-primary border-primary"
                           : "border-muted-foreground/30",

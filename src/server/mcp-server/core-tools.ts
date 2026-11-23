@@ -6,6 +6,7 @@ import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from "@model
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { agentCardText, buildAgentCard, type AgentCard } from "../mcp-agent-card.js";
 import { AGENT_CARD_HTML } from "../mcp-widgets.generated.js";
+import { cardAppearance } from "./card-appearance.js";
 import {
   BAD_CURSOR, DESTRUCTIVE, READ, WRITE, allowed, apiError, apiGet, apiSend, clip, cursorParam, enc, fail, formatBytes, limitParam,
   looseObject, ok, page, pageOutput, qs, short, unwrap,
@@ -28,10 +29,11 @@ async function loadAgentCard(deps: McpDeps, name: string): Promise<{ ok: true; c
   const list = (agents.data as AgentCardAgent[]) ?? [];
   const agent = list.find((a) => a.name === name) ?? list.find((a) => a.name.toLowerCase() === name.toLowerCase() || a.identity?.displayName?.toLowerCase() === name.toLowerCase());
   if (!agent) return { ok: false, error: `No agent "${name}". Agents: ${list.map((a) => a.name).join(", ") || "none"}` };
-  const [tasks, drive, connectors] = await Promise.all([
+  const [tasks, drive, connectors, appearance] = await Promise.all([
     deps.api("GET", "/api/v1/tasks").then(unwrap),
     deps.api("GET", `/api/v1/drive/${enc(agent.name)}`).then(unwrap),
     deps.api("GET", "/api/v1/connectors").then(unwrap),
+    cardAppearance(deps),
   ]);
   const card = buildAgentCard({
     agent,
@@ -41,7 +43,7 @@ async function loadAgentCard(deps: McpDeps, name: string): Promise<{ ok: true; c
     now: new Date(),
     key: { createdAt: Date.now(), seq: ++cardSeq },
   });
-  return { ok: true, card };
+  return { ok: true, card: appearance ? { ...card, appearance } : card };
 }
 
 /**

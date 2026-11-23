@@ -12,14 +12,21 @@
   var label = document.createElement("div");
   var cursorStyle = document.createElement("style");
 
+  /*
+   * The overlay's look: the dashboard's (its primary, the text on it, its mono font), sent with
+   * polpo:app-preview-inspector. These defaults only show until it arrives (the dashboard's
+   * built-in look); the page under preview is someone else's, so nothing is read from it.
+   */
+  var look = { accent: "#0891b2", accentForeground: "#ffffff", font: "ui-monospace, SFMono-Regular, Menlo, monospace" };
+  var COLOR = /^(#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|(?:oklch|oklab|lab|lch|hsla?|rgba?)\(\s*[0-9a-zA-Z.%\s,/+-]{1,80}\))$/;
+  var FONT = /^[A-Za-z0-9 ,"'_.-]{1,200}$/;
+
   box.setAttribute("data-polpo-preview-overlay", "");
   Object.assign(box.style, {
     position: "fixed",
     display: "none",
     pointerEvents: "none",
     zIndex: "2147483646",
-    border: "2px solid #06b6d4",
-    background: "rgba(6, 182, 212, 0.12)",
     boxSizing: "border-box",
   });
   Object.assign(label.style, {
@@ -31,10 +38,21 @@
     whiteSpace: "nowrap",
     textOverflow: "ellipsis",
     padding: "3px 6px",
-    background: "#0891b2",
-    color: "#fff",
-    font: "500 10px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace",
   });
+
+  function applyLook(next) {
+    if (next && typeof next === "object") {
+      if (typeof next.accent === "string" && COLOR.test(next.accent.trim())) look.accent = next.accent.trim();
+      if (typeof next.accentForeground === "string" && COLOR.test(next.accentForeground.trim())) look.accentForeground = next.accentForeground.trim();
+      if (typeof next.font === "string" && FONT.test(next.font.trim())) look.font = next.font.trim();
+    }
+    box.style.border = "2px solid " + look.accent;
+    box.style.background = "color-mix(in srgb, " + look.accent + " 12%, transparent)";
+    label.style.background = look.accent;
+    label.style.color = look.accentForeground;
+    label.style.font = "500 10px/1.2 " + look.font;
+  }
+  applyLook(null);
   cursorStyle.textContent = "html[data-polpo-preview-picking] *, html[data-polpo-preview-picking] { cursor: crosshair !important; }";
   box.appendChild(label);
 
@@ -159,7 +177,10 @@
 
   window.addEventListener("message", function (event) {
     if (event.source !== window.parent || !event.data) return;
-    if (event.data.type === "polpo:app-preview-inspector") setEnabled(event.data.enabled);
+    if (event.data.type === "polpo:app-preview-inspector") {
+      applyLook(event.data.look);
+      setEnabled(event.data.enabled);
+    }
     if (event.data.type === "polpo:app-preview-ping") {
       window.parent.postMessage({ type: "polpo:app-preview-bridge-ready", version: 1 }, "*");
     }

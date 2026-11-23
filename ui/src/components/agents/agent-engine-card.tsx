@@ -70,7 +70,7 @@ export function AgentEngineCard() {
   };
 
   return (
-    <Card className="gap-0 border-border/40 bg-card/80 py-0 backdrop-blur-sm" data-testid="agent-engine-card">
+    <Card className="gap-0 border-border/40 bg-card/80 py-0 backdrop-blur-surface" data-testid="agent-engine-card">
       <CardContent className="space-y-3 px-4 py-3 text-xs">
         <div className="flex items-center gap-1.5 text-label text-muted-foreground"><Cpu className="h-3 w-3" /> Engine</div>
         {/* the engine it runs on now, with its mark (and how the harness authenticates) */}

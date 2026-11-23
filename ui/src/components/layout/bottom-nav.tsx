@@ -38,7 +38,7 @@ export function BottomNav() {
       className={cn(
         "fixed inset-x-3 z-50 mx-auto max-w-md rounded-3xl border border-sidebar-border sidebar-surface-floating text-sidebar-foreground",
         "shadow-raised",
-        "backdrop-blur-2xl",
+        "backdrop-blur-surface",
         "lg:hidden bottom-[var(--mobile-nav-offset)] p-1",
       )}
     >
@@ -51,7 +51,7 @@ export function BottomNav() {
               cn(
                 "relative flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 rounded-2xl px-1 text-micro font-medium transition-all duration-200",
                 isActive
-                  ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-[0_10px_24px_color-mix(in_oklch,var(--sidebar-primary)_22%,transparent)]"
+                  ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-glow glow-sidebar-primary"
                   : "text-sidebar-foreground/70 active:scale-95 active:text-sidebar-primary",
               )
             }
@@ -61,7 +61,7 @@ export function BottomNav() {
                 <Icon className="h-5 w-5" />
                 <span className="max-w-full truncate tracking-wide">{label}</span>
                 {to === "/dashboard" && connectionStatus === "connected" && (
-                  <span className="absolute top-2 right-1/2 h-1.5 w-1.5 translate-x-4 rounded-full bg-success bio-pulse" />
+                  <span className="absolute top-2 right-1/2 h-1.5 w-1.5 translate-x-4 rounded-pill bg-success bio-pulse" />
                 )}
               </>
             )}

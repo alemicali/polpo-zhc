@@ -347,7 +347,7 @@ function StatusFilter({
               onClick={() => onToggle(opt.value)}
             >
               <div className={cn(
-                "flex h-4 w-4 shrink-0 items-center justify-center rounded border",
+                "flex h-4 w-4 shrink-0 items-center justify-center rounded-xs border",
                 selected.has(opt.value) ? "bg-primary border-primary" : "border-muted-foreground/30"
               )}>
                 {selected.has(opt.value) && <Check className="h-3 w-3 text-primary-foreground" />}
@@ -409,7 +409,7 @@ function TeamFilter({
               onClick={() => onToggle(name)}
             >
               <div className={cn(
-                "flex h-4 w-4 shrink-0 items-center justify-center rounded border",
+                "flex h-4 w-4 shrink-0 items-center justify-center rounded-xs border",
                 selected.has(name) ? "bg-primary border-primary" : "border-muted-foreground/30"
               )}>
                 {selected.has(name) && <Check className="h-3 w-3 text-primary-foreground" />}
@@ -691,7 +691,7 @@ export function MissionsPage() {
             <p className="text-xs mt-1 text-center max-w-xs">
               Missions are created when you give the orchestrator a prompt via the CLI or Chat.
             </p>
-            <kbd className="mt-3 rounded border border-border bg-muted px-2 py-1 font-mono text-micro">
+            <kbd className="mt-3 rounded-xs border border-border bg-muted px-2 py-1 font-mono text-micro">
               polpo mission &lt;prompt&gt;
             </kbd>
           </CardContent>

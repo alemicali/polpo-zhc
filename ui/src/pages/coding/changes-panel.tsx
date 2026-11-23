@@ -66,7 +66,7 @@ function ChangedFileRow({ file }: { file: GitFile }) {
       </span>
       <span
         title={status.label}
-        className={cn("inline-flex h-4 w-4 shrink-0 items-center justify-center rounded", status.bg, status.text)}
+        className={cn("inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-xs", status.bg, status.text)}
       >
         <status.icon className="h-3 w-3" />
       </span>

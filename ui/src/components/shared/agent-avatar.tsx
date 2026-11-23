@@ -3,6 +3,7 @@ import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card";
 import { cn } from "@/lib/utils";
 import { config } from "@/lib/config";
+import { useAgentColor } from "@/lib/agent-colors";
 
 const base = config.baseUrl || "";
 
@@ -38,7 +39,8 @@ export function AgentAvatar({
   className,
   iconClassName,
   fallbackVariant = "icon",
-  shape = "rounded",
+  shape = "square",
+  color,
 }: {
   /** avatar path from agent.identity?.avatar */
   avatar?: string;
@@ -53,12 +55,15 @@ export function AgentAvatar({
    *  - "circle": a coloured circle with the agent's initials — looks like a real avatar */
   fallbackVariant?: "icon" | "circle";
   /** Box shape — applied both to image and initials fallback so they match.
-   *  - "rounded": rounded-lg square (legacy default)
-   *  - "circle": rounded-full — use this when the fallback is a circle so visual sizes match */
-  shape?: "rounded" | "circle";
+   *  - "square": a rounded-lg square (legacy default)
+   *  - "circle": rounded-avatar — use this when the fallback is a circle so visual sizes match */
+  shape?: "square" | "circle";
+  /** The agent's colour (identity.color: "agent3"); default: the one it chose, else by its name. */
+  color?: unknown;
 }) {
-  const radius = shape === "circle" ? "rounded-full" : "rounded-lg";
+  const radius = shape === "circle" ? "rounded-avatar" : "rounded-lg";
   const s = sizeMap[size];
+  const tone = useAgentColor(name, color);
 
   if (!avatar) {
     if (fallbackVariant === "circle") {
@@ -67,7 +72,7 @@ export function AgentAvatar({
         <div className={cn(
           s.avatar,
           radius,
-          "bg-primary/12 text-primary/85 flex items-center justify-center font-semibold tabular-nums select-none",
+          tone.solid, "flex items-center justify-center font-semibold tabular-nums select-none",
           // Pick a font size that matches the avatar size — initials only.
           size === "xs" && "text-micro",
           size === "sm" && "text-micro",
@@ -80,7 +85,7 @@ export function AgentAvatar({
         </div>
       );
     }
-    return <Bot className={cn(s.icon, iconClassName)} />;
+    return <Bot className={cn(s.icon, iconClassName ?? tone.text)} />;
   }
 
   const url = avatarUrl(avatar);
@@ -88,7 +93,7 @@ export function AgentAvatar({
   const avatarEl = (
     <Avatar className={cn(s.avatar, radius, className)}>
       <AvatarImage src={url} alt={name ?? "Agent"} className="object-cover" />
-      <AvatarFallback className={radius}>
+      <AvatarFallback className={cn(radius, tone.solid)}>
         <Bot className={cn(s.icon, iconClassName)} />
       </AvatarFallback>
     </Avatar>

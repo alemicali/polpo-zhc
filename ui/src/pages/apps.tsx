@@ -79,7 +79,7 @@ function AppRegistry({ api }: { api: ReturnType<typeof useApps> }) {
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button type="button" variant="outline" size="sm" className={cn("h-8", selectedTags.size > 0 && "border-primary/40 bg-primary/10 text-primary")} disabled={allTags.length === 0}>
-                <Tag className="h-3.5 w-3.5" />Categories{selectedTags.size > 0 && <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-micro text-primary-foreground">{selectedTags.size}</span>}
+                <Tag className="h-3.5 w-3.5" />Categories{selectedTags.size > 0 && <span className="flex h-4 min-w-4 items-center justify-center rounded-pill bg-primary px-1 text-micro text-primary-foreground">{selectedTags.size}</span>}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-56">
@@ -165,7 +165,7 @@ function AppProjectListRow({ app, api, onOpen }: { app: RegisteredApp; api: Retu
           </div>
           <p className="mt-0.5 truncate text-xs text-muted-foreground">{app.description || app.localPath}</p>
           <div className="mt-1.5 flex min-w-0 items-center gap-2 text-micro text-muted-foreground">
-            <span className="flex shrink-0 items-center gap-1.5"><span className={cn("h-1.5 w-1.5 rounded-full", failed ? "bg-destructive" : running ? "bg-success" : "bg-muted-foreground/40")} />{failed ? "Needs attention" : running ? "Active" : "Stopped"}</span>
+            <span className="flex shrink-0 items-center gap-1.5"><span className={cn("h-1.5 w-1.5 rounded-pill", failed ? "bg-destructive" : running ? "bg-success" : "bg-muted-foreground/40")} />{failed ? "Needs attention" : running ? "Active" : "Stopped"}</span>
             <span className="text-border">/</span>
             <span className="shrink-0">{publishedUrl ? "Published" : "Not published"}</span>
             {app.framework && <><span className="hidden text-border lg:inline">/</span><span className="hidden truncate lg:inline">{app.framework}</span></>}
@@ -200,7 +200,7 @@ function AppProjectCard({ app, api, onOpen }: { app: RegisteredApp; api: ReturnT
   const publishedUrl = publishedAppUrl(app);
   const status = failed ? "Error" : running > 0 ? "Active" : "Stopped";
   return (
-    <article className="group min-w-0 overflow-hidden rounded-md border border-border/70 bg-background transition-[border-color,box-shadow] hover:border-foreground/25 hover:shadow-sm">
+    <article className="group min-w-0 overflow-hidden rounded-md border border-border/70 bg-background transition-[border-color,box-shadow] hover:border-foreground/25 hover:shadow-card">
       <button type="button" onClick={onOpen} className="block w-full text-left">
         <div className="relative aspect-[16/9] overflow-hidden border-b border-border/60 bg-muted/25">
           {screenshot ? <img src={screenshot} alt={`${app.name} preview`} loading="lazy" decoding="async" className="h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-[1.015]" /> : <div className="flex h-full flex-col items-center justify-center text-muted-foreground"><AppWindow className="h-7 w-7 opacity-30" /><span className="mt-2 text-caption">No preview yet</span></div>}
@@ -210,7 +210,7 @@ function AppProjectCard({ app, api, onOpen }: { app: RegisteredApp; api: ReturnT
           <p className="mt-1 line-clamp-2 min-h-8 text-xs leading-4 text-muted-foreground">{app.description || "No description"}</p>
           {app.tags.length > 0 && <div className="mt-2 flex min-w-0 items-center gap-1 overflow-hidden">{app.tags.slice(0, 3).map((tag) => <Badge key={tag} variant="outline" className="h-5 max-w-28 shrink-0 px-1.5 text-micro font-normal"><span className="truncate">{tag}</span></Badge>)}{app.tags.length > 3 && <span className="shrink-0 text-micro text-muted-foreground">+{app.tags.length - 3}</span>}</div>}
           <div className="mt-3 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-caption text-muted-foreground">
-            <span className="flex items-center gap-1.5"><span className={cn("h-1.5 w-1.5 rounded-full", failed ? "bg-destructive" : running ? "bg-success" : "bg-muted-foreground/40")} />{failed ? "Needs attention" : `Development ${status.toLowerCase()}`}</span>
+            <span className="flex items-center gap-1.5"><span className={cn("h-1.5 w-1.5 rounded-pill", failed ? "bg-destructive" : running ? "bg-success" : "bg-muted-foreground/40")} />{failed ? "Needs attention" : `Development ${status.toLowerCase()}`}</span>
             <span className="text-border">/</span>
             <span>{publishedUrl ? "Published" : "Not published"}</span>
             {app.framework && <><span className="text-border">/</span><span>{app.framework}</span></>}
@@ -337,7 +337,7 @@ function AppOverview({ app, previewUrl, coverTarget, busy, run, api }: { app: Re
         </div>
         <div className="flex min-w-0 flex-col justify-center py-1">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1.5"><span className={cn("h-2 w-2 rounded-full", failed ? "bg-destructive" : active ? "bg-success" : "bg-muted-foreground/40")} />{developmentLabel}</span>
+            <span className="flex items-center gap-1.5"><span className={cn("h-2 w-2 rounded-pill", failed ? "bg-destructive" : active ? "bg-success" : "bg-muted-foreground/40")} />{developmentLabel}</span>
             <span className="text-border">/</span>
             <span>{publishedUrl ? "Published" : "Not published"}</span>
             {app.framework && <Badge variant="outline" className="h-5 px-1.5 text-micro font-normal">{app.framework}</Badge>}
@@ -544,7 +544,7 @@ function AppSettingsPanel({ app, onSave, onDelete }: { app: RegisteredApp; onSav
         </div>
       </div>
 
-      <div className="sticky bottom-0 -mx-5 flex min-h-14 items-center justify-end gap-2 border-t border-border/70 bg-background/95 px-5 py-2 backdrop-blur-sm lg:-mx-6 lg:px-6">
+      <div className="sticky bottom-0 -mx-5 flex min-h-14 items-center justify-end gap-2 border-t border-border/70 bg-background/95 px-5 py-2 backdrop-blur-surface lg:-mx-6 lg:px-6">
         {dirty && <Button type="button" variant="ghost" size="sm" disabled={saving} onClick={() => setValue(toInput(app))}>Discard</Button>}
         <Button type="submit" size="sm" disabled={!dirty || saving}>
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -591,7 +591,7 @@ function AppTagInput({ value, onChange }: { value: string[]; onChange: (tags: st
     onChange(next.sort((left, right) => left.localeCompare(right)));
     setDraft("");
   };
-  return <div className="flex min-h-9 min-w-0 flex-wrap items-center gap-1.5 rounded-md border border-input bg-transparent px-2 py-1 shadow-xs focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/30">
+  return <div className="flex min-h-9 min-w-0 flex-wrap items-center gap-1.5 rounded-md border border-input bg-transparent px-2 py-1 shadow-control focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/30">
     {value.map((tag) => <span key={tag} className="inline-flex h-6 max-w-full items-center gap-1 rounded-md bg-muted px-2 text-micro font-normal text-foreground"><Tag className="h-3 w-3 shrink-0 text-muted-foreground" /><span className="truncate">{tag}</span><button type="button" aria-label={`Remove ${tag}`} className="shrink-0 text-muted-foreground hover:text-foreground" onClick={() => onChange(value.filter((item) => item !== tag))}><X className="h-3 w-3" /></button></span>)}
     <input value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={addDraft} onKeyDown={(event) => { if (event.key === "Enter" || event.key === ",") { event.preventDefault(); addDraft(); } else if (event.key === "Backspace" && !draft && value.length > 0) onChange(value.slice(0, -1)); }} placeholder={value.length ? "Add category" : "internal, client, public"} className="h-6 min-w-24 flex-1 bg-transparent px-1 text-xs outline-none placeholder:text-muted-foreground" />
   </div>;

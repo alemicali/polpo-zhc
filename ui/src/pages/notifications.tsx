@@ -155,7 +155,7 @@ function NotificationRow({ record }: { record: NotificationRecord }) {
   return (
     <div className="flex items-start gap-3 px-4 py-3 hover:bg-accent/20 transition-colors group">
       {/* Severity indicator */}
-      <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg mt-0.5 backdrop-blur-sm", sev.bg)}>
+      <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg mt-0.5 backdrop-blur-surface", sev.bg)}>
         <SevIcon className={cn("h-4 w-4", sev.color)} />
       </div>
 
@@ -268,7 +268,7 @@ function SendDirectDialog({
           Send Direct
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-md bg-popover/95 backdrop-blur-xl border-border/40">
+      <DialogContent className="sm:max-w-md bg-popover/95 backdrop-blur-surface border-border/40">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-sm">
             <Megaphone className="h-4 w-4 text-muted-foreground" />
@@ -533,7 +533,7 @@ export function NotificationsPage() {
                   <Tooltip key={sev}>
                     <TooltipTrigger asChild>
                       <div className="flex items-center gap-1 cursor-help">
-                        <div className={cn("h-1.5 w-1.5 rounded-full", cfg.dot)} />
+                        <div className={cn("h-1.5 w-1.5 rounded-pill", cfg.dot)} />
                         <span className="text-micro text-muted-foreground">{count}</span>
                       </div>
                     </TooltipTrigger>

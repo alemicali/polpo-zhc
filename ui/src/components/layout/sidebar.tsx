@@ -169,11 +169,11 @@ const PendingBadge = memo(function PendingBadge({ collapsed }: { collapsed: bool
   if (count === 0) return null;
 
   return collapsed ? (
-    <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-warning text-micro font-bold text-warning-foreground px-1">
+    <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-pill bg-warning text-micro font-bold text-warning-foreground px-1">
       {count}
     </span>
   ) : (
-    <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-warning text-micro font-bold text-warning-foreground px-1.5">
+    <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-pill bg-warning text-micro font-bold text-warning-foreground px-1.5">
       {count}
     </span>
   );
@@ -302,7 +302,7 @@ export function Sidebar() {
             <BrandMark className="rounded-xl" bareMaxWidthClassName="max-w-10" />
             <button
               onClick={() => setCollapsed(false)}
-              className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-sidebar/90 backdrop-blur-sm cursor-pointer"
+              className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-sidebar/90 backdrop-blur-surface cursor-pointer"
               aria-label="Expand sidebar"
             >
               <Columns2 className="h-4 w-4 text-sidebar-foreground" />
@@ -375,7 +375,7 @@ export function Sidebar() {
               <div className="flex items-center justify-center">
                 <div
                   className={cn(
-                    "h-2.5 w-2.5 rounded-full",
+                    "h-2.5 w-2.5 rounded-pill",
                     status.color,
                     status.pulse && "bio-pulse"
                   )}
@@ -384,7 +384,7 @@ export function Sidebar() {
             </TooltipTrigger>
             <TooltipContent side="right" className="text-xs">
               <div className="flex items-center gap-1.5">
-                <span className={cn("h-1.5 w-1.5 rounded-full", status.color, status.pulse && "bio-pulse")} />
+                <span className={cn("h-1.5 w-1.5 rounded-pill", status.color, status.pulse && "bio-pulse")} />
                 <span>{status.label}</span>
                 <span className="text-muted-foreground/40">·</span>
                 <span className="font-semibold text-foreground">{info?.project ?? "Polpo"}</span>
@@ -398,7 +398,7 @@ export function Sidebar() {
           <div className="flex min-w-0 items-center gap-2.5">
             <div
               className={cn(
-                "h-2 w-2 shrink-0 rounded-full",
+                "h-2 w-2 shrink-0 rounded-pill",
                 status.color,
                 status.pulse && "bio-pulse"
               )}

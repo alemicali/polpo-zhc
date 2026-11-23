@@ -25,7 +25,7 @@ export function LiveActivity({ process }: { process: AgentProcess }) {
     <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className={cn("h-2.5 w-2.5 rounded-full", process.alive ? "bg-primary animate-pulse" : "bg-muted-foreground")} />
+          <div className={cn("h-2.5 w-2.5 rounded-pill", process.alive ? "bg-primary animate-pulse" : "bg-muted-foreground")} />
           <span className="text-label text-primary">
             {process.alive ? "Active" : "Finished"}
           </span>

@@ -492,14 +492,14 @@ function HeaderInfo({
         <span className="max-w-[12rem] truncate font-medium text-foreground">{repoLabel}</span>
         <EndpointBadge />
         {git?.branch && (
-          <code className="hidden max-w-[14rem] truncate rounded bg-muted px-1.5 py-0.5 font-mono text-caption text-muted-foreground md:inline-block">
+          <code className="hidden max-w-[14rem] truncate rounded-xs bg-muted px-1.5 py-0.5 font-mono text-caption text-muted-foreground md:inline-block">
             {git.branch}
           </code>
         )}
       </span>
       <span className="flex items-center gap-1 rounded-md border border-border/70 bg-muted/50 px-1.5 py-0.5 text-micro text-muted-foreground">
         <span className={cn(
-          "inline-flex h-2 w-2 shrink-0 rounded-full",
+          "inline-flex h-2 w-2 shrink-0 rounded-pill",
           state === "connected" ? "bg-success"
           : state === "error" ? "bg-destructive"
           : state === "closed" ? "bg-muted-foreground"
