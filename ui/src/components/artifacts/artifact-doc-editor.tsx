@@ -35,12 +35,12 @@ const docScroll = "min-h-0 min-w-0 flex-1 overflow-y-auto px-5 pb-20 pt-16 sm:px
 const docColumn = "mx-auto w-full max-w-[672px]";
 const docTypography = [
   "min-h-[45vh] break-words text-base leading-6 outline-none",
-  "[&_p]:my-2 [&_h1:first-child]:mt-0 [&_h1]:mb-2 [&_h1]:mt-7 [&_h1]:font-serif [&_h1]:text-[32px] [&_h1]:leading-[1.2] [&_h1]:font-normal",
+  "[&_p]:mt-0 [&_p]:mb-[0.6em] [&_strong]:font-semibold [&_h1:first-child]:mt-0 [&_h1]:mb-2 [&_h1]:mt-7 [&_h1]:font-serif [&_h1]:text-[32px] [&_h1]:leading-[1.2] [&_h1]:font-normal",
   "[&_[data-doc-placeholder]]:relative [&_[data-doc-placeholder]::before]:pointer-events-none [&_[data-doc-placeholder]::before]:absolute [&_[data-doc-placeholder]::before]:text-neutral-500 [&_[data-doc-placeholder]::before]:content-[attr(data-doc-placeholder)]",
-  "[&_h2]:mb-3 [&_h2]:mt-6 [&_h2]:text-2xl [&_h2]:font-semibold",
+  "[&_h2]:mb-[0.5em] [&_h2]:mt-[1.6em] [&_h2]:font-serif [&_h2]:text-[22px] [&_h2]:leading-[1.3] [&_h2]:font-normal",
   "[&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:text-xl [&_h3]:font-semibold",
   "[&_h4]:my-2 [&_h4]:text-lg [&_h4]:font-semibold [&_h5]:my-2 [&_h5]:font-semibold [&_h6]:my-2 [&_h6]:font-semibold",
-  "[&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_li>p]:my-0",
+  "[&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 [&_li>p]:my-0",
   "[&_ul[data-type=taskList]]:list-none [&_li[data-type=taskItem]]:flex [&_li[data-type=taskItem]]:gap-2",
   "[&_a]:text-primary [&_a]:underline [&_blockquote]:my-4 [&_blockquote]:border-l-2 [&_blockquote]:border-primary/40",
   "[&_[data-alert]::before]:content-[attr(data-alert)] [&_[data-alert]::before]:block [&_[data-alert]::before]:font-semibold",
