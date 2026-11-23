@@ -33,6 +33,7 @@ import { ConnectorIcons } from "./icon-store.js";
 import type { IconFetcher } from "./icons.js";
 import { bridgeMcpTool, connectorToolAllowed, type McpToolInfo } from "./tools.js";
 import { clientMetadataUrlFor } from "./paths.js";
+import { catalogEntry } from "./catalog.js";
 import { accountFromIdToken, connectorLabel } from "./view.js";
 import { accountFromToolResult, pickIdentityTool } from "./account-identity.js";
 
@@ -282,7 +283,8 @@ export class ConnectorManager {
     }
     if ((failure?.step === "registration" && failure.status < 500 && failure.status !== 429)
       || errorMessage(error) === "Incompatible auth server: does not support dynamic client registration") {
-      const app = connector.catalogId ?? connector.id;
+      // the shared app the catalog names (e.g. "meta" for WhatsApp Business), else one for this connector
+      const app = connector.auth.oauth?.app ?? (connector.catalogId ? catalogEntry(connector.catalogId)?.oauth?.app : undefined) ?? connector.catalogId ?? connector.id;
       return new ConnectorError(
         `${failure?.message ?? `${connector.name} does not offer dynamic OAuth client registration.`} Set up an approved, pre-registered client in Connectors → OAuth apps.`,
         "error",
