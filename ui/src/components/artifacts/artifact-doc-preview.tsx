@@ -1,6 +1,8 @@
 import { useMemo, useState, type ComponentProps } from "react";
 import { defaultRehypePlugins } from "streamdown";
 import { RichStreamdown } from "@/components/ai-elements/rich-streamdown";
+import { DocumentComment } from "./artifact-doc-comment";
+import { decodeDocComment } from "./artifact-doc-comments";
 import { embeddedDocImage } from "./artifact-doc-assets";
 import { choiceTone, decodeDocChoice, selectedChoice } from "./artifact-doc-choices";
 import { DocTabPicker } from "./artifact-doc-tab-navigation";
@@ -41,7 +43,7 @@ function docRehypePlugins(): ComponentProps<typeof RichStreamdown>["rehypePlugin
       attributes: {
         ...defaults.attributes,
         video: ["src", "controls", "playsInline", "preload", "title", "ariaLabel"],
-        span: [...(defaults.attributes?.span ?? []), ["dataPolpoDocFont", "sans", "serif", "mono"], "dataPolpoDocChoice"],
+        span: [...(defaults.attributes?.span ?? []), ["dataPolpoDocFont", "sans", "serif", "mono"], "dataPolpoDocChoice", "dataPolpoDocComment"],
       },
       protocols: { ...defaults.protocols, src: ["http", "https", "data"] },
     }],
@@ -69,6 +71,8 @@ export function ArtifactDocPreview({ content }: { content: string }) {
 
 const docMarkdownComponents: ComponentProps<typeof RichStreamdown>["components"] = {
   span({ node, children, ...props }) {
+    const comment = decodeDocComment(node?.properties?.dataPolpoDocComment);
+    if (comment) return <DocumentComment comment={comment} />;
     const choice = decodeDocChoice(node?.properties?.dataPolpoDocChoice);
     if (!choice) return <span {...props}>{children}</span>;
     const option = selectedChoice(choice);
