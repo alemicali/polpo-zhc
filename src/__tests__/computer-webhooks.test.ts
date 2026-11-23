@@ -337,6 +337,85 @@ describe("stale errors", () => {
   });
 });
 
+describe("counts before the event log (legacy status files)", () => {
+  /** A status file as the version before the event log wrote it: counters, no log. */
+  const legacy = (polpoDir: string, daytona: Record<string, unknown>) =>
+    writeFileSync(join(polpoDir, "computer-webhooks.json"), JSON.stringify({ version: 1, providers: { daytona }, seen: {} }));
+  const agree = async (t: ReturnType<typeof setup>) => {
+    const [d] = await t.w.status();
+    const { counts, total } = t.w.events("daytona", { limit: 200 });
+    // the card's numbers are the sheet's
+    expect({ received: d!.received, ignored: d!.ignored, rejected: d!.rejected, errors: d!.errors })
+      .toEqual({ received: counts.accepted + counts.ignored + counts.error, ignored: counts.ignored, rejected: counts.rejected, errors: counts.error });
+    expect(d!.received + d!.rejected).toBe(total);
+    return d!;
+  };
+
+  it("counters without a log (as on lumea: 7 ignored, 1 rejected, an empty log) move to `before`, once, persisted", async () => {
+    const t = setup();
+    await t.w.setSecret("daytona", SECRET);
+    legacy(t.polpoDir, { received: 7, ignored: 7, rejected: 1, lastEventAt: new Date(NOW - 3_600_000).toISOString(), lastEventType: "sandbox.state.updated" });
+    const d = await agree(t);
+    expect(d).toMatchObject({ received: 0, ignored: 0, rejected: 0, errors: 0, lastEventType: "sandbox.state.updated", state: "receiving" });
+    expect(d.before).toEqual({ received: 7, ignored: 7, rejected: 1, errors: 0, until: new Date(NOW).toISOString() });
+    // persisted: version 2, the totals in `before`, no counters left
+    const file = JSON.parse(readFileSync(join(t.polpoDir, "computer-webhooks.json"), "utf8"));
+    expect(file.version).toBe(2);
+    expect(file.providers.daytona).toMatchObject({ before: { received: 7, ignored: 7, rejected: 1, errors: 0 } });
+    expect(file.providers.daytona.received).toBeUndefined();
+    // once: reading again (another process, a restart) does not move them again
+    t.advance(60_000);
+    const again = new ComputerWebhooks({ polpoDir: () => t.polpoDir, manager: () => t.manager, computers: () => t.computers, vault: () => t.vault as unknown as VaultStore, now: () => NOW + 60_000 });
+    expect((await again.status())[0]!.before).toEqual(d.before);
+    expect((await again.status())[0]).toMatchObject({ received: 0, ignored: 0, rejected: 0 });
+    // the sheet lists nothing for them
+    expect(t.w.events("daytona").total).toBe(0);
+  });
+
+  it("only the difference with the log moves (the log's entries keep their own counts); `until` is the log's first entry", async () => {
+    const t = setup();
+    const log = new ComputerWebhookEventLog(() => t.polpoDir);
+    const at = (s: number) => new Date(NOW - s * 1000).toISOString();
+    log.add({ id: "a", provider: "daytona", receivedAt: at(30), outcome: "rejected", httpStatus: 503, signature: "not-checked", processingMs: 1, bytes: 2 });
+    log.add({ id: "b", provider: "daytona", receivedAt: at(20), outcome: "ignored", httpStatus: 200, signature: "valid", processingMs: 1, bytes: 2 });
+    log.add({ id: "c", provider: "daytona", receivedAt: at(10), outcome: "error", httpStatus: 200, signature: "valid", processingMs: 1, bytes: 2 });
+    legacy(t.polpoDir, { received: 9, ignored: 5, rejected: 3, errors: 2 });
+    const d = await agree(t);
+    expect(d).toMatchObject({ received: 2, ignored: 1, rejected: 1, errors: 1 });
+    expect(d.before).toEqual({ received: 7, ignored: 4, rejected: 2, errors: 1, until: at(30) });
+  });
+
+  it("a legacy file whose counters the log already covers gets no `before`", async () => {
+    const t = setup();
+    new ComputerWebhookEventLog(() => t.polpoDir).add({ id: "a", provider: "daytona", receivedAt: new Date(NOW).toISOString(), outcome: "rejected", httpStatus: 503, signature: "not-checked", processingMs: 1, bytes: 2 });
+    legacy(t.polpoDir, { received: 0, ignored: 0, rejected: 1 });
+    const d = await agree(t);
+    expect(d.rejected).toBe(1);
+    expect(d.before).toBeUndefined();
+  });
+
+  it("new deliveries count in the card and the sheet alike; `before` stays as it was (also when the first thing after the upgrade is a delivery)", async () => {
+    const t = setup();
+    legacy(t.polpoDir, { received: 7, ignored: 7, rejected: 1 });
+    // the first delivery after the upgrade: refused (not configured), recorded before anything read the status
+    const raw = JSON.stringify({ event: "sandbox.state.updated", id: "someone-elses", oldState: "started", newState: "stopped" });
+    expect((await t.w.handle("daytona", raw, get(svixHeaders(raw, { id: "msg_nc" })))).status).toBe(503);
+    let d = await agree(t);
+    expect(d).toMatchObject({ received: 0, ignored: 0, rejected: 1 });
+    expect(d.before).toMatchObject({ received: 7, ignored: 7, rejected: 1, errors: 0 });
+    await t.w.setSecret("daytona", SECRET);
+    expect((await t.w.handle("daytona", raw, get(svixHeaders(raw, { id: "msg_other" })))).status).toBe(200);
+    const nina = t.computers[0]!;
+    await t.manager.ensure(nina, { provider: "daytona", network: { mode: "open" }, resources: {}, providerOptions: {}, denied: [] } as never);
+    const mine = JSON.stringify({ event: "sandbox.state.updated", id: "m-1", oldState: "started", newState: "stopped" });
+    expect((await t.w.handle("daytona", mine, get(svixHeaders(mine, { id: "msg_mine" })))).body).toMatchObject({ matched: ["nina"] });
+    await t.w.idle();
+    d = await agree(t);
+    expect(d).toMatchObject({ received: 2, ignored: 1, rejected: 1, errors: 0 });
+    expect(d.before).toMatchObject({ received: 7, ignored: 7, rejected: 1, errors: 0 });
+  });
+});
+
 describe("event log", () => {
   const sbx = (id: string, extra: Record<string, unknown> = {}) => JSON.stringify({ event: "sandbox.state.updated", id, oldState: "started", newState: "stopped", updatedAt: `u-${id}`, ...extra });
 

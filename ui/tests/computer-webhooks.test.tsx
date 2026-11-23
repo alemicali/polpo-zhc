@@ -193,3 +193,22 @@ test("a provider's row opens its events: outcome badges, sandbox → computer li
   expect(dialog.querySelector('[data-slot="dialog-body"]')).not.toBeNull();
   expect(dialog.querySelector('[data-slot="dialog-footer"]')!.className).toMatch(/sticky/);
 });
+
+test("counts from before the event log: a muted line in the card and the sheet's header; the card's counts are the sheet's", async () => {
+  // as on lumea after the upgrade: the log is empty, the legacy totals are in `before`
+  providers[0] = base("daytona", {
+    secretSet: true, state: "receiving", lastEventAt: ago(30), lastEventType: "sandbox.state.updated",
+    before: { received: 7, ignored: 7, rejected: 1, errors: 0, until: ago(10) },
+  });
+  await render();
+  const daytona = $('[data-testid="webhook-daytona"]')!;
+  expect(daytona.querySelector('[data-testid="webhook-counts"]')!.textContent).toMatch(/^0 accepted · 0 ignored · 0 rejected/);
+  expect(daytona.querySelector('[data-testid="webhook-counts-before"]')!.textContent).toBe("Before the event log: 7 ignored, 1 rejected — no details");
+  expect($('[data-testid="webhook-e2b"] [data-testid="webhook-counts-before"]')).toBeNull();
+  await act(async () => { daytona.querySelector<HTMLButtonElement>('[data-testid="webhook-events-open"]')!.click(); });
+  await flush();
+  const sheet = $('[data-testid="webhook-events-sheet"]')!;
+  expect(sheet.querySelector('[data-testid="webhook-counts-before"]')!.textContent).toBe("Before the event log: 7 ignored, 1 rejected — no details");
+  expect($('[data-testid="webhook-filter-ignored"]')!.textContent).toBe("Ignored0");
+  expect($('[data-testid="webhook-filter-rejected"]')!.textContent).toBe("Rejected0");
+});

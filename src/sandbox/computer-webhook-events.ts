@@ -185,6 +185,14 @@ export class ComputerWebhookEventLog {
     return this.all(provider).find((e) => e.id === id);
   }
 
+  /** Entries kept per outcome, and in all. */
+  counts(provider: string): { total: number; counts: Record<ComputerWebhookOutcome, number> } {
+    const all = this.all(provider);
+    const counts = emptyCounts();
+    for (const e of all) if (e.outcome in counts) counts[e.outcome]++;
+    return { total: all.length, counts };
+  }
+
   /** A page of summaries, newest first; `cursor`: the last id of the previous page. */
   list(provider: string, o: { limit?: number; cursor?: string; outcomes?: readonly ComputerWebhookOutcome[] } = {}): ComputerWebhookEventPage {
     const all = this.all(provider);

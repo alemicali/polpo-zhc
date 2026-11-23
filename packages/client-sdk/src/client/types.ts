@@ -2167,6 +2167,16 @@ export interface ConnectorTool {
 export type ComputerWebhookProvider = "daytona" | "e2b";
 export type ComputerWebhookOutcome = "accepted" | "ignored" | "rejected" | "error";
 
+/** Deliveries a provider's webhooks counted before the event log existed (no detail is kept for them). */
+export interface ComputerWebhookCountsBefore {
+  received: number;
+  ignored: number;
+  rejected: number;
+  errors: number;
+  /** When the event log took over. */
+  until: string;
+}
+
 /** A computer provider's webhook status (never a secret). */
 export interface ComputerWebhookStatus {
   provider: ComputerWebhookProvider;
@@ -2182,12 +2192,14 @@ export interface ComputerWebhookStatus {
   inUse: boolean;
   lastEventAt?: string;
   lastEventType?: string;
-  /** Deliveries that passed the signature check. */
+  /** Deliveries that passed the signature check (the counts are the event log's: the last 200 deliveries kept). */
   received: number;
   rejected: number;
   ignored: number;
   /** Deliveries Polpo could not apply. */
   errors: number;
+  /** Deliveries counted before the event log existed: totals only, with no entry in the log. */
+  before?: ComputerWebhookCountsBefore;
   /** The last problem since the provider was configured. */
   lastError?: string;
   lastErrorAt?: string;

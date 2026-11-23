@@ -24,9 +24,11 @@
  *
  * Replays: a delivery id (Svix) or event id (E2B) is accepted once (kept 24 h); Svix timestamps
  * older than 5 minutes and E2B events older than 24 h are refused. Each provider is rate limited
- * and bodies over 256 KB refused. The status (secret set, registered, last event, counts) is kept
- * in .polpo/computer-webhooks.json; every delivery, whatever came of it, is in the provider's event
- * log (computer-webhook-events.ts: accepted / ignored / rejected / error, with what Polpo did).
+ * and bodies over 256 KB refused. The status (secret set, registered, last event) is kept in
+ * .polpo/computer-webhooks.json; every delivery, whatever came of it, is in the provider's event log
+ * (computer-webhook-events.ts: accepted / ignored / rejected / error, with what Polpo did). The
+ * status' counts are the log's (one source: the card and the events sheet always agree); counts the
+ * status file kept before the log existed are reported apart, as `before` (no detail exists for them).
  */
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -214,12 +216,18 @@ export interface ComputerWebhookProviderStatus {
   inUse: boolean;
   lastEventAt?: string;
   lastEventType?: string;
-  /** Deliveries that passed the signature check (accepted, ignored or failed while applied). */
+  /**
+   * The counts below are the event log's (the deliveries it keeps, the last 200): the same numbers
+   * as the provider's events sheet.
+   * Deliveries that passed the signature check (accepted, ignored or failed while applied).
+   */
   received: number;
   rejected: number;
   ignored: number;
   /** Deliveries Polpo could not apply (the computer's check failed). */
   errors: number;
+  /** Deliveries counted before the event log existed: totals only, with no entry in the log. */
+  before?: ComputerWebhookCountsBefore;
   /** The last problem since the provider was (re)configured; an error from before (e.g. "not configured") is not shown. */
   lastError?: string;
   lastErrorAt?: string;
@@ -229,9 +237,21 @@ export interface ComputerWebhookProviderStatus {
   waitingNote?: string;
 }
 
+/** Deliveries counted before the event log existed (older status files): totals, no details. */
+export interface ComputerWebhookCountsBefore {
+  received: number;
+  ignored: number;
+  rejected: number;
+  errors: number;
+  /** When the event log took over (its first entry, or when the totals were moved here). */
+  until: string;
+}
+
 interface ProviderCounters {
   lastEventAt?: string; lastEventType?: string;
-  received: number; rejected: number; ignored: number; errors?: number;
+  /** Legacy (status files of version 1): the counters before the event log; moved to `before` on read. */
+  received?: number; rejected?: number; ignored?: number; errors?: number;
+  before?: ComputerWebhookCountsBefore;
   lastError?: string; lastErrorAt?: string;
   /** What kind of problem lastError is ("not-configured" disappears once the provider is configured). */
   lastErrorCode?: "not-configured" | "signature" | "body" | "rate" | "apply" | "register" | "internal";
@@ -241,7 +261,8 @@ interface ProviderCounters {
 }
 
 interface StatusFile {
-  version: 1;
+  /** 1: counters kept here (before the event log); 2: counters from the event log, legacy totals in `before`. */
+  version: 1 | 2;
   providers: Partial<Record<ComputerWebhookProviderId, ProviderCounters>>;
   seen: Record<string, number>;
 }
@@ -284,6 +305,8 @@ export const computerWebhookPath = (p: ComputerWebhookProviderId) => `/api/v1/co
 export class ComputerWebhooks {
   private readonly buckets = new Map<string, { at: number; count: number }>();
   private readonly log: ComputerWebhookEventLog;
+  /** A legacy status file was checked (and migrated) in this process. */
+  private migrated = false;
   constructor(private readonly o: ComputerWebhooksOptions) {
     this.log = new ComputerWebhookEventLog(o.polpoDir);
   }
@@ -295,10 +318,40 @@ export class ComputerWebhooks {
     try {
       if (existsSync(this.file)) {
         const d = JSON.parse(readFileSync(this.file, "utf8")) as StatusFile;
-        if (d?.version === 1) return { version: 1, providers: d.providers ?? {}, seen: d.seen ?? {} };
+        if (d?.version === 2) return { version: 2, providers: d.providers ?? {}, seen: d.seen ?? {} };
+        if (d?.version === 1) return this.migrate({ version: 1, providers: d.providers ?? {}, seen: d.seen ?? {} });
       }
     } catch { /* a broken file starts over */ }
-    return { version: 1, providers: {}, seen: {} };
+    return { version: 2, providers: {}, seen: {} };
+  }
+
+  /**
+   * A status file from before the event log (version 1) counted deliveries itself, and the log
+   * started empty: what the counters hold beyond the log's entries is moved, once, to `before`
+   * (totals with no detail), and the counts are the log's from then on.
+   */
+  private migrate(f: StatusFile): StatusFile {
+    for (const [id, s] of Object.entries(f.providers) as Array<[ComputerWebhookProviderId, ProviderCounters]>) {
+      if (!s) continue;
+      const { total, counts } = this.log.counts(id);
+      const logReceived = counts.accepted + counts.ignored + counts.error;
+      const before = {
+        received: Math.max(0, (s.received ?? 0) - logReceived),
+        ignored: Math.max(0, (s.ignored ?? 0) - counts.ignored),
+        rejected: Math.max(0, (s.rejected ?? 0) - counts.rejected),
+        errors: Math.max(0, (s.errors ?? 0) - counts.error),
+      };
+      delete s.received; delete s.ignored; delete s.rejected; delete s.errors;
+      if (!s.before && (before.received || before.ignored || before.rejected || before.errors)) {
+        const oldest = total ? this.log.all(id).at(-1)?.receivedAt : undefined;
+        s.before = { ...before, received: Math.max(before.received, before.ignored + before.errors), until: oldest ?? new Date(this.now()).toISOString() };
+      }
+    }
+    const migrated: StatusFile = { ...f, version: 2 };
+    try { this.write(migrated); } catch (err) {
+      this.o.log?.("warn", `Computer webhooks: the status file could not be migrated: ${(err as Error).message}`);
+    }
+    return migrated;
   }
 
   private write(f: StatusFile): void {
@@ -313,7 +366,7 @@ export class ComputerWebhooks {
 
   private bump(p: ComputerWebhookProviderId, fn: (s: ProviderCounters) => void): void {
     const f = this.read();
-    const s = f.providers[p] ?? { received: 0, rejected: 0, ignored: 0 };
+    const s = f.providers[p] ?? {};
     fn(s);
     f.providers[p] = s;
     this.write(f);
@@ -340,7 +393,9 @@ export class ComputerWebhooks {
     const kinds = new Set(this.o.computers().filter(isRemoteComputer).map((c) => c.kind));
     return Promise.all(Object.values(COMPUTER_WEBHOOK_PROVIDERS).map(async (prov) => {
       const creds = await this.secretEntry(prov.id);
-      const s = f.providers[prov.id] ?? { received: 0, rejected: 0, ignored: 0 };
+      const s = f.providers[prov.id] ?? {};
+      // the counts are the event log's: the events sheet shows the same
+      const { counts } = this.log.counts(prov.id);
       const secretSet = !!creds?.secret;
       const registered = prov.registration === "api" ? !!creds?.webhookId : undefined;
       const ready = secretSet && (prov.registration === "manual" || !!registered);
@@ -356,7 +411,8 @@ export class ComputerWebhooks {
         ...(registered !== undefined ? { registered } : {}), ...(creds?.webhookId ? { webhookId: creds.webhookId } : {}),
         ...(url ? { url } : {}), inUse: kinds.has(prov.id),
         ...(s.lastEventAt ? { lastEventAt: s.lastEventAt } : {}), ...(s.lastEventType ? { lastEventType: s.lastEventType } : {}),
-        received: s.received, rejected: s.rejected, ignored: s.ignored, errors: s.errors ?? 0,
+        received: counts.accepted + counts.ignored + counts.error, rejected: counts.rejected, ignored: counts.ignored, errors: counts.error,
+        ...(s.before ? { before: s.before } : {}),
         ...(showError ? { lastError: s.lastError, lastErrorAt: s.lastErrorAt } : {}),
         state,
         ...(state === "configured" && !s.lastEventAt ? { waitingNote: COMPUTER_WEBHOOK_WAITING_NOTES[prov.id] } : {}),
@@ -490,9 +546,9 @@ export class ComputerWebhooks {
   }
 
   /**
-   * Record a delivery in the provider's log and count it (the status' counters follow the log):
-   * rejected → rejected (and the last error); anything that passed the signature → received (and
-   * the last event); ignored → ignored; accepted clears the last error.
+   * Record a delivery in the provider's log (the status' counts are the log's) and update the
+   * status: rejected → the last error; anything that passed the signature → the last event; an
+   * error → the last error; accepted clears the last error.
    */
   private record(
     p: ComputerWebhookProviderId,
@@ -509,21 +565,19 @@ export class ComputerWebhooks {
       headers: safeWebhookHeaders(d.header),
     };
     try {
+      // a legacy status file is migrated before the log grows (its counters are compared with the log)
+      if (!this.migrated) { this.read(); this.migrated = true; }
       this.log.add(rec);
       this.bump(p, (s) => {
         if (rec.outcome === "rejected") {
-          s.rejected++;
           s.lastError = rec.reason ?? "Rejected";
           s.lastErrorAt = receivedAt;
           s.lastErrorCode = code ?? "internal";
           return;
         }
-        s.received++;
         s.lastEventAt = receivedAt;
         if (rec.eventType) s.lastEventType = rec.eventType;
-        if (rec.outcome === "ignored") s.ignored++;
         if (rec.outcome === "error") {
-          s.errors = (s.errors ?? 0) + 1;
           s.lastError = rec.reason ?? "Error";
           s.lastErrorAt = receivedAt;
           s.lastErrorCode = code ?? "internal";
@@ -661,7 +715,7 @@ export class ComputerWebhooks {
         : { statusChange, action: `Checked computer "${target.c.id}" at ${prov.label}: ${to && to !== from ? `${from} → ${to}` : `no change (${to ?? from})`}` };
       try {
         if (this.log.update(prov.id, rec.id, patch)) {
-          if (failure) this.bump(prov.id, (s) => { s.errors = (s.errors ?? 0) + 1; s.lastError = patch.reason; s.lastErrorAt = appliedAt; s.lastErrorCode = "apply"; });
+          if (failure) this.bump(prov.id, (s) => { s.lastError = patch.reason; s.lastErrorAt = appliedAt; s.lastErrorCode = "apply"; });
           this.announce({ ...rec, ...patch }, "updated");
         }
       } catch (err) {

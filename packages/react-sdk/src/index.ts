@@ -236,6 +236,7 @@ export type {
   ComputerWebhookProvider,
   ComputerWebhookOutcome,
   ComputerWebhookStatus,
+  ComputerWebhookCountsBefore,
   ComputerWebhookEventSummary,
   ComputerWebhookEvent,
   ComputerWebhookEventPage,

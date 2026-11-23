@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { BrandIcon } from "@/components/shared/brand-icon";
-import { WebhookEventsSheet } from "@/components/config/computer-webhook-events-sheet";
+import { WebhookCountsBefore, WebhookEventsSheet } from "@/components/config/computer-webhook-events-sheet";
 import { computerWebhooksApi, formatLastUsed, type ComputerWebhookStatus } from "@/lib/computers-api";
 import { notifySetupSaved } from "@/lib/setup-link";
 import { cn } from "@/lib/utils";
@@ -68,8 +68,9 @@ function ProviderCard({ s, onChanged }: { s: ComputerWebhookStatus; onChanged: (
           <dt className="text-muted-foreground">Last event</dt>
           <dd>{s.lastEventAt ? `${formatLastUsed(s.lastEventAt)}${s.lastEventType ? ` · ${s.lastEventType}` : ""}` : "none yet"}</dd>
           <dt className="text-muted-foreground">Deliveries</dt>
-          <dd className="tabular-nums" data-testid="webhook-counts">
+          <dd className="tabular-nums" data-testid="webhook-counts" title="The deliveries in the event log (the last 200 are kept)">
             {Math.max(0, s.received - s.ignored - (s.errors ?? 0))} accepted · {s.ignored} ignored · {s.rejected} rejected{s.errors ? ` · ${s.errors} errors` : ""}
+            <WebhookCountsBefore s={s} className="mt-0.5" />
           </dd>
           {s.lastError && (<><dt className="text-muted-foreground">Last problem</dt><dd className="text-destructive" data-testid="webhook-last-error">{s.lastError}</dd></>)}
         </dl>

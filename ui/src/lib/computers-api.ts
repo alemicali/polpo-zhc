@@ -406,6 +406,13 @@ export type {
 
 export const COMPUTER_WEBHOOK_OUTCOMES: ComputerWebhookOutcome[] = ["accepted", "ignored", "rejected", "error"];
 
+/** "7 ignored, 1 rejected": the deliveries counted before the event log existed (the non-zero ones). */
+export function formatWebhookCountsBefore(b: NonNullable<ComputerWebhookStatus["before"]>): string {
+  const accepted = Math.max(0, b.received - b.ignored - b.errors);
+  return ([[accepted, "accepted"], [b.ignored, "ignored"], [b.rejected, "rejected"], [b.errors, b.errors === 1 ? "error" : "errors"]] as const)
+    .filter(([n]) => n > 0).map(([n, what]) => `${n} ${what}`).join(", ");
+}
+
 export const computerWebhooksApi = {
   /** A provider's event log, newest first (no payloads); `outcome`: only these. */
   events: (provider: string, o: { limit?: number; cursor?: string; outcome?: ComputerWebhookOutcome[] } = {}) => {

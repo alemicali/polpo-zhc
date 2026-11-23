@@ -15,13 +15,29 @@ import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, Dia
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { BrandIcon } from "@/components/shared/brand-icon";
 import {
-  COMPUTER_WEBHOOK_OUTCOMES, computerWebhooksApi, formatLastUsed,
+  COMPUTER_WEBHOOK_OUTCOMES, computerWebhooksApi, formatLastUsed, formatWebhookCountsBefore,
   type ComputerWebhookEvent, type ComputerWebhookEventPage, type ComputerWebhookEventSummary, type ComputerWebhookOutcome, type ComputerWebhookStatus,
 } from "@/lib/computers-api";
 import { cn } from "@/lib/utils";
 
 const WEBHOOK_EVENTS = ["computer:webhook"];
 const PAGE = 50;
+
+/**
+ * Deliveries counted before the event log existed (older instances): totals only, kept apart so the
+ * counts above (the log's) and the log's entries always agree. Shown in the card and the sheet.
+ */
+export function WebhookCountsBefore({ s, className }: { s: ComputerWebhookStatus; className?: string }) {
+  if (!s.before) return null;
+  const counts = formatWebhookCountsBefore(s.before);
+  if (!counts) return null;
+  return (
+    <p className={cn("text-caption text-muted-foreground", className)} data-testid="webhook-counts-before"
+      title={`Counted before ${new Date(s.before.until).toLocaleString()}, when the event log started: only the totals were kept.`}>
+      Before the event log: {counts} — no details
+    </p>
+  );
+}
 
 const OUTCOME: Record<ComputerWebhookOutcome, { label: string; className: string; hint: string }> = {
   accepted: { label: "Accepted", className: "border-success/30 bg-success/10 text-success", hint: "about one of this instance's computers: Polpo checked it at the provider" },
@@ -247,6 +263,7 @@ export function WebhookEventsSheet({ s, open, onOpenChange }: { s: ComputerWebho
             <SheetDescription>
               Every delivery {s.label} sent to this instance (the last 200 are kept), newest first. Click one for what Polpo did and its payload.
             </SheetDescription>
+            <WebhookCountsBefore s={s} />
             <div className="flex flex-wrap items-center gap-1.5 pt-1" role="group" aria-label="Filter by outcome">
               {(["all", ...COMPUTER_WEBHOOK_OUTCOMES] as const).map((o) => {
                 const n = o === "all" ? page?.total : counts?.[o];
