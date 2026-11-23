@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-11-23 — Data workspace, artifacts browser, safer agent commands
+
 ### Changed
 - **Artifacts page: a table and a preview layout instead of cards.** The default is a sortable table (name with the type icon, type and version, created by — agent or person —, from — the task and its mission, or the chat —, size, updated as a relative time with the exact one on hover) with row actions (open, download, copy link, delete with confirmation). **Preview** is a file-manager layout: a compact list grouped by type on the left, the selected artifact live on the right with its metadata and the detail page's actions (versions, source, reload data, full screen, open on its own page); `?selected=<id>` keeps the selection. Arrow keys move the selection, Enter opens. The Table / Preview choice is kept in the browser (`localStorage`, `polpo:artifacts:layout`). On a phone the table folds into a list (name, type, date) and Preview opens the artifact's page. Every existing link (`/artifacts`, `/artifacts?type=…`, `/artifacts/<id>`, `/views` redirects) still works.
 - **Artifacts record the task they came from.** An artifact an agent creates while working on a task carries `taskId` and `missionId` (`Artifact` / `NewArtifact` in `@polpo-ai/core/artifacts`, stored in the artifact document, so no migration); REST `GET /api/v1/artifacts` returns them with `size`, MCP `polpo_artifacts_list` shows the task, size and last change (and types `taskId`, `missionId`, `size`, `updatedAt` in its structured output), and the agents' `artifact_list` / `artifact_get` show the task.
