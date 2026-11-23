@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Harness relay: requests with a body no longer fail with 400.** The public relay route passed the incoming `content-length` to the run's socket next to `transfer-encoding: chunked`, which Node rejects; every model call through the relay (API key or gateway auth, OpenCode on Bedrock) failed before reaching the provider. Found by the live OpenCode spike.
+
 ## [0.6.2] — 2026-11-22 — Harness gateways, computers you can trust, costs everywhere
 
 ### Added
