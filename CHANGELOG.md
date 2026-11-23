@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Eight more official remote MCP servers in the connector catalog** (160 entries), each probed live (`initialize` → `401` + `resource_metadata`, RFC 9728 / RFC 8414 metadata) and with its vendor icon bundled (`ui/public/connector-icons/`): **OVHcloud** (`ovhcloud`, `https://mcp.eu.ovhcloud.com/mcp`, variants EU / US / CA; OAuth + DCR), **WhatsApp Business** (`whatsapp-business`, Meta's WhatsApp Business Tools MCP `https://mcp.facebook.com/whatsapp_business_tools`; OAuth + DCR with Facebook Login for Business, scopes `business_management`, `whatsapp_business_management`, `whatsapp_business_messaging`), **Zernio** (`zernio`, `https://mcp.zernio.com/mcp`; OAuth + DCR, API key as Bearer too), **v0** (`v0`, `https://v0.app/api/mcp`; OAuth + DCR), **Expo** (`expo`, `https://mcp.expo.dev/mcp`; OAuth + DCR + CIMD), **Autumn** (`autumn`, `https://mcp.useautumn.com/mcp`; OAuth + DCR, secret key as Bearer too), **AWS** (`aws`, the AWS MCP Server `https://aws-mcp.us-east-1.api.aws/mcp`, variants US / EU; OAuth 2.1 + DCR through AWS Sign-in, the IAM principal needs `AWSMCPSignInOAuthAccessPolicy`) and **AgentPhone** (`agentphone`, `https://mcp.agentphone.ai/mcp`; OAuth + DCR, API key as Bearer too). None needs an OAuth app. Catalog notes can now name a `CA` region variant.
 
+### Fixed
+- **Harness relay: requests with a body no longer fail with 400.** The public relay route passed the incoming `content-length` to the run's socket next to `transfer-encoding: chunked`, which Node rejects; every model call through the relay (API key or gateway auth, OpenCode on Bedrock) failed before reaching the provider. Found by the live OpenCode spike.
+
 ## [0.6.2] — 2026-11-22 — Harness gateways, computers you can trust, costs everywhere
 
 ### Added
