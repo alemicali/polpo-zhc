@@ -34,7 +34,7 @@ export function DocTabNavigation({ tabs, activeId, onSelect, onAdd, onAction }: 
                 <DropdownMenuTrigger asChild>
                   <Button type="button" size="icon-xs" variant="ghost" className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100" aria-label={`More actions for ${tab.title}`} title={`More actions for ${tab.title}`}><MoreHorizontal /></Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="artifact-doc-surface">
+                <DropdownMenuContent align="start">
                   <DropdownMenuItem onSelect={() => onAction("rename", tab)}>Rename tab</DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => onAction("duplicate", tab)}>Duplicate tab</DropdownMenuItem>
                   <DropdownMenuItem disabled={index === 0} onSelect={() => onAction("earlier", tab)}>Move tab up</DropdownMenuItem>
@@ -67,7 +67,7 @@ export function DocTabPicker({ tabs, activeId, onSelect }: {
           <ChevronDown />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="artifact-doc-surface">
+      <DropdownMenuContent align="start">
         {tabs.map((tab) => (
           <DropdownMenuItem key={tab.id} onSelect={() => onSelect(tab.id)} aria-current={tab.id === activeId ? "page" : undefined}>
             {tab.title}

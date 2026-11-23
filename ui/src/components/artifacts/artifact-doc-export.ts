@@ -2,35 +2,10 @@ import type { JSONContent } from "@tiptap/core";
 import type { ILevelsOptions, IParagraphOptions, Paragraph, ParagraphChild, Table } from "docx";
 import { embeddedDocImage } from "./artifact-doc-assets";
 import { decodeDocChoice, selectedChoice } from "./artifact-doc-choices";
+import { DOC_PRINT_STYLES } from "./artifact-content-palette";
 import { artifactDocUrl, readArtifactDoc } from "./artifact-doc-format";
 
-const printStyles = `
-  @page { margin: 18mm; }
-  body { color: #182033; max-width: 760px; margin: 24px auto; padding: 0 1rem; font: 12pt/1.55 system-ui, sans-serif; }
-  h1,h2,h3,h4,h5,h6 { line-height: 1.2; break-after: avoid; }
-  p { orphans: 3; widows: 3; }
-  img, video { max-width: 100%; max-height: 70vh; }
-  video { display: none; }
-  table { width: 100%; border-collapse: collapse; margin: 1em 0; }
-  thead { display: table-header-group; }
-  th,td { text-align: left; padding: .4em; border: 1px solid #cbd5e1; }
-  th, pre { background: #f1f5f9; }
-  pre { padding: .8em; white-space: pre-wrap; overflow-wrap: anywhere; }
-  blockquote { margin-left: 0; padding-left: 1em; border-left: 2px solid #cbd5e1; }
-  blockquote[data-alert]::before { content: attr(data-alert); display: block; font-weight: 650; }
-  ul[data-type="taskList"] { list-style: none; padding-left: 1.2em; }
-  li[data-type="taskItem"] { display: flex; gap: .5em; }
-  li p { margin: 0; }
-  details { margin: 1em 0; }
-  [data-polpo-doc-choice] { border: 1px solid #cbd5e1; border-radius: 9999px; padding: .05em .45em; }
-  [data-polpo-doc-font="sans"] { font-family: system-ui, sans-serif; }
-  [data-polpo-doc-font="serif"] { font-family: Georgia, serif; }
-  [data-polpo-doc-font="mono"] { font-family: ui-monospace, monospace; }
-  @media print {
-    body { margin: 0; padding: 0; }
-    section[data-doc-tab] + section[data-doc-tab] { break-before: page; }
-  }
-`;
+const printStyles = DOC_PRINT_STYLES;
 
 export function printArtifactDoc(content: string, title: string): void {
   const { html } = readArtifactDoc(content);

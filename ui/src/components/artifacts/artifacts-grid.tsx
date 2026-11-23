@@ -8,7 +8,8 @@ import { ArtifactIcon } from "./artifact-icon";
 import { ArtifactRowMenu, LegacyBadge, type ArtifactRowInfo } from "./artifacts-browser";
 import { drawMotionFrame, parseMotion, type MotionProject } from "./artifact-motion-model";
 import { readWorkbook, type Sheet } from "./artifact-sheets-model";
-import { parseSlides, THEMES, type Slide } from "./artifact-slides-format";
+import { SLIDE_THEMES } from "./artifact-content-palette";
+import { parseSlides, type Slide } from "./artifact-slides-format";
 
 const motionPosterWidth = 360;
 const motionPosterHeight = 203;
@@ -18,18 +19,18 @@ const sheetColumns = ["A", "B", "C", "D"];
 function DocumentPoster({ content }: { content: string }) {
   const excerpt = content.replace(/^---\n[\s\S]*?\n---\n/, "").split(/\r?\n/).filter((line) => line.trim()).slice(0, 12);
   return (
-    <div className="absolute inset-x-[17%] top-4 rounded-t border border-border bg-background px-[7%] py-4 text-foreground shadow-sm">
+    <div className="absolute inset-x-[17%] top-4 rounded-t-xs border border-border bg-background px-[7%] py-4 text-foreground shadow-card">
       {excerpt.map((line, index) => {
         const heading = /^#{1,6}\s+/.test(line);
         const text = line.replace(/^#{1,6}\s+/, "").replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").replace(/[*`_]/g, "").slice(0, 140);
-        return <p key={index} className={heading ? "mb-1 line-clamp-2 font-heading text-xs font-semibold" : "mb-1 line-clamp-2 text-[8px] leading-snug text-muted-foreground"}>{text}</p>;
+        return <p key={index} className={heading ? "mb-1 line-clamp-2 font-heading text-xs font-semibold" : "mb-1 line-clamp-2 text-micro text-muted-foreground"}>{text}</p>;
       })}
     </div>
   );
 }
 
 function SlidePoster({ slide }: { slide: Slide }) {
-  const { bg, fg, accent } = THEMES[slide.theme ?? "light"];
+  const { bg, fg, accent } = SLIDE_THEMES[slide.theme ?? "light"];
   const titleSlide = slide.layout === "title";
   return (
     <div className="relative size-full overflow-hidden [container-type:inline-size]" style={{ backgroundColor: bg, color: fg }}>
@@ -55,8 +56,8 @@ function SlidePoster({ slide }: { slide: Slide }) {
 
 function SheetPoster({ sheet }: { sheet: Sheet }) {
   return (
-    <div className="absolute inset-x-[7%] top-4 overflow-hidden rounded-t border border-border bg-background shadow-sm">
-      <div className="grid grid-cols-[1.2rem_repeat(4,minmax(0,1fr))] text-[8px] leading-4">
+    <div className="absolute inset-x-[7%] top-4 overflow-hidden rounded-t-xs border border-border bg-background shadow-card">
+      <div className="grid grid-cols-[1.2rem_repeat(4,minmax(0,1fr))] text-micro">
         <span className="border-b border-r bg-muted" />
         {sheetColumns.map((column) => <span key={column} className="border-b border-r bg-muted text-center font-medium text-muted-foreground">{column}</span>)}
         {sheetRows.flatMap((row) => [
@@ -67,7 +68,7 @@ function SheetPoster({ sheet }: { sheet: Sheet }) {
           }),
         ])}
       </div>
-      <p className="inline-block max-w-full truncate border-t-2 border-primary px-2 py-0.5 text-[8px] font-medium">{sheet.name}</p>
+      <p className="inline-block max-w-full truncate border-t-2 border-primary px-2 py-0.5 text-micro font-medium">{sheet.name}</p>
     </div>
   );
 }
@@ -85,9 +86,9 @@ function MotionPoster({ project }: { project: MotionProject }) {
     context.resetTransform();
   }, [project, height, width]);
   return (
-    <div className="flex size-full items-center justify-center bg-neutral-950">
+    <div className="flex size-full items-center justify-center bg-stage">
       <canvas ref={canvas} width={width} height={height} className="max-h-full max-w-full object-contain" />
-      <span className="absolute bottom-2 right-2 grid size-6 place-items-center rounded-full bg-black/45 text-white"><Play className="size-3" /></span>
+      <span className="absolute bottom-2 right-2 grid size-6 place-items-center rounded-pill bg-stage/60 text-stage-foreground"><Play className="size-3" /></span>
     </div>
   );
 }
@@ -105,7 +106,7 @@ function StaticHtmlPoster({ content }: { content: string }) {
   return srcDoc ? (
     <div className="absolute inset-0 overflow-hidden [container-type:inline-size]">
       <iframe srcDoc={srcDoc} sandbox="" referrerPolicy="no-referrer" tabIndex={-1} title="Static artifact thumbnail"
-        className="pointer-events-none absolute left-0 top-0 h-[576px] w-[1024px] origin-top-left scale-[calc(tan(atan2(100cqw,1024px)))] border-0 bg-white" />
+        className="pointer-events-none absolute left-0 top-0 h-[576px] w-[1024px] origin-top-left scale-[calc(tan(atan2(100cqw,1024px)))] border-0 bg-canvas" />
     </div>
   ) : null;
 }
@@ -128,7 +129,7 @@ function PreviewContent({ artifact, content }: { artifact: ArtifactSummary; cont
   } else if (artifact.type === "svg" && /<\/svg>\s*$/i.test(content)) {
     return <img alt="" decoding="async" className="size-full object-contain p-4" src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(content)}`} />;
   } else if (artifact.type === "mermaid" && content.trim()) {
-    return <pre className="absolute inset-0 overflow-hidden whitespace-pre-wrap p-[8%] text-[8px] leading-relaxed text-muted-foreground">{content.slice(0, 500)}</pre>;
+    return <pre className="absolute inset-0 overflow-hidden whitespace-pre-wrap p-[8%] text-micro text-muted-foreground">{content.slice(0, 500)}</pre>;
   }
   return null;
 }

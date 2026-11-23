@@ -31,7 +31,7 @@ export const DocEmptyHints = Extension.create<{
             items.push(Decoration.widget(title.nodeSize + 1, () => {
               const hint = document.createElement("span");
               hint.contentEditable = "false";
-              hint.className = "inline-flex flex-wrap items-baseline gap-x-1 select-none text-neutral-500";
+              hint.className = "inline-flex flex-wrap items-baseline gap-x-1 select-none text-muted-foreground";
               if (!settings.canAsk) {
                 hint.textContent = "Start writing…";
                 return hint;
@@ -39,7 +39,7 @@ export const DocEmptyHints = Extension.create<{
               hint.append("Start typing, or ask ");
               const ask = document.createElement("button");
               ask.type = "button";
-              ask.className = "cursor-pointer rounded-sm font-medium text-neutral-700 underline decoration-slate-300 underline-offset-2 hover:text-neutral-950 focus-visible:ring-2 focus-visible:ring-blue-600";
+              ask.className = "cursor-pointer rounded-sm font-medium text-foreground/80 underline decoration-border underline-offset-2 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring";
               ask.textContent = `@${settings.instanceName}`;
               ask.addEventListener("mousedown", (event) => event.preventDefault());
               ask.dataset.docAsk = "";

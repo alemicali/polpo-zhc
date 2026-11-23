@@ -1,8 +1,7 @@
-export const THEMES = {
-  light: { bg: "#f7f7ef", fg: "#182d29", accent: "#3c7968" },
-  dark: { bg: "#182d29", fg: "#f7f7ef", accent: "#b6e1cd" },
-  accent: { bg: "#d1ece1", fg: "#182d29", accent: "#265c50" },
-} as const;
+import { SLIDE_THEMES } from "./artifact-content-palette";
+
+/** The slide themes (content colours: shown as chosen and written into the .pptx). */
+export const THEMES = SLIDE_THEMES;
 const LAYOUTS = ["title", "content", "split"] as const;
 export type Theme = keyof typeof THEMES;
 export type Layout = typeof LAYOUTS[number];

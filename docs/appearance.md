@@ -120,6 +120,7 @@ Every CSS custom property the dashboard's theme uses (`ui/src/index.css`), and w
 | Shape | `shadowDialog` | `--shadow-dialog` (`shadow-dialog`: dialogs and sheets) | no (`shadowRaised`) | yes (default `shadowRaised`, the palette's or the look's) |
 | Surfaces | `overlay` | `--overlay` (`bg-overlay`: the dialog and sheet scrim) | no (fixed black 50%) | yes |
 | Surfaces | `canvas`, `canvasForeground` | `--canvas`, `--canvas-foreground` (`bg-canvas`: the sheet behind embedded web pages and QR codes) | no (fixed white) | yes (foreground derived by contrast) |
+| Surfaces | `stage`, `stageForeground` | `--stage`, `--stage-foreground` (`bg-stage text-stage-foreground`: the dark backdrop behind videos, motion previews and full-screen presentations) | no (fixed `bg-black` / `bg-neutral-950`) | yes (foreground derived by contrast) |
 | Agents | `agent1` … `agent10` | `--agent-1` … `--agent-10` (`bg-agent-3`, `text-agent-3`, `bg-agent-3/15`) | no (fixed Tailwind hues, team colours from the chart colours) | yes (every palette, light and dark) |
 | Agents | `agent1Foreground` … `agent10Foreground` | `--agent-1-foreground` … (`text-agent-3-foreground`) | no | yes (derived by contrast) |
 | Typography | `textXs`, `textSm`, `textBase`, `textLg`, `textXl`, `text2xl`, `text3xl` | `--text-xs` … `--text-3xl` (Tailwind's `text-xs` … `text-3xl`) | no (Tailwind's) | yes |
@@ -139,7 +140,7 @@ Not configurable: palette-only textures (Editorial's paper grain, Cyber's scanli
 
 The rule: everything that is software — not only the logos — is under the theme. Every colour, corner, shadow, blur, font, font size and weight a screen shows comes from a token above, so every palette and every custom look restyles all of it, and an instance can configure all of it (the editor, REST, MCP). Nothing in a screen's code is a raw colour (`#…`, `rgb(…)`, `oklch(…)`, `white`), a Tailwind palette colour (`bg-zinc-900`, `text-emerald-400`), a fixed corner (`rounded-full`, the bare `rounded`, `rounded-[3px]`), a fixed shadow or blur (`shadow-lg`, `shadow-[…]`, `backdrop-blur-sm`, `blur-3xl`) or an arbitrary type value (`text-[11px]`, `font-[550]`, `tracking-[0.2em]`, `fontSize: 12` in a style). When a screen needs something no token says yet, add a token (packages/core `APPEARANCE_TOKENS`, `lib/appearance-kit.ts` `TOKENS`, `index.css` defaults per palette, the editor group): never a fixed value. The theme guard enforces it (see below).
 
-What legitimately keeps literal values: the token definitions themselves (`index.css`, `lib/palette.ts`, `lib/appearance-kit.ts`, the sandboxed artifact document's stylesheet, the token editor's colour inputs) and vendors' own marks (provider, connector and channel logos, generated brand icons): a brand's logo keeps its colours. Defaults that must work before the look is known (the MCP cards' fallbacks inside a third-party host, the app preview inspector inside someone else's page, the PWA manifest of the build) are written once, in a token block, and replaced by the instance's look as soon as it is known.
+What legitimately keeps literal values: the token definitions themselves (`index.css`, `lib/palette.ts`, `lib/appearance-kit.ts`, the sandboxed artifact document's stylesheet, the token editor's colour inputs) and vendors' own marks (provider, connector and channel logos, generated brand icons): a brand's logo keeps its colours. A user's own document is content, not software: the colours a person picks for text, cells, shapes and choice chips inside a doc, sheet, slide deck, design or motion project, the default content palette those pickers offer, and the literal colours written into exported .docx / .xlsx / .pptx / print / video files live in one module, `components/artifacts/artifact-content-palette.ts`; the editors' chrome around them (toolbars, panels, inspectors, selection outlines, the live chart preview, comment and choice chips) uses tokens. Defaults that must work before the look is known (the MCP cards' fallbacks inside a third-party host, the app preview inspector inside someone else's page, the PWA manifest of the build) are written once, in a token block, and replaced by the instance's look as soon as it is known.
 
 ### Agent colours
 
@@ -179,7 +180,7 @@ The agent, task and mission cards (MCP Apps in Claude, ChatGPT and other hosts) 
 | Shadows and halos | `shadow-control` (inputs), `shadow-card`, `shadow-raised`, `shadow-dialog`, `shadow-glow` / `shadow-glow-strong` with `glow-success`, `glow-warning`, `glow-info`, `glow-destructive`, `glow-status-running`… |
 | Blur | `backdrop-blur-surface` (glassy bars), `backdrop-blur-overlay` (the scrim), `blur-glow` (soft halos) |
 | An agent's colour | `useAgentColor(name)` → `solid`, `soft`, `text`, `dot`…; `<AgentAvatar name />` (a list of agents shows each with it, never a plain `Bot` icon: its fallback is the agent's coloured icon or, with `fallbackVariant="circle"`, its initials on its colour) |
-| Scrim, white sheet | `bg-overlay`; `bg-canvas text-canvas-foreground` (behind web pages and QR codes) |
+| Scrim, white sheet, dark stage | `bg-overlay`; `bg-canvas text-canvas-foreground` (behind web pages and QR codes); `bg-stage text-stage-foreground` (behind videos and presentations) |
 | Sizes in a style or a chart | `var(--text-micro)` (`style={{ fontSize: "var(--text-micro)" }}`), `className="text-micro"` on Recharts ticks |
 | A primary call to action of your own | `bg-button-primary text-button-primary-foreground shadow-button-primary hover:bg-button-primary-hover hover:shadow-button-primary-hover` (follows the button style, gradient and glow included) |
 
@@ -191,7 +192,7 @@ The agent, task and mission cards (MCP Apps in Claude, ChatGPT and other hosts) 
 - `shape`: `rounded-full`, the bare `rounded`, `rounded-[…]` (except `inherit` and `var(…)`), Tailwind's `shadow`, `shadow-xs` … `shadow-2xl`, `shadow-[…]`, `drop-shadow*`, `backdrop-blur` and its sizes, `blur-sm` … `blur-3xl`, `borderRadius` / `boxShadow` literals in styles;
 - `font`: `font-[…]`, `tracking-[…]`, `leading-[…]`, `font-thin`, `font-extralight`, `font-light`, `font-extrabold`, `font-black`, and `fontFamily` / `fontWeight` / `letterSpacing` / `lineHeight` literals in styles.
 
-Use a token instead (the table above), or add one. The test's `ALLOWLIST` holds only token definitions (`lib/palette.ts`, `lib/appearance-kit.ts`, `lib/artifact-frame-doc.ts`, the token editor) and vendors' marks (`generated/`, the connector, channel and provider icons).
+Use a token instead (the table above), or add one. The test's `ALLOWLIST` holds only token definitions (`lib/palette.ts`, `lib/appearance-kit.ts`, `lib/artifact-frame-doc.ts`, the token editor), the artifacts' content palette (`components/artifacts/artifact-content-palette.ts`) and vendors' marks (`generated/`, the connector, channel and provider icons).
 
 ## Derivation
 

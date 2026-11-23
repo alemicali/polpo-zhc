@@ -76,7 +76,7 @@ const docMarkdownComponents: ComponentProps<typeof RichStreamdown>["components"]
     const choice = decodeDocChoice(node?.properties?.dataPolpoDocChoice);
     if (!choice) return <span {...props}>{children}</span>;
     const option = selectedChoice(choice);
-    return <span className={`inline-flex items-center rounded-full border px-2 py-0.5 align-baseline text-xs font-medium leading-tight ${choiceTone[option?.color ?? "slate"]}`}>
+    return <span className={`inline-flex items-center rounded-pill border px-2 py-0.5 align-baseline text-xs font-medium leading-tight ${choiceTone[option?.color ?? "slate"]}`}>
       {option?.label ?? choice.name}
     </span>;
   },
@@ -84,7 +84,7 @@ const docMarkdownComponents: ComponentProps<typeof RichStreamdown>["components"]
 
 export function ArtifactDocMarkdown({ content }: { content: string }) {
   return (
-    <div className="[&_video]:my-4 [&_video]:max-h-130 [&_video]:w-full [&_video]:rounded-md [&_video]:bg-black [&_details]:my-3 [&_details]:rounded-md [&_details]:border [&_details]:p-3 [&_summary]:cursor-pointer [&_summary]:font-medium [&_[data-polpo-doc-font=sans]]:font-sans [&_[data-polpo-doc-font=serif]]:font-serif [&_[data-polpo-doc-font=mono]]:font-mono">
+    <div className="[&_video]:my-4 [&_video]:max-h-130 [&_video]:w-full [&_video]:rounded-md [&_video]:bg-stage [&_details]:my-3 [&_details]:rounded-md [&_details]:border [&_details]:p-3 [&_summary]:cursor-pointer [&_summary]:font-medium [&_[data-polpo-doc-font=sans]]:font-sans [&_[data-polpo-doc-font=serif]]:font-serif [&_[data-polpo-doc-font=mono]]:font-mono">
       <RichStreamdown mode="static" rehypePlugins={rehypePlugins} components={docMarkdownComponents}>{content}</RichStreamdown>
     </div>
   );

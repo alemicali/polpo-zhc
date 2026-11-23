@@ -10,16 +10,16 @@ export function DocumentComment({ comment, onToggle }: { comment: DocComment; on
         <button type="button"
           aria-label={comment.resolved ? "Open resolved comment" : "Open comment"}
           title={comment.resolved ? "Resolved comment" : "Comment"}
-          className={`inline-flex size-5 items-center justify-center rounded-md border align-middle outline-none focus-visible:ring-2 focus-visible:ring-blue-600 ${comment.resolved
-            ? "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
-            : "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100"}`}>
+          className={`inline-flex size-5 items-center justify-center rounded-md border align-middle outline-none focus-visible:ring-2 focus-visible:ring-ring ${comment.resolved
+            ? "border-border bg-muted text-muted-foreground hover:bg-accent"
+            : "border-warning/40 bg-warning/10 text-warning hover:bg-warning/20"}`}>
           <MessageSquare className="size-3.5" />
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="artifact-doc-surface w-72 max-w-[calc(100vw-1.5rem)]">
+      <PopoverContent align="start" className="w-72 max-w-[calc(100vw-1.5rem)]">
         <PopoverHeader><PopoverTitle>{comment.resolved ? "Resolved comment" : "Document comment"}</PopoverTitle></PopoverHeader>
         {comment.quote && (
-          <blockquote className="max-h-28 overflow-auto whitespace-pre-wrap break-words border-l-2 border-amber-400 pl-2 text-xs text-muted-foreground">
+          <blockquote className="max-h-28 overflow-auto whitespace-pre-wrap break-words border-l-2 border-warning pl-2 text-xs text-muted-foreground">
             {comment.quote}
           </blockquote>
         )}

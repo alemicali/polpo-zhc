@@ -20,7 +20,7 @@ export function ArtifactPreparation({ phase = "Opening", kind, compact }: {
   const instance = info?.project || brand;
   const description = kind ? descriptions[kind] ?? "artifact" : "artifact";
   const message = `${phase} ${description}…`;
-  const spinner = <span aria-hidden="true" className="artifact-preparation-spinner block size-5 shrink-0 rounded-full" />;
+  const spinner = <span aria-hidden="true" className="artifact-preparation-spinner block size-5 shrink-0 rounded-pill" />;
 
   if (compact) {
     return (

@@ -1,3 +1,4 @@
+import { SLIDE_TEXT } from "./artifact-content-palette";
 import type { SlideElement } from "./artifact-slides-format";
 import { slideTableFontSize } from "./artifact-slides-format";
 
@@ -11,7 +12,7 @@ export function SlideTable({ element, colors, onChange, onSelect }: {
   if (!cells?.length) return null;
   return (
     <table aria-label="Slide table" className="size-full table-fixed border-collapse"
-      style={{ backgroundColor: colors.bg, color: colors.fg, fontSize: `${slideTableFontSize(element)}cqw`, lineHeight: 1.15 }}>
+      style={{ backgroundColor: colors.bg, color: colors.fg, fontSize: `${slideTableFontSize(element)}cqw`, lineHeight: SLIDE_TEXT.tableLineHeight }}>
       <tbody>
         {cells.map((row, rowIndex) => <tr key={rowIndex} style={{ height: `${100 / cells.length}%` }}>
           {row.map((value, columnIndex) => {

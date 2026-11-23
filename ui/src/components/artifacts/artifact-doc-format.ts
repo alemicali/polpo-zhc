@@ -111,7 +111,7 @@ const DocComment = Node.create({
             if (comment?.resolved || !comment?.length || !comment.quote || position < comment.length) return;
             const start = position - comment.length;
             if (state.doc.textBetween(start, position, "\n").trim() === comment.quote) {
-              items.push(Decoration.inline(start, position, { class: "rounded-sm bg-amber-100/80" }));
+              items.push(Decoration.inline(start, position, { class: "rounded-sm bg-warning/20" }));
             }
           });
           return DecorationSet.create(state.doc, items);

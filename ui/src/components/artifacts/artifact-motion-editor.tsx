@@ -6,6 +6,13 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { loadMotionAudio } from "./artifact-motion-audio";
 import { clamp, drawMotionFrame, MAX_LAYERS, MAX_SCENES, parseMotion, sceneAt, sceneOffsets, type MotionAudio, type MotionLayer, type MotionProject, type MotionScene } from "./artifact-motion-model";
+import { MOTION_LAYER_COLOR } from "./artifact-content-palette";
+
+/** The selection outline on the preview canvas: the theme's ring over its background (a canvas needs resolved colours). */
+function selectionOutline() {
+  const style = getComputedStyle(document.documentElement);
+  return { ink: style.getPropertyValue("--ring").trim() || "currentColor", paper: style.getPropertyValue("--background").trim() || "transparent" };
+}
 
 export { MOTION_STARTER } from "./artifact-motion-model";
 
@@ -100,7 +107,7 @@ function MotionWorkspace({ project, onChange, title }: { project: MotionProject;
 
   useEffect(() => {
     const ctx = canvasRef.current?.getContext("2d");
-    if (ctx) drawMotionFrame(ctx, project, offsets, currentTime, showLayout ? { selectedId: editing ? selected?.id : undefined, drag: drag ?? undefined } : undefined);
+    if (ctx) drawMotionFrame(ctx, project, offsets, currentTime, showLayout ? { selectedId: editing ? selected?.id : undefined, drag: drag ?? undefined, outline: selectionOutline() } : undefined);
   }, [project, offsets, currentTime, showLayout, editing, selected?.id, drag]);
 
   useEffect(() => {
@@ -294,7 +301,7 @@ function MotionWorkspace({ project, onChange, title }: { project: MotionProject;
     const layer: MotionLayer = {
       id: newId(), type, x: Math.round(project.width / 5), y: Math.round(project.height / 3),
       width: Math.max(1, Math.round(project.width / (type === "text" ? 2 : 5))), height: Math.max(1, Math.round(project.height / 5)),
-      color: "#f6faf7", ...(type === "text" ? { text: "New text", fontSize: Math.max(12, Math.round(project.height / 12)) } : {}),
+      color: MOTION_LAYER_COLOR, ...(type === "text" ? { text: "New text", fontSize: Math.max(12, Math.round(project.height / 12)) } : {}),
     };
     patchScene({ layers: [...scene.layers, layer] });
     selectLayer(layer.id);
@@ -387,10 +394,10 @@ function MotionWorkspace({ project, onChange, title }: { project: MotionProject;
       onLoadedMetadata={() => syncAudio(currentTime, playing, true)} hidden />}
     <div className="contents md:relative md:flex md:min-h-48 md:flex-1">
       <div className="order-1 grid min-h-44 min-w-0 shrink-0 place-items-center overflow-hidden bg-muted/35 px-3 pb-3 pt-2 md:order-none md:flex-1">
-        <div ref={previewRef} className="group relative grid size-full min-h-0 min-w-0 place-items-center overflow-hidden md:[container-type:size] [&:fullscreen]:bg-black [&:fullscreen]:[container-type:size]">
+        <div ref={previewRef} className="group relative grid size-full min-h-0 min-w-0 place-items-center overflow-hidden md:[container-type:size] [&:fullscreen]:bg-stage [&:fullscreen]:[container-type:size]">
           <canvas ref={canvasRef} width={project.width} height={project.height}
             style={{ "--motion-fit-width": `${100 * project.width / project.height}cqh` } as CSSProperties}
-            className={cn("h-auto w-full max-w-full rounded-sm bg-black shadow-md group-[:fullscreen]:w-[min(100cqw,var(--motion-fit-width))] md:w-[min(100cqw,var(--motion-fit-width))]", editing && "touch-none cursor-crosshair", drag && "cursor-grabbing")}
+            className={cn("h-auto w-full max-w-full rounded-sm bg-stage shadow-card group-[:fullscreen]:w-[min(100cqw,var(--motion-fit-width))] md:w-[min(100cqw,var(--motion-fit-width))]", editing && "touch-none cursor-crosshair", drag && "cursor-grabbing")}
             aria-label={`${scene.name} animation preview`} role={editing ? undefined : "button"} tabIndex={0}
             onClick={() => { if (!editing) togglePlay(); }}
             onPointerDown={dragStart} onPointerMove={dragMove} onPointerUp={dragEnd} onPointerCancel={() => setDrag(null)}
@@ -404,14 +411,14 @@ function MotionWorkspace({ project, onChange, title }: { project: MotionProject;
               patchLayer(selected.id, { x: selected.x + movement[0] * amount, y: selected.y + movement[1] * amount });
             }} />
           {fullscreen && <div className="absolute inset-x-0 bottom-0 flex items-center justify-center p-4">
-            <div className="flex items-center gap-1 rounded-lg border bg-background p-1 shadow-md">
+            <div className="flex items-center gap-1 rounded-lg border bg-background p-1 shadow-raised">
               {playbackButtons}
               <Button ref={exitFullscreenButtonRef} type="button" size="icon-sm" variant="ghost" aria-label="Exit full screen preview" title="Exit full screen preview" onClick={() => void toggleFullscreen()}><Minimize2 /></Button>
             </div>
           </div>}
         </div>
       </div>
-      {onChange && showProperties && <aside aria-label="Motion properties" className="order-3 min-h-0 shrink-0 border-t bg-card p-3 md:absolute md:bottom-3 md:right-3 md:top-2 md:z-10 md:w-64 md:overflow-y-auto md:rounded-lg md:border md:shadow-lg 2xl:w-72">
+      {onChange && showProperties && <aside aria-label="Motion properties" className="order-3 min-h-0 shrink-0 border-t bg-card p-3 md:absolute md:bottom-3 md:right-3 md:top-2 md:z-10 md:w-64 md:overflow-y-auto md:rounded-lg md:border md:shadow-raised 2xl:w-72">
         <div className="mb-2 flex items-center justify-between gap-2">
           <h3 className="text-sm font-medium">Properties</h3>
           <Button type="button" size="icon-xs" variant="ghost" aria-label="Close properties" onClick={() => { setShowProperties(false); propertiesButtonRef.current?.focus(); }}><X /></Button>

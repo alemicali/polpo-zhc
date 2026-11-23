@@ -2,12 +2,13 @@ import { useMemo } from "react";
 import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { cellKey, columnLabel, displaySheetValue, readRange, type SheetChart, type SheetValue } from "./artifact-sheets-model";
 
-const palette = ["var(--primary)", "#0f766e", "#c2410c", "#7e22ce", "#a21caf", "#2563eb", "#b45309", "#be123c"];
+/** The live preview follows the theme: the chart colours, then the agent hues for more series. */
+const palette = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)", "var(--agent-1)", "var(--agent-3)", "var(--agent-7)"];
 const tooltipStyle = {
   background: "var(--popover)",
   color: "var(--popover-foreground)",
   border: "1px solid var(--border)",
-  borderRadius: 6,
+  borderRadius: "var(--radius)",
 };
 
 function chartData(chart: SheetChart, get: (address: string) => SheetValue) {

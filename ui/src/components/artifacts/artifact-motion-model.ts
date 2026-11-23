@@ -1,3 +1,4 @@
+import { MOTION_SCENE_BACKGROUND } from "./artifact-content-palette";
 export type MotionAnimation = "none" | "fade" | "rise" | "slide";
 
 export interface MotionLayer {
@@ -170,7 +171,8 @@ export function drawMotionFrame(
   project: MotionProject,
   offsets: number[],
   seconds: number,
-  editing?: { selectedId?: string; drag?: Pick<MotionLayer, "id" | "x" | "y"> },
+  /** The editor's overlay; `outline` is the selection's two colours, resolved from the theme by the caller. */
+  editing?: { selectedId?: string; drag?: Pick<MotionLayer, "id" | "x" | "y">; outline?: { ink: string; paper: string } },
 ) {
   const index = sceneAt(offsets, seconds);
   const scene = project.scenes[index];
@@ -208,17 +210,17 @@ export function drawMotionFrame(
   } else {
     drawScene(ctx, scene, time, true);
   }
-  if (!editing?.selectedId) return;
+  if (!editing?.selectedId || !editing.outline) return;
   const layer = scene.layers.find((item) => item.id === editing.selectedId);
   if (!layer) return;
   const position = editing.drag?.id === layer.id ? editing.drag : layer;
   const stroke = project.width / 410;
   ctx.save();
-  ctx.strokeStyle = "#111827";
+  ctx.strokeStyle = editing.outline.ink;
   ctx.lineWidth = stroke * 2;
   ctx.strokeRect(position.x, position.y, layer.width, layer.height);
   ctx.setLineDash([stroke * 2, stroke]);
-  ctx.strokeStyle = "#f8fafc";
+  ctx.strokeStyle = editing.outline.paper;
   ctx.lineWidth = stroke;
   ctx.strokeRect(position.x, position.y, layer.width, layer.height);
   ctx.restore();
@@ -228,5 +230,5 @@ export const MOTION_STARTER = JSON.stringify({
   version: 1,
   width: 1280,
   height: 720,
-  scenes: [{ id: "scene-1", name: "Scene 1", duration: 3, background: "#ffffff", layers: [] }],
+  scenes: [{ id: "scene-1", name: "Scene 1", duration: 3, background: MOTION_SCENE_BACKGROUND, layers: [] }],
 } satisfies MotionProject, null, 2);

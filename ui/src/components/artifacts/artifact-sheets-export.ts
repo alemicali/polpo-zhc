@@ -1,3 +1,4 @@
+import { SHEET_EXPORT_BORDER_ARGB } from "./artifact-content-palette";
 import { isSupportedFormula } from "./artifact-sheets-formulas";
 import { cellKey, readRange, sheetDate, xlsxNumberFormat, type RuleOperator, type SheetValue, type Workbook } from "./artifact-sheets-model";
 
@@ -60,7 +61,7 @@ export async function buildWorkbookXlsx(workbook: Workbook, get: (sheetName: str
       if (style.align) cell.alignment = { horizontal: style.align };
       if (style.fill) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF" + style.fill.slice(1).toUpperCase() } };
       if (style.border) {
-        const border = { style: "thin" as const, color: { argb: "FF64748B" } };
+        const border = { style: "thin" as const, color: { argb: SHEET_EXPORT_BORDER_ARGB } };
         cell.border = style.border === "all" ? { top: border, right: border, bottom: border, left: border } : { [style.border]: border };
       }
       const numberFormat = xlsxNumberFormat(style);

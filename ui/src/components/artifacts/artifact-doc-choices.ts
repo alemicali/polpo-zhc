@@ -1,7 +1,9 @@
 import { nanoid } from "nanoid";
 
-export const choiceColors = ["slate", "blue", "green", "amber", "rose", "violet"] as const;
-export type DocChoiceColor = typeof choiceColors[number];
+import { DOC_CHOICE_COLORS, DOC_CHOICE_TEMPLATES, type DocChoiceColor } from "./artifact-content-palette";
+
+export const choiceColors = DOC_CHOICE_COLORS;
+export type { DocChoiceColor };
 
 export interface DocChoiceOption {
   id: string;
@@ -19,35 +21,17 @@ export interface DocChoice extends DocChoiceDefinition {
   selected?: string;
 }
 
+/** How a choice colour looks in the dashboard: the theme's agent hues (a doc's chips follow the look). */
 export const choiceTone: Record<DocChoiceColor, string> = {
   slate: "border-border bg-muted text-muted-foreground",
-  blue: "border-blue-300 bg-blue-100 text-blue-800 dark:border-blue-700 dark:bg-blue-900/40 dark:text-blue-200",
-  green: "border-green-300 bg-green-100 text-green-800 dark:border-green-700 dark:bg-green-900/40 dark:text-green-200",
-  amber: "border-amber-300 bg-amber-100 text-amber-800 dark:border-amber-700 dark:bg-amber-900/40 dark:text-amber-200",
-  rose: "border-rose-300 bg-rose-100 text-rose-800 dark:border-rose-700 dark:bg-rose-900/40 dark:text-rose-200",
-  violet: "border-violet-300 bg-violet-100 text-violet-800 dark:border-violet-700 dark:bg-violet-900/40 dark:text-violet-200",
+  blue: "border-agent-1/40 bg-agent-1/15 text-foreground",
+  green: "border-agent-3/40 bg-agent-3/15 text-foreground",
+  amber: "border-agent-5/40 bg-agent-5/15 text-foreground",
+  rose: "border-agent-2/40 bg-agent-2/15 text-foreground",
+  violet: "border-agent-7/40 bg-agent-7/15 text-foreground",
 };
 
-export const choiceTemplates: DocChoiceDefinition[] = [
-  {
-    id: "status",
-    name: "Status",
-    options: [
-      { id: "todo", label: "Not started", color: "slate" },
-      { id: "doing", label: "In progress", color: "blue" },
-      { id: "done", label: "Done", color: "green" },
-    ],
-  },
-  {
-    id: "priority",
-    name: "Priority",
-    options: [
-      { id: "low", label: "Low", color: "blue" },
-      { id: "medium", label: "Medium", color: "amber" },
-      { id: "high", label: "High", color: "rose" },
-    ],
-  },
-];
+export const choiceTemplates: DocChoiceDefinition[] = DOC_CHOICE_TEMPLATES;
 
 export function newChoiceOption(color: DocChoiceColor = "slate"): DocChoiceOption {
   return { id: nanoid(10), label: "", color };

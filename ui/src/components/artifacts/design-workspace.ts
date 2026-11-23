@@ -1,11 +1,12 @@
 import { parse, type DefaultTreeAdapterTypes } from "parse5";
+import { DESIGN_BLANK_BOARD_STYLE } from "./artifact-content-palette";
 
 export type Artboard = { id: string; name: string; x: number; y: number; width: number; height: number; html: string };
 export type DesignPage = { id: string; name: string; boards: Artboard[] };
 export type DesignWorkspace = { pages: DesignPage[] };
 
 export const BLANK_BOARD =
-  '<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>*{box-sizing:border-box}body{margin:0;background:white;color:#202124;font:16px system-ui,sans-serif}</style></head><body></body></html>';
+  '<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>' + DESIGN_BLANK_BOARD_STYLE + '</style></head><body></body></html>';
 
 export function createBoard(id: string, name: string, html = BLANK_BOARD, x = 0, y = 0): Artboard {
   return { id, name, html, x, y, width: 1024, height: 680 };

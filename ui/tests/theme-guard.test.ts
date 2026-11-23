@@ -50,6 +50,8 @@ const ALLOWLIST: Array<[string, string]> = [
   ["lib/appearance-kit.ts", "token definitions: the built-in theme colours, contrast colours, token kinds"],
   ["lib/artifact-frame-doc.ts", "token definitions: the sandboxed artifact document's own stylesheet (its tokens)"],
   ["components/config/appearance-editor.tsx", "token definitions: the token editor (colour inputs take #rrggbb) and its preview"],
+  // user content, not software
+  ["components/artifacts/artifact-content-palette.ts", "user content: a document's own colours (picker defaults, slide themes, exported .docx/.xlsx/.pptx/print/video)"],
   // vendors' own marks
   ["generated/", "generated brand icon data"],
   ["components/connectors/connector-icon.tsx", "vendor brand marks"],

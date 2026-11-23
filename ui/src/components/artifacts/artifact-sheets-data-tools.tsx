@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { SHEET_RULE_FILL } from "./artifact-content-palette";
 import { CHART_KINDS, MAX_SHEET_CHARTS, MAX_SHEET_RULES, MAX_VALIDATION_OPTIONS, rangeLabel, readRange, type CellValidation, type RuleOperator, type SheetChart, type SheetRule } from "./artifact-sheets-model";
 
 const operations: Record<RuleOperator, string> = {
@@ -148,7 +149,7 @@ function RulesForm({ range, rules, onRules }: { range: string; rules: SheetRule[
   const [address, setAddress] = useState(range);
   const [operator, setOperator] = useState<RuleOperator>("greaterThan");
   const [amount, setAmount] = useState("");
-  const [fill, setFill] = useState("#CCFBF1");
+  const [fill, setFill] = useState<string>(SHEET_RULE_FILL);
   const validRange = readRange(address);
   const canAdd = validRange && amount.trim() && Number.isFinite(Number(amount)) && rules.length < MAX_SHEET_RULES;
 

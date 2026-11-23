@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type PointerEvent } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import { ChartNoAxesColumn, ChevronDown, Download, FileUp, FunctionSquare, History, List, MoreHorizontal, MoveLeft, MoveRight, Plus, Trash2, X } from "lucide-react";
 import { MAX_ARTIFACT_BYTES } from "@polpo-ai/core/artifacts";
 import { toast } from "sonner";
@@ -651,7 +651,7 @@ function WorkbookGrid({ workbook, onChange, appearanceVersion, streaming, onShow
                 <th className="sticky left-0 w-10 min-w-10 border-b border-r border-border bg-muted" scope="col" aria-label="Rows" />
                 {Array.from({ length: columns }, (_, index) => (
                   <th key={index} scope="col" className={cn(
-                    "h-6 min-w-[5.5rem] cursor-s-resize border-b border-r border-border px-2 text-center font-mono text-[11px] font-medium text-muted-foreground",
+                    "h-6 min-w-[5.5rem] cursor-s-resize border-b border-r border-border px-2 text-center font-mono text-caption font-medium text-muted-foreground",
                     index + 1 >= selection.start.col && index + 1 <= selection.end.col && "bg-primary/10 text-primary",
                   )} onClick={() => selectColumn(index + 1)}>{columnLabel(index + 1)}</th>
                 ))}
@@ -665,7 +665,7 @@ function WorkbookGrid({ workbook, onChange, appearanceVersion, streaming, onShow
                 return (
                   <tr key={row} aria-rowindex={row + 1} style={height === ROW_HEIGHT ? undefined : { height }}>
                     <th scope="row" className={cn(
-                      "sticky left-0 z-10 h-[26px] cursor-e-resize border-b border-r border-border bg-muted px-1.5 text-right font-mono text-[11px] font-normal text-muted-foreground",
+                      "sticky left-0 z-10 h-[26px] cursor-e-resize border-b border-r border-border bg-muted px-1.5 text-right font-mono text-caption font-normal text-muted-foreground",
                       row >= selection.start.row && row <= selection.end.row && "bg-accent text-primary",
                     )} onClick={() => selectRow(row)}>{row}</th>
                     {Array.from({ length: columns }, (_, index) => {
@@ -749,15 +749,16 @@ function WorkbookGrid({ workbook, onChange, appearanceVersion, streaming, onShow
                               cellStyle?.bold && "font-bold",
                               cellStyle?.italic && "italic",
                               cellStyle?.underline && "underline",
+                              height > ROW_HEIGHT && "leading-(--sheet-line)",
                             )} style={{
                               textAlign: cellStyle?.align,
                               color: result.error ? undefined : cellStyle?.color,
                               fontSize: cellStyle?.fontSize,
-                              ...(height > ROW_HEIGHT ? { height: height - 2, lineHeight: `${height - 2}px` } : {}),
-                            }}>{display}</span>
+                              ...(height > ROW_HEIGHT ? { height: height - 2, "--sheet-line": `${height - 2}px` } : {}),
+                            } as CSSProperties}>{display}</span>
                           )}
                           <span aria-hidden="true" data-sheet-outline
-                            className="pointer-events-none absolute inset-0 z-1 rounded-[1px] border border-primary opacity-0 shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--primary)_22%,transparent)]" />
+                            className="pointer-events-none absolute inset-0 z-1 rounded-xs border border-primary opacity-0 ring-1 ring-inset ring-primary/20" />
                         </td>
                       );
                     })}
@@ -770,7 +771,7 @@ function WorkbookGrid({ workbook, onChange, appearanceVersion, streaming, onShow
         </div>
         <div ref={sweepRef} aria-hidden="true" className="pointer-events-none absolute left-10 right-0 top-0 z-10 h-8 border-t border-primary/35 opacity-0"
           style={{ background: "linear-gradient(to bottom, color-mix(in oklab, var(--primary) 15%, transparent), transparent)" }} />
-        <div ref={badgeRef} aria-hidden="true" className="pointer-events-none absolute left-0 top-0 z-30 max-w-40 truncate rounded-control bg-primary px-1.5 text-[10px] font-semibold leading-4 text-primary-foreground opacity-0">
+        <div ref={badgeRef} aria-hidden="true" className="pointer-events-none absolute left-0 top-0 z-30 max-w-40 truncate rounded-control bg-primary px-1.5 text-micro font-semibold text-primary-foreground opacity-0">
           {product}
         </div>
         {onChange && <SheetFormatBar style={selectedStyle} onChange={setStyle}>

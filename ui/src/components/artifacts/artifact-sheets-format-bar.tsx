@@ -9,6 +9,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
   DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { SHEET_FILL_COLORS, SHEET_TEXT_COLORS } from "./artifact-content-palette";
 import { MAX_CELL_DECIMALS, type CellStyle } from "./artifact-sheets-model";
 
 const textStyles = [
@@ -24,14 +25,8 @@ const alignments = [
 ] as const;
 
 const palettes = [
-  { key: "color", label: "Text color", icon: CaseSensitive, colors: [
-    ["Ink", "#111827"], ["White", "#FFFFFF"], ["Ocean", "#0369A1"],
-    ["Teal", "#0F766E"], ["Amber", "#B45309"], ["Red", "#B91C1C"], ["Violet", "#7E22CE"],
-  ] },
-  { key: "fill", label: "Cell color", icon: PaintBucket, colors: [
-    ["Graphite", "#1F2937"], ["White", "#FFFFFF"], ["Sky", "#DBEAFE"],
-    ["Mint", "#CCFBF1"], ["Sand", "#FEF3C7"], ["Rose", "#FCE7F3"], ["Lavender", "#EDE9FE"],
-  ] },
+  { key: "color", label: "Text color", icon: CaseSensitive, colors: SHEET_TEXT_COLORS },
+  { key: "fill", label: "Cell color", icon: PaintBucket, colors: SHEET_FILL_COLORS },
 ] as const;
 
 const borders = [

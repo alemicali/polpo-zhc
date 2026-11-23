@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 
 import { SlideTable } from "./artifact-slides-table";
 import { embeddedVideo, linkedVideo, powerPointVideoCover, videoFileExtension, VIDEO_MIME_TYPES } from "./artifact-slides-media";
+import { SLIDE_TEXT } from "./artifact-content-palette";
 import { isLinkableSlideVideo, MAX_SLIDE_TABLE_DIMENSION, parseSlides, slideTableFontSize, THEMES, type Layout, type Shape, type Slide, type SlideElement, type Theme } from "./artifact-slides-format";
 
 function slideFields(slide: Slide) {
@@ -19,7 +20,7 @@ function slideFields(slide: Slide) {
     { key: "title" as const, label: "Slide title", x: 8, y: titleSlide ? 29 : 14, w: 84, h: titleSlide ? 24 : 20, fontSize: titleSlide ? 6.3 : 4.5, bold: true },
     { key: "body" as const, label: "Slide text", x: 8, y: titleSlide ? 55 : 38, w: split ? 39 : 82, h: titleSlide ? 26 : 51, fontSize: titleSlide ? 3 : 2.6, bold: false },
   ] as { key: "title" | "body" | "secondary"; label: string; x: number; y: number; w: number; h: number; fontSize: number; bold: boolean }[];
-  if (split) fields.push({ key: "secondary", label: "Right column", x: 52, y: 38, w: 40, h: 51, fontSize: 2.6, bold: false });
+  if (split) fields.push({ key: "secondary", label: "Right column", x: 52, y: 38, w: 40, h: 51, fontSize: SLIDE_TEXT.columnSize, bold: false });
   return fields;
 }
 
@@ -30,10 +31,10 @@ const rectStyle = (value: Pick<SlideElement, "x" | "y" | "w" | "h">) => ({
 function SlideVideo({ element }: { element: SlideElement }) {
   const [playing, setPlaying] = useState(false);
   if (!(element.src?.startsWith("data:") || playing)) {
-    return <button type="button" className="flex size-full items-center justify-center gap-2 bg-neutral-950 text-[1.8cqw] text-white hover:bg-neutral-800"
+    return <button type="button" className="flex size-full items-center justify-center gap-2 bg-stage text-[1.8cqw] text-stage-foreground hover:bg-stage/85"
       onClick={() => setPlaying(true)}><Play className="size-[2cqw]" /> Play {element.alt || "video"}</button>;
   }
-  return <video src={element.src} poster={element.poster} aria-label={element.alt || "Slide video"} controls preload="metadata" playsInline className="size-full bg-neutral-950 object-contain" />;
+  return <video src={element.src} poster={element.poster} aria-label={element.alt || "Slide video"} controls preload="metadata" playsInline className="size-full bg-stage object-contain" />;
 }
 
 function SlideCanvas({ slide, onField, onElement, selected, onSelect, onDrag, thumbnail }: {
@@ -65,13 +66,13 @@ function SlideCanvas({ slide, onField, onElement, selected, onSelect, onDrag, th
         const isVideo = element.type === "video";
         const isTable = element.type === "table";
         const color = element.color ?? (isTextBox ? fg : accent);
-        const style = { ...rectStyle(element), color, fontSize: `${element.fontSize ?? 3}cqw`, lineHeight: 1.2, borderRadius: element.type === "ellipse" ? "50%" : undefined, backgroundColor: isTextBox || isImage || isVideo || isTable ? undefined : color };
+        const style = { ...rectStyle(element), color, fontSize: `${element.fontSize ?? 3}cqw`, lineHeight: SLIDE_TEXT.lineHeight, borderRadius: element.type === "ellipse" ? "50%" : undefined, backgroundColor: isTextBox || isImage || isVideo || isTable ? undefined : color };
         const active = selected === element.id;
         const outline = active ? " outline-2 outline-offset-2 outline-primary" : "";
         const drawing = isImage ? <img src={element.src} alt={element.alt ?? ""} draggable={false} className="size-full" /> : null;
         const videoCard = isVideo ? (element.poster
           ? <img src={element.poster} alt="" draggable={false} className="size-full" />
-          : <span className="flex size-full items-center justify-center gap-2 bg-neutral-950 text-[1.8cqw] text-white"><Video className="size-[2cqw]" /> {element.alt || "Video"}</span>) : null;
+          : <span className="flex size-full items-center justify-center gap-2 bg-stage text-[1.8cqw] text-stage-foreground"><Video className="size-[2cqw]" /> {element.alt || "Video"}</span>) : null;
         const table = isTable ? <SlideTable element={element} colors={colors} onSelect={() => onSelect?.(element.id)}
           onChange={onElement ? (cells) => onElement({ id: element.id, cells }) : undefined} /> : null;
         if (!onSelect) return <div key={element.id} className={textClass} style={style}>
@@ -84,14 +85,14 @@ function SlideCanvas({ slide, onField, onElement, selected, onSelect, onDrag, th
               onFocus={() => onSelect(element.id)} onChange={(event) => onElement?.({ id: element.id, text: event.target.value })} />
               : <button type="button" aria-label={label} className="size-full cursor-move touch-none rounded-[inherit] focus-visible:outline-2 focus-visible:outline-offset-2"
                 onFocus={() => onSelect(element.id)} onPointerDown={(event) => onDrag?.(event, element)}>{drawing ?? videoCard}</button>)}
-            {active && (isTextBox || isTable) && <button type="button" aria-label={isTable ? "Drag table" : "Drag text box"} className="absolute -right-2 -top-2 size-4 cursor-move touch-none rounded-full border border-background bg-primary outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            {active && (isTextBox || isTable) && <button type="button" aria-label={isTable ? "Drag table" : "Drag text box"} className="absolute -right-2 -top-2 size-4 cursor-move touch-none rounded-pill border border-background bg-primary outline-none focus-visible:ring-2 focus-visible:ring-ring"
               onPointerDown={(event) => onDrag?.(event, element)} />}
-            {active && (isImage || isVideo || isTable) && <button type="button" aria-label={`Resize ${element.type}`} className="absolute -bottom-2 -right-2 size-4 cursor-nwse-resize touch-none rounded-full border border-background bg-primary outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            {active && (isImage || isVideo || isTable) && <button type="button" aria-label={`Resize ${element.type}`} className="absolute -bottom-2 -right-2 size-4 cursor-nwse-resize touch-none rounded-pill border border-background bg-primary outline-none focus-visible:ring-2 focus-visible:ring-ring"
               onPointerDown={(event) => onDrag?.(event, element, true)} />}
           </div>
         );
       })}
-      {!thumbnail && slide.hidden && <span className="absolute bottom-2 right-2 rounded bg-background/85 px-2 py-1 text-xs text-foreground">Skipped in presentation</span>}
+      {!thumbnail && slide.hidden && <span className="absolute bottom-2 right-2 rounded-xs bg-background/85 px-2 py-1 text-xs text-foreground">Skipped in presentation</span>}
     </div>
   );
 }
@@ -130,7 +131,7 @@ function Presentation({ slides, initial, onClose }: { slides: Slide[]; initial: 
   };
   return (
     <dialog ref={dialog} aria-label="Slide presentation" onCancel={(event) => { event.preventDefault(); onClose(); }} onKeyDown={keys}
-      className="fixed inset-0 m-0 size-full max-h-none max-w-none flex-col bg-neutral-950 p-4 text-neutral-50 open:flex backdrop:bg-neutral-950">
+      className="fixed inset-0 m-0 size-full max-h-none max-w-none flex-col bg-stage p-4 text-stage-foreground open:flex backdrop:bg-stage">
       <div className="flex min-w-0 items-center justify-between gap-2">
         <p className="truncate text-sm" aria-live="polite">{index + 1} / {slides.length} · {slides[index].title}</p>
         <div className="flex items-center gap-1">
@@ -175,7 +176,7 @@ async function printSlides(slides: Slide[], title: string) {
     page.style.color = theme.fg;
     const boxes = [
       ...slideFields(slide).map((field) => ({ ...field, text: slide[field.key] ?? "", color: theme.fg, radius: false, fill: false })),
-      { x: 8, y: 8, w: 5, h: 0.7, text: "", fontSize: 1, bold: false, color: theme.accent, radius: false, fill: true },
+      { x: 8, y: 8, w: 5, h: 0.7, text: "", fontSize: SLIDE_TEXT.accentBarSize, bold: false, color: theme.accent, radius: false, fill: true },
       ...(slide.elements ?? []).map((element) => ({ ...element, text: element.type === "text" ? element.text ?? "" : "", fontSize: element.fontSize ?? 3, bold: false, color: element.color ?? (element.type === "text" ? theme.fg : theme.accent), radius: element.type === "ellipse", fill: element.type === "rect" || element.type === "ellipse", src: element.type === "image" ? element.src : element.poster, link: element.type === "video" && element.src && isLinkableSlideVideo(element.src) ? element.src : undefined })),
     ];
     for (const box of boxes) {
@@ -610,7 +611,7 @@ export function ArtifactSlidesEditor({ content, onChange, title = "Slides" }: { 
             <div className="min-h-0 flex-1 overflow-auto [container-type:size]">
               <div className={`flex min-h-full items-center justify-center p-3 @4xl:px-6 @4xl:pt-[1.125rem] @4xl:pb-[1.625rem] ${zoom ? "w-max min-w-full" : ""}`}>
                 <div ref={visibleCanvas} style={{ width: zoom ? SLIDE_LOGICAL_WIDTH * zoom / 100 : "min(calc(100% - 2px), max(12rem, calc((100cqh - 3rem) * 16 / 9)))" }}
-                  className="box-content shrink-0 overflow-hidden rounded-sm border border-border/70 shadow-sm">
+                  className="box-content shrink-0 overflow-hidden rounded-sm border border-border/70 shadow-card">
                   <SlideCanvas slide={shownSlide} onField={onChange ? patchSlide : undefined} onElement={onChange ? patchElement : undefined}
                     selected={selected} onSelect={onChange ? setSelected : undefined} onDrag={onChange ? drag : undefined} />
                 </div>

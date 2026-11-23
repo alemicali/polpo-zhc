@@ -61,7 +61,7 @@ export function DesignLayers({
       >
         <div
           className={
-            "flex h-7 min-w-0 items-center rounded " +
+            "flex h-7 min-w-0 items-center rounded-xs " +
             (selection.id === active.id && selection.index === index ? "bg-accent" : "")
           }
           style={{ paddingLeft: Math.min(88, depth * 12 + 12) }}
@@ -200,7 +200,7 @@ export function DesignTweaks({ board, onChange }: { board: Artboard; onChange: (
               <input
                 type="color"
                 aria-label={label + " color"}
-                className="h-7 w-8 cursor-pointer rounded border"
+                className="h-7 w-8 cursor-pointer rounded-xs border"
                 value={hex}
                 onChange={(e) => setValue(name, e.currentTarget.value)}
               />
@@ -208,7 +208,7 @@ export function DesignTweaks({ board, onChange }: { board: Artboard; onChange: (
             <input
               aria-label={label + " value"}
               key={value}
-              className="w-24 rounded border bg-transparent px-2 py-1"
+              className="w-24 rounded-control border bg-transparent px-2 py-1"
               defaultValue={value}
               onBlur={(e) => setValue(name, e.currentTarget.value)}
               onKeyDown={(e) => {

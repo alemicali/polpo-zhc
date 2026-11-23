@@ -29,6 +29,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { DESIGN_COLOR_PLACEHOLDERS, DESIGN_NOTE, DESIGN_SHAPE_FILL, DESIGN_STROKE } from "./artifact-content-palette";
 import { ArtifactFrame } from "./artifact-frame";
 import type { Artifact } from "@/lib/artifacts-api";
 
@@ -116,7 +117,7 @@ function instrumentCanvas(content: string, elements: Element[]) {
     `<style>
 html[data-polpo-design-tool="select"] [${NODE_ATTRIBUTE}] { cursor: default !important; }
 html:not([data-polpo-design-tool="select"]) * { cursor: crosshair !important; }
-[data-polpo-design-active] { outline: 2px solid var(--polpo-design-highlight, #147d64) !important; outline-offset: -2px; }
+[data-polpo-design-active] { outline: 2px solid var(--polpo-design-highlight, Highlight) !important; outline-offset: -2px; }
 html[data-polpo-design-tool="pan"], html[data-polpo-design-tool="pan"] * { cursor: grab !important; }
 </style><script>
 (() => {
@@ -132,7 +133,7 @@ html[data-polpo-design-tool="pan"], html[data-polpo-design-tool="pan"] * { curso
   const handlePositions = {nw:[0,0],ne:[100,0],sw:[0,100],se:[100,100]};
   for (const [corner,[x,y]] of Object.entries(handlePositions)) {
     const handle=document.createElement("span");
-    handle.style.cssText="position:absolute;width:8px;height:8px;box-sizing:border-box;pointer-events:auto;transform:translate(-50%,-50%);background:white;border:1px solid var(--polpo-design-highlight,#147d64);left:"+x+"%;top:"+y+"%;cursor:"+corner+"-resize";
+    handle.style.cssText="position:absolute;width:8px;height:8px;box-sizing:border-box;pointer-events:auto;transform:translate(-50%,-50%);background:Canvas;border:1px solid var(--polpo-design-highlight,Highlight);left:"+x+"%;top:"+y+"%;cursor:"+corner+"-resize";
     handle.dataset.polpoHandle=corner;handles.append(handle);
   }
   function syncBounds(){
@@ -179,7 +180,7 @@ html[data-polpo-design-tool="pan"], html[data-polpo-design-tool="pan"] * { curso
       overlay.style.cssText = "position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:2147483647";
       const path = document.createElementNS(svgNS, "path");
       path.setAttribute("fill", "none");
-      path.setAttribute("stroke", "#416a9b");
+      path.setAttribute("stroke", ${JSON.stringify(DESIGN_STROKE)});
       path.setAttribute("stroke-width", "3");
       path.setAttribute("stroke-linecap", "round");
       path.setAttribute("stroke-linejoin", "round");
@@ -333,13 +334,13 @@ const INSERT_ITEMS = {
     tag: "aside",
     body: "Add a note",
     style:
-      "width: min(100%, 14rem); margin: 1rem; padding: 1rem; border-radius: .4rem; background: #fff2bd; color: #342608;",
+      "width: min(100%, 14rem); margin: 1rem; padding: 1rem; border-radius: .4rem; background: " + DESIGN_NOTE.background + "; color: " + DESIGN_NOTE.color + ";",
   },
-  rectangle: { tag: "div", body: "", style: "width: 8rem; height: 5rem; margin: 1rem; background: #6186b4;" },
+  rectangle: { tag: "div", body: "", style: "width: 8rem; height: 5rem; margin: 1rem; background: " + DESIGN_SHAPE_FILL + ";" },
   circle: {
     tag: "div",
     body: "",
-    style: "width: 6rem; height: 6rem; margin: 1rem; border-radius: 50%; background: #6186b4;",
+    style: "width: 6rem; height: 6rem; margin: 1rem; border-radius: 50%; background: " + DESIGN_SHAPE_FILL + ";",
   },
 } as const;
 
@@ -397,14 +398,14 @@ function addStroke(content: string, points: unknown): string | undefined {
   const path = coordinates.map(([x, y], index) => `${index ? "L" : "M"}${x - left} ${y - top}`).join(" ");
   return appendMarkup(
     content,
-    `<svg role="img" aria-label="Freehand line" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" style="position:absolute;left:${left}px;top:${top}px"><path d="${path}" fill="none" stroke="#416a9b" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+    `<svg role="img" aria-label="Freehand line" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" style="position:absolute;left:${left}px;top:${top}px"><path d="${path}" fill="none" stroke="${DESIGN_STROKE}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   );
 }
 
 const STYLE_FIELDS = [
   { property: "font-size", label: "Font size", placeholder: "24px" },
-  { property: "color", label: "Text color", placeholder: "#192620" },
-  { property: "background-color", label: "Background", placeholder: "#f2f0ea" },
+  { property: "color", label: "Text color", placeholder: DESIGN_COLOR_PLACEHOLDERS.color },
+  { property: "background-color", label: "Background", placeholder: DESIGN_COLOR_PLACEHOLDERS.background },
   { property: "width", label: "Width", placeholder: "auto" },
   { property: "height", label: "Height", placeholder: "auto" },
   { property: "border-radius", label: "Corner radius", placeholder: "8px" },
@@ -435,7 +436,7 @@ const ROOT_TOOLS = [
 ] as const;
 const ZOOMS = [25, 50, 75, 100, 150, 200];
 const TOOL_BUTTON = "size-8 rounded-md p-0 [&_svg]:size-4";
-const CORNER_BUTTON = "h-7 rounded-md border bg-background/95 px-2 shadow-sm";
+const CORNER_BUTTON = "h-7 rounded-md border bg-background/95 px-2 shadow-control";
 const EMPTY_SELECTION = { id: "", index: -1 };
 
 function DesignFrame({
@@ -473,7 +474,7 @@ function DesignFrame({
       data-board-frame={board.id}
       ref={ref}
       onLoadCapture={sync}
-      className="size-full overflow-hidden bg-white shadow-sm"
+      className="size-full overflow-hidden bg-canvas shadow-card"
     >
       <ArtifactFrame
         artifactId={artifact.id}
@@ -1061,7 +1062,7 @@ export function ArtifactDesignEditor({
                 >
                   <div className="absolute inset-x-0 bottom-full mb-1 flex items-center gap-1 text-muted-foreground">
                     <button
-                      className="min-w-0 flex-1 touch-none truncate text-left text-[11px] font-medium"
+                      className="min-w-0 flex-1 touch-none truncate text-left text-caption font-medium"
                       data-board-title
                       title={board.name}
                       onPointerDown={(e) => beginDrag(e, board)}
@@ -1076,7 +1077,7 @@ export function ArtifactDesignEditor({
                     <button
                       aria-label={`Open artboard ${board.name} full window`}
                       title="Open artboard"
-                      className="rounded p-1 hover:bg-muted"
+                      className="rounded-xs p-1 hover:bg-muted"
                       onClick={() => setPlayer(board.id)}
                     >
                       <Expand className="size-3" />
@@ -1084,7 +1085,7 @@ export function ArtifactDesignEditor({
                     <button
                       aria-label={`Export artboard ${board.name}`}
                       title="Export artboard"
-                      className="rounded p-1 hover:bg-muted"
+                      className="rounded-xs p-1 hover:bg-muted"
                       onClick={() => exportBoard(board)}
                     >
                       <Download className="size-3" />
@@ -1122,7 +1123,7 @@ export function ArtifactDesignEditor({
           <div
             role="toolbar"
             aria-label="Canvas tools"
-            className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-xl border bg-background p-[3px] shadow-md"
+            className="absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-xl border bg-background p-[3px] shadow-raised"
           >
             {ROOT_TOOLS.map(({ id, label, key, icon: Icon }, i) => (
               <div key={id} className={i === 2 ? "border-l pl-1" : "contents"}>
@@ -1166,7 +1167,7 @@ export function ArtifactDesignEditor({
       {onChange && properties && (
         <aside
           aria-label="Properties panel"
-          className="absolute inset-y-0 right-0 z-30 w-[min(21rem,90%)] shrink-0 overflow-auto border-l bg-card p-3 shadow-md md:static md:shadow-none"
+          className="absolute inset-y-0 right-0 z-30 w-[min(21rem,90%)] shrink-0 overflow-auto border-l bg-card p-3 shadow-raised md:static md:shadow-none"
         >
           <div className="mb-3 flex items-center justify-between border-b pb-2 text-sm">
             <div role="tablist" aria-label="Inspector">
@@ -1177,7 +1178,7 @@ export function ArtifactDesignEditor({
                   aria-selected={tab === inspectorTab}
                   onClick={() => setInspectorTab(tab)}
                   className={
-                    "rounded px-2 py-1 text-xs " +
+                    "rounded-xs px-2 py-1 text-xs " +
                     (tab === inspectorTab ? "bg-accent font-semibold" : "text-muted-foreground")
                   }
                 >
@@ -1212,7 +1213,7 @@ export function ArtifactDesignEditor({
                 spellCheck={false}
                 aria-label="Layer HTML"
                 key={active.id + ":" + selection.index + ":" + active.html}
-                className="min-h-64 w-full resize-y rounded border bg-background p-2 font-mono text-xs"
+                className="min-h-64 w-full resize-y rounded-control border bg-background p-2 font-mono text-xs"
                 defaultValue={
                   element?.sourceCodeLocation
                     ? active.html.slice(element.sourceCodeLocation.startOffset, element.sourceCodeLocation.endOffset)
@@ -1279,7 +1280,7 @@ export function ArtifactDesignEditor({
                 <label>
                   Text
                   <textarea
-                    className="mt-1 block w-full rounded border bg-background p-2"
+                    className="mt-1 block w-full rounded-control border bg-background p-2"
                     value={text}
                     onChange={(e) =>
                       updateBoard({

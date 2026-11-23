@@ -35,9 +35,9 @@ const docScroll = "min-h-0 min-w-0 flex-1 overflow-y-auto px-5 pb-20 pt-16 sm:px
 const docColumn = "mx-auto w-full max-w-[672px]";
 const docTypography = [
   "min-h-[45vh] break-words text-base leading-6 outline-none",
-  "[&_p]:mt-0 [&_p]:mb-[0.6em] [&_strong]:font-semibold [&_h1:first-child]:mt-0 [&_h1]:mb-2 [&_h1]:mt-7 [&_h1]:font-serif [&_h1]:text-[32px] [&_h1]:leading-[1.2] [&_h1]:font-normal",
-  "[&_[data-doc-placeholder]]:relative [&_[data-doc-placeholder]::before]:pointer-events-none [&_[data-doc-placeholder]::before]:absolute [&_[data-doc-placeholder]::before]:text-neutral-500 [&_[data-doc-placeholder]::before]:content-[attr(data-doc-placeholder)]",
-  "[&_h2]:mb-[0.5em] [&_h2]:mt-[1.6em] [&_h2]:font-serif [&_h2]:text-[22px] [&_h2]:leading-[1.3] [&_h2]:font-normal",
+  "[&_p]:mt-0 [&_p]:mb-[0.6em] [&_strong]:font-semibold [&_h1:first-child]:mt-0 [&_h1]:mb-2 [&_h1]:mt-7 [&_h1]:font-serif [&_h1]:text-3xl [&_h1]:leading-tight [&_h1]:font-normal",
+  "[&_[data-doc-placeholder]]:relative [&_[data-doc-placeholder]::before]:pointer-events-none [&_[data-doc-placeholder]::before]:absolute [&_[data-doc-placeholder]::before]:text-muted-foreground [&_[data-doc-placeholder]::before]:content-[attr(data-doc-placeholder)]",
+  "[&_h2]:mb-[0.5em] [&_h2]:mt-[1.6em] [&_h2]:font-serif [&_h2]:text-2xl [&_h2]:leading-snug [&_h2]:font-normal",
   "[&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:text-xl [&_h3]:font-semibold",
   "[&_h4]:my-2 [&_h4]:text-lg [&_h4]:font-semibold [&_h5]:my-2 [&_h5]:font-semibold [&_h6]:my-2 [&_h6]:font-semibold",
   "[&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 [&_li>p]:my-0",
@@ -45,11 +45,11 @@ const docTypography = [
   "[&_a]:text-primary [&_a]:underline [&_blockquote]:my-4 [&_blockquote]:border-l-2 [&_blockquote]:border-primary/40",
   "[&_[data-alert]::before]:content-[attr(data-alert)] [&_[data-alert]::before]:block [&_[data-alert]::before]:font-semibold",
   "[&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_hr]:my-6 [&_pre]:my-4 [&_pre]:overflow-auto",
-  "[&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:font-mono [&_code]:text-[0.88em]",
+  "[&_code]:rounded-xs [&_code]:bg-muted [&_code]:px-1 [&_code]:font-mono",
   "[&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-4 [&_pre_code]:px-0",
   "[&_details]:my-3 [&_details]:rounded-md [&_details]:border [&_details]:p-3 [&_summary]:cursor-pointer [&_summary]:font-medium",
   "[&_[data-polpo-doc-font=sans]]:font-sans [&_[data-polpo-doc-font=serif]]:font-serif [&_[data-polpo-doc-font=mono]]:font-mono",
-  "[&_video]:my-4 [&_video]:max-h-130 [&_video]:w-full [&_video]:rounded-md [&_video]:bg-black",
+  "[&_video]:my-4 [&_video]:max-h-130 [&_video]:w-full [&_video]:rounded-md [&_video]:bg-stage",
   "[&_img]:inline-block [&_img]:max-h-130 [&_img]:max-w-full [&_img]:rounded-md",
   "[&_.tableWrapper]:overflow-x-auto [&_table]:my-4 [&_table]:w-full [&_table]:border-collapse",
   "[&_td]:min-w-16 [&_td]:border [&_td]:border-border [&_td]:p-2 [&_td]:align-top",
@@ -164,22 +164,22 @@ export function ArtifactDocEditor({ content, onChange, readOnly = false, instanc
   }
 
   return (
-    <div className="artifact-doc-surface @container relative isolate flex h-full min-h-0 flex-col bg-background text-foreground">
+    <div className="@container relative isolate flex h-full min-h-0 flex-col bg-background text-foreground">
       <div className="pointer-events-none absolute inset-x-0 top-3 z-20 flex items-center justify-between gap-2 px-3">
         <div role="group" aria-label="Document actions" className="pointer-events-auto">
           <Button type="button" size="icon" variant={tabsOpen ? "secondary" : "outline"} aria-controls={sidebarId}
-            className="h-9 w-[34px] shadow-sm" aria-label="Tabs" title={activeTab.title} aria-expanded={tabsOpen} onClick={() => setTabsOpen((open) => !open)}>
+            className="h-9 w-[34px] shadow-control" aria-label="Tabs" title={activeTab.title} aria-expanded={tabsOpen} onClick={() => setTabsOpen((open) => !open)}>
             <TextAlignStart />
           </Button>
         </div>
         {!readOnly && <div role="group" aria-label="View options" className="pointer-events-auto">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button type="button" size="sm" variant="outline" className="h-9 min-w-[100px] shadow-sm" aria-label={mode === "editing" ? "Editing, mode" : "Reading, mode"}>
+              <Button type="button" size="sm" variant="outline" className="h-9 min-w-[100px] shadow-control" aria-label={mode === "editing" ? "Editing, mode" : "Reading, mode"}>
                 {mode === "editing" ? <Pencil /> : <Eye />} {mode === "editing" ? "Editing" : "Reading"} <ChevronDown />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="artifact-doc-surface">
+            <DropdownMenuContent align="end">
               <DropdownMenuItem onSelect={() => setMode("editing")}><Pencil /> Editing</DropdownMenuItem>
               <DropdownMenuItem onSelect={() => setMode("reading")}><Eye /> Reading</DropdownMenuItem>
             </DropdownMenuContent>
@@ -216,7 +216,7 @@ export function ArtifactDocEditor({ content, onChange, readOnly = false, instanc
       </div>
       <Dialog open={tabDialog !== null} onOpenChange={(open) => { if (!open) setTabDialog(null); }}>
         {tabDialog && (
-          <DialogContent className="artifact-doc-surface">
+          <DialogContent>
             <DialogHeader>
               <DialogTitle>{tabDialog.action === "rename" ? "Rename tab" : "Delete tab"}</DialogTitle>
               <DialogDescription>
@@ -432,7 +432,7 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       <BubbleMenu editor={editor} updateDelay={80} options={{ placement: "top", offset: 7, flip: true, shift: true }}
-        className="artifact-doc-surface z-30 flex max-w-[calc(100vw-1rem)] flex-wrap items-center rounded-lg border bg-background p-1 shadow-lg"
+        className="z-30 flex max-w-[calc(100vw-1rem)] flex-wrap items-center rounded-lg border bg-background p-1 shadow-raised"
         role="group" aria-label="Document formatting">
         <div role="group" aria-label="Text format" className="flex items-center gap-0.5 border-r px-1.5">
           <select
@@ -491,12 +491,12 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
       </div>
 
       <div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 px-2">
-        <div role="group" aria-label="Insert tools" className="pointer-events-auto mx-auto flex w-fit max-w-full flex-wrap items-center justify-center gap-0.5 rounded-lg border bg-background px-1 py-px shadow-sm">
+        <div role="group" aria-label="Insert tools" className="pointer-events-auto mx-auto flex w-fit max-w-full flex-wrap items-center justify-center gap-0.5 rounded-lg border bg-background px-1 py-px shadow-raised">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <FormatButton label="Font"><Type /></FormatButton>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="artifact-doc-surface">
+            <DropdownMenuContent align="start">
               <DropdownMenuLabel>Typeface</DropdownMenuLabel>
               <DropdownMenuRadioGroup value={format.font} onValueChange={(value) => {
                 if (value === "default") editor.chain().focus().unsetMark("docFont").run();
@@ -511,7 +511,7 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
             <DropdownMenuTrigger asChild>
               <FormatButton label="Table" active={format.table}><Table2 /></FormatButton>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="artifact-doc-surface">
+            <DropdownMenuContent align="start">
               <DropdownMenuItem onSelect={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}>Insert 3 × 3 table</DropdownMenuItem>
               {format.table && <>
                 <DropdownMenuSeparator />
@@ -530,7 +530,7 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
             <DropdownMenuTrigger asChild>
               <FormatButton label="Image or video"><FileImage /></FormatButton>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="artifact-doc-surface">
+            <DropdownMenuContent align="start">
               <DropdownMenuItem onSelect={() => setInsertion({ kind: "image", url: "", label: "" })}><FileImage /> Image</DropdownMenuItem>
               <DropdownMenuItem onSelect={() => setInsertion({ kind: "video", url: "", label: "" })}><Video /> Video</DropdownMenuItem>
             </DropdownMenuContent>
@@ -543,7 +543,7 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
             <DropdownMenuTrigger asChild>
               <Button type="button" size="icon-sm" variant="ghost" aria-label="More document formatting" title="More document formatting"><MoreHorizontal /></Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="artifact-doc-surface">
+            <DropdownMenuContent align="end">
               <DropdownMenuItem onSelect={() => setInsertion({ kind: "link", url: editor.getAttributes("link").href ?? "", label: "" })}><Link2 />{format.link ? "Edit link" : "Link"}</DropdownMenuItem>
               <DropdownMenuItem onSelect={() => editor.chain().focus().setHorizontalRule().run()}><Minus /> Divider</DropdownMenuItem>
               <DropdownMenuSeparator />
@@ -566,12 +566,12 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
       </div>
 
       <Dialog open={comment !== null} onOpenChange={(open) => { if (!open) setComment(null); }}>
-        {comment && <DialogContent className="artifact-doc-surface" onCloseAutoFocus={(event) => { event.preventDefault(); editor.commands.focus(); }}>
+        {comment && <DialogContent onCloseAutoFocus={(event) => { event.preventDefault(); editor.commands.focus(); }}>
           <DialogHeader>
             <DialogTitle>New comment</DialogTitle>
             <DialogDescription>Attach a note to this part of the document.</DialogDescription>
           </DialogHeader>
-          {comment.quote && <blockquote className="max-h-28 overflow-auto whitespace-pre-wrap break-words border-l-2 border-amber-400 pl-3 text-sm text-muted-foreground">{comment.quote}</blockquote>}
+          {comment.quote && <blockquote className="max-h-28 overflow-auto whitespace-pre-wrap break-words border-l-2 border-warning pl-3 text-sm text-muted-foreground">{comment.quote}</blockquote>}
           <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); saveComment(); }}>
             <Textarea aria-label="Comment text" placeholder="Write a comment…" rows={4} autoFocus required maxLength={2000}
               value={comment.body} onChange={(event) => setComment({ ...comment, body: event.target.value })} />
@@ -582,7 +582,7 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
 
       <Dialog open={dropdown !== null} onOpenChange={(open) => { if (!open) setDropdown(null); }}>
         {dropdown && (
-          <DialogContent className="artifact-doc-surface" onCloseAutoFocus={(event) => { event.preventDefault(); editor.commands.focus(); }}>
+          <DialogContent onCloseAutoFocus={(event) => { event.preventDefault(); editor.commands.focus(); }}>
             <DialogHeader>
               <DialogTitle>{dropdown.position === undefined ? "Insert dropdown" : "Edit dropdown"}</DialogTitle>
               <DialogDescription>Readers can expand the section to see its text.</DialogDescription>
@@ -609,7 +609,7 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
         }
       }}>
         {insertion && (
-          <DialogContent className="artifact-doc-surface" onCloseAutoFocus={(event) => { event.preventDefault(); editor.commands.focus(); }}>
+          <DialogContent onCloseAutoFocus={(event) => { event.preventDefault(); editor.commands.focus(); }}>
             <DialogHeader>
               <DialogTitle>{insertion.kind === "image" ? "Insert image" : insertion.kind === "video" ? "Insert video" : format.link ? "Edit link" : "Insert link"}</DialogTitle>
               <DialogDescription>{insertion.kind === "image" ? "Use an image URL or select an image from your device." : insertion.kind === "video" ? "Use a direct link to an MP4 or other browser-playable video." : "Add the destination address."}</DialogDescription>

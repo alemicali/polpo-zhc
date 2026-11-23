@@ -10,7 +10,7 @@ import {
 } from "./artifact-doc-choices";
 import { DocChoiceDialog } from "./artifact-doc-choice-picker";
 
-const chipClass = "inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 align-baseline text-xs font-medium leading-tight";
+const chipClass = "inline-flex max-w-full items-center gap-1 rounded-pill border px-2 py-0.5 align-baseline text-xs font-medium leading-tight";
 
 export function DocChoiceChip({ node, updateAttributes }: NodeViewProps) {
   const choice = decodeDocChoice(node.attrs.choice);
@@ -50,7 +50,7 @@ export function DocChoiceChip({ node, updateAttributes }: NodeViewProps) {
             <ChevronDown className="size-3" aria-hidden="true" />
           </button>
         </PopoverTrigger>
-        <PopoverContent align="start" className="artifact-doc-surface w-60 p-0">
+        <PopoverContent align="start" className="w-60 p-0">
           <Command shouldFilter={false}>
             <CommandInput aria-label="Find or add an option" placeholder="Find or add an option…" value={query} onValueChange={setQuery} />
             <CommandList>
