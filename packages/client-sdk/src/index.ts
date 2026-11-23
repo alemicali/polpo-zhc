@@ -190,6 +190,12 @@ export type {
   TemplateInfo,
   TemplateDefinition,
   TemplateRunResult,
+  ComputerWebhookProvider,
+  ComputerWebhookOutcome,
+  ComputerWebhookStatus,
+  ComputerWebhookEventSummary,
+  ComputerWebhookEvent,
+  ComputerWebhookEventPage,
 } from "./client/types.js";
 
 export type { StoreState, PolpoStats, AssessmentProgressEntry, AssessmentCheckStatus } from "./store/types.js";

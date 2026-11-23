@@ -5,7 +5,8 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHmac } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { ComputerWebhookEventLog, redactWebhookPayload, webhookPayloadPreview, COMPUTER_WEBHOOK_PAYLOAD_MAX_BYTES } from "../sandbox/computer-webhook-events.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ComputerConfig, RemoteSandboxProvider, VaultEntry, VaultStore } from "@polpo-ai/core";
@@ -68,11 +69,13 @@ function setup(o: { computers?: ComputerConfig[]; publicBase?: string; e2bKey?: 
   const manager = new ComputerManager(polpoDir, { adapter: () => provider, now: () => clock });
   const vault = new MemoryVault();
   const computers = o.computers ?? [{ id: "nina", name: "Nina", kind: "daytona" } as ComputerConfig];
+  const emitted: Array<{ provider: string; id: string; action: string; outcome: string; computerId?: string }> = [];
   const w = new ComputerWebhooks({
     polpoDir: () => polpoDir, manager: () => manager, computers: () => computers, vault: () => vault as unknown as VaultStore,
     publicBase: () => o.publicBase, e2bApiKey: async () => o.e2bKey, fetch: o.fetch, now: () => clock,
+    emit: (payload) => { emitted.push(payload); },
   });
-  return { w, manager, provider, vault, computers, advance: (ms: number) => { clock += ms; }, polpoDir };
+  return { w, manager, provider, vault, computers, advance: (ms: number) => { clock += ms; }, polpoDir, emitted };
 }
 
 describe("signatures", () => {
@@ -212,7 +215,10 @@ describe("receiving", () => {
     expect(body.signatureSecret.length).toBeGreaterThan(30);
     expect(t.vault.entries.get("$computers/webhook-e2b")!.credentials).toMatchObject({ secret: body.signatureSecret, webhookId: "wh_42" });
     expect((await t.w.status()).find((s) => s.provider === "e2b")).toMatchObject({ registered: true, secretSet: true, state: "configured" });
-    // every provider in use pushes: the reconcile slows down
+    // registered but silent: the 5-minute check stays; once events arrive the reconcile slows down
+    expect(await t.w.pushing()).toBe(false);
+    const ev = JSON.stringify({ id: "ev-r", type: "sandbox.lifecycle.paused", sandbox_id: "elsewhere", timestamp: new Date(NOW).toISOString() });
+    expect((await t.w.handle("e2b", ev, get({ "e2b-signature": e2bSignature(body.signatureSecret, ev) }))).status).toBe(200);
     expect(await t.w.pushing()).toBe(true);
     await t.w.autoRegister();
     expect(calls).toHaveLength(1);
@@ -290,5 +296,215 @@ describe("MCP polpo_computer_webhooks", () => {
     const reg = await call({ action: "register", provider: "e2b" });
     expect(reg.structuredContent.providers.find((p: any) => p.provider === "e2b")).toMatchObject({ registered: true, state: "configured" });
     expect((await call({ action: "register", provider: "daytona" })).isError).toBe(true);
+  });
+});
+
+describe("stale errors", () => {
+  it("a 'not configured' error from before the secret was saved is not shown once configured; a newer problem is", async () => {
+    const t = setup();
+    const raw = JSON.stringify({ event: "sandbox.state.updated", id: "m-1", oldState: "started", newState: "stopped" });
+    expect((await t.w.handle("daytona", raw, get(svixHeaders(raw)))).status).toBe(503);
+    expect((await t.w.status())[0]!.lastError).toMatch(/not configured on this instance/);
+    await t.w.setSecret("daytona", SECRET);
+    let [d] = await t.w.status();
+    expect(d).toMatchObject({ state: "configured", secretSet: true, rejected: 1 });
+    expect(d!.lastError).toBeUndefined();
+    expect(d!.waitingNote).toMatch(/Waiting for the first event.*Daytona v2.*every 5 minutes/s);
+    // a signature problem after the configuration is shown
+    t.advance(1000);
+    expect((await t.w.handle("daytona", raw, get(svixHeaders(raw, { at: NOW + 1000, secret: `whsec_${Buffer.from("y".repeat(20)).toString("base64")}` })))).status).toBe(401);
+    [d] = await t.w.status();
+    expect(d!.lastError).toMatch(/Signature refused/);
+    // an accepted (here: ignored, it is about no computer) delivery ends the wait
+    const ok = await t.w.handle("daytona", raw, get(svixHeaders(raw, { id: "msg_ok", at: NOW + 1000 })));
+    expect(ok.status).toBe(200);
+    [d] = await t.w.status();
+    expect(d!.waitingNote).toBeUndefined();
+    expect(d!.state).toBe("receiving");
+  });
+
+  it("legacy status files (no error code): the 'not configured' text is recognised and hidden when configured", async () => {
+    const t = setup();
+    await t.w.setSecret("daytona", SECRET);
+    // as on lumea: the error was written by the previous version (no code, no configuration time)
+    const file = join(t.polpoDir, "computer-webhooks.json");
+    const f = JSON.parse(readFileSync(file, "utf8"));
+    f.providers.daytona = { received: 0, rejected: 4, ignored: 0, lastError: "Daytona webhooks are not configured on this instance", lastErrorAt: new Date(NOW + 5000).toISOString() };
+    writeFileSync(file, JSON.stringify(f));
+    const [d] = await t.w.status();
+    expect(d).toMatchObject({ state: "configured", secretSet: true });
+    expect(d!.lastError).toBeUndefined();
+  });
+});
+
+describe("event log", () => {
+  const sbx = (id: string, extra: Record<string, unknown> = {}) => JSON.stringify({ event: "sandbox.state.updated", id, oldState: "started", newState: "stopped", updatedAt: `u-${id}`, ...extra });
+
+  it("records every outcome: rejected (not configured, signature, not JSON, size), ignored (unknown sandbox, unknown event, duplicate), accepted with the status change", async () => {
+    const t = setup();
+    const nina = t.computers[0]!;
+    await t.manager.ensure(nina, { provider: "daytona", network: { mode: "open" }, resources: {}, providerOptions: {}, denied: [] } as never);
+    const raw = sbx("m-1");
+    await t.w.handle("daytona", raw, get(svixHeaders(raw, { id: "msg_nc" })));
+    await t.w.setSecret("daytona", SECRET);
+    await t.w.handle("daytona", raw, get({ "svix-id": "msg_bad", "svix-timestamp": String(NOW / 1000), "svix-signature": "v1,nope" }));
+    await t.w.handle("daytona", raw, get({}));
+    await t.w.handle("daytona", "not json", get(svixHeaders("not json", { id: "msg_text" })));
+    await t.w.handle("daytona", "x".repeat(300 * 1024), get({}));
+    const other = sbx("someone-elses");
+    await t.w.handle("daytona", other, get(svixHeaders(other, { id: "msg_other" })));
+    const vol = JSON.stringify({ event: "volume.created", id: "v1" });
+    await t.w.handle("daytona", vol, get(svixHeaders(vol, { id: "msg_vol" })));
+    // the provider stopped the machine; the event says so
+    await t.provider.suspendById("m-1");
+    expect((await t.w.handle("daytona", raw, get(svixHeaders(raw, { id: "msg_1" })))).body).toMatchObject({ matched: ["nina"] });
+    await t.w.handle("daytona", raw, get(svixHeaders(raw, { id: "msg_1" })));
+    await t.w.idle();
+    const page = t.w.events("daytona", { limit: 50 });
+    expect(page.total).toBe(9);
+    expect(page.counts).toEqual({ accepted: 1, ignored: 3, rejected: 5, error: 0 });
+    const [dup, accepted, unknownEvent, unknownSandbox, size, text, missing, bad, notConfigured] = page.events;
+    expect(notConfigured).toMatchObject({ outcome: "rejected", httpStatus: 503, signature: "not-checked", reason: expect.stringMatching(/not configured/), eventType: "sandbox.state.updated" });
+    expect(bad).toMatchObject({ outcome: "rejected", httpStatus: 401, signature: "invalid", deliveryId: "msg_bad", reason: expect.stringMatching(/signature does not match/) });
+    expect(missing).toMatchObject({ outcome: "rejected", signature: "missing" });
+    expect(text).toMatchObject({ outcome: "rejected", httpStatus: 400, signature: "valid", reason: "Not JSON" });
+    expect(size).toMatchObject({ outcome: "rejected", httpStatus: 413, reason: expect.stringMatching(/Body too large \(300 KB/) });
+    expect(unknownSandbox).toMatchObject({ outcome: "ignored", sandboxId: "someone-elses", reason: expect.stringMatching(/Not about one of this instance's computers \(sandbox someone-elses\)/) });
+    expect(unknownSandbox!.computerId).toBeUndefined();
+    expect(unknownEvent).toMatchObject({ outcome: "ignored", eventType: "volume.created", reason: expect.stringMatching(/Not an event Polpo acts on/) });
+    expect(accepted).toMatchObject({
+      outcome: "accepted", httpStatus: 200, signature: "valid", eventType: "sandbox.state.updated", sandboxId: "m-1", computerId: "nina", deliveryId: "msg_1",
+      providerState: { from: "started", to: "stopped" }, statusChange: { from: "running", to: "stopped" }, action: expect.stringMatching(/running → stopped/),
+    });
+    expect(accepted!.processingMs).toBeGreaterThanOrEqual(0);
+    expect(dup).toMatchObject({ outcome: "ignored", reason: expect.stringMatching(/Duplicate delivery/) });
+    // the list has no payloads; one entry has its redacted payload and safe headers
+    expect("payload" in accepted!).toBe(false);
+    const full = t.w.event("daytona", accepted!.id)!;
+    expect(full.payload).toMatchObject({ event: "sandbox.state.updated", id: "m-1" });
+    expect(full.headers).toEqual({ "svix-id": "msg_1", "svix-timestamp": String(Math.floor(NOW / 1000)) });
+    expect(JSON.stringify(full)).not.toMatch(/v1,/);
+    expect(t.w.event("daytona", size!.id)!.payload).toBeUndefined();
+    // counters follow the log
+    const [d] = await t.w.status();
+    expect(d).toMatchObject({ received: 4, ignored: 3, rejected: 5, errors: 0 });
+    // filtered by outcome, paged with a cursor
+    expect(t.w.events("daytona", { outcomes: ["rejected"] }).events.map((e) => e.httpStatus)).toEqual([413, 400, 401, 401, 503]);
+    const first = t.w.events("daytona", { limit: 4 });
+    expect(first.nextCursor).toBe(first.events[3]!.id);
+    const second = t.w.events("daytona", { limit: 4, cursor: first.nextCursor });
+    expect(second.events[0]!.id).toBe(page.events[4]!.id);
+    // announced over the bus: recorded, then updated once applied
+    expect(t.emitted.filter((e) => e.id === accepted!.id).map((e) => e.action)).toEqual(["recorded", "updated"]);
+  });
+
+  it("an event Polpo cannot apply is an error, with the reason; rate-limited floods are recorded once", async () => {
+    const t = setup();
+    await t.w.setSecret("daytona", SECRET);
+    const nina = t.computers[0]!;
+    await t.manager.ensure(nina, { provider: "daytona", network: { mode: "open" }, resources: {}, providerOptions: {}, denied: [] } as never);
+    vi.spyOn(t.manager, "providerEvent").mockRejectedValue(new Error("Daytona is down"));
+    const raw = sbx("m-1");
+    await t.w.handle("daytona", raw, get(svixHeaders(raw)));
+    await t.w.idle();
+    const [e] = t.w.events("daytona").events;
+    expect(e).toMatchObject({ outcome: "error", computerId: "nina", reason: "Could not apply it: Daytona is down", statusChange: { from: "running", error: "Daytona is down" } });
+    expect((await t.w.status())[0]).toMatchObject({ errors: 1, lastError: "Could not apply it: Daytona is down" });
+    for (let i = 0; i < WEBHOOK_RATE_PER_MINUTE + 5; i++) await t.w.handle("daytona", "{}", get({}));
+    expect(t.w.events("daytona", { outcomes: ["rejected"], limit: 200 }).events.filter((x) => x.httpStatus === 429)).toHaveLength(1);
+  });
+
+  it("redaction: secrets, tokens, keys and signatures by key or by value; payloads capped", () => {
+    const red = redactWebhookPayload({
+      event: "sandbox.created", id: "sbx", env: { OPENAI_API_KEY: "sk-abc" }, envVars: { A: "b" }, apiKey: "k", token: "t", password: "p",
+      nested: { webhookSecret: "whsec_xyz", note: "auth Bearer abcdefghijklmnop and whsec_QUJDREVGR0g=", signature: "v1,abc" }, labels: { "polpo-computer": "inst:nina" }, empty: "",
+    }) as Record<string, any>;
+    expect(red).toMatchObject({ event: "sandbox.created", id: "sbx", env: "[redacted]", envVars: "[redacted]", apiKey: "[redacted]", token: "[redacted]", password: "[redacted]", labels: { "polpo-computer": "inst:nina" }, empty: "" });
+    expect(red.nested).toEqual({ webhookSecret: "[redacted]", note: "auth [redacted] and [redacted]", signature: "[redacted]" });
+    const big = webhookPayloadPreview(JSON.stringify({ event: "x", blob: "a".repeat(10_000) }));
+    expect(big.truncated).toBe(true);
+    expect(String(big.payload).length).toBeLessThanOrEqual(COMPUTER_WEBHOOK_PAYLOAD_MAX_BYTES + 1);
+    expect(webhookPayloadPreview("plain whsec_AAAABBBBCCCC text")).toEqual({ payload: "plain [redacted] text" });
+  });
+
+  it("keeps the last N per provider (the oldest are dropped), per provider", () => {
+    const dir = tmp();
+    const log = new ComputerWebhookEventLog(() => dir, 5);
+    for (let i = 0; i < 8; i++) log.add({ id: `e${i}`, provider: "daytona", receivedAt: `t${i}`, outcome: "ignored", httpStatus: 200, signature: "valid", processingMs: 1, bytes: 2 });
+    log.add({ id: "x", provider: "e2b", receivedAt: "t", outcome: "accepted", httpStatus: 200, signature: "valid", processingMs: 1, bytes: 2 });
+    expect(log.all("daytona").map((e) => e.id)).toEqual(["e7", "e6", "e5", "e4", "e3"]);
+    expect(log.all("e2b").map((e) => e.id)).toEqual(["x"]);
+    expect(log.update("daytona", "e0", { reason: "gone" })).toBe(false);
+    expect(log.update("daytona", "e3", { reason: "kept" })).toBe(true);
+    expect(log.get("daytona", "e3")!.reason).toBe("kept");
+    // a broken file starts over
+    writeFileSync(join(dir, "computer-webhook-events", "daytona.json"), "{");
+    expect(log.all("daytona")).toEqual([]);
+  });
+
+  it("routes: list with outcome filter and cursor, one event, 404s and a bad outcome", async () => {
+    const t = setup();
+    const admin = computerWebhookAdminRoutes({ webhooks: () => t.w });
+    const inbound = computerWebhookInboundRoutes({ webhooks: () => t.w });
+    await t.w.setSecret("daytona", SECRET);
+    const raw = sbx("nobody");
+    await inbound.request("/daytona", { method: "POST", headers: { "content-type": "application/json", ...svixHeaders(raw) }, body: raw });
+    await inbound.request("/daytona", { method: "POST", body: raw });
+    // refused before being read (content-length), still recorded
+    await inbound.request("/daytona", { method: "POST", headers: { "content-length": String(1024 * 1024) }, body: raw });
+    const list = await (await admin.request("/daytona/events?limit=2")).json();
+    expect(list.data).toMatchObject({ provider: "daytona", total: 3, counts: { ignored: 1, rejected: 2 } });
+    expect(list.data.events.map((e: any) => e.httpStatus)).toEqual([413, 401]);
+    expect(list.data.nextCursor).toBe(list.data.events[1].id);
+    const next = await (await admin.request(`/daytona/events?cursor=${list.data.nextCursor}`)).json();
+    expect(next.data.events.map((e: any) => e.outcome)).toEqual(["ignored"]);
+    const only = await (await admin.request("/daytona/events?outcome=ignored")).json();
+    expect(only.data.events).toHaveLength(1);
+    const one = await (await admin.request(`/daytona/events/${only.data.events[0].id}`)).json();
+    expect(one.data).toMatchObject({ outcome: "ignored", sandboxId: "nobody", payload: { id: "nobody" } });
+    expect((await admin.request("/daytona/events/whe_nope")).status).toBe(404);
+    expect((await admin.request("/vercel/events")).status).toBe(404);
+    expect((await admin.request("/daytona/events?outcome=weird")).status).toBe(400);
+    expect((await (await admin.request("/e2b/events")).json()).data).toMatchObject({ events: [], total: 0 });
+    // unknown providers are not recorded
+    await inbound.request("/vercel", { method: "POST", body: "{}" });
+    expect(readFileSync(join(t.polpoDir, "computer-webhook-events", "daytona.json"), "utf8")).not.toContain("vercel");
+  });
+
+  it("MCP: events: true lists a provider's deliveries (text + structured); event_id shows one with its payload", async () => {
+    const { handleMcpRequest } = await import("../server/mcp.js");
+    const t = setup();
+    await t.w.setSecret("daytona", SECRET);
+    const admin = computerWebhookAdminRoutes({ webhooks: () => t.w });
+    const api = async (method: string, path: string, body?: unknown) => {
+      const res = await admin.request(path.replace(/^\/api\/v1\/computer-webhooks/, "") || "/", { method, headers: { "content-type": "application/json" }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
+      const text = await res.text();
+      return { status: res.status, body: text ? JSON.parse(text) : null, headers: res.headers };
+    };
+    const deps = { api, version: "x", toolsets: ["computers"], principal: { kind: "oauth" as const, actor: "test", scopes: ["polpo"] } };
+    const call = async (args: Record<string, unknown>) => (await (await handleMcpRequest(new Request("http://localhost/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-protocol-version": "2025-06-18" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "polpo_computer_webhooks", arguments: args } }),
+    }), deps as never)).json()).result;
+    // nothing yet: the waiting note
+    const empty = await call({ provider: "daytona", events: true });
+    expect(empty.isError).toBeFalsy();
+    expect(empty.content[0].text).toMatch(/Waiting for the first event/);
+    const raw = sbx("nobody");
+    await t.w.handle("daytona", raw, get(svixHeaders(raw)));
+    await t.w.handle("daytona", raw, get({}));
+    const all = await call({ provider: "daytona", events: true });
+    expect(all.structuredContent.events.map((e: any) => e.outcome)).toEqual(["rejected", "ignored"]);
+    expect(all.structuredContent.counts).toMatchObject({ ignored: 1, rejected: 1 });
+    expect(all.content[0].text).toMatch(/ignored sandbox\.state\.updated sandbox nobody \(started → stopped\)/);
+    const rejected = await call({ provider: "daytona", events: true, outcome: ["rejected"] });
+    expect(rejected.structuredContent.events).toHaveLength(1);
+    const one = await call({ provider: "daytona", event_id: all.structuredContent.events[1].id });
+    expect(one.structuredContent.event).toMatchObject({ outcome: "ignored", payload: { id: "nobody" } });
+    expect(one.content[0].text).toMatch(/Payload \(redacted\)/);
+    expect((await call({ events: true })).isError).toBe(true);
+    // the status points to the log
+    expect((await call({})).content[0].text).toMatch(/events: true/);
   });
 });

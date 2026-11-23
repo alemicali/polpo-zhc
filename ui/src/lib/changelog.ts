@@ -32,6 +32,22 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-23-webhook-events",
+    date: "2026-11-23",
+    kind: "improved",
+    title: "Webhook dei computer: ogni evento ricevuto, e cosa ne ha fatto Polpo",
+    summary: "In Impostazioni → Computer, clicca Daytona o E2B: vedi ogni consegna del provider (accettata, ignorata, rifiutata o in errore), il motivo, il computer interessato e il payload senza segreti.",
+    body: [
+      "- **Registro eventi per provider**: in Impostazioni → Computer → Webhook, la riga **Eventi** di Daytona o E2B apre l'elenco delle ultime 200 consegne, dalla più recente: ora, tipo di evento, sandbox → computer (con il link), esito e motivo. Si filtra per esito e si aggiorna da solo quando arriva un evento.",
+      "- **Dettaglio di una consegna**: cosa ha fatto Polpo (lo stato del computer prima e dopo il controllo), la firma, la risposta data al provider, gli header sicuri e il payload in JSON, con segreti, token e chiavi oscurati.",
+      "- **Niente più \"non configurato\" dopo aver salvato il segreto**: l'errore di prima della configurazione non viene più mostrato; resta nel registro.",
+      "- **In attesa del primo evento**: se il provider è configurato ma non ha mai inviato nulla lo dice, e spiega perché può succedere (Daytona oggi invia webhook solo per le sandbox classiche, non per le VM Daytona v2). Finché non arrivano eventi Polpo continua a controllare i computer ogni 5 minuti.",
+      "- Anche da MCP e da Polpo: `polpo_computer_webhooks` con `events: true` elenca le consegne di un provider, con `event_id` ne mostra una.",
+    ].join("\n"),
+    highlight: false,
+    cta: { label: "Apri le impostazioni dei computer", to: "/config?section=computers" },
+  },
+  {
     id: "2026-11-22-theme-everything",
     date: "2026-11-22",
     kind: "improved",

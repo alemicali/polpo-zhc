@@ -182,7 +182,7 @@ A machine can be deleted outside Polpo: in the provider's dashboard or API, by i
 - When: on every live status read (`GET /computers`, the Computers page, `polpo_computers_list`),
   whose provider answers are reused for **15 s** (`?fresh=1`, and the page's refresh button, ask
   again), at once when the provider pushes an event (webhooks, below), and in the background every
-  **5 minutes** (every **20** when every provider in use pushes its events: a safety net): one
+  **5 minutes** (every **20** while every provider in use pushes events, one in the last 24 h: a safety net): one
   listing of this instance's computer machines per provider (label `polpo-scope=computer`) and, for
   hibernated v2 computers, one snapshot listing; only the computers that disagree with it get the
   full check. A provider that cannot be asked changes nothing.
@@ -232,9 +232,52 @@ yet, or not configured; the last event; the URL to give the provider).
 - **Vercel Sandbox** (not a provider yet) has no lifecycle webhooks: reconcile only.
 - Replays: a delivery id (Svix) or event id is accepted once (remembered 24 h); counts and the last
   event are kept in `.polpo/computer-webhooks.json`.
+- Status: the last problem shown is one from after the provider was configured (saving the secret,
+  registering E2B's endpoint or an accepted delivery clears it), never "not configured" once it is.
+  Configured but nothing ever received: a note says so (`waitingNote`). **Daytona currently sends
+  webhooks only for its classic sandboxes (containers), not for Daytona v2 VMs**, so v2 computers
+  may never produce an event. The reconcile slows to every 20 minutes only while every provider in
+  use has sent an event in the last 24 hours; otherwise it stays at 5 minutes.
 - REST (authenticated): `GET /api/v1/computer-webhooks`, `PUT|DELETE /api/v1/computer-webhooks/daytona/secret`
-  (`{ secret }`), `POST|DELETE /api/v1/computer-webhooks/e2b/register`. MCP: `polpo_computer_webhooks`
-  (`action: status | register | unregister`); Polpo: `computer_webhooks`.
+  (`{ secret }`), `POST|DELETE /api/v1/computer-webhooks/e2b/register`, the event log (below). MCP:
+  `polpo_computer_webhooks` (`action: status | register | unregister`; `events: true` / `event_id`
+  for the log); Polpo: `computer_webhooks`.
+
+#### Event log
+
+Every delivery a provider sends is recorded, whatever came of it, so you can see what arrived and
+what Polpo did with it (**Settings → Computers**, a provider's **Events** row):
+
+| Outcome | When |
+| --- | --- |
+| `accepted` | about one of this instance's computers: Polpo checked it at the provider |
+| `ignored` | signed, but not about a computer of this instance, a duplicate delivery or event, or an event Polpo does not act on |
+| `rejected` | not configured, signature missing or wrong, replay outside the window, not JSON, body over 256 KB, rate limit (a flood is recorded once a minute) |
+| `error` | accepted, but Polpo could not apply it (the computer's check failed) |
+
+Each entry has the time, event type, provider event id and delivery id, the sandbox (or snapshot)
+and the computer it matched, the provider's states (`oldState → newState`), the computer's status
+in Polpo before and after the check (filled in once applied, a moment after the provider got its
+answer), the signature check, the HTTP status Polpo answered, the reason, what Polpo did, the
+processing time and size, the safe headers (`content-type`, `user-agent`, `svix-id`,
+`svix-timestamp`, `webhook-id`, `webhook-timestamp`, `x-forwarded-for`; never a signature or an
+authorization) and the payload, **redacted** (any key that looks like a secret, token, password,
+key, signature, cookie or env, and any value that looks like a `whsec_…` secret, a provider key or
+a bearer token, becomes `[redacted]`) and capped at 4 KB. Posts for an unknown provider are not
+recorded.
+
+The last 200 deliveries per provider are kept in `.polpo/computer-webhook-events/<provider>.json`
+(newest first; the oldest are dropped), next to the status file, whatever the instance's store: it
+is per-instance diagnostics, like the sync history. The status counters (`received`, `ignored`,
+`rejected`, `errors`) follow it.
+
+- `GET /api/v1/computer-webhooks/:provider/events?limit=50&cursor=<nextCursor>&outcome=rejected,error`:
+  newest first, without payloads; `{ provider, events, nextCursor?, total, counts }`.
+- `GET /api/v1/computer-webhooks/:provider/events/:id`: one delivery with its redacted payload and headers.
+- Each recorded delivery emits `computer:webhook` (`{ provider, id, action: "recorded" | "updated", outcome, eventType?, computerId? }`;
+  `updated` when Polpo finished applying it): the dashboard's list updates live.
+- MCP: `polpo_computer_webhooks { provider: "daytona", events: true, outcome?: ["rejected"], limit?, cursor? }`,
+  `{ provider, event_id }` for one; Polpo: `computer_webhooks`.
 - A pushed change emits `computer:changed` like any other (the pages update live) and adds a line to
   the computer's activity ("The provider reported sandbox.state.updated (started → destroyed)").
 
