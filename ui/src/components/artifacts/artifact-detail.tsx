@@ -1,4 +1,4 @@
-import { lazy, Suspense, use, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, use, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ArrowLeft, Check, ChevronDown, Cloud, Code2, CopyPlus, Download, ExternalLink, FileDown, History, House, Link2, Maximize2, MessageSquare, Pencil, Pin, Printer, RefreshCw, RotateCcw, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -19,11 +19,9 @@ import { ArtifactIcon } from "./artifact-icon";
 import { ArtifactPreparation } from "./artifact-preparation";
 import { ArtifactView } from "./artifact-view";
 
-const DocEditor = lazy(() => import("./artifact-doc-editor").then((m) => ({ default: m.ArtifactDocEditor })));
-const DesignEditor = lazy(() => import("./artifact-design-editor").then((m) => ({ default: m.ArtifactDesignEditor })));
-const SlidesEditor = lazy(() => import("./artifact-slides-editor").then((m) => ({ default: m.ArtifactSlidesEditor })));
-const ActiveWorkbook = lazy(() => import("./artifact-generation").then(m => ({ default: m.ActiveWorkbook })));
-const MotionEditor = lazy(() => import("./artifact-motion-editor").then((m) => ({ default: m.ArtifactMotionEditor })));
+import { ArtifactLiveWorkspace } from "./artifact-live-workspace";
+import { useLiveArtifactUpdate } from "@/hooks/use-live-artifact";
+import { liveArtifactKind } from "@/lib/artifact-stream";
 
 interface Draft {
   base: Pick<Artifact, "version" | "title" | "content">;
@@ -72,6 +70,8 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
   }, []);
 
   const dirty = !!draft && (draft.content !== draft.base.content || draft.title !== draft.base.title);
+
+  const live = useLiveArtifactUpdate(artifact, !dirty && !saving && version === undefined && !embedded, acceptCommitted);
 
   useEffect(() => {
     if (!dirty) return;
@@ -146,6 +146,7 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
   const legacy = artifact.type === "view";
   const docSurface = artifact.type === "doc" ? "artifact-doc-surface" : "";
   const BackIcon = docSurface ? House : ArrowLeft;
+  const kind = workspace ?? ((artifact.type === "doc" || artifact.kind === "design") ? liveArtifactKind(artifact.type, artifact.kind) : undefined);
   const editable = !legacy && !shownVersion && !embedded;
   const versionChanged = !!draft && artifact.version !== draft.base.version && !saving;
   const autoSaveStatus = saving ? "Saving…" : versionChanged ? "A newer version is available" :
@@ -275,7 +276,8 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
             if (window.matchMedia("(max-width: 1023px)").matches) void leaveEditor(`/chat?artifact=${encodeURIComponent(id)}`);
             else sidebarActions.setSidebarOpen(!chatOpen);
           }}><MessageSquare className="size-4" /><span className="hidden sm:inline">Chat</span></Button>}
-        {editable && <span role="status" title={saveError || autoSaveStatus} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+        {live.generating && <ArtifactPreparation kind={kind} compact phase="Preparing" />}
+        {editable && !live.generating && <span role="status" title={saveError || autoSaveStatus} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
           {autoSaveStatus === "Saved" ? <Check className="size-3.5" /> : <Cloud className="size-3.5" />}
           <span className={autoSaveStatus === "Saved" ? "sr-only" : "hidden sm:inline"}>{autoSaveStatus}</span>
         </span>}
@@ -306,17 +308,12 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
       {legacy && <p className="rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning">Edit this view on the Data page.</p>}
       <div ref={stage} className="min-h-0 flex-1 overflow-hidden bg-background" inert={busy}>
         <Suspense fallback={<ArtifactPreparation kind={artifact.kind} />}>
-          {workspace === "slides" ? (
-            <SlidesEditor content={content} onChange={onChange} title={artifact.title} />
-          ) : workspace === "sheets" ? (
-            <ActiveWorkbook onCommitted={acceptCommitted} onShowHistory={() => setShowHistory(true)} artifactId={id} content={content} onChange={onChange} version={shownVersion?.version ?? artifact.version} follow={!dirty && !shownVersion && !embedded} />
-          ) : workspace === "motion" ? (
-            <MotionEditor content={content} onChange={onChange} title={artifact.title} />
-          ) : artifact.type === "doc" ? (
-            <DocEditor content={content} readOnly={!editable} onChange={onChange ?? (() => {})}
-              instanceName={info?.project || product} onAskAssistant={editable ? askAssistant : undefined} />
-          ) : artifact.type === "html" && artifact.kind === "design" ? (
-            <DesignEditor artifact={artifact} content={content} onChange={onChange} refreshKey={refreshKey} />
+          {kind ? (
+            <ArtifactLiveWorkspace kind={kind} artifact={artifact} content={live.preview ?? content}
+              streaming={live.preview !== undefined} readOnly={!editable} onChange={onChange} refreshKey={refreshKey}
+              appearanceVersion={live.preview !== undefined ? live.tick : shownVersion?.version ?? artifact.version}
+              onShowHistory={() => setShowHistory(true)} instanceName={info?.project || product}
+              onAskAssistant={editable ? askAssistant : undefined} />
           ) : (
             <ArtifactView artifact={artifact} content={content} refreshKey={refreshKey} />
           )}

@@ -243,7 +243,7 @@ export function registerArtifactTools(tool: Register, deps: McpDeps): void {
   tool("artifacts", "polpo_artifact_get", {
     title: "Get an artifact",
     description: "An artifact's details, its content and its earlier versions (polpo_artifacts_list for ids). "
-      + "Slides, sheets and motion are JSON in content; a design is HTML. Change it with polpo_artifact_update, passing baseVersion = its version.",
+      + "Slides, sheets and motion are JSON in content; a design is HTML. Change it with polpo_artifact_update, passing expectedVersion = its version.",
     inputSchema: { id: z.string().min(1).describe("The artifact's id") },
     outputSchema: { artifact: looseObject },
     annotations: READ,
@@ -276,10 +276,10 @@ export function registerArtifactTools(tool: Register, deps: McpDeps): void {
   tool("artifacts", "polpo_artifact_update", {
     title: "Change an artifact",
     description: "Change an artifact: its whole new content (same format as polpo_artifact_create; the previous one is kept as a version people can go back to), "
-      + "title, description or pin. Pass baseVersion (the version you read with polpo_artifact_get): refused if someone changed it since, then read it again.",
+      + "title, description or pin. Pass expectedVersion (the version you read with polpo_artifact_get): refused if someone changed it since, then read it again.",
     inputSchema: {
       id: z.string().min(1).describe("The artifact's id (art_…)"),
-      baseVersion: z.number().int().positive().optional().describe("The version you read: refused when it changed since"),
+      expectedVersion: z.number().int().positive().optional().describe("The version you read: refused when it changed since"),
       content: z.string().optional().describe("The whole new content"),
       title: z.string().optional().describe("A new title"),
       description: z.string().optional().describe("One line on what it is"),
@@ -288,8 +288,8 @@ export function registerArtifactTools(tool: Register, deps: McpDeps): void {
     },
     outputSchema: { artifact: looseObject },
     annotations: WRITE,
-  }, async ({ id, baseVersion, ...patch }) => {
-    const r = await apiSend(deps, "PATCH", `/artifacts/${enc(id)}`, { ...patch, ...(baseVersion ? { expectedVersion: baseVersion } : {}) });
+  }, async ({ id, expectedVersion, ...patch }) => {
+    const r = await apiSend(deps, "PATCH", `/artifacts/${enc(id)}`, { ...patch, ...(expectedVersion ? { expectedVersion } : {}) });
     if (!r.ok) {
       return apiError(r, `Changing artifact ${id}`, r.status === 409 ? "It changed since that version: read it again with polpo_artifact_get and redo the change."
         : r.status === 404 ? "Check the id with polpo_artifacts_list." : undefined);

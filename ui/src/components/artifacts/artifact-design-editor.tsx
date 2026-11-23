@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { DESIGN_COLOR_PLACEHOLDERS, DESIGN_NOTE, DESIGN_SHAPE_FILL, DESIGN_STROKE } from "./artifact-content-palette";
 import { ArtifactFrame } from "./artifact-frame";
+import { artifactStaticPreview } from "./artifact-static-preview";
 import type { Artifact } from "@/lib/artifacts-api";
 
 import { BLANK_BOARD, createBoard, readDesign, writeDesign, type Artboard, type DesignPage } from "./design-workspace";
@@ -487,17 +488,33 @@ function DesignFrame({
   );
 }
 
+function StaticDesignFrame({ board }: { board: Artboard }) {
+  const srcDoc = useMemo(() => artifactStaticPreview(board.html), [board.html]);
+  return (
+    <iframe
+      title={board.name}
+      srcDoc={srcDoc}
+      sandbox=""
+      referrerPolicy="no-referrer"
+      className="h-full w-full border-0 bg-background"
+    />
+  );
+}
+
 export function ArtifactDesignEditor({
   artifact,
   content,
-  onChange,
+  onChange: commit,
   refreshKey,
+  streaming = false,
 }: {
   artifact: DesignArtifact;
   content: string;
   onChange?: (content: string) => void;
   refreshKey?: number;
+  streaming?: boolean;
 }) {
+  const onChange = streaming ? undefined : commit;
   const root = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const model = useMemo(() => readDesign(content), [content]);
@@ -1095,7 +1112,9 @@ export function ArtifactDesignEditor({
                     className="absolute left-0 top-0 origin-top-left"
                     style={{ width: board.width, height: board.height, transform: `scale(${scale})` }}
                   >
-                    {onChange ? (
+                    {streaming ? (
+                      <StaticDesignFrame board={board} />
+                    ) : onChange ? (
                       <DesignFrame
                         artifact={artifact}
                         board={board}
@@ -1107,7 +1126,7 @@ export function ArtifactDesignEditor({
                       <ArtifactFrame
                         artifactId={artifact.id}
                         data-board-title
-                      title={board.name}
+                        title={board.name}
                         html={board.html}
                         refreshSeconds={artifact.refreshSeconds}
                         refreshKey={refreshKey}
@@ -1355,13 +1374,17 @@ export function ArtifactDesignEditor({
             </div>
           </div>
           <div className="min-h-0 flex-1">
-            <ArtifactFrame
-              artifactId={artifact.id}
-              title={playing.name}
-              html={playing.html}
-              refreshSeconds={artifact.refreshSeconds}
-              refreshKey={refreshKey}
-            />
+            {streaming ? (
+              <StaticDesignFrame board={playing} />
+            ) : (
+              <ArtifactFrame
+                artifactId={artifact.id}
+                title={playing.name}
+                html={playing.html}
+                refreshSeconds={artifact.refreshSeconds}
+                refreshKey={refreshKey}
+              />
+            )}
           </div>
         </div>
       )}

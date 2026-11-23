@@ -196,6 +196,9 @@ describe("artifact tools", () => {
     expect(await executeArtifactTool("artifact_get", { id, version: 1 }, polpo)).toContain("--- content of v1 ---\n# Plan\n\n- step one");
     await expect(executeArtifactTool("artifact_update", { id, content: "x", edits: [{ find: "a", replace: "b" }] }, polpo)).rejects.toThrow(/either content or edits/);
 
+    await expect(executeArtifactTool("artifact_update", { id, expectedVersion: 1, content: "outdated draft" }, polpo)).rejects.toThrow();
+    expect((await store.get(id))?.version).toBe(2);
+
     const analyst = { store, author: "analyst" };
     await expect(executeArtifactTool("artifact_update", { id, content: "hijack" }, analyst)).rejects.toThrow(/belongs to polpo/);
     await expect(executeArtifactTool("artifact_delete", { id }, analyst)).rejects.toThrow(/belongs to polpo/);
@@ -260,14 +263,14 @@ it("a new kind must still fit the current content", async () => {
   expect(changed.body.error).toMatch(/sheets workspace/);
 });
 
-it("artifact_update with baseVersion refuses a change made since, and a whole rewrite of a long artifact needs it", async () => {
+it("artifact_update with expectedVersion refuses a change made since, and a whole rewrite of a long artifact needs it", async () => {
   const { store } = await fixture();
   const polpo = { store, author: "polpo" };
   const doc = await store.create({ title: "Notes", type: "doc", content: "# Notes", createdBy: "polpo" });
   await store.update(doc.id, { content: "# Notes\n\nby a person", author: "person:ada@example.com" });
-  await expect(executeArtifactTool("artifact_update", { id: doc.id, baseVersion: 1, content: "# Mine" }, polpo)).rejects.toThrow(/changed since v1 \(now v2\)/);
-  expect(await executeArtifactTool("artifact_update", { id: doc.id, baseVersion: 2, content: "# Mine" }, polpo)).toMatch(/now v3/);
+  await expect(executeArtifactTool("artifact_update", { id: doc.id, expectedVersion: 1, content: "# Mine" }, polpo)).rejects.toThrow(/changed since v1 \(now v2\)/);
+  expect(await executeArtifactTool("artifact_update", { id: doc.id, expectedVersion: 2, content: "# Mine" }, polpo)).toMatch(/now v3/);
   const long = await store.create({ title: "Long", type: "doc", content: "a".repeat(70_000), createdBy: "polpo" });
   await expect(executeArtifactTool("artifact_update", { id: long.id, content: "short" }, polpo)).rejects.toThrow(/longer than artifact_get shows/);
-  expect(await executeArtifactTool("artifact_update", { id: long.id, baseVersion: 1, content: "short" }, polpo)).toMatch(/now v2/);
+  expect(await executeArtifactTool("artifact_update", { id: long.id, expectedVersion: 1, content: "short" }, polpo)).toMatch(/now v2/);
 });

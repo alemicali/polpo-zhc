@@ -26,7 +26,7 @@ Artifacts shows each artifact as a card with a live thumbnail (the first slide, 
 
 ## Versions and editing at the same time
 
-Every content change keeps the previous content as a version, with who made it and, for agents, a note on what changed. A person editing an artifact saves against the version they opened: if someone (a person or an agent) saved a newer one meanwhile, the save is refused and the editor offers to download the draft or open the latest version. Agents do the same with `baseVersion`.
+Every content change keeps the previous content as a version, with who made it and, for agents, a note on what changed. A person editing an artifact saves against the version they opened: if someone (a person or an agent) saved a newer one meanwhile, the save is refused and the editor offers to download the draft or open the latest version. Agents do the same with `expectedVersion`.
 
 A duplicate keeps the original's author: an HTML artifact reads data sources with its author's rights, so a copy never gets wider access than the original had. Who made the copy, and from which version, is recorded on the copy's first version.
 
@@ -35,9 +35,9 @@ A duplicate keeps the original's author: an HTML artifact reads data sources wit
 | Surface | Create | Read | Change |
 |---|---|---|---|
 | Dashboard | **New** in Artifacts (blank Doc, Slides, Sheets, Design, Motion) | gallery, table, the chat | the workspace editors; rename, pin, duplicate, restore |
-| Agents | `artifact_create` (with `artifact_*` in `allowedTools`) | `artifact_get` (and any version), `artifact_list` | `artifact_update` (whole content or find / replace `edits`; `baseVersion`), `artifact_delete` — their own artifacts only |
+| Agents | `artifact_create` (with `artifact_*` in `allowedTools`) | `artifact_get` (and any version), `artifact_list` | `artifact_update` (whole content or find / replace `edits`; `expectedVersion`), `artifact_delete` — their own artifacts only |
 | Polpo (chat) | the same tools | the same | the same, on any artifact |
-| MCP | `polpo_artifact_create` | `polpo_artifacts_list` (filter by `type`, `kind`, words), `polpo_artifact_get` | `polpo_artifact_update` (content, title, description, pin; `baseVersion` → refused when it changed since) |
+| MCP | `polpo_artifact_create` | `polpo_artifacts_list` (filter by `type`, `kind`, words), `polpo_artifact_get` | `polpo_artifact_update` (content, title, description, pin; `expectedVersion` → refused when it changed since) |
 | REST | `POST /api/v1/artifacts` | `GET /api/v1/artifacts` (`?type`, `kind`, `createdBy`, `mine=true`, `sessionId`, `q`), `GET /api/v1/artifacts/:id` (`?preview=1`: a short excerpt for thumbnails) | `PATCH /api/v1/artifacts/:id` (`title`, `content`, `pinned`, `kind`, `description`, `tags`, `sources`, `refreshSeconds`, `note`; `expectedVersion` → 409 when it changed since), `POST /api/v1/artifacts/:id/duplicate` (`{ version? }`), `POST /api/v1/artifacts/:id/restore/:version`, `DELETE /api/v1/artifacts/:id` |
 
 Limits: a content is at most 1 MB (a request at most 4 MB), and the last 30 versions are kept.

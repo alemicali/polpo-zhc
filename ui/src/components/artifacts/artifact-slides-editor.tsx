@@ -320,7 +320,8 @@ async function prepareImage(file: File, availableBytes: number): Promise<SlideEl
   }
 }
 
-export function ArtifactSlidesEditor({ content, onChange, title = "Slides" }: { content: string; onChange?: (content: string) => void; title?: string }) {
+export function ArtifactSlidesEditor({ content, onChange: onEdit, title = "Slides", streaming = false }: { content: string; onChange?: (content: string) => void; title?: string; streaming?: boolean }) {
+  const onChange = streaming ? undefined : onEdit;
   const deck = useMemo(() => parseSlides(content), [content]);
   const [selectedSlide, setSelectedSlide] = useState<string>();
   const [selected, setSelected] = useState("");
@@ -549,7 +550,7 @@ export function ArtifactSlidesEditor({ content, onChange, title = "Slides" }: { 
   const theme = THEMES[slide.theme ?? "light"];
 
   return (
-    <div className="@container flex h-full min-h-0 flex-col" onKeyDown={deckKeys}>
+    <div className="@container flex h-full min-h-0 flex-col" aria-busy={streaming || undefined} onKeyDown={deckKeys}>
       <div className="flex min-h-15 flex-wrap items-center gap-1 border-b border-border/60 px-3 py-2">
         {onChange && <>
           <Button size="icon-sm" className={topButtonClass} variant="outline" aria-label="Add slide" title="Add slide" onClick={() => { insert(false); setShowOverview(false); }}><Plus className="size-5" /></Button>
@@ -564,7 +565,7 @@ export function ArtifactSlidesEditor({ content, onChange, title = "Slides" }: { 
           aria-pressed={showNotes} aria-label="Speaker notes" title="Speaker notes" onClick={() => setShowNotes((open) => !open)}><StickyNote className="size-5" /></Button>}
         <div className="ml-auto flex flex-wrap items-center gap-1">
           <DropdownMenu>
-            <DropdownMenuTrigger asChild><Button size="icon-sm" className={topButtonClass} variant="ghost" aria-label="Download" title="Download" disabled={exporting}><Download className="size-5" /></Button></DropdownMenuTrigger>
+            <DropdownMenuTrigger asChild><Button size="icon-sm" className={topButtonClass} variant="ghost" aria-label="Download" title="Download" disabled={streaming || exporting}><Download className="size-5" /></Button></DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem onSelect={async () => {
                 setExporting(true);
@@ -577,7 +578,7 @@ export function ArtifactSlidesEditor({ content, onChange, title = "Slides" }: { 
               }}><Printer /> Print / PDF</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <Button ref={presentButton} size="icon-sm" className={topButtonClass} aria-label="Present" title="Present" disabled={!visibleSlides.length}
+          <Button ref={presentButton} size="icon-sm" className={topButtonClass} aria-label="Present" title="Present" disabled={streaming || !visibleSlides.length}
             onClick={() => setPresenting(Math.max(0, visibleSlides.findIndex((item) => item.id === slide.id)))}><Play className="size-5" /></Button>
           {onChange && <Button size="icon-sm" className={topButtonClass} variant={showProperties ? "secondary" : "ghost"} aria-pressed={showProperties} aria-label="Properties" title="Properties"
             onClick={() => setShowProperties((open) => !open)}><Settings2 className="size-5" /></Button>}

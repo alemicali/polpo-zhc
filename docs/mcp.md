@@ -81,7 +81,7 @@ A failed task carries `failure` on every surface (`GET /tasks/:id`, the slim lis
 
 | Tool | What it does |
 |---|---|
-| `polpo_artifacts_list`, `polpo_artifact_get`, `polpo_artifact_create`, `polpo_artifact_update` | Docs, editable workspaces (slides, sheets, design, motion), html dashboards, drawings and diagrams; update takes `baseVersion` and is refused when the artifact changed since (see [artifacts.md](artifacts.md)). |
+| `polpo_artifacts_list`, `polpo_artifact_get`, `polpo_artifact_create`, `polpo_artifact_update` | Docs, editable workspaces (slides, sheets, design, motion), html dashboards, drawings and diagrams; update takes `expectedVersion` and is refused when the artifact changed since (see [artifacts.md](artifacts.md)). |
 | `polpo_data_sources_list`, `polpo_data_query` | Structured data: the sources (with the agents that may use them) and rows of a dataset (fields, filters, sort, limit, `offset`; `includeTotal` also counts every matching row as `meta.totalCount`, not for REST sources). |
 | `polpo_files_list`, `polpo_files_search`, `polpo_file_read` | Browse and read the instance's files (the agents' workspace, `.polpo`, volumes): text by line ranges, images and PDFs as they are. |
 | `polpo_file_write`, `polpo_file_manage` | Create a file (text or base64; replacing one needs `overwrite: true`), make folders, rename, delete (`confirm: true`). |

@@ -34,7 +34,7 @@ const editsParam = Type.Optional(Type.Array(Type.Object({
 export const ARTIFACT_TOOLS: Tool[] = [
   {
     name: "artifact_create",
-    description: "Create an artifact that opens in the dashboard. Also supports drawings (svg) and diagrams (mermaid). Returns the id and link.\n"
+    description: "Create an artifact that opens in the dashboard. Also supports drawings (svg) and diagrams (mermaid). Returns the id and link. Put type, kind and title before content so the workspace can open while writing.\n"
       + ARTIFACT_WORKSPACE_GUIDE + "\n" + ARTIFACT_BRIDGE_DOC,
     parameters: Type.Object({
       title: Type.String(),
@@ -50,12 +50,12 @@ export const ARTIFACT_TOOLS: Tool[] = [
   {
     name: "artifact_update",
     description: "Change an artifact: new content (whole, or edits that find and replace parts), title, description, sources, refresh. "
-      + "The previous content is kept as a version (people can go back to it). People may edit it in the dashboard meanwhile: "
-      + "pass baseVersion (the version you read with artifact_get) so a change made since is not overwritten. "
+      + "Read the artifact first. Put id and expectedVersion before content or edits. For a localized change, send its exact unique find before replace. "
+      + "The previous content is kept as a version. People may edit it in the dashboard meanwhile: the change is refused if it changed since expectedVersion. "
       + "artifact_get shows at most 60,000 characters: change a larger artifact with edits, not a whole content.",
     parameters: Type.Object({
       id: Type.String({ description: "Artifact id (art_…)" }),
-      baseVersion: Type.Optional(Type.Number({ description: "The version you read (artifact_get): refused if it changed since; read it again then" })),
+      expectedVersion: Type.Optional(Type.Integer({ minimum: 1, description: "Version read before preparing the change. A concurrent change requires reading again." })),
       content: Type.Optional(Type.String({ description: "The whole new content" })),
       edits: editsParam,
       title: Type.Optional(Type.String()),
@@ -146,16 +146,16 @@ export async function executeArtifactTool(name: string, args: Record<string, unk
       const current = await ownArtifact(ctx, String(args.id ?? ""));
       const edits = Array.isArray(args.edits) ? (args.edits as Array<{ find: string; replace: string }>) : undefined;
       if (typeof args.content === "string" && edits?.length) throw new Error("Give either content or edits, not both");
-      const base = typeof args.baseVersion === "number" && Number.isSafeInteger(args.baseVersion) ? args.baseVersion : undefined;
+      const base = typeof args.expectedVersion === "number" && Number.isSafeInteger(args.expectedVersion) ? args.expectedVersion : undefined;
       if (base !== undefined && base !== current.version) {
         throw new Error(`Artifact ${current.id} changed since v${base} (now v${current.version}): read it again with artifact_get and redo the change`);
       }
       if (typeof args.content === "string" && base === undefined && current.content.length > MAX_CONTENT_IN_RESULT) {
-        throw new Error(`Artifact ${current.id} is longer than artifact_get shows (${current.content.length} characters): change it with edits, or pass baseVersion to replace the whole content`);
+        throw new Error(`Artifact ${current.id} is longer than artifact_get shows (${current.content.length} characters): change it with edits, or pass expectedVersion to replace the whole content`);
       }
       const content = typeof args.content === "string" ? args.content : edits?.length ? applyArtifactEdits(current.content, edits) : undefined;
       const artifact = await ctx.store.update(current.id, {
-        ...(edits?.length || base !== undefined ? { expectedVersion: current.version } : {}),
+        expectedVersion: base ?? current.version,
         ...(content !== undefined ? { content } : {}),
         ...(typeof args.title === "string" ? { title: args.title } : {}),
         ...(typeof args.description === "string" ? { description: args.description } : {}),

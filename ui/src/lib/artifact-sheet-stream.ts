@@ -10,13 +10,7 @@ function readPartial(text: string, allow: number): Record<string, unknown> {
   try { return fields(parse(text, allow)); } catch { return {}; }
 }
 
-export function artifactStreamArgs(tool: ToolCallInfo) {
-  if (tool.state !== "preparing" && tool.arguments) return tool.arguments;
-  const text = tool.argumentsText ?? "";
-  const args = readPartial(text, Allow.COLLECTION | Allow.STR);
-  if (typeof args.id === "string" && !/"id"\s*:\s*"art_[\w-]+"/.test(text)) delete args.id;
-  return args;
-}
+export { artifactStreamArgs } from "./artifact-stream-text";
 
 // Tool arguments contain a string whose contents are themselves a workbook.
 // Keep incomplete containers at both levels, but only publish completed cell values.

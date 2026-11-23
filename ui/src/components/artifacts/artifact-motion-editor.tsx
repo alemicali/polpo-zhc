@@ -20,6 +20,7 @@ interface ArtifactMotionEditorProps {
   content: string;
   onChange?: (content: string) => void;
   title?: string;
+  streaming?: boolean;
 }
 
 type Drag = { id: string; sceneId: string; pointerId: number; offsetX: number; offsetY: number; x: number; y: number };
@@ -61,13 +62,13 @@ function ColorField({ label, value, onChange }: { label: string; value: string; 
   </div></Field>;
 }
 
-export function ArtifactMotionEditor({ content, onChange, title }: ArtifactMotionEditorProps) {
+export function ArtifactMotionEditor({ content, onChange, title, streaming = false }: ArtifactMotionEditorProps) {
   const project = useMemo(() => parseMotion(content), [content]);
   if (!project) return <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground" role="status">This animation has invalid project data. Check its source and try again.</div>;
-  return <MotionWorkspace project={project} onChange={onChange} title={title} />;
+  return <MotionWorkspace project={project} onChange={streaming ? undefined : onChange} title={title} streaming={streaming} />;
 }
 
-function MotionWorkspace({ project, onChange, title }: { project: MotionProject; onChange?: (content: string) => void; title?: string }) {
+function MotionWorkspace({ project, onChange, title, streaming }: { project: MotionProject; onChange?: (content: string) => void; title?: string; streaming: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -76,6 +77,8 @@ function MotionWorkspace({ project, onChange, title }: { project: MotionProject;
   const rejectedPlay = useRef(false);
   const uploadRequest = useRef(0);
   const latestProject = useRef(project);
+  const lastPreview = useRef({ project, streaming });
+  const manualPlayhead = useRef(false);
   const latestOnChange = useRef(onChange);
   const fullscreenButtonRef = useRef<HTMLButtonElement>(null);
   const propertiesButtonRef = useRef<HTMLButtonElement>(null);
@@ -89,7 +92,8 @@ function MotionWorkspace({ project, onChange, title }: { project: MotionProject;
   const [readingAudio, setReadingAudio] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [showProperties, setShowProperties] = useState(false);
-  const [showScenes, setShowScenes] = useState(false);
+  const [scenesOpen, setScenesOpen] = useState<boolean>();
+  const showScenes = scenesOpen ?? streaming;
   const [editingCanvas, setEditingCanvas] = useState(true);
   const [selection, setSelection] = useState<{ sceneId: string; layerId: string }>();
   const [drag, setDrag] = useState<Drag | null>(null);
@@ -109,6 +113,30 @@ function MotionWorkspace({ project, onChange, title }: { project: MotionProject;
     const ctx = canvasRef.current?.getContext("2d");
     if (ctx) drawMotionFrame(ctx, project, offsets, currentTime, showLayout ? { selectedId: editing ? selected?.id : undefined, drag: drag ?? undefined, outline: selectionOutline() } : undefined);
   }, [project, offsets, currentTime, showLayout, editing, selected?.id, drag]);
+
+  useEffect(() => {
+    const previous = lastPreview.current;
+    lastPreview.current = { project, streaming };
+    if (previous.project === project || (!streaming && !previous.streaming) || playing) return;
+    if (streaming && !manualPlayhead.current) {
+      const before = new Map(previous.project.scenes.map(scene => [scene.id, JSON.stringify(scene)]));
+      for (let index = project.scenes.length - 1; index >= 0; index--) {
+        const scene = project.scenes[index];
+        if (before.get(scene.id) === JSON.stringify(scene)) continue;
+        setTime(offsets[index]);
+        setEditingCanvas(true);
+        return;
+      }
+    }
+    const oldOffsets = sceneOffsets(previous.project);
+    setTime(seconds => {
+      const oldIndex = sceneAt(oldOffsets, seconds);
+      const nextIndex = project.scenes.findIndex(scene => scene.id === previous.project.scenes[oldIndex].id);
+      if (nextIndex < 0) return 0;
+      const withinScene = clamp(seconds - oldOffsets[oldIndex], 0, project.scenes[nextIndex].duration - 0.001);
+      return offsets[nextIndex] + withinScene;
+    });
+  }, [offsets, playing, project, streaming]);
 
   useEffect(() => {
     if (!playing) return;
@@ -221,18 +249,21 @@ function MotionWorkspace({ project, onChange, title }: { project: MotionProject;
   };
 
   const seek = (next: number) => {
+    manualPlayhead.current = true;
     setPlaying(false);
     setEditingCanvas(false);
     setTime(next);
     syncAudio(next, false, true);
   };
   const openScene = (index: number) => {
+    manualPlayhead.current = true;
     setPlaying(false);
     setEditingCanvas(true);
     setTime(offsets[index]);
     syncAudio(offsets[index], false, true);
   };
   const togglePlay = () => {
+    manualPlayhead.current = true;
     if (playing) {
       setPlaying(false);
       syncAudio(currentTime, false);
@@ -247,6 +278,7 @@ function MotionWorkspace({ project, onChange, title }: { project: MotionProject;
   };
 
   const restart = () => {
+    manualPlayhead.current = true;
     setTime(0);
     setEditingCanvas(false);
     setPlaying(true);
@@ -372,15 +404,15 @@ function MotionWorkspace({ project, onChange, title }: { project: MotionProject;
     setExportProgress(null);
   };
 
-  return <section aria-label="Motion workspace" className="flex h-full min-h-0 flex-col overflow-auto bg-background">
+  return <section aria-label="Motion workspace" aria-busy={streaming || undefined} className="flex h-full min-h-0 flex-col overflow-auto bg-background">
     <header className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
       <div role="toolbar" aria-label="Playback controls" className="flex items-center gap-1">
         {!fullscreen && playbackButtons}
       </div>
       <div role="toolbar" aria-label="Motion actions" className="ml-auto flex items-center gap-2">
         {onChange && !editing && <Button type="button" size="sm" variant="ghost" onClick={() => { setPlaying(false); setEditingCanvas(true); }}><Pencil /> Edit canvas</Button>}
-        {(onChange || project.scenes.length > 1) && <Button type="button" size="icon-sm" variant={showScenes ? "secondary" : "ghost"}
-          aria-label="Scenes" title="Scenes" aria-expanded={showScenes} onClick={() => setShowScenes((value) => !value)}><Layers3 /></Button>}
+        {(onChange || streaming || project.scenes.length > 1) && <Button type="button" size="icon-sm" variant={showScenes ? "secondary" : "ghost"}
+          aria-label="Scenes" title="Scenes" aria-expanded={showScenes} onClick={() => setScenesOpen(!showScenes)}><Layers3 /></Button>}
         {onChange && <Button ref={propertiesButtonRef} type="button" size="icon-sm" variant={showProperties ? "secondary" : "ghost"} aria-label="Motion properties"
           aria-expanded={showProperties} title="Properties and soundtrack" onClick={toggleProperties}><SlidersHorizontal /></Button>}
         <Button ref={fullscreenButtonRef} type="button" size="icon-sm" variant="ghost" aria-label="Full screen preview" title="Full screen preview" onClick={() => void toggleFullscreen()}><Maximize2 /></Button>

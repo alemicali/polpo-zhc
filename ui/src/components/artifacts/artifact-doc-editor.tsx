@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
+import type { Editor } from "@tiptap/core";
 import { BubbleMenu } from "@tiptap/react/menus";
 import { TextSelection, type EditorState } from "@tiptap/pm/state";
 import { nanoid } from "nanoid";
@@ -93,7 +94,8 @@ function FormatButton({ label, active, ...props }: React.ComponentProps<typeof B
 
 interface DocEditorProps {
   content: string;
-  onChange: (content: string) => void;
+  onChange?: (content: string) => void;
+  streaming?: boolean;
   instanceName?: string;
   onAskAssistant?: (selection?: string) => void;
 }
@@ -102,7 +104,7 @@ interface ArtifactDocEditorProps extends DocEditorProps {
   readOnly?: boolean;
 }
 
-export function ArtifactDocEditor({ content, onChange, readOnly = false, instanceName = "Polpo", onAskAssistant }: ArtifactDocEditorProps) {
+export function ArtifactDocEditor({ content, onChange, readOnly = false, streaming = false, instanceName = "Polpo", onAskAssistant }: ArtifactDocEditorProps) {
   const book = useMemo(() => readDocTabs(content), [content]);
   const choices = useMemo(() => readChoiceDefinitions(content), [content]);
   const [activeId, setActiveId] = useState(book.tabs[0].id);
@@ -111,10 +113,11 @@ export function ArtifactDocEditor({ content, onChange, readOnly = false, instanc
   const [tabDialog, setTabDialog] = useState<{ action: "rename" | "delete"; tab: ArtifactDocTab; title: string } | null>(null);
   const sidebarId = useId();
   const activeTab = book.tabs.find((tab) => tab.id === activeId) ?? book.tabs[0];
-  const editing = !readOnly && mode === "editing";
+  const showEditor = streaming || (!readOnly && mode === "editing");
+  const editing = showEditor && !streaming && !readOnly;
 
   function updateTab(tabId: string, patch: Partial<Pick<ArtifactDocTab, "title" | "content">>) {
-    onChange(writeDocTabs({
+    onChange?.(writeDocTabs({
       ...book,
       tabs: book.tabs.map((tab) => tab.id === tabId ? { ...tab, ...patch } : tab),
     }));
@@ -128,7 +131,7 @@ export function ArtifactDocEditor({ content, onChange, readOnly = false, instanc
     setTabsOpen(true);
     setActiveId(tab.id);
     setMode("editing");
-    onChange(writeDocTabs({ ...book, tabs }));
+    onChange?.(writeDocTabs({ ...book, tabs }));
   }
 
   function tabAction(action: DocTabAction, tab: ArtifactDocTab) {
@@ -145,7 +148,7 @@ export function ArtifactDocEditor({ content, onChange, readOnly = false, instanc
     const next = current + (action === "earlier" ? -1 : 1);
     if (current < 0 || next < 0 || next >= tabs.length) return;
     [tabs[current], tabs[next]] = [tabs[next], tabs[current]];
-    onChange(writeDocTabs({ ...book, tabs }));
+    onChange?.(writeDocTabs({ ...book, tabs }));
   }
 
   function confirmTabAction() {
@@ -158,7 +161,7 @@ export function ArtifactDocEditor({ content, onChange, readOnly = false, instanc
       if (index < 0) return;
       const tabs = book.tabs.filter((tab) => tab.id !== tabDialog.tab.id);
       if (activeTab.id === tabDialog.tab.id) setActiveId(tabs[Math.min(index, tabs.length - 1)].id);
-      onChange(writeDocTabs({ ...book, tabs }));
+      onChange?.(writeDocTabs({ ...book, tabs }));
     }
     setTabDialog(null);
   }
@@ -172,7 +175,7 @@ export function ArtifactDocEditor({ content, onChange, readOnly = false, instanc
             <TextAlignStart />
           </Button>
         </div>
-        {!readOnly && <div role="group" aria-label="View options" className="pointer-events-auto">
+        {!readOnly && !streaming && <div role="group" aria-label="View options" className="pointer-events-auto">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button type="button" size="sm" variant="outline" className="h-9 min-w-[100px] shadow-control" aria-label={mode === "editing" ? "Editing, mode" : "Reading, mode"}>
@@ -197,13 +200,13 @@ export function ArtifactDocEditor({ content, onChange, readOnly = false, instanc
           />
         </aside>
         <div className="min-h-0 min-w-0 flex-1">
-          {editing ? (
-            <DocChoiceEditContext.Provider value={(definition) => onChange(writeDocTabs({
+          {showEditor ? (
+            <DocChoiceEditContext.Provider value={(definition) => onChange?.(writeDocTabs({
               ...book,
               tabs: book.tabs.map((tab) => ({ ...tab, content: updateChoiceDefinition(tab.content, definition) })),
             }))}>
-              <DocTabEditor key={activeTab.id} content={activeTab.content} choices={choices} instanceName={instanceName}
-                onAskAssistant={onAskAssistant} onChange={(text) => updateTab(activeTab.id, { content: text })} />
+              <DocTabEditor key={activeTab.id} content={activeTab.content} choices={choices} instanceName={instanceName} streaming={streaming}
+                onAskAssistant={onAskAssistant} onChange={editing ? (text) => updateTab(activeTab.id, { content: text }) : undefined} />
             </DocChoiceEditContext.Provider>
           ) : (
             <div className={`h-full ${docScroll}`}>
@@ -214,7 +217,7 @@ export function ArtifactDocEditor({ content, onChange, readOnly = false, instanc
           )}
         </div>
       </div>
-      <Dialog open={tabDialog !== null} onOpenChange={(open) => { if (!open) setTabDialog(null); }}>
+      <Dialog open={editing && tabDialog !== null} onOpenChange={(open) => { if (!open) setTabDialog(null); }}>
         {tabDialog && (
           <DialogContent>
             <DialogHeader>
@@ -245,8 +248,32 @@ export function ArtifactDocEditor({ content, onChange, readOnly = false, instanc
   );
 }
 
-function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAskAssistant }: DocEditorProps & { choices: DocChoiceDefinition[] }) {
+function replaceLiveContent(editor: Editor, content: string): boolean {
+  const parsed = content.trim() ? editor.markdown?.parse(content) : blankDocContent;
+  if (!parsed) return false;
+  try {
+    const next = editor.schema.nodeFromJSON(parsed);
+    const { doc, tr } = editor.state;
+    const start = doc.content.findDiffStart(next.content);
+    if (start === null) return true;
+    const end = doc.content.findDiffEnd(next.content);
+    if (!end) return false;
+
+    const overlap = Math.max(0, start - Math.min(end.a, end.b));
+    tr.replace(start, end.a + overlap, next.slice(start, end.b + overlap));
+    if (!tr.doc.eq(next)) return false;
+
+    editor.view.dispatch(tr.setMeta("addToHistory", false).setMeta("preventUpdate", true));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function DocTabEditor({ content, onChange, choices, streaming = false, instanceName = "Polpo", onAskAssistant }: DocEditorProps & { choices: DocChoiceDefinition[] }) {
   const emitted = useRef(content);
+  const wasStreaming = useRef(streaming);
+  const scroller = useRef<HTMLDivElement>(null);
   const hasAssistant = !!onAskAssistant;
   const extensions = useMemo(() => [
     ...artifactDocExtensions,
@@ -259,11 +286,13 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
   const [dropdown, setDropdown] = useState<{ title: string; body: string; position?: number } | null>(null);
   const editor = useEditor({
     extensions,
+    editable: !streaming,
     content: content.trim() ? content : blankDocContent,
     contentType: content.trim() ? "markdown" : "json",
     shouldRerenderOnTransaction: false,
     editorProps: {
       handleKeyDown: (view, event) => {
+        if (streaming) return false;
         const { doc, selection } = view.state;
         if (event.key.toLowerCase() === "m" && (event.metaKey || event.ctrlKey) && event.altKey) {
           event.preventDefault();
@@ -281,7 +310,7 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
         return true;
       },
       handleDoubleClickOn: (_view, _pos, node, nodePos, _event, direct) => {
-        if (!direct || node.type.name !== "docDropdown") return false;
+        if (streaming || !direct || node.type.name !== "docDropdown") return false;
         setDropdown({ title: String(node.attrs.title), body: String(node.attrs.body), position: nodePos });
         return true;
       },
@@ -293,20 +322,30 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
       },
     },
     onUpdate: ({ editor }) => {
+      if (streaming || !editor.isEditable) return;
       const markdown = editor.isEmpty ? "" : editor.getMarkdown();
       emitted.current = markdown;
-      onChange(markdown);
+      onChange?.(markdown);
     },
   }, [hasAssistant, instanceName]);
 
   useEffect(() => {
-    if (!editor || content === emitted.current) return;
+    if (!editor) return;
+    const live = streaming || wasStreaming.current;
+    wasStreaming.current = streaming;
+    if (editor.isEditable === streaming) editor.setEditable(!streaming, false);
+    if (content === emitted.current) return;
     emitted.current = content;
+
+    if (live && replaceLiveContent(editor, content)) return;
+    const scroll = scroller.current;
+    const scrollTop = scroll?.scrollTop;
     editor.commands.setContent(content.trim() ? content : blankDocContent, {
       contentType: content.trim() ? "markdown" : "json",
       emitUpdate: false,
     });
-  }, [content, editor]);
+    if (live && scroll && scrollTop !== undefined) scroll.scrollTop = scrollTop;
+  }, [content, editor, streaming]);
 
   const format = useEditorState({
     editor,
@@ -430,8 +469,8 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
   };
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col">
-      <BubbleMenu editor={editor} updateDelay={80} options={{ placement: "top", offset: 7, flip: true, shift: true }}
+    <div className="relative flex h-full min-h-0 flex-col" aria-busy={streaming || undefined}>
+      {!streaming && <BubbleMenu editor={editor} updateDelay={80} options={{ placement: "top", offset: 7, flip: true, shift: true }}
         className="z-30 flex max-w-[calc(100vw-1rem)] flex-wrap items-center rounded-lg border bg-background p-1 shadow-raised"
         role="group" aria-label="Document formatting">
         <div role="group" aria-label="Text format" className="flex items-center gap-0.5 border-r px-1.5">
@@ -461,7 +500,7 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
 
         <FormatButton label="Comment on selection" onClick={openComment}><MessageSquare /></FormatButton>
         {onAskAssistant && <FormatButton label={`Ask ${instanceName} about selection`} onClick={askWithSelection}><Sparkles /></FormatButton>}
-      </BubbleMenu>
+      </BubbleMenu>}
 
       <div className="flex min-h-0 flex-1">
         {outlineOpen && (
@@ -490,7 +529,7 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
         </div>
       </div>
 
-      <div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 px-2">
+      {!streaming && <div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 px-2">
         <div role="group" aria-label="Insert tools" className="pointer-events-auto mx-auto flex w-fit max-w-full flex-wrap items-center justify-center gap-0.5 rounded-lg border bg-background px-1 py-px shadow-raised">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -563,9 +602,9 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
             <Sparkles className="size-3.5" /> <span className="truncate">Ask {instanceName}</span>
           </Button>}
         </div>
-      </div>
+      </div>}
 
-      <Dialog open={comment !== null} onOpenChange={(open) => { if (!open) setComment(null); }}>
+      <Dialog open={!streaming && comment !== null} onOpenChange={(open) => { if (!open) setComment(null); }}>
         {comment && <DialogContent onCloseAutoFocus={(event) => { event.preventDefault(); editor.commands.focus(); }}>
           <DialogHeader>
             <DialogTitle>New comment</DialogTitle>
@@ -580,7 +619,7 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
         </DialogContent>}
       </Dialog>
 
-      <Dialog open={dropdown !== null} onOpenChange={(open) => { if (!open) setDropdown(null); }}>
+      <Dialog open={!streaming && dropdown !== null} onOpenChange={(open) => { if (!open) setDropdown(null); }}>
         {dropdown && (
           <DialogContent onCloseAutoFocus={(event) => { event.preventDefault(); editor.commands.focus(); }}>
             <DialogHeader>
@@ -602,7 +641,7 @@ function DocTabEditor({ content, onChange, choices, instanceName = "Polpo", onAs
         )}
       </Dialog>
 
-      <Dialog open={insertion !== null} onOpenChange={(open) => {
+      <Dialog open={!streaming && insertion !== null} onOpenChange={(open) => {
         if (!open) {
           imageReader.current?.abort();
           setInsertion(null);

@@ -3458,7 +3458,8 @@ function ChatMessages() {
                                   groups.push({ type: "artifact", artifactId: madeArtifact, updated: seg.tool.name === "artifact_update", key: seg.tool.id });
                                 } else if ((seg.tool.name === "artifact_create" || seg.tool.name === "artifact_update") &&
                                   (seg.tool.state === "preparing" || seg.tool.state === "calling")) {
-                                  groups.push({ type: "artifact-pending", tool: seg.tool });
+                                  if (isStreaming) groups.push({ type: "artifact-pending", tool: seg.tool });
+                                  else groups.push({ type: "tools", tools: [{ ...seg.tool, state: "interrupted" }] });
                                 } else if (seg.tool.name === "render_widget") {
                                   // Inline widget: trova il widget corrispondente
                                   // in widgets[] (per-occorrenza) e renderizzalo
