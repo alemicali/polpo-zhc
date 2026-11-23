@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-11-23 — Artifact workspaces: Docs, Slides, Sheets, Design and Motion
+
 ### Added
 - **Artifact workspaces: Docs, Slides, Sheets, Design and Motion you can edit.** Artifacts open in an editor of their own, for people to change what an agent made or to start one with **New** in the gallery (see [docs/artifacts.md](docs/artifacts.md)):
   - **Docs** (`type: "doc"`, Markdown): rich text, **tabs**, inline **dropdowns** (status, priority or your own lists), **comments** on a passage; export to Word (.docx), print or PDF, Markdown.
