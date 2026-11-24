@@ -615,8 +615,10 @@ export function agentRoutes(getDeps: () => {
     const avatarPath = join(avatarsDir, filename);
     const relativePath = `.polpo/avatars/${filename}`;
 
-    const buffer = Buffer.from(await file.arrayBuffer());
-    await fs.writeFile(avatarPath, buffer.toString("base64"));
+    // The image's bytes as they are: a text write would store base64 text, not a picture.
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (!fs.writeFileBuffer) return c.json({ ok: false, error: "This filesystem cannot store binary files" }, 501);
+    await fs.writeFileBuffer(avatarPath, bytes);
 
     // Update agent identity with avatar path
     const identity = { ...(agent.identity ?? {}), avatar: relativePath };
