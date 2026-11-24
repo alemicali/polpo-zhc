@@ -7,18 +7,7 @@ import { useState } from "react";
 import { GitBranch } from "lucide-react";
 import { toast } from "sonner";
 import { Switch } from "@/components/ui/switch";
-import { apiUrl, config } from "@/lib/config";
-
-export async function saveAutoDeployApiUpdates(value: boolean): Promise<void> {
-  const headers = new Headers({ "content-type": "application/json" });
-  if (config.apiKey) headers.set("authorization", `Bearer ${config.apiKey}`);
-  const res = await fetch(apiUrl("/api/v1/config/settings"), {
-    method: "PATCH", headers, credentials: "include",
-    body: JSON.stringify({ agents: { versioning: { autoDeployApiUpdates: value } } }),
-  });
-  const body = await res.json().catch(() => null) as { ok?: boolean; error?: string } | null;
-  if (!res.ok || !body?.ok) throw new Error(body?.error || `Could not save (${res.status})`);
-}
+import { saveAutoDeployApiUpdates } from "@/lib/agent-versions";
 
 export function AgentVersioningSetting({ autoDeploy, onSaved }: { autoDeploy: boolean; onSaved: () => void }) {
   const [value, setValue] = useState(autoDeploy);

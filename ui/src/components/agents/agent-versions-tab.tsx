@@ -23,23 +23,11 @@ import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, Dia
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { cn } from "@/lib/utils";
 import { useAgentDetail } from "./agent-detail-context";
-
-const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+import { actorLabel, bumpVersion as bumpOf, isSemver } from "@/lib/agent-versions";
 
 function when(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
-}
-
-/** "person:ada@x.io" → "ada@x.io"; "system:migration" → "migration". */
-export function actorLabel(actor: string): string {
-  return actor.replace(/^(person|system|mcp):/, (_m, kind: string) => (kind === "mcp" ? "MCP " : ""));
-}
-
-function bumpOf(version: string, bump: AgentVersionBump): string {
-  const m = SEMVER.exec(version);
-  const [ma, mi, pa] = m ? [Number(m[1]), Number(m[2]), Number(m[3])] : [0, 0, 0];
-  return bump === "major" ? `${ma + 1}.0.0` : bump === "minor" ? `${ma}.${mi + 1}.0` : `${ma}.${mi}.${pa + 1}`;
 }
 
 // ── Diff ──
@@ -164,7 +152,7 @@ function PublishDialog({ open, onOpenChange, latest, suggested, diff, onPublish 
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { if (open) { setBump(suggested); setCustom(""); setNote(""); setError(null); } }, [open, suggested]);
   const next = custom.trim() || bumpOf(latest ?? "0.0.0", bump);
-  const invalid = !!custom.trim() && !SEMVER.test(custom.trim());
+  const invalid = !!custom.trim() && !isSemver(custom.trim());
 
   const submit = async (deploy: boolean) => {
     setBusy(deploy ? "deploy" : "publish");

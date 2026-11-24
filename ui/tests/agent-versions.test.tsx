@@ -56,7 +56,8 @@ vi.mock("../src/components/agents/agent-detail-context", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-import { AgentVersionsTab, AgentVersionBadges, actorLabel } from "../src/components/agents/agent-versions-tab";
+import { AgentVersionsTab, AgentVersionBadges } from "../src/components/agents/agent-versions-tab";
+import { actorLabel } from "../src/lib/agent-versions";
 import { AgentVersioningSetting } from "../src/components/config/agent-versioning-setting";
 
 let container: HTMLDivElement;
