@@ -1051,7 +1051,7 @@ const updateAgentTool: Tool = {
   name: "update_agent",
   description: "Update an existing agent's configuration or move it to another team: role, model, prompt, tools, skills, engine (polpo or a Claude Code / Codex / OpenCode harness), "
     + "computers and defaultComputer, per-connector tool selection (connectorTools), browser egress proxy, progressive tools, sandbox, learning, drive. "
-    + "Changes are applied immediately; do not reload config. Only provided fields are changed; omitted fields keep their current value. Use empty string for reportsTo to remove hierarchy.",
+    + "By default (instance setting) the change is published as a new version and deployed to production right away; publish: false keeps it in the draft. Do not reload config. Only provided fields are changed; omitted fields keep their current value. Use empty string for reportsTo to remove hierarchy.",
   parameters: Type.Object({
     name: Type.String({ description: "Agent name to update" }),
     role: Type.Optional(Type.String({ description: "New role description" })),
@@ -1082,6 +1082,9 @@ const updateAgentTool: Tool = {
     learning: agentLearningParam,
     voiceReplies: agentVoiceRepliesParam,
     drive: agentDriveParam,
+    publish: Type.Optional(Type.Boolean({ description: "Agents are versioned: false keeps the change in the draft (publish later: agent_publish); true publishes a new version. Default: the instance setting (normally publish and deploy)" })),
+    deploy: Type.Optional(Type.Boolean({ description: "true: publish and deploy the new version to production now" })),
+    note: Type.Optional(Type.String({ description: "Release note of the published version" })),
   }),
 };
 
@@ -4498,15 +4501,27 @@ async function execUpdateAgent(polpo: Orchestrator, args: Record<string, unknown
   if ("error" in platform) return platform.error;
   Object.assign(updates, platform.fields);
 
+  // versioned: the draft, then (flags or the instance setting) publish and deploy
+  const mode = args.deploy === true ? "deploy" : args.publish === true ? "publish" : args.publish === false ? "draft"
+    : polpo.autoDeployApiUpdates() ? "deploy" : "draft";
+  delete (updates as Record<string, unknown>).publish;
+  delete (updates as Record<string, unknown>).deploy;
+  delete (updates as Record<string, unknown>).note;
+  let result: Awaited<ReturnType<Orchestrator["updateAgentVersioned"]>>;
   try {
-    await polpo.updateAgent(name, updates as any);
+    result = await polpo.updateAgentVersioned(name, updates as any, {
+      actor: "polpo", mode, ...(typeof args.note === "string" && args.note ? { note: args.note } : {}),
+    });
   } catch (err) {
-    const message = engineError(err);
+    const message = engineError(err) ?? (err instanceof Error && err.name === "AgentVersionError" ? err.message : undefined);
     if (message) return `${message} Nothing was changed.`;
     throw err;
   }
-  const changes = Object.keys(args).filter(k => k !== "name").join(", ");
-  return `Agent "${name}" updated: ${changes}${sandboxNote}`;
+  const changes = Object.keys(args).filter(k => k !== "name" && k !== "publish" && k !== "deploy" && k !== "note").join(", ");
+  const where = result.deployed ? ` (version ${result.deployed.to} deployed to production)`
+    : result.published ? ` (published as ${result.published.version}, not deployed: agent_deploy)`
+    : result.draftChanged ? " (saved in the draft, production unchanged: agent_publish)" : "";
+  return `Agent "${name}" updated: ${changes}${where}${sandboxNote}`;
 }
 
 async function execSandboxStatus(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {

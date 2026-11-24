@@ -114,7 +114,7 @@ import { FileTeamStore } from "../stores/file-team-store.js";
 import { FileAgentStore } from "../stores/file-agent-store.js";
 import { FileAgentVersionStore } from "../stores/file-agent-version-store.js";
 import {
-  AgentVersioning, AgentVersionError, PRODUCTION_POINTER, parseAgentRef, snapshotsEqual,
+  AgentVersioning, AgentVersionError, PRODUCTION_POINTER, parseAgentRef,
   type AgentDeployEntry, type AgentVersion, type AgentVersionBump, type AgentVersionStore,
 } from "@polpo-ai/core/agent-versions";
 import type { TeamStore } from "./team-store.js";
@@ -1953,29 +1953,15 @@ export class Orchestrator extends TypedEmitter {
       // mission-scoped agents are not versioned
       return { agent: Object.keys(fields).length ? await this.writeAgentLive(name, fields) : current, draftChanged: false };
     }
-    let draftChanged = false;
-    if (Object.keys(fields).length) {
+    // check the engine the draft would have (it must be runnable before it can be deployed)
+    if ("engine" in fields || "defaultComputer" in fields) {
       const before = (await this.agentVersions.draftConfig(name)).config;
-      // check the engine the draft would have (it must be runnable before it can be deployed)
-      if ("engine" in fields || "defaultComputer" in fields) {
-        const engine = this.checkAgentEngine({ ...current, ...before, ...fields, name } as AgentConfig);
-        if ("engine" in fields) (fields as AgentUpdate).engine = engine;
-      }
-      const draft = await this.agentVersions.updateDraft(name, fields, opts.actor);
-      draftChanged = !snapshotsEqual(before, draft.config);
+      const engine = this.checkAgentEngine({ ...current, ...before, ...fields, name } as AgentConfig);
+      if ("engine" in fields) (fields as AgentUpdate).engine = engine;
     }
-    let published: AgentVersion | undefined;
-    let deployed: AgentDeployEntry | undefined;
-    if (opts.mode !== "draft") {
-      const state = await this.agentVersions.state(name);
-      if (state.draft.hasChanges) {
-        published = await this.agentVersions.publish(name, { actor: opts.actor, bump: opts.bump, version: opts.version, note: opts.note });
-      }
-      if (opts.mode === "deploy") {
-        const target = published?.version ?? state.latest;
-        if (target && target !== state.production) deployed = await this.deployAgentVersion(name, target, { actor: opts.actor, note: opts.note });
-      }
-    }
+    const { draftChanged, published, deployed } = await this.agentVersions.update(name, fields, {
+      actor: opts.actor, mode: opts.mode, bump: opts.bump, version: opts.version, note: opts.note,
+    });
     const agent = (await this.engine.getAgents()).find((a) => a.name === name) ?? current;
     if (!deployed) await this.emitTeamSnapshot("agent:updated", { agentName: name });
     return { agent, draftChanged, ...(published ? { published } : {}), ...(deployed ? { deployed } : {}) };

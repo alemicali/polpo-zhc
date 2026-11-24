@@ -80,6 +80,7 @@ async function unknownEgress(deps: McpDeps, name: string | undefined): Promise<s
 type Agent = {
   name: string; role?: string; model?: string; systemPrompt?: string; allowedTools?: string[]; skills?: string[]; identity?: { displayName?: string; title?: string };
   reportsTo?: string; engine?: unknown; connectorTools?: Record<string, "*" | string[]>;
+  versioning?: { production?: string; latest?: string; draft?: { hasChanges?: boolean; changedFields?: string[] } };
 };
 
 /** Selected tool names the connector no longer lists (it may be disconnected: then nothing is reported). */
@@ -111,8 +112,8 @@ async function loadAgent(deps: McpDeps, name: string): Promise<{ ok: true; agent
 export function registerTeamTools(tool: Register, deps: McpDeps): void {
   tool("team", "polpo_agent_get", {
     title: "Get an agent",
-    description: "One agent's configuration: role, model, instructions, tools, skills, identity and who it reports to. "
-      + "polpo_agent_show shows how it is doing instead.",
+    description: "One agent's configuration (what runs in production): role, model, instructions, tools, skills, identity, who it reports to, "
+      + "its production version and whether its draft has unpublished changes (polpo_agent_versions). polpo_agent_show shows how it is doing instead.",
     inputSchema: { name: z.string().min(1).describe("The agent's name (polpo_agents_list)") },
     outputSchema: { agent: looseObject, stale_connector_tools: z.record(z.string(), z.array(z.string())).optional() },
     annotations: READ,
@@ -125,6 +126,8 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
     const text = [
       `${a.name}${a.identity?.displayName ? ` (${a.identity.displayName}${a.identity.title ? `, ${a.identity.title}` : ""})` : ""}: ${a.role ?? "no role"}`,
       `model: ${modelWithEngineText(agentEffectiveModel(a), agentEngineIdOf(a.engine), "default")}${a.reportsTo ? ` · reports to ${a.reportsTo}` : ""}`,
+      ...(a.versioning ? [`version: ${a.versioning.production ?? "none"} in production${a.versioning.latest && a.versioning.latest !== a.versioning.production ? ` · latest ${a.versioning.latest}` : ""}`
+        + `${a.versioning.draft?.hasChanges ? ` · draft has changes (${(a.versioning.draft.changedFields ?? []).join(", ")})` : ""}`] : []),
       `tools: ${a.allowedTools?.join(", ") ?? "defaults"} · skills: ${a.skills?.join(", ") || "none"}`,
       ...(connectorLine ? [connectorLine] : []),
       ...(a.engine && typeof a.engine === "object"
@@ -164,7 +167,9 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
   tool("team", "polpo_agent_update", {
     title: "Update an agent",
     description: "Change an agent's role, model, instructions, tools (and which tools of each connector: connector_tools), skills, identity, manager, browser egress proxy, computer (defaultComputer) or engine (polpo, or a Claude Code / Codex / OpenCode harness). Only the fields given change "
-      + "(a list given replaces the old one); the result lists what changed. It applies to its next runs.",
+      + "(a list given replaces the old one); the result lists what changed. Agents are versioned: the change goes to its draft; publish: false keeps it there "
+      + "(publish later with polpo_agent_publish), publish: true makes a new version, deploy: true also deploys it to production. Without either flag the instance setting "
+      + "decides (by default: published and deployed, so it applies to its next runs).",
     inputSchema: {
       name: z.string().min(1).describe("The agent's name"),
       ...agentFields,
@@ -172,23 +177,224 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
         .describe("Computers it may use (ids from polpo_computers_list), replacing the list; null or [] clears it (\"host\", this server, is always allowed)"),
       connector_tools: connectorToolsParam.nullable().optional()
         .describe(`${CONNECTOR_TOOLS_HELP} Replaces the whole selection; null clears it (every tool of every granted connector).`),
+      publish: z.boolean().optional().describe("false: only the draft changes; true: publish the draft as a new version (default: the instance setting, normally publish and deploy)"),
+      deploy: z.boolean().optional().describe("true: publish and deploy the new version to production now"),
+      bump: z.enum(["major", "minor", "patch"]).optional().describe("The published version's bump (default: suggested from the change)"),
+      version: z.string().regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/).optional().describe("An explicit version number for the published version"),
+      note: z.string().max(2000).optional().describe("Release note"),
     },
-    outputSchema: { agent: looseObject, changed: z.array(z.string()) },
+    outputSchema: { agent: looseObject, changed: z.array(z.string()), versioning: looseObject.optional() },
     annotations: UPDATE,
-  }, async ({ name, connector_tools, ...fields }) => {
+  }, async ({ name, connector_tools, publish, deploy, bump, version, note, ...fields }) => {
     const patch: Record<string, unknown> = { ...fields, ...(connector_tools !== undefined ? { connectorTools: connector_tools } : {}) };
+    const flags = Object.fromEntries(Object.entries({ publish, deploy, bump, version, note }).filter(([, v]) => v !== undefined));
     const before = await loadAgent(deps, name);
     if (!before.ok) return before.status === 404 ? fail(`There is no agent "${name}". Find the name with polpo_agents_list.`) : apiError(before, `Reading agent ${name}`);
     const body = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
     if (Object.keys(body).length === 0) return fail("Nothing to change: give at least one field (role, model, systemPrompt, allowedTools, connector_tools, skills, identity, reportsTo, maxTurns, browserEgress, defaultComputer, engine).");
     const egress = await unknownEgress(deps, patch.browserEgress as string | undefined);
     if (egress) return fail(egress);
-    const r = await apiSend(deps, "PATCH", `/agents/${enc(name)}`, body);
+    const r = await apiSend(deps, "PATCH", `/agents/${enc(name)}`, { ...body, ...flags });
     if (!r.ok) return apiError(r, `Updating agent ${name}`);
+    const result = r.data as Record<string, unknown> & { versioning?: { mode?: string; draftChanged?: boolean; production?: string; published?: { version: string; bump: string }; deployed?: { from?: string; to: string }; draft?: { hasChanges: boolean; nextVersion?: string } } };
+    const v = result?.versioning;
+    if (v && !v.deployed) {
+      // the draft (or a published version not deployed): report what changed there
+      const changedInDraft = v.draftChanged ? Object.keys(body) : [];
+      const where = v.published ? `published as ${v.published.version} (${v.published.bump}), not deployed: production stays on ${v.production ?? "its version"} (polpo_agent_deploy)`
+        : v.draftChanged ? `saved in the draft${v.draft?.nextVersion ? ` (would publish ${v.draft.nextVersion})` : ""}: production is unchanged (polpo_agent_publish)`
+        : "nothing changed (the values were the same)";
+      return ok(`${name}: ${changedInDraft.length ? `${changedInDraft.join(", ")} ` : ""}${where}.`, { agent: result, changed: changedInDraft, versioning: v as Record<string, unknown> });
+    }
     const after = await loadAgent(deps, name);
     const agent = (after.ok ? after.agent : { ...before.agent, ...body }) as Record<string, unknown>;
     const changed = Object.keys(body).filter((k) => JSON.stringify((before.agent as Record<string, unknown>)[k]) !== JSON.stringify(agent[k]));
-    return ok(changed.length ? `Updated ${name}: ${changed.join(", ")}.` : `Nothing changed on ${name} (the values were the same).`, { agent, changed });
+    const versionNote = v?.deployed ? ` Version ${v.deployed.to} deployed to production${v.deployed.from ? ` (was ${v.deployed.from})` : ""}.` : "";
+    return ok(changed.length ? `Updated ${name}: ${changed.join(", ")}.${versionNote}` : `Nothing changed on ${name} (the values were the same).`,
+      { agent, changed, ...(v ? { versioning: v as Record<string, unknown> } : {}) });
+  });
+
+  // ── Versions: draft → publish → deploy (production) → rollback ──
+
+  const versionRef = z.string().regex(/^((0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)|draft|production)$/, "a version (1.2.0), draft or production");
+  const semver = z.string().regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/, "a version: major.minor.patch (e.g. 1.2.0)");
+  /** Long text kept as it is (diffs, JSON), cut at n characters. */
+  const clipText = (s: string, n: number) => s.length > n ? `${s.slice(0, n)}
+… (cut: the structured result has all of it)` : s;
+  const notFoundAgent = (name: string) => fail(`There is no agent "${name}". Find the name with polpo_agents_list.`);
+  type FieldChange = { field: string; kind: string; textDiff?: string };
+  type VersionDiff = { from?: string; to: string; changes: FieldChange[]; unified: string; suggestedBump?: string };
+  const changesLine = (changes: FieldChange[]) => changes.length ? changes.map((c) => `${c.field} (${c.kind})`).join(", ") : "no changes";
+  const deployLine = (d: { at: string; actor: string; from?: string; to: string; action: string; note?: string; id: string }) =>
+    `${d.at.slice(0, 16).replace("T", " ")} · ${d.action === "rollback" ? "ROLLBACK " : d.action === "initial" ? "initial " : ""}${d.from ? `${d.from} → ` : ""}${d.to} · ${d.actor}${d.note ? ` · "${short(d.note, 120)}"` : ""} [${d.id}]`;
+
+  tool("team", "polpo_agent_versions", {
+    title: "List an agent's versions",
+    description: "An agent's published versions (newest first: number, author, date, note, changed fields), which one production runs, "
+      + "and its draft (unpublished changes and the suggested next version). polpo_agent_version_get shows one; polpo_agent_version_diff compares two.",
+    inputSchema: { name: z.string().min(1).describe("The agent's name (polpo_agents_list)") },
+    outputSchema: { state: looseObject, versions: z.array(looseObject) },
+    annotations: READ,
+  }, async ({ name }) => {
+    const r = await apiGet(deps, `/agents/${enc(name)}/versions`);
+    if (!r.ok) return r.status === 404 ? notFoundAgent(name) : apiError(r, `Reading ${name}'s versions`);
+    const data = r.data as { state: { production?: string; latest?: string; draft: { hasChanges: boolean; changes: FieldChange[]; nextVersion?: string; suggestedBump?: string } }; versions: Array<{ version: string; author: string; createdAt: string; note?: string; changedFields: string[] }> };
+    const s = data.state;
+    const text = [
+      `${name}: production ${s.production ?? "none"} · latest ${s.latest ?? "none"}`,
+      s.draft.hasChanges
+        ? `Draft: ${changesLine(s.draft.changes)} → would publish ${s.draft.nextVersion} (${s.draft.suggestedBump})`
+        : "Draft: no unpublished changes",
+      "",
+      ...data.versions.map((v) => `${v.version}${v.version === s.production ? " (production)" : ""} · ${v.createdAt.slice(0, 16).replace("T", " ")} · ${v.author}${v.note ? ` · "${short(v.note, 120)}"` : ""} · ${v.changedFields.join(", ") || "—"}`),
+    ].join("\n");
+    return ok(text, { state: s as Record<string, unknown>, versions: data.versions as Array<Record<string, unknown>> });
+  });
+
+  tool("team", "polpo_agent_version_get", {
+    title: "Get an agent version",
+    description: "One version's full configuration, read-only: a published version (1.2.0), \"production\" (what runs) or \"draft\" (the unpublished working copy).",
+    inputSchema: {
+      name: z.string().min(1).describe("The agent's name"),
+      version: versionRef.describe("1.2.0, production or draft"),
+    },
+    outputSchema: { version: looseObject },
+    annotations: READ,
+  }, async ({ name, version }) => {
+    const r = await apiGet(deps, `/agents/${enc(name)}/versions/${enc(version)}`);
+    if (!r.ok) return r.status === 404 ? fail(`${name} has no version ${version}: see polpo_agent_versions.`) : apiError(r, `Reading ${name}@${version}`);
+    const v = r.data as { version: string; author?: string; createdAt?: string; note?: string; config: Record<string, unknown>; skillVersions?: Record<string, number> };
+    const text = [
+      `${name}@${v.version}${v.author ? ` · by ${v.author}` : ""}${v.createdAt ? ` · ${v.createdAt.slice(0, 16).replace("T", " ")}` : ""}${v.note ? ` · "${v.note}"` : ""}`,
+      ...(v.skillVersions && Object.keys(v.skillVersions).length ? [`skills pinned: ${Object.entries(v.skillVersions).map(([k, n]) => `${k} v${n}`).join(", ")}`] : []),
+      "",
+      clipText(JSON.stringify(v.config, null, 2), 6000),
+    ].join("\n");
+    return ok(text, { version: v as Record<string, unknown> });
+  });
+
+  tool("team", "polpo_agent_version_diff", {
+    title: "Compare two agent versions",
+    description: "What changed between two versions of an agent, git style: the changed fields and a unified diff of the whole configuration "
+      + "(instructions as line diffs). to defaults to the draft; from defaults to the latest published version for the draft, else the version before to.",
+    inputSchema: {
+      name: z.string().min(1).describe("The agent's name"),
+      to: versionRef.optional().describe("The newer side: 1.2.0, production or draft (default draft)"),
+      from: versionRef.optional().describe("The older side (default: see above)"),
+    },
+    outputSchema: { diff: looseObject },
+    annotations: READ,
+  }, async ({ name, to, from }) => {
+    const r = await apiGet(deps, `/agents/${enc(name)}/diff${qs({ to, from })}`);
+    if (!r.ok) return r.status === 404 ? fail(`${name} or that version does not exist: see polpo_agent_versions.`) : apiError(r, `Comparing ${name}'s versions`);
+    const d = r.data as VersionDiff;
+    const text = d.changes.length
+      ? [`${name}: ${d.from ?? "empty"} → ${d.to}: ${changesLine(d.changes)}${d.suggestedBump ? ` (a ${d.suggestedBump} change)` : ""}`, "", clipText(d.unified, 8000)].join("\n")
+      : `${name}: ${d.from ?? "empty"} and ${d.to} are the same.`;
+    return ok(text, { diff: d as unknown as Record<string, unknown> });
+  });
+
+  tool("team", "polpo_agent_publish", {
+    title: "Publish an agent's draft",
+    description: "Publish the agent's draft (its unpublished changes) as a new immutable version. The number follows the suggested bump "
+      + "(patch: text, instructions, identity; minor: added tools, skills, connectors or settings; major: engine or model change, removed tools, skills or connectors) "
+      + "unless bump or version say otherwise. It does not change what runs: deploy it with polpo_agent_deploy (or deploy: true here, after the person agreed).",
+    inputSchema: {
+      name: z.string().min(1).describe("The agent's name"),
+      bump: z.enum(["major", "minor", "patch"]).optional().describe("Override the suggested bump"),
+      version: semver.optional().describe("An explicit version number, above the latest"),
+      note: z.string().max(2000).optional().describe("Release note: what changed and why"),
+      deploy: z.boolean().optional().describe("Also deploy it to production now (ask the person first)"),
+    },
+    outputSchema: { version: looseObject, deploy: looseObject.optional() },
+    annotations: WRITE,
+  }, async ({ name, bump, version, note, deploy }) => {
+    const r = await apiSend(deps, "POST", `/agents/${enc(name)}/publish`, { bump, version, note, deploy });
+    if (!r.ok) {
+      if (r.status === 404) return notFoundAgent(name);
+      if (r.status === 409) return fail(`${r.error}. Change it first (polpo_agent_update with publish: false writes the draft), or see polpo_agent_versions.`);
+      return apiError(r, `Publishing ${name}`);
+    }
+    const data = r.data as { version: { version: string; changes: FieldChange[] }; deploy?: { from?: string; to: string } };
+    return ok(`Published ${name}@${data.version.version}: ${changesLine(data.version.changes)}.${data.deploy ? ` Deployed to production (${data.deploy.from ?? "none"} → ${data.deploy.to}).` : ` Production is unchanged: deploy it with polpo_agent_deploy.`}`,
+      { version: data.version as unknown as Record<string, unknown>, ...(data.deploy ? { deploy: data.deploy as unknown as Record<string, unknown> } : {}) });
+  });
+
+  tool("team", "polpo_agent_deploy", {
+    title: "Deploy an agent version",
+    description: "Deploy a published version to production: every chat, task, mission, schedule, channel and delegation that does not pin a version uses it from its next run "
+      + "(runs in flight keep theirs). Recorded in the deploy history. Needs confirm: true after the person agreed (show them polpo_agent_version_diff first).",
+    inputSchema: {
+      name: z.string().min(1).describe("The agent's name"),
+      version: semver.describe("The published version to deploy (polpo_agent_versions)"),
+      note: z.string().max(2000).optional().describe("Why (kept in the deploy history)"),
+      confirm: confirmParam("deploy this version to production"),
+    },
+    outputSchema: { deploy: looseObject },
+    annotations: DESTRUCTIVE,
+  }, async ({ name, version, note, confirm }) => {
+    if (confirm !== true) {
+      const d = await apiGet(deps, `/agents/${enc(name)}/diff${qs({ to: version, from: "production" })}`);
+      const summary = d.ok ? changesLine((d.data as VersionDiff).changes) : "see polpo_agent_version_diff";
+      return fail(`Deploying ${name}@${version} to production changes: ${summary}. Ask the person, then call again with confirm: true.`);
+    }
+    const r = await apiSend(deps, "POST", `/agents/${enc(name)}/deploy`, { version, note });
+    if (!r.ok) return r.status === 404 ? fail(`${name} has no version ${version}: see polpo_agent_versions.`) : apiError(r, `Deploying ${name}@${version}`);
+    const e = r.data as { from?: string; to: string };
+    return ok(`Deployed ${name}@${e.to} to production${e.from ? ` (was ${e.from})` : ""}.`, { deploy: e as unknown as Record<string, unknown> });
+  });
+
+  tool("team", "polpo_agent_rollback", {
+    title: "Roll an agent back",
+    description: "Put production back on the version it ran before the current one (or on to): one step, recorded as a rollback in the deploy history. "
+      + "Needs confirm: true after the person agreed.",
+    inputSchema: {
+      name: z.string().min(1).describe("The agent's name"),
+      to: semver.optional().describe("A specific published version (default: the previous deploy)"),
+      note: z.string().max(2000).optional().describe("Why (kept in the deploy history)"),
+      confirm: confirmParam("roll production back"),
+    },
+    outputSchema: { deploy: looseObject },
+    annotations: DESTRUCTIVE,
+  }, async ({ name, to, note, confirm }) => {
+    if (confirm !== true) {
+      const v = await apiGet(deps, `/agents/${enc(name)}/versions`);
+      const prod = v.ok ? (v.data as { state: { production?: string } }).state.production : undefined;
+      return fail(`Rolling ${name} back moves production from ${prod ?? "its version"} to ${to ?? "the previous deploy"}. Ask the person, then call again with confirm: true.`);
+    }
+    const r = await apiSend(deps, "POST", `/agents/${enc(name)}/rollback`, { to, note });
+    if (!r.ok) {
+      if (r.status === 404) return fail(r.error ?? `Nothing to roll back to for ${name}.`);
+      if (r.status === 409) return fail(r.error ?? `Nothing to roll back for ${name}.`);
+      return apiError(r, `Rolling ${name} back`);
+    }
+    const e = r.data as { from?: string; to: string };
+    return ok(`Rolled ${name} back: production ${e.from ?? "?"} → ${e.to}.`, { deploy: e as unknown as Record<string, unknown> });
+  });
+
+  tool("team", "polpo_agent_deploys", {
+    title: "An agent's deploy history",
+    description: "Every deploy of an agent to production, newest first: when, who, from → to, note, rollbacks marked. "
+      + "id: one deploy with its git-style diff (the version it replaced vs the one it deployed).",
+    inputSchema: {
+      name: z.string().min(1).describe("The agent's name"),
+      id: z.string().optional().describe("One deploy's id (from the list): its diff"),
+      limit: z.number().int().min(1).max(200).optional().describe("How many (default 20)"),
+    },
+    outputSchema: { deploys: z.array(looseObject).optional(), deploy: looseObject.optional() },
+    annotations: READ,
+  }, async ({ name, id, limit }) => {
+    if (id) {
+      const r = await apiGet(deps, `/agents/${enc(name)}/deploys/${enc(id)}`);
+      if (!r.ok) return r.status === 404 ? fail(`${name} has no deploy ${id}: list them with polpo_agent_deploys.`) : apiError(r, `Reading deploy ${id}`);
+      const d = r.data as Parameters<typeof deployLine>[0] & { diff: VersionDiff };
+      return ok([deployLine(d), `changes: ${changesLine(d.diff.changes)}`, "", clipText(d.diff.unified, 8000)].join("\n"), { deploy: d as unknown as Record<string, unknown> });
+    }
+    const r = await apiGet(deps, `/agents/${enc(name)}/deploys${qs({ limit: String(limit ?? 20) })}`);
+    if (!r.ok) return r.status === 404 ? notFoundAgent(name) : apiError(r, `Reading ${name}'s deploys`);
+    const list = r.data as Array<Parameters<typeof deployLine>[0]>;
+    return ok(list.length ? [`${name}: ${list.length} deploy(s), newest first`, ...list.map(deployLine)].join("\n") : `${name} has no deploys yet.`,
+      { deploys: list as unknown as Array<Record<string, unknown>> });
   });
 
   tool("team", "polpo_agent_delete", {

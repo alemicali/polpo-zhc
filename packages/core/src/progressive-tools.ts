@@ -149,6 +149,10 @@ export const POLPO_TOOL_GROUPS: ToolGroupRule[] = [
     id: "learning", label: "Agent learning and drive",
     names: ["get_agent_learning", "review_agent_learning", "revert_agent_learning", "get_agent_drive", "reflect_agent"],
   },
+  {
+    id: "agent-versions", label: "Agent versions: list and read versions, diff two, publish the draft, deploy to production, roll back, deploy history",
+    names: ["agent_versions", "agent_version_get", "agent_version_diff", "agent_publish", "agent_deploy", "agent_rollback", "agent_deploys"],
+  },
 ];
 
 const MCP_PREFIX = "mcp__";

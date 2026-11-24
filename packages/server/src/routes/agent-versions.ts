@@ -95,7 +95,7 @@ export function registerAgentVersionRoutes(app: OpenAPIHono, getDeps: () => { ve
   app.openapi(createRoute({
     method: "get", path: "/{name}/diff", tags: ["Agent versions"], summary: "Diff two versions",
     description: "Per-field changes and a git-style unified diff of the serialized config between two refs: a version (1.2.0), `production` or `draft`. "
-      + "`to` defaults to `draft`; `from` defaults to production for the draft, else the version before `to`.",
+      + "`to` defaults to `draft`; `from` defaults to the latest version for the draft, else the version before `to`.",
     request: { params: nameParam, query: z.object({ from: z.string().optional(), to: z.string().optional() }) },
     responses: { 200: { content: { "application/json": { schema: okAny } }, description: "The diff" }, 404: { content: { "application/json": { schema: errorSchema } }, description: "Not found" } },
   }), async (c) => {

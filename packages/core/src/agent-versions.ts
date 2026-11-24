@@ -274,6 +274,51 @@ export function serializeSnapshot(snapshot: AgentSnapshot): string {
   return `${JSON.stringify(sortKeys(snapshot), null, 2)}\n`;
 }
 
+/** A YAML rendering for reading and diffing: keys sorted, multi-line text as block scalars (line diffs). */
+export function snapshotToYaml(snapshot: AgentSnapshot): string {
+  const lines: string[] = [];
+  const scalar = (v: unknown): string => {
+    if (v === null) return "null";
+    if (typeof v === "string") return /^[\w./@:+-][\w ./@:+,()-]*$/.test(v) && !/^(true|false|null|\d[\d.]*)$/.test(v) && !v.endsWith(" ") ? v : JSON.stringify(v);
+    return String(v);
+  };
+  const emit = (value: unknown, indent: string, key?: string, listItem = false): void => {
+    const head = listItem ? `${indent}- ` : key !== undefined ? `${indent}${key}: ` : indent;
+    const child = listItem ? `${indent}  ` : `${indent}  `;
+    if (typeof value === "string" && value.includes("\n")) {
+      lines.push(`${head}|`);
+      for (const l of value.replace(/\n$/, "").split("\n")) lines.push(l ? `${child}${l}` : "");
+      return;
+    }
+    if (Array.isArray(value)) {
+      if (!value.length) { lines.push(`${head}[]`); return; }
+      lines.push(head.trimEnd());
+      for (const item of value) emit(item, child, undefined, true);
+      return;
+    }
+    if (value && typeof value === "object") {
+      const entries = Object.entries(value as Record<string, unknown>).filter(([, v]) => v !== undefined).sort(([a], [b]) => a.localeCompare(b));
+      if (!entries.length) { lines.push(`${head}{}`); return; }
+      if (listItem) {
+        // first key on the dash line
+        const [[k0, v0], ...rest] = entries as [[string, unknown], ...Array<[string, unknown]>];
+        const saved = lines.length;
+        emit(v0, child, k0);
+        const first = lines.splice(saved);
+        lines.push(`${indent}- ${first[0]!.trimStart()}`, ...first.slice(1));
+        for (const [k, v] of rest) emit(v, child, k);
+        return;
+      }
+      if (key !== undefined) lines.push(head.trimEnd());
+      for (const [k, v] of entries) emit(v, key !== undefined ? child : indent, k);
+      return;
+    }
+    lines.push(`${head}${scalar(value)}`);
+  };
+  emit(sortKeys(snapshot), "");
+  return lines.length ? `${lines.join("\n")}\n` : "";
+}
+
 export function snapshotsEqual(a: AgentSnapshot, b: AgentSnapshot): boolean {
   return serializeSnapshot(a) === serializeSnapshot(b);
 }
@@ -445,8 +490,8 @@ export function diffAgentSnapshots(agent: string, from: { label?: string; config
     ...(from.label ? { from: from.label } : {}),
     to: to.label,
     changes: diffSnapshots(from.config, to.config),
-    unified: unifiedLineDiff(serializeSnapshot(from.config), serializeSnapshot(to.config),
-      `a/${agent}@${from.label ?? "empty"}.json`, `b/${agent}@${to.label}.json`),
+    unified: unifiedLineDiff(snapshotToYaml(from.config), snapshotToYaml(to.config),
+      `a/${agent}@${from.label ?? "empty"}.yaml`, `b/${agent}@${to.label}.yaml`),
     ...(suggestBump(from.config, to.config) ? { suggestedBump: suggestBump(from.config, to.config) } : {}),
   };
 }
@@ -630,12 +675,22 @@ export class AgentVersioning {
     return { config: agentSnapshot(await this.live(name)) };
   }
 
-  /** The draft's config: the saved working copy, or production's when there is none. */
+  /**
+   * What a new draft starts from: the latest published version (edits build on the newest version,
+   * deployed or not, as commits build on a branch's head), else the live config.
+   */
+  private async baseSnapshot(name: string): Promise<{ version?: string; config: AgentSnapshot }> {
+    const latest = await this.latest(name);
+    if (latest) return { version: latest.version, config: latest.config };
+    return { config: agentSnapshot(await this.live(name)) };
+  }
+
+  /** The draft's config: the saved working copy, or the latest version's when there is none. */
   async draftConfig(name: string): Promise<{ config: AgentSnapshot; draft?: AgentDraft }> {
     await this.ensureInitial(name);
     const draft = await this.store.getDraft(name);
     if (draft) return { config: draft.config, draft };
-    return { config: (await this.productionSnapshot(name)).config };
+    return { config: (await this.baseSnapshot(name)).config };
   }
 
   async state(name: string): Promise<AgentVersionState> {
@@ -673,7 +728,7 @@ export class AgentVersioning {
     await this.ensureInitial(name);
     return this.serial(name, async () => {
       const current = await this.store.getDraft(name);
-      const base = current ? { version: current.baseVersion, config: current.config } : await this.productionSnapshot(name);
+      const base = current ? { version: current.baseVersion, config: current.config } : await this.baseSnapshot(name);
       const { team: _team, ...fields } = updates as AgentUpdate & { team?: string };
       const merged: Record<string, unknown> = { ...base.config };
       for (const [k, v] of Object.entries(fields)) {
@@ -770,8 +825,8 @@ export class AgentVersioning {
   }
 
   /**
-   * Roll production back: to `to`, or to the version production ran before the current one
-   * (the previous deploy), else the published version below it.
+   * Roll production back: to `to`, or to the version production ran before the deploy that brought
+   * the current one, else the published version below it.
    */
   async rollback(name: string, opts: DeployOptions & { to?: string }): Promise<AgentDeployEntry> {
     await this.ensureInitial(name);
@@ -780,7 +835,9 @@ export class AgentVersioning {
       let to = opts.to;
       if (!to) {
         const deploys = await this.store.listDeploys(name);
-        to = deploys.find((d) => d.pointer === PRODUCTION_POINTER && d.to === current && d.from && d.from !== current)?.from;
+        // the deploy that brought the current version (not a rollback to it): one step back in the
+        // history each time, so repeated rollbacks walk back instead of toggling
+        to = deploys.find((d) => d.pointer === PRODUCTION_POINTER && d.to === current && d.action !== "rollback" && d.from && d.from !== current)?.from;
       }
       if (!to) {
         const below = (await this.store.listVersions(name))
@@ -851,7 +908,10 @@ export class AgentVersioning {
     const target = await this.snapshotOf(name, to);
     let source: { label?: string; config: AgentSnapshot } | undefined;
     if (from) source = await this.snapshotOf(name, from);
-    else if (to === "draft") source = await this.snapshotOf(name, "production");
+    else if (to === "draft") {
+      const latest = await this.latest(name);
+      source = latest ? { label: latest.version, config: latest.config } : { config: {} };
+    }
     else {
       const v = await this.store.getVersion(name, target.label);
       source = v?.previous ? await this.snapshotOf(name, v.previous) : { config: {} };
@@ -894,6 +954,31 @@ export class AgentVersioning {
       if (cls === "excluded" && (live as unknown as Record<string, unknown>)[k] !== undefined) runtime[k] = (live as unknown as Record<string, unknown>)[k];
     }
     return { agent: { ...(runtime as unknown as AgentConfig), ...(v.config as AgentConfig), name }, version: v.version, ref: v.version };
+  }
+
+  /**
+   * Change an agent through versioning: the fields go to its draft; then, as `mode` asks, the draft
+   * is published ("publish") and also deployed to production ("deploy"). "draft" stops at the draft.
+   */
+  async update(name: string, fields: AgentUpdate, opts: PublishOptions & { mode: "draft" | "publish" | "deploy" }): Promise<{
+    draftChanged: boolean; published?: AgentVersion; deployed?: AgentDeployEntry;
+  }> {
+    let draftChanged = false;
+    if (Object.keys(fields).length) {
+      const before = (await this.draftConfig(name)).config;
+      const draft = await this.updateDraft(name, fields, opts.actor);
+      draftChanged = !snapshotsEqual(before, draft.config);
+    }
+    let published: AgentVersion | undefined;
+    let deployed: AgentDeployEntry | undefined;
+    if (opts.mode !== "draft") {
+      const state = await this.state(name);
+      if (state.draft.hasChanges) published = await this.publish(name, opts);
+      else if (state.draft.exists) await this.discardDraft(name); // nothing left to publish
+      // only what this call published is deployed (a version published earlier is deployed explicitly)
+      if (opts.mode === "deploy" && published) deployed = await this.deploy(name, published.version, { actor: opts.actor, note: opts.note });
+    }
+    return { draftChanged, ...(published ? { published } : {}), ...(deployed ? { deployed } : {}) };
   }
 
   /** Forget an agent's versions (it was deleted). */
