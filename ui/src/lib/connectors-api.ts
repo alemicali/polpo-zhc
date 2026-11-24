@@ -260,7 +260,7 @@ export function iconSourceLabel(asset: ConnectorIconAsset | undefined): string {
 
 /** Save an agent's per-connector tool selection (null: every tool of every granted connector). */
 export function saveAgentConnectorTools(agent: string, connectorTools: AgentConnectorTools | null): Promise<{ connectorTools?: AgentConnectorTools } | null> {
-  return request(`/${encodeURIComponent(agent)}`, json("PATCH", { connectorTools }), "/api/v1/agents");
+  return request(`/${encodeURIComponent(agent)}`, json("PATCH", { connectorTools, publish: false }), "/api/v1/agents");
 }
 
 // ── Catalog search ───────────────────────────────────────────────────────────

@@ -22,6 +22,7 @@ import {
   Palette,
 } from "lucide-react";
 import { AgentColorPicker } from "./agent-color-picker";
+import { AgentVersionBadges } from "./agent-versions-tab";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { cn } from "@/lib/utils";
 import { useAgentDetail } from "./agent-detail-context";
@@ -57,6 +58,7 @@ export function AgentHeroCard() {
               <p className="text-micro font-mono text-muted-foreground">@{agent.name}</p>
             )}
             <AgentModelWithEngine agent={agent} size={14} className="mt-0.5 text-caption text-muted-foreground" mono testId="agent-hero-model" />
+            <AgentVersionBadges agent={agent} className="mt-1" />
           </div>
         </div>
 

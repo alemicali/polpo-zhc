@@ -574,6 +574,7 @@ export class OrchestratorEngine {
     notifications?: ScopedNotificationRules; sideEffects?: boolean; draft?: boolean; maxRetries?: number;
     toolScope?: import("./task-tool-scope.js").TaskToolScope;
     requestedBy?: string;
+    agentVersion?: string;
   }): Promise<Task> { return this.taskMgr.addTask(opts); }
 
   async updateTaskDescription(taskId: string, description: string): Promise<void> { return this.taskMgr.updateTaskDescription(taskId, description); }

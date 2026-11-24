@@ -29,6 +29,7 @@ export { brainItemsSqlite } from "./company-brain.js";
 export { whatsappMessagesSqlite, whatsappContactsSqlite } from "./whatsapp.js";
 export { chatQueueItemsSqlite, chatQueueSettingsSqlite } from "./chat-queue.js";
 export { roomsSqlite, roomMessagesSqlite } from "./rooms.js";
+export { agentVersionsSqlite, agentDraftsSqlite, agentPointersSqlite, agentDeploysSqlite } from "./agent-versions.js";
 
 // PostgreSQL schemas
 export {
@@ -61,3 +62,4 @@ export { brainItemsPg } from "./company-brain.js";
 export { whatsappMessagesPg, whatsappContactsPg } from "./whatsapp.js";
 export { chatQueueItemsPg, chatQueueSettingsPg } from "./chat-queue.js";
 export { roomsPg, roomMessagesPg } from "./rooms.js";
+export { agentVersionsPg, agentDraftsPg, agentPointersPg, agentDeploysPg } from "./agent-versions.js";

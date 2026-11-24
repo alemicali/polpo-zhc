@@ -143,7 +143,9 @@ function header(c: AgentCard, s: Strings): HTMLElement {
       h("div", { class: "role" }, [c.agent.role, c.agent.displayName ? c.agent.name : undefined].filter(Boolean).join(" · ")),
       // the model it runs, then its engine (mark + Polpo / Harness / CLI), then its computer
       c.agent.engine ? h("div", { class: "role marks agent-model" }, modelWithEngine(c.agent.engine.modelLabel, c.agent.engine),
-        c.agent.computer ? h("span", { class: "muted" }, `· ${s.on} ${c.agent.computer}`) : null) : null),
+        c.agent.computer ? h("span", { class: "muted" }, `· ${s.on} ${c.agent.computer}`) : null,
+        // the version production runs (agent versions)
+        c.agent.version ? h("span", { class: "muted agent-version", title: c.agent.draftChanges ? "draft has unpublished changes" : "production" }, `· v${c.agent.version}${c.agent.draftChanges ? "*" : ""}`) : null) : null),
     h("span", { class: `chip chip-${c.status === "working" ? "info" : c.status === "waiting" ? "warning" : "neutral"}` }, s[c.status]));
 }
 

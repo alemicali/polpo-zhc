@@ -84,6 +84,8 @@ export interface TaskRunContext {
   continuation?: boolean;
   /** The agent that ran it (the task's assignee at the time; reassignments change it). */
   agent?: string;
+  /** The agent's published version the run used (production's, or the task's pinned one). */
+  agentVersion?: string;
   engine: RunEngine;
   /** Model id (the agent's for Polpo's engine; the harness model for a harness). */
   model?: string;
@@ -125,6 +127,8 @@ export interface BuildRunContextInput {
   continuation?: boolean;
   /** The task's tool scope (Task.toolScope), recorded as the run had it. */
   toolScope?: TaskToolScope;
+  /** The agent's published version the run uses. */
+  agentVersion?: string;
 }
 
 /** The agent's harness engine (lenient: the engine was validated when the agent was saved). */
@@ -191,6 +195,7 @@ export function buildRunContext(i: BuildRunContextInput): TaskRunContext {
     status: "running",
     ...(i.continuation ? { continuation: true } : {}),
     agent: i.agent.name,
+    ...(i.agentVersion ? { agentVersion: i.agentVersion } : {}),
     engine: harness ? harness.harness : "polpo",
     computer,
     sandbox: { provider, ephemeral: !c && remote, ...(i.sandbox?.fallback ? { fallbackFrom: i.sandbox.fallback.from } : {}) },

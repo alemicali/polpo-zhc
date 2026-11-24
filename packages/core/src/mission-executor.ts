@@ -1,3 +1,4 @@
+import { parseAgentRef } from "./agent-versions.js";
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { TaskManager } from "./task-manager.js";
 import type { AgentManager } from "./agent-manager.js";
@@ -739,7 +740,8 @@ export class MissionExecutor {
     const allAgents = await this.agentMgr.getAgents();
     const referencedModels: string[] = [];
     for (const t of doc.tasks) {
-      const agentName = t.assignTo || allAgents[0]?.name;
+      // "writer@1.2.0": the agent, pinned to a published version
+      const agentName = t.assignTo ? parseAgentRef(t.assignTo).name : allAgents[0]?.name;
       const agent = allAgents.find(a => a.name === agentName);
       if (agent?.model) {
         referencedModels.push(agent.model);

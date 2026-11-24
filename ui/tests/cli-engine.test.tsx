@@ -105,7 +105,7 @@ test("agent engine: picks Claude Code (CLI) with an account and saves { type: cl
   const save = [...document.querySelectorAll("button")].find((b) => b.textContent?.includes("Save engine"))!;
   await act(async () => save.click());
   await flush();
-  expect(calls.find((c) => c.method === "PATCH" && c.path === "/agents/dev")?.body).toEqual({ engine: { type: "cli", cli: "claude", account: "ada-claude", model: "opus" } });
+  expect(calls.find((c) => c.method === "PATCH" && c.path === "/agents/dev")?.body).toEqual({ engine: { type: "cli", cli: "claude", account: "ada-claude", model: "opus" }, publish: false });
   // no model-connection test for a CLI (its account's status says if it can run)
   expect(calls.some((c) => c.path === "/harnesses/test")).toBe(false);
 });

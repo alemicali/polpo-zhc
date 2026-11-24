@@ -563,10 +563,15 @@ export function taskRoutes(getDeps: () => {
       ...(body.toolScope !== undefined ? { toolScope: body.toolScope } : {}),
       // the member who started it (signed-in dashboard / API session): a CLI engine on a personal sign-in checks it
       ...(memberOf(c) ? { requestedBy: memberOf(c) } : {}),
+      ...(body.agentVersion ? { agentVersion: body.agentVersion } : {}),
     });
     } catch (err) {
       const invalid = toolScopeError(err);
       if (invalid) return c.json(invalid, 400);
+      // a pinned version that does not exist ("writer@9.9.9")
+      if (err instanceof Error && /has no published version|is not a version of/.test(err.message)) {
+        return c.json({ ok: false, error: err.message, code: "VALIDATION_ERROR" }, 400);
+      }
       throw err;
     }
 

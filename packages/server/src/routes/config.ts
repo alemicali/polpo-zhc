@@ -420,6 +420,12 @@ export function configRoutes(getDeps: () => {
       if (body.dependencyResults !== undefined) {
         settings.dependencyResults = body.dependencyResults === null || Object.keys(body.dependencyResults).length === 0 ? undefined : body.dependencyResults;
       }
+      // agent configuration management: merged (versioning flags)
+      if (body.agents === null) delete settings.agents;
+      else if (body.agents !== undefined) {
+        settings.agents = { ...(settings.agents ?? {}), ...body.agents,
+          ...(body.agents.versioning ? { versioning: { ...(settings.agents?.versioning ?? {}), ...body.agents.versioning } } : {}) };
+      }
       // Polpo's MCP server settings merge: the keys given change (toolsets, keys)
       if (body.mcp === null) delete settings.mcp;
       else if (body.mcp !== undefined) {

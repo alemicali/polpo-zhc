@@ -150,6 +150,15 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_skill_versions", name: "skill_versions", group: "skills" },
   { mcp: "polpo_skill_version_diff", name: "skill_version_diff", group: "skills" },
   { mcp: "polpo_skill_restore", name: "skill_restore", group: "skills" },
+  // Agent versions: draft → publish → deploy (production), rollback, history
+  { mcp: "polpo_agent_versions", name: "agent_versions", group: "agent-versions" },
+  { mcp: "polpo_agent_version_get", name: "agent_version_get", group: "agent-versions" },
+  { mcp: "polpo_agent_version_diff", name: "agent_version_diff", group: "agent-versions" },
+  { mcp: "polpo_agent_draft", name: "agent_draft", group: "agent-versions" },
+  { mcp: "polpo_agent_publish", name: "agent_publish", group: "agent-versions" },
+  { mcp: "polpo_agent_deploy", name: "agent_deploy", group: "agent-versions" },
+  { mcp: "polpo_agent_rollback", name: "agent_rollback", group: "agent-versions" },
+  { mcp: "polpo_agent_deploys", name: "agent_deploys", group: "agent-versions" },
 ];
 
 /** MCP tools Polpo already covers with a tool of its own (or a parameter of one). */

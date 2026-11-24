@@ -585,7 +585,7 @@ test("agent page: choose which of a connector's tools the agent gets", async () 
   await flush();
   // the whole selection is saved: Notion's list is kept
   expect(server.calls.filter((c) => c.method === "PATCH").at(-1)).toEqual({
-    method: "PATCH", path: "/api/v1/agents/pm", body: { connectorTools: { notion: ["search", "gone_tool"], linear: ["create_issue"] } },
+    method: "PATCH", path: "/api/v1/agents/pm", body: { connectorTools: { notion: ["search", "gone_tool"], linear: ["create_issue"] }, publish: false },
   });
   expect(onSaved).toHaveBeenCalled();
   expect(container.querySelector('[data-testid="agent-connector-linear"]')?.textContent).toContain("1 selected tool");
@@ -598,7 +598,7 @@ test("agent page: choose which of a connector's tools the agent gets", async () 
   await click(notion().querySelector('[aria-label="All tools"]'));
   await click(byText("Save", '[data-testid="agent-connector-tools-notion"] button'));
   await flush();
-  expect(server.calls.filter((c) => c.method === "PATCH").at(-1)?.body).toEqual({ connectorTools: { linear: ["create_issue"] } });
+  expect(server.calls.filter((c) => c.method === "PATCH").at(-1)?.body).toEqual({ connectorTools: { linear: ["create_issue"] }, publish: false });
 });
 
 // ── Custom connector dialog ─────────────────────────────────────────────────
