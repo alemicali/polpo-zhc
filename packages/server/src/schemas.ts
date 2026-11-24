@@ -294,7 +294,8 @@ export const UpdateSettingsSchema = z.object({
    * model } }. gateway: ai-gateway → { baseUrl?, credentialRef }; gateway → { format: "anthropic" | "openai-responses" | "openai-chat"
    * (OpenCode), baseUrl, credentialRef?, authScheme: "x-api-key" | "bearer" | "none", headers?: [{ name, credentialRef?,
    * field?, prefix?, value? }], models?: { main, haiku?, sonnet?, opus? }, nonClaude? }.
-   * Credentials are vault references only (a Claude subscription and OpenCode logins are refused). Replaces it; null removes it.
+   * Credentials are vault references only (a Claude subscription and OpenCode logins are refused). cli?: { accounts: [{ id, cli: "claude" | "codex",
+   * computer?, configDir?, owner, label? }], allowInstanceCodex? } (the CLI engine: config directories, never tokens). Replaces it; null removes it.
    */
   harnesses: z.record(z.string(), z.unknown()).nullable().optional(),
 
@@ -533,6 +534,15 @@ export const AgentEngineSchema = z.union([
     maxBudgetUsd: z.number().positive().max(10000).optional(),
     /** This agent's own credential (cost separation): a vault reference that replaces the harness's API key or gateway key. */
     credentialRef: z.object({ owner: z.string().min(1), service: z.string().min(1) }).optional(),
+  }),
+  /** The CLI engine: the official Claude Code / Codex program signed in with a person's own plan (settings.harnesses.cli.accounts). */
+  z.object({
+    type: z.literal("cli"),
+    cli: z.enum(["claude", "codex"]),
+    account: z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/).optional(),
+    model: z.string().max(200).optional(),
+    permissionMode: z.enum(["allow-all", "allow-edits", "allow-reads"]).optional(),
+    args: z.array(z.string().min(1).max(300)).max(20).optional(),
   }),
 ]);
 

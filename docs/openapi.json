@@ -7700,6 +7700,53 @@
                         ]
                       },
                       {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "cli"
+                            ]
+                          },
+                          "cli": {
+                            "type": "string",
+                            "enum": [
+                              "claude",
+                              "codex"
+                            ]
+                          },
+                          "account": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"
+                          },
+                          "model": {
+                            "type": "string",
+                            "maxLength": 200
+                          },
+                          "permissionMode": {
+                            "type": "string",
+                            "enum": [
+                              "allow-all",
+                              "allow-edits",
+                              "allow-reads"
+                            ]
+                          },
+                          "args": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 300
+                            },
+                            "maxItems": 20
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "cli"
+                        ]
+                      },
+                      {
                         "nullable": true
                       }
                     ]
@@ -8393,6 +8440,53 @@
                         },
                         "required": [
                           "harness"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "cli"
+                            ]
+                          },
+                          "cli": {
+                            "type": "string",
+                            "enum": [
+                              "claude",
+                              "codex"
+                            ]
+                          },
+                          "account": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9-]{0,39}$"
+                          },
+                          "model": {
+                            "type": "string",
+                            "maxLength": 200
+                          },
+                          "permissionMode": {
+                            "type": "string",
+                            "enum": [
+                              "allow-all",
+                              "allow-edits",
+                              "allow-reads"
+                            ]
+                          },
+                          "args": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 300
+                            },
+                            "maxItems": 20
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "cli"
                         ]
                       },
                       {
