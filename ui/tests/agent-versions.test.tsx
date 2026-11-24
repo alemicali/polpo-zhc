@@ -31,7 +31,9 @@ const versionsApi = {
   get: vi.fn(async (v: string) => ({ ...VERSIONS.find((x) => x.version === v)!, config: { role: "Writes", systemPrompt: "Be brief." }, skillVersions: { style: 3 } })),
   publish: vi.fn(async (req: { deploy?: boolean }) => ({ version: { ...VERSIONS[0], version: "1.2.0" }, ...(req.deploy ? { deploy: DEPLOYS[0] } : {}) })),
   discardDraft: vi.fn(async () => undefined),
+  rebaseDraft: vi.fn(async () => ({ from: "1.1.0", to: "1.0.0", dropped: false })),
 };
+const draftState = { stale: false };
 const deploysApi = {
   deploy: vi.fn(async (v: string) => ({ ...DEPLOYS[0], from: "1.1.0", to: v })),
   rollback: vi.fn(async () => ({ ...DEPLOYS[0], action: "rollback", from: "1.1.0", to: "1.0.0" })),
@@ -43,7 +45,8 @@ vi.mock("@polpo-ai/react", () => ({
     data: {
       state: {
         agent: "writer", production: "1.1.0", latest: "1.1.0", pointers: { production: "1.1.0" }, versions: 2,
-        draft: { exists: true, hasChanges: true, changes: DRAFT_DIFF.changes, suggestedBump: "minor", nextVersion: "1.2.0", updatedAt: "2026-11-21T10:00:00.000Z", updatedBy: "person:ada@example.com" },
+        draft: { exists: true, hasChanges: true, changes: DRAFT_DIFF.changes, suggestedBump: "minor", nextVersion: "1.2.0", updatedAt: "2026-11-21T10:00:00.000Z", updatedBy: "person:ada@example.com",
+          baseVersion: draftState.stale ? "1.2.0" : "1.1.0", stale: draftState.stale },
       },
       versions: VERSIONS,
     },
@@ -68,6 +71,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   for (const f of [...Object.values(versionsApi), ...Object.values(deploysApi)]) f.mockClear();
+  draftState.stale = false;
 });
 afterEach(async () => {
   await act(async () => root.unmount());
@@ -182,4 +186,16 @@ test("settings: API/MCP updates published and deployed at once, switchable", asy
   expect(calls.at(-1)!.url).toContain("/api/v1/config/settings");
   expect(onSaved).toHaveBeenCalled();
   vi.unstubAllGlobals();
+});
+
+test("a stale draft (production moved by a rollback): warning, rebase or discard, no publish", async () => {
+  draftState.stale = true;
+  await render();
+  const warning = q('[data-testid="draft-stale"]')!;
+  expect(warning.textContent).toContain("The draft is based on 1.2.0, production is now 1.1.0");
+  expect((q('[data-testid="open-publish"]') as HTMLButtonElement).disabled).toBe(true);
+  await click(q('[data-testid="rebase-draft"]'));
+  expect(versionsApi.rebaseDraft).toHaveBeenCalled();
+  await act(async () => root.render(<AgentVersionBadges agent={{ name: "writer", versioning: { production: "1.0.0", pointers: {}, versions: 2, draft: { exists: true, hasChanges: true, changedFields: ["role"], stale: true, warning: "writer's draft is based on 1.1.0, production is now 1.0.0" } } }} />));
+  expect(q('[data-testid="agent-version-badges"]')!.textContent).toBe("v1.0.0Draft out of date");
 });

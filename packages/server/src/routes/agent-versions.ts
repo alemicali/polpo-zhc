@@ -123,6 +123,27 @@ export function registerAgentVersionRoutes(app: OpenAPIHono, getDeps: () => { ve
     } catch (err) { return versionErrorResponse(c, err); }
   });
 
+  // POST /agents/{name}/draft/rebase
+  app.openapi(createRoute({
+    method: "post", path: "/{name}/draft/rebase", tags: ["Agent versions"], summary: "Rebase the draft onto production",
+    description: "A draft is based on the version production ran when it started. After a rollback or deploy moved production elsewhere the draft is stale "
+      + "(`versioning.draft.stale`): this applies its own changes over what production runs now (or drops it when nothing is left to change).",
+    request: { params: nameParam },
+    responses: {
+      200: { content: { "application/json": { schema: okAny } }, description: "Rebased (from → to, dropped)" },
+      404: { content: { "application/json": { schema: errorSchema } }, description: "Agent or draft not found" },
+    },
+  }), async (c) => {
+    const { name } = c.req.valid("param");
+    if (!(await exists(name))) return notFound(c, name);
+    try {
+      const deps = v();
+      const r = await deps.versioning().rebaseDraft(name, deps.actor(c));
+      deps.changed?.(name, "draft");
+      return c.json({ ok: true, data: { from: r.from, to: r.to, dropped: r.dropped, ...(r.draft ? { draft: r.draft } : {}) } }, 200);
+    } catch (err) { return versionErrorResponse(c, err); }
+  });
+
   // POST /agents/{name}/publish
   app.openapi(createRoute({
     method: "post", path: "/{name}/publish", tags: ["Agent versions"], summary: "Publish the draft",
@@ -140,7 +161,7 @@ export function registerAgentVersionRoutes(app: OpenAPIHono, getDeps: () => { ve
     responses: {
       200: { content: { "application/json": { schema: okAny } }, description: "Published (and deployed)" },
       404: { content: { "application/json": { schema: errorSchema } }, description: "Agent not found" },
-      409: { content: { "application/json": { schema: errorSchema } }, description: "No draft changes, or the version exists" },
+      409: { content: { "application/json": { schema: errorSchema } }, description: "No draft changes, the version exists, or the draft is stale (rebase or discard it)" },
     },
   }), async (c) => {
     const { name } = c.req.valid("param");

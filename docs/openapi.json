@@ -9318,6 +9318,74 @@
         }
       }
     },
+    "/api/v1/agents/{name}/draft/rebase": {
+      "post": {
+        "tags": [
+          "Agent versions"
+        ],
+        "summary": "Rebase the draft onto production",
+        "description": "A draft is based on the version production ran when it started. After a rollback or deploy moved production elsewhere the draft is stale (`versioning.draft.stale`): this applies its own changes over what production runs now (or drops it when nothing is left to change).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rebased (from → to, dropped)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent or draft not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/agents/{name}/publish": {
       "post": {
         "tags": [
@@ -9414,7 +9482,7 @@
             }
           },
           "409": {
-            "description": "No draft changes, or the version exists",
+            "description": "No draft changes, the version exists, or the draft is stale (rebase or discard it)",
             "content": {
               "application/json": {
                 "schema": {

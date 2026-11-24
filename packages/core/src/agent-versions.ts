@@ -533,7 +533,12 @@ export interface AgentVersionState {
   draft: {
     exists: boolean;
     hasChanges: boolean;
+    /** The version the draft is based on (production's when it started). */
     baseVersion?: string;
+    /** Production moved away from the draft's base (rollback or deploy): rebase or discard before publishing. */
+    stale: boolean;
+    /** "draft is based on 1.4.0, production is now 1.2.0: …" when stale. */
+    warning?: string;
     updatedAt?: string;
     updatedBy?: string;
     changes: AgentFieldChange[];
@@ -676,21 +681,28 @@ export class AgentVersioning {
   }
 
   /**
-   * What a new draft starts from: the latest published version (edits build on the newest version,
-   * deployed or not, as commits build on a branch's head), else the live config.
+   * The version a draft is based on: the one production ran when the draft started (a new draft
+   * always starts from what is live, so a rolled-back change never comes back silently).
    */
-  private async baseSnapshot(name: string): Promise<{ version?: string; config: AgentSnapshot }> {
-    const latest = await this.latest(name);
-    if (latest) return { version: latest.version, config: latest.config };
-    return { config: agentSnapshot(await this.live(name)) };
+  private async draftBase(name: string, draft: AgentDraft | undefined): Promise<{ version?: string; config: AgentSnapshot }> {
+    if (draft?.baseVersion) {
+      const v = await this.store.getVersion(name, draft.baseVersion);
+      if (v) return { version: v.version, config: v.config };
+    }
+    return this.productionSnapshot(name);
   }
 
-  /** The draft's config: the saved working copy, or the latest version's when there is none. */
+  /** The draft's config: the saved working copy, or production's when there is none. */
   async draftConfig(name: string): Promise<{ config: AgentSnapshot; draft?: AgentDraft }> {
     await this.ensureInitial(name);
     const draft = await this.store.getDraft(name);
     if (draft) return { config: draft.config, draft };
-    return { config: (await this.baseSnapshot(name)).config };
+    return { config: (await this.productionSnapshot(name)).config };
+  }
+
+  /** A draft based on a version production no longer runs (a rollback or deploy moved it). */
+  private static staleMessage(name: string, base?: string, production?: string): string {
+    return `${name}'s draft is based on ${base ?? "an earlier version"}, production is now ${production ?? "another version"}: rebase it onto production or discard it first`;
   }
 
   async state(name: string): Promise<AgentVersionState> {
@@ -700,9 +712,11 @@ export class AgentVersioning {
     ]);
     const latest = versions.sort((a, b) => compareSemver(a.version, b.version)).at(-1);
     const prodVersion = pointers.find((p) => p.pointer === PRODUCTION_POINTER)?.version;
-    const base = latest?.config ?? {};
-    const changes = draft ? diffSnapshots(base, draft.config) : [];
-    const bump = draft ? suggestBump(base, draft.config) : undefined;
+    // changes against the version the draft is based on; the next number is above every version
+    const base = draft ? await this.draftBase(name, draft) : undefined;
+    const changes = draft && base ? diffSnapshots(base.config, draft.config) : [];
+    const bump = draft && base ? suggestBump(base.config, draft.config) : undefined;
+    const stale = !!draft && !!prodVersion && !!base?.version && base.version !== prodVersion;
     return {
       agent: name,
       ...(prodVersion ? { production: prodVersion } : {}),
@@ -712,7 +726,9 @@ export class AgentVersioning {
       draft: {
         exists: !!draft,
         hasChanges: changes.length > 0,
-        ...(draft?.baseVersion ? { baseVersion: draft.baseVersion } : {}),
+        ...(base?.version ? { baseVersion: base.version } : {}),
+        stale,
+        ...(stale ? { warning: AgentVersioning.staleMessage(name, base?.version, prodVersion).replace(" first", "") } : {}),
         ...(draft ? { updatedAt: draft.updatedAt, updatedBy: draft.updatedBy } : {}),
         changes,
         ...(bump ? { suggestedBump: bump, nextVersion: bumpSemver(latest?.version ?? "0.0.0", bump) } : {}),
@@ -728,7 +744,7 @@ export class AgentVersioning {
     await this.ensureInitial(name);
     return this.serial(name, async () => {
       const current = await this.store.getDraft(name);
-      const base = current ? { version: current.baseVersion, config: current.config } : await this.baseSnapshot(name);
+      const base = current ? { version: current.baseVersion, config: current.config } : await this.productionSnapshot(name);
       const { team: _team, ...fields } = updates as AgentUpdate & { team?: string };
       const merged: Record<string, unknown> = { ...base.config };
       for (const [k, v] of Object.entries(fields)) {
@@ -745,6 +761,33 @@ export class AgentVersioning {
     });
   }
 
+  /**
+   * Move a stale draft onto what production runs now: its own changes (against the version it was
+   * based on) applied over production's config. Nothing left to change: the draft goes.
+   */
+  async rebaseDraft(name: string, actor: string): Promise<{ draft?: AgentDraft; from?: string; to?: string; dropped: boolean }> {
+    await this.ensureInitial(name);
+    return this.serial(name, async () => {
+      const draft = await this.store.getDraft(name);
+      if (!draft) throw new AgentVersionError(`${name} has no draft to rebase`, "NOT_FOUND");
+      const base = await this.draftBase(name, draft);
+      const prod = await this.productionSnapshot(name);
+      const merged: Record<string, unknown> = { ...prod.config };
+      for (const c of diffSnapshots(base.config, draft.config)) {
+        if (c.after === undefined) delete merged[c.field];
+        else merged[c.field] = c.after;
+      }
+      const config = agentSnapshot(merged as Partial<AgentConfig>);
+      if (snapshotsEqual(config, prod.config)) {
+        await this.store.deleteDraft(name);
+        return { ...(base.version ? { from: base.version } : {}), ...(prod.version ? { to: prod.version } : {}), dropped: true };
+      }
+      const next: AgentDraft = { ...draft, config, updatedAt: this.now(), updatedBy: actor, ...(prod.version ? { baseVersion: prod.version } : {}) };
+      await this.store.saveDraft(next);
+      return { draft: next, ...(base.version ? { from: base.version } : {}), ...(prod.version ? { to: prod.version } : {}), dropped: false };
+    });
+  }
+
   async discardDraft(name: string): Promise<boolean> {
     const had = !!(await this.store.getDraft(name));
     await this.store.deleteDraft(name);
@@ -752,7 +795,7 @@ export class AgentVersioning {
   }
 
   /** The version number a publish would get. */
-  async nextVersion(name: string, opts: { bump?: AgentVersionBump; version?: string; config?: AgentSnapshot } = {}): Promise<{ version: string; bump: AgentVersion["bump"] }> {
+  async nextVersion(name: string, opts: { bump?: AgentVersionBump; version?: string; config?: AgentSnapshot; parent?: AgentSnapshot } = {}): Promise<{ version: string; bump: AgentVersion["bump"] }> {
     const latest = await this.latest(name);
     if (opts.version) {
       if (!isSemver(opts.version)) throw new AgentVersionError(`"${opts.version}" is not a version (major.minor.patch, e.g. 1.4.0)`, "INVALID");
@@ -761,7 +804,9 @@ export class AgentVersioning {
       }
       return { version: opts.version, bump: "custom" };
     }
-    const bump = opts.bump ?? (opts.config && latest ? suggestBump(latest.config, opts.config) : undefined) ?? "patch";
+    // the bump the change deserves (against its parent); the number is above the highest version
+    const parent = opts.parent ?? latest?.config;
+    const bump = opts.bump ?? (opts.config && parent ? suggestBump(parent, opts.config) : undefined) ?? "patch";
     return { version: bumpSemver(latest?.version ?? "0.0.0", bump), bump };
   }
 
@@ -770,24 +815,29 @@ export class AgentVersioning {
     await this.ensureInitial(name);
     return this.serial(name, async () => {
       const draft = await this.store.getDraft(name);
-      const latest = await this.latest(name);
-      if (!draft || (latest && snapshotsEqual(latest.config, draft.config))) {
+      const base = await this.draftBase(name, draft);
+      if (!draft || snapshotsEqual(base.config, draft.config)) {
         throw new AgentVersionError(`${name} has no draft changes to publish`, "NO_CHANGES");
       }
-      const version = await this.createVersion(name, draft.config, latest, opts);
+      const production = await this.pointer(name);
+      if (base.version && production && base.version !== production) {
+        throw new AgentVersionError(AgentVersioning.staleMessage(name, base.version, production), "CONFLICT");
+      }
+      const version = await this.createVersion(name, draft.config, base, opts);
       await this.store.deleteDraft(name);
       return version;
     });
   }
 
-  private async createVersion(name: string, config: AgentSnapshot, latest: AgentVersion | undefined, opts: PublishOptions): Promise<AgentVersion> {
-    const next = await this.nextVersion(name, { bump: opts.bump, version: opts.version, config });
+  /** A new version whose parent is `parent` (the version it was edited from); numbered above every version. */
+  private async createVersion(name: string, config: AgentSnapshot, parent: { version?: string; config: AgentSnapshot } | undefined, opts: PublishOptions): Promise<AgentVersion> {
+    const next = await this.nextVersion(name, { bump: opts.bump, version: opts.version, config, ...(parent ? { parent: parent.config } : {}) });
     if (await this.store.getVersion(name, next.version)) throw new AgentVersionError(`Version ${next.version} of ${name} already exists`, "CONFLICT");
     const version: AgentVersion = {
       agent: name, version: next.version, config, author: opts.actor, createdAt: this.now(), bump: next.bump,
       ...(opts.note?.trim() ? { note: opts.note.trim() } : {}),
-      ...(latest ? { previous: latest.version } : {}),
-      changes: diffSnapshots(latest?.config ?? {}, config),
+      ...(parent?.version ? { previous: parent.version } : {}),
+      changes: diffSnapshots(parent?.config ?? {}, config),
       ...this.skillPins(config),
     };
     await this.store.addVersion(version);
@@ -864,8 +914,7 @@ export class AgentVersioning {
       const live = agentSnapshot(agent);
       const prod = await this.productionSnapshot(name);
       if (snapshotsEqual(prod.config, live)) return undefined;
-      const latest = await this.latest(name);
-      const version = await this.createVersion(name, live, latest, { actor: opts.actor, note: opts.note ?? "Applied directly" });
+      const version = await this.createVersion(name, live, prod, { actor: opts.actor, note: opts.note ?? "Applied directly" });
       const at = this.now();
       await this.store.setPointer({ agent: name, pointer: PRODUCTION_POINTER, version: version.version, updatedAt: at, updatedBy: opts.actor });
       const entry: AgentDeployEntry = {
@@ -883,7 +932,8 @@ export class AgentVersioning {
         }
         const config = agentSnapshot(merged as Partial<AgentConfig>);
         if (snapshotsEqual(config, live)) await this.store.deleteDraft(name);
-        else await this.store.saveDraft({ ...draft, config, baseVersion: version.version });
+        // a draft on production follows it to the new version; a stale one stays stale (rebase shows it)
+        else await this.store.saveDraft({ ...draft, config, ...(!draft.baseVersion || draft.baseVersion === prod.version ? { baseVersion: version.version } : {}) });
       }
       await this.opts.onDeploy?.(entry);
       return version;
@@ -909,8 +959,8 @@ export class AgentVersioning {
     let source: { label?: string; config: AgentSnapshot } | undefined;
     if (from) source = await this.snapshotOf(name, from);
     else if (to === "draft") {
-      const latest = await this.latest(name);
-      source = latest ? { label: latest.version, config: latest.config } : { config: {} };
+      const base = await this.draftBase(name, await this.store.getDraft(name));
+      source = { ...(base.version ? { label: base.version } : {}), config: base.config };
     }
     else {
       const v = await this.store.getVersion(name, target.label);
@@ -963,6 +1013,10 @@ export class AgentVersioning {
   async update(name: string, fields: AgentUpdate, opts: PublishOptions & { mode: "draft" | "publish" | "deploy" }): Promise<{
     draftChanged: boolean; published?: AgentVersion; deployed?: AgentDeployEntry;
   }> {
+    if (opts.mode !== "draft") {
+      const st = await this.state(name);
+      if (st.draft.stale) throw new AgentVersionError(AgentVersioning.staleMessage(name, st.draft.baseVersion, st.production), "CONFLICT");
+    }
     let draftChanged = false;
     if (Object.keys(fields).length) {
       const before = (await this.draftConfig(name)).config;

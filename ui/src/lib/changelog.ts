@@ -38,7 +38,8 @@ export const CHANGELOG: ChangelogEntry[] = [
     title: "Versioni degli agenti: bozza, pubblicazione, deploy e rollback",
     summary: "Le modifiche a un agente vanno in una bozza; la pubblichi come versione (1.3.0) e la porti in produzione quando vuoi. Torni indietro con un clic e vedi ogni deploy con le differenze.",
     body: [
-      "- **Bozza**: tutto quello che cambi dalla dashboard (istruzioni, modello, motore, strumenti, skill, connettori, sandbox, computer…) resta nella bozza finché non lo pubblichi: la produzione continua a girare com'era.",
+      "- **Bozza**: tutto quello che cambi dalla dashboard (istruzioni, modello, motore, strumenti, skill, connettori, sandbox, computer…) resta nella bozza finché non lo pubblichi: la produzione continua a girare com'era. La bozza parte sempre da ciò che è in produzione: dopo un rollback le modifiche annullate non ritornano.",
+      "- **Bozza superata**: se un rollback o un deploy sposta la produzione, la bozza resta ma te lo segnaliamo (\"la bozza parte dalla 1.4.0, in produzione ora c'è la 1.2.0\"): la riporti sulla produzione con un clic o la scarti prima di pubblicare.",
       "- **Versioni immutabili**: pubblicando ottieni una versione numerata (`1.3.0`) con autore, data, nota e le differenze dalla precedente. Il numero è suggerito: patch per testi e identità, minor per strumenti o impostazioni in più, major per un cambio di motore o modello o strumenti tolti; puoi cambiarlo.",
       "- **Deploy e rollback**: **Deploy** porta una versione in produzione (chat, task, missioni, pianificazioni, canali la usano dal prossimo run; quelli già in corso finiscono con la loro). **Rollback** torna alla versione di prima con un clic.",
       "- **Storico dei deploy**: chi, quando, da quale a quale versione e la nota; ogni deploy apre le differenze stile git, unificate o affiancate.",

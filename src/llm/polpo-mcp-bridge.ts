@@ -154,6 +154,7 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_agent_versions", name: "agent_versions", group: "agent-versions" },
   { mcp: "polpo_agent_version_get", name: "agent_version_get", group: "agent-versions" },
   { mcp: "polpo_agent_version_diff", name: "agent_version_diff", group: "agent-versions" },
+  { mcp: "polpo_agent_draft", name: "agent_draft", group: "agent-versions" },
   { mcp: "polpo_agent_publish", name: "agent_publish", group: "agent-versions" },
   { mcp: "polpo_agent_deploy", name: "agent_deploy", group: "agent-versions" },
   { mcp: "polpo_agent_rollback", name: "agent_rollback", group: "agent-versions" },

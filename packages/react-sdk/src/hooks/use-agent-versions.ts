@@ -32,6 +32,8 @@ export interface UseAgentVersionsReturn {
   publish: (req?: { bump?: AgentVersionBump; version?: string; note?: string; deploy?: boolean }) => Promise<AgentPublishResult>;
   /** Throw away the draft; refetches. */
   discardDraft: () => Promise<void>;
+  /** Move a stale draft onto production (after a rollback or deploy); refetches. */
+  rebaseDraft: () => Promise<{ from?: string; to?: string; dropped: boolean }>;
 }
 
 /**
@@ -67,6 +69,12 @@ export function useAgentVersions(name: string | undefined): UseAgentVersionsRetu
     await fetch_();
   }, [client, name, fetch_]);
 
+  const rebaseDraft = useCallback(async () => {
+    const r = await client.rebaseAgentDraft(name ?? "");
+    await fetch_();
+    return r;
+  }, [client, name, fetch_]);
+
   const get = useCallback((version: string) => client.getAgentVersion(name ?? "", version), [client, name]);
   const diff = useCallback((o?: { from?: string; to?: string }) => client.diffAgentVersions(name ?? "", o), [client, name]);
 
@@ -80,6 +88,7 @@ export function useAgentVersions(name: string | undefined): UseAgentVersionsRetu
     diff,
     publish,
     discardDraft,
+    rebaseDraft,
   };
 }
 

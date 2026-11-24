@@ -114,6 +114,7 @@ export function agentRoutes(getDeps: () => {
       return {
         production: st.production, latest: st.latest, pointers: st.pointers, versions: st.versions,
         draft: { exists: st.draft.exists, hasChanges: st.draft.hasChanges, changedFields: st.draft.changes.map((c) => c.field),
+          ...(st.draft.baseVersion ? { baseVersion: st.draft.baseVersion } : {}), stale: st.draft.stale, ...(st.draft.warning ? { warning: st.draft.warning } : {}),
           ...(st.draft.updatedAt ? { updatedAt: st.draft.updatedAt, updatedBy: st.draft.updatedBy } : {}),
           ...(st.draft.suggestedBump ? { suggestedBump: st.draft.suggestedBump, nextVersion: st.draft.nextVersion } : {}) },
       };

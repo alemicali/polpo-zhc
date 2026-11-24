@@ -1554,7 +1554,11 @@ export interface AgentVersionState {
   draft: {
     exists: boolean;
     hasChanges: boolean;
+    /** The version the draft is based on (production's when it started). */
     baseVersion?: string;
+    /** Production moved away from the draft's base: rebase or discard before publishing. */
+    stale: boolean;
+    warning?: string;
     updatedAt?: string;
     updatedBy?: string;
     changes: AgentFieldChange[];
@@ -1569,7 +1573,7 @@ export interface AgentVersioningSummary {
   latest?: string;
   pointers: Record<string, string>;
   versions: number;
-  draft: { exists: boolean; hasChanges: boolean; changedFields: string[]; updatedAt?: string; updatedBy?: string; suggestedBump?: AgentVersionBump; nextVersion?: string };
+  draft: { exists: boolean; hasChanges: boolean; changedFields: string[]; baseVersion?: string; stale?: boolean; warning?: string; updatedAt?: string; updatedBy?: string; suggestedBump?: AgentVersionBump; nextVersion?: string };
   /** PATCH only: what the update did. */
   mode?: "draft" | "publish" | "deploy";
   draftChanged?: boolean;

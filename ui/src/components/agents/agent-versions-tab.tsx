@@ -8,7 +8,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { GitCompare, History, Loader2, Rocket, RotateCcw, Trash2, Upload, Eye } from "lucide-react";
+import { AlertTriangle, GitCompare, GitMerge, History, Loader2, Rocket, RotateCcw, Trash2, Upload, Eye } from "lucide-react";
 import {
   useAgentDeploys, useAgentVersions,
   type AgentDeployEntry, type AgentVersion, type AgentVersionBump, type AgentVersionDiff, type AgentConfig,
@@ -127,8 +127,8 @@ export function AgentVersionBadges({ agent, className }: { agent: AgentConfig; c
         <Badge variant="outline" className="font-mono text-micro" title="The version production runs">v{v.production}</Badge>
       )}
       {v.draft.hasChanges && (
-        <Badge variant="outline" className="text-micro text-warning border-warning/30 bg-warning/10" title={`Unpublished: ${v.draft.changedFields.join(", ")}`}>
-          Draft has changes
+        <Badge variant="outline" className="text-micro text-warning border-warning/30 bg-warning/10" title={v.draft.warning ?? `Unpublished: ${v.draft.changedFields.join(", ")}`}>
+          {v.draft.stale ? "Draft out of date" : "Draft has changes"}
         </Badge>
       )}
     </span>
@@ -291,6 +291,18 @@ export function AgentVersionsTab() {
     }
   };
 
+  const rebase = async () => {
+    setBusy(true);
+    try {
+      const r = await versions.rebaseDraft();
+      await after(r.dropped ? `Nothing left to change over ${r.to ?? "production"}: draft dropped` : `Draft rebased from ${r.from ?? "?"} onto ${r.to ?? "production"}`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const view = async (version: string) => {
     try { setViewing(await versions.get(version)); } catch (e) { toast.error((e as Error).message); }
   };
@@ -321,12 +333,26 @@ export function AgentVersionsTab() {
               <Button variant="ghost" size="sm" onClick={() => setConfirm({ kind: "discard" })} aria-label="Discard the draft">
                 <Trash2 className="mr-1 h-3.5 w-3.5" /> Discard
               </Button>
-              <Button size="sm" onClick={() => setPublishOpen(true)} data-testid="open-publish">
+              <Button size="sm" onClick={() => setPublishOpen(true)} data-testid="open-publish" disabled={state.draft.stale}
+                title={state.draft.stale ? "Rebase the draft onto production (or discard it) first" : undefined}>
                 <Upload className="mr-1 h-3.5 w-3.5" /> Publish…
               </Button>
             </div>
           )}
         </header>
+        {state?.draft.stale && (
+          <div className="flex flex-wrap items-center gap-2 border-t border-warning/30 bg-warning/10 px-4 py-2 text-caption text-warning" role="alert" data-testid="draft-stale">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            <span className="min-w-0 flex-1">
+              The draft is based on {state.draft.baseVersion ?? "an earlier version"}, production is now {state.production ?? "another version"}.
+              Rebase it onto production (its changes applied over what runs now) or discard it before publishing.
+            </span>
+            <Button variant="outline" size="sm" className="h-7" disabled={busy} onClick={() => void rebase()} data-testid="rebase-draft">
+              <GitMerge className="mr-1 h-3.5 w-3.5" /> Rebase onto {state.production ?? "production"}
+            </Button>
+            <Button variant="ghost" size="sm" className="h-7" disabled={busy} onClick={() => setConfirm({ kind: "discard" })}>Discard</Button>
+          </div>
+        )}
         {state?.draft.hasChanges && draftDiff && (
           <div className="border-t border-border/40 p-3"><AgentVersionDiffView diff={draftDiff} /></div>
         )}

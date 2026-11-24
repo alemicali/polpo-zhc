@@ -80,7 +80,7 @@ async function unknownEgress(deps: McpDeps, name: string | undefined): Promise<s
 type Agent = {
   name: string; role?: string; model?: string; systemPrompt?: string; allowedTools?: string[]; skills?: string[]; identity?: { displayName?: string; title?: string };
   reportsTo?: string; engine?: unknown; connectorTools?: Record<string, "*" | string[]>;
-  versioning?: { production?: string; latest?: string; draft?: { hasChanges?: boolean; changedFields?: string[] } };
+  versioning?: { production?: string; latest?: string; draft?: { hasChanges?: boolean; changedFields?: string[]; stale?: boolean; warning?: string } };
 };
 
 /** Selected tool names the connector no longer lists (it may be disconnected: then nothing is reported). */
@@ -127,7 +127,8 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
       `${a.name}${a.identity?.displayName ? ` (${a.identity.displayName}${a.identity.title ? `, ${a.identity.title}` : ""})` : ""}: ${a.role ?? "no role"}`,
       `model: ${modelWithEngineText(agentEffectiveModel(a), agentEngineIdOf(a.engine), "default")}${a.reportsTo ? ` · reports to ${a.reportsTo}` : ""}`,
       ...(a.versioning ? [`version: ${a.versioning.production ?? "none"} in production${a.versioning.latest && a.versioning.latest !== a.versioning.production ? ` · latest ${a.versioning.latest}` : ""}`
-        + `${a.versioning.draft?.hasChanges ? ` · draft has changes (${(a.versioning.draft.changedFields ?? []).join(", ")})` : ""}`] : []),
+        + `${a.versioning.draft?.hasChanges ? ` · draft has changes (${(a.versioning.draft.changedFields ?? []).join(", ")})` : ""}`
+        + `${a.versioning.draft?.stale ? ` · ⚠ ${a.versioning.draft.warning}` : ""}`] : []),
       `tools: ${a.allowedTools?.join(", ") ?? "defaults"} · skills: ${a.skills?.join(", ") || "none"}`,
       ...(connectorLine ? [connectorLine] : []),
       ...(a.engine && typeof a.engine === "object"
@@ -238,13 +239,14 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
   }, async ({ name }) => {
     const r = await apiGet(deps, `/agents/${enc(name)}/versions`);
     if (!r.ok) return r.status === 404 ? notFoundAgent(name) : apiError(r, `Reading ${name}'s versions`);
-    const data = r.data as { state: { production?: string; latest?: string; draft: { hasChanges: boolean; changes: FieldChange[]; nextVersion?: string; suggestedBump?: string } }; versions: Array<{ version: string; author: string; createdAt: string; note?: string; changedFields: string[] }> };
+    const data = r.data as { state: { production?: string; latest?: string; draft: { hasChanges: boolean; stale?: boolean; warning?: string; changes: FieldChange[]; nextVersion?: string; suggestedBump?: string } }; versions: Array<{ version: string; author: string; createdAt: string; note?: string; changedFields: string[] }> };
     const s = data.state;
     const text = [
       `${name}: production ${s.production ?? "none"} · latest ${s.latest ?? "none"}`,
       s.draft.hasChanges
         ? `Draft: ${changesLine(s.draft.changes)} → would publish ${s.draft.nextVersion} (${s.draft.suggestedBump})`
         : "Draft: no unpublished changes",
+      ...(s.draft.stale ? [`⚠ ${s.draft.warning} (polpo_agent_draft action rebase or discard)`] : []),
       "",
       ...data.versions.map((v) => `${v.version}${v.version === s.production ? " (production)" : ""} · ${v.createdAt.slice(0, 16).replace("T", " ")} · ${v.author}${v.note ? ` · "${short(v.note, 120)}"` : ""} · ${v.changedFields.join(", ") || "—"}`),
     ].join("\n");
@@ -294,6 +296,31 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
     return ok(text, { diff: d as unknown as Record<string, unknown> });
   });
 
+  tool("team", "polpo_agent_draft", {
+    title: "Rebase or discard an agent's draft",
+    description: "An agent's draft is based on the version production ran when it started. After a rollback or deploy, a stale draft must be rebased onto "
+      + "production (its own changes applied over what runs now) or discarded before it can be published. action: rebase, or discard (needs confirm: true: the unpublished changes are lost).",
+    inputSchema: {
+      name: z.string().min(1).describe("The agent's name"),
+      action: z.enum(["rebase", "discard"]).describe("rebase onto production, or discard the draft"),
+      confirm: confirmParam("discard the draft").optional(),
+    },
+    outputSchema: { result: looseObject },
+    annotations: DESTRUCTIVE,
+  }, async ({ name, action, confirm }) => {
+    if (action === "discard") {
+      if (confirm !== true) return fail(`Discarding ${name}'s draft loses its unpublished changes: ask the person, then call again with confirm: true.`);
+      const r = await apiSend(deps, "DELETE", `/agents/${enc(name)}/draft`);
+      if (!r.ok) return r.status === 404 ? notFoundAgent(name) : apiError(r, `Discarding ${name}'s draft`);
+      return ok((r.data as { discarded: boolean }).discarded ? `Discarded ${name}'s draft.` : `${name} had no draft.`, { result: r.data as Record<string, unknown> });
+    }
+    const r = await apiSend(deps, "POST", `/agents/${enc(name)}/draft/rebase`);
+    if (!r.ok) return r.status === 404 ? fail(r.error ?? `${name} has no draft.`) : apiError(r, `Rebasing ${name}'s draft`);
+    const d = r.data as { from?: string; to?: string; dropped: boolean };
+    return ok(d.dropped ? `${name}'s draft had nothing left to change over production ${d.to ?? ""}: dropped.`
+      : `Rebased ${name}'s draft from ${d.from ?? "?"} onto production ${d.to ?? "?"}: publish it with polpo_agent_publish.`, { result: d as unknown as Record<string, unknown> });
+  });
+
   tool("team", "polpo_agent_publish", {
     title: "Publish an agent's draft",
     description: "Publish the agent's draft (its unpublished changes) as a new immutable version. The number follows the suggested bump "
@@ -312,7 +339,7 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
     const r = await apiSend(deps, "POST", `/agents/${enc(name)}/publish`, { bump, version, note, deploy });
     if (!r.ok) {
       if (r.status === 404) return notFoundAgent(name);
-      if (r.status === 409) return fail(`${r.error}. Change it first (polpo_agent_update with publish: false writes the draft), or see polpo_agent_versions.`);
+      if (r.status === 409) return fail(/rebase/.test(r.error ?? "") ? `${r.error} (polpo_agent_draft).` : `${r.error}. Change it first (polpo_agent_update with publish: false writes the draft), or see polpo_agent_versions.`);
       return apiError(r, `Publishing ${name}`);
     }
     const data = r.data as { version: { version: string; changes: FieldChange[] }; deploy?: { from?: string; to: string } };

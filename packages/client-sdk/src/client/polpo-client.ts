@@ -923,6 +923,11 @@ export class PolpoClient {
     return this.post<AgentPublishResult>(`/agents/${encodeURIComponent(name)}/publish`, req);
   }
 
+  /** Move a stale draft onto what production runs now (after a rollback or deploy). */
+  rebaseAgentDraft(name: string): Promise<{ from?: string; to?: string; dropped: boolean }> {
+    return this.post<{ from?: string; to?: string; dropped: boolean }>(`/agents/${encodeURIComponent(name)}/draft/rebase`);
+  }
+
   /** Throw away the draft's unpublished changes. */
   discardAgentDraft(name: string): Promise<{ discarded: boolean }> {
     return this.del<{ discarded: boolean }>(`/agents/${encodeURIComponent(name)}/draft`);

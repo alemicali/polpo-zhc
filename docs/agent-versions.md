@@ -43,10 +43,23 @@ Vault values are never in a version: an agent's config only ever holds reference
 
 ## Draft and publish
 
-- The **draft** starts from the latest published version. "Draft has changes" means it differs from
-  the latest version.
-- **Publish** makes the next version with the **suggested bump** unless you choose another or give an
-  explicit number (above the latest):
+- The **draft** starts from what is **live in production**. After a rollback to 1.2.0 the next edit
+  starts from 1.2.0, so rolled-back changes never come back silently (when production is the latest
+  version nothing changes). The draft remembers the version it is based on (`baseVersion`); "Draft has
+  changes" means it differs from that version.
+- **Stale draft**: when a rollback or deploy moves production away from a draft's base, the draft is
+  kept but marked stale (`versioning.draft.stale`, with `warning`: "writer's draft is based on 1.4.0,
+  production is now 1.2.0: …"), shown in the dashboard (Versions tab and header badge "Draft out of
+  date"), in REST and in MCP. It can still be edited but not published until it is **rebased** onto
+  production (`POST /agents/{name}/draft/rebase`, MCP `polpo_agent_draft action: rebase`: its own
+  changes against its base applied over what production runs; nothing left → the draft goes) or
+  **discarded** (`DELETE /agents/{name}/draft`, `polpo_agent_draft action: discard`). Publishing or an
+  API update that would publish a stale draft is refused with `409`.
+- **Publish** makes the next version with the **suggested bump** (computed against the draft's base)
+  unless you choose another or give an explicit number. The number is always above the **highest**
+  existing version: after a rollback to 1.2.0 with 1.4.0 existing, the next is 1.4.1, 1.5.0 or 2.0.0
+  per bump. The version's `previous` is its parent (the base it was edited from), and its changes are
+  against that parent:
   - **patch** — text, prompt and identity edits (`role`, `systemPrompt`, `identity`, `suggestions`, `reportsTo`, `author`, `tags`);
   - **minor** — added tools, skills or connectors, or any other setting;
   - **major** — a different engine or model, or removed tools, skills or connectors.
@@ -87,10 +100,10 @@ used (`Task.runs[].agentVersion`), shown on the task's run card next to the mode
 | | |
 | --- | --- |
 | Dashboard | Agent page: header shows the production version and "Draft has changes"; **Versions** tab (draft with its diff, publish dialog with bump and note, discard; versions list, view one read-only, select two to diff; deploys: production, rollback, history with each deploy's diff, unified or split). Dashboard edits always go to the draft. Configuration → General → Agent versions holds the API setting below. |
-| REST | `GET /agents/{name}` (production config + `versioning`: production, latest, draft state; `?view=draft` returns the draft), `GET /agents/{name}/versions`, `GET /agents/{name}/versions/{version}` (`draft`, `production` accepted), `GET /agents/{name}/diff?from=&to=`, `DELETE /agents/{name}/draft`, `POST /agents/{name}/publish`, `POST /agents/{name}/deploy`, `POST /agents/{name}/rollback`, `GET /agents/{name}/deploys[?diff=true]`, `GET /agents/{name}/deploys/{id}` |
-| MCP (admin) | `polpo_agent_versions`, `polpo_agent_version_get`, `polpo_agent_version_diff`, `polpo_agent_publish`, `polpo_agent_deploy` and `polpo_agent_rollback` (destructive, `confirm: true`), `polpo_agent_deploys`; `polpo_agent_get` shows the version and draft state; `polpo_agent_update` takes `publish`, `deploy`, `bump`, `version`, `note`; the agent card shows the production version |
-| Polpo's chat | the same tools (`agent_versions`, `agent_publish`, `agent_deploy`, … in the "agent-versions" group); `update_agent` takes `publish`, `deploy`, `note` |
-| SDK | `client.getAgentVersions`, `getAgentVersion`, `diffAgentVersions`, `publishAgent`, `discardAgentDraft`, `deployAgentVersion`, `rollbackAgent`, `getAgentDeploys`, `getAgentDeploy`; React `useAgentVersions`, `useAgentDeploys`, `useAgent(name, { view: "draft" })` |
+| REST | `GET /agents/{name}` (production config + `versioning`: production, latest, draft state with `baseVersion`, `stale`, `warning`; `?view=draft` returns the draft), `GET /agents/{name}/versions`, `GET /agents/{name}/versions/{version}` (`draft`, `production` accepted), `GET /agents/{name}/diff?from=&to=`, `DELETE /agents/{name}/draft`, `POST /agents/{name}/draft/rebase`, `POST /agents/{name}/publish`, `POST /agents/{name}/deploy`, `POST /agents/{name}/rollback`, `GET /agents/{name}/deploys[?diff=true]`, `GET /agents/{name}/deploys/{id}` |
+| MCP (admin) | `polpo_agent_versions` (warns about a stale draft), `polpo_agent_version_get`, `polpo_agent_version_diff`, `polpo_agent_draft` (rebase, or discard with `confirm: true`), `polpo_agent_publish`, `polpo_agent_deploy` and `polpo_agent_rollback` (destructive, `confirm: true`), `polpo_agent_deploys`; `polpo_agent_get` shows the version and draft state; `polpo_agent_update` takes `publish`, `deploy`, `bump`, `version`, `note`; the agent card shows the production version |
+| Polpo's chat | the same tools (`agent_versions`, `agent_draft`, `agent_publish`, `agent_deploy`, … in the "agent-versions" group); `update_agent` takes `publish`, `deploy`, `note` |
+| SDK | `client.getAgentVersions`, `getAgentVersion`, `diffAgentVersions`, `publishAgent`, `discardAgentDraft`, `rebaseAgentDraft`, `deployAgentVersion`, `rollbackAgent`, `getAgentDeploys`, `getAgentDeploy`; React `useAgentVersions` (with `rebaseDraft`), `useAgentDeploys`, `useAgent(name, { view: "draft" })` |
 
 ## API compatibility
 
@@ -112,7 +125,8 @@ happened (`mode`, `draftChanged`, `published`, `deployed`, and the state). Turn 
 deploys it.
 
 An update that publishes takes the whole draft: pending dashboard edits in the draft are published
-with it.
+with it. If the draft is stale (production moved away from its base), such an update is refused
+(`409`) until the draft is rebased or discarded.
 
 Changes written directly to the live agent — an agent changing its own settings (voice replies,
 learning), skill assignment, Ink installs, a CLI or a file edit — are recorded as a new version

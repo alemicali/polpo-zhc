@@ -65,9 +65,10 @@ describe("agent versioning REST", () => {
     let r = await json("PATCH", "/writer", { role: "Edits", publish: true, note: "rename" });
     expect(r.body.data.versioning).toMatchObject({ mode: "publish", published: { version: "1.0.1" }, production: "1.0.0" });
     expect(agents.get("writer")!.role).toBe("Writes");
+    // a new edit starts from production (1.0.0), not from the published-but-not-deployed 1.0.1
     r = await json("PATCH", "/writer", { model: "openai:gpt-5", deploy: true, version: "3.0.0" });
     expect(r.body.data.versioning).toMatchObject({ mode: "deploy", published: { version: "3.0.0" }, production: "3.0.0" });
-    expect(agents.get("writer")).toMatchObject({ role: "Edits", model: "openai:gpt-5" });
+    expect(agents.get("writer")).toMatchObject({ role: "Writes", model: "openai:gpt-5" });
   });
 
   it("lists, reads and diffs versions; publishes, deploys and rolls back with an audited history", async () => {
@@ -118,5 +119,34 @@ describe("agent versioning REST", () => {
     expect((await json("DELETE", "/writer/draft")).body.data).toEqual({ discarded: true });
     expect((await json("GET", "/writer")).body.data.versioning.draft.hasChanges).toBe(false);
     expect((await json("GET", "/ghost/versions")).status).toBe(404);
+  });
+});
+
+describe("agent versioning REST: a draft after a rollback", () => {
+  it("warns that the draft is stale, refuses to publish it, rebases it onto production", async () => {
+    const { json, agents } = app({ autoDeploy: false });
+    await json("PATCH", "/writer", { role: "Edits", deploy: true });            // 1.0.1 in production
+    await json("PATCH", "/writer", { systemPrompt: "Be warm." });                 // draft based on 1.0.1
+    await json("POST", "/writer/rollback", {});                                    // production back to 1.0.0
+    let r = await json("GET", "/writer");
+    expect(r.body.data.versioning.draft).toMatchObject({ stale: true, baseVersion: "1.0.1", hasChanges: true });
+    expect(r.body.data.versioning.draft.warning).toContain("draft is based on 1.0.1, production is now 1.0.0");
+
+    r = await json("POST", "/writer/publish", {});
+    expect(r.status).toBe(409);
+    expect(r.body.error).toMatch(/rebase it onto production or discard it/);
+    r = await json("PATCH", "/writer", { maxTurns: 9, deploy: true });
+    expect(r.status).toBe(409);
+
+    r = await json("POST", "/writer/draft/rebase", {});
+    expect(r.body.data).toMatchObject({ from: "1.0.1", to: "1.0.0", dropped: false });
+    r = await json("GET", "/writer?view=draft");
+    // the draft's own change over production: the rolled-back role does not come back
+    expect(r.body.data).toMatchObject({ role: "Writes", systemPrompt: "Be warm." });
+    expect(r.body.data.versioning.draft).toMatchObject({ stale: false, baseVersion: "1.0.0" });
+    r = await json("POST", "/writer/publish", { deploy: true });
+    // numbered above the highest version (1.0.1), its parent is 1.0.0
+    expect(r.body.data.version).toMatchObject({ version: "1.0.2", previous: "1.0.0" });
+    expect(agents.get("writer")).toMatchObject({ role: "Writes", systemPrompt: "Be warm." });
   });
 });

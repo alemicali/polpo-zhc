@@ -409,3 +409,59 @@ describe("Orchestrator: agents under versioning", () => {
     expect(await v.store.listVersions("agent-2")).toEqual([]);
   });
 });
+
+describe("agent versions: drafts start from production", () => {
+  it("after a rollback the next edit starts from production, numbered above the highest version", async () => {
+    const { versioning, live } = setup();
+    await versioning.updateDraft("writer", { role: "Edits" }, "x");
+    await versioning.publish("writer", { actor: "x" });                       // 1.0.1
+    await versioning.updateDraft("writer", { allowedTools: ["read", "write", "bash"] }, "x");
+    await versioning.publish("writer", { actor: "x" });                       // 1.1.0 (based on 1.0.1, not deployed)
+    await versioning.deploy("writer", "1.1.0", { actor: "x" });
+    await versioning.rollback("writer", { actor: "x", to: "1.0.0" });          // production 1.0.0, 1.1.0 exists
+    expect(live.agents.get("writer")!.role).toBe(writer.role);
+
+    // a new draft is production's config: the rolled-back changes do not come back
+    const d = await versioning.updateDraft("writer", { systemPrompt: "Be warm." }, "x");
+    expect(d.baseVersion).toBe("1.0.0");
+    expect(d.config).toMatchObject({ role: writer.role, allowedTools: ["read", "write"], systemPrompt: "Be warm." });
+    const st = await versioning.state("writer");
+    expect(st.draft).toMatchObject({ stale: false, baseVersion: "1.0.0", suggestedBump: "patch", nextVersion: "1.1.1" });
+    expect(st.draft.changes.map((c) => c.field)).toEqual(["systemPrompt"]);
+    expect((await versioning.diff("writer", "draft")).from).toBe("1.0.0");
+    const v = await versioning.publish("writer", { actor: "x", bump: "minor" });
+    expect(v).toMatchObject({ version: "1.2.0", previous: "1.0.0" });
+    expect(v.changes.map((c) => c.field)).toEqual(["systemPrompt"]);
+  });
+
+  it("a draft left behind by a rollback is stale: kept, refused for publish, rebased or discarded", async () => {
+    const { versioning } = setup();
+    await versioning.update("writer", { role: "Edits" }, { actor: "x", mode: "deploy" });       // 1.0.1 in production
+    await versioning.updateDraft("writer", { systemPrompt: "Be warm." }, "x");                    // based on 1.0.1
+    await versioning.rollback("writer", { actor: "x" });                                          // production 1.0.0
+    let st = await versioning.state("writer");
+    expect(st.draft).toMatchObject({ exists: true, stale: true, baseVersion: "1.0.1" });
+    expect(st.draft.warning).toBe("writer's draft is based on 1.0.1, production is now 1.0.0: rebase it onto production or discard it");
+    expect(st.draft.changes.map((c) => c.field)).toEqual(["systemPrompt"]);
+    await expect(versioning.publish("writer", { actor: "x" })).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(versioning.update("writer", { maxTurns: 3 }, { actor: "x", mode: "deploy" })).rejects.toMatchObject({ code: "CONFLICT" });
+    // editing a stale draft is still allowed (it stays stale)
+    await versioning.update("writer", { maxTurns: 3 }, { actor: "x", mode: "draft" });
+
+    const r = await versioning.rebaseDraft("writer", "person:ada@example.com");
+    expect(r).toMatchObject({ from: "1.0.1", to: "1.0.0", dropped: false });
+    expect(r.draft!.config).toMatchObject({ role: writer.role, systemPrompt: "Be warm.", maxTurns: 3 });
+    st = await versioning.state("writer");
+    expect(st.draft).toMatchObject({ stale: false, baseVersion: "1.0.0" });
+    expect(st.draft.changes.map((c) => c.field).sort()).toEqual(["maxTurns", "systemPrompt"]);
+
+    // a draft whose changes production already has is dropped by the rebase
+    await versioning.discardDraft("writer");
+    await versioning.updateDraft("writer", { role: "Edits" }, "x");
+    await versioning.deploy("writer", "1.0.1", { actor: "x" });
+    expect((await versioning.state("writer")).draft.stale).toBe(true);
+    expect(await versioning.rebaseDraft("writer", "x")).toMatchObject({ dropped: true, to: "1.0.1" });
+    expect((await versioning.state("writer")).draft.exists).toBe(false);
+    await expect(versioning.rebaseDraft("writer", "x")).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+});
