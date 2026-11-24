@@ -32,6 +32,24 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-24-agent-versions",
+    date: "2026-11-24",
+    kind: "new",
+    title: "Versioni degli agenti: bozza, pubblicazione, deploy e rollback",
+    summary: "Le modifiche a un agente vanno in una bozza; la pubblichi come versione (1.3.0) e la porti in produzione quando vuoi. Torni indietro con un clic e vedi ogni deploy con le differenze.",
+    body: [
+      "- **Bozza**: tutto quello che cambi dalla dashboard (istruzioni, modello, motore, strumenti, skill, connettori, sandbox, computer…) resta nella bozza finché non lo pubblichi: la produzione continua a girare com'era.",
+      "- **Versioni immutabili**: pubblicando ottieni una versione numerata (`1.3.0`) con autore, data, nota e le differenze dalla precedente. Il numero è suggerito: patch per testi e identità, minor per strumenti o impostazioni in più, major per un cambio di motore o modello o strumenti tolti; puoi cambiarlo.",
+      "- **Deploy e rollback**: **Deploy** porta una versione in produzione (chat, task, missioni, pianificazioni, canali la usano dal prossimo run; quelli già in corso finiscono con la loro). **Rollback** torna alla versione di prima con un clic.",
+      "- **Storico dei deploy**: chi, quando, da quale a quale versione e la nota; ogni deploy apre le differenze stile git, unificate o affiancate.",
+      "- **Versione fissa**: un task o una chat può usare una versione precisa (`writer@1.2.0`); ogni run mostra la versione usata accanto a modello e motore.",
+      "- **API e MCP**: chi aggiorna un agente da API, MCP o dalla chat con Polpo continua a vedere l'effetto subito (pubblicazione e deploy automatici, disattivabili in Impostazioni → Generale); nuovi strumenti MCP per versioni, differenze, pubblicazione, deploy e rollback.",
+      "- Gli agenti esistenti partono dalla versione **1.0.0** già in produzione.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri gli agenti", to: "/agents" },
+  },
+  {
     id: "2026-11-24-cli-engine-parity",
     date: "2026-11-24",
     kind: "improved",
