@@ -35,6 +35,10 @@ export { useTaskDirections } from "./hooks/use-task-directions.js";
 export type { UseTaskDirectionsReturn } from "./hooks/use-task-directions.js";
 export { useSkills } from "./hooks/use-skills.js";
 export { useOrchestratorSkills } from "./hooks/use-orchestrator-skills.js";
+export { useSkillFiles } from "./hooks/use-skill-files.js";
+export type { UseSkillFilesReturn } from "./hooks/use-skill-files.js";
+export { useSkillBundleUpload } from "./hooks/use-skill-bundle-upload.js";
+export type { UseSkillBundleUploadReturn } from "./hooks/use-skill-bundle-upload.js";
 export { useNotifications } from "./hooks/use-notifications.js";
 export { useApprovals } from "./hooks/use-approvals.js";
 export type { UseApprovalsReturn } from "./hooks/use-approvals.js";
@@ -223,6 +227,13 @@ export type {
   SkillWithAssignment,
   SkillIndexEntry,
   SkillIndex,
+  SkillPool,
+  SkillFileEntry,
+  SkillFileList,
+  SkillBundleSkill,
+  SkillBundlePreview,
+  SkillBundleInstallOptions,
+  SkillBundleInstallResult,
   NotificationChannelType,
   NotificationChannelConfig,
   ChannelGatewayConfig,

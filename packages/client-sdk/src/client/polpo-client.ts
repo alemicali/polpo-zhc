@@ -76,6 +76,11 @@ import type {
   SkillWithAssignment,
   SkillIndexEntry,
   SkillIndex,
+  SkillPool,
+  SkillFileList,
+  SkillBundlePreview,
+  SkillBundleInstallOptions,
+  SkillBundleInstallResult,
   NotificationChannelConfig,
   NotificationRecord,
   NotificationStats,
@@ -997,6 +1002,81 @@ export class PolpoClient {
   /** Get the full skills index (tags and categories for all skills). */
   getSkillsIndex(): Promise<SkillIndex> {
     return this.get<SkillIndex>("/skills/index");
+  }
+
+  // ── Skill bundles and files ──
+
+  private skillBase(pool?: SkillPool): string {
+    return pool === "orchestrator" ? "/skills/orchestrator" : "/skills";
+  }
+
+  /** The files of an installed skill (SKILL.md, scripts/, references/, assets/…) with sizes. */
+  getSkillFiles(name: string, pool?: SkillPool): Promise<SkillFileList> {
+    return this.get<SkillFileList>(`${this.skillBase(pool)}/${encodeURIComponent(name)}/files`);
+  }
+
+  /** The URL of one file of a skill (raw, with its content type): for <img>, <iframe> or a download link. */
+  skillFileUrl(name: string, path: string, opts: { pool?: SkillPool; download?: boolean } = {}): string {
+    const rel = path.split("/").map(encodeURIComponent).join("/");
+    return this.apiUrl(`${this.skillBase(opts.pool)}/${encodeURIComponent(name)}/files/${rel}${opts.download ? "?download=1" : ""}`);
+  }
+
+  /** The URL of the whole skill as an archive (.skill by default, or .zip). */
+  skillDownloadUrl(name: string, opts: { pool?: SkillPool; format?: "skill" | "zip" } = {}): string {
+    return this.apiUrl(`${this.skillBase(opts.pool)}/${encodeURIComponent(name)}/download${opts.format === "zip" ? "?format=zip" : ""}`);
+  }
+
+  /** Read one file of a skill: its bytes and content type (text: decode with TextDecoder or use getSkillFileText). */
+  async getSkillFile(name: string, path: string, pool?: SkillPool): Promise<{ contentType: string; bytes: ArrayBuffer }> {
+    const res = await this.fetchFn(this.skillFileUrl(name, path, { pool }), { headers: { ...this.headers }, credentials: "include" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null) as { error?: string; code?: string } | null;
+      throw new PolpoApiError(body?.error ?? `Could not read ${path}`, (body?.code ?? "NOT_FOUND") as never, res.status);
+    }
+    return { contentType: res.headers.get("content-type") ?? "application/octet-stream", bytes: await res.arrayBuffer() };
+  }
+
+  /** Read one text file of a skill. */
+  async getSkillFileText(name: string, path: string, pool?: SkillPool): Promise<string> {
+    const { bytes } = await this.getSkillFile(name, path, pool);
+    return new TextDecoder().decode(bytes);
+  }
+
+  private async requestForm<T>(path: string, form: FormData): Promise<T> {
+    const res = await this.fetchFn(this.apiUrl(path), { method: "POST", headers: { ...this.headers }, body: form, credentials: "include" });
+    const json = await res.json() as ApiResult<T> & { details?: unknown };
+    if (!json.ok) throw new PolpoApiError(json.error, json.code, res.status, json.details);
+    return json.data;
+  }
+
+  /**
+   * Upload a .skill / .zip archive and preview it without installing (each skill's name, description,
+   * files, errors, warnings, and whether its name is taken). Install it with installSkillBundle(uploadId).
+   */
+  previewSkillBundle(file: Blob, filename = "bundle.skill"): Promise<SkillBundlePreview> {
+    const form = new FormData();
+    form.append("file", file, filename);
+    return this.requestForm<SkillBundlePreview>("/skills/upload?dryRun=1", form);
+  }
+
+  /** Install an archive previewed with previewSkillBundle (kept 30 minutes on the server). */
+  installSkillBundle(uploadId: string, opts: SkillBundleInstallOptions = {}): Promise<SkillBundleInstallResult> {
+    return this.post<SkillBundleInstallResult>(`/skills/upload/${encodeURIComponent(uploadId)}/install`, opts);
+  }
+
+  /** Upload and install a .skill / .zip archive in one call. */
+  uploadSkillBundle(file: Blob, filename: string, opts: SkillBundleInstallOptions = {}): Promise<SkillBundleInstallResult> {
+    const form = new FormData();
+    form.append("file", file, filename);
+    if (opts.renames) form.append("renames", JSON.stringify(opts.renames));
+    const q = new URLSearchParams();
+    if (opts.pool) q.set("pool", opts.pool);
+    if (opts.global) q.set("global", "1");
+    if (opts.onConflict) q.set("onConflict", opts.onConflict);
+    if (opts.skills?.length) q.set("skills", opts.skills.join(","));
+    if (opts.assignTo?.length) q.set("assignTo", opts.assignTo.join(","));
+    const qs = q.toString();
+    return this.requestForm<SkillBundleInstallResult>(`/skills/upload${qs ? `?${qs}` : ""}`, form);
   }
 
   /** Update a skill's tags and/or category in the skills index. */

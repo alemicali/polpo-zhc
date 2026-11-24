@@ -26,6 +26,12 @@ export interface SkillInfo {
 
 export interface LoadedSkill extends SkillInfo {
   content: string;
+  /** The skill folder with symlinks resolved (where bundled files are read from). */
+  dir?: string;
+  /** Bundled files besides SKILL.md, relative to the folder. */
+  files?: Array<{ path: string; size: number }>;
+  /** More bundled files exist than listed in `files`. */
+  filesTruncated?: boolean;
 }
 
 export interface SkillIndexEntry {
@@ -148,10 +154,33 @@ export function buildSkillPrompt(skills: LoadedSkill[]): string {
     parts.push(`### ${skill.name}`);
     if (skill.description) parts.push(`> ${skill.description}\n`);
     parts.push(skill.content);
+    const files = skillFilesSection(skill);
+    if (files) parts.push("", files);
     parts.push("");
   }
 
   return parts.join("\n");
+}
+
+/**
+ * Where a skill's bundled files are (progressive disclosure: the agent reads a reference or runs a
+ * script only when the instructions call for it). Relative paths in the instructions are relative
+ * to the skill folder. Empty when the skill is only its SKILL.md.
+ */
+export function skillFilesSection(skill: Pick<LoadedSkill, "dir" | "files" | "filesTruncated">): string {
+  if (!skill.dir || !skill.files?.length) return "";
+  const lines = [
+    `Skill folder: \`${skill.dir}\`. Paths in these instructions (e.g. \`references/…\`, \`scripts/…\`) are relative to it.`,
+    "Read a bundled file with your file tools only when the instructions call for it; run scripts with their interpreter "
+      + "(e.g. `python <folder>/scripts/x.py`, `bash <folder>/scripts/x.sh`). Bundled files:",
+    ...skill.files.map((f) => `- ${f.path} (${formatSkillFileSize(f.size)})`),
+  ];
+  if (skill.filesTruncated) lines.push("- … more files: list the folder to see them all");
+  return lines.join("\n");
+}
+
+function formatSkillFileSize(n: number): string {
+  return n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
 // ── Discovery (async, uses FileSystem) ──

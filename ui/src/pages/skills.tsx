@@ -31,10 +31,12 @@ import {
   LayoutGrid,
   Check,
   Users,
+  Upload,
 } from "lucide-react";
 import { useSkills, useAgents } from "@polpo-ai/react";
 import type { SkillWithAssignment, Team } from "@polpo-ai/react";
 import { cn } from "@/lib/utils";
+import { SkillUploadDialog } from "@/components/skills/skill-upload-dialog";
 
 // ── Helpers ──
 
@@ -439,7 +441,7 @@ function EmptyState({ filtered }: { filtered: boolean }) {
         <p className="text-xs">
           {filtered
             ? "Try adjusting your search or filter criteria"
-            : "Install skills with polpo skills add <owner/repo>"}
+            : "Upload a .skill or .zip bundle, or install with polpo skills add <owner/repo>"}
         </p>
       </div>
     </div>
@@ -479,6 +481,7 @@ export function SkillsPage() {
   const [selectedCategories, setSelectedCategories] = useState<Set<string>>(new Set());
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
   const [view, setView] = useState<ViewMode>("list");
+  const [uploadOpen, setUploadOpen] = useState(false);
 
   const agentTeamMap = useMemo(() => buildAgentTeamMap(teams), [teams]);
 
@@ -615,11 +618,19 @@ export function SkillsPage() {
           <div className="h-4 w-px bg-border/60" />
           <StatChip label="unassigned" value={stats.unassigned} />
         </div>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            size="sm"
+            className="h-7"
+            onClick={() => setUploadOpen(true)}
+          >
+            <Upload className="h-3.5 w-3.5 mr-1.5" /> Upload
+          </Button>
           <Button
             variant="outline"
             size="sm"
             className="h-7"
+            aria-label="Refresh"
             onClick={handleRefresh}
             disabled={isRefreshing}
           >
@@ -798,6 +809,7 @@ export function SkillsPage() {
           <EmptyState filtered={isFiltered} />
         )}
       </div>
+      <SkillUploadDialog open={uploadOpen} onOpenChange={setUploadOpen} />
     </div>
   );
 }

@@ -70,7 +70,7 @@ export type { AgentPromptOptions } from "./agent-prompt.js";
 // ── Skills Reader (async, FileSystem-based) ────────────────────────────
 export {
   discoverSkills, loadAgentSkills, listSkillsWithAssignments,
-  buildSkillPrompt, parseSkillFrontmatter, extractSkillBody,
+  buildSkillPrompt, skillFilesSection, parseSkillFrontmatter, extractSkillBody,
   sanitizeFrontmatterValue, buildSkillFrontmatter,
 } from "./skills-reader.js";
 export type { SkillInfo, LoadedSkill, SkillWithAssignment, SkillIndex, SkillIndexEntry } from "./skills-reader.js";

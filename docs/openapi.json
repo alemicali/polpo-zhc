@@ -9228,6 +9228,924 @@
         }
       }
     },
+    "/api/v1/skills/upload": {
+      "post": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Upload a skill bundle",
+        "description": "Upload a `.skill` or `.zip` archive (multipart field `file`). With `dryRun=1` nothing is installed: the response is a preview (each skill's name, description, files, sizes, warnings, errors, and whether the name is taken) with an `uploadId` to install it later with POST /skills/upload/{uploadId}/install. Without dryRun the archive is installed at once with the query options.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "1/true: preview only"
+            },
+            "required": false,
+            "description": "1/true: preview only",
+            "name": "dryRun",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "agent",
+                "orchestrator"
+              ]
+            },
+            "required": false,
+            "name": "pool",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "1/true: the global pool"
+            },
+            "required": false,
+            "description": "1/true: the global pool",
+            "name": "global",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "fail",
+                "replace",
+                "skip"
+              ]
+            },
+            "required": false,
+            "name": "onConflict",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated archive names to install"
+            },
+            "required": false,
+            "description": "Comma-separated archive names to install",
+            "name": "skills",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated agents to assign the installed skills to"
+            },
+            "required": false,
+            "description": "Comma-separated agents to assign the installed skills to",
+            "name": "assignTo",
+            "in": "query"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "nullable": true,
+                    "description": "The .skill or .zip archive"
+                  },
+                  "renames": {
+                    "type": "string",
+                    "description": "JSON object: archive name → name to install as"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Preview (dryRun)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Installed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No file",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A skill with the name exists (onConflict=fail)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Not a valid skill archive",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/upload/{uploadId}/install": {
+      "post": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Install a previewed skill bundle",
+        "description": "Install an archive uploaded with dryRun (kept 30 minutes): choose the pool, what to do with names that exist (fail, replace, skip, or rename), which skills, and the agents to assign them to.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "uploadId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "pool": {
+                    "type": "string",
+                    "enum": [
+                      "agent",
+                      "orchestrator"
+                    ],
+                    "description": "agent (default): the agents' pool; orchestrator: Polpo's own skills"
+                  },
+                  "global": {
+                    "type": "boolean",
+                    "description": "true: the global pool (~/.polpo) shared by every project"
+                  },
+                  "onConflict": {
+                    "type": "string",
+                    "enum": [
+                      "fail",
+                      "replace",
+                      "skip"
+                    ],
+                    "description": "When a skill with the same name exists (default fail)"
+                  },
+                  "skills": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Only these skills of the archive (default all)"
+                  },
+                  "renames": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "Archive name → name to install as"
+                  },
+                  "assignTo": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Agents to assign the installed skills to (agent pool only)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Installed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Upload not found or expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A skill with the name exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Nothing installable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/orchestrator/{name}/files": {
+      "get": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "List an orchestrator skill's files",
+        "description": "Every file of the skill folder (SKILL.md, scripts/, references/, assets/…) with its size, relative to the folder.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The files",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Skill not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/orchestrator/{name}/files/{path}": {
+      "get": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Read an orchestrator skill's file",
+        "description": "The raw file with its content type (text as UTF-8). The path is relative to the skill folder; slashes may be literal or encoded (references%2Fapi.md). ?download=1 serves it as an attachment. Paths outside the folder are refused.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "path",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "download",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "nullable": true
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Skill or file not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/orchestrator/{name}/download": {
+      "get": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Download an orchestrator skill",
+        "description": "The whole skill folder as an archive (`.skill` by default, or `.zip` with format=zip — the same zip either way, with the folder at its root, ready to upload elsewhere).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "skill",
+                "zip"
+              ]
+            },
+            "required": false,
+            "name": "format",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The archive",
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "nullable": true
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Skill not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/{name}/files": {
+      "get": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "List a skill's files",
+        "description": "Every file of the skill folder (SKILL.md, scripts/, references/, assets/…) with its size, relative to the folder.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The files",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Skill not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/{name}/files/{path}": {
+      "get": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Read a skill's file",
+        "description": "The raw file with its content type (text as UTF-8). The path is relative to the skill folder; slashes may be literal or encoded (references%2Fapi.md). ?download=1 serves it as an attachment. Paths outside the folder are refused.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "path",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "download",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "nullable": true
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Skill or file not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/{name}/download": {
+      "get": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Download a skill",
+        "description": "The whole skill folder as an archive (`.skill` by default, or `.zip` with format=zip — the same zip either way, with the folder at its root, ready to upload elsewhere).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "skill",
+                "zip"
+              ]
+            },
+            "required": false,
+            "name": "format",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The archive",
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "nullable": true
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Skill not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/skills": {
       "get": {
         "tags": [

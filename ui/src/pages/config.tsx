@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
+import { SkillUploadDialog } from "@/components/skills/skill-upload-dialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -831,6 +832,7 @@ function AgentTab({ settings, primaryModel, fallbackModels, authStatus, onUpdate
   onUpdateSettings: (patch: { orchestratorModel?: string; orchestratorName?: string | null; imageModel?: string | null; reasoning?: ReasoningLevel }) => Promise<void>;
 }) {
   const { skills, isLoading: skillsLoading } = useOrchestratorSkills();
+  const [skillUploadOpen, setSkillUploadOpen] = useState(false);
   const [reasoningSaving, setReasoningSaving] = useState(false);
 
   // The orchestrator's display name (default "Polpo"), saved on blur / Enter; empty restores the default
@@ -1052,7 +1054,11 @@ function AgentTab({ settings, primaryModel, fallbackModels, authStatus, onUpdate
         ) : skills.length > 0 ? (
           <div className="space-y-2 max-w-xl">
             {skills.map((skill: SkillInfo) => (
-              <div key={skill.name} className="flex items-start gap-3 rounded-lg border border-border/40 bg-card/60 px-4 py-3">
+              <Link
+                key={skill.name}
+                to={`/skills/${encodeURIComponent(skill.name)}?pool=orchestrator`}
+                className="flex items-start gap-3 rounded-lg border border-border/40 bg-card/60 px-4 py-3 transition-colors hover:border-primary/20"
+              >
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted/40 shrink-0">
                   <Bookmark className="h-4 w-4 text-muted-foreground" />
                 </div>
@@ -1065,7 +1071,7 @@ function AgentTab({ settings, primaryModel, fallbackModels, authStatus, onUpdate
                     <p className="text-micro text-muted-foreground mt-0.5 line-clamp-2 leading-tight">{skill.description}</p>
                   )}
                 </div>
-              </div>
+              </Link>
             ))}
             {settings.orchestratorSkills && settings.orchestratorSkills.length > 0 && (
               <p className="text-micro text-muted-foreground mt-1 ml-11">
@@ -1076,9 +1082,15 @@ function AgentTab({ settings, primaryModel, fallbackModels, authStatus, onUpdate
         ) : (
           <Empty text="No orchestrator skills installed" />
         )}
-        <p className="text-micro text-muted-foreground mt-2">
-          Skill pool: <code className="font-mono text-primary">.polpo/.agent/skills/</code>
-        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <p className="text-micro text-muted-foreground">
+            Skill pool: <code className="font-mono text-primary">.polpo/.agent/skills/</code>
+          </p>
+          <Button variant="outline" size="sm" className="h-7" onClick={() => setSkillUploadOpen(true)}>
+            <Upload className="h-3.5 w-3.5 mr-1.5" /> Upload a skill
+          </Button>
+        </div>
+        <SkillUploadDialog open={skillUploadOpen} onOpenChange={setSkillUploadOpen} defaultPool="orchestrator" />
       </section>
 
       {/* ── Orchestrator Model Picker Dialog ── */}

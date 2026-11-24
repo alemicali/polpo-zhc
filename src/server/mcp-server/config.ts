@@ -40,13 +40,30 @@ const defaultResolve: ResolveHost = async (hostname) => (await lookup(hostname, 
  * (checked again at every redirect), at most MAX_LOGO_BYTES, and a real PNG, JPEG, WebP or GIF.
  */
 export async function fetchPublicImage(deps: McpDeps, url: string): Promise<{ ok: true; bytes: Uint8Array; type: string } | { ok: false; error: string }> {
+  const got = await fetchPublicBytes(deps, url, { maxBytes: MAX_LOGO_BYTES, accept: LOGO_TYPES.join(", "), urlLabel: "logo", sizeLabel: "image" });
+  if (!got.ok) return got;
+  const type = sniffImage(got.bytes);
+  if (!type) return { ok: false, error: "The URL does not point to a PNG, JPEG, WebP or GIF image" };
+  return { ok: true, bytes: got.bytes, type };
+}
+
+/**
+ * Fetch a file from a public URL: https only, never an address inside the server's network
+ * (checked again at every redirect), at most `maxBytes` whatever the headers say.
+ */
+export async function fetchPublicBytes(
+  deps: McpDeps, url: string,
+  opts: { maxBytes: number; accept?: string; urlLabel?: string; sizeLabel?: string },
+): Promise<{ ok: true; bytes: Uint8Array } | { ok: false; error: string }> {
+  const MAX_LOGO_BYTES = opts.maxBytes;
+  const urlLabel = opts.urlLabel ?? "file", sizeLabel = opts.sizeLabel ?? "file";
   const doFetch = deps.fetch ?? fetch;
   const resolve = deps.resolveHost ?? defaultResolve;
   let current = url;
   for (let hop = 0; hop < 4; hop++) {
     let u: URL;
     try { u = new URL(current); } catch { return { ok: false, error: `${current} is not a valid URL` }; }
-    if (u.protocol !== "https:" && !(deps.allowPrivateFetch && u.protocol === "http:")) return { ok: false, error: "The logo URL must be https" };
+    if (u.protocol !== "https:" && !(deps.allowPrivateFetch && u.protocol === "http:")) return { ok: false, error: `The ${urlLabel} URL must be https` };
     if (!deps.allowPrivateFetch) {
       const host = u.hostname.replace(/^\[|\]$/g, "");
       const addresses = isIP(host) ? [host] : await resolve(host).catch(() => [] as string[]);
@@ -55,7 +72,7 @@ export async function fetchPublicImage(deps: McpDeps, url: string): Promise<{ ok
     }
     let res: Response;
     try {
-      res = await doFetch(u, { redirect: "manual", signal: AbortSignal.timeout(10_000), headers: { accept: LOGO_TYPES.join(", ") } });
+      res = await doFetch(u, { redirect: "manual", signal: AbortSignal.timeout(10_000), headers: { accept: opts.accept ?? "*/*" } });
     } catch (err) {
       return { ok: false, error: `Could not fetch ${u.host}: ${err instanceof Error ? err.message : String(err)}` };
     }
@@ -65,7 +82,7 @@ export async function fetchPublicImage(deps: McpDeps, url: string): Promise<{ ok
     }
     if (!res.ok || !res.body) return { ok: false, error: `${u.host} answered HTTP ${res.status}` };
     const declared = Number(res.headers.get("content-length") ?? "0");
-    if (declared > MAX_LOGO_BYTES) return { ok: false, error: `The image is ${Math.round(declared / 1024)} KB: the limit is ${MAX_LOGO_BYTES / 1024 / 1024} MB` };
+    if (declared > MAX_LOGO_BYTES) return { ok: false, error: `The ${sizeLabel} is ${Math.round(declared / 1024)} KB: the limit is ${MAX_LOGO_BYTES / 1024 / 1024} MB` };
     // read at most the limit, whatever the headers say
     const reader = res.body.getReader();
     const chunks: Uint8Array[] = [];
@@ -74,15 +91,13 @@ export async function fetchPublicImage(deps: McpDeps, url: string): Promise<{ ok
       const { done, value } = await reader.read();
       if (done) break;
       size += value.byteLength;
-      if (size > MAX_LOGO_BYTES) { void reader.cancel(); return { ok: false, error: `The image is larger than ${MAX_LOGO_BYTES / 1024 / 1024} MB` }; }
+      if (size > MAX_LOGO_BYTES) { void reader.cancel(); return { ok: false, error: `The ${sizeLabel} is larger than ${MAX_LOGO_BYTES / 1024 / 1024} MB` }; }
       chunks.push(value);
     }
     const bytes = new Uint8Array(size);
     let at = 0;
     for (const c of chunks) { bytes.set(c, at); at += c.byteLength; }
-    const type = sniffImage(bytes);
-    if (!type) return { ok: false, error: "The URL does not point to a PNG, JPEG, WebP or GIF image" };
-    return { ok: true, bytes, type };
+    return { ok: true, bytes };
   }
   return { ok: false, error: "Too many redirects" };
 }

@@ -177,7 +177,7 @@ describe("the Data area through MCP", () => {
     const actions = (await tool("polpo_data_activity", { sourceId: id, limit: 100 })).structuredContent.items.map((a: { action: string }) => a.action);
     expect(actions).toEqual(expect.arrayContaining(["test", "discover", "sql", "mutate"]));
     expect((await tool("polpo_data_activity", { sourceId: id, cursor: "nope!" })).isError).toBe(true);
-  });
+  }, 20_000); // ~25 MCP calls, each building the server and checking the full tool list: ~4.5 s on Node 20 runners
 
   it("data views: create, list, read, change in part, delete with confirm; deleting a source names the views it breaks", async () => {
     const src = (await tool("polpo_data_source_save", { name: "Views DB", kind: "sqlite", location: dbPath })).structuredContent.source.id as string;
