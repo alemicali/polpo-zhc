@@ -113,7 +113,11 @@ describe("the header", () => {
     expect(items).toContain("Drill-in (new)");
     expect(items).toContain("Sidebar");
     expect(items).toContain("Chat-first");
-    expect(within(menu).getByRole("menuitem", { name: /Theme/ })).toBeTruthy();
+    const theme = within(menu).getByRole("radiogroup", { name: "Theme" });
+    expect(within(theme).getAllByRole("radio").map((r) => r.getAttribute("aria-label"))).toEqual(["Light", "Dark", "System"]);
+    fireEvent.click(within(theme).getByRole("radio", { name: "Dark" }));
+    expect(within(theme).getByRole("radio", { name: "Dark" }).getAttribute("aria-checked")).toBe("true");
+    expect(within(menu).getByRole("radiogroup", { name: "Palette" })).toBeTruthy();
     expect(within(menu).getByRole("menuitem", { name: "GitHub" }).getAttribute("href")).toBe(GITHUB_URL);
     expect(within(menu).getByRole("menuitem", { name: "Polpo Ink Hub" }).getAttribute("target")).toBe("_blank");
     await waitFor(() => expect(within(screen.getByRole("menu")).getByRole("menuitem", { name: "Log out" })).toBeTruthy());
