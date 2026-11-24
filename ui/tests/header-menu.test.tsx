@@ -29,7 +29,7 @@ vi.mock("@/pages/chat", () => ({ ChatHistoryPanel: () => <div /> }));
 import { Header } from "../src/components/layout/header";
 import { MobileNavSheet } from "../src/components/layout/mobile-nav-sheet";
 import { HeaderMoreMenu, ThemeMenu, GITHUB_URL } from "../src/components/layout/header-actions";
-import { WhatsNewStack } from "../src/components/whats-new/whats-new-stack";
+import { KIND_BADGE_CLASS, WhatsNewStack } from "../src/components/whats-new/whats-new-stack";
 import { ConfigSectionBar } from "../src/components/config/config-sections";
 import { findConfigSection } from "../src/lib/config-sections";
 import { closeWhatsNew, useWhatsNewFocus, useWhatsNewOpen } from "../src/hooks/use-whats-new-drawer";
@@ -186,6 +186,37 @@ describe("the What's new cards", () => {
     expect(whatsNewStackEntries(list, new Set([list[0].id]), 2).map((e) => e.title)).toEqual(["Older B", "Oldest C"]);
   });
 
+  test("called Novità, with a quiet kind badge and three cards visibly stacked", () => {
+    const list = entries();
+    wrap(<WhatsNewStack entries={list} />);
+    const stack = screen.getByRole("region", { name: "Novità" });
+    expect(stack.dataset.testid).toBe("whats-new-stack");
+    expect(within(stack).getByText("Novità")).toBeTruthy();
+    expect(front().getAttribute("aria-label")).toBe(`Nuovo: ${list[0].title} (unread). Open in Novità`);
+    // the kind: a small muted badge, not a coloured pill
+    const badge = within(front()).getByTestId("whats-new-stack-kind");
+    expect(badge.textContent).toBe("Nuovo");
+    expect(badge.className).toBe(KIND_BADGE_CLASS);
+    for (const cls of ["rounded-badge", "text-micro", "bg-muted/60", "text-muted-foreground"]) expect(badge.className).toContain(cls);
+    expect(badge.className).not.toMatch(/\b(?:bg|text)-(?:primary|success|warning)\b/);
+    // the layers: the front card and two behind it, each lower, smaller and fainter
+    const layer = (d: number) => document.querySelector<HTMLElement>(`[data-testid='whats-new-stack'] [data-depth='${d}']`)!;
+    const shift = (el: HTMLElement) => Number(/translateY\(([\d.]+)rem\)/.exec(el.style.transform)?.[1]);
+    const scale = (el: HTMLElement) => Number(/scale\(([\d.]+)\)/.exec(el.style.transform)?.[1]);
+    expect([0, 1, 2].map((d) => layer(d).className.includes("invisible"))).toEqual([false, false, false]);
+    expect(layer(3).className).toContain("invisible");
+    expect(shift(layer(1))).toBeGreaterThanOrEqual(0.6);
+    expect(shift(layer(2))).toBeGreaterThan(shift(layer(1)));
+    expect(scale(layer(1))).toBeLessThan(1);
+    expect(scale(layer(2))).toBeLessThan(scale(layer(1)));
+    expect(Number(layer(1).style.opacity)).toBeLessThan(1);
+    expect(Number(layer(2).style.opacity)).toBeLessThan(Number(layer(1).style.opacity));
+    expect(Number(layer(2).style.opacity)).toBeGreaterThan(0.4);
+    // roomier cards
+    expect(front().className).toContain("px-3");
+    expect(front().className).toContain("py-2.5");
+  });
+
   test("a card opens the What's new drawer at its entry", () => {
     const list = entries();
     const onOpen = vi.fn();
@@ -243,7 +274,7 @@ describe("the What's new cards", () => {
     const list = entries();
     wrap(<><WhatsNewStack entries={list} collapsed /><DrawerProbe /></>);
     expect(screen.queryByTestId("whats-new-stack")).toBeNull();
-    const rail = screen.getByRole("button", { name: "What's new" });
+    const rail = screen.getByRole("button", { name: "Novità" });
     expect(within(rail).getByRole("status", { name: "Unread" })).toBeTruthy();
     fireEvent.click(rail);
     expect(screen.getByTestId("drawer").textContent).toBe("open:");
@@ -308,5 +339,18 @@ describe("the mobile navigation drawer", () => {
     const stack = within(sheet).getByTestId("whats-new-stack");
     const pinned = within(sheet).getByRole("list", { name: "Settings and more" });
     expect(stack.compareDocumentPosition(pinned) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  test("drill-in: the Novità cards on the drawer's top level only", async () => {
+    act(() => setSidebarStyle("drill-in"));
+    wrap(<MobileNavSheet><button type="button">Open navigation</button></MobileNavSheet>);
+    fireEvent.click(screen.getByRole("button", { name: "Open navigation" }));
+    const sheet = await screen.findByRole("dialog");
+    expect(within(sheet).getByRole("region", { name: "Novità" })).toBeTruthy();
+    fireEvent.click(within(sheet).getByRole("button", { name: /Team/ }));
+    expect(sheet.querySelector<HTMLElement>("[data-level]")!.dataset.level).toBe("team");
+    expect(within(sheet).queryByTestId("whats-new-stack")).toBeNull();
+    fireEvent.click(within(sheet).getByRole("button", { name: "Back to main menu" }));
+    expect(within(sheet).getByTestId("whats-new-stack")).toBeTruthy();
   });
 });

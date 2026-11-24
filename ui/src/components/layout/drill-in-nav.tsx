@@ -107,8 +107,11 @@ export interface DrillInNavProps {
   className?: string;
   /** The tree (tests, later trees); the dashboard's by default. */
   tree?: NavNode[];
-  /** Shown above the entries pinned at the bottom (Settings): the What's new cards, the banner. */
-  aboveBottom?: ReactNode;
+  /**
+   * Shown above the entries pinned at the bottom (Settings): the What's new cards, the banner.
+   * A function gets `{ top }` (true on the top level), e.g. to show the cards there only.
+   */
+  aboveBottom?: ReactNode | ((state: { top: boolean }) => ReactNode);
 }
 
 export function DrillInNav({ variant = "sidebar", collapsed = false, onNavigate, onExpand, className, tree = DRILL_IN_NAV, aboveBottom }: DrillInNavProps) {
@@ -272,7 +275,7 @@ export function DrillInNav({ variant = "sidebar", collapsed = false, onNavigate,
           </div>
         )}
       </div>
-      {aboveBottom}
+      {typeof aboveBottom === "function" ? aboveBottom({ top: stack.length === 0 }) : aboveBottom}
       {pinned.length > 0 && (
         <ul
           role="list"
