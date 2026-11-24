@@ -375,7 +375,8 @@ export function ChatHistoryList({
     if (!sentinel || typeof IntersectionObserver === "undefined") return;
     const observer = new IntersectionObserver((entries) => {
       if (entries.some((e) => e.isIntersecting)) setLimit((l) => l + HISTORY_PAGE_SIZE);
-    }, { root: scrollRef.current, rootMargin: "200px" });
+    // the viewport as root: it also sees the sentinel through a scrolling list (clipped by it)
+    }, { rootMargin: "200px" });
     observer.observe(sentinel);
     return () => observer.disconnect();
   }, [hasMore, limit]);
@@ -662,7 +663,11 @@ export function ChatHistoryList({
       </div>
 
       {/* The lists */}
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain pb-3">
+      {/* In the mobile sheet the sheet itself scrolls: no nested scroll area there. */}
+      <div
+        ref={scrollRef}
+        className={cn("pb-3", surface !== "sheet" && "min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain")}
+      >
         {pinned.length > 0 && (
           <section aria-label="Pinned" className="pb-2">
             <SectionLabel styles={styles}>Pinned</SectionLabel>

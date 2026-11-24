@@ -47,7 +47,8 @@ export function historyStyles(surface: HistorySurface): HistoryStyles {
     rowIdle: "text-foreground/80 hover:bg-accent hover:text-accent-foreground",
     rowActive: "bg-primary/10 text-primary font-medium",
     label: "text-caption font-medium text-muted-foreground",
-    stickyBg: "bg-background",
+    // the mobile sheet is a popover surface; the chat page's column is the page background
+    stickyBg: surface === "sheet" ? "bg-popover" : "bg-background",
     muted: "text-muted-foreground",
     search: "bg-transparent text-foreground placeholder:text-muted-foreground hover:bg-accent focus-within:bg-accent",
     iconButton: "text-muted-foreground hover:bg-accent hover:text-foreground",

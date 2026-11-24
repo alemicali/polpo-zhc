@@ -489,7 +489,7 @@ function PanelSlot({ panel, live, collapsed, sheet, onExpand, onOpenChat }: {
     <div
       role="region"
       aria-label="Chat history"
-      className={cn("flex min-h-0 flex-col", sheet ? "h-96" : "flex-1")}
+      className={cn("flex min-h-0 flex-col", !sheet && "flex-1")}
     >
       <Suspense
         fallback={(
