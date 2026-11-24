@@ -111,12 +111,12 @@ describe("the task and mission cards", () => {
 
   it("a run as the cards show it: engine, readable model, auth, computer and cost with their marks", () => {
     expect(runView(harnessRun as never)).toMatchObject({
-      engineLabel: "Claude Code", engineMark: "claude-code", modelLabel: "Sonnet 4.5",
+      engineLabel: "Claude Code Harness", engineKind: "harness", engineMark: "claude-code", modelLabel: "Sonnet 4.5",
       auth: { label: "Bedrock", mark: "bedrock", region: "eu-west-1" },
       computer: { label: "GPU box", kindLabel: "Daytona v2", mark: "daytona", remoteId: "sb-1" },
       egress: { mode: "proxy", label: "home", tailscale: true }, costUsd: 0.42, budgetUsd: 2,
     });
-    expect(runView(polpoRun as never)).toMatchObject({ engineMark: "polpo", computer: { label: "this server", mark: "host" }, costUsd: 0.1 });
+    expect(runView(polpoRun as never)).toMatchObject({ engineMark: "polpo", engineLabel: "Polpo", engineKind: "polpo", computer: { label: "this server", mark: "host" }, costUsd: 0.1 });
     expect(modelLabel("gpt-5-codex")).toBe("gpt-5-codex");
   });
 
@@ -135,7 +135,7 @@ describe("the task and mission cards", () => {
     const text = taskCardText(card);
     expect(text).toContain("Failed: Bedrock: model");
     expect(text).toContain("(not retried");
-    expect(text).toContain("Claude Code · Sonnet 4.5 via Bedrock · on GPU box (Daytona v2) · $0.42 of $2");
+    expect(text).toContain("Sonnet 4.5 (Claude Code · Harness) via Bedrock · on GPU box (Daytona v2) · $0.42 of $2");
     expect(text).toContain("Depends on: Collect data [done], Ghost [missing]");
   });
 
@@ -166,15 +166,16 @@ describe("the task and mission cards", () => {
       agent: { name: "dev", model: "anthropic:claude-opus-4-5", engine: { harness: "claude-code", model: "us.anthropic.claude-sonnet-4-5-20250929-v1:0" }, defaultComputer: "gpu-box", connectorTools: { gmail: ["send", "search"] } },
       tasks: TASKS as never, connectors: CONNECTORS as never, now: new Date("2026-11-22T11:00:00Z"), key,
     });
-    expect(card.agent.engine).toMatchObject({ id: "claude-code", label: "Claude Code", mark: "claude-code", modelLabel: "Sonnet 4.5" });
+    expect(card.agent.engine).toMatchObject({ id: "claude-code", label: "Claude Code Harness", kind: "harness", mark: "claude-code", modelLabel: "Sonnet 4.5" });
     expect(card.agent.computer).toBe("gpu-box");
-    expect(card.current).toMatchObject({ id: "t2", run: { engineLabel: "Claude Code", computer: { label: "GPU box" } }, failure: { retryable: false } });
+    expect(card.current).toMatchObject({ id: "t2", run: { engineLabel: "Claude Code Harness", computer: { label: "GPU box" } }, failure: { retryable: false } });
     expect(card.connectors).toEqual([
       { id: "gmail", label: "Gmail – ada@acme.com", account: "ada@acme.com", status: "connected", tools: 2 },
       { id: "gmail-2", label: "Gmail – info@acme.com", account: "info@acme.com", status: "needs_reauth", tools: "all" },
     ]);
     const text = agentCardText(card);
-    expect(text).toContain("Engine: Claude Code (Sonnet 4.5) on gpu-box.");
+    expect(text).toContain("Model: Sonnet 4.5 (Claude Code · Harness) on gpu-box.");
+    expect(text).toMatch(/with Sonnet 4\.5 \(Claude Code · Harness\) on GPU box/);
     expect(text).toContain("It failed: Bedrock: model");
     expect(text).toContain("Connectors: Gmail – ada@acme.com [gmail] (2 tools), Gmail – info@acme.com [gmail-2].");
   });

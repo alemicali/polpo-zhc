@@ -26,10 +26,11 @@ import { StatusBadge } from "@/components/computers/status-badge";
 import { BrandIcon } from "@/components/shared/brand-icon";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { EngineBadge } from "@/components/shared/run-context";
+import { EngineMark, RunModelWithEngine } from "@/components/shared/model-with-engine";
 import { StatValue } from "@/components/shared/stat-value";
 import { useComputerActions } from "@/hooks/use-computer-actions";
-import { HARNESS_NAMES, type HarnessSession } from "@/lib/harnesses-api";
-import { agentEngineId, computerBrand, formatMs, formatUsd, modelLabel } from "@/lib/run-context";
+import type { HarnessSession } from "@/lib/harnesses-api";
+import { agentEngineId, computerBrand, formatMs, formatUsd } from "@/lib/run-context";
 import { NETWORK_MODES } from "@/lib/sandbox-api";
 import {
   STATUS_SHORT_LABELS, availableActions, computersApi, formatBytes, formatLastUsed, formatUptime, kindLabel, stopLabel,
@@ -95,10 +96,7 @@ function SessionsList({ sessions }: { sessions: HarnessSession[] }) {
         const duration = s.createdAt ? Date.parse(s.updatedAt) - Date.parse(s.createdAt) : undefined;
         return (
           <li key={s.key} className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 py-2 text-xs first:pt-0 last:pb-0">
-            <span className="inline-flex min-w-0 items-center gap-1.5 font-medium">
-              <BrandIcon name={s.harness} size={14} />
-              <span className="truncate">{HARNESS_NAMES[s.harness]}</span>
-            </span>
+            <EngineMark engine={s.harness} size={14} className="font-medium" />
             <Link to={`/agents/${encodeURIComponent(s.agent)}`} className="truncate hover:underline">{s.agent}</Link>
             {s.taskId
               ? <Link to={`/tasks/${encodeURIComponent(s.taskId)}`} className="truncate text-muted-foreground hover:underline">task {s.taskId.slice(0, 8)}</Link>
@@ -129,13 +127,8 @@ function RunsList({ runs }: { runs: ComputerDetail["runs"] }) {
       {runs.map((r) => (
         <li key={`${r.taskId}:${r.runId}`} className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 py-2 text-xs first:pt-0 last:pb-0">
           <Link to={`/tasks/${encodeURIComponent(r.taskId)}`} className="min-w-0 max-w-full truncate font-medium hover:underline sm:max-w-[18rem]">{r.taskTitle}</Link>
-          {r.agent && (
-            <span className="inline-flex items-center gap-1">
-              <EngineBadge engine={r.engine} size={12} />
-              <Link to={`/agents/${encodeURIComponent(r.agent)}`} className="hover:underline">{r.agent}</Link>
-            </span>
-          )}
-          {r.model && <span className="text-muted-foreground">{modelLabel(r.model)}</span>}
+          {r.agent && <Link to={`/agents/${encodeURIComponent(r.agent)}`} className="hover:underline">{r.agent}</Link>}
+          <RunModelWithEngine run={r} pretty compact size={12} className="text-muted-foreground" testId="computer-run-model" />
           <span className={RUN_STATUS_TONE[r.status] ?? "text-muted-foreground"}>{r.status}</span>
           <span className="ml-auto flex shrink-0 items-center gap-x-3 tabular-nums text-muted-foreground">
             <span title={date(r.startedAt)}>{formatLastUsed(r.startedAt)}</span>

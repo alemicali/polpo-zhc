@@ -27,8 +27,7 @@ import { cn } from "@/lib/utils";
 import { useAgentDetail } from "./agent-detail-context";
 import { reasoningMeta, formatAgentAge } from "@/lib/agent-meta";
 import { getTeamColor } from "./agents-team-colors";
-import { EngineBadge } from "@/components/shared/run-context";
-import { agentEngineId } from "@/lib/run-context";
+import { AgentModelWithEngine } from "@/components/shared/model-with-engine";
 
 export function AgentHeroCard() {
   const { state: { agent, process, teamColorIndex, isRefreshing }, actions: { refetch } } = useAgentDetail();
@@ -57,7 +56,7 @@ export function AgentHeroCard() {
             {identity?.displayName && identity.displayName !== agent.name && (
               <p className="text-micro font-mono text-muted-foreground">@{agent.name}</p>
             )}
-            <EngineBadge engine={agentEngineId((agent as { engine?: unknown }).engine)} model={((agent as { engine?: { model?: string } }).engine?.model)} withLabel size={14} className="mt-0.5 text-caption" />
+            <AgentModelWithEngine agent={agent} size={14} className="mt-0.5 text-caption text-muted-foreground" mono testId="agent-hero-model" />
           </div>
         </div>
 
@@ -107,7 +106,7 @@ export function AgentHeroCard() {
           <div className="flex items-center gap-2 py-1.5">
             <Zap className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <span className="text-muted-foreground shrink-0">Model</span>
-            <span className={cn("ml-auto truncate font-mono", agent.model ? "text-foreground" : "text-muted-foreground/60 italic")}>{agent.model || "not set"}</span>
+            <AgentModelWithEngine agent={agent} fallback="default" mono size={13} className="ml-auto justify-end text-foreground" testId="agent-hero-model-row" />
           </div>
           <div className="flex items-center gap-2 py-1.5">
             <Brain className="h-3.5 w-3.5 text-muted-foreground shrink-0" />

@@ -21,7 +21,9 @@ import { BrandIcon } from "@/components/shared/brand-icon";
 import { VaultRefPicker } from "@/components/vault/vault-ref-picker";
 import { HarnessTestLine } from "@/components/config/harness-test-line";
 import { ProviderIcon } from "@/components/shared/provider-icon";
-import { authBrand, AUTH_LABELS, engineBrand, engineLabel, openCodeProviderIcon } from "@/lib/run-context";
+import { authBrand, AUTH_LABELS, openCodeProviderIcon } from "@/lib/run-context";
+import { agentEngineInfo, engineInfo } from "@/lib/engine-mark";
+import { ModelWithEngine } from "@/components/shared/model-with-engine";
 import {
   CLI_NAMES, HARNESS_NAMES, harnessesApi, isCliEngine,
   type AgentCliEngine, type AgentHarnessEngine, type CliAccountView, type CliId, type CliOverview, type HarnessEffort, type HarnessesOverview, type HarnessId,
@@ -95,9 +97,13 @@ export function AgentEngineCard() {
         <div className="flex items-center gap-1.5 text-label text-muted-foreground"><Cpu className="h-3 w-3" /> Engine</div>
         {/* the engine it runs on now, with its mark (and how the harness authenticates) */}
         <div className="flex items-center gap-2 text-small" data-testid="agent-engine-current">
-          <BrandIcon name={engineBrand(currentCli ? `${currentCli.cli}-cli` : current?.harness)} size={20} />
-          <span className="font-medium">{engineLabel(currentCli ? `${currentCli.cli}-cli` : current?.harness)}</span>
-          {(current?.model ?? currentCli?.model) && <span className="text-muted-foreground">{current?.model ?? currentCli?.model}</span>}
+          {(() => {
+            // the model it runs, then the engine (with how it authenticates in the tooltip)
+            const { engine: info, model } = agentEngineInfo(agent as { model?: unknown; engine?: unknown });
+            const item = current ? overview.harnesses.find((h) => h.id === current.harness) : undefined;
+            const withAuth = item?.auth ? engineInfo(info.id, { kind: item.auth, ...(item.provider ? { provider: item.provider } : {}) }) : info;
+            return <ModelWithEngine model={model} engine={withAuth} fallback={info.kind === "polpo" ? undefined : "default model"} mono size={18} className="font-medium" testId="agent-engine-model" />;
+          })()}
           {currentCli && <span className="text-muted-foreground">personal plan{currentCli.account ? ` · ${currentCli.account}` : ""}</span>}
           {(() => {
             const item = current ? overview.harnesses.find((h) => h.id === current.harness) : undefined;

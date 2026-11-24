@@ -13,6 +13,7 @@
  * Pure (type-only imports apart from MAX_TASK_RUNS): the dashboard imports it too.
  */
 import { MAX_TASK_RUNS, type RunContextStatus, type RunCostContext, type RunEngine, type TaskRunContext } from "./run-context.js";
+import { engineTypeText, modelWithEngineText } from "./engine-label.js";
 
 /** USD, split by source, tokens and runs. */
 export interface CostBucket {
@@ -207,7 +208,7 @@ export function taskMayHaveDroppedRuns(task: { runs?: unknown[] }): boolean {
   return (task.runs?.length ?? 0) >= MAX_TASK_RUNS;
 }
 
-const ENGINE_NAMES: Record<string, string> = { polpo: "Polpo", "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode" };
+const ENGINE_NAMES: Record<string, string> = { polpo: "Polpo", "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", "claude-cli": "Claude Code CLI", "codex-cli": "Codex CLI" };
 export const usdText = (v: number) => (v === 0 ? "$0" : v < 0.01 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`);
 export const engineName = (e: string) => ENGINE_NAMES[e] ?? e;
 
@@ -223,7 +224,7 @@ export function describeTaskCost(cost: TaskCost, opts: { perRun?: boolean } = {}
   if (cost.byEngine.length > 1) lines.push(`by engine: ${cost.byEngine.map((e) => `${engineName(e.engine)} ${usdText(e.usd)} (${e.runs})`).join(", ")}`);
   if (opts.perRun && cost.perRun.length > 1) {
     lines.push("per run (oldest first):", ...cost.perRun.map((r, i) =>
-      `  ${i + 1}. ${r.runId} [${r.status}]${r.continuation ? " continuation" : ""} ${engineName(r.engine)}${r.model ? ` ${r.model}` : ""}`
+      `  ${i + 1}. ${r.runId} [${r.status}]${r.continuation ? " continuation" : ""} ${r.model ? modelWithEngineText(r.model, r.engine) : engineTypeText(r.engine)}`
       + ` · ${r.usd !== undefined ? usdText(r.usd) : "no cost recorded"}${r.tokens ? ` · ${r.tokens.toLocaleString("en-US")} tokens` : ""}`
       + `${r.durationMs !== undefined ? ` · ${Math.round(r.durationMs / 1000)} s` : ""}`));
   }

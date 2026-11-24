@@ -41,6 +41,7 @@ import { gitClone, gitPullFastForward, gitHeadCommit, sourceCacheKey } from "../
 import { isReservedVaultOwner } from "@polpo-ai/core/vault-store";
 import { redactSecrets } from "@polpo-ai/core/secret-redaction";
 import { describeMissionCost, isValidBudgetUsd, type MissionCostSummary } from "@polpo-ai/core/mission-cost";
+import { agentEffectiveModel, agentEngineIdOf, modelWithEngineText } from "@polpo-ai/core/engine-label";
 import { computeTaskCost, describeTaskCost, usdText } from "@polpo-ai/core/task-cost";
 import { describeTaskRun } from "@polpo-ai/core/run-context";
 import { describeTaskFailure, taskFailure } from "@polpo-ai/core/task-failure";
@@ -3855,7 +3856,8 @@ async function execListAgents(polpo: Orchestrator): Promise<string> {
     const dn = a.identity?.displayName;
     const parts = [`• ${a.name}${dn ? ` (${dn})` : ""}`];
     if (a.role) parts.push(`— ${a.role}`);
-    if (a.model) parts.push(`[${a.model}]`);
+    // the model it runs, with its engine: [claude-sonnet-4-6 (Claude Code · CLI)]
+    parts.push(`[${modelWithEngineText(agentEffectiveModel(a), agentEngineIdOf(a.engine), "default model")}]`);
     if (a.reportsTo) parts.push(`→ reports to: ${a.reportsTo}`);
     if (a.skills?.length) parts.push(`skills: ${a.skills.join(", ")}`);
     if (a.systemPrompt) parts.push("(has system prompt)");

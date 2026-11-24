@@ -6,6 +6,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { usePolpo, type SearchResult } from "@polpo-ai/react";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
+import { AgentModelWithEngine, RunModelWithEngine } from "@/components/shared/model-with-engine";
 import { apiFetch, apiUrl } from "@/lib/config";
 import { queryTermRanges, shortAge } from "@/lib/global-search";
 import { taskCostSummaryOf } from "@/lib/task-cost";
@@ -113,6 +114,7 @@ function TaskPreview({ result }: { result: SearchResult }) {
         <Row label="Status"><StatusBadge kind="task" status={task.status} /></Row>
         <Row label="Agent">{task.assignTo || "—"}</Row>
         {lastRun && <Row label="Last run">{`${shortAge(lastRun.endedAt ?? lastRun.startedAt)} · ${lastRun.status}`}</Row>}
+        {lastRun && <Row label="Model"><RunModelWithEngine run={lastRun} pretty size={12} className="justify-end" testId="search-task-model" /></Row>}
         {cost && cost.usd > 0 && <Row label="Cost">{`$${cost.usd.toFixed(cost.usd < 1 ? 3 : 2)} · ${cost.runs} run${cost.runs === 1 ? "" : "s"}`}</Row>}
         <Row label="Updated">{shortAge(task.updatedAt)}</Row>
       </div>
@@ -159,7 +161,7 @@ function AgentPreview({ result }: { result: SearchResult }) {
       </div>
       <div>
         <Row label="Name">{result.id}</Row>
-        {a?.model && <Row label="Model">{a.model}</Row>}
+        {a && <Row label="Model"><AgentModelWithEngine agent={a} fallback="default" size={12} className="justify-end" testId="search-agent-model" /></Row>}
         {typeof result.meta?.status === "string" && <Row label="Status"><StatusBadge kind="agent" status={result.meta.status} /></Row>}
         {a?.skills?.length ? <Row label="Skills">{a.skills.length}</Row> : null}
         {a?.reportsTo && <Row label="Reports to">{a.reportsTo}</Row>}

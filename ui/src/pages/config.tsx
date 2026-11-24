@@ -81,6 +81,7 @@ import { AuthStep, OAuthFlow, ApiKeyStep } from "@/components/shared/provider-au
 import type { Provider as AuthProvider, OAuthProvider } from "@/components/shared/provider-auth";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { ModelPicker } from "@/components/shared/model-picker";
+import { ModelWithEngine } from "@/components/shared/model-with-engine";
 import { RuleFormDialog, type NotificationRuleDraft } from "@/components/config/rule-form-dialog";
 import { summarizeRule } from "@/lib/rule-summary";
 import { HOOK_EVENT_CATALOG, HOOK_EVENT_GLOBS } from "@polpo-ai/core/hook-events";
@@ -919,7 +920,8 @@ function AgentTab({ settings, primaryModel, fallbackModels, authStatus, onUpdate
   // Format model display value
   const orchestratorDisplay = primaryModel ? (
     <span className="flex items-center gap-1.5">
-      <span>{parseModelSpec(primaryModel).model}</span>
+      {/* the orchestrator always runs on Polpo's own engine */}
+      <ModelWithEngine model={parseModelSpec(primaryModel).model} engine="polpo" size={13} testId="orchestrator-model" />
       <Badge variant="outline" className="text-micro h-4 font-normal">{providerLabel(parseModelSpec(primaryModel).provider)}</Badge>
     </span>
   ) : undefined;
