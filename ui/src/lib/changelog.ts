@@ -32,6 +32,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-24-cli-engine",
+    date: "2026-11-24",
+    kind: "new",
+    title: "Agenti su Claude Code e Codex con il tuo abbonamento",
+    summary: "Un agente può lavorare con il programma ufficiale Claude Code o Codex, collegato al tuo piano Claude o ChatGPT: accedi tu, da un terminale nella dashboard, e Polpo non vede mai le tue credenziali.",
+    body: [
+      "- **Motore CLI**: nella scheda Motore dell'agente scegli **Claude Code (CLI)** o **Codex (CLI)**, l'account e il modello. L'agente esegue il programma ufficiale, senza modifiche, nella cartella del task: risposte, comandi, file modificati e token compaiono nel task come per gli altri motori.",
+      "- **Account CLI** (Impostazioni → Harness): aggiungi un account, premi **Accedi** e completa l'accesso di Anthropic o OpenAI nel tuo browser, dal terminale che si apre. Vedi la versione installata e con chi sei collegato; puoi uscire, rimuovere l'account o installare il programma se manca.",
+      "- **Solo il tuo lavoro**: un abbonamento personale esegue solo i task avviati da chi ha fatto l'accesso. Non risponde ad altri membri, ai clienti sui canali né alle attività pianificate, come chiedono i termini di Anthropic e OpenAI; per il lavoro condiviso usa una chiave API.",
+      "- **Errori chiari**: se l'accesso è scaduto o hai raggiunto il limite del piano, il task si ferma e ti dice cosa fare, senza tentativi a vuoto.",
+      "- **Costi**: i token vengono contati, ma non c'è un costo in dollari: paga il tuo piano.",
+      "- Anche da MCP (`polpo_harnesses_get`, `polpo_harnesses_update`, `polpo_agent_update`), dalla chat con Polpo e da REST (`/api/v1/harnesses/cli`).",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri Impostazioni → Harness", to: "/config?section=harnesses" },
+  },
+  {
     id: "2026-11-24-task-page-chat",
     date: "2026-11-24",
     kind: "improved",

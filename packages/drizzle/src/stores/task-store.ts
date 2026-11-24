@@ -117,6 +117,7 @@ export class DrizzleTaskStore implements TaskStore {
       revisionCount: row.revisionCount ?? undefined,
       ...(row.runs != null ? { runs: deserializeJson(row.runs, undefined, d) } : {}),
       ...(row.toolScope != null ? { toolScope: deserializeJson(row.toolScope, undefined, d) } : {}),
+      ...(row.requestedBy ? { requestedBy: row.requestedBy } : {}),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -155,6 +156,7 @@ export class DrizzleTaskStore implements TaskStore {
     if (task.runs !== undefined) v.runs = serializeJson(task.runs, d);
     // present with undefined/null: cleared (back to inheriting the agent's tools)
     if ("toolScope" in task) v.toolScope = task.toolScope ? serializeJson(task.toolScope, d) : null;
+    if (task.requestedBy !== undefined) v.requestedBy = task.requestedBy || null;
     if (task.createdAt !== undefined) v.createdAt = task.createdAt;
     if (task.updatedAt !== undefined) v.updatedAt = task.updatedAt;
     return v;
@@ -491,6 +493,7 @@ export class DrizzleTaskStore implements TaskStore {
       revisionCount: r.revision_count,
       runs: r.runs,
       toolScope: r.tool_scope,
+      requestedBy: r.requested_by,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     };

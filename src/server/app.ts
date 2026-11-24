@@ -76,7 +76,8 @@ import { computerRoutes, egressRoutes, type ComputerRouteDeps } from "./routes/c
 import { harnessRoutes } from "./routes/harnesses.js";
 import { harnessSessionViews } from "../harness/control.js";
 import { forwardToRelay, HARNESS_RELAY_PATH } from "../harness/relay.js";
-import { computerManagerWithEvents } from "../sandbox/computers.js";
+import { computerManagerWithEvents, driverHost } from "../sandbox/computers.js";
+import { cliAccountRoutes } from "./routes/cli-accounts.js";
 import { computerWebhooksFor } from "../sandbox/computer-webhooks.js";
 import { computerWebhookAdminRoutes, computerWebhookInboundRoutes } from "./routes/computer-webhooks.js";
 import { waBusinessAdminRoutes, waBusinessWebhookRoutes } from "./routes/whatsapp-business.js";
@@ -1631,6 +1632,25 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   authed.route("/computer-webhooks", computerWebhookAdminRoutes({ webhooks: computerWebhooks }));
   // WhatsApp Business channels: status, secrets (vault, write-only), events, contacts, sends, templates, approvals
   authed.route("/whatsapp-business", waBusinessAdminRoutes({ service: waBusiness }));
+  // the CLI engine's accounts (personal Claude Code / Codex sign-ins: config directories, never tokens)
+  authed.route("/harnesses/cli", cliAccountRoutes({
+    settings: () => o.getConfig()?.settings,
+    agents: () => o.getAgents(),
+    save: async (cli) => {
+      const { savePolpoSettingsKey } = await import("../core/config.js");
+      const harnesses = { enabled: [], ...((o.getConfig()?.settings?.harnesses ?? {}) as Record<string, unknown>) } as Record<string, unknown>;
+      if (cli) harnesses.cli = cli; else delete harnesses.cli;
+      savePolpoSettingsKey(o.getPolpoDir(), "harnesses", harnesses);
+      await o.reloadConfig();
+    },
+    onComputer: async (id, command, timeoutMs) => {
+      const computer = (o.getConfig()?.settings?.computers ?? []).find((x) => x.id === id);
+      if (!computer) return undefined;
+      return computerDeps.manager().whenRunning(computer, (d) => driverHost(d).exec(command, { timeoutMs }));
+    },
+    member: (c) => c.get("polpoUserEmail" as never) as string | undefined,
+    instanceAuth: () => isInstanceAuthEnabled(),
+  }));
   // agent harnesses (Claude Code, Codex, OpenCode): settings overview and their sessions (status, stop, reset)
   authed.route("/harnesses", harnessRoutes({
     polpoDir: () => o.getPolpoDir(),

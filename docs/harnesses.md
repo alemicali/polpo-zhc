@@ -425,3 +425,130 @@ sessions that are live and sessions updated in the last 10 minutes.
   agent's model). Codex has no budget limit and no Polpo-side cost (OpenAI does not report one in the
   stream). E2B and Daytona v0 computers are refused. Interactive approvals for `allow-edits` /
   `allow-reads` (a person answering in the dashboard) come later.
+
+## CLI engine: the official Claude Code / Codex program on a personal plan
+
+Besides the harnesses above (API keys, Bedrock, Vertex, gateways), an agent can run its tasks
+through the **official, unmodified `claude` or `codex` program** signed in with **a person's own
+plan** (Claude Pro/Max, ChatGPT Plus/Pro). This is the CLI engine:
+`agent.engine: { type: "cli", cli: "claude" | "codex", account?, model?, permissionMode?, args? }`.
+
+### Why it is allowed, and what it does not do
+
+- Anthropic's [Claude Code legal and compliance page](https://code.claude.com/docs/en/legal-and-compliance)
+  lets a platform host **the unmodified Claude Code binary** when **each end user signs in with their
+  own credentials** (their own Claude subscription included) **through Anthropic's own sign-in flow**.
+  A platform must not collect, store or intermediate claude.ai credentials or tokens, nor route
+  requests on behalf of other users. That is why the API-key harness above still refuses a Claude
+  subscription (the Agent SDK with an OAuth token is not allowed), and why the CLI engine works as
+  follows:
+  - Polpo runs the official program as installed on the computer; it never patches, wraps or
+    proxies its model traffic, and it never sees a token.
+  - The person signs in themselves, in a terminal on the computer (`claude auth login`), completing
+    Anthropic's sign-in in their own browser. Polpo only streams that terminal.
+  - Polpo never reads, copies or backs up the credential files: the account's directory is not in
+    the vault, not in Polpo's state, and excluded from Cloud sync (`.polpo-cli/**`).
+  - **A personal sign-in runs only the work of the person who signed in** (see the policy guard).
+- OpenAI lets Codex CLI users [sign in with ChatGPT](https://developers.openai.com/codex/auth);
+  the same owner rule applies by default. An instance may opt in to sharing a Codex account
+  (owner `"instance"`) with `settings.harnesses.cli.allowInstanceCodex: true`; the dashboard warns
+  that a shared ChatGPT plan must be allowed by OpenAI's terms for that plan.
+- T3 Code ([github.com/pingdotgg/t3code](https://github.com/pingdotgg/t3code)) uses the same
+  approach: the user signs in with `claude auth login` / `codex login` on the machine, one config
+  directory per account (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`).
+
+### Accounts
+
+An account is **a CLI config directory on one computer** — no secret is ever stored:
+
+```jsonc
+"settings": {
+  "harnesses": {
+    "enabled": [],
+    "cli": {
+      "accounts": [
+        { "id": "ada-claude", "cli": "claude", "computer": "host",
+          "configDir": "~/.polpo-cli/claude/ada-claude", "owner": "ada@example.com", "label": "Ada's Max" },
+        { "id": "team-codex", "cli": "codex", "computer": "host",
+          "configDir": "~/.polpo-cli/codex/team-codex", "owner": "instance" }
+      ],
+      "allowInstanceCodex": false
+    }
+  }
+}
+```
+
+- `configDir` defaults to `~/.polpo-cli/<cli>/<id>` (`~` is that computer's home). Claude Code runs
+  with `CLAUDE_CONFIG_DIR=<configDir>`, Codex with `CODEX_HOME=<configDir>`; `HOME` stays the
+  computer's, so the official installers' locations (`~/.local/bin`) work.
+- `owner` is the member who signs in (their email), or `"instance"`. The dashboard sets it to you
+  when you add an account; nobody can create an account owned by someone else.
+- Fields other than `id`, `cli`, `computer`, `configDir`, `owner`, `label` are refused (a token in
+  the settings is an error).
+
+**Settings → Harnesses → CLI accounts**: add an account (CLI, computer, label), see its installed
+version and who is signed in (`claude auth status` JSON, `codex login status`), **Sign in** (a
+terminal on this server running `claude auth login` or `codex login --device-auth` with the account's
+directory and a minimal environment — none of the server's keys), **Sign out** (`claude auth logout`,
+`codex logout`), **Install** when the program is missing (the official `npm install -g
+@anthropic-ai/claude-code` / `npm install -g @openai/codex`, an explicit action), **Remove** (refused
+while agents use it; the sign-in stays in its directory until you sign out). Only the owner can sign
+in, sign out or remove a personal account. On a remote computer the dashboard shows the command to
+run in that computer's terminal (the sign-in terminal is this server's). A hibernated Daytona
+computer's snapshot contains the sign-in in its home directory: that is the person's machine state.
+
+REST (`/api/v1/harnesses/cli`): `GET /accounts` (with status; `?status=0` skips the checks),
+`POST /accounts`, `PATCH /accounts/:id`, `DELETE /accounts/:id`, `GET /accounts/:id/status`,
+`POST /accounts/:id/logout`, `GET /accounts/:id/login` (the terminal to open, or the command),
+`POST /install`, `PATCH /settings { allowInstanceCodex }`. The sign-in terminal is
+`/ws/terminal?agent=cli-login&cli_account=<id>`. MCP: `polpo_harnesses_get` lists the accounts with
+their status; `polpo_harnesses_update { cli: { add_account, remove_account, sign_out, install,
+allow_instance_codex } }`; agents get the engine with `polpo_agent_create` / `polpo_agent_update`
+(`engine: { type: "cli", … }`). Polpo's chat has the same through its harness tools.
+
+### Policy guard
+
+Before a run starts (and before the program is launched) Polpo checks the account against the work:
+
+| The work | Account owned by a member | `"instance"` (Claude) | `"instance"` (Codex) |
+| --- | --- | --- | --- |
+| A task the owner created (dashboard, or the API with their session) | runs | runs only without member sign-in (a personal install) | runs only with `allowInstanceCodex` |
+| A task another member created | refused | refused when members sign in | with `allowInstanceCodex` |
+| No known author (API key, another agent, a mission or schedule without author) | refused | as above | with `allowInstanceCodex` |
+| Scheduled work | refused | as above | with `allowInstanceCodex` |
+| Channel customers, or an instance serving customers (a WhatsApp Business channel with audience `customers`) | refused | refused | refused (customers); allowed for an instance account with `allowInstanceCodex` on a customer-serving instance |
+
+The refusal says why (Anthropic's terms, with the link) and what to use instead: an Anthropic API
+key, Amazon Bedrock or Google Vertex AI (the Claude Code harness), or an OpenAI API key (Codex).
+Tasks record who started them (`Task.requestedBy`, the signed-in member's email).
+
+### How a run works
+
+- **Claude Code**: `claude -p --input-format stream-json --output-format stream-json --verbose
+  --replay-user-messages --permission-mode <mode> --append-system-prompt <Polpo's instructions>
+  [--model m] [--resume <session>] [--max-turns n] [args…]` in the task's working directory. Each
+  task prompt, follow-up and direction is a stream-json user message on stdin; the program echoes
+  the messages it reads (`--replay-user-messages`), so a direction sent during a turn is known to
+  be read. Output events (`system/init`, `assistant` text / thinking / `tool_use`, `user`
+  `tool_result`, `result` with `usage` and `total_cost_usd`) become the run's transcript and activity.
+  Permission modes: allow-all → `bypassPermissions`, allow-edits → `acceptEdits`, allow-reads →
+  `default` (print mode cannot ask: what needs permission is denied).
+- **Codex**: `codex app-server` (JSON-RPC over stdio, one object per line): `initialize`,
+  `thread/start { cwd, model, approvalPolicy: "never", sandbox, developerInstructions }` (or
+  `thread/resume` for a continuation), `turn/start`, `turn/steer` for a direction during a turn,
+  `turn/interrupt`; notifications `item/started` / `item/completed` (agent messages, reasoning,
+  commands, file changes, MCP and web tools), `thread/tokenUsage/updated`, `turn/completed`, `error`.
+  Sandbox: allow-all → `danger-full-access`, allow-edits → `workspace-write`, allow-reads → `read-only`.
+  An approval request is declined (the run is unattended).
+- **Where**: this server (a child process in its own process group, killed with everything it
+  started on kill or timeout), or a Daytona v2 computer (the provider's process API; the program
+  reads an inbox file through `tail -f`, since remote processes have no stdin). The account must be
+  on the agent's computer.
+- **Cost**: tokens are recorded (usage store, run context) with `costSource: "subscription"` and cost
+  0 — the plan pays. Claude Code's own `total_cost_usd` estimate is in the transcript, not billed.
+- **Errors**: "not signed in" (or an expired sign-in) and "usage limit reached" fail the run without
+  retries, saying how to sign in again or when to try again; a missing program says to install it.
+- **Continuations** resume the CLI's conversation (`--resume <session>`, `thread/resume`): the ids are
+  kept in `.polpo/cli-sessions.json` (ids only).
+- Polpo's own tools (register_outcome, connectors…) are not offered to the CLI yet: it works with its
+  own tools on the task's files; deliverables go to the output directory named in its instructions.

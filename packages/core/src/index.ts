@@ -249,6 +249,8 @@ export type {
 export * from "./computers.js";
 // Agent harnesses: official agent runtimes (Claude Code, Codex, OpenCode) as an agent's engine
 export * from "./harnesses.js";
+// The CLI engine: the official Claude Code / Codex programs signed in with a person's own account
+export * from "./cli-engine.js";
 export { computerSelection } from "./sandbox.js";
 // open Polpo's sandbox ports and runtime policy (copied as is from lumea-labs/polpo)
 export { resolveRuntimeSandboxOptions } from "./runtime-sandbox.js";

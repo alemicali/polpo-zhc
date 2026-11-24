@@ -1487,6 +1487,8 @@ export class Orchestrator extends TypedEmitter {
     notifications?: ScopedNotificationRules; sideEffects?: boolean; draft?: boolean; maxRetries?: number;
     /** Narrowing of the run's tools (validated: it may only narrow what the agent has). */
     toolScope?: unknown;
+    /** The member (email) who started it, when known (a CLI engine on a personal sign-in checks it). */
+    requestedBy?: string;
   }): Promise<Task> {
     const { toolScope, ...rest } = opts;
     if (toolScope === undefined || toolScope === null) return this.engine.addTask(rest);

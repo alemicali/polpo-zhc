@@ -186,6 +186,10 @@ export function syncRoutes(getDeps: () => {
 export const INTERNAL_EXCLUDES = [
   ".polpo/sync-config.json",
   ".polpo/sync-history.jsonl",
+  // CLI engine sign-ins (personal Claude Code / Codex logins), should a config directory live in
+  // the project: never copied to the bucket
+  ".polpo-cli/**",
+  ".polpo/cli-sessions.json",
 ];
 
 function baseArgs(

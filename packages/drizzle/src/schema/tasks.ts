@@ -35,6 +35,8 @@ export const tasksSqlite = sqliteTable("tasks", {
   runs: text("runs"),
   /** Optional narrowing of the run's tools (connectors, their tools, built-in tools): Task.toolScope. */
   toolScope: text("tool_scope"),
+  /** The member (email) who started the task, when known: Task.requestedBy. */
+  requestedBy: text("requested_by"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
   /** Bumped by every update: lets readers cache rows safely (updated_at can repeat within a millisecond). */
@@ -118,6 +120,8 @@ export const tasksPg = pgTable("tasks", {
   runs: jsonb("runs"),
   /** Optional narrowing of the run's tools (connectors, their tools, built-in tools): Task.toolScope. */
   toolScope: jsonb("tool_scope"),
+  /** The member (email) who started the task, when known: Task.requestedBy. */
+  requestedBy: pgText("requested_by"),
   createdAt: pgText("created_at").notNull(),
   updatedAt: pgText("updated_at").notNull(),
   /** Bumped by every update: lets readers cache rows safely (updated_at can repeat within a millisecond). */

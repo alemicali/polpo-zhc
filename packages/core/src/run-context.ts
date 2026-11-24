@@ -14,11 +14,13 @@ import type { AgentHarnessEngine, HarnessId } from "./harnesses.js";
 import type { ComputerConfig, ComputerKind } from "./computers.js";
 import type { SandboxProviderId } from "./sandbox.js";
 import type { TaskToolScope } from "./task-tool-scope.js";
+import { agentCliEngine } from "./cli-engine.js";
 
-export type RunEngine = "polpo" | HarnessId;
+/** "claude-cli" / "codex-cli": the official program signed in with a person's account (agent.engine { type: "cli" }). */
+export type RunEngine = "polpo" | HarnessId | "claude-cli" | "codex-cli";
 export type RunContextStatus = "running" | "completed" | "failed" | "killed";
 /** How the harness authenticates (the kind only). */
-export type RunAuthKind = "api-key" | "bedrock" | "vertex" | "ai-gateway" | "gateway";
+export type RunAuthKind = "api-key" | "bedrock" | "vertex" | "ai-gateway" | "gateway" | "subscription";
 
 export interface RunComputerContext {
   /** "host" (this server), a computer id, or "ephemeral" (a sandbox made for this run). */
@@ -58,9 +60,10 @@ export interface RunCostContext {
   /**
    * Where harnessUsd comes from: "gateway" (the gateway reported it), "runtime" (Claude Code's own
    * estimate, Anthropic prices), "runtime-estimate" (that estimate for a model behind a gateway:
-   * approximate), "tokens-only" (no reliable price: non-Claude models; only tokens are recorded).
+   * approximate), "tokens-only" (no reliable price: non-Claude models; only tokens are recorded),
+   * "subscription" (a CLI signed in with a person's plan: tokens only, no USD billed by Polpo).
    */
-  costSource?: "gateway" | "runtime" | "runtime-estimate" | "tokens-only";
+  costSource?: "gateway" | "runtime" | "runtime-estimate" | "tokens-only" | "subscription";
 }
 
 /** What the engine reports while the run goes (AgentActivity.runContext). */
@@ -167,6 +170,7 @@ function daytonaApi(settings: BuildRunContextInput["settings"]): "v0" | "v2" {
 /** The context the orchestrator knows when it spawns a run (no secrets). */
 export function buildRunContext(i: BuildRunContextInput): TaskRunContext {
   const harness = harnessOf(i.agent.engine);
+  const cli = agentCliEngine(i.agent);
   const provider = i.sandbox?.provider ?? "local";
   const c = i.sandbox?.computer;
   const remote = provider === "daytona" || provider === "e2b";
@@ -200,6 +204,11 @@ export function buildRunContext(i: BuildRunContextInput): TaskRunContext {
     ctx.permissionMode = harness.permissionMode ?? "allow-all";
     if (harness.effort) ctx.effort = harness.effort;
     if (harness.maxBudgetUsd) ctx.budgetUsd = harness.maxBudgetUsd;
+  } else if (cli) {
+    ctx.engine = cli.cli === "claude" ? "claude-cli" : "codex-cli";
+    if (cli.model) ctx.model = cli.model;
+    ctx.auth = { kind: "subscription" };
+    ctx.permissionMode = cli.permissionMode ?? "allow-all";
   } else if (i.agent.model) {
     ctx.model = i.agent.model;
   }
@@ -281,7 +290,8 @@ function describeScopeShort(scope: TaskToolScope): string {
 
 /** One line describing a run, for text outputs (MCP). */
 export function describeTaskRun(ctx: TaskRunContext): string {
-  const engine = ctx.engine === "polpo" ? "Polpo" : ctx.engine === "claude-code" ? "Claude Code" : ctx.engine === "opencode" ? "OpenCode" : "Codex";
+  const engine = ctx.engine === "polpo" ? "Polpo" : ctx.engine === "claude-code" ? "Claude Code" : ctx.engine === "opencode" ? "OpenCode"
+    : ctx.engine === "claude-cli" ? "Claude Code (CLI)" : ctx.engine === "codex-cli" ? "Codex (CLI)" : "Codex";
   const kind = ctx.auth?.kind === "bedrock" ? "Bedrock" : ctx.auth?.kind === "vertex" ? "Vertex" : ctx.auth?.kind === "ai-gateway" ? "AI Gateway" : ctx.auth?.kind === "gateway" ? "gateway" : "API key";
   const auth = ctx.auth ? ` via ${kind}${ctx.auth.provider && ctx.auth.kind === "api-key" ? ` (${ctx.auth.provider})` : ""}${ctx.auth.region ? ` (${ctx.auth.region})` : ""}` : "";
   const where = ctx.computer.kind === "host" && ctx.computer.id === "host"

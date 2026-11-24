@@ -113,6 +113,8 @@ export type {
   TaskRunContext,
   TaskToolScope,
   TaskRunEngine,
+  AgentCliEngine,
+  CliAccount,
   TaskRunSummary,
   TaskFailure,
   TaskFailureKind,
