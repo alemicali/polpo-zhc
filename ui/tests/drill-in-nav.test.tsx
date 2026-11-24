@@ -371,6 +371,16 @@ describe("the preference", () => {
     expect(localStorage.getItem(SIDEBAR_STYLE_STORAGE_KEY)).toBe("drill-in");
   });
 
+  test("aboveBottom as a function: told whether the top level is on screen", () => {
+    const { container } = renderNav("/dashboard", <DrillInNav aboveBottom={({ top }) => top && <div data-testid="top-only" />} />);
+    expect(screen.getByTestId("top-only")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Work/ }));
+    expect(level(container).dataset.level).toBe("work");
+    expect(screen.queryByTestId("top-only")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Back to main menu" }));
+    expect(screen.getByTestId("top-only")).toBeTruthy();
+  });
+
   test("a person's earlier choice of classic is kept", () => {
     localStorage.setItem(SIDEBAR_STYLE_STORAGE_KEY, "classic");
     resetSidebarStyleForTests();
@@ -392,8 +402,8 @@ describe("the preference", () => {
   test("classic: no What's new row, the What's new cards at the bottom; Artifacts is Beta", () => {
     act(() => setSidebarStyle("classic"));
     renderSidebar("/dashboard");
-    expect(screen.queryByText("Novità")).toBeNull();
-    expect(screen.getByTestId("whats-new-stack")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /Novità|What's new/ })).toBeNull();
+    expect(screen.getByRole("region", { name: "Novità" })).toBe(screen.getByTestId("whats-new-stack"));
     expect(within(screen.getByRole("link", { name: /Artifacts/ })).getByTestId("beta-badge")).toBeTruthy();
     // classic keeps Configuration in its list
     expect(screen.getByRole("link", { name: /Configuration/ }).getAttribute("href")).toBe("/config");
@@ -408,6 +418,28 @@ describe("the preference", () => {
     expect(screen.getByText(/You're using the new sidebar/).compareDocumentPosition(stack) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // the connection footer stays last
     expect(pinned.compareDocumentPosition(screen.getByText("Connected")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  test("drill-in: the Novità cards on the top level only, not inside Work, Settings…", () => {
+    act(() => setSidebarStyle("drill-in"));
+    const { container } = renderSidebar("/tasks");
+    expect(level(container).dataset.level).toBe("work");
+    expect(screen.queryByTestId("whats-new-stack")).toBeNull();
+    // the banner stays
+    expect(screen.getByText(/You're using the new sidebar/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Back to main menu" }));
+    expect(level(container).dataset.level).toBe("top");
+    expect(screen.getByRole("region", { name: "Novità" })).toBeTruthy();
+    fireEvent.click(within(screen.getByRole("list", { name: "Settings and more" })).getByRole("button", { name: /Settings/ }));
+    expect(level(container).dataset.level).toBe("settings");
+    expect(screen.queryByTestId("whats-new-stack")).toBeNull();
+  });
+
+  test("drill-in collapsed rail: the Novità icon on the top level only", () => {
+    act(() => setSidebarStyle("drill-in"));
+    localStorage.setItem("polpo-sidebar-collapsed", "true");
+    renderSidebar("/dashboard");
+    expect(screen.getByTestId("whats-new-rail").getAttribute("aria-label")).toBe("Novità");
   });
 
   test("with storage blocked the switch and the dismissal still work for the visit", () => {

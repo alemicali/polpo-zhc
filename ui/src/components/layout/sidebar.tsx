@@ -284,11 +284,12 @@ export function Sidebar() {
           collapsed={collapsed}
           onExpand={() => setCollapsed(false)}
           className="flex-1 min-h-0"
-          // Settings is pinned at the bottom of the nav: the banner and What's new sit above it
-          aboveBottom={(
+          // Settings is pinned at the bottom of the nav: the banner and the Novità cards sit above
+          // it (the cards on the top level only, not inside Work, Team, Settings…)
+          aboveBottom={({ top }) => (
             <>
               {!collapsed && <SidebarStyleBanner className="mx-3 mb-2 shrink-0" />}
-              <WhatsNewStack collapsed={collapsed} className={collapsed ? "mx-auto mb-2" : "mx-3 mb-2"} />
+              {top && <WhatsNewStack collapsed={collapsed} className={collapsed ? "mx-auto mb-2" : "mx-3 mb-2"} />}
             </>
           )}
         />

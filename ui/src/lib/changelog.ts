@@ -32,6 +32,20 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-24-novita-stack-polish",
+    date: "2026-11-24",
+    kind: "improved",
+    title: "Le schede Novità: più leggibili, solo nel menu principale",
+    summary: "Le schede in fondo alla barra si chiamano Novità, compaiono solo al livello principale della barra a livelli e sono più ariose, con un badge discreto per il tipo.",
+    body: [
+      "- **Si chiamano Novità**: l'etichetta sopra le schede, il nome letto dagli screen reader e il suggerimento dell'icona con la barra compressa.",
+      "- **Solo nel menu principale**: nella barra a livelli le schede compaiono al livello principale e spariscono quando entri in Work, Team, Content, Tools, Settings o Chat; tornando indietro ricompaiono. Lo stesso nel menu del telefono. La barra classica non cambia.",
+      "- **Pila più visibile**: le due schede dietro sporgono di più, un po' più piccole e più tenui a ogni passo, sempre dentro la larghezza della barra. Con il movimento ridotto restano ferme.",
+      "- **Schede più ariose**: più margine interno e più spazio tra le righe.",
+      "- **Tipo più discreto**: Nuovo, Migliorato e Corretto sono ora un piccolo badge grigio con l'icona, non più una scritta colorata; il pallino delle non lette resta.",
+    ].join("\n"),
+  },
+  {
     id: "2026-11-24-header-menu-settings",
     date: "2026-11-24",
     kind: "improved",

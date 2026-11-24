@@ -3,14 +3,17 @@
  * sidebar (and in the mobile navigation drawer).
  *
  * - Unread entries first (with the unread dot), then the most recent; a handful at most.
- * - The front card shows the kind and the title; two more peek out behind it, a little lower,
- *   smaller and further away (a 3D stack). It moves to the next card every few seconds, pauses
+ * - Called "Novità" (the What's new content is Italian).
+ * - The front card shows the kind (a small, quiet badge) and the title; two more peek out behind
+ *   it, clearly lower, smaller and fainter at each step (a 3D stack), within the sidebar width. It moves to the next card every few seconds, pauses
  *   while hovered or focused, and moves with ← / → or a swipe.
  * - prefers-reduced-motion: no auto-advance and no animation (the arrows and swipe still work).
  * - A card opens the What's new drawer at that entry.
  * - The icon rail (collapsed sidebar): one icon with the unread dot, opening the drawer.
+ * - In the drill-in sidebar it shows on the top level only (the caller decides, see DrillInNav).
  *
- * Every colour, corner and shadow is a token (bg-card, border-border, rounded-card, shadow-card).
+ * Every colour, corner and shadow is a token (bg-card, border-border, rounded-card, rounded-badge,
+ * shadow-card).
  */
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type TouchEvent } from "react";
 import { Megaphone } from "lucide-react";
@@ -27,11 +30,21 @@ export const WHATS_NEW_STACK_INTERVAL_MS = 6000;
 const VISIBLE_DEPTH = 3;
 /** A swipe needs this many pixels sideways. */
 const SWIPE_PX = 30;
+/** The name of the stack (its label, aria-label and tooltip). */
+export const WHATS_NEW_STACK_LABEL = "Novità";
+/** Each card behind: this much lower (rem), smaller and fainter than the one before it. */
+const STEP_OFFSET_REM = 0.7;
+const STEP_SCALE = 0.07;
+const STEP_OPACITY = 0.22;
+const STEP_TILT_DEG = 6;
 
-const KIND_TONE = {
-  new: "text-primary",
-  improved: "text-success",
-  fixed: "text-warning",
+/** The kind badge: small and quiet (a muted chip, the icon tinted by the kind). */
+export const KIND_BADGE_CLASS =
+  "inline-flex shrink-0 items-center gap-1 rounded-badge border border-border/60 bg-muted/60 px-1.5 py-px text-micro font-medium leading-none text-muted-foreground";
+const KIND_ICON_TONE = {
+  new: "text-primary/80",
+  improved: "text-success/80",
+  fixed: "text-warning/80",
 } as const;
 
 function usePrefersReducedMotion(): boolean {
@@ -108,7 +121,7 @@ export function WhatsNewStack({
         <TooltipTrigger asChild>
           <button
             type="button"
-            aria-label="What's new"
+            aria-label={WHATS_NEW_STACK_LABEL}
             data-testid="whats-new-rail"
             onClick={() => { openWhatsNew(); onOpen?.(); }}
             className={cn(
@@ -120,7 +133,7 @@ export function WhatsNewStack({
             {hasUnseen && <span aria-label="Unread" role="status" className="absolute right-1.5 top-1.5 h-2 w-2 rounded-pill bg-primary ring-2 ring-sidebar" />}
           </button>
         </TooltipTrigger>
-        <TooltipContent side="right" className="text-xs font-medium">What's new</TooltipContent>
+        <TooltipContent side="right" className="text-xs font-medium">{WHATS_NEW_STACK_LABEL}</TooltipContent>
       </Tooltip>
     );
   }
@@ -149,7 +162,7 @@ export function WhatsNewStack({
     <div
       role="region"
       aria-roledescription="carousel"
-      aria-label="What's new"
+      aria-label={WHATS_NEW_STACK_LABEL}
       data-testid="whats-new-stack"
       data-paused={paused ? "true" : "false"}
       onMouseEnter={() => setHovered(true)}
@@ -163,12 +176,12 @@ export function WhatsNewStack({
     >
       <div className={cn("mb-1 flex items-center gap-1.5 px-1 text-label", sheet ? "text-muted-foreground/70" : "text-sidebar-foreground/50")}>
         <Megaphone aria-hidden className="h-3 w-3" />
-        <span className="flex-1">What's new</span>
-        {unreadCount > 0 && <span className="text-primary">{unreadCount} unread</span>}
+        <span className="flex-1">{WHATS_NEW_STACK_LABEL}</span>
+        {unreadCount > 0 && <span className="text-primary">{unreadCount} {unreadCount === 1 ? "non letta" : "non lette"}</span>}
         {count > 1 && <span aria-hidden className="tabular-nums">{index + 1}/{count}</span>}
       </div>
-      {/* the cards: the front one, two more behind it (lower, smaller, further) */}
-      <div className="relative h-[4.5rem] [perspective:40rem]" aria-live={paused ? "polite" : "off"}>
+      {/* the cards: the front one, two more behind it (lower, smaller, fainter) */}
+      <div className="relative h-[6.25rem] [perspective:40rem]" aria-live={paused ? "polite" : "off"}>
         {items.map((entry, i) => {
           const depth = (i - index + count) % count;
           const front = depth === 0;
@@ -182,16 +195,16 @@ export function WhatsNewStack({
               data-entry={entry.id}
               aria-hidden={front ? undefined : true}
               tabIndex={front ? 0 : -1}
-              aria-label={front ? `${CHANGELOG_KIND_LABEL[entry.kind]}: ${entry.title}${unread ? " (unread)" : ""}. Open in What's new` : undefined}
+              aria-label={front ? `${CHANGELOG_KIND_LABEL[entry.kind]}: ${entry.title}${unread ? " (non letta)" : ""}. Apri in ${WHATS_NEW_STACK_LABEL}` : undefined}
               onClick={() => { openWhatsNewAt(entry.id); onOpen?.(); }}
               style={{
                 // lower, smaller and tilted away: the cards behind peek out under the front one
-                transform: `translateY(${depth * 0.45}rem) scale(${1 - depth * 0.06}) rotateX(${depth * 8}deg)`,
-                opacity: shown ? 1 - depth * 0.3 : 0,
+                transform: `translateY(${depth * STEP_OFFSET_REM}rem) scale(${1 - depth * STEP_SCALE}) rotateX(${depth * STEP_TILT_DEG}deg)`,
+                opacity: shown ? 1 - depth * STEP_OPACITY : 0,
                 zIndex: count - depth,
               }}
               className={cn(
-                "absolute inset-x-0 top-0 flex h-14 origin-bottom flex-col justify-center gap-0.5 overflow-hidden rounded-card border px-2.5 text-left outline-none",
+                "absolute inset-x-0 top-0 flex h-[4.75rem] origin-bottom flex-col justify-center gap-1.5 overflow-hidden rounded-card border px-3 py-2.5 text-left outline-none",
                 "transition-[transform,opacity] duration-500 ease-out motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-ring",
                 sheet ? "border-border/60 bg-card text-card-foreground" : "border-sidebar-border bg-card text-card-foreground",
                 front ? "shadow-card hover:bg-accent" : "pointer-events-none",
@@ -199,12 +212,14 @@ export function WhatsNewStack({
               )}
             >
               {/* behind the front card only the edges show */}
-              <span className={cn("flex min-w-0 items-center gap-1.5 text-label", !front && "invisible")}>
-                <ChangelogKindIcon kind={entry.kind} className={cn("h-3 w-3 shrink-0", KIND_TONE[entry.kind])} />
-                <span className={cn("shrink-0", KIND_TONE[entry.kind])}>{CHANGELOG_KIND_LABEL[entry.kind]}</span>
+              <span className={cn("flex min-w-0 items-center gap-1.5", !front && "invisible")}>
+                <span data-testid="whats-new-stack-kind" className={KIND_BADGE_CLASS}>
+                  <ChangelogKindIcon kind={entry.kind} className={cn("h-2.5 w-2.5 shrink-0", KIND_ICON_TONE[entry.kind])} />
+                  {CHANGELOG_KIND_LABEL[entry.kind]}
+                </span>
                 {unread && <span data-testid="whats-new-stack-unread" aria-hidden className="ml-auto h-2 w-2 shrink-0 rounded-pill bg-primary" />}
               </span>
-              <span className={cn("line-clamp-2 text-caption font-medium leading-snug", !front && "invisible")}>{entry.title}</span>
+              <span className={cn("line-clamp-2 text-caption font-medium leading-normal", !front && "invisible")}>{entry.title}</span>
             </button>
           );
         })}

@@ -129,8 +129,8 @@ export function MobileNavSheet({ children }: { children: ReactNode }) {
             <DrillInNav
               variant="sheet"
               onNavigate={() => setOpen(false)}
-              // What's new sits above Settings, as in the sidebar
-              aboveBottom={<WhatsNewStack variant="sheet" onOpen={() => setOpen(false)} className="mb-2 mt-3 px-1" />}
+              // the Novità cards sit above Settings, on the top level only, as in the sidebar
+              aboveBottom={({ top }) => top && <WhatsNewStack variant="sheet" onOpen={() => setOpen(false)} className="mb-2 mt-3 px-1" />}
             />
           )}
           {!drillIn && NAV_GROUPS.map((group) => (
