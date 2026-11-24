@@ -79,6 +79,7 @@ import { forwardToRelay, HARNESS_RELAY_PATH } from "../harness/relay.js";
 import { computerManagerWithEvents } from "../sandbox/computers.js";
 import { computerWebhooksFor } from "../sandbox/computer-webhooks.js";
 import { computerWebhookAdminRoutes, computerWebhookInboundRoutes } from "./routes/computer-webhooks.js";
+import { waBusinessAdminRoutes, waBusinessWebhookRoutes } from "./routes/whatsapp-business.js";
 import { computerSandbox } from "../sandbox/manager.js";
 import { whatsappRoutes } from "./routes/whatsapp.js";
 import { emailRoutes } from "./routes/email.js";
@@ -206,6 +207,12 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   app.all(`${HARNESS_RELAY_PATH}/*`, (c) => forwardToRelay({
     polpoDir: activePolpoDir(), path: c.req.path.slice(HARNESS_RELAY_PATH.length), request: c.req.raw,
   }));
+
+  // ── WhatsApp Business webhooks (public) ───────────────────────────────
+  // Meta's verify token and signature authenticate; before the global per-IP rate limit (Meta posts
+  // from a few addresses in bursts), with a limit of its own per channel (whatsapp-business-service.ts).
+  const waBusiness = () => (orchestrator?.isInitialized ? orchestrator.getWaBusiness() : undefined);
+  app.route("/api/v1/channels/whatsapp-business/webhooks", waBusinessWebhookRoutes({ service: waBusiness }));
 
   // Rate limit API routes only (not static assets)
   app.use("/api/*", rateLimitMiddleware());
@@ -570,6 +577,12 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
             },
           } : {}),
         })).filter((tool) => !existingToolNames.has(tool.name)));
+      }
+      // WhatsApp Business (wabiz_*): only when allowedTools names them (never through whatsapp_*), host-side
+      if (agentConfig.allowedTools?.some((t: string) => t.toLowerCase().startsWith("wabiz"))) {
+        const { createWabizTools } = await import("../tools/wabiz-tools.js");
+        tools.push(...createWabizTools({ service: () => o.getWaBusiness(), sender: agentConfig.name }, agentConfig.allowedTools)
+          .filter((tool) => !existingToolNames.has(tool.name)));
       }
       // Talking to other agents in the middle of the chat (nobody waits: answers arrive live)
       if (agentTalk && !existingToolNames.has("ask_agent")) {
@@ -1570,6 +1583,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   };
   authed.route("/computers", computerRoutes(computerDeps));
   authed.route("/computer-webhooks", computerWebhookAdminRoutes({ webhooks: computerWebhooks }));
+  // WhatsApp Business channels: status, secrets (vault, write-only), events, contacts, sends, templates, approvals
+  authed.route("/whatsapp-business", waBusinessAdminRoutes({ service: waBusiness }));
   // agent harnesses (Claude Code, Codex, OpenCode): settings overview and their sessions (status, stop, reset)
   authed.route("/harnesses", harnessRoutes({
     polpoDir: () => o.getPolpoDir(),

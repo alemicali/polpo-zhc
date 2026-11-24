@@ -2,6 +2,7 @@ import { daytonaProviderErrors, normalizeSandboxSettings } from "@polpo-ai/core/
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { redactPolpoConfig, redactSecrets, restoreRedactedSecrets } from "../security.js";
 import { UnrestorableSecretError } from "@polpo-ai/core/secret-redaction";
+import { validateWaBusinessChannel } from "@polpo-ai/core/whatsapp-business";
 import { computerEgressProblem, isEmptyAppearance, parseAppearanceSettings, parseComputers, parseEgressProxies, parseTailscaleSettings, type AppearanceSettings, type TailscaleSettings } from "@polpo-ai/core";
 import { agentHarness, HARNESS_NAMES, harnessesVaultProblems, parseHarnessesSettings, type HarnessesSettings } from "@polpo-ai/core/harnesses";
 import {
@@ -484,6 +485,10 @@ export function configRoutes(getDeps: () => {
     const checked = StoredNotificationChannelConfigSchema.safeParse(channelConfig);
     if (!checked.success) {
       return c.json({ ok: false, error: `Invalid channel config: ${checked.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}` }, 400);
+    }
+    if (checked.data.type === "whatsapp-business") {
+      const problems = validateWaBusinessChannel(name, checked.data as Record<string, unknown>);
+      if (problems.length) return c.json({ ok: false, error: `Invalid channel config: ${problems.join("; ")}` }, 400);
     }
 
     const result = await mutateConfig(deps, (config) => {

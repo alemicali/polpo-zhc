@@ -278,6 +278,10 @@
       "types": "./dist/progressive-tools.d.ts",
       "import": "./dist/progressive-tools.js"
     },
+    "./whatsapp-business": {
+      "types": "./dist/whatsapp-business.d.ts",
+      "import": "./dist/whatsapp-business.js"
+    },
     "./whatsapp-store": {
       "types": "./dist/whatsapp-store.d.ts",
       "import": "./dist/whatsapp-store.js"

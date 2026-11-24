@@ -118,6 +118,7 @@ import { SandboxSettingsSection } from "@/components/sandbox/sandbox-settings";
 import { McpAccessSection } from "@/components/config/mcp-access-section";
 import { HarnessesSection } from "@/components/config/harnesses-section";
 import { ComputerWebhooksSection } from "@/components/config/computer-webhooks-section";
+import { WaBusinessFields, WaBusinessLive } from "@/components/config/whatsapp-business-section";
 import { SectionHeader } from "@/components/shared/section-header";
 
 // ── API helper (same pattern as setup.tsx) ──
@@ -449,12 +450,13 @@ const CHANNEL_META: Record<string, { label: string; icon: LucideIcon; color: str
   telegram: { label: "Telegram", icon: Send,            color: "border-l-chart-1",     hue: "chart-1",     description: "Send notifications to a Telegram chat via bot" },
   slack:    { label: "Slack",    icon: MessageSquare,   color: "border-l-chart-3",   hue: "chart-3",   description: "Post to a Slack channel via webhook" },
   whatsapp: { label: "WhatsApp", icon: MessageSquare,   color: "border-l-chart-2", hue: "chart-2", description: "Send notifications to a WhatsApp chat (unofficial)" },
+  "whatsapp-business": { label: "WhatsApp Business (official)", icon: MessageSquare, color: "border-l-chart-2", hue: "chart-2", description: "Your business number on Meta's Cloud API: customers write to an agent, templates for messages you start" },
   email:    { label: "Email",    icon: Mail,            color: "border-l-chart-4",   hue: "chart-4",   description: "Send email via Resend, SendGrid, or SMTP" },
   webhook:  { label: "Webhook",  icon: Link2,           color: "border-l-chart-5",  hue: "chart-5",  description: "HTTP in and out: talk to Polpo from Shortcuts or scripts, POST notifications to any endpoint" },
   push:     { label: "Push",     icon: Monitor,         color: "border-l-primary", hue: "primary", description: "Send PWA push notifications to subscribed browsers" },
 };
 
-const ALL_CHANNEL_TYPES: NotificationChannelType[] = ["telegram", "whatsapp", "slack", "email", "webhook", "push"];
+const ALL_CHANNEL_TYPES: NotificationChannelType[] = ["telegram", "whatsapp", "whatsapp-business", "slack", "email", "webhook", "push"];
 
 /** Each channel type's colour: a categorical chart token (Configuration → Appearance), muted for unknown types. */
 const HUE_STYLES: Record<string, { iconBg: string; iconRing: string; gradient: string; pip: string; text: string; glow: string; hoverBorder: string; line: string; chip: string }> = {
@@ -475,6 +477,7 @@ function defaultChannelConfig(type: NotificationChannelType): NotificationChanne
     case "slack":    return { type, webhookUrl: "" };
     case "email":    return { type, provider: "resend", apiKey: "", from: "", to: [] };
     case "webhook":  return { type, gateway: { enableInbound: false, dmPolicy: "open" } };
+    case "whatsapp-business": return { type, business: { audience: "customers" }, gateway: { enableInbound: false, dmPolicy: "open" } };
     case "push":     return { type, vapidSubject: "mailto:hello@polpo.ai", ttl: 3600, urgency: "normal" };
     default:         return { type };
   }
@@ -557,7 +560,7 @@ function TelegramCardDetails({ name, ch }: { name: string; ch: NotificationChann
 }
 
 function channelSupportsInbound(type: NotificationChannelType): boolean {
-  return type === "telegram" || type === "whatsapp" || type === "webhook";
+  return type === "telegram" || type === "whatsapp" || type === "whatsapp-business" || type === "webhook";
 }
 
 /** Random secret for inbound webhooks (64 hex chars). */
@@ -676,6 +679,20 @@ function ChannelSetupGuide({ type }: { type: NotificationChannelType }) {
           <span>1. In Telegram, open <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" className="text-info hover:underline">@BotFather</a>, send /newbot and paste the token below.</span>
           <span>2. Press <b>Find my chat</b> and send any message to your bot — the chat ID fills in after you confirm.</span>
           <span>3. To talk to {product} from Telegram, turn on the inbound gateway. Save.</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (type === "whatsapp-business") {
+    return (
+      <div className="rounded-lg border border-success/20 bg-success/5 px-3 py-2.5">
+        <p className="text-xs font-medium">WhatsApp Business setup (Meta Cloud API)</p>
+        <div className="mt-1 grid gap-1 text-caption leading-relaxed text-muted-foreground">
+          <span>1. In Meta for Developers create a Business app with the WhatsApp product; register and verify the number (with its two-step PIN).</span>
+          <span>2. Copy the phone number ID and the WhatsApp Business Account ID here, choose who it talks to and save.</span>
+          <span>3. Paste a system user's access token and the app secret, generate the verify token, then give Meta the callback URL and the token and subscribe to <code>messages</code>.</span>
+          <span>4. Expose the callback with the Funnel command shown, add a payment method and approved templates, and switch the app to Live. Guide: docs/whatsapp-business.md.</span>
         </div>
       </div>
     );
@@ -918,11 +935,13 @@ function WhatsAppProfileSetup({ config, onChange }: {
   );
 }
 
-function DeliveryFields({ config, onChange, gatewayRunning, channelName, savedBotToken }: {
+function DeliveryFields({ config, onChange, gatewayRunning, channelName, savedBotToken, isSavedChannel }: {
   config: NotificationChannelConfig;
   onChange: (patch: Partial<NotificationChannelConfig>) => void;
   gatewayRunning: boolean;
   channelName?: string;
+  /** The channel exists on the server (its secrets can be set). */
+  isSavedChannel?: boolean;
   /** Bot token of the saved channel; while it is unchanged the bot is already polled by the server. */
   savedBotToken?: string;
 }) {
@@ -962,6 +981,15 @@ function DeliveryFields({ config, onChange, gatewayRunning, channelName, savedBo
               onConfirm={(chat) => set({ chatId: chat.chatId })}
             />
           )}
+        </>
+      )}
+
+      {config.type === "whatsapp-business" && (
+        <>
+          <WaBusinessFields config={config} onChange={set} />
+          {channelName && isSavedChannel
+            ? <WaBusinessLive channel={channelName} />
+            : <p className="rounded-md border border-border/30 bg-muted/15 px-2.5 py-2 text-caption text-muted-foreground">Save the channel, then enter its access token, app secret and verify token here: they go to the vault and are never shown again.</p>}
         </>
       )}
 
@@ -1092,8 +1120,10 @@ function InboundGatewayForm({ config, onChange, channelName, otherChannels = [] 
   const gateway = config.gateway ?? {};
   const enabled = gateway.enableInbound === true;
   const isWebhook = config.type === "webhook";
-  // A webhook is authenticated by its secret, so it defaults to open.
-  const defaultPolicy: GatewayPolicy = isWebhook ? "open" : "pairing";
+  const isWaBusiness = config.type === "whatsapp-business";
+  const forCustomers = isWaBusiness && (config.business?.audience ?? "customers") === "customers";
+  // A webhook is authenticated by its secret, and a business number is meant for anyone: both default to open.
+  const defaultPolicy: GatewayPolicy = isWebhook || isWaBusiness ? "open" : "pairing";
   const policy = gateway.dmPolicy ?? defaultPolicy;
   const updateGateway = (patch: Partial<GatewayConfig>) => {
     const next: NotificationChannelConfig = {
@@ -1160,8 +1190,10 @@ function InboundGatewayForm({ config, onChange, channelName, otherChannels = [] 
               />
             </Field>
           </div>
-          {(config.type === "telegram" || isWebhook) && (
-            <Field label="Dedicated agent" hint={isWebhook
+          {(config.type === "telegram" || isWebhook || isWaBusiness) && (
+            <Field label={forCustomers ? "Agent that answers customers (required)" : "Dedicated agent"} hint={forCustomers
+              ? "Customers talk only with this agent, never with Polpo, and cannot use commands. Give it few tools: what customers write is untrusted."
+              : isWebhook
               ? "Send every message to one agent, without /agent. Leave on Polpo to talk to the orchestrator and switch with /agent."
               : "Give an important agent its own bot: every message goes to it, without /agent. Leave on Polpo for the main bot."}>
               <Select value={gateway.agent ?? "__polpo__"} onValueChange={(v) => updateGateway({ agent: v === "__polpo__" ? undefined : v })}>
@@ -1175,7 +1207,7 @@ function InboundGatewayForm({ config, onChange, channelName, otherChannels = [] 
               </Select>
             </Field>
           )}
-          <Field label="Replies go to" hint="Conversation pipe: answer here, or deliver replies through another channel (e.g. in from Shortcuts, out on Telegram).">
+          {!forCustomers && <Field label="Replies go to" hint="Conversation pipe: answer here, or deliver replies through another channel (e.g. in from Shortcuts, out on Telegram).">
             <Select
               value={gateway.replyTo?.channel ?? "__origin__"}
               onValueChange={(v) => updateGateway({ replyTo: v === "__origin__" ? undefined : { ...gateway.replyTo, channel: v } })}
@@ -1190,8 +1222,8 @@ function InboundGatewayForm({ config, onChange, channelName, otherChannels = [] 
                 ))}
               </SelectContent>
             </Select>
-          </Field>
-          {gateway.replyTo && (
+          </Field>}
+          {gateway.replyTo && !forCustomers && (
             <div className="grid grid-cols-2 gap-2">
               <Field label="Chat ID" hint="Optional. Default: the target's chat ID, or its only paired person.">
                 <Input
@@ -1275,8 +1307,10 @@ function InboundGatewayForm({ config, onChange, channelName, otherChannels = [] 
 }
 
 /** Channel config form — renders type-specific fields */
-function ChannelForm({ config, onChange, gatewayRunning, channelName, savedBotToken, otherChannels = [] }: {
+function ChannelForm({ config, onChange, gatewayRunning, channelName, savedBotToken, otherChannels = [], isSavedChannel }: {
   config: NotificationChannelConfig;
+  /** The channel exists on the server. */
+  isSavedChannel?: boolean;
   onChange: (config: NotificationChannelConfig) => void;
   /** The saved version of this channel has inbound enabled. */
   gatewayRunning: boolean;
@@ -1291,7 +1325,7 @@ function ChannelForm({ config, onChange, gatewayRunning, channelName, savedBotTo
     <div className="space-y-3">
       <ChannelConceptPanel type={config.type} />
       <ChannelSetupGuide type={config.type} />
-      <DeliveryFields config={config} onChange={set} gatewayRunning={gatewayRunning} channelName={channelName} savedBotToken={savedBotToken} />
+      <DeliveryFields config={config} onChange={set} gatewayRunning={gatewayRunning} channelName={channelName} savedBotToken={savedBotToken} isSavedChannel={isSavedChannel} />
       {channelSupportsInbound(config.type) && (
         <InboundGatewayForm config={config} onChange={onChange} channelName={channelName} otherChannels={otherChannels} />
       )}
@@ -1312,6 +1346,9 @@ function channelReadiness(ch: NotificationChannelConfig): { ok: boolean; label: 
     case "slack": return ch.webhookUrl ? { ok: true, label: "Live" } : { ok: false, label: "Needs webhook" };
     case "whatsapp": return { ok: true, label: ch.gateway?.enableInbound ? "Live · two-way" : "Live" };
     case "email": return ch.apiKey || ch.host ? { ok: true, label: "Live" } : { ok: false, label: "Needs credentials" };
+    case "whatsapp-business": return ch.phoneNumberId && ch.wabaId
+      ? { ok: true, label: ch.gateway?.enableInbound ? "Official · two-way" : "Official" }
+      : { ok: false, label: "Needs the number's ids" };
     case "webhook": return ch.url || ch.gateway?.enableInbound ? { ok: true, label: ch.gateway?.enableInbound ? (ch.url ? "Live · two-way" : "Inbound only") : "Live" } : { ok: false, label: "Needs URL" };
     default: return { ok: true, label: "Live" };
   }
@@ -1332,6 +1369,10 @@ function channelFacts(ch: NotificationChannelConfig): Array<{ label: string; val
     case "whatsapp": return [
       { label: "Chat", value: ch.chatId || "—", mono: true },
       { label: "Profile", value: ch.profileDir || "default", mono: true },
+    ];
+    case "whatsapp-business": return [
+      { label: "Number ID", value: ch.phoneNumberId || "—", mono: true },
+      { label: "Talks to", value: (ch.business?.audience ?? "customers") === "customers" ? `customers → ${gateway?.agent ?? "—"}` : "operators" },
     ];
     case "email": return [
       { label: "Provider", value: ch.provider ?? "resend" },
@@ -1493,8 +1534,16 @@ function ChannelCard({ name, ch, onEdit, onDelete, onTest, deleting, testing, te
                 <Row label="VAPID" value={ch.vapidPublicKey || ch.vapidPrivateKey ? "custom keys" : "project generated"} mono />
               )}
               {ch.type === "whatsapp" && <Row label="Type" value={ch.type} mono />}
+              {ch.type === "whatsapp-business" && (
+                <>
+                  <Row label="Account" value={ch.wabaId || "—"} mono />
+                  <Row label="Templates" value={`${(ch.business?.allowedCategories ?? ["UTILITY"]).join(", ").toLowerCase()} · ${ch.business?.approveTemplates === false ? "sent at once" : "need approval"}`} wrap />
+                  <Row label="Daily cap" value={String(ch.business?.limits?.businessInitiatedPerDay ?? 50)} mono />
+                  <Row label="Retention" value={`${ch.business?.retentionDays ?? 90} days`} />
+                </>
+              )}
               {ch.type === "slack" && <Row label="Webhook" value={ch.webhookUrl ? "*** configured" : "not set"} mono />}
-              {!["telegram", "email", "webhook", "push", "whatsapp", "slack"].includes(ch.type) && <Row label="Type" value={ch.type} mono />}
+              {!["telegram", "email", "webhook", "push", "whatsapp", "whatsapp-business", "slack"].includes(ch.type) && <Row label="Type" value={ch.type} mono />}
             </div>
           </CollapsibleContent>
         </Collapsible>
@@ -1910,6 +1959,7 @@ function ChannelsTab({ settings, onUpdateConfig }: {
               channelName={isNew ? undefined : editName}
               savedBotToken={isNew ? undefined : channels[editName]?.botToken}
               otherChannels={Object.entries(channels).filter(([n]) => n !== editName).map(([n, c]) => ({ name: n, type: c.type }))}
+              isSavedChannel={!isNew && !!channels[editName]}
             />
             {saveError && (
               <p className="text-xs text-destructive">{saveError}</p>

@@ -92,13 +92,19 @@ export function buildReachabilitySection(
   botUsernames: Map<string, string> = new Map(),
 ): string {
   const entries = Object.entries(channels);
-  const inbound = entries.filter(([, ch]) => (ch.type === "telegram" || ch.type === "whatsapp" || ch.type === "webhook") && ch.gateway?.enableInbound);
+  const inbound = entries.filter(([, ch]) => (ch.type === "telegram" || ch.type === "whatsapp" || ch.type === "whatsapp-business" || ch.type === "webhook") && ch.gateway?.enableInbound);
   const outboundOnly = entries.filter(([, ch]) => !inbound.some(([, i]) => i === ch));
 
   const describeInbound = ([name, ch]: [string, ReachabilityChannel]) => {
     if (ch.type === "webhook") {
       const target = ch.gateway?.agent ? `dedicated to agent ${ch.gateway.agent}` : "talks to you; /agent NAME switches to an agent";
       return `- Webhook "${name}" (HTTP, e.g. iOS Shortcuts or scripts): \`POST /api/v1/channels/${name}/inbound\` with the channel secret; ${target}; the reply comes back in the HTTP response. Accepts text and files.`;
+    }
+    if (ch.type === "whatsapp-business") {
+      const audience = (ch as { business?: { audience?: string } }).business?.audience === "operators" ? "operators" : "customers";
+      return audience === "customers"
+        ? `- WhatsApp Business "${name}" (official number, Meta Cloud API): customers write to it and only agent ${ch.gateway?.agent ?? "(none set)"} answers them, never you; text only. Business-initiated messages go out only as approved templates (wabiz_* tools).`
+        : `- WhatsApp Business "${name}" (official number): the team's operators write to it${ch.gateway?.agent ? `, answered by agent ${ch.gateway.agent}` : ", and talk to you"}; text only.`;
     }
     const handle = botUsernames.get(name) ? `@${botUsernames.get(name)}` : `channel "${name}"`;
     const target = ch.gateway?.agent
@@ -118,6 +124,7 @@ export function buildReachabilitySection(
     "expo-push": "Polpo sends mobile push notifications",
     telegram: "Polpo sends notifications to Telegram (inbound disabled)",
     whatsapp: "Polpo sends notifications to WhatsApp (inbound disabled)",
+    "whatsapp-business": "Polpo notifies the operators on the official WhatsApp Business number (inside the 24-hour window, or with the notification template)",
   };
 
   return [

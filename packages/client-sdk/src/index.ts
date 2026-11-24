@@ -198,6 +198,18 @@ export type {
   ComputerWebhookEventSummary,
   ComputerWebhookEvent,
   ComputerWebhookEventPage,
+  WaBusinessSettings,
+  WaBizOutcome,
+  WaBizSecretKind,
+  WaBusinessStatus,
+  WaBusinessEventSummary,
+  WaBusinessEvent,
+  WaBusinessEventPage,
+  WaBusinessContact,
+  WaBusinessMessage,
+  WaBusinessConversation,
+  WaBusinessTemplate,
+  WaBusinessSendResult,
 } from "./client/types.js";
 
 export type { StoreState, PolpoStats, AssessmentProgressEntry, AssessmentCheckStatus } from "./store/types.js";
