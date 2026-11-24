@@ -309,8 +309,8 @@ describe("toolsets and scopes", () => {
       "polpo_schedules_list", "polpo_schedule_run", "polpo_checks_list", "polpo_connectors_list", "polpo_connector_add", "polpo_channels_list", "polpo_message_send",
       "polpo_teams_list", "polpo_team_save", "polpo_agent_delete"]) expect(def).toContain(n);
     for (const n of ["polpo_brain_search", "polpo_learning_get", "polpo_watchers_list", "polpo_vault_list", "polpo_apps_list", "polpo_api_get"]) expect(def).not.toContain(n);
-    // the visible default set, every Configuration section included (the settings toolset) the task and mission cards and the computer detail and webhooks, WhatsApp Business, skill bundles (upload prepare/finalize, files), skill versions (list, diff, restore), agent versions (list, get, diff, draft rebase/discard, publish, deploy, rollback, deploys), for a full-access client
-    expect(def.length).toBeLessThanOrEqual(179);
+    // the visible default set, every Configuration section included (the settings toolset) the task and mission cards and the computer detail and webhooks, WhatsApp Business, skill bundles (upload prepare/finalize, files), skill versions (list, diff, restore), agent versions (list, get, diff, draft rebase/discard, publish, deploy, rollback, deploys), artifact uploads (prepare/finalize), for a full-access client
+    expect(def.length).toBeLessThanOrEqual(181);
     const all = await names(deps(f));
     for (const t of all) if (t.name !== "polpo_file_read") expect(t.outputSchema, t.name).toBeTruthy();
     const a = Object.fromEntries(all.map((t) => [t.name, t.annotations]));

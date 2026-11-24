@@ -105,6 +105,7 @@ export const POLPO_TOOL_GROUPS: ToolGroupRule[] = [
       "run_playbook", "delete_playbook"],
   },
   { id: "ink", label: "Ink Hub (skills and packages)", prefixes: ["ink_"] },
+  { id: "artifact-uploads", label: "Large artifact contents: upload from a public URL, a file of the instance or base64 parts, then create an artifact or replace one's content (a file in the workspace: artifact_from_file)", names: ["artifact_upload_prepare", "artifact_upload_finalize"] },
   { id: "phone", label: "Phone calls", prefixes: ["phone_"] },
   { id: "whatsapp", label: "WhatsApp", prefixes: ["whatsapp_"] },
   {

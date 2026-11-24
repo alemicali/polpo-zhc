@@ -68,7 +68,16 @@ export class FileArtifactStore implements ArtifactStore {
     if (!current) return undefined;
     const old = current.versions.find((v) => v.version === version);
     if (!old) throw new Error(`No version ${version} of this artifact`);
-    return this.update(id, { content: old.content, author, note: `restored version ${version}` });
+    return this.update(id, { content: old.content, ...(old.blob ? { blob: old.blob } : {}), author, note: `restored version ${version}` });
+  }
+
+  async put(artifact: Artifact, options: { ifUpdatedAt?: string | null } = {}): Promise<boolean> {
+    if (options.ifUpdatedAt !== undefined) {
+      const current = this.read(artifact.id);
+      if (options.ifUpdatedAt === null ? current !== undefined : current?.updatedAt !== options.ifUpdatedAt) return false;
+    }
+    atomicWrite(this.path(artifact.id), artifact);
+    return true;
   }
 
   async delete(id: string): Promise<boolean> {

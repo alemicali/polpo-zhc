@@ -42,6 +42,8 @@ export type { UseSkillVersionsReturn } from "./hooks/use-skill-versions.js";
 export { useAgentVersions, useAgentDeploys } from "./hooks/use-agent-versions.js";
 export type { UseAgentVersionsReturn, UseAgentDeploysReturn } from "./hooks/use-agent-versions.js";
 export { useSkillBundleUpload } from "./hooks/use-skill-bundle-upload.js";
+export { useArtifactUpload, ARTIFACT_UPLOAD_PART_BYTES } from "./hooks/use-artifact-upload.js";
+export type { UseArtifactUploadReturn } from "./hooks/use-artifact-upload.js";
 export type { UseSkillBundleUploadReturn } from "./hooks/use-skill-bundle-upload.js";
 export { useNotifications } from "./hooks/use-notifications.js";
 export { useApprovals } from "./hooks/use-approvals.js";

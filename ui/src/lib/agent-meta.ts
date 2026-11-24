@@ -121,7 +121,7 @@ export const toolCategories: { prefix: string; label: string; tools: string; ico
   { prefix: "search_", label: "Web Search", tools: "search_web (Exa semantic search), search_find_similar", icon: Search, color: kind(6).color },
   { prefix: "phone_", label: "Phone (VAPI)", tools: "phone_call, phone_get_call, phone_list_calls, phone_hangup, inbound call configuration", icon: PhoneCall, color: kind(8).color },
   { prefix: "data_", label: "Structured Data", tools: "source registry, scoped grants, typed queries and mutations", icon: Database, color: kind(9).color },
-  { prefix: "artifact_", label: "Artifacts", tools: "artifact_create, artifact_update, artifact_get, artifact_list, artifact_delete (documents, html dashboards and designs on its data sources, diagrams)", icon: Shapes, color: kind(4).color },
+  { prefix: "artifact_", label: "Artifacts", tools: "artifact_create, artifact_update, artifact_from_file, artifact_get, artifact_list, artifact_delete (documents, html dashboards and designs on its data sources, diagrams; large files published from its workspace)", icon: Shapes, color: kind(4).color },
   { prefix: "storage_", label: "Storage", tools: "storage_list, storage_read, storage_write, storage_delete, storage_presign (S3/R2 buckets granted to the agent)", icon: HardDrive, color: kind(6).color },
 ];
 
