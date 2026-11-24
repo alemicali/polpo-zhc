@@ -54,6 +54,10 @@
       "types": "./dist/run-store.d.ts",
       "import": "./dist/run-store.js"
     },
+    "./agent-versions": {
+      "types": "./dist/agent-versions.d.ts",
+      "import": "./dist/agent-versions.js"
+    },
     "./run-context": {
       "types": "./dist/run-context.d.ts",
       "import": "./dist/run-context.js"

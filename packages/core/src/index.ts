@@ -52,6 +52,7 @@ export type { NotificationStore, NotificationRecord, NotificationStatus } from "
 export type { PeerStore } from "./peer-store.js";
 export type { TeamStore } from "./team-store.js";
 export type { AgentStore } from "./agent-store.js";
+export * from "./agent-versions.js";
 export type { VaultStore } from "./vault-store.js";
 export { isReservedVaultOwner, RESERVED_VAULT_OWNER_PREFIX } from "./vault-store.js";
 export type { PlaybookStore } from "./playbook-store.js";

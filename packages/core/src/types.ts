@@ -129,6 +129,11 @@ export interface Task {
   title: string;
   description: string;
   assignTo: string;
+  /**
+   * A published version of the assignee to run (e.g. "1.2.0"), instead of the one deployed to
+   * production. Absent: production. `assignTo: "writer@1.2.0"` on creation sets it.
+   */
+  agentVersion?: string;
   group?: string;
   /** ID of the mission this task belongs to (set when created via executeMission). */
   missionId?: string;

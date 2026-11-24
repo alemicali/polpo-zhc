@@ -1,3 +1,4 @@
+import { isProductionRef, isSemver, parseAgentRef } from "./agent-versions.js";
 import { normalizeTaskToolScope, type TaskToolScope } from "./task-tool-scope.js";
 import type { TaskStore } from "./task-store.js";
 import type { OrchestratorContext } from "./orchestrator-context.js";
@@ -34,8 +35,25 @@ export class TaskManager {
     toolScope?: TaskToolScope;
     /** The member (email) who started it, when known. */
     requestedBy?: string;
+    /** A published version of the assignee to run (absent: production). `assignTo: "name@1.2.0"` sets it too. */
+    agentVersion?: string;
   }): Promise<Task> {
     if (!this.ctx.registry) throw new Error("Orchestrator not initialized");
+    // "writer@1.2.0": the agent and the version it is pinned to
+    {
+      const parsed = parseAgentRef(opts.assignTo);
+      const pinned = opts.agentVersion ?? parsed.ref;
+      opts = { ...opts, assignTo: parsed.name };
+      if (pinned && !isProductionRef(pinned)) {
+        if (!isSemver(pinned)) throw new Error(`"${pinned}" is not a version of ${parsed.name}: use a published version like 1.2.0 (or no version for production)`);
+        if (this.ctx.agentVersions && !(await this.ctx.agentVersions.getVersion(parsed.name, pinned).catch(() => undefined))) {
+          throw new Error(`Agent "${parsed.name}" has no published version ${pinned}`);
+        }
+        opts.agentVersion = pinned;
+      } else {
+        delete opts.agentVersion;
+      }
+    }
 
     // Run before:task:create hook (sync — addTask is synchronous)
     const hookResult = this.ctx.hooks.runBeforeSync("task:create", {
@@ -93,6 +111,7 @@ export class TaskManager {
       sideEffects: hookData.sideEffects,
       ...(normalizeTaskToolScope(opts.toolScope) ? { toolScope: normalizeTaskToolScope(opts.toolScope) } : {}),
       ...(opts.requestedBy ? { requestedBy: opts.requestedBy } : {}),
+      ...(opts.agentVersion ? { agentVersion: opts.agentVersion } : {}),
       status: hookData.draft ? "draft" : undefined,
     });
     this.ctx.emitter.emit("task:created", { task });
@@ -114,8 +133,15 @@ export class TaskManager {
     await this.ctx.registry.updateTask(taskId, { description });
   }
 
+  /** Reassign a task: "name" (production) or "name@1.2.0" (pinned to that published version). */
   async updateTaskAssignment(taskId: string, agentName: string): Promise<void> {
-    await this.ctx.registry.updateTask(taskId, { assignTo: agentName });
+    const { name, ref } = parseAgentRef(agentName);
+    const pinned = ref && !isProductionRef(ref) ? ref : undefined;
+    if (pinned && !isSemver(pinned)) throw new Error(`"${pinned}" is not a version of ${name}: use a published version like 1.2.0`);
+    if (pinned && this.ctx.agentVersions && !(await this.ctx.agentVersions.getVersion(name, pinned).catch(() => undefined))) {
+      throw new Error(`Agent "${name}" has no published version ${pinned}`);
+    }
+    await this.ctx.registry.updateTask(taskId, { assignTo: name, agentVersion: pinned });
   }
 
   async updateTaskExpectations(taskId: string, expectations: TaskExpectation[]): Promise<void> {
