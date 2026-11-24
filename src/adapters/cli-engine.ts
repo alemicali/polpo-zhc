@@ -174,7 +174,8 @@ export function spawnCliEngine(agentConfig: AgentConfig, task: Task, cwd: string
       const instructions = buildHarnessInstructions({
         agent: agentConfig, cwd, outputDir: ctx.outputDir, agentsMd: remote ? undefined : agentsMd, hostTools: [],
         harness: engine.cli === "claude" ? "claude-code" : "codex",
-      });
+        // Polpo's tools are not offered to the CLI (yet): its instructions do not name them
+      }).replace(", and register each one with the register_outcome tool.", ".");
       const args = engine.cli === "claude"
         ? claudeArgs({ resume, model: engine.model, permissionMode: engine.permissionMode, instructions, maxTurns: agentConfig.maxTurns, extra: engine.args })
         : codexArgs(engine.args);

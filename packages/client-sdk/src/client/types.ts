@@ -131,6 +131,8 @@ export interface Task {
   failure?: TaskFailure;
   /** Optional narrowing of the run's tools; absent: everything the agent has. */
   toolScope?: TaskToolScope;
+  /** The member (email) who started it, when known: a CLI engine on a personal sign-in runs only its owner's tasks. */
+  requestedBy?: string;
   /** GET /tasks/:id: what of the tool scope the agent no longer has (connector removed, access revoked…). */
   toolScopeStale?: string[];
   /**
@@ -167,7 +169,35 @@ export interface TaskToolScope {
   allowedTools?: string[];
 }
 
-/** The engine a run used: Polpo's own, or an agent harness. */
+/**
+ * An agent's CLI engine (agent.engine { type: "cli" }): the official Claude Code / Codex program,
+ * signed in with a person's own plan through a CLI account (a config directory, never a token).
+ */
+export interface AgentCliEngine {
+  type: "cli";
+  cli: "claude" | "codex";
+  account?: string;
+  model?: string;
+  permissionMode?: "allow-all" | "allow-edits" | "allow-reads";
+  args?: string[];
+}
+
+/** A CLI account (settings.harnesses.cli.accounts; GET /harnesses/cli/accounts adds report, agents, manageable). */
+export interface CliAccount {
+  id: string;
+  cli: "claude" | "codex";
+  /** "host" or a computer id. */
+  computer: string;
+  configDir: string;
+  /** The member who signed in, or "instance". */
+  owner: string;
+  label?: string;
+  report?: { installed: boolean; version?: string; status?: { signedIn: boolean; who?: string; method?: string; plan?: string; detail?: string }; error?: string };
+  agents?: string[];
+  manageable?: boolean;
+}
+
+/** The engine a run used: Polpo's own, an agent harness, or a CLI on a personal plan (claude-cli, codex-cli). */
 export type TaskRunEngine = "polpo" | "claude-code" | "codex" | "opencode" | "claude-cli" | "codex-cli";
 
 /** Where and with what a task run executed (no secrets). */
