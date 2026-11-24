@@ -25,8 +25,7 @@ import {
 } from "lucide-react";
 import type { AgentConfig, AgentProcess } from "@polpo-ai/react";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
-import { EngineBadge } from "@/components/shared/run-context";
-import { agentEngineId } from "@/lib/run-context";
+import { AgentModelWithEngine } from "@/components/shared/model-with-engine";
 import { useAsyncAction } from "@/hooks/use-polpo";
 import { RemoveAgentDialog } from "./agents-dialogs";
 import { useAgentsPage } from "./agents-page-context";
@@ -122,15 +121,13 @@ function AgentCard({
                   <Zap className="h-2.5 w-2.5 mr-0.5" /> mission
                 </Badge>
               )}
-              <EngineBadge engine={agentEngineId((agent as { engine?: unknown }).engine)} model={((agent as { engine?: { model?: string } }).engine?.model)} withLabel size={13} className="text-micro text-muted-foreground" />
             </div>
             <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
               {agent.identity?.title && <span className="text-micro text-muted-foreground truncate max-w-[200px]">{agent.identity.title}</span>}
-              {agent.model && (
-                <span className="max-w-full truncate text-micro font-mono text-muted-foreground sm:max-w-[200px]">
-                  {agent.identity?.title ? <>&middot; </> : ""}{agent.model}
-                </span>
-              )}
+              <span className="inline-flex min-w-0 max-w-full items-center gap-1 text-micro text-muted-foreground sm:max-w-[320px]">
+                {agent.identity?.title ? <>&middot; </> : ""}
+                <AgentModelWithEngine agent={agent} mono size={12} testId="agent-row-model" />
+              </span>
               {agent.role && !agent.identity?.title && (
                 <span className="text-micro text-muted-foreground truncate max-w-[200px] hidden lg:inline">&middot; {agent.role}</span>
               )}

@@ -25,6 +25,7 @@ import {
   Monitor,
 } from "lucide-react";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
+import { AgentModelWithEngine } from "@/components/shared/model-with-engine";
 // Provider + context hook
 import { AgentDetailProvider } from "@/components/agents/agent-detail-provider";
 import { useAgentDetail } from "@/components/agents/agent-detail-context";
@@ -99,7 +100,7 @@ function MobileIdentitySummary() {
             {process && <div className="h-2 w-2 rounded-pill bg-primary animate-pulse" />}
           </div>
           {identity?.title && <p className="text-xs text-muted-foreground">{identity.title}</p>}
-          {agent.model && <p className="mt-0.5 truncate text-micro font-mono text-muted-foreground">{agent.model}</p>}
+          <p className="mt-0.5 flex min-w-0 text-micro text-muted-foreground"><AgentModelWithEngine agent={agent} mono size={12} testId="agent-mobile-model" /></p>
         </div>
         <Button
           variant="outline"

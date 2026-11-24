@@ -17,6 +17,7 @@ import { MobileNavSheet } from "./mobile-nav-sheet";
 import { MobileSearchButton } from "@/components/search/sidebar-search-button";
 import { ChatTabs } from "./chat-tabs";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
+import { AgentModelWithEngine, EngineMark } from "@/components/shared/model-with-engine";
 import { useAgents } from "@polpo-ai/react";
 import { BrandMark } from "@/components/shared/brand-mark";
 import { resolveTitle } from "@/lib/page-titles";
@@ -78,7 +79,7 @@ function ChatHeaderCenter() {
           />
         </div>
 
-        <div className="flex min-w-0 max-w-44 items-center gap-1.5 rounded-pill bg-muted/45 px-2 py-1">
+        <div className="flex min-w-0 max-w-80 items-center gap-1.5 rounded-pill bg-muted/45 px-2 py-1">
           {inGroup ? (
             <UsersRound className="h-3.5 w-3.5 shrink-0 text-primary" />
           ) : agentConfig ? (
@@ -91,6 +92,9 @@ function ChatHeaderCenter() {
             <span className="shrink-0 text-sm leading-none">🐙</span>
           )}
           <span className="truncate text-xs font-semibold text-foreground">{inGroup ? "Group chat" : agentName}</span>
+          {!inGroup && (agentConfig
+            ? <AgentModelWithEngine agent={agentConfig} compact size={12} className="text-micro text-muted-foreground" testId="header-chat-model" />
+            : <EngineMark engine="polpo" compact size={12} />)}
         </div>
       </div>
 

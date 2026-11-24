@@ -19,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { VaultRefPicker } from "@/components/vault/vault-ref-picker";
 import { BrandIcon } from "@/components/shared/brand-icon";
+import { EngineMark } from "@/components/shared/model-with-engine";
 import { ProviderIcon } from "@/components/shared/provider-icon";
 import { authBrand, computerBrand } from "@/lib/run-context";
 import {
@@ -322,10 +323,10 @@ export function HarnessesSection() {
         </div>
         {sessions.length === 0 ? <p className="text-xs text-muted-foreground">No harness sessions yet.</p> : sessions.map((s) => (
           <div key={s.key} className="flex flex-wrap items-center gap-2 rounded-lg border p-2 text-xs" data-testid={`harness-session-${s.key}`}>
-            <BrandIcon name={s.harness} size={16} />
+            <EngineMark engine={s.harness} size={16} className="font-medium" />
             <code>{s.key}</code>
             <span className="inline-flex items-center gap-1">
-              {s.agent} · {HARNESS_NAMES[s.harness]} on
+              {s.agent} on
               <BrandIcon name={s.computerId === "host" ? "host" : computerBrand({ kind: "daytona", provider: "daytona" })} size={12} />
               {s.computerId}
             </span>
