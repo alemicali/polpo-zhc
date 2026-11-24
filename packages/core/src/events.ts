@@ -269,6 +269,8 @@ export interface PolpoEventMap {
   "storage:changed": { name: string; action: "created" | "updated" | "deleted" | "mounted" | "unmounted" | "mount-failed"; error?: string } & EventOrigin;
   /** A connector (MCP server) was added, changed, removed, or its connection status changed. */
   "connector:changed": import("./connectors.js").ConnectorChangedEvent & EventOrigin;
+  /** A hosted MCP server changed: created, draft, published, deployed, settings, tests, pending (approval), deleted. */
+  "mcp-server:changed": { id: string; what: string } & EventOrigin;
   /**
    * A computer (persistent machine, settings.computers) was created, changed, deleted, or its
    * machine changed status (creating, running, stopped, paused, hibernated, archived, error…).

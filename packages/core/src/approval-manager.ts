@@ -200,7 +200,8 @@ export class ApprovalManager {
   async reject(requestId: string, feedback: string, resolvedBy?: string): Promise<ApprovalRequest | null> {
     const request = await this.store.get(requestId);
     if (!request || request.status !== "pending") return null;
-    if (!request.taskId) return null;
+    // a request about no task (an escalation, a hosted MCP server's call): rejecting just resolves it
+    if (!request.taskId) return this.resolve(requestId, "rejected", resolvedBy, feedback);
 
     const gate = this.ctx.config.settings.approvalGates?.find(g => g.id === request.gateId);
     const maxRevisions = gate?.maxRevisions ?? 3;
@@ -245,9 +246,10 @@ export class ApprovalManager {
 
   async canReject(requestId: string): Promise<{ allowed: boolean; rejectionCount: number; maxRejections: number }> {
     const request = await this.store.get(requestId);
-    if (!request || request.status !== "pending" || !request.taskId) {
+    if (!request || request.status !== "pending") {
       return { allowed: false, rejectionCount: 0, maxRejections: 0 };
     }
+    if (!request.taskId) return { allowed: true, rejectionCount: 0, maxRejections: 1 };
 
     const gate = this.ctx.config.settings.approvalGates?.find(g => g.id === request.gateId);
     const maxRejections = gate?.maxRevisions ?? 3;

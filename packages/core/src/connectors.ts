@@ -45,8 +45,13 @@ export interface ConnectorIconAsset extends ConnectorIconImage {
 
 /** How the client reaches the MCP server. */
 export interface ConnectorTransport {
-  /** "http": streamable HTTP, falling back to SSE automatically; "sse": legacy SSE; "stdio": a local process (admin only). */
-  type: "http" | "sse" | "stdio";
+  /**
+   * "http": streamable HTTP, falling back to SSE automatically; "sse": legacy SSE; "stdio": a local process (admin only);
+   * "hosted": a custom MCP server Polpo hosts itself (served in process, see docs/custom-mcp-servers.md).
+   */
+  type: "http" | "sse" | "stdio" | "hosted";
+  /** hosted: the hosted server's id. */
+  serverId?: string;
   /** Remote server URL (http, sse). */
   url?: string;
   /** stdio: command and arguments. */
@@ -130,6 +135,8 @@ export interface ConnectorConfig {
   iconCheckedAt?: string;
   /** Tool call timeout (ms); default 60 000. */
   toolTimeoutMs?: number;
+  /** Hosted servers: the version deployed to production (shown as "Hosted by Polpo · v1.2.0"). */
+  hostedVersion?: string;
   /** Per-tool policy keyed by the server's tool name (not the prefixed one). Missing = "allow". */
   toolPolicy?: Record<string, ConnectorToolPolicy>;
   createdAt: string;

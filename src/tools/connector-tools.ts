@@ -78,7 +78,7 @@ export function noAccessNote(agent: string, c: Pick<ConnectorConfig, "id" | "nam
 
 function describe(c: ConnectorConfig): string {
   const who = [c.access.agents === "*" ? "every agent" : c.access.agents.length ? `agents: ${c.access.agents.join(", ")}` : "no agent", c.access.polpo ? "Polpo" : ""].filter(Boolean).join(" + ");
-  const where = c.transport.type === "stdio" ? `local command ${c.transport.command}` : c.transport.url;
+  const where = c.transport.type === "stdio" ? `local command ${c.transport.command}` : c.transport.type === "hosted" ? `hosted by Polpo${c.hostedVersion ? ` (v${c.hostedVersion})` : ""}` : c.transport.url;
   const status = c.enabled ? (c.status ?? "not connected yet") : "disabled";
   return `- ${connectorLabel(c)} [${c.id}${c.catalogId && c.catalogId !== c.id ? `, another ${c.catalogId} account` : ""}] ${status}${c.toolCount !== undefined ? `, ${c.toolCount} tools` : ""}${c.lastError ? ` (${c.lastError.slice(0, 160)})` : ""}; `
     + `auth ${c.auth.type}; used by ${who}; ${where}; tools mcp__${c.id}__*${c.iconAsset ? `; icon: ${c.iconAsset.pinned ? "set by the person" : `found (${c.iconAsset.source})`}` : ""}`;

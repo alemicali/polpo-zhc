@@ -239,6 +239,9 @@ export async function applyConnectorPatch(
   if (input.id !== undefined && input.id !== current.id) throw new ConnectorInputError("A connector's id cannot change");
   const patch: Partial<ConnectorConfig> = {};
   let reconnect = false;
+  if (current.transport.type === "hosted" && (input.transport !== undefined || input.url !== undefined || input.auth !== undefined || input.secrets !== undefined)) {
+    throw new ConnectorInputError("This connector is bound to a server Polpo hosts: change its auth, domains and tools in the server (Connectors → Hosted servers)");
+  }
   if (input.name !== undefined) {
     if (!input.name.trim()) throw new ConnectorInputError("name cannot be empty");
     patch.name = input.name.trim();
