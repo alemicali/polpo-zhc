@@ -3,7 +3,7 @@
  * catalog, the channel's sheet, the deep link (?channel=), and every setting and action of the
  * old cards and dialog still reachable from the sheet.
  */
-import { act, useState } from "react";
+import { act, useEffect, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -46,11 +46,11 @@ let root: Root;
 let container: HTMLDivElement;
 let actions: ChannelApiAction[];
 let fetchMock: ReturnType<typeof vi.fn>;
-let location = "";
+const probe = { location: "" };
 
 function LocationProbe() {
   const loc = useLocation();
-  location = `${loc.pathname}${loc.search}`;
+  useEffect(() => { probe.location = `${loc.pathname}${loc.search}`; });
   return null;
 }
 
@@ -165,11 +165,11 @@ describe("Channels section", () => {
     await render();
     await click(byLabel("Manage ops"));
     expect(sheet()?.textContent).toContain("ops");
-    expect(location).toContain("channel=ops");
+    expect(probe.location).toContain("channel=ops");
     expect(sheet()?.querySelector('[data-testid="channel-facts"]')?.textContent).toContain("ops-agent");
     await click(byText("Cancel", sheet()!));
     expect(sheet()).toBeNull();
-    expect(location).not.toContain("channel=");
+    expect(probe.location).not.toContain("channel=");
   });
 
   it("a deep link (?section=channels&channel=shop) opens that channel's sheet with its Meta connection", async () => {
@@ -197,7 +197,7 @@ describe("Channels section", () => {
     await click(byText("Add channel", sheet()!));
     expect(actions).toEqual([{ path: `/${type}`, method: "PUT", body: expect.objectContaining({ type }) }]);
     // the sheet now shows the saved channel
-    expect(location).toContain(`channel=${type}`);
+    expect(probe.location).toContain(`channel=${type}`);
     expect(byText("Remove", sheet()!)).toBeTruthy();
   });
 
