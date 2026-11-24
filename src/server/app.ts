@@ -417,7 +417,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       const { createAllTools } = await import("../tools/system-tools.js");
       const { createMemoryTools } = await import("../tools/memory-tools.js");
       const { createDataAgentTools } = await import("../tools/data-tools.js");
-      const { createArtifactAgentTools } = await import("../tools/artifact-tools.js");
+      const { createArtifactAgentTools, workspaceFileReader } = await import("../tools/artifact-tools.js");
       const { createCompanyBrainAgentTools } = await import("../tools/company-brain-tools.js");
       const { createStorageAgentTools } = await import("../tools/storage-tools.js");
       const { resolveAgentVault } = await import("../vault/index.js");
@@ -521,6 +521,11 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         author: agentConfig.name,
         ...(context?.sessionId?.() ? { sessionId: context.sessionId()! } : {}),
         emit: (payload) => o.emit("artifact:changed", payload),
+        // artifact_from_file: a file of its chat workspace (the Cowork VM's or this machine's), copied out
+        readFile: workspaceFileReader({
+          cwd: o.getAgentWorkDir(), tempDir: join(polpoDir, "tmp"),
+          remote: { readFileBuffer: async (p: string) => chatFs.readFileBuffer ? chatFs.readFileBuffer(p) : Buffer.from(await chatFs.readFile(p)) },
+        }),
       })));
       // Buckets through host-side tools: credentials stay on the host.
       tools.push(...createStorageAgentTools(polpoDir, agentConfig.name, agentConfig.allowedTools, {
@@ -1586,6 +1591,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       return isTrustedApiCall(c.req.header(TRUSTED_API_CALL_HEADER)) ? `person:${currentEventOrigin()?.by ?? "mcp"}` : "person:dashboard";
     },
     emit: (payload) => orchestrator.emit("artifact:changed", payload),
+    // uploads from a file of the instance ({ path }): the same folders the Files page reads
+    fileRoots: () => [...new Set([o.getWorkDir(), o.getPolpoDir(), o.getAgentWorkDir()])],
   })));
   authed.route("/storage", storageRoutes(activeStorage, () => orchestrator.getAgentWorkDir()));
   authed.route("/brain", companyBrainRoutes(activeCompanyBrain));

@@ -328,7 +328,9 @@ export function buildSearchSources(deps: SearchSourceDeps): SearchSource[] {
         for (let i = 0; i < stale.length; i += 8) {
           await Promise.all(stale.slice(i, i + 8).map(async (s) => {
             const full = await store.get(s.id).catch(() => undefined);
-            artifactText.set(s.id, { updatedAt: s.updatedAt, text: full?.content ? clip(plainText(clip(full.content, 60_000)), 20_000) : "" });
+            // a large content (a blob) is indexed by its excerpt: never read whole here
+            const text = full?.blob ? full.excerpt ?? "" : full?.content ?? "";
+            artifactText.set(s.id, { updatedAt: s.updatedAt, text: text ? clip(plainText(clip(text, 60_000)), 20_000) : "" });
           }));
         }
         return list.map((a: any) => ({

@@ -7,17 +7,34 @@ import type { Artifact, ArtifactStore, ArtifactSummary } from "@polpo-ai/core/ar
 import type { DataQuery, DataView } from "@polpo-ai/core/data-registry";
 import { databaseStoresFor } from "../core/storage.js";
 import { FileArtifactStore } from "../stores/file-artifact-store.js";
+import { ArtifactBlobs } from "../artifacts/blobs.js";
+import { LargeArtifactStore } from "../artifacts/store.js";
 import type { DataPrincipal, DataRuntime } from "./data-runtime.js";
 
-const fileStores = new Map<string, FileArtifactStore>();
+const stores = new WeakMap<ArtifactStore, LargeArtifactStore>();
 
-export function getArtifactStore(polpoDir: string): ArtifactStore {
-  const database = databaseStoresFor(polpoDir)?.artifactStore;
-  if (database) return database;
-  let store = fileStores.get(polpoDir);
+/**
+ * The artifact store of a project: its records in the database (or .polpo/artifacts/ on files), large
+ * contents as blob files in .polpo/artifact-blobs/. The first use moves contents written inline before
+ * blobs existed (once; in the background).
+ */
+export function getArtifactStore(polpoDir: string): LargeArtifactStore {
+  const records: ArtifactStore = databaseStoresFor(polpoDir)?.artifactStore ?? fileRecords(polpoDir);
+  let store = stores.get(records);
+  if (!store) {
+    store = new LargeArtifactStore(records as LargeArtifactStore["base"], new ArtifactBlobs(polpoDir));
+    stores.set(records, store);
+    store.migrate().catch((err) => console.warn(`[artifacts] moving large contents to blobs failed: ${err instanceof Error ? err.message : String(err)}`));
+  }
+  return store;
+}
+
+const fileRecordStores = new Map<string, FileArtifactStore>();
+function fileRecords(polpoDir: string): FileArtifactStore {
+  let store = fileRecordStores.get(polpoDir);
   if (!store) {
     store = new FileArtifactStore(polpoDir);
-    fileStores.set(polpoDir, store);
+    fileRecordStores.set(polpoDir, store);
   }
   return store;
 }

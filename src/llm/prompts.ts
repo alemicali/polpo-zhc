@@ -35,7 +35,7 @@ function describeAgentCapabilities(agent: AgentConfig, skillPool?: SkillInfo[]):
   if (hasPattern("whatsapp_")) caps.push("whatsapp_list, whatsapp_read (markRead=false reads hidden), whatsapp_send, whatsapp_send_file, whatsapp_search, whatsapp_contacts");
   if (hasPattern("phone_")) caps.push("phone_call, phone_get_call, phone_list_calls, phone_hangup, phone_setup_inbound, phone_get_inbound_config, phone_disable_inbound (VAPI)");
   if (hasPattern("data_")) caps.push("scoped structured data discovery, query, read-only SQL, and mutation");
-  if (hasPattern("artifact_")) caps.push("artifacts: artifact_create / artifact_update (editable Docs, Slides, Sheets, Design and Motion, HTML dashboards with data, SVG and Mermaid), artifact_get, artifact_list, artifact_delete");
+  if (hasPattern("artifact_")) caps.push("artifacts: artifact_create / artifact_update (editable Docs, Slides, Sheets, Design and Motion, HTML dashboards with data, SVG and Mermaid; update old_str → new_str for small changes, rewrite only when most of it changes, ops for one tab, slide, sheet range, artboard or scene), artifact_from_file (publish a large file you wrote in your workspace), artifact_get (by part or byte range), artifact_list, artifact_delete");
   if (hasPattern("brain_")) caps.push("scoped Company Brain search, semantic context, evidence-aware enrichment, and knowledge graph maintenance");
   if (agent.skills?.length) {
     // Show skill names with descriptions when available from the pool
@@ -1379,8 +1379,10 @@ export async function buildChatSystemPrompt(
     `- For an editable presentation, workbook or animation, use type html and kind slides, sheets or motion. Follow the versioned JSON schema in artifact_create. For Sheets, write the kind before content and cells in reading order so the grid fills in as you work.`,
     `- When working with an artifact already open in the dashboard, read its current content with artifact_get and edit that id with artifact_update, passing expectedVersion (the version you read) so a person's edit made meanwhile is never overwritten. Preserve existing tabs, artboards, layers, and stable identifiers when changing one part.`,
     `- **svg**: a drawing or an illustration. **mermaid**: a diagram (flow, sequence, ER, Gantt…).`,
-    `Change an artifact with artifact_update (edits for small changes, content to rewrite it); every change keeps the`,
-    `previous version, so people can go back. After creating one, navigate_to({ target: "artifact", id }) so the person sees it.`,
+    `Change an artifact with artifact_update: command update (old_str → new_str, several with updates[]) for small changes, rewrite (content)`,
+    `only when most of it changes, ops / patch for one tab, slide, sheet range, artboard or scene; every change keeps the previous version,`,
+    `so people can go back. A large artifact (over ~20 KB): write the file and publish it with artifact_from_file instead of sending it`,
+    `in a tool call; read a large one by part or byte range (artifact_get). After creating one, navigate_to({ target: "artifact", id }) so the person sees it.`,
     `Use render_widget only for a small, throwaway visual inside the chat (no data sources, not kept).`,
     ``,
     `### Connectors (external apps over MCP)`,

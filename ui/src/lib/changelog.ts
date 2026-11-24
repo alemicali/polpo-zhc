@@ -51,6 +51,22 @@ export const CHANGELOG: ChangelogEntry[] = [
     cta: { label: "Apri i server ospitati", to: "/connectors?tab=servers" },
   },
   {
+    id: "2026-11-24-large-artifacts",
+    date: "2026-11-24",
+    kind: "new",
+    title: "Artefatti fino a 100 MB: carica file e modifica solo la parte che cambia",
+    summary: "Carica o trascina file negli Artefatti, sostituisci il contenuto di un artefatto, e lascia che agenti, Polpo e i client MCP cambino poche righe invece di riscrivere tutto.",
+    body: [
+      "- **Carica**: il pulsante Carica o il trascinamento sulla pagina Artefatti accettano Markdown, HTML, SVG, Mermaid, workspace JSON e fogli di calcolo (CSV, XLSX, convertiti in Fogli). Dal menu di un artefatto, **Sostituisci contenuto…**. I file grandi partono a pezzi, con l'avanzamento.",
+      "- **Modifiche mirate, come gli artefatti di Claude**: gli agenti usano `update` (testo vecchio → testo nuovo) per le piccole modifiche e `rewrite` solo quando cambia quasi tutto; in più operazioni su una scheda di un documento, una slide, un intervallo di celle, una tavola di un design o una scena.",
+      "- **Letture a pezzi**: un artefatto grande si legge per intervallo di byte, per struttura (schede, slide, fogli, tavole, scene) o una parte alla volta.",
+      "- **Da MCP**: Claude, ChatGPT e gli altri client caricano contenuti grandi da un URL, da un file dell'istanza o a pezzi in base64 (`polpo_artifact_upload_prepare` → `polpo_artifact_upload_finalize`). Gli agenti pubblicano un file scritto nel loro spazio con `artifact_from_file`.",
+      "- **Limiti e versioni**: fino a 100 MB per artefatto; ogni modifica è una versione (le ultime 30, fino a 500 MB per artefatto, configurabili in `settings.artifacts`). La cronologia mostra quanto spazio usano. Oltre 10 MB l'artefatto non si apre nell'editor: vedi dimensione, struttura, un'anteprima a pagine, scarica o sostituisci.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri gli Artefatti", to: "/artifacts" },
+  },
+  {
     id: "2026-11-24-agent-versions",
     date: "2026-11-24",
     kind: "new",

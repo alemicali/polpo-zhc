@@ -44,6 +44,8 @@ export type { UseAgentVersionsReturn, UseAgentDeploysReturn } from "./hooks/use-
 export { useMcpServers, useMcpServer } from "./hooks/use-mcp-servers.js";
 export type { UseMcpServersReturn, UseMcpServerReturn } from "./hooks/use-mcp-servers.js";
 export { useSkillBundleUpload } from "./hooks/use-skill-bundle-upload.js";
+export { useArtifactUpload, ARTIFACT_UPLOAD_PART_BYTES } from "./hooks/use-artifact-upload.js";
+export type { UseArtifactUploadReturn } from "./hooks/use-artifact-upload.js";
 export type { UseSkillBundleUploadReturn } from "./hooks/use-skill-bundle-upload.js";
 export { useNotifications } from "./hooks/use-notifications.js";
 export { useApprovals } from "./hooks/use-approvals.js";

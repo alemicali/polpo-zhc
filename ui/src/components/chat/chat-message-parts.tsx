@@ -98,9 +98,12 @@ export function AssistantSegments({
       else groups.push({ type: "thinking", content: seg.content });
     } else if (seg.type === "tool") {
       const isArtifactTool = seg.tool.name === "artifact_create" || seg.tool.name === "artifact_update";
-      const madeArtifact = isArtifactTool && seg.tool.state === "completed" ? artifactIdOf(seg.tool.result) : undefined;
+      // published from a file or an upload: the card too, once done (nothing to stream before)
+      const fromFile = seg.tool.name === "artifact_from_file" || seg.tool.name === "artifact_upload_finalize";
+      const madeArtifact = (isArtifactTool || fromFile) && seg.tool.state === "completed" ? artifactIdOf(seg.tool.result) : undefined;
       if (madeArtifact) {
-        groups.push({ type: "artifact", artifactId: madeArtifact, updated: seg.tool.name === "artifact_update", key: seg.tool.id });
+        const updated = seg.tool.name === "artifact_update" || (fromFile && /^(Updated|Replaced)/.test(seg.tool.result ?? ""));
+        groups.push({ type: "artifact", artifactId: madeArtifact, updated, key: seg.tool.id });
       } else if (isArtifactTool && (seg.tool.state === "preparing" || seg.tool.state === "calling")) {
         if (isStreaming) groups.push({ type: "artifact-pending", tool: seg.tool });
         else groups.push({ type: "tools", tools: [{ ...seg.tool, state: "interrupted" }] });

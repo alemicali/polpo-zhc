@@ -2953,4 +2953,156 @@ export interface McpPendingCall {
 export interface McpServerGenerateRequest { mode: "api" | "description"; url?: string; text?: string; goal?: string; name?: string; vaultOwner?: string; create?: boolean; id?: string }
 export interface McpServerGenerateResult {
   id?: string; spec: McpServerSpec; problems: string[]; notes: string[]; source: { kind: "openapi" | "docs" | "description"; endpoints?: number; title?: string };
+// ── Artifacts ────────────────────────────────────────────────────────
+
+export type ArtifactType = "doc" | "html" | "svg" | "mermaid" | "view";
+
+/** How much the versions of an artifact take, against the limits (settings.artifacts.versions). */
+export interface ArtifactVersionUsage {
+  count: number;
+  bytes: number;
+  currentBytes: number;
+  maxCount: number;
+  maxBytes: number;
+}
+
+export interface ArtifactVersionInfo {
+  version: number;
+  /** Empty when the version is large: read it with getArtifactVersion or artifactContentUrl. */
+  content: string;
+  blob?: { sha256: string; size: number };
+  size?: number;
+  author?: string;
+  note?: string;
+  at: string;
+}
+
+export interface ArtifactSummary {
+  id: string;
+  title: string;
+  type: ArtifactType;
+  kind?: string;
+  description?: string;
+  version: number;
+  author?: string;
+  note?: string;
+  createdBy: string;
+  sessionId?: string;
+  taskId?: string;
+  missionId?: string;
+  sources?: string[];
+  refreshSeconds?: number;
+  pinned?: boolean;
+  tags?: string[];
+  /** Bytes of the current content. */
+  size: number;
+  blob?: { sha256: string; size: number };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Artifact extends ArtifactSummary {
+  /** The content; empty with contentOmitted when it is over the viewer limit (read it as a file or by part). */
+  content: string;
+  contentOmitted?: boolean;
+  /** The beginning of a large content. */
+  excerpt?: string;
+  versions: ArtifactVersionInfo[];
+  usage?: ArtifactVersionUsage;
+  /** After a partial change: what it did ("1 update", "set_cells"…). */
+  change?: string;
+}
+
+/** A change to an artifact's content (one kind per call): Claude-artifact style update / rewrite, plus append, prepend, JSON Patch and per-kind ops. */
+export interface ArtifactChange {
+  command?: "update" | "rewrite" | "append" | "prepend";
+  old_str?: string;
+  new_str?: string;
+  replace_all?: boolean;
+  updates?: Array<{ old_str: string; new_str: string; replace_all?: boolean }>;
+  content?: string;
+  text?: string;
+  append?: string;
+  prepend?: string;
+  patch?: Array<{ op: "add" | "remove" | "replace" | "move" | "copy" | "test"; path: string; from?: string; value?: unknown }>;
+  ops?: Array<{ op: string; [key: string]: unknown }>;
+}
+
+export interface ArtifactUpdateInput extends ArtifactChange {
+  expectedVersion?: number;
+  title?: string;
+  description?: string;
+  kind?: string;
+  pinned?: boolean;
+  sources?: string[];
+  refreshSeconds?: number | null;
+  tags?: string[];
+  note?: string;
+}
+
+export interface ArtifactCreateInput {
+  title: string;
+  type: Exclude<ArtifactType, "view">;
+  content: string;
+  kind?: string;
+  description?: string;
+  sources?: string[];
+  refreshSeconds?: number;
+  pinned?: boolean;
+  tags?: string[];
+}
+
+/** A byte range (offset/limit), the outline, or one part (tab, slide(s), sheet + range, board, page, scene). */
+export interface ArtifactReadOptions {
+  version?: number;
+  offset?: number;
+  limit?: number;
+  outline?: boolean;
+  tab?: string | number;
+  slide?: string | number;
+  slides?: string;
+  sheet?: string | number;
+  range?: string;
+  board?: string | number;
+  page?: string | number;
+  scene?: string | number;
+}
+
+export interface ArtifactRead {
+  id: string;
+  version: number;
+  text: string;
+  size: number;
+  start?: number;
+  end?: number;
+  more?: boolean;
+  outline?: string;
+}
+
+export interface ArtifactUploadOptions {
+  title?: string;
+  type?: Exclude<ArtifactType, "view">;
+  kind?: string;
+  description?: string;
+  /** The file's name (helps detect the type). */
+  filename?: string;
+  note?: string;
+}
+
+/** An upload in progress (POST /artifacts/uploads). */
+export interface ArtifactUploadPart {
+  uploadId: string;
+  size: number;
+  complete: boolean;
+  filename?: string;
+}
+
+export interface ArtifactStorageUsage {
+  bytes: number;
+  maxBytes: number;
+  /** Over 80% of maxBytes. */
+  warning: boolean;
+  limits: { maxBytes: number; inlineBytes: number; maxEditBytes: number; maxTotalBytes: number; versions: { maxCount: number; maxTotalBytes: number } };
+  /** Contents over this are not sent whole with the artifact. */
+  viewerBytes: number;
 }

@@ -193,8 +193,8 @@ describe("the tools offered", () => {
     expect(a.polpo_mission_run).toMatchObject({ openWorldHint: true });
     for (const t of tools) if (t.name !== "polpo_file_read") expect(t.outputSchema, t.name).toBeTruthy();
     for (const n of ["polpo_task_delete", "polpo_mission_delete"]) expect(a[n]).toMatchObject({ destructiveHint: true, readOnlyHint: false });
-    // every Configuration section is on by default (the settings toolset), the task and mission cards, computer_get and computer_webhooks, WhatsApp Business (7), skill bundles (4), skill versions (3), agent versions (8), hosted MCP servers (10): 189 tools at most for a full-access client
-    expect(tools.length).toBeLessThanOrEqual(189);
+    // every Configuration section is on by default (the settings toolset), the task and mission cards, computer_get and computer_webhooks, WhatsApp Business (7), skill bundles (4), skill versions (3), agent versions (8), artifact uploads (2), hosted MCP servers (10): 191 tools at most for a full-access client
+    expect(tools.length).toBeLessThanOrEqual(191);
   });
 
   it("config and team changes need the admin scope; reads do not", async () => {

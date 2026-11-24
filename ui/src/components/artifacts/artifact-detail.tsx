@@ -1,13 +1,15 @@
 import { Suspense, use, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, Check, ChevronDown, Cloud, Code2, CopyPlus, Download, ExternalLink, FileDown, History, House, Link2, Maximize2, MessageSquare, Pencil, Pin, Printer, RefreshCw, RotateCcw, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, Cloud, Code2, CopyPlus, Download, ExternalLink, FileDown, History, House, Link2, Maximize2, MessageSquare, Pencil, Pin, Printer, RefreshCw, RotateCcw, Save, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { useEvents } from "@polpo-ai/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { artifactDownload, artifactWorkspace, artifactsApi, downloadArtifactFile, saveArtifactFile, type Artifact } from "@/lib/artifacts-api";
+import { ARTIFACT_LARGE_WARNING_BYTES, artifactDownload, artifactWorkspace, artifactsApi, downloadArtifactContent, downloadArtifactFile, saveArtifactFile, type Artifact } from "@/lib/artifacts-api";
+import { ARTIFACT_UPLOAD_ACCEPT, formatSize, prepareArtifactFile } from "@/lib/artifact-upload";
+import { ArtifactLargeView } from "./artifact-large-view";
 import { absoluteTime, artifactAuthor } from "@/lib/artifacts-list";
 import { artifactPath, useArtifactActions } from "@/hooks/use-artifact-actions";
 import { productName, useInstanceBranding } from "@/lib/branding";
@@ -52,6 +54,9 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
   const [rename, setRename] = useState<string>();
   const [showHistory, setShowHistory] = useState(false);
   const [busy, setBusy] = useState(false);
+  // versions kept as blobs come without their content: read when shown
+  const [loadedVersions, setLoadedVersions] = useState<Record<number, { content: string; omitted?: boolean }>>({});
+  const replaceInput = useRef<HTMLInputElement>(null);
   const { events } = useEvents(["artifact:changed"], 1);
   const lastEvent = events[0];
 
@@ -72,6 +77,17 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
   const dirty = !!draft && (draft.content !== draft.base.content || draft.title !== draft.base.title);
 
   const live = useLiveArtifactUpdate(artifact, !dirty && !saving && version === undefined && !embedded, acceptCommitted);
+
+  const pendingVersion = version !== undefined ? artifact?.versions.find((item) => item.version === version) : undefined;
+  const needsVersion = !!pendingVersion && !pendingVersion.content && (pendingVersion.size ?? pendingVersion.blob?.size ?? 0) > 0 && !loadedVersions[pendingVersion.version];
+  useEffect(() => {
+    if (!needsVersion || !pendingVersion) return;
+    let active = true;
+    void artifactsApi.version(id, pendingVersion.version).then((loaded) => {
+      if (active) setLoadedVersions((current) => ({ ...current, [loaded.version]: { content: loaded.content, ...(loaded.contentOmitted ? { omitted: true } : {}) } }));
+    }, (err: Error) => { if (active) toast.error(err.message); });
+    return () => { active = false; };
+  }, [id, needsVersion, pendingVersion]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -141,13 +157,19 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
   }
 
   const shownVersion = artifact.versions.find((item) => item.version === version);
-  const content = shownVersion?.content ?? draft?.content ?? artifact.content;
-  const workspace = artifactWorkspace(artifact, shownVersion?.content ?? draft?.base.content ?? content);
+  const loadedVersion = shownVersion ? loadedVersions[shownVersion.version] : undefined;
+  const shownContent = shownVersion ? loadedVersion?.content ?? shownVersion.content : undefined;
+  // too large for the editors: the large view (size, download, replace, outline, preview by pages)
+  const omitted = shownVersion ? !!loadedVersion?.omitted : !!artifact.contentOmitted;
+  const versionLoading = !!shownVersion && needsVersion;
+  const large = !omitted && (artifact.size ?? 0) > ARTIFACT_LARGE_WARNING_BYTES && !shownVersion;
+  const content = shownContent ?? draft?.content ?? artifact.content;
+  const workspace = artifactWorkspace(artifact, shownContent ?? draft?.base.content ?? (artifact.contentOmitted ? artifact.excerpt ?? "" : content));
   const legacy = artifact.type === "view";
   const docSurface = artifact.type === "doc" ? "artifact-doc-surface" : "";
   const BackIcon = docSurface ? House : ArrowLeft;
   const kind = workspace ?? ((artifact.type === "doc" || artifact.kind === "design") ? liveArtifactKind(artifact.type, artifact.kind) : undefined);
-  const editable = !legacy && !shownVersion && !embedded;
+  const editable = !legacy && !shownVersion && !embedded && !artifact.contentOmitted;
   const versionChanged = !!draft && artifact.version !== draft.base.version && !saving;
   const autoSaveStatus = saving ? "Saving…" : versionChanged ? "A newer version is available" :
     saveError ? "Changes could not be saved" : dirty ? "Changes pending" : "Saved";
@@ -174,6 +196,34 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
     } finally {
       setBusy(false);
     }
+  }
+
+  async function replaceContent(file: File) {
+    if (!artifact || busy || saving) return;
+    if (dirty && !window.confirm("Replace the content and discard the changes not saved yet?")) return;
+    setBusy(true);
+    const toastId = toast.loading(`Uploading ${file.name}…`);
+    try {
+      const prepared = await prepareArtifactFile(file);
+      const updated = await artifactsApi.replaceContent(artifact.id, prepared.file, {
+        expectedVersion: artifact.version, filename: prepared.filename,
+        onProgress: (sent, total) => toast.loading(`Uploading ${file.name}… ${total ? Math.round((sent / total) * 100) : 100}%`, { id: toastId }),
+      });
+      setArtifact(updated);
+      setDraft(undefined);
+      setVersion(undefined);
+      toast.success(`Content replaced (version ${updated.version})`, { id: toastId });
+    } catch (err) {
+      toast.error((err as Error).message, { id: toastId });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function downloadSource() {
+    if (!artifact) return;
+    if (omitted || (shownVersion && !shownContent)) void downloadArtifactContent(artifact, shownVersion?.version).catch((err: Error) => toast.error(err.message));
+    else saveArtifactFile(artifact, content);
   }
 
   async function remove() {
@@ -254,16 +304,17 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
                   <DropdownMenuItem onSelect={() => void exportDoc("word")}><FileDown /> Word document</DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => void exportDoc("print")}><Printer /> Print or save PDF</DropdownMenuItem>
                 </>}
-                <DropdownMenuItem onSelect={() => saveArtifactFile(artifact, content)}><Download /> Download source</DropdownMenuItem>
+                <DropdownMenuItem onSelect={downloadSource}><Download /> Download source</DropdownMenuItem>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
             {!legacy && <DropdownMenuItem disabled={busy || saving || dirty} onSelect={() => void togglePin()}><Pin />{artifact.pinned ? "Unpin" : "Pin"}</DropdownMenuItem>}
             {editable && <DropdownMenuItem onSelect={() => setRename(draft?.title ?? artifact.title)}><Pencil /> Rename</DropdownMenuItem>}
+            {!legacy && !embedded && !shownVersion && <DropdownMenuItem disabled={busy || saving} onSelect={() => replaceInput.current?.click()}><Upload /> Replace content…</DropdownMenuItem>}
             {!legacy && <DropdownMenuItem disabled={busy || dirty || saving} onSelect={() => void duplicate()}><CopyPlus /> Duplicate</DropdownMenuItem>}
             {!workspace && (artifact.type === "html" || legacy) && <DropdownMenuItem onSelect={() => setRefreshKey(key => key + 1)}><RefreshCw /> Refresh</DropdownMenuItem>}
             {!legacy && <DropdownMenuItem onSelect={() => setShowHistory(true)}><History /> Version history</DropdownMenuItem>}
             <DropdownMenuSeparator />
-            {!legacy && <DropdownMenuItem onSelect={() => setSource({ value: content, version: artifact.version })}><Code2 /> View source</DropdownMenuItem>}
+            {!legacy && !omitted && !versionLoading && <DropdownMenuItem onSelect={() => setSource({ value: content, version: artifact.version })}><Code2 /> View source</DropdownMenuItem>}
             {editable && dirty && <DropdownMenuItem disabled={saving || versionChanged} onSelect={() => void save()}><Save /> Save now</DropdownMenuItem>}
             <DropdownMenuItem onSelect={() => void stage.current?.requestFullscreen?.().catch(() => {})}><Maximize2 /> Full screen</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => void copyLink(artifact)}><Link2 /> Copy link</DropdownMenuItem>
@@ -306,9 +357,19 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
         </div>
       )}
       {legacy && <p className="rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning">Edit this view on the Data page.</p>}
+      {large && <p role="status" className="border-b border-warning/30 bg-warning/5 px-3 py-1.5 text-xs text-warning">
+        This artifact is {formatSize(artifact.size ?? 0)}: the editor may be slow. Agents can change parts of it without rewriting it.
+      </p>}
+      <input ref={replaceInput} type="file" hidden accept={ARTIFACT_UPLOAD_ACCEPT} data-testid="artifact-replace-input"
+        onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void replaceContent(file); }} />
       <div ref={stage} className="min-h-0 flex-1 overflow-hidden bg-background" inert={busy}>
         <Suspense fallback={<ArtifactPreparation kind={artifact.kind} />}>
-          {kind ? (
+          {omitted ? (
+            <ArtifactLargeView artifact={artifact} version={shownVersion?.version}
+              onReplace={!legacy && !embedded && !shownVersion ? () => replaceInput.current?.click() : undefined} />
+          ) : versionLoading ? (
+            <ArtifactPreparation kind={artifact.kind} />
+          ) : kind ? (
             <ArtifactLiveWorkspace kind={kind} artifact={artifact} content={live.preview ?? content}
               streaming={live.preview !== undefined} readOnly={!editable} onChange={onChange} refreshKey={refreshKey}
               appearanceVersion={live.preview !== undefined ? live.tick : shownVersion?.version ?? artifact.version}
@@ -322,6 +383,9 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
       <Dialog open={showHistory} onOpenChange={setShowHistory}>
         <DialogContent className={`${docSurface} sm:max-w-sm`}>
           <DialogHeader><DialogTitle>Version history</DialogTitle><DialogDescription>{artifact.title}</DialogDescription></DialogHeader>
+          {artifact.usage && <p className="text-xs text-muted-foreground" data-testid="artifact-version-usage">
+            {artifact.usage.count} earlier version{artifact.usage.count === 1 ? "" : "s"}, {formatSize(artifact.usage.bytes)} of {formatSize(artifact.usage.maxBytes)} (at most {artifact.usage.maxCount}; the oldest are removed first)
+          </p>}
           <div className="max-h-[55dvh] overflow-auto" role="list" aria-label="Artifact versions">
             {[artifact, ...artifact.versions].map(item => <button key={item.version} type="button" disabled={saving || busy}
               className="flex w-full items-center justify-between gap-3 rounded-md px-2 py-2 text-left hover:bg-accent"
@@ -331,7 +395,7 @@ export function ArtifactDetail({ id, embedded = false, onDeleted }: { id: string
                 setShowHistory(false);
               }}>
               <span className="min-w-0"><span className="block text-sm font-medium">Version {item.version}{item.version === artifact.version ? " · Current" : ""}</span>
-                <span className="block truncate text-xs text-muted-foreground">{absoluteTime("at" in item ? item.at : artifact.updatedAt)}</span></span>
+                <span className="block truncate text-xs text-muted-foreground">{absoluteTime("at" in item ? item.at : artifact.updatedAt)}{typeof item.size === "number" ? ` · ${formatSize(item.size)}` : ""}</span></span>
               {(shownVersion?.version ?? artifact.version) === item.version && <Check className="size-4" />}
             </button>)}
           </div>
