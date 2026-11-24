@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Bulleted and numbered lists in chat answers are indented again.** Streamdown's list classes (`list-inside`, `[li_&]:pl-6`) were never generated because Tailwind does not scan `node_modules`; `ui/src/index.css` now adds `@source "../node_modules/streamdown/dist/*.js"`, so bullets no longer hang outside the message on the left.
 - **Agent avatars are stored as images again.** `POST /api/v1/agents/:name/avatar` (the dashboard upload, MCP `polpo_agent_avatar_set` and Polpo's tool) wrote the image's base64 text to `.polpo/avatars/<name>.<ext>` instead of its bytes, so the avatar never showed; it now writes the bytes (`writeFileBuffer`).
 
 ### Added
