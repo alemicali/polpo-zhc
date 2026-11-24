@@ -234,7 +234,7 @@ export const harnessesApi = {
   test: (harness: HarnessId, o: { settings?: HarnessesSettings; agent?: string } = {}) =>
     request<HarnessTestResult>("/harnesses/test", json("POST", { harness, ...o })),
   /** An agent's engine: "polpo" (Polpo's own), a harness, or the CLI engine. */
-  setEngine: (agent: string, engine: "polpo" | AgentHarnessEngine | AgentCliEngine) => request<unknown>(`/agents/${encodeURIComponent(agent)}`, json("PATCH", { engine })),
+  setEngine: (agent: string, engine: "polpo" | AgentHarnessEngine | AgentCliEngine) => request<unknown>(`/agents/${encodeURIComponent(agent)}`, json("PATCH", { engine, publish: false })),
   // ── CLI accounts (personal sign-ins; Polpo never sees a token) ──
   cliAccounts: (o: { status?: boolean } = {}) => request<CliOverview>(`/harnesses/cli/accounts${o.status === false ? "?status=0" : ""}`),
   addCliAccount: (a: { cli: CliId; computer?: string; label?: string; id?: string }) => request<CliAccount>("/harnesses/cli/accounts", json("POST", a)),

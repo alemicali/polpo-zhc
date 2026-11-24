@@ -24,7 +24,8 @@ export function AgentColorPicker({ agent, onChanged }: { agent: AgentConfig; onC
       const identity = { ...(agent.identity ?? {}) } as Record<string, unknown>;
       if (token) identity.color = token;
       else delete identity.color;
-      await updateAgent(agent.name, { identity } as Parameters<typeof updateAgent>[1]);
+      // the dashboard edits the draft: publish and deploy are explicit steps (Versions tab)
+      await updateAgent(agent.name, { identity, publish: false } as Parameters<typeof updateAgent>[1]);
       await onChanged?.();
       setOpen(false);
     } catch (e) {

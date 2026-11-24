@@ -229,7 +229,7 @@ export const sandboxApi = {
     request<unknown>("/config/settings", { method: "PATCH", body: JSON.stringify({ sandbox }) }),
   /** Agent overrides; an empty object means "inherit everything". */
   saveAgent: (name: string, sandbox: SandboxSettings) =>
-    request<unknown>(`/agents/${encodeURIComponent(name)}`, { method: "PATCH", body: JSON.stringify({ sandbox }) }),
+    request<unknown>(`/agents/${encodeURIComponent(name)}`, { method: "PATCH", body: JSON.stringify({ sandbox, publish: false }) }),
 };
 
 /** Drop empty fields so "inherit" is stored as absence. */

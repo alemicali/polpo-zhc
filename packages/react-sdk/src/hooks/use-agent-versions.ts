@@ -53,7 +53,8 @@ export function useAgentVersions(name: string | undefined): UseAgentVersionsRetu
   }, [client, name]);
 
   useEffect(() => { void fetch_(); }, [fetch_]);
-  useAgentChanged(name, () => { void fetch_(); });
+  const onChanged = useCallback(() => { void fetch_(); }, [fetch_]);
+  useAgentChanged(name, onChanged);
 
   const publish = useCallback(async (req: Parameters<UseAgentVersionsReturn["publish"]>[0] = {}) => {
     const r = await client.publishAgent(name ?? "", req);
@@ -66,14 +67,17 @@ export function useAgentVersions(name: string | undefined): UseAgentVersionsRetu
     await fetch_();
   }, [client, name, fetch_]);
 
+  const get = useCallback((version: string) => client.getAgentVersion(name ?? "", version), [client, name]);
+  const diff = useCallback((o?: { from?: string; to?: string }) => client.diffAgentVersions(name ?? "", o), [client, name]);
+
   const current = state?.key === key ? state : null;
   return {
     data: current?.data,
     isLoading: !!name && !current,
     error: current?.error ?? null,
     refetch: fetch_,
-    get: (version) => client.getAgentVersion(name ?? "", version),
-    diff: (opts) => client.diffAgentVersions(name ?? "", opts),
+    get,
+    diff,
     publish,
     discardDraft,
   };
@@ -110,7 +114,8 @@ export function useAgentDeploys(name: string | undefined, opts: { limit?: number
   }, [client, name, limit]);
 
   useEffect(() => { void fetch_(); }, [fetch_]);
-  useAgentChanged(name, () => { void fetch_(); });
+  const onChanged = useCallback(() => { void fetch_(); }, [fetch_]);
+  useAgentChanged(name, onChanged);
 
   const deploy = useCallback(async (version: string, note?: string) => {
     const r = await client.deployAgentVersion(name ?? "", version, note);
@@ -124,13 +129,15 @@ export function useAgentDeploys(name: string | undefined, opts: { limit?: number
     return r;
   }, [client, name, fetch_]);
 
+  const get = useCallback((id: string) => client.getAgentDeploy(name ?? "", id), [client, name]);
+
   const current = state?.key === key ? state : null;
   return {
     data: current?.data,
     isLoading: !!name && !current,
     error: current?.error ?? null,
     refetch: fetch_,
-    get: (id) => client.getAgentDeploy(name ?? "", id),
+    get,
     deploy,
     rollback,
   };

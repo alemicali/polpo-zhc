@@ -53,6 +53,7 @@ import { AgentLearningTab } from "@/components/agents/agent-learning-tab";
 import { AgentDriveTab } from "@/components/agents/agent-drive-tab";
 import { AgentTasksTab } from "@/components/agents/agent-tasks-tab";
 import { AgentMemoryTab } from "@/components/agents/agent-memory-tab";
+import { AgentVersionsTab, AgentVersionBadges } from "@/components/agents/agent-versions-tab";
 
 // ── Breadcrumb ──
 
@@ -100,6 +101,7 @@ function MobileIdentitySummary() {
             {process && <div className="h-2 w-2 rounded-pill bg-primary animate-pulse" />}
           </div>
           {identity?.title && <p className="text-xs text-muted-foreground">{identity.title}</p>}
+          <AgentVersionBadges agent={agent} className="mt-1" />
           <p className="mt-0.5 flex min-w-0 text-micro text-muted-foreground"><AgentModelWithEngine agent={agent} mono size={12} testId="agent-mobile-model" /></p>
         </div>
         <Button
@@ -177,6 +179,12 @@ function AgentDetailContent() {
           </TabsTrigger>
           <TabsTrigger value="sandbox">Sandbox</TabsTrigger>
           <TabsTrigger value="config">Config</TabsTrigger>
+          <TabsTrigger value="versions">
+            <span className="inline-flex items-center gap-1.5">
+              Versions
+              {agent.versioning?.draft.hasChanges && <span className="h-1.5 w-1.5 rounded-pill bg-warning" aria-label="Draft has changes" />}
+            </span>
+          </TabsTrigger>
           <TabsTrigger value="tasks">
             Tasks
             {taskStats.total > 0 && (
@@ -221,6 +229,9 @@ function AgentDetailContent() {
           <AgentSandboxTab />
         </TabsContent>
 
+        <TabsContent value="versions" className="mt-4 flex-1 min-h-0">
+          <AgentVersionsTab />
+        </TabsContent>
         <TabsContent value="config" className="mt-4 flex-1 min-h-0">
           <AgentConfigTab />
         </TabsContent>

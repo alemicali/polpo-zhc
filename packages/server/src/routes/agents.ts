@@ -6,6 +6,7 @@ import { AddAgentSchema, UpdateAgentSchema, RenameTeamSchema, AddTeamSchema } fr
 import { redactAgentConfig, redactTeam, sanitizeTranscriptEntry } from "../security.js";
 import { buildETag, contentFingerprint, handleConditional } from "../etag.js";
 import { registerAgentVersionRoutes, versionErrorResponse, type AgentVersionDeps } from "./agent-versions.js";
+import { AGENT_FIELD_CLASSIFICATION } from "@polpo-ai/core/agent-versions";
 
 interface IndexedRunLog {
   file: string;
@@ -612,8 +613,10 @@ export function agentRoutes(getDeps: () => {
     path: "/{name}",
     tags: ["Agents"],
     summary: "Get agent",
+    description: "The agent as production runs it, with `versioning` (production version, latest, draft state). `view=draft`: its draft (working copy) instead, as the dashboard edits it.",
     request: {
       params: z.object({ name: z.string() }),
+      query: z.object({ view: z.enum(["production", "draft"]).optional() }),
     },
     responses: {
       200: {
@@ -630,13 +633,20 @@ export function agentRoutes(getDeps: () => {
   app.openapi(getAgentRoute, async (c) => {
     const deps = getDeps();
     const { name } = c.req.valid("param");
-    const agent = (await deps.getAgents()).find(a => a.name === name);
+    const { view } = c.req.valid("query");
+    let agent = (await deps.getAgents()).find(a => a.name === name);
     if (!agent) {
       return c.json({ ok: false, error: "Agent not found", code: "NOT_FOUND" }, 404);
     }
-    // the production config, with its version, the pointers and the draft's state
+    // the production config (or the draft's), with its version, the pointers and the draft's state
     const versioning = await versionState(deps, agent);
-    return c.json({ ok: true, data: { ...redactAgentConfig(agent), ...(versioning ? { versioning } : {}) } }, 200);
+    if (view === "draft" && versioning && deps.versions) {
+      const { config } = await deps.versions.versioning().draftConfig(name);
+      // the draft's versioned fields over the agent's own (name, createdAt, mission fields)
+      const own = Object.fromEntries(Object.entries(agent).filter(([k]) => AGENT_FIELD_CLASSIFICATION[k as keyof typeof AGENT_FIELD_CLASSIFICATION] !== "versioned"));
+      agent = { ...own, ...config, name };
+    }
+    return c.json({ ok: true, data: { ...redactAgentConfig(agent), ...(versioning ? { versioning: { ...versioning, ...(view === "draft" ? { view: "draft" } : {}) } } : {}) } }, 200);
   });
 
   // ── POST /agents/:name/avatar — upload agent avatar ──

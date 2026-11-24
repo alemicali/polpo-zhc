@@ -879,8 +879,9 @@ export class PolpoClient {
     return this.get<AgentConfig[]>("/agents");
   }
 
-  getAgent(name: string): Promise<AgentConfig> {
-    return this.get<AgentConfig>(`/agents/${encodeURIComponent(name)}`);
+  /** An agent as production runs it; view "draft": its draft (working copy), as the dashboard edits it. */
+  getAgent(name: string, opts: { view?: "production" | "draft" } = {}): Promise<AgentConfig> {
+    return this.get<AgentConfig>(`/agents/${encodeURIComponent(name)}${opts.view === "draft" ? "?view=draft" : ""}`);
   }
 
   addAgent(req: AddAgentRequest, teamName?: string): Promise<{ added: boolean }> {
