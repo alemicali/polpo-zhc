@@ -95,6 +95,8 @@ export interface Task {
   title: string;
   description: string;
   assignTo: string;
+  /** A published version of the assignee the task is pinned to (absent: production). */
+  agentVersion?: string;
   group?: string;
   /** The mission the task belongs to (missions created before names were unique can share a group). */
   missionId?: string;
@@ -210,6 +212,8 @@ export interface TaskRunContext {
   continuation?: boolean;
   /** The agent that ran it. */
   agent?: string;
+  /** The agent's published version the run used. */
+  agentVersion?: string;
   engine: TaskRunEngine;
   model?: string;
   /** The harness authentication kind (never the credential); provider: OpenCode's model provider (anthropic, openai, amazon-bedrock, vercel, polpo-gateway…). */
@@ -446,6 +450,8 @@ export interface AgentConfig {
   name: string;
   /** ISO timestamp of when this agent was created / added to the team. */
   createdAt?: string;
+  /** GET/PATCH /agents/{name}: the production version, the latest and the draft's state. */
+  versioning?: AgentVersioningSummary;
   role?: string;
   model?: string;
   allowedTools?: string[];
@@ -1495,6 +1501,114 @@ export interface UpdateAgentRequest {
   emailAllowedDomains?: string[];
   /** Move agent to a different team. */
   team?: string;
+  /**
+   * Versioning: false keeps the change in the draft; true publishes it as a new version. Absent:
+   * the instance setting decides (settings.agents.versioning.autoDeployApiUpdates, default: publish and deploy).
+   */
+  publish?: boolean;
+  /** Publish and deploy the new version to production in the same call. */
+  deploy?: boolean;
+  bump?: AgentVersionBump;
+  /** An explicit version number for the published version (above the latest). */
+  version?: string;
+  /** Release note of the published version. */
+  note?: string;
+}
+
+// ── Agent versions ──
+
+export type AgentVersionBump = "major" | "minor" | "patch";
+
+export interface AgentFieldChange {
+  field: string;
+  kind: "added" | "removed" | "changed";
+  before?: unknown;
+  after?: unknown;
+  /** Long text fields (system prompt): a unified line diff. */
+  textDiff?: string;
+}
+
+/** A published, immutable snapshot of an agent's configuration. */
+export interface AgentVersion {
+  agent: string;
+  version: string;
+  /** The versioned configuration (GET …/versions/{version}; absent in lists). */
+  config?: Partial<AgentConfig>;
+  author: string;
+  createdAt: string;
+  note?: string;
+  bump: AgentVersionBump | "custom" | "initial";
+  previous?: string;
+  changes: AgentFieldChange[];
+  changedFields?: string[];
+  /** Skill versions pinned at publish time (skill → version number). */
+  skillVersions?: Record<string, number>;
+}
+
+export interface AgentVersionState {
+  agent: string;
+  production?: string;
+  pointers: Record<string, string>;
+  latest?: string;
+  versions: number;
+  draft: {
+    exists: boolean;
+    hasChanges: boolean;
+    baseVersion?: string;
+    updatedAt?: string;
+    updatedBy?: string;
+    changes: AgentFieldChange[];
+    suggestedBump?: AgentVersionBump;
+    nextVersion?: string;
+  };
+}
+
+/** The versioning summary returned with an agent (GET/PATCH /agents/{name}). */
+export interface AgentVersioningSummary {
+  production?: string;
+  latest?: string;
+  pointers: Record<string, string>;
+  versions: number;
+  draft: { exists: boolean; hasChanges: boolean; changedFields: string[]; updatedAt?: string; updatedBy?: string; suggestedBump?: AgentVersionBump; nextVersion?: string };
+  /** PATCH only: what the update did. */
+  mode?: "draft" | "publish" | "deploy";
+  draftChanged?: boolean;
+  published?: { version: string; bump: string; changedFields: string[] };
+  deployed?: AgentDeployEntry;
+}
+
+export interface AgentVersionList {
+  state: AgentVersionState;
+  /** Newest first, without their config. */
+  versions: AgentVersion[];
+}
+
+export interface AgentVersionDiff {
+  agent: string;
+  from?: string;
+  to: string;
+  changes: AgentFieldChange[];
+  /** git-style unified diff of the configuration (YAML, keys sorted, text as blocks). */
+  unified: string;
+  suggestedBump?: AgentVersionBump;
+}
+
+export interface AgentDeployEntry {
+  id: string;
+  agent: string;
+  pointer: string;
+  from?: string;
+  to: string;
+  action: "deploy" | "rollback" | "initial";
+  actor: string;
+  note?: string;
+  at: string;
+  diff?: AgentVersionDiff;
+}
+
+export interface AgentPublishResult {
+  version: AgentVersion;
+  deploy?: AgentDeployEntry;
 }
 
 export interface UpdateSettingsRequest {

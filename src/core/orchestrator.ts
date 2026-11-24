@@ -1967,6 +1967,11 @@ export class Orchestrator extends TypedEmitter {
     return { agent, draftChanged, ...(published ? { published } : {}), ...(deployed ? { deployed } : {}) };
   }
 
+  /** Tell live clients an agent's versions changed (publish, draft discarded): agent:updated. */
+  async notifyAgentChanged(name: string): Promise<void> {
+    await this.emitTeamSnapshot("agent:updated", { agentName: name });
+  }
+
   /** Deploy a published version to production (or roll back): written live, recorded in the history. */
   async deployAgentVersion(name: string, version: string, opts: { actor: string; note?: string }): Promise<AgentDeployEntry> {
     return this.agentVersions.deploy(name, version, { actor: opts.actor, note: opts.note, pointer: PRODUCTION_POINTER });

@@ -1408,6 +1408,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       rollback: (name, opts) => o.rollbackAgentVersion(name, opts),
       autoDeploy: () => o.autoDeployApiUpdates(),
       actor: (c) => requestAuthor(c),
+      // publish / discard do not write the live agent: refresh live clients (deploys already do)
+      changed: (name, what) => { if (what !== "deployed") void o.notifyAgentChanged(name); },
     },
   })));
 
