@@ -18,7 +18,10 @@
  * Shared by the config file, the API, the MCP tools and the dashboard; the runtime is
  * src/cli-engine/ and src/adapters/cli-engine.ts.
  */
-import { HOST_COMPUTER_ID, COMPUTER_ID_PATTERN } from "./computers.js";
+// computers.ts constants, repeated here: importing computers.js would add an import cycle
+// (sandbox → computers → tailnet) that breaks `export *` under some loaders
+const HOST_COMPUTER_ID = "host";
+const COMPUTER_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
 export type CliId = "claude" | "codex";
 export const CLI_IDS: readonly CliId[] = ["claude", "codex"];
