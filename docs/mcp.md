@@ -83,7 +83,7 @@ A failed task carries `failure` on every surface (`GET /tasks/:id`, the slim lis
 
 | Tool | What it does |
 |---|---|
-| `polpo_artifacts_list`, `polpo_artifact_get`, `polpo_artifact_create`, `polpo_artifact_update` | Docs, editable workspaces (slides, sheets, design, motion), html dashboards, drawings and diagrams; update takes `expectedVersion` and is refused when the artifact changed since (see [artifacts.md](artifacts.md)). |
+| `polpo_artifacts_list`, `polpo_artifact_get`, `polpo_artifact_create`, `polpo_artifact_update`, `polpo_artifact_upload_prepare`, `polpo_artifact_upload_finalize` | Docs, editable workspaces (slides, sheets, design, motion), html dashboards, drawings and diagrams. Update is Claude-artifact style (`update` old_str → new_str by default, `rewrite` only when most of it changes, plus `patch` / per-kind `ops`), takes `expectedVersion` and is refused when the artifact changed since; get reads by byte range, outline or part; large contents go by upload (prepare from a URL, a file of the instance or base64 parts, then finalize) — see [artifacts.md](artifacts.md). |
 | `polpo_data_sources_list`, `polpo_data_query` | Structured data: the sources (with the agents that may use them) and rows of a dataset (fields, filters, sort, limit, `offset`; `includeTotal` also counts every matching row as `meta.totalCount`, not for REST sources). |
 | `polpo_files_list`, `polpo_files_search`, `polpo_file_read` | Browse and read the instance's files (the agents' workspace, `.polpo`, volumes): text by line ranges, images and PDFs as they are. |
 | `polpo_file_write`, `polpo_file_manage` | Create a file (text or base64; replacing one needs `overwrite: true`), make folders, rename, delete (`confirm: true`). |
