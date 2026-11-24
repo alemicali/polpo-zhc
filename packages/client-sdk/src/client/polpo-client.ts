@@ -87,6 +87,17 @@ import type {
   TaskDirection,
   SendTaskDirectionRequest,
   SendTaskDirectionResult,
+  WaBizOutcome,
+  WaBizSecretKind,
+  WaBusinessStatus,
+  WaBusinessEventSummary,
+  WaBusinessEvent,
+  WaBusinessEventPage,
+  WaBusinessContact,
+  WaBusinessMessage,
+  WaBusinessConversation,
+  WaBusinessTemplate,
+  WaBusinessSendResult,
 } from "./types.js";
 
 export interface PolpoClientConfig {
@@ -696,6 +707,96 @@ export class PolpoClient {
   /** The connectors (external apps over MCP), with their status, account and who may use them. */
   getConnectors(): Promise<Connector[]> {
     return this.get<{ connectors: Connector[] }>("/connectors").then((d) => d.connectors);
+  }
+
+  // ── WhatsApp Business (Meta Cloud API) ─────────────────────
+
+  /** Every WhatsApp Business channel's status (never a secret's value). */
+  getWaBusinessChannels(): Promise<WaBusinessStatus[]> {
+    return this.get<{ channels: WaBusinessStatus[] }>("/whatsapp-business").then((d) => d.channels);
+  }
+
+  getWaBusinessStatus(channel: string): Promise<WaBusinessStatus> {
+    return this.get<WaBusinessStatus>(`/whatsapp-business/${encodeURIComponent(channel)}/status`);
+  }
+
+  /** Store secrets in the vault (dashboard); only the ones given change. Returns which are set. */
+  setWaBusinessSecrets(channel: string, secrets: Partial<Record<WaBizSecretKind, string>>): Promise<{ secrets: Record<WaBizSecretKind, boolean> }> {
+    return this.put(`/whatsapp-business/${encodeURIComponent(channel)}/secrets`, secrets);
+  }
+
+  removeWaBusinessSecret(channel: string, kind: WaBizSecretKind): Promise<{ secrets: Record<WaBizSecretKind, boolean> }> {
+    return this.del(`/whatsapp-business/${encodeURIComponent(channel)}/secrets/${kind}`);
+  }
+
+  /** A fresh verify token, returned this once (paste it in Meta's dashboard). */
+  generateWaBusinessVerifyToken(channel: string): Promise<{ verifyToken: string }> {
+    return this.post(`/whatsapp-business/${encodeURIComponent(channel)}/verify-token`);
+  }
+
+  getWaBusinessEvents(channel: string, o: { limit?: number; cursor?: string; outcome?: WaBizOutcome[] } = {}): Promise<WaBusinessEventPage> {
+    const q = new URLSearchParams();
+    if (o.limit) q.set("limit", String(o.limit));
+    if (o.cursor) q.set("cursor", o.cursor);
+    if (o.outcome?.length) q.set("outcome", o.outcome.join(","));
+    const qs = q.toString();
+    return this.get(`/whatsapp-business/${encodeURIComponent(channel)}/events${qs ? `?${qs}` : ""}`);
+  }
+
+  getWaBusinessEvent(channel: string, id: string): Promise<WaBusinessEvent> {
+    return this.get(`/whatsapp-business/${encodeURIComponent(channel)}/events/${encodeURIComponent(id)}`);
+  }
+
+  getWaBusinessContacts(channel: string, limit?: number): Promise<WaBusinessContact[]> {
+    return this.get<{ contacts: WaBusinessContact[] }>(`/whatsapp-business/${encodeURIComponent(channel)}/contacts${limit ? `?limit=${limit}` : ""}`).then((d) => d.contacts);
+  }
+
+  getWaBusinessConversation(channel: string, waId: string, limit?: number): Promise<WaBusinessConversation> {
+    return this.get(`/whatsapp-business/${encodeURIComponent(channel)}/contacts/${encodeURIComponent(waId)}${limit ? `?limit=${limit}` : ""}`);
+  }
+
+  setWaBusinessOptIn(channel: string, waId: string, optIn: boolean, source?: string): Promise<WaBusinessContact> {
+    return this.put(`/whatsapp-business/${encodeURIComponent(channel)}/contacts/${encodeURIComponent(waId)}/opt-in`, { optIn, ...(source ? { source } : {}) });
+  }
+
+  /** Erase a contact and its messages (GDPR). */
+  deleteWaBusinessContact(channel: string, waId: string): Promise<{ deleted: boolean }> {
+    return this.del(`/whatsapp-business/${encodeURIComponent(channel)}/contacts/${encodeURIComponent(waId)}`);
+  }
+
+  /** Free-form text, inside the 24-hour window only. */
+  sendWaBusinessText(channel: string, to: string, text: string): Promise<WaBusinessSendResult> {
+    return this.post(`/whatsapp-business/${encodeURIComponent(channel)}/send`, { to, text });
+  }
+
+  /** An approved template (business-initiated); queue: wait for an operator's approval. */
+  sendWaBusinessTemplate(channel: string, input: { to: string; template: string; language?: string; params?: string[]; queue?: boolean; reason?: string }): Promise<WaBusinessSendResult> {
+    return this.post(`/whatsapp-business/${encodeURIComponent(channel)}/send-template`, input);
+  }
+
+  getWaBusinessTemplates(channel: string, refresh = false): Promise<{ templates: WaBusinessTemplate[]; syncedAt?: string }> {
+    return this.get(`/whatsapp-business/${encodeURIComponent(channel)}/templates${refresh ? "?refresh=true" : ""}`);
+  }
+
+  syncWaBusinessTemplates(channel: string): Promise<{ templates: WaBusinessTemplate[]; syncedAt?: string }> {
+    return this.post(`/whatsapp-business/${encodeURIComponent(channel)}/templates/sync`);
+  }
+
+  getWaBusinessPending(channel: string): Promise<WaBusinessMessage[]> {
+    return this.get<{ pending: WaBusinessMessage[] }>(`/whatsapp-business/${encodeURIComponent(channel)}/pending`).then((d) => d.pending);
+  }
+
+  approveWaBusinessSend(channel: string, id: string, by?: string): Promise<{ id: string; sentAs: string }> {
+    return this.post(`/whatsapp-business/${encodeURIComponent(channel)}/pending/${encodeURIComponent(id)}/approve`, by ? { by } : {});
+  }
+
+  rejectWaBusinessSend(channel: string, id: string, reason?: string, by?: string): Promise<{ id: string; status: "rejected" }> {
+    return this.post(`/whatsapp-business/${encodeURIComponent(channel)}/pending/${encodeURIComponent(id)}/reject`, { ...(reason ? { reason } : {}), ...(by ? { by } : {}) });
+  }
+
+  /** Check the token and the number at Meta: quality rating and messaging tier when Graph returns them. */
+  testWaBusiness(channel: string): Promise<NonNullable<WaBusinessStatus["phone"]>> {
+    return this.post(`/whatsapp-business/${encodeURIComponent(channel)}/test`);
   }
 
   getConnector(id: string): Promise<Connector> {

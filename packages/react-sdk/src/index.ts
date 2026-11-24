@@ -17,6 +17,8 @@ export { useMission } from "./hooks/use-mission.js";
 export { useMissionCost } from "./hooks/use-mission-cost.js";
 export type { UseMissionCostReturn } from "./hooks/use-mission-cost.js";
 export { useConnectors, connectorLabel } from "./hooks/use-connectors.js";
+export { useWaBusinessStatus, useWaTemplates, useWaConversation } from "./hooks/use-whatsapp-business.js";
+export type { UseWaBusinessStatusReturn, UseWaTemplatesReturn, UseWaConversationReturn } from "./hooks/use-whatsapp-business.js";
 export type { UseConnectorsReturn } from "./hooks/use-connectors.js";
 export { useAgents } from "./hooks/use-agents.js";
 export type { UseAgentsReturn } from "./hooks/use-agents.js";
@@ -243,6 +245,18 @@ export type {
   AssessmentCheckStatus,
   TaskFilter,
   ComputerWebhookProvider,
+  WaBusinessSettings,
+  WaBizOutcome,
+  WaBizSecretKind,
+  WaBusinessStatus,
+  WaBusinessEventSummary,
+  WaBusinessEvent,
+  WaBusinessEventPage,
+  WaBusinessContact,
+  WaBusinessMessage,
+  WaBusinessConversation,
+  WaBusinessTemplate,
+  WaBusinessSendResult,
   ComputerWebhookOutcome,
   ComputerWebhookStatus,
   ComputerWebhookCountsBefore,

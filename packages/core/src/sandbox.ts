@@ -399,7 +399,7 @@ export function toolPlacement(name: string): ToolPlacement {
 
 /** Tools that bring other people's content into the agent's context (prompt-injection risk). */
 export const EXTERNAL_CONTENT_TOOLS = [
-  "browser_*", "http_fetch", "http_download", "search_*", "email_*", "whatsapp_*", "web_*",
+  "browser_*", "http_fetch", "http_download", "search_*", "email_*", "whatsapp_*", "wabiz_*", "web_*",
 ];
 
 function matches(pattern: string, name: string): boolean {

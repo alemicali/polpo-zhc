@@ -46,7 +46,7 @@ const OUTCOME: Record<ComputerWebhookOutcome, { label: string; className: string
   error: { label: "Error", className: "border-destructive/30 bg-destructive/10 text-destructive", hint: "accepted, but Polpo could not apply it" },
 };
 
-function OutcomeBadge({ outcome }: { outcome: ComputerWebhookOutcome }) {
+export function OutcomeBadge({ outcome }: { outcome: ComputerWebhookOutcome }) {
   const o = OUTCOME[outcome] ?? OUTCOME.ignored;
   return <Badge variant="outline" className={cn("font-normal", o.className)} data-testid="webhook-outcome" title={o.hint}>{o.label}</Badge>;
 }

@@ -15,6 +15,12 @@ export interface VaultRef {
   service: string;
 }
 
+/** A reference as stored in configuration ({ owner, service }), including system owners ("$channels"). */
+export interface VaultRefLike {
+  owner: string;
+  service: string;
+}
+
 export function isVaultRef(value: unknown): value is VaultRef {
   return !!value && typeof value === "object"
     && typeof (value as VaultRef).owner === "string" && !!(value as VaultRef).owner.trim()

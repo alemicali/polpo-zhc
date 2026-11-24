@@ -91,6 +91,14 @@ export interface ChannelGatewayOptions {
    * read and the intent classifier judges on. Without it, group context stays in memory.
    */
   roomStore?: RoomStore;
+  /**
+   * Customer mode (WhatsApp Business facing customers): only operators use commands, nobody is
+   * told about pairing, every message goes to gateway.agent (never to the orchestrator), and
+   * nothing meant for the team (fallback texts) is sent.
+   */
+  customerMode?: boolean;
+  /** Who counts as an operator for gateway.commands "operators" (default: people paired or in allowFrom). */
+  isOperator?: (externalId: string) => boolean;
 }
 
 /** Where a message goes inside a chat: a forum topic, as a reply to a message (groups). */
@@ -328,6 +336,8 @@ export class ChannelGateway {
   private relay?: TelegramAgentRelay;
   /** Group conversations this bot has seen a message in (it is a member). */
   private presentIn = new Set<string>();
+  private customerMode: boolean;
+  private isOperator?: (externalId: string) => boolean;
 
   constructor(opts: ChannelGatewayOptions) {
     this.orchestrator = opts.orchestrator;
@@ -339,6 +349,21 @@ export class ChannelGateway {
     this.onTyping = opts.onTyping;
     this.key = opts.key ?? "default";
     this.roomStore = opts.roomStore;
+    this.customerMode = !!opts.customerMode;
+    this.isOperator = opts.isOperator;
+  }
+
+  /**
+   * May this person use slash commands? gateway.commands: "all" (default), "operators", "none";
+   * in customer mode at most operators.
+   */
+  private async commandsAllowed(msg: InboundMessage, peerId: string): Promise<boolean> {
+    const configured = this.gatewayConfig.commands ?? "all";
+    const mode = this.customerMode && configured === "all" ? "operators" : configured;
+    if (mode === "all") return true;
+    if (mode === "none") return false;
+    if (this.isOperator) return this.isOperator(msg.externalId);
+    return this.personAuthorized(peerId);
   }
 
   /**
@@ -494,6 +519,12 @@ export class ChannelGateway {
       }
     }
 
+    // Customers only ever talk with the channel's agent, never with the orchestrator.
+    if (this.customerMode && !this.gatewayConfig.agent) {
+      this.log("warn", `${msg.channel}: a customer message was not answered: the channel has no gateway.agent`);
+      return undefined;
+    }
+
     // Who the agents talk with: the person in a DM, the group (and topic) in a group.
     const conversation = this.conversationId(msg, peerId);
     const pendingKey = this.pendingKey(msg);
@@ -518,8 +549,8 @@ export class ChannelGateway {
       }
     }
 
-    // ── Slash commands ──
-    if (msg.text.startsWith("/")) {
+    // ── Slash commands (gateway.commands decides who may use them; the rest is chat) ──
+    if (msg.text.startsWith("/") && await this.commandsAllowed(msg, peerId)) {
       const suggestion = await this.handleSuggestionCommand(msg, conversation);
       if (suggestion) return suggestion;
       const result = await this.handleCommand(msg, peerId, conversation);
@@ -1007,6 +1038,12 @@ export class ChannelGateway {
     const policy = this.gatewayConfig.dmPolicy ?? "allowlist";
 
     if (policy === "disabled") return undefined; // Silent ignore
+
+    // Customers are never told about pairing codes or administrators: the request is kept silently.
+    if (policy === "pairing" && this.customerMode) {
+      if (!await this.peerStore.getPendingPairing(peerId)) await this.peerStore.createPairingRequest(msg.channel, msg.externalId, msg.displayName);
+      return undefined;
+    }
 
     if (policy === "pairing") {
       // Check if already has a pending request
@@ -1722,6 +1759,7 @@ export class ChannelGateway {
     const who = agent ?? this.polpoName();
     const runner = this.getChatRunner();
     if (!runner) {
+      if (this.customerMode) return "";
       return agent
         ? "Direct agent chat is not available on this instance. Send /polpo to talk to the orchestrator."
         : "Attachments are not supported on this instance yet. Please send text.";
@@ -1749,7 +1787,8 @@ export class ChannelGateway {
 
     const body = text.trim();
     if (!body && files.length === 0) this.log("warn", `${who} ended a turn without a reply (session ${sessionId})`);
-    const reply = body || (files.length > 0 ? "" : NO_REPLY_FALLBACK(who));
+    // customers never get the team's fallback ("open this chat in the web app")
+    const reply = body || (files.length > 0 || this.customerMode ? "" : NO_REPLY_FALLBACK(who));
     const capped = reply.length > MAX_REPLY_CHARS ? reply.slice(0, MAX_REPLY_CHARS - 10) + "\n\n... (truncated)" : reply;
     return files.length > 0 ? { text: capped, files } : capped;
   }

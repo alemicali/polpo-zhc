@@ -17,6 +17,7 @@ import type { ApiResponse, McpDeps, Register, ToolExtra, ToolSpec } from "../ser
 import { registerHarnessTools } from "../server/mcp-server/harnesses.js";
 import { registerSetupTools } from "../server/mcp-server/setup.js";
 import { registerComputerTools } from "../server/mcp-server/computers.js";
+import { registerWaBusinessTools } from "../server/mcp-server/whatsapp-business.js";
 import { registerConnectorTools } from "../server/mcp-server/connectors.js";
 import { registerChannelTools } from "../server/mcp-server/channels.js";
 import { registerChannelSetupTools } from "../server/mcp-server/channel-setup.js";
@@ -108,6 +109,14 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_whatsapp_login", name: "channel_whatsapp_login", group: "channels" },
   { mcp: "polpo_whatsapp_login_wait", name: "channel_whatsapp_login_wait", group: "channels" },
   { mcp: "polpo_whatsapp_logout", name: "channel_whatsapp_logout", group: "channels" },
+  // WhatsApp Business (Meta Cloud API): status, events, templates, conversations, sends, approvals
+  { mcp: "polpo_wabiz_status", name: "wabiz_status", group: "whatsapp-business" },
+  { mcp: "polpo_wabiz_events", name: "wabiz_events", group: "whatsapp-business" },
+  { mcp: "polpo_wabiz_templates", name: "wabiz_templates", group: "whatsapp-business" },
+  { mcp: "polpo_wabiz_conversation", name: "wabiz_conversation", group: "whatsapp-business" },
+  { mcp: "polpo_wabiz_send", name: "wabiz_send", group: "whatsapp-business" },
+  { mcp: "polpo_wabiz_send_template", name: "wabiz_send_template", group: "whatsapp-business" },
+  { mcp: "polpo_wabiz_approval", name: "wabiz_approval", group: "whatsapp-business" },
   // Rooms (group chats of people and agents)
   { mcp: "polpo_rooms_list", name: "rooms_list", group: "rooms" },
   { mcp: "polpo_room_create", name: "room_create", group: "rooms" },
@@ -305,7 +314,7 @@ function capture(): Map<string, Captured> {
   for (const register of [
     registerSetupTools, registerTeamTools, registerConnectorTools, registerHarnessTools, registerComputerTools, registerConfigTools,
     registerSettingsTools, registerChannelTools, registerChannelSetupTools, registerRoomTools, registerChatTools, registerAutomationTools,
-    registerMissionTools, registerDataTools, registerBrainTools, registerSkillTools, registerSearchTools,
+    registerMissionTools, registerDataTools, registerBrainTools, registerSkillTools, registerWaBusinessTools, registerSearchTools,
   ]) register(tool, deps);
   captured = out;
   return out;

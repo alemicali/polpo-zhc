@@ -144,6 +144,7 @@ describe("Polpo MCP server", () => {
       "polpo_connectors_list", "polpo_connector_catalog", "polpo_connector_add", "polpo_connector_update", "polpo_connector_test", "polpo_connector_connect", "polpo_connector_disconnect", "polpo_connector_remove",
       "polpo_channels_list", "polpo_channel_test", "polpo_message_send", "polpo_notification_rule_save", "polpo_notification_rule_delete",
       "polpo_computers_list", "polpo_computer_get", "polpo_computer_webhooks", "polpo_computer_save", "polpo_computer_control", "polpo_egress_status", "polpo_computer_delete",
+      "polpo_wabiz_status", "polpo_wabiz_events", "polpo_wabiz_templates", "polpo_wabiz_conversation", "polpo_wabiz_send", "polpo_wabiz_send_template", "polpo_wabiz_approval",
       "polpo_harnesses_get", "polpo_harnesses_update", "polpo_harness_sessions_list", "polpo_harness_session_control",
     ]);
     const byName = Object.fromEntries(tools.map((t) => [t.name, t]));

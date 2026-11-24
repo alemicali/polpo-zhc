@@ -1,8 +1,8 @@
 {
-  "id": "20158125-39de-4040-a587-ee05e9a08991",
-  "prevId": "bf87f602-b460-4c3f-ac80-1b967253680d",
   "version": "6",
   "dialect": "sqlite",
+  "id": "782037b8-836d-4c83-8070-6b3596bcb924",
+  "prevId": "bf87f602-b460-4c3f-ac80-1b967253680d",
   "tables": {
     "approvals": {
       "name": "approvals",
@@ -315,15 +315,15 @@
         "chat_queue_items_session_id_sessions_id_fk": {
           "name": "chat_queue_items_session_id_sessions_id_fk",
           "tableFrom": "chat_queue_items",
+          "tableTo": "sessions",
           "columnsFrom": [
             "session_id"
           ],
-          "tableTo": "sessions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -360,15 +360,15 @@
         "chat_queue_settings_session_id_sessions_id_fk": {
           "name": "chat_queue_settings_session_id_sessions_id_fk",
           "tableFrom": "chat_queue_settings",
+          "tableTo": "sessions",
           "columnsFrom": [
             "session_id"
           ],
-          "tableTo": "sessions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1194,15 +1194,15 @@
         "log_entries_session_id_log_sessions_id_fk": {
           "name": "log_entries_session_id_log_sessions_id_fk",
           "tableFrom": "log_entries",
+          "tableTo": "log_sessions",
           "columnsFrom": [
             "session_id"
           ],
-          "tableTo": "log_sessions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1333,15 +1333,15 @@
         "messages_session_id_sessions_id_fk": {
           "name": "messages_session_id_sessions_id_fk",
           "tableFrom": "messages",
+          "tableTo": "sessions",
           "columnsFrom": [
             "session_id"
           ],
-          "tableTo": "sessions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2225,15 +2225,15 @@
         "room_messages_room_id_rooms_id_fk": {
           "name": "room_messages_room_id_rooms_id_fk",
           "tableFrom": "room_messages",
+          "tableTo": "rooms",
           "columnsFrom": [
             "room_id"
           ],
-          "tableTo": "rooms",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3269,6 +3269,183 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "wabiz_contacts": {
+      "name": "wabiz_contacts",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "channel": {
+          "name": "channel",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "wa_id": {
+          "name": "wa_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "doc": {
+          "name": "doc",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "activity_at": {
+          "name": "activity_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_wabiz_contacts_channel": {
+          "name": "idx_wabiz_contacts_channel",
+          "columns": [
+            "channel",
+            "activity_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "wabiz_messages": {
+      "name": "wabiz_messages",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "channel": {
+          "name": "channel",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "wa_id": {
+          "name": "wa_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "direction": {
+          "name": "direction",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "initiated": {
+          "name": "initiated",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "sent_by": {
+          "name": "sent_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "doc": {
+          "name": "doc",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_wabiz_messages_contact": {
+          "name": "idx_wabiz_messages_contact",
+          "columns": [
+            "channel",
+            "wa_id",
+            "created_at"
+          ],
+          "isUnique": false
+        },
+        "idx_wabiz_messages_created": {
+          "name": "idx_wabiz_messages_created",
+          "columns": [
+            "channel",
+            "created_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "wabiz_processed": {
+      "name": "wabiz_processed",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_wabiz_processed_created": {
+          "name": "idx_wabiz_processed_created",
+          "columns": [
+            "created_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "whatsapp_contacts": {
       "name": "whatsapp_contacts",
       "columns": {
@@ -3445,9 +3622,9 @@
   "views": {},
   "enums": {},
   "_meta": {
-    "columns": {},
     "schemas": {},
-    "tables": {}
+    "tables": {},
+    "columns": {}
   },
   "internal": {
     "indexes": {}
