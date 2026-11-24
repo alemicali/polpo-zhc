@@ -7,27 +7,11 @@ import { useEffect, useState, type ReactNode } from "react";
 import { usePolpo, type SearchResult } from "@polpo-ai/react";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { apiFetch, apiUrl } from "@/lib/config";
-import { foldText, shortAge } from "@/lib/global-search";
+import { queryTermRanges, shortAge } from "@/lib/global-search";
 import { taskCostSummaryOf } from "@/lib/task-cost";
 import { cn } from "@/lib/utils";
-import { Highlighted, StatusBadge, iconFor } from "./search-parts";
+import { Highlighted, KindIcon, StatusBadge } from "./search-parts";
 import type { PaletteEntry } from "./search-palette";
-
-/** Ranges where the query's words start words of a text (local, for the preview's messages). */
-export function termRanges(text: string, query: string): Array<[number, number]> {
-  const terms = foldText(query).match(/[\p{L}\p{N}]+/gu) ?? [];
-  if (!terms.length) return [];
-  const folded = foldText(text);
-  // folding may change lengths (ligatures): only highlight when it did not
-  if (folded.length !== text.length) return [];
-  const out: Array<[number, number]> = [];
-  for (const m of folded.matchAll(/[\p{L}\p{N}]+/gu)) {
-    const t = terms.find((term) => m[0].startsWith(term.length > 4 ? term.slice(0, -1) : term));
-    if (t) out.push([m.index ?? 0, (m.index ?? 0) + Math.min(m[0].length, t.length)]);
-    if (out.length > 40) break;
-  }
-  return out;
-}
 
 /** Load something for the selected result (cancelled when the selection moves on). */
 function useLoad<T>(key: string | null, load: (signal: AbortSignal) => Promise<T>): { data?: T; loading: boolean; error?: string } {
@@ -97,7 +81,7 @@ function ChatPreview({ result, query }: { result: SearchResult; query: string })
               <span>{shortAge(typeof m.ts === "string" ? m.ts : undefined)}</span>
             </div>
             <p className="text-xs leading-relaxed text-foreground/90">
-              <Highlighted text={text} ranges={hit ? termRanges(text, query) : undefined} />
+              <Highlighted text={text} ranges={hit ? queryTermRanges(text, query) : undefined} />
             </p>
           </div>
         );
@@ -275,13 +259,12 @@ export function SearchPreview({ entry, query }: { entry: PaletteEntry | undefine
   if (!entry) {
     return <div className="flex h-full items-center justify-center p-6 text-center text-xs text-muted-foreground">Select a result to see more.</div>;
   }
-  const Icon = entry.icon ?? iconFor(entry.kind, entry.result?.meta);
   const r = entry.result;
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-start gap-2.5 border-b border-border/60 px-4 py-3">
         <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-control bg-muted text-muted-foreground">
-          <Icon className="h-4 w-4" />
+          <KindIcon kind={entry.kind} meta={entry.result?.meta} icon={entry.icon} className="h-4 w-4" />
         </span>
         <div className="min-w-0">
           <p className="break-words text-sm font-semibold leading-snug">{entry.title}</p>

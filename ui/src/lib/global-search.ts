@@ -219,3 +219,20 @@ export function shortAge(iso: string | undefined, now = Date.now()): string {
   if (s < 7 * 86_400) return `${Math.floor(s / 86_400)}d`;
   return new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
+
+/** Ranges where the query's words start words of a text (local, for the preview's messages). */
+export function queryTermRanges(text: string, query: string): Array<[number, number]> {
+  const terms = foldText(query).match(/[\p{L}\p{N}]+/gu) ?? [];
+  if (!terms.length) return [];
+  const folded = foldText(text);
+  // folding may change lengths (ligatures): only highlight when it did not
+  if (folded.length !== text.length) return [];
+  const out: Array<[number, number]> = [];
+  for (const m of folded.matchAll(/[\p{L}\p{N}]+/gu)) {
+    const t = terms.find((term) => m[0].startsWith(term.length > 4 ? term.slice(0, -1) : term));
+    if (t) out.push([m.index ?? 0, (m.index ?? 0) + Math.min(m[0].length, t.length)]);
+    if (out.length > 40) break;
+  }
+  return out;
+}
+

@@ -26,7 +26,7 @@ import {
 } from "@/lib/global-search";
 import { cn } from "@/lib/utils";
 import { matchActions, paletteActions, type PaletteContext } from "./palette-actions";
-import { Highlighted, Kbd, StatusBadge, iconFor } from "./search-parts";
+import { Highlighted, Kbd, KindIcon, StatusBadge } from "./search-parts";
 import { SearchPreview } from "./search-preview";
 
 /** One row of the palette. */
@@ -89,10 +89,9 @@ function EntryIcon({ entry }: { entry: PaletteEntry }) {
         size="sm" fallbackVariant="circle" shape="circle" className="h-7 w-7 shrink-0" />
     );
   }
-  const Icon = entry.icon ?? iconFor(entry.kind, meta);
   return (
     <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control bg-muted text-muted-foreground group-data-[selected=true]:bg-primary/10 group-data-[selected=true]:text-primary">
-      <Icon className="h-4 w-4" />
+      <KindIcon kind={entry.kind} meta={meta} icon={entry.icon} className="h-4 w-4" />
     </span>
   );
 }
@@ -463,7 +462,7 @@ export function SearchPalette() {
 /** The palette and its shortcut (⌘K / Ctrl+K): mounted once by the layout. */
 export function GlobalSearch() {
   useSearchShortcut();
-  const { open } = useSearchPalette();
+  const { open, seq } = useSearchPalette();
   // a link may open it (?search=<query>, e.g. What's new): open, then drop the parameter
   const location = useLocation();
   const navigate = useNavigate();
@@ -475,8 +474,6 @@ export function GlobalSearch() {
     const rest = params.toString();
     navigate({ pathname: location.pathname, search: rest ? `?${rest}` : "" }, { replace: true });
   }, [location.pathname, location.search, navigate]);
-  // nothing mounted (no search hook running) until it is first opened
-  const [used, setUsed] = useState(false);
-  useEffect(() => { if (open) setUsed(true); }, [open]);
-  return used || open ? <SearchPalette /> : null;
+  // nothing mounted (no search hook running) until it is first opened (seq counts the openings)
+  return open || seq > 0 ? <SearchPalette /> : null;
 }

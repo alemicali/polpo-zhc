@@ -2,13 +2,10 @@
  * Small pieces of the search palette: matched text, the icon of each kind of result, status
  * badges and the keyboard hints. Colours, sizes and corners come from the look's tokens.
  */
-import type { ReactNode } from "react";
-import {
-  AppWindow, Bell, Bot, Boxes, Brain, BrainCircuit, CalendarClock, Database, File, FileText, Folder, LayoutGrid, ListChecks,
-  MessageCircle, Monitor, Plug, Radio, Send, Shapes, ShieldCheck, Sparkles, Table2, Target, Terminal, Users, UsersRound, Workflow,
-  type LucideIcon,
-} from "lucide-react";
-import type { SearchRange, SearchType } from "@polpo-ai/react";
+import { createElement, type ReactNode } from "react";
+import type { LucideIcon } from "lucide-react";
+import type { SearchRange } from "@polpo-ai/react";
+import { iconFor, type ResultKind } from "./search-icons";
 import { cn } from "@/lib/utils";
 import { missionStatusStyles, taskStatusStyles, tones, type Tone } from "@/lib/status-tokens";
 
@@ -28,18 +25,9 @@ export function Highlighted({ text, ranges, className }: { text: string; ranges?
   return <span className={className}>{parts}</span>;
 }
 
-export const TYPE_ICONS: Record<SearchType | "page" | "action", LucideIcon> = {
-  chat: MessageCircle, room: UsersRound, agent: Bot, task: ListChecks, mission: Target, schedule: CalendarClock, playbook: Workflow,
-  approval: ShieldCheck, artifact: Shapes, file: FileText, data: Database, connector: Plug, skill: Sparkles, memory: Brain,
-  brain: BrainCircuit, computer: Monitor, app: Boxes, channel: Send, member: Users, event: Radio, page: LayoutGrid, action: Terminal,
-};
-
-/** The icon for a result: files and folders, tables and views differ from their type's. */
-export function iconFor(kind: SearchType | "page" | "action", meta?: Record<string, unknown>): LucideIcon {
-  if (kind === "file") return meta?.kind === "directory" ? Folder : File;
-  if (kind === "data") return meta?.kind === "table" ? Table2 : meta?.kind === "view" ? AppWindow : Database;
-  if (kind === "event") return Bell;
-  return TYPE_ICONS[kind];
+/** The icon of a result's kind (or the one given), as an element. */
+export function KindIcon({ kind, meta, icon, className }: { kind: ResultKind; meta?: Record<string, unknown>; icon?: LucideIcon; className?: string }) {
+  return createElement(icon ?? iconFor(kind, meta), { className });
 }
 
 /** A task's or mission's status as a small tinted badge (other kinds: a neutral one). */
