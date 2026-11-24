@@ -8615,6 +8615,7 @@
           "Agents"
         ],
         "summary": "Get agent",
+        "description": "The agent as production runs it, with `versioning` (production version, latest, draft state). `view=draft`: its draft (working copy) instead, as the dashboard edits it.",
         "parameters": [
           {
             "schema": {
@@ -8623,6 +8624,18 @@
             "required": true,
             "name": "name",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "production",
+                "draft"
+              ]
+            },
+            "required": false,
+            "name": "view",
+            "in": "query"
           }
         ],
         "responses": {
