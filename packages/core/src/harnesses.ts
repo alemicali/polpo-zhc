@@ -28,6 +28,7 @@
  */
 import { normalizeVaultRef, type VaultRef } from "./vault-ref.js";
 import { HOST_COMPUTER_ID, isRemoteComputer, type ComputerConfig } from "./computers.js";
+import { cliEngineProblem, isCliEngineInput, parseAgentCliEngine, parseCliSettings, type AgentCliEngine, type CliSettings } from "./cli-engine.js";
 
 export type HarnessId = "claude-code" | "codex" | "opencode";
 export const HARNESS_IDS: readonly HarnessId[] = ["claude-code", "codex", "opencode"];
@@ -185,6 +186,8 @@ export interface HarnessesSettings {
   "claude-code"?: ClaudeCodeHarnessSettings;
   codex?: CodexHarnessSettings;
   opencode?: OpenCodeHarnessSettings;
+  /** The CLI engine's accounts (agent.engine { type: "cli" }): config directories on computers, never tokens. */
+  cli?: CliSettings;
 }
 
 /** The harness's main credential reference (the gateway's for gateways), if any. */
@@ -229,8 +232,8 @@ export interface AgentHarnessEngine {
   credentialRef?: VaultRef;
 }
 
-/** agent.engine: "polpo" (default) or a harness. */
-export type AgentEngine = "polpo" | AgentHarnessEngine;
+/** agent.engine: "polpo" (default), a harness, or the official CLI signed in with a person's account. */
+export type AgentEngine = "polpo" | AgentHarnessEngine | AgentCliEngine;
 
 export class HarnessConfigError extends Error {
   constructor(message: string) { super(message); this.name = "HarnessConfigError"; }
@@ -561,6 +564,9 @@ export function parseHarnessesSettings(raw: unknown): HarnessesSettings {
   if (r["claude-code"] !== undefined && r["claude-code"] !== null) out["claude-code"] = parseClaudeCode(r["claude-code"], `${where}["claude-code"]`);
   if (r.codex !== undefined && r.codex !== null) out.codex = parseCodex(r.codex, `${where}.codex`);
   if (r.opencode !== undefined && r.opencode !== null) out.opencode = parseOpenCode(r.opencode, `${where}.opencode`);
+  if (r.cli !== undefined && r.cli !== null) {
+    try { out.cli = parseCliSettings(r.cli, `${where}.cli`); } catch (err) { throw new HarnessConfigError((err as Error).message); }
+  }
   for (const h of out.enabled) {
     if (!out[h]) throw new HarnessConfigError(`${where}: ${HARNESS_NAMES[h]} is enabled but has no settings (${where}${h === "claude-code" ? `["${h}"]` : `.${h}`}: { auth, credentialRef })`);
   }
@@ -601,8 +607,11 @@ export async function harnessesVaultProblems(
 }
 
 /** agent.engine from raw input: undefined for "polpo" (the default), or an error naming the field. */
-export function parseAgentEngine(raw: unknown, where = "engine"): AgentHarnessEngine | undefined {
+export function parseAgentEngine(raw: unknown, where = "engine"): AgentHarnessEngine | AgentCliEngine | undefined {
   if (raw === undefined || raw === null || raw === "" || raw === "polpo") return undefined;
+  if (isCliEngineInput(raw)) {
+    try { return parseAgentCliEngine(raw, where); } catch (err) { throw new HarnessConfigError((err as Error).message); }
+  }
   if (typeof raw === "string") {
     if ((HARNESS_IDS as string[]).includes(raw)) return { harness: raw as HarnessId };
     throw new HarnessConfigError(`${where} must be "polpo" or { harness: ${HARNESS_IDS.map((h) => `"${h}"`).join(" | ")}, model?, permissionMode?, effort?, maxBudgetUsd?, credentialRef? }`);
@@ -635,7 +644,8 @@ export function parseAgentEngine(raw: unknown, where = "engine"): AgentHarnessEn
 
 /** The agent's harness engine, or undefined when it runs on Polpo's engine (never throws). */
 export function agentHarness(agent: { engine?: unknown } | undefined): AgentHarnessEngine | undefined {
-  try { return parseAgentEngine(agent?.engine); } catch { return undefined; }
+  if (isCliEngineInput(agent?.engine)) return undefined;
+  try { return parseAgentEngine(agent?.engine) as AgentHarnessEngine | undefined; } catch { return undefined; }
 }
 
 /**
@@ -648,8 +658,9 @@ export function agentEngineProblem(
   settings: { harnesses?: unknown; computers?: unknown } | undefined,
   opts: { daytonaApi?: "v0" | "v2" } = {},
 ): string | null {
+  if (isCliEngineInput(agent.engine)) return cliEngineProblem(agent, settings);
   let engine: AgentHarnessEngine | undefined;
-  try { engine = parseAgentEngine(agent.engine); } catch (err) { return (err as Error).message; }
+  try { engine = parseAgentEngine(agent.engine) as AgentHarnessEngine | undefined; } catch (err) { return (err as Error).message; }
   if (!engine) return null;
   const who = agent.name ? `Agent "${agent.name}"` : "This agent";
   const name = HARNESS_NAMES[engine.harness];

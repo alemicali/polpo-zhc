@@ -1,0 +1,1 @@
+ALTER TABLE `tasks` ADD `requested_by` text;

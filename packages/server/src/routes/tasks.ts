@@ -361,6 +361,11 @@ function projectSlim(t: any): any {
     ...(t.toolScope ? { toolScope: t.toolScope } : {}),
   };
 }
+/** The signed-in member (instance sign-in sets it on the context), if any. */
+function memberOf(c: { get(key: never): unknown }): string | undefined {
+  const v = c.get("polpoUserEmail" as never);
+  return typeof v === "string" && v ? v.toLowerCase() : undefined;
+}
 
 /** `{ failure }` for a failed task: its reason in a line, whether it is retryable, its kind. */
 export function withFailure(t: any): { failure?: NonNullable<ReturnType<typeof taskFailure>> } {
@@ -556,6 +561,8 @@ export function taskRoutes(getDeps: () => {
       sideEffects: body.sideEffects,
       draft: body.draft,
       ...(body.toolScope !== undefined ? { toolScope: body.toolScope } : {}),
+      // the member who started it (signed-in dashboard / API session): a CLI engine on a personal sign-in checks it
+      ...(memberOf(c) ? { requestedBy: memberOf(c) } : {}),
     });
     } catch (err) {
       const invalid = toolScopeError(err);

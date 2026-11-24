@@ -168,7 +168,7 @@ export interface TaskToolScope {
 }
 
 /** The engine a run used: Polpo's own, or an agent harness. */
-export type TaskRunEngine = "polpo" | "claude-code" | "codex" | "opencode";
+export type TaskRunEngine = "polpo" | "claude-code" | "codex" | "opencode" | "claude-cli" | "codex-cli";
 
 /** Where and with what a task run executed (no secrets). */
 export interface TaskRunContext {
@@ -183,7 +183,7 @@ export interface TaskRunContext {
   engine: TaskRunEngine;
   model?: string;
   /** The harness authentication kind (never the credential); provider: OpenCode's model provider (anthropic, openai, amazon-bedrock, vercel, polpo-gateway…). */
-  auth?: { kind: "api-key" | "bedrock" | "vertex" | "ai-gateway" | "gateway"; region?: string; provider?: string };
+  auth?: { kind: "api-key" | "bedrock" | "vertex" | "ai-gateway" | "gateway" | "subscription"; region?: string; provider?: string };
   permissionMode?: string;
   effort?: string;
   computer: {
@@ -203,7 +203,7 @@ export interface TaskRunContext {
     modelUsd?: number;
     tokens?: number;
     /** Where harnessUsd comes from (gateway, the runtime's estimate, tokens only). */
-    costSource?: "gateway" | "runtime" | "runtime-estimate" | "tokens-only";
+    costSource?: "gateway" | "runtime" | "runtime-estimate" | "tokens-only" | "subscription";
   };
   budgetUsd?: number;
   durationMs?: number;

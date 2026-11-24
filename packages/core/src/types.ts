@@ -172,6 +172,11 @@ export interface Task {
    */
   runs?: import("./run-context.js").TaskRunContext[];
   /**
+   * The member (email) who started this task, when known (the dashboard or the API with a member's
+   * session). A CLI engine signed in with a person's plan runs only work its owner started.
+   */
+  requestedBy?: string;
+  /**
    * Optional narrowing of the tools this task's runs may use (connectors, their tools, built-in
    * tools). Absent: everything the agent has. It never grants. See task-tool-scope.ts.
    */

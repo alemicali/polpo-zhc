@@ -32,6 +32,8 @@ export class TaskManager {
     maxRetries?: number;
     /** Narrowing of the run's tools; absent: everything the agent has. Validated by the caller. */
     toolScope?: TaskToolScope;
+    /** The member (email) who started it, when known. */
+    requestedBy?: string;
   }): Promise<Task> {
     if (!this.ctx.registry) throw new Error("Orchestrator not initialized");
 
@@ -90,6 +92,7 @@ export class TaskManager {
       notifications: hookData.notifications,
       sideEffects: hookData.sideEffects,
       ...(normalizeTaskToolScope(opts.toolScope) ? { toolScope: normalizeTaskToolScope(opts.toolScope) } : {}),
+      ...(opts.requestedBy ? { requestedBy: opts.requestedBy } : {}),
       status: hookData.draft ? "draft" : undefined,
     });
     this.ctx.emitter.emit("task:created", { task });
