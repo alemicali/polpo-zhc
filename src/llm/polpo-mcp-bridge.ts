@@ -141,6 +141,11 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_data_activity", name: "data_activity", group: "data" },
   { mcp: "polpo_brain_delete", name: "brain_delete", group: "brain" },
   { mcp: "polpo_skill_update", name: "skill_update", group: "skills" },
+  // Skill bundles (.skill / .zip: from a chat attachment or any file of the instance, a URL, base64) and a skill's files
+  { mcp: "polpo_skill_upload_prepare", name: "skill_upload_prepare", group: "skills" },
+  { mcp: "polpo_skill_upload_finalize", name: "skill_upload_finalize", group: "skills" },
+  { mcp: "polpo_skill_files", name: "skill_files", group: "skills" },
+  { mcp: "polpo_skill_file_read", name: "skill_file_read", group: "skills" },
 ];
 
 /** MCP tools Polpo already covers with a tool of its own (or a parameter of one). */

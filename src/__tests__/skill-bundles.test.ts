@@ -13,6 +13,8 @@ import {
 } from "../llm/skill-bundle.js";
 import { buildSkillPrompt, installSkills, loadAgentSkills, assignSkillToAgent } from "../llm/skills.js";
 import { skillRoutes } from "../server/routes/skills.js";
+import { handleMcpRequest, type ApiResponse, type McpDeps } from "../server/mcp.js";
+import { expectValidOutput } from "./helpers/mcp-output.js";
 
 // ── a raw zip writer that can produce hostile archives ──
 interface RawEntry { name: string; data?: Buffer | string; mode?: number; method?: 0 | 8; declaredSize?: number; flags?: number; crc?: number }
@@ -356,5 +358,85 @@ describe("REST", () => {
       expect(parsed.preview.skills[0].name).toBe("alpha");
       expect((await a.request(`${prefix}/alpha/download`)).headers.get("content-disposition")).toContain("alpha.skill");
     }
+  });
+});
+
+describe("MCP: upload in two steps, files", () => {
+  /** MCP deps whose API is the real skill routes (+ /files/read of the instance). */
+  const mcp = (instanceFiles: Record<string, Buffer> = {}) => {
+    const app = skillRoutes(() => ({ polpoDir, workDir: join(tmp, "project"), getAgents: async () => [{ name: "dev" }], emit: () => undefined }));
+    const api = async (method: string, path: string, body?: unknown): Promise<ApiResponse> => {
+      if (path.startsWith("/api/v1/files/read")) {
+        const p = new URL(`http://x${path}`).searchParams.get("path")!;
+        const b = instanceFiles[p];
+        return b ? { status: 200, body: null, headers: new Headers({ "content-type": "application/zip" }), bytes: new Uint8Array(b) } : { status: 404, body: { ok: false, error: "nope" }, headers: new Headers() };
+      }
+      if (path.startsWith("/api/v1/agents")) return { status: 200, body: { ok: true, data: [{ name: "dev" }] }, headers: new Headers() };
+      const sub = path.replace(/^\/api\/v1\/skills/, "") || "/";
+      const init: RequestInit = { method };
+      if (body instanceof FormData) init.body = body;
+      else if (body !== undefined) { init.body = JSON.stringify(body); init.headers = { "content-type": "application/json" }; }
+      const res = await app.request(sub, init);
+      const type = res.headers.get("content-type") ?? "";
+      if (type.startsWith("application/json")) return { status: res.status, body: await res.json(), headers: res.headers };
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      return { status: res.status, body: Buffer.from(bytes).toString("utf8"), headers: res.headers, bytes };
+    };
+    const deps: McpDeps = { api, version: "x", toolsets: ["all"] };
+    const rpc = (method: string, params: Record<string, unknown> = {}) => handleMcpRequest(new Request("http://localhost/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-protocol-version": "2025-06-18" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    }), deps);
+    const call = async (name: string, args: Record<string, unknown> = {}) => {
+      const result = (await (await rpc("tools/call", { name, arguments: args })).json()).result;
+      await expectValidOutput(deps, async () => (await (await rpc("tools/list")).json()).result.tools, name, result);
+      return result;
+    };
+    return { call };
+  };
+  const bundle = zipOf({ "alpha/SKILL.md": skillMd("alpha"), "alpha/references/api.md": "# API", "alpha/assets/bin.dat": "\u0000\u0001\u0002" });
+
+  it("prepare (base64, in chunks, or a file of the instance) → finalize", async () => {
+    const { call } = mcp({ "attachments/alpha.skill": bundle });
+    const prep = await call("polpo_skill_upload_prepare", { archive: { base64: bundle.toString("base64"), filename: "alpha.skill" } });
+    expect(prep.isError).toBeFalsy();
+    expect(prep.structuredContent.skills[0]).toMatchObject({ name: "alpha", errors: [], name_taken: false });
+    expect(existsSync(join(polpoDir, "skills", "alpha"))).toBe(false);
+    const fin = await call("polpo_skill_upload_finalize", { upload_id: prep.structuredContent.upload_id, assign_to: ["dev"] });
+    expect(fin.structuredContent).toMatchObject({ installed: [{ name: "alpha", from: "alpha", replaced: false, files: 3 }], assigned: ["alpha → dev"] });
+    // chunks
+    const b64 = bundle.toString("base64");
+    const first = await call("polpo_skill_upload_prepare", { archive: { base64: b64.slice(0, 400), filename: "alpha.skill", more: true } });
+    const id = first.structuredContent.chunk_id;
+    const last = await call("polpo_skill_upload_prepare", { archive: { base64: b64.slice(400), append_to: id } });
+    expect(last.structuredContent.skills[0]).toMatchObject({ name: "alpha", name_taken: true });
+    const clash = await call("polpo_skill_upload_finalize", { upload_id: last.structuredContent.upload_id });
+    expect(clash).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/on_conflict/) }] });
+    const renamed = await call("polpo_skill_upload_finalize", { upload_id: last.structuredContent.upload_id, renames: { alpha: "alpha-two" } });
+    expect(renamed.structuredContent.installed[0].name).toBe("alpha-two");
+    // a file of the instance, into the orchestrator's pool
+    const fromPath = await call("polpo_skill_upload_prepare", { archive: { path: "attachments/alpha.skill" }, pool: "orchestrator" });
+    const orch = await call("polpo_skill_upload_finalize", { upload_id: fromPath.structuredContent.upload_id, pool: "orchestrator" });
+    expect(orch.structuredContent.installed[0].name).toBe("alpha");
+    expect(existsSync(join(polpoDir, ".agent", "skills", "alpha", "references", "api.md"))).toBe(true);
+    // not a skill
+    expect(await call("polpo_skill_upload_prepare", { archive: { base64: Buffer.from("nope").toString("base64") } })).toMatchObject({ isError: true });
+  });
+
+  it("lists and reads a skill's files; polpo_skill_get lists them too", async () => {
+    const { call } = mcp();
+    installSkillBundle(parseSkillBundle(bundle), join(polpoDir, "skills"));
+    const files = await call("polpo_skill_files", { name: "alpha" });
+    expect(files.structuredContent.files.map((f: { path: string }) => f.path)).toEqual(["SKILL.md", "assets/bin.dat", "references/api.md"]);
+    const md = await call("polpo_skill_file_read", { name: "alpha", path: "references/api.md" });
+    expect(md.structuredContent).toMatchObject({ path: "references/api.md", text: "# API" });
+    const bin = await call("polpo_skill_file_read", { name: "alpha", path: "assets/bin.dat" });
+    expect(bin.structuredContent.text).toBeUndefined();
+    expect((await call("polpo_skill_file_read", { name: "alpha", path: "assets/bin.dat", encoding: "base64" })).structuredContent.base64).toBe(Buffer.from([0, 1, 2]).toString("base64"));
+    expect(await call("polpo_skill_file_read", { name: "alpha", path: "../../polpo.json" })).toMatchObject({ isError: true });
+    const got = await call("polpo_skill_get", { name: "alpha" });
+    expect(got.content[0].text).toContain("- references/api.md");
+    expect(got.structuredContent.skill.files).toHaveLength(3);
   });
 });
