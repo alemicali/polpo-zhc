@@ -8,6 +8,8 @@ The deterministic loops agent contract is documented in [loops.md](loops.md).
 
 Connectors (Polpo as an MCP client: Linear, Notion, Gmail, custom servers) are documented in [connectors.md](connectors.md).
 
+Hosted MCP servers — MCP servers Polpo builds (from an API, a description or a template such as Printful) and serves itself, each becoming a connector; HTTP and sandboxed code tools, vault-referenced credentials, tests, versions and deploys, private or public exposure — are documented in [custom-mcp-servers.md](custom-mcp-servers.md).
+
 Computers (a persistent machine per agent) are documented in [computers.md](computers.md); running sandboxes and computers on Daytona's new service (Linux VMs) in [daytona-v2.md](daytona-v2.md).
 
 The dashboard's look (instance default, per-browser customization, design tokens, the no-flash boot) is documented in [appearance.md](appearance.md); the MCP connector and its tools, every Configuration section included, in [mcp.md](mcp.md).

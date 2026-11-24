@@ -34,7 +34,7 @@ export const POLPO_EVENT_NAMES = [
   "sandbox:suspended",
   "sandbox:volume",
   "sandbox:resumed", "sandbox:override-denied", "sandbox:network-denied",
-  "sandbox:failed", "sandbox:destroyed", "storage:changed", "connector:changed", "computer:changed", "computer:webhook", "channel:message-status", "channel:webhook", "log",
+  "sandbox:failed", "sandbox:destroyed", "storage:changed", "connector:changed", "mcp-server:changed", "computer:changed", "computer:webhook", "channel:message-status", "channel:webhook", "log",
 ] as const;
 
 export type PolpoEventName = typeof POLPO_EVENT_NAMES[number];

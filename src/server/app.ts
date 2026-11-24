@@ -94,6 +94,11 @@ import { syncRoutes } from "./routes/sync.js";
 import { browserDashboardRoutes } from "./routes/browser-dashboard.js";
 import { browserProfileRoutes } from "./routes/browser-profiles.js";
 import { connectorRoutes, connectorOAuthCallback } from "./routes/connectors.js";
+import { mcpServerRoutes } from "./routes/mcp-servers.js";
+import { mcpServerServiceFor } from "./mcp-servers-runtime.js";
+import { handlePublicMcpRequest, RateLimiter, PUBLIC_MCP_SERVERS_PATH } from "../mcp-servers/public.js";
+import { hostedDeps } from "../mcp-servers/host.js";
+import { queryOrchestratorText } from "../llm/query.js";
 import {
   connectorManagerFor, connectorsPromptSection, notePublicOrigin, clientMetadataDocument, connectorDashboardBase, connectorPublicBase,
   CONNECTOR_CLIENT_METADATA_PATH, CONNECTOR_OAUTH_CALLBACK_PATH,
@@ -942,6 +947,24 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     }));
   });
 
+  // ── Hosted MCP servers: the public endpoint ───────────────────────────
+  // POLPO_PUBLIC_URL/mcp/servers/<id>: only servers marked public answer (others 404), with the
+  // instance's credentials, rate limited per IP and globally; destructive / approval tools are not
+  // offered unless a tool allows it. No API key: it is public on purpose (see docs/custom-mcp-servers.md).
+  const publicMcpLimiter = new RateLimiter();
+  app.all(`${PUBLIC_MCP_SERVERS_PATH}/:id`, async (c) => {
+    if (!orchestrator?.isInitialized) return c.json({ error: "Polpo is not initialized" }, 503);
+    mcpServerServiceFor(orchestrator); // approvals wired
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the node server's socket
+    const socketIp = (c.env as any)?.incoming?.socket?.remoteAddress as string | undefined;
+    const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || socketIp || "unknown";
+    return handlePublicMcpRequest(c.req.raw, {
+      serverId: c.req.param("id"), ip, limiter: publicMcpLimiter,
+      deps: hostedDeps(orchestrator.getPolpoDir(), orchestrator.getVaultStore()),
+      log: (line) => console.log(`[polpo/mcp-servers] ${line}`),
+    });
+  });
+
   // ── Connectors: the OAuth callback ────────────────────────────────────
   // The browser comes back here from the provider (Linear, Notion, Google…) without the API key or
   // a session: it is public, and authenticated by the single-use, 10-minute state it carries.
@@ -1643,6 +1666,14 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     settings: () => o.getConfig()?.settings,
     // what the provider must reach: POLPO_PUBLIC_URL when set, even when the dashboard calls the API on another port
     redirectUri: (c) => `${connectorPublicBase(publicOrigin(c))}${CONNECTOR_OAUTH_CALLBACK_PATH}`,
+  }));
+  // Hosted MCP servers: build, test, publish, deploy; each becomes a connector (docs/custom-mcp-servers.md)
+  authed.route("/mcp-servers", mcpServerRoutes({
+    service: () => mcpServerServiceFor(o),
+    llm: () => async (prompt) => (await queryOrchestratorText(prompt, o.getConfig()?.settings?.orchestratorModel)).text,
+    actor: (c) => requestAuthor(c),
+    publicBase: (c) => connectorPublicBase(publicOrigin(c)),
+    urlPolicy: () => ({ allowPrivateNetwork: false }),
   }));
   const computerDeps: ComputerRouteDeps = {
     computers: () => o.getConfig()?.settings?.computers ?? [],

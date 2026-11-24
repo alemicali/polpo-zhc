@@ -1,0 +1,480 @@
+/**
+ * Hosted MCP servers: create, edit the draft, test, publish, deploy, roll back, delete — and the
+ * connector bound to each server. Used by the REST routes (and through them by the MCP tools,
+ * Polpo's chat and the SDK).
+ */
+import { randomUUID } from "node:crypto";
+import type { ConnectorConfig, VaultStore } from "@polpo-ai/core";
+import { CONNECTOR_ID_PATTERN } from "@polpo-ai/core";
+import type { ConnectorManager } from "../mcp/manager.js";
+import { runTool, secretStatus, type HostedRuntimeDeps } from "./runtime.js";
+import { McpServerStore } from "./store.js";
+import { McpServerInputError, normalizeSpec, specProblems } from "./validate.js";
+import { compareSemver, nextVersion, specChanges, specsEqual, suggestBump, unifiedSpecDiff } from "./versioning.js";
+import {
+  DEFAULT_RATE_LIMITS, isSensitiveTool, MCP_SERVER_ID_PATTERN,
+  type McpServerBump, type McpServerDeploy, type McpServerMeta, type McpServerSpec, type McpServerTestCase, type McpServerVersion,
+  type McpServerVisibility, type McpToolCallResult, type PendingCall, type PublicRateLimits,
+} from "./types.js";
+
+export class McpServerError extends Error {
+  constructor(message: string, readonly code: "NOT_FOUND" | "INVALID" | "CONFLICT" | "TESTS_FAILED" = "INVALID", readonly details?: unknown) {
+    super(message);
+  }
+}
+
+/** Builds code tools (installs npm deps) for a version; see code-build.ts. */
+export type CodeBuilder = (args: { serverId: string; versionKey: string; spec: McpServerSpec; buildDir: string }) => Promise<{ lockfile?: string; depsBytes?: number }>;
+
+export interface McpServerServiceDeps {
+  polpoDir: string;
+  vault: () => VaultStore | undefined;
+  /** The connector manager (the bound connector is created / updated / closed through it). */
+  connectors?: () => ConnectorManager;
+  /** Runtime dependencies (code runner, approval hook, tests' fetch). */
+  runtime?: () => Partial<HostedRuntimeDeps>;
+  build?: CodeBuilder;
+  /** Announce a change (SSE: mcp-server:changed). */
+  changed?: (id: string, what: string) => void;
+}
+
+export interface TestRunResult extends McpToolCallResult {
+  tool: string;
+  skipped?: string;
+  testId?: string;
+  passed?: boolean;
+}
+
+const SLUG = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "server";
+
+export class McpServerService {
+  readonly store: McpServerStore;
+
+  constructor(private readonly deps: McpServerServiceDeps) {
+    this.store = new McpServerStore(deps.polpoDir);
+  }
+
+  private runtimeDeps(): HostedRuntimeDeps {
+    return { polpoDir: this.deps.polpoDir, ...(this.deps.vault() ? { vault: this.deps.vault() } : {}), ...(this.deps.runtime?.() ?? {}) };
+  }
+
+  private need(id: string): McpServerMeta {
+    const meta = this.store.meta(id);
+    if (!meta) throw new McpServerError(`No hosted server "${id}"`, "NOT_FOUND");
+    return meta;
+  }
+
+  private touch(meta: McpServerMeta, patch: Partial<McpServerMeta> = {}): McpServerMeta {
+    const next = { ...meta, ...patch, updatedAt: new Date().toISOString() };
+    this.store.saveMeta(next);
+    return next;
+  }
+
+  // ── reading ──
+
+  list(): Array<ReturnType<McpServerService["summary"]>> {
+    return this.store.ids().map((id) => this.summary(id));
+  }
+
+  summary(id: string) {
+    const meta = this.need(id);
+    const draft = this.store.draft(id);
+    const production = this.store.production(id);
+    const prodSpec = production ? this.store.version(id, production)?.spec : undefined;
+    const spec = prodSpec ?? draft?.spec;
+    const versions = this.store.versions(id).map((v) => v.version).sort(compareSemver);
+    return {
+      ...meta,
+      name: spec?.name ?? id,
+      ...(spec?.description ? { description: spec.description } : {}),
+      ...(spec?.icon ? { icon: spec.icon } : {}),
+      toolCount: spec?.tools.length ?? 0,
+      ...(production ? { production } : {}),
+      latest: versions.at(-1),
+      versionCount: versions.length,
+      draftChanged: !!draft && (!prodSpec || !specsEqual(draft.spec, prodSpec)),
+      pendingApprovals: this.store.pending(id).filter((p) => p.status === "pending").length,
+    };
+  }
+
+  async get(id: string) {
+    const meta = this.need(id);
+    const draft = this.store.draft(id);
+    const production = this.store.production(id);
+    const prod = production ? this.store.version(id, production) : undefined;
+    const spec = draft?.spec ?? prod?.spec;
+    return {
+      ...this.summary(id),
+      meta,
+      draft: draft ? { ...draft, problems: specProblems(draft.spec), ...(draft.baseVersion && production && draft.baseVersion !== production ? { stale: true } : {}) } : null,
+      ...(prod ? { productionSpec: prod.spec } : {}),
+      secrets: spec ? await secretStatus(this.deps.vault(), spec) : {},
+      tests: this.store.tests(id),
+      rateLimits: meta.rateLimits ?? DEFAULT_RATE_LIMITS,
+    };
+  }
+
+  versions(id: string): Array<Omit<McpServerVersion, "spec"> & { toolCount: number; production: boolean }> {
+    this.need(id);
+    const production = this.store.production(id);
+    return this.store.versions(id).sort((a, b) => compareSemver(b.version, a.version))
+      .map(({ spec, ...v }) => ({ ...v, toolCount: spec.tools.length, production: v.version === production }));
+  }
+
+  version(id: string, version: string): McpServerVersion {
+    this.need(id);
+    const v = this.store.version(id, version === "production" ? this.store.production(id) ?? "" : version);
+    if (!v) throw new McpServerError(`No version ${version} of "${id}"`, "NOT_FOUND");
+    return v;
+  }
+
+  deploys(id: string): McpServerDeploy[] {
+    this.need(id);
+    return [...this.store.deploys(id)].reverse();
+  }
+
+  /** The spec at a ref: "draft", "production" or a semver. */
+  specAt(id: string, ref: string): McpServerSpec | undefined {
+    if (ref === "draft") return this.store.draft(id)?.spec;
+    if (ref === "production") { const p = this.store.production(id); return p ? this.store.version(id, p)?.spec : undefined; }
+    return this.store.version(id, ref)?.spec;
+  }
+
+  diff(id: string, from: string | undefined, to: string) {
+    this.need(id);
+    const toSpec = this.specAt(id, to);
+    if (!toSpec) throw new McpServerError(`Nothing at "${to}"`, "NOT_FOUND");
+    const fromRef = from ?? (to === "draft" ? "production" : undefined);
+    const fromSpec = fromRef ? this.specAt(id, fromRef) : undefined;
+    if (from && !fromSpec) throw new McpServerError(`Nothing at "${from}"`, "NOT_FOUND");
+    const label = (r: string | undefined) => (r === "production" ? this.store.production(id) ?? "production" : r);
+    return {
+      server: id, ...(fromRef && fromSpec ? { from: label(fromRef) } : {}), to: label(to)!,
+      changes: specChanges(fromSpec, toSpec),
+      unified: unifiedSpecDiff(id, { ...(fromSpec ? { label: label(fromRef), spec: fromSpec } : {}) }, { label: label(to)!, spec: toSpec }),
+      ...(suggestBump(fromSpec, toSpec) ? { suggestedBump: suggestBump(fromSpec, toSpec) } : {}),
+    };
+  }
+
+  logs(id: string, limit?: number) {
+    this.need(id);
+    return this.store.logs(id, limit);
+  }
+
+  pending(id: string): PendingCall[] {
+    this.need(id);
+    return this.store.pending(id);
+  }
+
+  // ── writing ──
+
+  create(input: { id?: string; spec: unknown; visibility?: McpServerVisibility; template?: string }, actor: string) {
+    const spec = normalizeSpec(input.spec);
+    let id = input.id?.trim() || SLUG(spec.name);
+    if (!MCP_SERVER_ID_PATTERN.test(id)) throw new McpServerError("id must be lowercase letters, digits and dashes (at most 40)");
+    if (this.store.exists(id)) {
+      if (input.id) throw new McpServerError(`A hosted server "${id}" already exists`, "CONFLICT");
+      let n = 2;
+      while (this.store.exists(`${id.slice(0, 37)}-${n}`)) n++;
+      id = `${id.slice(0, 37)}-${n}`;
+    }
+    const now = new Date().toISOString();
+    const meta: McpServerMeta = {
+      id, createdAt: now, updatedAt: now, createdBy: actor, visibility: input.visibility === "public" ? "public" : "private",
+      ...(input.template ? { template: input.template } : {}),
+    };
+    this.store.saveMeta(meta);
+    this.store.saveDraft(id, { spec, updatedAt: now, updatedBy: actor });
+    this.deps.changed?.(id, "created");
+    return { id, problems: specProblems(spec) };
+  }
+
+  updateDraft(id: string, input: unknown, actor: string) {
+    this.need(id);
+    const spec = normalizeSpec(input);
+    const current = this.store.draft(id);
+    const production = this.store.production(id);
+    this.store.saveDraft(id, {
+      spec, updatedAt: new Date().toISOString(), updatedBy: actor,
+      ...(current?.baseVersion ?? production ? { baseVersion: current?.baseVersion ?? production } : {}),
+    });
+    this.touch(this.need(id));
+    this.deps.changed?.(id, "draft");
+    return { problems: specProblems(spec) };
+  }
+
+  /** Throw the draft away: back to the production spec. */
+  discardDraft(id: string): void {
+    this.need(id);
+    const production = this.store.production(id);
+    const prod = production ? this.store.version(id, production) : undefined;
+    if (!prod) throw new McpServerError("Nothing is deployed: there is nothing to go back to", "CONFLICT");
+    this.store.saveDraft(id, { spec: prod.spec, baseVersion: prod.version, updatedAt: new Date().toISOString(), updatedBy: "discard" });
+    this.deps.changed?.(id, "draft");
+  }
+
+  updateSettings(id: string, patch: { visibility?: unknown; disabled?: unknown; onTestFailure?: unknown; rateLimits?: unknown }) {
+    const meta = this.need(id);
+    const next: Partial<McpServerMeta> = {};
+    if (patch.visibility !== undefined) {
+      if (patch.visibility !== "private" && patch.visibility !== "public") throw new McpServerError('visibility must be "private" or "public"');
+      next.visibility = patch.visibility;
+    }
+    if (patch.disabled !== undefined) next.disabled = patch.disabled === true;
+    if (patch.onTestFailure !== undefined) {
+      if (patch.onTestFailure !== "warn" && patch.onTestFailure !== "block") throw new McpServerError('onTestFailure must be "warn" or "block"');
+      next.onTestFailure = patch.onTestFailure;
+    }
+    if (patch.rateLimits !== undefined) {
+      const r = patch.rateLimits as Partial<PublicRateLimits> | null;
+      const n = (v: unknown, def: number) => (typeof v === "number" && v >= 1 && v <= 100_000 ? Math.floor(v) : def);
+      next.rateLimits = r ? { perIpPerMinute: n(r.perIpPerMinute, DEFAULT_RATE_LIMITS.perIpPerMinute), globalPerMinute: n(r.globalPerMinute, DEFAULT_RATE_LIMITS.globalPerMinute) } : undefined;
+    }
+    const saved = this.touch(meta, next);
+    void this.syncConnector(id).catch(() => undefined);
+    this.deps.changed?.(id, "settings");
+    return saved;
+  }
+
+  async remove(id: string): Promise<boolean> {
+    const meta = this.store.meta(id);
+    if (!meta) return false;
+    if (meta.connectorId) {
+      const manager = this.deps.connectors?.();
+      const connector = manager?.store.get(meta.connectorId);
+      if (manager && connector?.transport.type === "hosted" && connector.transport.serverId === id) await manager.remove(meta.connectorId);
+    }
+    this.store.remove(id);
+    this.deps.changed?.(id, "deleted");
+    return true;
+  }
+
+  saveTests(id: string, tests: unknown): McpServerTestCase[] {
+    this.need(id);
+    if (!Array.isArray(tests)) throw new McpServerError("tests must be a list");
+    const out: McpServerTestCase[] = tests.map((t, i) => {
+      const x = t as Record<string, unknown>;
+      if (!x || typeof x.tool !== "string" || !x.tool) throw new McpServerError(`tests[${i}].tool is required`);
+      const input = x.input && typeof x.input === "object" && !Array.isArray(x.input) ? x.input as Record<string, unknown> : {};
+      return {
+        id: typeof x.id === "string" && /^[\w-]{1,64}$/.test(x.id) ? x.id : randomUUID().slice(0, 8), tool: x.tool, input,
+        ...(typeof x.name === "string" && x.name.trim() ? { name: x.name.trim().slice(0, 120) } : {}),
+        ...(x.expect === "error" ? { expect: "error" as const } : {}),
+        ...(typeof x.contains === "string" && x.contains ? { contains: x.contains } : {}),
+      };
+    });
+    this.store.saveTests(id, out);
+    this.deps.changed?.(id, "tests");
+    return out;
+  }
+
+  // ── testing ──
+
+  /**
+   * Run one tool (the draft by default) with a sample input. Destructive / approval tools need
+   * `confirm: true` to really run; without it they are a dry run (the request that would go out).
+   */
+  async test(id: string, opts: { tool: string; input?: Record<string, unknown>; ref?: string; confirm?: boolean; dryRun?: boolean; actor?: string }): Promise<TestRunResult> {
+    this.need(id);
+    const ref = opts.ref ?? "draft";
+    const spec = this.specAt(id, ref);
+    if (!spec) throw new McpServerError(`Nothing at "${ref}"`, "NOT_FOUND");
+    const tool = spec.tools.find((t) => t.name === opts.tool);
+    if (!tool) throw new McpServerError(`No tool "${opts.tool}" in ${ref}`, "NOT_FOUND");
+    const version = ref === "draft" ? undefined : ref === "production" ? this.store.production(id) : ref;
+    if (tool.kind === "code") await this.ensureBuild(id, version ?? "draft", spec);
+    const dryRun = opts.dryRun === true || (isSensitiveTool(tool) && opts.confirm !== true);
+    const result = await runTool({
+      serverId: id, spec, ...(version ? { version } : {}), toolName: tool.name, input: opts.input ?? {}, source: "test",
+      approved: true, dryRun, ...(opts.actor ? { requestedBy: opts.actor } : {}),
+    }, this.runtimeDeps());
+    return {
+      ...result, tool: tool.name,
+      ...(dryRun && isSensitiveTool(tool) && opts.confirm !== true ? { skipped: "Destructive or approval tool: not sent. Pass confirm: true to really run it." } : {}),
+    };
+  }
+
+  /** Run the saved tests against a spec. Destructive / approval tools are never run here (skipped). */
+  async runSavedTests(id: string, ref = "draft"): Promise<{ results: TestRunResult[]; passed: number; failed: number; skipped: number }> {
+    this.need(id);
+    const spec = this.specAt(id, ref);
+    if (!spec) throw new McpServerError(`Nothing at "${ref}"`, "NOT_FOUND");
+    const results: TestRunResult[] = [];
+    const version = ref === "draft" ? undefined : ref === "production" ? this.store.production(id) : ref;
+    if (spec.tools.some((t) => t.kind === "code")) await this.ensureBuild(id, version ?? "draft", spec);
+    for (const test of this.store.tests(id)) {
+      const tool = spec.tools.find((t) => t.name === test.tool);
+      if (!tool) { results.push({ ok: false, text: "", tool: test.tool, testId: test.id, error: `No tool "${test.tool}"`, ms: 0, passed: false }); continue; }
+      if (isSensitiveTool(tool)) { results.push({ ok: true, text: "", tool: tool.name, testId: test.id, ms: 0, skipped: "destructive / approval tools never run automatically" }); continue; }
+      const r = await runTool({ serverId: id, spec, ...(version ? { version } : {}), toolName: tool.name, input: test.input, source: "test", approved: true }, this.runtimeDeps());
+      const passed = (test.expect === "error" ? !r.ok : r.ok) && (!test.contains || r.text.includes(test.contains) || (r.error ?? "").includes(test.contains));
+      results.push({ ...r, tool: tool.name, testId: test.id, passed });
+    }
+    return {
+      results,
+      passed: results.filter((r) => r.passed).length,
+      failed: results.filter((r) => !r.skipped && r.passed === false).length,
+      skipped: results.filter((r) => r.skipped).length,
+    };
+  }
+
+  private async ensureBuild(id: string, versionKey: string, spec: McpServerSpec): Promise<{ lockfile?: string; depsBytes?: number } | undefined> {
+    if (!spec.tools.some((t) => t.kind === "code")) return undefined;
+    if (!this.deps.build) throw new McpServerError("Code tools cannot be built here", "CONFLICT");
+    return this.deps.build({ serverId: id, versionKey, spec, buildDir: this.store.buildDir(id, versionKey) });
+  }
+
+  // ── publish / deploy ──
+
+  async publish(id: string, opts: { bump?: McpServerBump; version?: string; note?: string; deploy?: boolean; force?: boolean }, actor: string) {
+    const meta = this.need(id);
+    const draft = this.store.draft(id);
+    if (!draft) throw new McpServerError("There is no draft to publish", "CONFLICT");
+    const problems = specProblems(draft.spec);
+    if (problems.length) throw new McpServerError(`Fix these first: ${problems.join("; ")}`, "INVALID", { problems });
+    const existing = this.store.versions(id);
+    const latest = existing.map((v) => v.version).sort(compareSemver).at(-1);
+    const latestSpec = latest ? this.store.version(id, latest)?.spec : undefined;
+    if (latestSpec && specsEqual(latestSpec, draft.spec)) throw new McpServerError(`The draft is the same as ${latest}: nothing to publish`, "CONFLICT");
+    let version: string;
+    if (opts.version) {
+      if (!/^\d+\.\d+\.\d+$/.test(opts.version)) throw new McpServerError("version must be semver (1.2.0)");
+      if (latest && compareSemver(opts.version, latest) <= 0) throw new McpServerError(`version must be greater than ${latest}`, "CONFLICT");
+      version = opts.version;
+    } else {
+      version = nextVersion(existing.map((v) => v.version), opts.bump ?? suggestBump(latestSpec, draft.spec) ?? "patch");
+    }
+    // saved tests on the draft (destructive / approval tools are skipped)
+    const tests = this.store.tests(id).length ? await this.runSavedTests(id, "draft") : undefined;
+    if (tests?.failed && (meta.onTestFailure ?? "warn") === "block" && !opts.force) {
+      throw new McpServerError(`${tests.failed} saved test(s) failed: publishing is blocked (settings: onTestFailure "block")`, "TESTS_FAILED", { tests });
+    }
+    const build = await this.ensureBuild(id, version, draft.spec);
+    const record: McpServerVersion = {
+      version, spec: draft.spec, createdAt: new Date().toISOString(), author: actor,
+      ...(opts.note ? { note: opts.note.slice(0, 1000) } : {}), ...(opts.version ? {} : { bump: opts.bump ?? suggestBump(latestSpec, draft.spec) ?? "patch" }),
+      changes: specChanges(latestSpec, draft.spec),
+      ...(build ? { build: { ...build, builtAt: new Date().toISOString() } } : {}),
+      ...(tests ? { tests: { passed: tests.passed, failed: tests.failed, skipped: tests.skipped } } : {}),
+    };
+    this.store.saveVersion(id, record);
+    this.store.saveDraft(id, { ...draft, baseVersion: version });
+    this.deps.changed?.(id, "published");
+    // the first version goes live at once (the connector needs something to serve)
+    const first = !this.store.production(id);
+    let deploy: McpServerDeploy | undefined;
+    if (first || opts.deploy) deploy = await this.deploy(id, version, { actor, ...(opts.note ? { note: opts.note } : {}), action: first ? "initial" : "deploy" });
+    return { version: record.version, changes: record.changes, ...(deploy ? { deployed: deploy } : {}), ...(tests ? { tests } : {}) };
+  }
+
+  async deploy(id: string, version: string, opts: { actor: string; note?: string; action?: McpServerDeploy["action"] }): Promise<McpServerDeploy> {
+    this.need(id);
+    if (!this.store.version(id, version)) throw new McpServerError(`No version ${version}`, "NOT_FOUND");
+    const from = this.store.production(id);
+    if (from === version) throw new McpServerError(`${version} is already in production`, "CONFLICT");
+    const entry: McpServerDeploy = {
+      id: randomUUID(), ...(from ? { from } : {}), to: version, action: opts.action ?? "deploy", actor: opts.actor,
+      ...(opts.note ? { note: opts.note.slice(0, 1000) } : {}), at: new Date().toISOString(),
+    };
+    this.store.addDeploy(id, entry);
+    this.touch(this.need(id));
+    await this.syncConnector(id);
+    this.deps.changed?.(id, "deployed");
+    return entry;
+  }
+
+  /** Production back to the version before (or `to`). */
+  async rollback(id: string, opts: { actor: string; note?: string; to?: string }): Promise<McpServerDeploy> {
+    this.need(id);
+    const current = this.store.production(id);
+    if (!current) throw new McpServerError("Nothing is deployed", "CONFLICT");
+    let target = opts.to;
+    if (!target) {
+      const history = this.store.deploys(id).map((d) => d.to);
+      target = [...history].reverse().find((v) => v !== current);
+      if (!target) target = this.store.versions(id).map((v) => v.version).filter((v) => compareSemver(v, current) < 0).sort(compareSemver).at(-1);
+    }
+    if (!target) throw new McpServerError("There is no earlier version to roll back to", "CONFLICT");
+    return this.deploy(id, target, { actor: opts.actor, ...(opts.note ? { note: opts.note } : {}), action: "rollback" });
+  }
+
+  // ── the connector ──
+
+  /**
+   * Create or update the connector bound to the server: transport "hosted", the instance's own
+   * access rules (Polpo by default, agents granted in Connectors), the deployed version as label.
+   */
+  async syncConnector(id: string): Promise<ConnectorConfig | undefined> {
+    const manager = this.deps.connectors?.();
+    if (!manager) return undefined;
+    const meta = this.need(id);
+    const production = this.store.production(id);
+    const spec = production ? this.store.version(id, production)?.spec : undefined;
+    if (!spec || !production) return undefined;
+    const existing = meta.connectorId ? manager.store.get(meta.connectorId) : undefined;
+    const bound = existing?.transport.type === "hosted" && existing.transport.serverId === id ? existing : undefined;
+    const icon = spec.icon && /^[a-z0-9]+$/.test(spec.icon) ? { simpleIcons: spec.icon } : undefined;
+    if (bound) {
+      manager.store.update(bound.id, {
+        name: spec.name, ...(spec.description ? { description: spec.description } : {}), hostedVersion: production,
+        ...(icon ? { icon } : {}),
+      });
+      await manager.close(bound.id);
+      manager.announce(bound.id, "updated");
+      return manager.store.get(bound.id);
+    }
+    let connectorId = CONNECTOR_ID_PATTERN.test(id) && !manager.store.get(id) ? id : `${id.slice(0, 33)}-hosted`;
+    let n = 2;
+    while (manager.store.get(connectorId)) connectorId = `${id.slice(0, 33)}-h${n++}`;
+    const connector: ConnectorConfig = {
+      id: connectorId, name: spec.name, kind: "mcp", ...(spec.description ? { description: spec.description } : {}),
+      transport: { type: "hosted", serverId: id }, auth: { type: "none" },
+      // like any connector: Polpo may use it, agents are granted explicitly in Connectors
+      access: { agents: [], polpo: true }, enabled: true,
+      ...(icon ? { icon } : {}), hostedVersion: production, createdAt: new Date().toISOString(), status: "disconnected",
+    };
+    manager.store.create(connector);
+    this.touch(meta, { connectorId });
+    manager.announce(connectorId, "created");
+    return connector;
+  }
+
+  // ── approvals ──
+
+  /** Run an approved call once (in the server process), or mark it rejected. */
+  async resolvePending(serverId: string, callId: string, decision: "approved" | "rejected", by?: string): Promise<PendingCall | undefined> {
+    const call = this.store.pendingCall(serverId, callId);
+    if (!call || call.status !== "pending") return call;
+    const at = new Date().toISOString();
+    if (decision === "rejected") {
+      const next: PendingCall = { ...call, status: "rejected", resolvedAt: at, ...(by ? { resolvedBy: by } : {}) };
+      this.store.savePending(next);
+      this.deps.changed?.(serverId, "pending");
+      return next;
+    }
+    this.store.savePending({ ...call, status: "approved", resolvedAt: at, ...(by ? { resolvedBy: by } : {}) });
+    const spec = (call.version ? this.store.version(serverId, call.version)?.spec : undefined) ?? this.specAt(serverId, "production");
+    const result = spec
+      ? await runTool({ serverId, spec, ...(call.version ? { version: call.version } : {}), toolName: call.tool, input: call.input, source: "approval", approved: true, ...(call.approvalId ? { approvalId: call.approvalId } : {}) }, this.runtimeDeps())
+      : { ok: false, text: "The server has no deployed version any more", error: "The server has no deployed version any more", ms: 0 };
+    const next: PendingCall = {
+      ...call, status: result.ok ? "done" : "failed", resolvedAt: at, ...(by ? { resolvedBy: by } : {}),
+      result: { ok: result.ok, text: result.text.slice(0, 4000), ...(result.error ? { error: result.error } : {}) },
+    };
+    this.store.savePending(next);
+    this.deps.changed?.(serverId, "pending");
+    return next;
+  }
+
+  /** Every pending call, across servers. */
+  allPending(): PendingCall[] {
+    return this.store.ids().flatMap((id) => this.store.pending(id));
+  }
+
+  /** Find the pending call an approval request is about. */
+  findByApproval(approvalId: string): PendingCall | undefined {
+    return this.allPending().find((p) => p.approvalId === approvalId);
+  }
+}
+
+export { McpServerInputError };

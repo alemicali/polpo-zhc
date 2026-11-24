@@ -58,13 +58,13 @@ test("changelog data: unique ids, newest first, Italian dates, grouped by day", 
   expect([...dates].sort().reverse()).toEqual(dates);
   expect(formatChangelogDate("2026-10-06")).toBe("6 ottobre 2026");
   expect(groupChangelogByDate(CHANGELOG).map((g) => [g.date, g.entries.length])).toEqual([
-    ["2026-11-24", 20], ["2026-11-23", 9], ["2026-11-22", 22], ["2026-11-21", 3], ["2026-11-19", 2], ["2026-11-17", 5], ["2026-11-16", 1], ["2026-11-09", 1], ["2026-11-03", 2], ["2026-10-31", 2], ["2026-10-25", 2], ["2026-10-15", 1], ["2026-10-14", 1], ["2026-10-13", 3], ["2026-10-12", 3], ["2026-10-11", 4], ["2026-10-10", 2], ["2026-10-06", 8], ["2026-10-05", 1],
+    ["2026-11-24", 21], ["2026-11-23", 9], ["2026-11-22", 22], ["2026-11-21", 3], ["2026-11-19", 2], ["2026-11-17", 5], ["2026-11-16", 1], ["2026-11-09", 1], ["2026-11-03", 2], ["2026-10-31", 2], ["2026-10-25", 2], ["2026-10-15", 1], ["2026-10-14", 1], ["2026-10-13", 3], ["2026-10-12", 3], ["2026-10-11", 4], ["2026-10-10", 2], ["2026-10-06", 8], ["2026-10-05", 1],
   ]);
   expect(CHANGELOG.find((e) => e.id === "2026-10-06-group-chats")?.cta?.to).toBe("/chat?newGroup=1");
   // the newest news lead the bar (agents talking live, threads, sending anywhere, learning, recurring checks), then group chats and the Telegram news
   expect(unseenHighlights(CHANGELOG, new Set()).slice(0, 20).map((e) => e.id)).toEqual([
-    "2026-11-24-large-artifacts", "2026-11-24-agent-versions", "2026-11-24-cli-engine-parity", "2026-11-24-engine-badge-everywhere", "2026-11-24-cli-engine", "2026-11-24-task-page-chat", "2026-11-24-skill-versions", "2026-11-24-skill-bundles", "2026-11-24-spotlight-ai",
-    "2026-11-24-global-search", "2026-11-24-channels-like-connectors", "2026-11-24-chat-history-clean", "2026-11-24-whatsapp-business", "2026-11-24-drill-in-sidebar", "2026-11-23-artifact-workspaces", "2026-11-23-data-ui", "2026-11-22-theme-everything", "2026-11-22-opencode", "2026-11-22-harness-gateways", "2026-11-22-task-tool-scope",
+    "2026-11-24-custom-mcp-servers", "2026-11-24-large-artifacts", "2026-11-24-agent-versions", "2026-11-24-cli-engine-parity", "2026-11-24-engine-badge-everywhere", "2026-11-24-cli-engine", "2026-11-24-task-page-chat", "2026-11-24-skill-versions", "2026-11-24-skill-bundles", "2026-11-24-spotlight-ai",
+    "2026-11-24-global-search", "2026-11-24-channels-like-connectors", "2026-11-24-chat-history-clean", "2026-11-24-whatsapp-business", "2026-11-24-drill-in-sidebar", "2026-11-23-artifact-workspaces", "2026-11-23-data-ui", "2026-11-22-theme-everything", "2026-11-22-opencode", "2026-11-22-harness-gateways",
   ]);
   expect(unseenHighlights(CHANGELOG, new Set()).map((e) => e.id)).toEqual(CHANGELOG.filter((e) => e.highlight).map((e) => e.id));
 });

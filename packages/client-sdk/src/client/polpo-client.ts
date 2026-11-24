@@ -2,6 +2,8 @@ import { PolpoApiError } from "./errors.js";
 import type {
   Connector,
   ConnectorTool,
+  McpServerSummary, McpServerTemplateInfo, McpHostedServer, McpServerSpec, McpServerGenerateRequest, McpServerGenerateResult,
+  McpServerTestCase, McpToolTestResult, McpServerVersionInfo, McpServerDeploy, McpServerDiff, McpServerCallLog, McpPendingCall,
   AuthStatusResponse,
   MemberPreferencesPatch,
   MemberPreferencesResponse,
@@ -968,6 +970,100 @@ export class PolpoClient {
   /** One deploy with its diff. */
   getAgentDeploy(name: string, id: string): Promise<AgentDeployEntry & { diff: AgentVersionDiff }> {
     return this.get<AgentDeployEntry & { diff: AgentVersionDiff }>(`/agents/${encodeURIComponent(name)}/deploys/${encodeURIComponent(id)}`);
+  }
+
+  // ── Hosted MCP servers ──
+
+  /** Custom MCP servers Polpo hosts (each becomes a connector on first publish). */
+  getMcpServers(): Promise<McpServerSummary[]> {
+    return this.get<{ servers: McpServerSummary[] }>("/mcp-servers").then((d) => d.servers);
+  }
+
+  getMcpServerTemplates(): Promise<McpServerTemplateInfo[]> {
+    return this.get<{ templates: McpServerTemplateInfo[] }>("/mcp-servers/templates").then((d) => d.templates);
+  }
+
+  getMcpServer(id: string): Promise<McpHostedServer> {
+    return this.get<McpHostedServer>(`/mcp-servers/${encodeURIComponent(id)}`);
+  }
+
+  /** Create a draft from a spec or a template ({ template: "printful" }). */
+  createMcpServer(req: { id?: string; spec?: McpServerSpec; template?: string; visibility?: "private" | "public" }): Promise<{ id: string; problems: string[]; setup?: string }> {
+    return this.post<{ id: string; problems: string[]; setup?: string }>("/mcp-servers", req);
+  }
+
+  /** Draft a spec with the orchestrator model, from an API or a description (create: true saves it). */
+  generateMcpServer(req: McpServerGenerateRequest): Promise<McpServerGenerateResult> {
+    return this.post<McpServerGenerateResult>("/mcp-servers/generate", req);
+  }
+
+  updateMcpServerSettings(id: string, req: { visibility?: "private" | "public"; disabled?: boolean; onTestFailure?: "warn" | "block"; rateLimits?: { perIpPerMinute: number; globalPerMinute: number } }): Promise<McpServerSummary> {
+    return this.patch<McpServerSummary>(`/mcp-servers/${encodeURIComponent(id)}`, req);
+  }
+
+  saveMcpServerDraft(id: string, spec: McpServerSpec): Promise<{ problems: string[] }> {
+    return this.put<{ problems: string[] }>(`/mcp-servers/${encodeURIComponent(id)}/draft`, { spec });
+  }
+
+  discardMcpServerDraft(id: string): Promise<{ discarded: boolean }> {
+    return this.del<{ discarded: boolean }>(`/mcp-servers/${encodeURIComponent(id)}/draft`);
+  }
+
+  deleteMcpServer(id: string): Promise<{ removed: boolean }> {
+    return this.del<{ removed: boolean }>(`/mcp-servers/${encodeURIComponent(id)}`);
+  }
+
+  saveMcpServerTests(id: string, tests: Array<Omit<McpServerTestCase, "id"> & { id?: string }>): Promise<{ tests: McpServerTestCase[] }> {
+    return this.put<{ tests: McpServerTestCase[] }>(`/mcp-servers/${encodeURIComponent(id)}/tests`, { tests });
+  }
+
+  /** Run one tool (destructive / approval tools: a dry run unless confirm). */
+  testMcpServerTool(id: string, req: { tool: string; input?: Record<string, unknown>; ref?: string; confirm?: boolean; dryRun?: boolean }): Promise<McpToolTestResult> {
+    return this.post<McpToolTestResult>(`/mcp-servers/${encodeURIComponent(id)}/test`, req);
+  }
+
+  runMcpServerTests(id: string, ref?: string): Promise<{ results: McpToolTestResult[]; passed: number; failed: number; skipped: number }> {
+    return this.post<{ results: McpToolTestResult[]; passed: number; failed: number; skipped: number }>(`/mcp-servers/${encodeURIComponent(id)}/tests/run`, ref ? { ref } : {});
+  }
+
+  publishMcpServer(id: string, req: { bump?: "major" | "minor" | "patch"; version?: string; note?: string; deploy?: boolean; force?: boolean } = {}): Promise<{ version: string; changes: McpServerVersionInfo["changes"]; deployed?: McpServerDeploy; tests?: { passed: number; failed: number; skipped: number } }> {
+    return this.post(`/mcp-servers/${encodeURIComponent(id)}/publish`, req);
+  }
+
+  deployMcpServer(id: string, version: string, note?: string): Promise<McpServerDeploy> {
+    return this.post<McpServerDeploy>(`/mcp-servers/${encodeURIComponent(id)}/deploy`, { version, ...(note ? { note } : {}) });
+  }
+
+  rollbackMcpServer(id: string, opts: { to?: string; note?: string } = {}): Promise<McpServerDeploy> {
+    return this.post<McpServerDeploy>(`/mcp-servers/${encodeURIComponent(id)}/rollback`, opts);
+  }
+
+  getMcpServerVersions(id: string): Promise<McpServerVersionInfo[]> {
+    return this.get<{ versions: McpServerVersionInfo[] }>(`/mcp-servers/${encodeURIComponent(id)}/versions`).then((d) => d.versions);
+  }
+
+  getMcpServerVersion(id: string, version: string): Promise<McpServerVersionInfo & { spec: McpServerSpec }> {
+    return this.get<McpServerVersionInfo & { spec: McpServerSpec }>(`/mcp-servers/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`);
+  }
+
+  getMcpServerDeploys(id: string): Promise<McpServerDeploy[]> {
+    return this.get<{ deploys: McpServerDeploy[] }>(`/mcp-servers/${encodeURIComponent(id)}/deploys`).then((d) => d.deploys);
+  }
+
+  diffMcpServer(id: string, opts: { from?: string; to?: string } = {}): Promise<McpServerDiff> {
+    const q = new URLSearchParams();
+    if (opts.from) q.set("from", opts.from);
+    if (opts.to) q.set("to", opts.to);
+    const qs = q.toString();
+    return this.get<McpServerDiff>(`/mcp-servers/${encodeURIComponent(id)}/diff${qs ? `?${qs}` : ""}`);
+  }
+
+  getMcpServerLogs(id: string, limit?: number): Promise<McpServerCallLog[]> {
+    return this.get<{ logs: McpServerCallLog[] }>(`/mcp-servers/${encodeURIComponent(id)}/logs${limit ? `?limit=${limit}` : ""}`).then((d) => d.logs);
+  }
+
+  getMcpServerPending(id: string): Promise<McpPendingCall[]> {
+    return this.get<{ calls: McpPendingCall[] }>(`/mcp-servers/${encodeURIComponent(id)}/pending`).then((d) => d.calls);
   }
 
   getTeams(): Promise<Team[]> {

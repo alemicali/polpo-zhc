@@ -125,6 +125,10 @@ export const POLPO_TOOL_GROUPS: ToolGroupRule[] = [
     names: ["connector_catalog", "connector_update", "connector_test", "connector_disconnect"],
   },
   {
+    id: "hosted-servers", label: "Hosted MCP servers Polpo builds and serves (each becomes a connector): create from a template (Printful) or draft from an API / a description, test, publish, deploy, roll back, visibility, logs",
+    prefixes: ["mcp_server"],
+  },
+  {
     id: "channels", label: "Channels end to end: Telegram, WhatsApp, Slack, email… setup (secrets via setup link), test, routes, Telegram verify, invites, pairing, peers, allowlist, WhatsApp QR sign-in",
     prefixes: ["channel_"], names: ["channels_list"],
   },

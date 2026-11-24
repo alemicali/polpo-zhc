@@ -1616,6 +1616,10 @@ export class Orchestrator extends TypedEmitter {
   async rejectRequest(requestId: string, feedback: string, resolvedBy?: string): Promise<ApprovalRequest | null> {
     return this.engine.rejectRequest(requestId, feedback, resolvedBy);
   }
+  /** A human approval asked by the system itself (no configured gate), e.g. a hosted MCP server's approval tool call. */
+  async requestHumanApproval(opts: { gateId: string; gateName: string; taskId?: string; missionId?: string; payload?: unknown }): Promise<ApprovalRequest | null> {
+    return (await this.approvalMgr?.requestHumanApproval(opts)) ?? null;
+  }
   async canRejectRequest(requestId: string): Promise<{ allowed: boolean; rejectionCount: number; maxRejections: number }> {
     return this.engine.canRejectRequest(requestId);
   }

@@ -41,6 +41,8 @@ export { useSkillVersions } from "./hooks/use-skill-versions.js";
 export type { UseSkillVersionsReturn } from "./hooks/use-skill-versions.js";
 export { useAgentVersions, useAgentDeploys } from "./hooks/use-agent-versions.js";
 export type { UseAgentVersionsReturn, UseAgentDeploysReturn } from "./hooks/use-agent-versions.js";
+export { useMcpServers, useMcpServer } from "./hooks/use-mcp-servers.js";
+export type { UseMcpServersReturn, UseMcpServerReturn } from "./hooks/use-mcp-servers.js";
 export { useSkillBundleUpload } from "./hooks/use-skill-bundle-upload.js";
 export { useArtifactUpload, ARTIFACT_UPLOAD_PART_BYTES } from "./hooks/use-artifact-upload.js";
 export type { UseArtifactUploadReturn } from "./hooks/use-artifact-upload.js";
@@ -257,6 +259,8 @@ export type {
   AgentVersionDiff,
   AgentDeployEntry,
   AgentPublishResult,
+  McpSecretRef, McpServerAuth, McpServerTool, McpServerSpec, McpServerSummary, McpHostedServer, McpServerTemplateInfo, McpServerTestCase,
+  McpServerVersionInfo, McpServerDeploy, McpServerDiff, McpToolTestResult, McpServerCallLog, McpPendingCall, McpServerGenerateRequest, McpServerGenerateResult,
   SkillRestoreResult,
   NotificationChannelType,
   NotificationChannelConfig,
