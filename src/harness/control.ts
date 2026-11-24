@@ -117,6 +117,8 @@ export async function harnessesOverview(settings: PolpoSettings | undefined, vau
     relay: publicUrl
       ? { available: true, url: `${publicUrl}/api/v1/harness-relay/`, path: "/api/v1/harness-relay/" }
       : { available: false, path: "/api/v1/harness-relay/", warning: "POLPO_PUBLIC_URL is not set: computers cannot reach Polpo's model relay, so API keys and gateway keys go into the computer's VM. Set POLPO_PUBLIC_URL and expose <public URL>/api/v1/harness-relay/." },
+    /** The CLI engine's accounts as saved (config directories, never tokens): kept when the dashboard saves these settings. */
+    ...(h?.cli ? { cli: h.cli } : {}),
     /** Computers that can run a harness (Daytona; v2 checked at run time). */
     computers: computers.filter((c) => isRemoteComputer(c) && c.kind === "daytona").map((c) => c.id),
   };

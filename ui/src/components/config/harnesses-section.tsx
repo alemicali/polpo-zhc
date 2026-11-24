@@ -6,7 +6,8 @@
  * a gateway; its logins and subscriptions are not offered. Credentials are vault
  * references (the picker; the key itself is added in an agent's Credentials tab). A Claude
  * subscription is not offered (Anthropic's terms). "Test connection" (and every save) sends one
- * tiny model request from the Polpo server and shows the result. Below: the harness sessions.
+ * tiny model request from the Polpo server and shows the result. Below: the CLI engine's accounts
+ * (personal Claude Code / Codex sign-ins, cli-accounts-section.tsx) and the harness sessions.
  */
 import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, Loader2, PlugZap, RefreshCw, Save, ShieldCheck, Square, Trash2 } from "lucide-react";
@@ -28,6 +29,7 @@ import {
 } from "@/lib/harnesses-api";
 import { HarnessGatewayFields } from "./harness-gateway-fields";
 import { HarnessTestLine } from "./harness-test-line";
+import { CliAccountsSection } from "./cli-accounts-section";
 
 const selectClass = "h-8 rounded-md border bg-transparent px-2 text-xs";
 
@@ -308,6 +310,9 @@ export function HarnessesSection() {
       <Button size="sm" onClick={() => void save()} disabled={saving}>
         {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} Save
       </Button>
+
+      {/* The CLI engine: personal Claude Code / Codex sign-ins */}
+      <CliAccountsSection />
 
       {/* Sessions */}
       <div className="space-y-2">
