@@ -31,7 +31,6 @@ import {
   Boxes,
   MousePointerClick,
   MessagesSquare,
-  PanelLeft,
   History,
   ChevronsLeft,
   Menu,
@@ -69,7 +68,6 @@ import { useChatActions } from "@/hooks/chat-context";
 import { useProjectInfo } from "@/hooks/use-polpo";
 import {
   setChatFirstNavMode,
-  setLayoutMode,
   toggleChatFirstSessions,
   useChatFirstNavMode,
   useChatFirstSessionsOpen,
@@ -79,7 +77,7 @@ import { cn } from "@/lib/utils";
 import { BrandMark } from "@/components/shared/brand-mark";
 import { productName, productTagline, useInstanceBranding } from "@/lib/branding";
 import { MobileNavSheet } from "./mobile-nav-sheet";
-import { HeaderMoreMenu, ThemeMenu, WhatsNewButton } from "./header-actions";
+import { HeaderMoreMenu, WhatsNewButton } from "./header-actions";
 import { BetaBadge } from "@/components/shared/beta-badge";
 import { isBetaPath } from "@/lib/beta";
 import { PersistentPageOutlet } from "./persistent-page-outlet";
@@ -449,21 +447,7 @@ const PagesPanelHeader = memo(function PagesPanelHeader() {
       <div className="flex items-center gap-1 shrink-0">
         <WhatsNewButton />
         <NavigationModeMenu mode={navMode} />
-        <ThemeMenu className="hidden lg:inline-flex" />
         <HeaderMoreMenu showSidebarStyle={false} />
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all"
-              onClick={() => setLayoutMode("sidebar")}
-            >
-              <PanelLeft className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="text-xs">Switch to sidebar layout</TooltipContent>
-        </Tooltip>
       </div>
     </header>
   );

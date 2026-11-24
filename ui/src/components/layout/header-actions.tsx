@@ -11,6 +11,7 @@
 import { useState } from "react";
 import {
   Check,
+  Columns2,
   Github,
   ListTree,
   LogOut,
@@ -32,6 +33,9 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
@@ -41,6 +45,7 @@ import { usePalette, PALETTES } from "@/lib/palette";
 import { openWhatsNew, useWhatsNewOpen } from "@/hooks/use-whats-new-drawer";
 import { useUnseenChangelog } from "@/hooks/use-whats-new";
 import { setSidebarStyle, useSidebarStyle } from "@/hooks/use-sidebar-style";
+import { setLayoutMode, useLayoutMode } from "@/hooks/use-layout-mode";
 import { useInstanceLogout } from "@/hooks/use-instance-logout";
 import { PwaInstallDialog } from "./pwa-install-dialog";
 
@@ -85,10 +90,52 @@ export function WhatsNewButton({ className }: { className?: string }) {
   );
 }
 
-/** Light / dark / system and the palette. */
-export function ThemeMenu({ className }: { className?: string }) {
+/** Light / dark / system and the palette, as menu items (the ⋯ menu's Theme submenu and ThemeMenu). */
+function ThemeMenuItems() {
   const { theme, resolved, setTheme } = useTheme();
   const { palette, setPalette } = usePalette();
+  return (
+    <>
+      <DropdownMenuLabel className="text-label text-muted-foreground/70">Mode</DropdownMenuLabel>
+      {([
+        { id: "light" as const, label: "Light", icon: Sun },
+        { id: "dark" as const, label: "Dark", icon: Moon },
+        { id: "system" as const, label: "System", icon: Monitor },
+      ]).map(({ id, label, icon: Icon }) => (
+        <DropdownMenuItem key={id} onSelect={() => setTheme(id)} className="gap-2.5 text-xs">
+          <Icon className="h-3.5 w-3.5" /> {label}
+          {theme === id && <Check className="ml-auto h-3 w-3 text-primary" />}
+        </DropdownMenuItem>
+      ))}
+      <DropdownMenuSeparator />
+      <DropdownMenuLabel className="text-label text-muted-foreground/70 flex items-center gap-1.5">
+        <PaletteIcon className="h-3 w-3" /> Palette
+      </DropdownMenuLabel>
+      {PALETTES.map((p) => {
+        const swatch = resolved === "dark" ? p.swatchDark : p.swatchLight;
+        return (
+          <DropdownMenuItem key={p.id} onSelect={() => setPalette(p.id)} className="gap-2.5 text-xs py-1.5">
+            {/* Three-stop swatch — bg, primary, accent — overlapping discs */}
+            <span className="relative inline-flex shrink-0 h-4 w-4 items-center justify-center">
+              <span className="absolute inset-0 rounded-pill ring-1 ring-border/60" style={{ backgroundColor: swatch[0] }} />
+              <span className="absolute h-3 w-3 rounded-pill" style={{ backgroundColor: swatch[1], left: "30%", top: "10%" }} />
+              <span className="absolute h-2 w-2 rounded-pill" style={{ backgroundColor: swatch[2], left: "55%", top: "50%" }} />
+            </span>
+            <span className="flex-1 min-w-0">
+              <span className="block leading-tight">{p.name}</span>
+              <span className="block text-micro text-muted-foreground/70 leading-tight">{p.blurb}</span>
+            </span>
+            {palette === p.id && <Check className="h-3 w-3 text-primary shrink-0" />}
+          </DropdownMenuItem>
+        );
+      })}
+    </>
+  );
+}
+
+/** Light / dark / system and the palette, as a standalone menu (kept for places that want it on its own). */
+export function ThemeMenu({ className }: { className?: string }) {
+  const { resolved } = useTheme();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -97,39 +144,7 @@ export function ThemeMenu({ className }: { className?: string }) {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-[220px] bg-popover/95 backdrop-blur-surface border-border/50">
-        <DropdownMenuLabel className="text-label text-muted-foreground/70">Mode</DropdownMenuLabel>
-        {([
-          { id: "light" as const, label: "Light", icon: Sun },
-          { id: "dark" as const, label: "Dark", icon: Moon },
-          { id: "system" as const, label: "System", icon: Monitor },
-        ]).map(({ id, label, icon: Icon }) => (
-          <DropdownMenuItem key={id} onSelect={() => setTheme(id)} className="gap-2.5 text-xs">
-            <Icon className="h-3.5 w-3.5" /> {label}
-            {theme === id && <Check className="ml-auto h-3 w-3 text-primary" />}
-          </DropdownMenuItem>
-        ))}
-        <DropdownMenuSeparator />
-        <DropdownMenuLabel className="text-label text-muted-foreground/70 flex items-center gap-1.5">
-          <PaletteIcon className="h-3 w-3" /> Palette
-        </DropdownMenuLabel>
-        {PALETTES.map((p) => {
-          const swatch = resolved === "dark" ? p.swatchDark : p.swatchLight;
-          return (
-            <DropdownMenuItem key={p.id} onSelect={() => setPalette(p.id)} className="gap-2.5 text-xs py-1.5">
-              {/* Three-stop swatch — bg, primary, accent — overlapping discs */}
-              <span className="relative inline-flex shrink-0 h-4 w-4 items-center justify-center">
-                <span className="absolute inset-0 rounded-pill ring-1 ring-border/60" style={{ backgroundColor: swatch[0] }} />
-                <span className="absolute h-3 w-3 rounded-pill" style={{ backgroundColor: swatch[1], left: "30%", top: "10%" }} />
-                <span className="absolute h-2 w-2 rounded-pill" style={{ backgroundColor: swatch[2], left: "55%", top: "50%" }} />
-              </span>
-              <span className="flex-1 min-w-0">
-                <span className="block leading-tight">{p.name}</span>
-                <span className="block text-micro text-muted-foreground/70 leading-tight">{p.blurb}</span>
-              </span>
-              {palette === p.id && <Check className="h-3 w-3 text-primary shrink-0" />}
-            </DropdownMenuItem>
-          );
-        })}
+        <ThemeMenuItems />
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -139,6 +154,8 @@ export function ThemeMenu({ className }: { className?: string }) {
 export function HeaderMoreMenu({ className, showSidebarStyle = true }: { className?: string; showSidebarStyle?: boolean }) {
   const [installOpen, setInstallOpen] = useState(false);
   const sidebarStyle = useSidebarStyle();
+  const layoutMode = useLayoutMode();
+  const { resolved } = useTheme();
   const { available: canLogOut, busy: loggingOut, logout } = useInstanceLogout();
   return (
     <>
@@ -167,6 +184,24 @@ export function HeaderMoreMenu({ className, showSidebarStyle = true }: { classNa
             <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
               <Github className="h-3.5 w-3.5" /> GitHub
             </a>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger className="gap-2.5 text-xs">
+              {resolved === "dark" ? <Moon className="h-3.5 w-3.5" /> : <Sun className="h-3.5 w-3.5" />} Theme
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="min-w-[220px] bg-popover/95 backdrop-blur-surface border-border/50">
+              <ThemeMenuItems />
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+          <DropdownMenuLabel className="text-label text-muted-foreground/70">Layout</DropdownMenuLabel>
+          <DropdownMenuItem onSelect={() => setLayoutMode("sidebar")} className="gap-2.5 text-xs">
+            <PanelLeft className="h-3.5 w-3.5" /> Sidebar
+            {layoutMode === "sidebar" && <Check className="ml-auto h-3 w-3 text-primary" />}
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setLayoutMode("chat-first")} className="gap-2.5 text-xs">
+            <Columns2 className="h-3.5 w-3.5" /> Chat-first
+            {layoutMode === "chat-first" && <Check className="ml-auto h-3 w-3 text-primary" />}
           </DropdownMenuItem>
           {showSidebarStyle && (
             <>
