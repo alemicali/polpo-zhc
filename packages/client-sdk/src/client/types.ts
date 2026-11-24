@@ -2953,6 +2953,8 @@ export interface McpPendingCall {
 export interface McpServerGenerateRequest { mode: "api" | "description"; url?: string; text?: string; goal?: string; name?: string; vaultOwner?: string; create?: boolean; id?: string }
 export interface McpServerGenerateResult {
   id?: string; spec: McpServerSpec; problems: string[]; notes: string[]; source: { kind: "openapi" | "docs" | "description"; endpoints?: number; title?: string };
+}
+
 // ── Artifacts ────────────────────────────────────────────────────────
 
 export type ArtifactType = "doc" | "html" | "svg" | "mermaid" | "view";
