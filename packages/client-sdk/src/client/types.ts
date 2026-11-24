@@ -2251,3 +2251,117 @@ export interface ComputerWebhookEventPage {
   total: number;
   counts: Record<ComputerWebhookOutcome, number>;
 }
+
+// ── WhatsApp Business (Meta Cloud API) ─────────────────────────────────
+
+export type WaBizOutcome = "accepted" | "ignored" | "rejected" | "error";
+export type WaBizSecretKind = "accessToken" | "appSecret" | "verifyToken";
+
+/** A WhatsApp Business channel's status (never a secret's value). */
+export interface WaBusinessStatus {
+  channel: string;
+  phoneNumberId?: string;
+  wabaId?: string;
+  graphApiVersion: string;
+  audience: "customers" | "operators";
+  agent?: string;
+  inbound: boolean;
+  secrets: Record<WaBizSecretKind, boolean>;
+  state: "receiving" | "configured" | "not-configured";
+  missing: string[];
+  callbackUrl?: string;
+  funnelCommand: string;
+  note: string;
+  lastEventAt?: string;
+  lastError?: string;
+  counts: Record<WaBizOutcome, number>;
+  inbox: number;
+  pendingApprovals: number;
+  sentToday: number;
+  limits: { businessInitiatedPerDay: number; perAgentPerDay: Record<string, number> };
+  phone?: { displayPhoneNumber?: string; verifiedName?: string; qualityRating?: string; messagingLimitTier?: string; checkedAt: string };
+  templates?: { count: number; approved: number; syncedAt: string };
+}
+
+export interface WaBusinessEventSummary {
+  id: string;
+  channel: string;
+  receivedAt: string;
+  outcome: WaBizOutcome;
+  reason?: string;
+  httpStatus: number;
+  signature: "valid" | "invalid" | "missing" | "not-checked";
+  eventType?: string;
+  phoneNumberId?: string;
+  messages?: number;
+  statuses?: number;
+  action?: string;
+  processingMs: number;
+  bytes: number;
+}
+
+export interface WaBusinessEvent extends WaBusinessEventSummary {
+  /** Types, lengths and masked contacts: never message text. */
+  items?: Array<{ kind: "message" | "status"; wamid?: string; type?: string; length?: number; status?: string; contact?: string; error?: string }>;
+}
+
+export interface WaBusinessEventPage {
+  channel: string;
+  events: WaBusinessEventSummary[];
+  nextCursor?: string;
+  total: number;
+  counts: Record<WaBizOutcome, number>;
+}
+
+export interface WaBusinessContact {
+  channel: string;
+  waId: string;
+  userId?: string;
+  name?: string;
+  lastInboundAt?: string;
+  optIn: { at: string; source: string } | null;
+  optOut: { at: string; keyword: string } | null;
+  window?: { open: boolean; closesAt?: string };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WaBusinessMessage {
+  id: string;
+  channel: string;
+  waId: string;
+  direction: "in" | "out";
+  type: string;
+  initiated?: "reply" | "business";
+  sentBy?: string;
+  template?: { name: string; language: string; category?: string };
+  text?: string;
+  status: string;
+  statuses: Array<{ status: string; at: string; error?: string }>;
+  pricing?: { category?: string; type?: string; billable?: boolean; model?: string };
+  error?: { code?: number; title?: string; detail?: string };
+  pending?: { template: string; language: string; params: string[]; requestedBy: string; requestedAt: string; reason?: string };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WaBusinessConversation {
+  contact: WaBusinessContact & { masked?: string };
+  window: { open: boolean; closesAt?: string };
+  optedOut: boolean;
+  messages: WaBusinessMessage[];
+}
+
+export interface WaBusinessTemplate {
+  id?: string;
+  name: string;
+  language: string;
+  status: string;
+  category: string;
+  parameterFormat?: "POSITIONAL" | "NAMED";
+  components: Array<{ type: string; format?: string; text?: string }>;
+}
+
+export type WaBusinessSendResult =
+  | { status: "sent"; ids: string[] }
+  | { status: "pending_approval"; id: string; note: string };
