@@ -2,7 +2,9 @@
  * Agents, approvals, artifacts and files (data: data.ts).
  */
 import { z } from "zod";
-import { ARTIFACT_WORKSPACE_GUIDE } from "@polpo-ai/core/artifacts";
+import { ARTIFACT_WORKSPACE_GUIDE, artifactLimits } from "@polpo-ai/core/artifacts";
+import { ARTIFACT_OPS_GUIDE } from "../../artifacts/ops.js";
+import { fetchPublicBytes } from "./config.js";
 import { agentEffectiveModel, agentEngineIdOf, engineTypeText, modelWithEngineText } from "@polpo-ai/core/engine-label";
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -225,6 +227,30 @@ const artifactItem = z.object({
   taskId: z.string().optional(), missionId: z.string().optional(), size: z.number().optional(), updatedAt: z.string().optional(),
 }).passthrough();
 
+/** How a model should change artifacts (Claude-artifact style): in every tool that writes one. */
+const CHANGE_GUIDE = "Prefer command \"update\" (old_str → new_str; several with updates[]) for any change smaller than most of the content: it is cheap and leaves the rest untouched. "
+  + "Use \"rewrite\" (content) only when most of it changes. For a content over a few KB never send it whole: upload it with polpo_artifact_upload_prepare "
+  + "({ url } or { path }, or base64 parts) and polpo_artifact_upload_finalize.";
+
+const UPLOAD_HINT = "This content is too large to send in one call: upload it with polpo_artifact_upload_prepare ({ url }, { path } of a file of the instance, or { base64 } in parts with append_to/more) "
+  + "then polpo_artifact_upload_finalize (with id to replace this artifact's content), or change only part of it with polpo_artifact_update command update / ops.";
+
+const selector = z.union([z.string(), z.number().int().min(0)]);
+const updateItem = z.object({
+  old_str: z.string().describe("Exact text in the current content (once, unless replace_all)"),
+  new_str: z.string().describe("The replacement (\"\" deletes old_str)"),
+  replace_all: z.boolean().optional(),
+});
+const readOutput = z.object({ text: z.string(), size: z.number(), start: z.number().optional(), end: z.number().optional(), more: z.boolean().optional(), outline: z.string().optional() }).passthrough();
+const uploadOutput = { upload_id: z.string(), size: z.number(), complete: z.boolean(), filename: z.string().optional() };
+
+/** "12 earlier versions, 3.1 MB of 500 MB (max 30)". */
+function usageLine(usage: unknown): string {
+  const u = usage as { count?: number; bytes?: number; maxBytes?: number; maxCount?: number } | undefined;
+  if (!u || typeof u.count !== "number") return "";
+  return `${u.count} earlier version${u.count === 1 ? "" : "s"}, ${formatBytes(u.bytes ?? 0)} of ${formatBytes(u.maxBytes ?? 0)} (max ${u.maxCount}; the oldest are pruned first)`;
+}
+
 export function registerArtifactTools(tool: Register, deps: McpDeps): void {
   tool("artifacts", "polpo_artifacts_list", {
     title: "List artifacts",
@@ -248,51 +274,104 @@ export function registerArtifactTools(tool: Register, deps: McpDeps): void {
     const lines = (p.items as Array<{ id: string; title: string; type: string; kind?: string; createdBy?: string; version?: number; taskId?: string; missionId?: string; size?: number; updatedAt?: string }>)
       .map((a) => `- ${a.id} [${artifactLabel(a.type, a.kind)}] ${a.title}${a.createdBy ? ` — by ${a.createdBy}` : ""}${a.version ? `, v${a.version}` : ""}`
         + `${a.taskId ? `, from task ${a.taskId}${a.missionId ? ` (mission ${a.missionId})` : ""}` : ""}`
-        + `${typeof a.size === "number" ? `, ${a.size} bytes` : ""}${a.updatedAt ? `, updated ${a.updatedAt.slice(0, 16).replace("T", " ")}` : ""}`);
+        + `${typeof a.size === "number" ? `, ${formatBytes(a.size)}` : ""}${a.updatedAt ? `, updated ${a.updatedAt.slice(0, 16).replace("T", " ")}` : ""}`);
     return ok(`${lines.join("\n") || "No artifacts."}${p.next_cursor ? `\n(more: cursor ${p.next_cursor})` : ""}`, p);
   });
 
   tool("artifacts", "polpo_artifact_get", {
     title: "Get an artifact",
-    description: "An artifact's details, its content and its earlier versions (polpo_artifacts_list for ids). "
-      + "Slides, sheets and motion are JSON in content; a design is HTML. Change it with polpo_artifact_update, passing expectedVersion = its version.",
-    inputSchema: { id: z.string().min(1).describe("The artifact's id") },
-    outputSchema: { artifact: looseObject },
+    description: "An artifact's details, versions (with how much of the version limit they use) and content (polpo_artifacts_list for ids). "
+      + "A small content comes whole; a large one shows its first 60,000 bytes and its outline (tabs, slides, sheets, artboards, scenes with ids). "
+      + "Read more with offset/limit (bytes; continue from the end shown), the outline alone with outline: true, or one part: tab, slide (or slides \"2-5\"), "
+      + "sheet (+ range \"A1:D20\"), board, page, scene — by id, name or position from 0. Slides, sheets and motion are JSON; a design is HTML. "
+      + "Change it with polpo_artifact_update, passing expectedVersion = its version.",
+    inputSchema: {
+      id: z.string().min(1).describe("The artifact's id"),
+      version: z.number().int().positive().optional().describe("An earlier version"),
+      offset: z.number().int().min(0).optional().describe("Byte to start reading from"),
+      limit: z.number().int().positive().max(240_000).optional().describe("Bytes to read (default 60,000)"),
+      outline: z.boolean().optional().describe("Only the structure"),
+      tab: selector.optional().describe("A document's tab"),
+      slide: selector.optional().describe("One slide"),
+      slides: z.string().optional().describe("Slides by position, e.g. \"2-5\""),
+      sheet: selector.optional().describe("A sheet of a workbook"),
+      range: z.string().optional().describe("With sheet: cells like A1:D20"),
+      board: selector.optional().describe("A design's artboard"),
+      page: selector.optional().describe("A design's page"),
+      scene: selector.optional().describe("A motion scene"),
+    },
+    outputSchema: { artifact: looseObject, read: readOutput.optional() },
     annotations: READ,
-  }, async ({ id }) => {
-    const r = await apiGet(deps, `/artifacts/${enc(id)}`);
-    if (!r.ok) return apiError(r, `Reading artifact ${id}`, r.status === 404 ? "Check the id with polpo_artifacts_list." : undefined);
-    return ok(clip(r.data), { artifact: r.data as Record<string, unknown> });
+  }, async ({ id, version, offset, limit, outline, tab, slide, slides, sheet, range, board, page: pageSel, scene }) => {
+    const meta = await apiGet(deps, `/artifacts/${enc(id)}?content=none`);
+    if (!meta.ok) return apiError(meta, `Reading artifact ${id}`, meta.status === 404 ? "Check the id with polpo_artifacts_list." : undefined);
+    const artifact = meta.data as Record<string, any>;
+    if (String(id).startsWith("view:")) return ok(clip(artifact), { artifact });
+    const r = await apiGet(deps, `/artifacts/${enc(id)}/read${qs({ version, offset, limit, outline: outline ? 1 : undefined, tab, slide, slides, sheet, range, board, page: pageSel, scene })}`);
+    if (!r.ok) {
+      return apiError(r, `Reading artifact ${id}`, r.status === 413 ? "Read it by byte range (offset/limit) instead of by part." : undefined);
+    }
+    const read = r.data as { text: string; size: number; start?: number; end?: number; more?: boolean; outline?: string };
+    const { content: _content, versions, usage, ...rest } = artifact;
+    const whole = read.start === 0 && read.more === false && !version;
+    const summary = { ...rest, usage, versions: (versions as Array<Record<string, unknown>> | undefined)?.map(({ content: _c, ...v }) => v), ...(whole ? { content: read.text } : {}) };
+    const range_ = read.start !== undefined && (read.start > 0 || read.more) ? ` (bytes ${read.start}–${read.end} of ${read.size}${read.more ? `; more: offset ${read.end}` : ""})` : "";
+    const text = [
+      `${artifact.id} [${artifactLabel(artifact.type, artifact.kind)}] ${artifact.title} — v${artifact.version}, ${formatBytes(artifact.size)}${artifact.createdBy ? `, by ${artifact.createdBy}` : ""}`,
+      artifact.description ? `Description: ${artifact.description}` : "",
+      `Versions: v${artifact.version} (current)${(versions as unknown[] | undefined)?.length ? `, ${(versions as Array<{ version: number }>).map((v) => `v${v.version}`).join(", ")}` : ""}${usage ? ` — ${usageLine(usage)}` : ""}`,
+      read.outline ? `--- outline ---\n${read.outline}` : "",
+      `--- ${version ? `v${version} ` : ""}content${range_} ---`,
+      read.text,
+    ].filter(Boolean).join("\n");
+    return ok(clip(text), { artifact: summary, read });
   });
 
   tool("artifacts", "polpo_artifact_create", {
     title: "Create an artifact",
-    description: "Create an artifact that opens in Polpo. Also supports drawings (svg) and diagrams (mermaid). HTML can read data through window.polpo.query/sql.\n"
+    description: "Create an artifact that opens in Polpo. Also supports drawings (svg) and diagrams (mermaid). HTML can read data through window.polpo.query/sql. "
+      + "Only for contents of a few KB: for anything larger use polpo_artifact_upload_prepare + polpo_artifact_upload_finalize "
+      + "(from a public URL, a file of the instance, or base64 in parts), then change it with polpo_artifact_update command update.\n"
       + ARTIFACT_WORKSPACE_GUIDE,
     inputSchema: {
       title: z.string().min(1).describe("The title people see"),
       type: z.enum(["doc", "html", "svg", "mermaid"]).describe("doc (Markdown), html, svg or mermaid"),
       kind: z.string().optional().describe("For html: slides, sheets, design, motion, dashboard, app, report, page"),
-      content: z.string().describe("The full content in that format"),
+      content: z.string().describe("The full content in that format (a few KB; larger: upload)"),
       description: z.string().optional().describe("One line on what it is"),
     },
     outputSchema: { artifact: looseObject },
     annotations: WRITE,
   }, async (args) => {
     const r = await apiSend(deps, "POST", "/artifacts", args);
-    if (!r.ok) return apiError(r, "Creating the artifact");
-    const a = r.data as { id?: string; title?: string };
-    return ok(`Created artifact ${a.id}: ${a.title}.`, { artifact: r.data as Record<string, unknown> });
+    if (!r.ok) return apiError(r, "Creating the artifact", r.status === 413 ? UPLOAD_HINT : undefined);
+    const { content: _content, ...a } = r.data as Record<string, any>;
+    return ok(`Created artifact ${a.id}: ${a.title} (v1, ${formatBytes(a.size)}).`, { artifact: a });
   });
 
   tool("artifacts", "polpo_artifact_update", {
     title: "Change an artifact",
-    description: "Change an artifact: its whole new content (same format as polpo_artifact_create; the previous one is kept as a version people can go back to), "
-      + "title, description or pin. Pass expectedVersion (the version you read with polpo_artifact_get): refused if someone changed it since, then read it again.",
+    description: "Change an artifact; every change is a new version people can step through and restore. Read it first with polpo_artifact_get and pass expectedVersion "
+      + "(refused if someone changed it since: read it again). "
+      + "command \"update\" (default with old_str): old_str → new_str, old_str must match the current content exactly once (or replace_all); several: updates [{ old_str, new_str }] "
+      + "applied in sequence, all or nothing; a miss shows the closest lines. command \"rewrite\": the whole new content (same format as polpo_artifact_create). "
+      + "command \"append\"/\"prepend\" with text. patch: JSON Patch (RFC 6902) on the model (workspace JSON; { pages } of a design; { tabs } of a document). "
+      + "ops: per-kind operations.\n" + ARTIFACT_OPS_GUIDE + "\n" + CHANGE_GUIDE + " Also title, description, pin.",
     inputSchema: {
       id: z.string().min(1).describe("The artifact's id (art_…)"),
       expectedVersion: z.number().int().positive().optional().describe("The version you read: refused when it changed since"),
-      content: z.string().optional().describe("The whole new content"),
+      command: z.enum(["update", "rewrite", "append", "prepend"]).optional().describe("update (default with old_str/updates), rewrite (default with content), append, prepend"),
+      old_str: z.string().optional().describe("update: the exact text to replace"),
+      new_str: z.string().optional().describe("update: the replacement"),
+      replace_all: z.boolean().optional().describe("update: replace every occurrence of old_str"),
+      updates: z.array(updateItem).optional().describe("update: several replacements, in sequence"),
+      content: z.string().optional().describe("rewrite: the whole new content (only when most of it changes)"),
+      text: z.string().optional().describe("append/prepend: the text to add"),
+      patch: z.array(z.object({
+        op: z.enum(["add", "remove", "replace", "move", "copy", "test"]), path: z.string().describe("JSON pointer, e.g. /slides/2/title"),
+        from: z.string().optional(), value: z.unknown().optional(),
+      })).optional().describe("JSON Patch on the model"),
+      ops: z.array(z.object({ op: z.string() }).passthrough()).optional().describe("Per-kind operations (see the description)"),
       title: z.string().optional().describe("A new title"),
       description: z.string().optional().describe("One line on what it is"),
       pinned: z.boolean().optional().describe("Pin it at the top of the artifacts, or unpin it"),
@@ -304,10 +383,85 @@ export function registerArtifactTools(tool: Register, deps: McpDeps): void {
     const r = await apiSend(deps, "PATCH", `/artifacts/${enc(id)}`, { ...patch, ...(expectedVersion ? { expectedVersion } : {}) });
     if (!r.ok) {
       return apiError(r, `Changing artifact ${id}`, r.status === 409 ? "It changed since that version: read it again with polpo_artifact_get and redo the change."
-        : r.status === 404 ? "Check the id with polpo_artifacts_list." : undefined);
+        : r.status === 404 ? "Check the id with polpo_artifacts_list."
+        : r.status === 413 ? UPLOAD_HINT
+        : /old_str .*not found|found \d+ times/.test(r.error) ? "Copy old_str exactly from polpo_artifact_get (read the part you change), or add context to make it unique." : undefined);
     }
-    const a = r.data as { id?: string; title?: string; version?: number };
-    return ok(`Updated artifact ${a.id} (now v${a.version}): ${a.title}.`, { artifact: r.data as Record<string, unknown> });
+    const { content: _content, versions: _versions, ...a } = r.data as Record<string, any>;
+    return ok(`Updated artifact ${a.id} (now v${a.version}${a.change ? `, ${a.change}` : ""}, ${formatBytes(a.size)}): ${a.title}.${a.usage ? ` Versions: ${usageLine(a.usage)}.` : ""}`, { artifact: a });
+  });
+
+  tool("artifacts", "polpo_artifact_upload_prepare", {
+    title: "Upload an artifact's content",
+    description: "Upload a content for an artifact without sending it in a tool call's text — the way to create or replace a large artifact (up to the instance limit, 100 MB by default). "
+      + "The content comes from a public https URL, a file of the instance (e.g. a chat attachment or a file an agent wrote: path), or base64 — in parts for large contents: "
+      + "the first part without append_to, each next one with append_to = the upload_id and more: true until the last (send it without more). "
+      + "Then create the artifact or replace one's content with polpo_artifact_upload_finalize and the upload_id (kept 30 minutes). "
+      + "Files: .md doc, .html page or design, .svg, .mmd mermaid, .json slides/sheets/motion workspace (detected unless you give type at finalize).",
+    inputSchema: {
+      source: z.union([
+        z.object({ url: z.string().url().describe("A public https URL of the file") }),
+        z.object({ path: z.string().min(1).describe("A file of the instance, e.g. workspace/attachments/…/deck.json or reports/q3.html") }),
+        z.object({
+          base64: z.string().min(1).describe("The content's bytes (or the next part of them) in base64; parts of up to ~1 MB"),
+          filename: z.string().optional().describe("The file name, e.g. report.html (helps detect the type)"),
+          append_to: z.string().optional().describe("The upload_id of the previous part"),
+          more: z.boolean().optional().describe("true: more parts follow"),
+        }),
+      ]).describe("{ url } or { path } or { base64, filename?, append_to?, more? }"),
+    },
+    outputSchema: uploadOutput,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, async ({ source }) => {
+    const limit = artifactLimits().maxBytes;
+    let r;
+    if ("url" in source) {
+      const got = await fetchPublicBytes(deps, source.url, { maxBytes: limit, urlLabel: "file", sizeLabel: "file" });
+      if (!got.ok) return fail(`The file could not be read: ${got.error}. Give another URL, a file of the instance (path) or base64 data.`);
+      const filename = decodeURIComponent(new URL(source.url).pathname.split("/").pop() ?? "") || undefined;
+      r = await apiSend(deps, "POST", `/artifacts/uploads${qs({ filename })}`, got.bytes);
+    } else if ("path" in source) {
+      r = await apiSend(deps, "POST", "/artifacts/uploads", { path: source.path });
+    } else {
+      r = await apiSend(deps, "POST", "/artifacts/uploads", source);
+    }
+    if (!r.ok) {
+      return apiError(r, "Uploading", r.status === 413 ? `The content is over the artifact limit (${formatBytes(limit)}).`
+        : /no upload/i.test(r.error) ? "Start again without append_to." : /No file/.test(r.error) ? "Find the file with polpo_files_search." : undefined);
+    }
+    const d = r.data as { uploadId: string; size: number; complete: boolean; filename?: string };
+    const next = d.complete
+      ? `Complete: create the artifact (or replace one's content: id) with polpo_artifact_upload_finalize upload_id "${d.uploadId}".`
+      : `Send the next part with append_to: "${d.uploadId}" (more: true until the last one).`;
+    return ok(`Received ${formatBytes(d.size)}${d.filename ? ` (${d.filename})` : ""}. ${next}`,
+      { upload_id: d.uploadId, size: d.size, complete: d.complete, ...(d.filename ? { filename: d.filename } : {}) });
+  });
+
+  tool("artifacts", "polpo_artifact_upload_finalize", {
+    title: "Create or replace an artifact from an upload",
+    description: "Finish an upload made with polpo_artifact_upload_prepare: create a new artifact from it, or replace the content of an existing one (id; the previous content "
+      + "becomes a version, pass expectedVersion). The type and kind are detected from the file unless given.",
+    inputSchema: {
+      upload_id: z.string().min(1).describe("The upload_id from polpo_artifact_upload_prepare"),
+      id: z.string().optional().describe("Replace this artifact's content instead of creating one"),
+      expectedVersion: z.number().int().positive().optional().describe("With id: the version you read"),
+      title: z.string().optional().describe("The title (default: the file name)"),
+      type: z.enum(["doc", "html", "svg", "mermaid"]).optional().describe("Default: detected"),
+      kind: z.string().optional().describe("For html: slides, sheets, design, motion, dashboard, app, report, page (default: detected)"),
+      description: z.string().optional().describe("One line on what it is"),
+      note: z.string().optional().describe("What changed (with id)"),
+    },
+    outputSchema: { artifact: looseObject },
+    annotations: WRITE,
+  }, async ({ upload_id, ...input }) => {
+    const r = await apiSend(deps, "POST", `/artifacts/uploads/${enc(upload_id)}/finalize`, input);
+    if (!r.ok) {
+      return apiError(r, input.id ? `Replacing the content of ${input.id}` : "Creating the artifact",
+        r.status === 404 ? (/Upload/.test(r.error) ? "Upload it again with polpo_artifact_upload_prepare." : "Check the id with polpo_artifacts_list.")
+        : r.status === 409 ? "It changed since that version: read it again with polpo_artifact_get." : undefined);
+    }
+    const { content: _content, versions: _versions, ...a } = r.data as Record<string, any>;
+    return ok(`${input.id ? "Replaced the content of" : "Created"} artifact ${a.id}: ${a.title} (v${a.version}, ${formatBytes(a.size)}).${a.usage ? ` Versions: ${usageLine(a.usage)}.` : ""}`, { artifact: a });
   });
 }
 

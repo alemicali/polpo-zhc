@@ -32,6 +32,7 @@ import { registerBrainTools } from "../server/mcp-server/knowledge.js";
 import { registerSearchTools } from "../server/mcp-server/search.js";
 import { registerSkillTools } from "../server/mcp-server/skills.js";
 import { registerTeamTools } from "../server/mcp-server/team.js";
+import { registerArtifactTools } from "../server/mcp-server/core-tools.js";
 import { knownPublicOrigin } from "../mcp/runtime.js";
 
 /** One MCP tool Polpo runs as its own: its Polpo name and the deferred group it belongs to (none: always on). */
@@ -150,6 +151,9 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_skill_versions", name: "skill_versions", group: "skills" },
   { mcp: "polpo_skill_version_diff", name: "skill_version_diff", group: "skills" },
   { mcp: "polpo_skill_restore", name: "skill_restore", group: "skills" },
+  // Large artifact contents: upload from a public URL, a file of the instance or base64 parts, then create or replace
+  { mcp: "polpo_artifact_upload_prepare", name: "artifact_upload_prepare", group: "artifact-uploads" },
+  { mcp: "polpo_artifact_upload_finalize", name: "artifact_upload_finalize", group: "artifact-uploads" },
 ];
 
 /** MCP tools Polpo already covers with a tool of its own (or a parameter of one). */
@@ -325,6 +329,7 @@ function capture(): Map<string, Captured> {
     registerSetupTools, registerTeamTools, registerConnectorTools, registerHarnessTools, registerComputerTools, registerConfigTools,
     registerSettingsTools, registerChannelTools, registerChannelSetupTools, registerRoomTools, registerChatTools, registerAutomationTools,
     registerMissionTools, registerDataTools, registerBrainTools, registerSkillTools, registerWaBusinessTools, registerSearchTools,
+    registerArtifactTools,
   ]) register(tool, deps);
   captured = out;
   return out;

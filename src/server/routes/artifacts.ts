@@ -182,8 +182,8 @@ function failure(err: unknown): { status: number; message: string } {
   if (err instanceof ArtifactTooLargeToEditError) return { status: 413, message };
   if (err instanceof ArtifactQuotaError) return { status: 507, message };
   if (err instanceof UnsupportedArtifactFileError) return { status: 415, message };
+  if (/^The content is over /.test(message)) return { status: 413, message: `${message}. ${UPLOAD_HINT}` };
   if (err instanceof ArtifactContentError || err instanceof ArtifactChangeError) return { status: 400, message };
-  if (/ is over \d/.test(message) || /The content is over/.test(message)) return { status: 413, message: `${message}. ${UPLOAD_HINT}` };
   return { status: 400, message };
 }
 
@@ -585,8 +585,9 @@ export function artifactRoutes(getDeps: () => ArtifactRoutesDeps): OpenAPIHono {
       });
       emit(updated.id, "updated", updated.type, updated.title);
       // a partial change answers without the whole content (read it with GET when needed)
-      const data = await present(updated, { content: summary === undefined || summary === "rewritten" });
-      return c.json({ ok: true, data: summary ? { ...data, change: summary } : data });
+      if (summary === undefined || summary === "rewritten") return c.json({ ok: true, data: { ...(await present(updated)), ...(summary ? { change: summary } : {}) } });
+      const { content: _content, contentOmitted: _omitted, ...data } = await present(updated, { content: false }) as Record<string, unknown>;
+      return c.json({ ok: true, data: { ...data, change: summary } });
     } catch (err) {
       return failWith(c, err);
     }

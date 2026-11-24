@@ -74,6 +74,7 @@ export const AGENT_TOOL_GROUPS: ToolGroupRule[] = [
   { id: "whatsapp-business", label: "WhatsApp Business (Meta Cloud API): channel status, webhook events, templates, a contact's conversation and 24-hour window, sends, approving queued templates", prefixes: ["wabiz_"] },
   { id: "phone", label: "Phone calls", prefixes: ["phone_"] },
   { id: "ink", label: "Ink Hub (skills and packages)", prefixes: ["ink_"] },
+  { id: "artifact-uploads", label: "Large artifact contents: upload from a public URL, a file of the instance or base64 parts, then create an artifact or replace one's content (a file in the workspace: artifact_from_file)", names: ["artifact_upload_prepare", "artifact_upload_finalize"] },
   { id: "data", label: "Data sources and views", prefixes: ["data_"] },
   { id: "brain", label: "Company brain", prefixes: ["brain_"] },
   { id: "storage", label: "Storage buckets", prefixes: ["storage_"] },

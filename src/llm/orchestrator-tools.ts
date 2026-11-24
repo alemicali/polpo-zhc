@@ -60,7 +60,7 @@ import { discoverAppPreviewTargets } from "../server/routes/app-preview.js";
 import { captureAppScreenshot, removeAppScreenshot, verifyAppDomain } from "../server/routes/apps.js";
 import { getAppRegistryRuntime } from "../server/app-runtime-manager.js";
 import { DATA_ORCHESTRATOR_TOOLS, executeDataTool } from "../tools/data-tools.js";
-import { ARTIFACT_TOOLS, executeArtifactTool } from "../tools/artifact-tools.js";
+import { ARTIFACT_TOOLS, executeArtifactTool, workspaceFileReader } from "../tools/artifact-tools.js";
 import { getArtifactStore } from "../server/artifact-runtime.js";
 import { BRAIN_ORCHESTRATOR_TOOLS, executeCompanyBrainTool } from "../tools/company-brain-tools.js";
 import { STORAGE_ORCHESTRATOR_TOOLS, executeStorageTool } from "../tools/storage-tools.js";
@@ -2386,7 +2386,8 @@ export const WRITE_TOOLS = new Set([
   // Browser profiles (deleting one signs its agents out)
   "browser_profile_clear",
   // Artifacts
-  "artifact_create", "artifact_update", "artifact_delete",
+  "artifact_create", "artifact_update", "artifact_from_file", "artifact_delete",
+  "artifact_upload_prepare", "artifact_upload_finalize",
   // Notification rules
   "add_notification_rule", "remove_notification_rule", "send_notification",
   // Task watchers
@@ -2588,6 +2589,7 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
 const TOOL_LABELS: Record<string, string> = {
   artifact_create: "Create Artifact",
   artifact_update: "Update Artifact",
+  artifact_from_file: "Publish Artifact From File",
   artifact_get: "Read Artifact",
   artifact_list: "List Artifacts",
   artifact_delete: "Delete Artifact",
@@ -2866,12 +2868,18 @@ export async function executeOrchestratorTool(
       case "capture_app_screenshot": return execCaptureAppScreenshot(polpo, args);
 
       // ── Artifacts ──
-      case "artifact_create": case "artifact_update": case "artifact_get": case "artifact_list": case "artifact_delete":
+      case "artifact_create": case "artifact_update": case "artifact_get": case "artifact_list": case "artifact_delete": case "artifact_from_file":
         return executeArtifactTool(toolName, args, {
           store: getArtifactStore(polpo.getPolpoDir()),
           author: "polpo",
           ...(context.sessionId ? { sessionId: context.sessionId } : {}),
           emit: (payload) => polpo.emit("artifact:changed", payload),
+          // Polpo publishes files of the project, of the agents' workspace and of .polpo (chat attachments)
+          readFile: workspaceFileReader({
+            cwd: polpo.getWorkDir(),
+            allowedPaths: [...new Set([polpo.getWorkDir(), polpo.getAgentWorkDir(), polpo.getPolpoDir()])],
+            tempDir: join(polpo.getPolpoDir(), "tmp"),
+          }),
         });
 
       // ── Structured data ──
