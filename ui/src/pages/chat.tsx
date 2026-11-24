@@ -11,7 +11,6 @@ import {
   useMemo,
   useId,
   type CSSProperties,
-  type ReactNode,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import {
@@ -63,10 +62,6 @@ import {
   CornerDownRight,
   Undo2,
   ListPlus,
-  Pencil,
-  Star,
-  StarOff,
-  MoreHorizontal,
   ClockArrowUp,
   AppWindow,
   Database,
@@ -75,7 +70,6 @@ import {
   MessagesSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -92,13 +86,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
 import {
   Dialog,
   DialogContent,
@@ -172,7 +159,8 @@ import { clearDataPromptContext, formatDataPromptContext, removeDataPromptItem, 
 import { GroupConversation } from "@/components/groups/group-conversation";
 import { GroupSettingsDialog, NewGroupDialog } from "@/components/groups/group-dialogs";
 import { GroupSidebarSection } from "@/components/groups/group-list";
-import { NewChatMenu } from "@/components/groups/new-chat-menu";
+import { ChatHistoryList, type ChatHistoryListProps } from "@/components/chat/chat-history-list";
+import type { HistorySurface } from "@/components/chat/history-styles";
 import { useMemberDirectory } from "@/components/groups/use-member-directory";
 import { useGroups } from "@/hooks/use-rooms";
 import {
@@ -1984,19 +1972,12 @@ function isFileAllowedForAgent(file: MentionFile, agent?: AgentConfig): boolean 
   });
 }
 
-// ── Session sidebar (two-level: agent groups → session list) ──
+// ── Session sidebar (the chat history in the chat page's column) ──
 
-/** Key used for orchestrator (non-agent) sessions in the group map */
-const ORCHESTRATOR_KEY = "__orchestrator__";
-
-const SIDEBAR_VIEW_KEY = "polpo-chat-sidebar-view";
 const SESSION_SIDEBAR_WIDTH_KEY = "polpo-chat-session-sidebar-width";
-const SESSION_SIDEBAR_DEFAULT_WIDTH = 360;
-const SESSION_SIDEBAR_MIN_WIDTH = 320;
+const SESSION_SIDEBAR_DEFAULT_WIDTH = 300;
+const SESSION_SIDEBAR_MIN_WIDTH = 240;
 const SESSION_SIDEBAR_MAX_WIDTH = 520;
-
-type SessionItem = { id: string; title?: string; createdAt: string; updatedAt: string; messageCount: number; agent?: string; starred?: boolean; parentSessionId?: string; forkMessageId?: string };
-type SidebarView = "drill" | "flat";
 
 const clampSessionSidebarWidth = (value: number) => {
   const viewportCap = typeof window === "undefined"
@@ -2007,218 +1988,41 @@ const clampSessionSidebarWidth = (value: number) => {
 
 const readStoredSessionSidebarWidth = () => {
   if (typeof window === "undefined") return SESSION_SIDEBAR_DEFAULT_WIDTH;
-  const parsed = Number(localStorage.getItem(SESSION_SIDEBAR_WIDTH_KEY));
-  return Number.isFinite(parsed) ? clampSessionSidebarWidth(parsed) : SESSION_SIDEBAR_DEFAULT_WIDTH;
+  try {
+    const raw = localStorage.getItem(SESSION_SIDEBAR_WIDTH_KEY);
+    const parsed = raw === null ? NaN : Number(raw);
+    return Number.isFinite(parsed) ? clampSessionSidebarWidth(parsed) : SESSION_SIDEBAR_DEFAULT_WIDTH;
+  } catch {
+    return SESSION_SIDEBAR_DEFAULT_WIDTH;
+  }
 };
 
-/** Shared session row — used by both drill-down and flat views.
- *
- *  Wraps the row in a <ContextMenu> so a right-click anywhere on the row
- *  exposes Rename / Star|Unstar / Delete. The trailing kebab dropdown
- *  exposes the same actions for users who don't expect right-click on the
- *  web. Both surfaces call the same callbacks — single source of truth.
- *
- *  A small amber star (lucide Star, filled) appears next to the title when
- *  `session.starred` is truthy.
+/**
+ * The chat page's thread column: the chat history (ChatHistoryList, the same component as the
+ * drill-in sidebar's Chat level) in a resizable column on desktop, full width on mobile and in
+ * the compact chat.
  */
-function SessionRow({
-  session,
-  isActive,
-  isStreaming,
-  onSelect,
-  onDelete,
-  onRename,
-  onToggleStar,
-}: {
-  session: SessionItem;
-  isActive: boolean;
-  /** True when this session is actively receiving a streaming response */
-  isStreaming?: boolean;
-  onSelect: (id: string) => void;
-  onDelete: (id: string) => void;
-  onRename: (id: string, currentTitle: string) => void;
-  onToggleStar: (id: string, starred: boolean) => void;
-}) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const isStarred = !!session.starred;
-  const title = session.title || "Untitled";
-
-  const handleRename = () => onRename(session.id, title);
-  const handleToggleStar = () => onToggleStar(session.id, !isStarred);
-  const handleDelete = () => onDelete(session.id);
-
-  return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <div
-          className={cn(
-            "group flex items-start gap-2.5 rounded-lg px-3 py-2.5 cursor-pointer transition-colors",
-            isActive
-              ? "bg-accent/80 text-accent-foreground"
-              : "hover:bg-accent/30 text-muted-foreground"
-          )}
-          onClick={() => onSelect(session.id)}
-        >
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5 min-w-0">
-              {isStarred && (
-                <Star
-                  className="h-3 w-3 shrink-0 fill-warning text-warning"
-                  aria-label="Starred"
-                />
-              )}
-              {session.parentSessionId && (
-                <GitBranch className="h-3 w-3 shrink-0 text-muted-foreground" aria-label="Branch" />
-              )}
-              <p className={cn(
-                "whitespace-normal break-words text-small font-medium leading-snug min-w-0",
-                isActive ? "text-accent-foreground" : "text-foreground"
-              )}>
-                {title}
-              </p>
-            </div>
-            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-micro text-muted-foreground/70">
-              {isStreaming ? (
-                <span className="flex items-center gap-1 font-medium text-primary/70">
-                  <span className="relative flex h-2 w-2 shrink-0">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-pill bg-primary opacity-75" />
-                    <span className="relative inline-flex rounded-pill h-2 w-2 bg-primary" />
-                  </span>
-                  Streaming...
-                </span>
-              ) : (
-                <span>{session.messageCount} message{session.messageCount !== 1 ? "s" : ""}</span>
-              )}
-              <span>{formatDistanceToNow(new Date(session.updatedAt), { addSuffix: false })}</span>
-            </div>
-          </div>
-          {/* Kebab dropdown — visible on hover/focus, or while open so it
-              doesn't vanish under the cursor. Mirrors the context menu. */}
-          <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Session actions"
-                className={cn(
-                  "-mr-1 h-5 w-5 shrink-0 text-muted-foreground transition-opacity hover:text-foreground",
-                  menuOpen
-                    ? "opacity-100"
-                    : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100",
-                )}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <MoreHorizontal className="h-3 w-3" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-              <DropdownMenuItem onSelect={handleRename}>
-                <Pencil className="mr-2 h-3.5 w-3.5" />
-                Rename
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={handleToggleStar}>
-                {isStarred ? (
-                  <>
-                    <StarOff className="mr-2 h-3.5 w-3.5" />
-                    Unstar
-                  </>
-                ) : (
-                  <>
-                    <Star className="mr-2 h-3.5 w-3.5" />
-                    Star
-                  </>
-                )}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onSelect={handleDelete}
-                className="text-destructive focus:text-destructive"
-              >
-                <Trash2 className="mr-2 h-3.5 w-3.5" />
-                Delete
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </ContextMenuTrigger>
-      <ContextMenuContent>
-        <ContextMenuItem onSelect={handleRename}>
-          <Pencil className="mr-2 h-3.5 w-3.5" />
-          Rename
-        </ContextMenuItem>
-        <ContextMenuItem onSelect={handleToggleStar}>
-          {isStarred ? (
-            <>
-              <StarOff className="mr-2 h-3.5 w-3.5" />
-              Unstar
-            </>
-          ) : (
-            <>
-              <Star className="mr-2 h-3.5 w-3.5" />
-              Star
-            </>
-          )}
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem
-          onSelect={handleDelete}
-          className="text-destructive focus:text-destructive"
-        >
-          <Trash2 className="mr-2 h-3.5 w-3.5" />
-          Delete
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
-  );
-}
-
 function SessionSidebar({
-  sessions,
-  activeSessionId,
-  streamingSessionIds,
-  onSelect,
-  onNew,
-  onDelete,
-  onRename,
-  onToggleStar,
   onBack,
   fullWidth,
   mobileFullWidth,
   mobileOnlyBack,
-  onNewGroup,
-  groupsSection,
-}: {
-  sessions: SessionItem[];
-  activeSessionId: string | null;
-  /** Session IDs currently receiving a streaming response. */
-  streamingSessionIds: string[];
-  onSelect: (id: string) => void;
-  onNew: (agent?: string) => void;
-  onDelete: (id: string) => void;
-  onRename: (id: string, currentTitle: string) => void;
-  onToggleStar: (id: string, starred: boolean) => void;
-  /** Callback to close the sidebar (used in compact/overlay mode) */
+  ...list
+}: Omit<ChatHistoryListProps, "surface" | "onClose" | "closeClassName"> & {
+  /** Closes the column (classic chat page, compact chat). */
   onBack?: () => void;
-  /** When true, sidebar takes full width instead of fixed w-72 */
+  /** When true, the column takes the full width (compact chat). */
   fullWidth?: boolean;
   /** Full width on mobile, resizable fixed width on desktop. */
   mobileFullWidth?: boolean;
-  /** Show the close/back control only while the mobile overlay layout applies. */
+  /** Show the close control only while the mobile overlay layout applies. */
   mobileOnlyBack?: boolean;
-  /** Opens the "New group" dialog, preselecting the agent when given. */
-  onNewGroup: (agent?: string) => void;
-  /** "Groups" section rendered above the threads. */
-  groupsSection?: ReactNode;
 }) {
-  const orchestratorName = useOrchestratorName();
-  const { agents } = useAgents();
-  const agentMap = agents ? Object.fromEntries(agents.map((a) => [a.name, a])) : {};
   const [sidebarWidth, setSidebarWidth] = useState(readStoredSessionSidebarWidth);
 
   useEffect(() => {
-    if (!fullWidth) {
-      localStorage.setItem(SESSION_SIDEBAR_WIDTH_KEY, String(sidebarWidth));
-    }
+    if (fullWidth) return;
+    try { localStorage.setItem(SESSION_SIDEBAR_WIDTH_KEY, String(sidebarWidth)); } catch { /* storage unavailable */ }
   }, [fullWidth, sidebarWidth]);
 
   const startResize = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -2247,477 +2051,45 @@ function SessionSidebar({
     window.addEventListener("pointercancel", stopResize);
   }, [fullWidth, sidebarWidth]);
 
-  // ── View toggle (drill-down vs flat/accordion) ──
-  const [view, setView] = useState<SidebarView>(() => {
-    try {
-      const stored = localStorage.getItem(SIDEBAR_VIEW_KEY);
-      return stored === "flat" ? "flat" : "drill";
-    } catch {
-      return "drill";
-    }
-  });
-  useEffect(() => {
-    try { localStorage.setItem(SIDEBAR_VIEW_KEY, view); } catch { /* silent */ }
-  }, [view]);
-
-  // ── Drill-down state ──
-  const [activeGroup, setActiveGroup] = useState<string | null>(null);
-  const [lastAutoDrilledSession, setLastAutoDrilledSession] = useState<string | null>(null);
-
-  // Auto-drill into the group that contains the active session
-  // (adjusted during render, not in an effect)
-  if (view === "drill" && activeSessionId && lastAutoDrilledSession !== activeSessionId) {
-    const session = sessions.find((s) => s.id === activeSessionId);
-    if (session) {
-      setActiveGroup(session.agent ?? ORCHESTRATOR_KEY);
-      setLastAutoDrilledSession(activeSessionId);
-    }
-  }
-
-  // ── Flat/accordion state: which groups are expanded ──
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => {
-    // Auto-expand the group that contains the active session
-    if (activeSessionId) {
-      const s = sessions.find((s) => s.id === activeSessionId);
-      if (s) return new Set([s.agent ?? ORCHESTRATOR_KEY]);
-    }
-    return new Set<string>();
-  });
-  const toggleGroup = useCallback((key: string) => {
-    setExpandedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }, []);
-
-  // ── Within-group "show more": which groups have all sessions visible ──
-  // Per-group cap so an agent with 30 sessions doesn't flood the sidebar.
-  const [showAllGroups, setShowAllGroups] = useState<Set<string>>(new Set());
-  const SESSIONS_PER_GROUP_PREVIEW = 4;
-  const toggleShowAll = useCallback((key: string) => {
-    setShowAllGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }, []);
-
-  // Auto-expand group of active session when it changes
-  // (adjusted during render when the inputs change, not in an effect)
-  const [expandInputs, setExpandInputs] = useState({ activeSessionId, sessions, view });
-  if (expandInputs.activeSessionId !== activeSessionId || expandInputs.sessions !== sessions || expandInputs.view !== view) {
-    setExpandInputs({ activeSessionId, sessions, view });
-    const s = view === "flat" && activeSessionId ? sessions.find((s) => s.id === activeSessionId) : undefined;
-    if (s) {
-      const key = s.agent ?? ORCHESTRATOR_KEY;
-      setExpandedGroups((prev) => prev.has(key) ? prev : new Set(prev).add(key));
-    }
-  }
-
-  // ── Build groups: key → sessions[], sorted by most-recent-first ──
-  const groups = useMemo((): [string, SessionItem[]][] => {
-    const map = new Map<string, SessionItem[]>();
-    for (const s of sessions) {
-      const key = s.agent ?? ORCHESTRATOR_KEY;
-      const arr = map.get(key) ?? [];
-      arr.push(s);
-      map.set(key, arr);
-    }
-    // Sort sessions within each group by updatedAt desc
-    for (const arr of map.values()) {
-      arr.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-    }
-    // Sort groups by the most recent session in each
-    return [...map.entries()].sort((a, b) => {
-      const aLatest = new Date(a[1][0].updatedAt).getTime();
-      const bLatest = new Date(b[1][0].updatedAt).getTime();
-      return bLatest - aLatest;
-    });
-  }, [sessions]);
-
-  // ── Header ──
-  const renderHeader = () => {
-    // Drill-down mode with an active group → show back + agent name
-    if (view === "drill" && activeGroup) {
-      const agent = activeGroup !== ORCHESTRATOR_KEY ? agentMap[activeGroup] : undefined;
-      const name = agent ? (agent.identity?.displayName ?? agent.name) : orchestratorName;
-      return (
-        <div className="px-3 py-2.5 border-b border-border/40 flex items-start gap-2 shrink-0">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 shrink-0"
-            onClick={() => setActiveGroup(null)}
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <div className="flex items-start gap-2 flex-1 min-w-0">
-            {agent ? (
-              <AgentAvatar
-                avatar={agent.identity?.avatar}
-                name={name}
-                size="sm"
-                fallbackVariant="circle"
-                shape="circle"
-              />
-            ) : (
-              <span className="text-sm leading-none">🐙</span>
-            )}
-            <span className="whitespace-normal break-words text-sm font-medium leading-snug">{name}</span>
-          </div>
-          <NewChatMenu
-            className="h-7 w-7 shrink-0 text-foreground"
-            iconClassName="h-3.5 w-3.5"
-            align="end"
-            newChatLabel={`New chat with ${name}`}
-            newGroupLabel={`New group with ${name}`}
-            onNewChat={() => onNew(activeGroup !== ORCHESTRATOR_KEY ? activeGroup! : undefined)}
-            onNewGroup={() => onNewGroup(activeGroup !== ORCHESTRATOR_KEY ? activeGroup! : ORCHESTRATOR_MEMBER_ID)}
-          />
-        </div>
-      );
-    }
-
-    // Top-level header (both views when no drill-down is active).
-    // Sidebar toggle now lives on the RIGHT (using Columns2 to evoke
-    // "show/hide a column"). The "+ new session" button used to live there;
-    // it's been removed because each group already exposes a "+" inline,
-    // and orchestrator new-session is reachable via that group's header.
-    return (
-      <div className="px-3 py-2.5 border-b border-border/40 flex items-center gap-2 shrink-0">
-        <span className="text-label text-muted-foreground flex-1">
-          History
-        </span>
-        <NewChatMenu
-          className="h-7 w-7 shrink-0"
-          iconClassName="h-3.5 w-3.5"
-          align="end"
-          onNewChat={() => onNew()}
-          onNewGroup={() => onNewGroup()}
-        />
-        {/* View toggle — text labels, not icons */}
-        <SegmentedControl size="sm" aria-label="History view" value={view} onValueChange={setView}>
-          <ToggleGroupItem value="drill">By agent</ToggleGroupItem>
-          <ToggleGroupItem value="flat">All</ToggleGroupItem>
-        </SegmentedControl>
-        {/* Sidebar close button — pure close (the open action lives elsewhere) */}
-        {onBack && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className={cn("h-7 w-7 shrink-0", mobileOnlyBack && "lg:hidden")}
-                onClick={onBack}
-                aria-label="Close chat sidebar"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" className="text-xs">Close</TooltipContent>
-          </Tooltip>
-        )}
-      </div>
-    );
-  };
-
-  // ── Drill-down view: session list for a single group ──
-  const renderSessionList = (groupSessions: SessionItem[]) => (
-    <div className="p-1.5 space-y-0.5">
-      <div className="px-3 pt-1.5 pb-1">
-        <span className="text-label text-muted-foreground">
-          Sessions
-        </span>
-      </div>
-      {groupSessions.map((s) => (
-        <SessionRow
-          key={s.id}
-          session={s}
-          isActive={activeSessionId === s.id}
-          isStreaming={streamingSessionIds.includes(s.id)}
-          onSelect={onSelect}
-          onDelete={onDelete}
-          onRename={onRename}
-          onToggleStar={onToggleStar}
-        />
-      ))}
-    </div>
-  );
-
-  // ── Drill-down view: grouped overview ──
-  const renderGroups = () => (
-    <div className="p-1.5 space-y-0.5">
-      {groups.map(([key, groupSessions]: [string, SessionItem[]]) => {
-        const agent = key !== ORCHESTRATOR_KEY ? agentMap[key] : undefined;
-        const displayName = agent ? (agent.identity?.displayName ?? agent.name) : orchestratorName;
-        const latestSession = groupSessions[0];
-        const count = groupSessions.length;
-        const hasActive = groupSessions.some((s: SessionItem) => s.id === activeSessionId);
-
-        return (
-          <div
-            key={key}
-            className={cn(
-              "group flex items-start gap-3 rounded-lg px-3 py-3 cursor-pointer transition-colors",
-              hasActive
-                ? "bg-accent/60 text-accent-foreground"
-                : "hover:bg-accent/30 text-muted-foreground"
-            )}
-            onClick={() => setActiveGroup(key)}
-          >
-            <div className="shrink-0">
-              {agent ? (
-                <AgentAvatar
-                  avatar={agent.identity?.avatar}
-                  name={displayName}
-                  size="md"
-                  fallbackVariant="circle"
-                  shape="circle"
-                />
-              ) : (
-                <div className="flex h-8 w-8 items-center justify-center rounded-pill bg-primary/10 text-base">
-                  🐙
-                </div>
-              )}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className={cn(
-                "whitespace-normal break-words text-small font-semibold leading-snug",
-                hasActive ? "text-accent-foreground" : "text-foreground"
-              )}>
-                {displayName}
-              </p>
-              <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-micro text-muted-foreground/70">
-                <span>{count} chat{count !== 1 ? "s" : ""}</span>
-                <span>{formatDistanceToNow(new Date(latestSession.updatedAt), { addSuffix: false })}</span>
-              </div>
-            </div>
-            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
-          </div>
-        );
-      })}
-    </div>
-  );
-
-  // ── Flat/accordion view: all groups inline with collapsible sections ──
-  const renderFlat = () => (
-    <div className="p-1.5 space-y-1">
-      {groups.map(([key, groupSessions]: [string, SessionItem[]]) => {
-        const agent = key !== ORCHESTRATOR_KEY ? agentMap[key] : undefined;
-        const displayName = agent ? (agent.identity?.displayName ?? agent.name) : orchestratorName;
-        const count = groupSessions.length;
-        const isExpanded = expandedGroups.has(key);
-        const hasActive = groupSessions.some((s: SessionItem) => s.id === activeSessionId);
-
-        return (
-          <div key={key}>
-            {/* Group header — click to expand/collapse */}
-            <div
-              className={cn(
-                "flex items-start gap-2.5 rounded-lg px-3 py-2 cursor-pointer transition-colors",
-                hasActive
-                  ? "bg-accent/40"
-                  : "hover:bg-accent/20"
-              )}
-              onClick={() => toggleGroup(key)}
-            >
-              <div className="shrink-0">
-                {agent ? (
-                  <AgentAvatar
-                    avatar={agent.identity?.avatar}
-                    name={displayName}
-                    size="sm"
-                    fallbackVariant="circle"
-                    shape="circle"
-                  />
-                ) : (
-                  <div className="flex h-6 w-6 items-center justify-center rounded-pill bg-primary/10 text-xs">
-                    🐙
-                  </div>
-                )}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
-                  <span className="whitespace-normal break-words text-small font-bold tracking-tight text-foreground leading-tight">
-                    {displayName}
-                  </span>
-                  <span className="shrink-0 text-micro font-bold tracking-widest uppercase text-muted-foreground/55 border border-border/60 rounded-sm px-1 py-px leading-none">
-                    {agent ? "Agent" : "Orchestrator"}
-                  </span>
-                </div>
-                <span className="text-micro text-muted-foreground/60">
-                  {count} chat{count !== 1 ? "s" : ""}
-                </span>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-5 w-5 shrink-0 text-muted-foreground hover:text-foreground"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onNew(key !== ORCHESTRATOR_KEY ? key : undefined);
-                }}
-              >
-                <Plus className="h-3 w-3" />
-              </Button>
-              {isExpanded ? (
-                <ChevronUp className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-              ) : (
-                <ChevronDown className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-              )}
-            </div>
-            {/* Collapsible session list — capped to N most-recent unless "show more" clicked.
-                groupSessions is already sorted most-recent-first upstream. */}
-            {isExpanded && (() => {
-              const showAll = showAllGroups.has(key);
-              // Always show the active session even if outside the cap, so the
-              // visible row never disappears just because the user clicks an
-              // older one in another view.
-              const activeIdx = groupSessions.findIndex((s) => s.id === activeSessionId);
-              const cap = showAll
-                ? groupSessions.length
-                : Math.max(SESSIONS_PER_GROUP_PREVIEW, activeIdx + 1);
-              const visible = groupSessions.slice(0, cap);
-              const hidden = groupSessions.length - visible.length;
-              return (
-                <div className="pl-4 pr-1 pb-1 space-y-0.5 mt-0.5">
-                  {visible.map((s) => (
-                    <SessionRow
-                      key={s.id}
-                      session={s}
-                      isActive={activeSessionId === s.id}
-                      isStreaming={streamingSessionIds.includes(s.id)}
-                      onSelect={onSelect}
-                      onDelete={onDelete}
-                      onRename={onRename}
-                      onToggleStar={onToggleStar}
-                    />
-                  ))}
-                  {(hidden > 0 || showAll) && (
-                    <button
-                      type="button"
-                      onClick={() => toggleShowAll(key)}
-                      className="w-full text-left text-caption font-medium text-muted-foreground hover:text-foreground px-2 py-1 rounded-md hover:bg-accent/30 transition-colors"
-                    >
-                      {showAll
-                        ? "Show less"
-                        : `Show ${hidden} more`}
-                    </button>
-                  )}
-                </div>
-              );
-            })()}
-          </div>
-        );
-      })}
-    </div>
-  );
-
-  // ── Find sessions for the active group (drill-down view) ──
-  const activeGroupSessions = activeGroup
-    ? (groups.find(([k]: [string, SessionItem[]]) => k === activeGroup)?.[1] ?? [])
-    : [];
-
-  // ── Starred sessions — surfaced above the main list in every view ──
-  // Order: most-recently-updated first (consistent with the grouped lists
-  // below). The section is conditionally rendered: zero starred → nothing.
-  // Keys are namespaced with a "starred-" prefix so React doesn't collide
-  // with the same SessionRow reappearing in its group below.
-  const starredSessions = useMemo(
-    () => sessions
-      .filter((s) => s.starred)
-      .slice()
-      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
-    [sessions],
-  );
-
-  const renderStarred = () => {
-    if (starredSessions.length === 0) return null;
-    return (
-      <div className="p-1.5 pb-2 border-b border-border/30">
-        <div className="px-3 pt-1.5 pb-1 flex items-center gap-1.5">
-          <Star className="h-3 w-3 fill-warning text-warning" />
-          <span className="text-label text-muted-foreground">
-            Starred
-          </span>
-        </div>
-        <div className="space-y-0.5">
-          {starredSessions.map((s) => (
-            <SessionRow
-              key={`starred-${s.id}`}
-              session={s}
-              isActive={activeSessionId === s.id}
-              isStreaming={streamingSessionIds.includes(s.id)}
-              onSelect={onSelect}
-              onDelete={onDelete}
-              onRename={onRename}
-              onToggleStar={onToggleStar}
-            />
-          ))}
-        </div>
-      </div>
-    );
-  };
-
   const sidebarStyle = fullWidth
     ? undefined
     : ({ "--session-sidebar-width": `${sidebarWidth}px` } as CSSProperties);
 
   return (
-    <div className={cn(
-      "relative border-r border-border/30 flex flex-col bg-card/40 h-full",
-      fullWidth
-        ? "w-full"
-        : mobileFullWidth
-          ? "w-full lg:w-[var(--session-sidebar-width)] lg:shrink-0"
-          : "w-[var(--session-sidebar-width)] shrink-0"
-    )}
-    style={sidebarStyle}
+    <div
+      className={cn(
+        "relative flex h-full flex-col bg-background",
+        fullWidth
+          ? "w-full"
+          : mobileFullWidth
+            ? "w-full lg:w-[var(--session-sidebar-width)] lg:shrink-0 lg:border-r lg:border-border/50"
+            : "w-[var(--session-sidebar-width)] shrink-0 border-r border-border/50",
+      )}
+      style={sidebarStyle}
     >
       {!fullWidth && (
         <button
           type="button"
-          aria-label="Resize Agent Chats sidebar"
+          aria-label="Resize chat history"
           onPointerDown={startResize}
           className={cn(
             "absolute inset-y-0 -right-1 z-20 w-2 cursor-col-resize rounded-pill outline-none focus-visible:ring-2 focus-visible:ring-primary/40 group",
             mobileFullWidth && "hidden lg:block"
           )}
         >
-          <span className="absolute inset-y-3 left-1/2 w-px -translate-x-1/2 rounded-pill bg-border transition-all group-hover:w-[3px] group-hover:bg-primary/40" />
+          <span className="absolute inset-y-3 left-1/2 w-px -translate-x-1/2 rounded-pill bg-border opacity-0 transition-all group-hover:w-[3px] group-hover:bg-primary/40 group-hover:opacity-100" />
         </button>
       )}
-      {renderHeader()}
-      <div className="flex-1 overflow-y-auto min-h-0">
-        {/* Groups sit above the threads (top level only, not inside an agent drill-down). */}
-        {(view === "flat" || !activeGroup) && groupsSection}
-        {sessions.length === 0 ? (
-          <div className="flex flex-col items-center text-center py-8 px-3 text-muted-foreground">
-            <p className="text-xs font-medium">No sessions yet</p>
-            <p className="text-micro mt-1">
-              Start a new session or use the CLI — sessions are shared
-              between both interfaces.
-            </p>
-          </div>
-        ) : (
-          <>
-            {/* Starred section — sits above the normal list in every view.
-                Auto-hides when the user has zero starred sessions. */}
-            {renderStarred()}
-            {view === "flat"
-              ? renderFlat()
-              : activeGroup
-                ? renderSessionList(activeGroupSessions)
-                : renderGroups()}
-          </>
-        )}
-      </div>
+      <ChatHistoryList
+        {...list}
+        surface="panel"
+        onClose={onBack}
+        closeClassName={mobileOnlyBack ? "lg:hidden" : undefined}
+      />
     </div>
   );
 }
+
 
 // ── Message skeleton (reused in initial load and session switching) ──
 
@@ -4516,10 +3888,10 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
     setRenameTarget({ id, title: currentTitle });
   }, []);
 
-  // Toggle handler — fire-and-forget. Errors are swallowed by useChat's
-  // silent catch; the optimistic update keeps the UI snappy.
-  const handleToggleStar = useCallback((id: string, starred: boolean) => {
-    void setStarred(id, starred);
+  // Pin/unpin (the API's `starred`) — fire-and-forget. Errors are swallowed by
+  // useChat's silent catch; the optimistic update keeps the UI snappy.
+  const handleTogglePin = useCallback((id: string, pinned: boolean) => {
+    void setStarred(id, pinned);
   }, [setStarred]);
 
   // Filter out empty/orphan sessions
@@ -4588,7 +3960,7 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
     return <ChatLoadingSkeleton />;
   }
 
-  const groupsSection = (
+  const renderGroups = (query: string) => (
     <GroupSidebarSection
       rooms={groups.rooms}
       loading={groups.roomsLoading}
@@ -4599,6 +3971,8 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
       onSelect={handleSelectRoom}
       onNew={() => handleNewGroup()}
       onRetry={() => { void refreshRooms(); }}
+      query={query}
+      surface="panel"
     />
   );
   // While a group is open no thread row is highlighted.
@@ -4615,10 +3989,10 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
           onSelect={handleSelectSession}
           onNew={handleNewSession}
           onNewGroup={handleNewGroup}
-          groupsSection={groupsSection}
+          renderGroups={renderGroups}
           onDelete={deleteSession}
           onRename={openRename}
-          onToggleStar={handleToggleStar}
+          onTogglePin={handleTogglePin}
           onBack={() => setSidebarOpen(false)}
           fullWidth
         />
@@ -4639,10 +4013,10 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
                 onSelect={handleSelectSession}
                 onNew={handleNewSession}
                 onNewGroup={handleNewGroup}
-                groupsSection={groupsSection}
+                renderGroups={renderGroups}
                 onDelete={deleteSession}
                 onRename={openRename}
-                onToggleStar={handleToggleStar}
+                onTogglePin={handleTogglePin}
                 onBack={embedded || !compact ? () => setSidebarOpen(false) : undefined}
                 mobileFullWidth={!embedded && !compact}
                 mobileOnlyBack={!embedded && !compact}
@@ -4740,11 +4114,12 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
 
 // ── ChatHistoryPanel ──
 //
-// The chat's history (groups, threads by agent or all, starred, new chat / new group) on its
-// own: the drill-in sidebar's Chat level. Opening a thread or a group loads it in the chat and
-// calls onOpenChat (the sidebar goes to /chat). New groups open the dialog of the chat page.
+// The chat's history (new chat, search, pinned, groups, recents by chat or by agent) on its own:
+// the drill-in sidebar's Chat level (and its mobile sheet). Opening a thread or a group loads it
+// in the chat and calls onOpenChat (the sidebar goes to /chat). New groups open the dialog of the
+// chat page. Flat on the sidebar's surface: no box around it.
 
-export function ChatHistoryPanel({ onOpenChat }: { onOpenChat: () => void }) {
+export function ChatHistoryPanel({ onOpenChat, surface = "sidebar" }: { onOpenChat: () => void; surface?: HistorySurface }) {
   const { sessions, sessionsLoading, sessionId, streamingSessionIds } = useChatState();
   const { loadSession, newSession, deleteSession, renameSession, setStarred, setSelectedAgent } = useChatActions();
   const activeRoomId = useActiveChatRoom();
@@ -4782,24 +4157,24 @@ export function ChatHistoryPanel({ onOpenChat }: { onOpenChat: () => void }) {
 
   if (sessionsLoading) {
     return (
-      <div className="space-y-2 p-3" aria-busy="true">
+      <div className="space-y-2 px-3 py-2" aria-busy="true">
         <Skeleton className="h-4 w-24 rounded-xs" />
-        <Skeleton className="h-8 w-full rounded-md" />
-        <Skeleton className="h-8 w-full rounded-md" />
+        <Skeleton className="h-4 w-full rounded-xs" />
+        <Skeleton className="h-4 w-2/3 rounded-xs" />
       </div>
     );
   }
 
   return (
     <>
-      <SessionSidebar
+      <ChatHistoryList
         sessions={visibleSessions}
         activeSessionId={activeRoomId ? null : sessionId}
         streamingSessionIds={streamingSessionIds}
         onSelect={handleSelect}
         onNew={handleNew}
         onNewGroup={handleNewGroup}
-        groupsSection={(
+        renderGroups={(query) => (
           <GroupSidebarSection
             rooms={groups.rooms}
             loading={groups.roomsLoading}
@@ -4810,12 +4185,14 @@ export function ChatHistoryPanel({ onOpenChat }: { onOpenChat: () => void }) {
             onSelect={handleSelectRoom}
             onNew={() => handleNewGroup()}
             onRetry={() => { void groups.refreshRooms(); }}
+            query={query}
+            surface={surface}
           />
         )}
         onDelete={deleteSession}
         onRename={(id, title) => setRenameTarget({ id, title })}
-        onToggleStar={(id, starred) => { void setStarred(id, starred); }}
-        fullWidth
+        onTogglePin={(id, pinned) => { void setStarred(id, pinned); }}
+        surface={surface}
       />
       <RenameSessionDialog
         target={renameTarget}
