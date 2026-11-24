@@ -127,6 +127,19 @@ export function resolveSkillLink(href: string | undefined, fromPath: string, kno
   return !known || known.has(path) ? path : null;
 }
 
+/** The Agent Skills spec's name rule: 1–64 lowercase letters, digits and single hyphens. */
+export const SKILL_NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
+/** Why a skill name is invalid, or null. */
+export function skillNameError(n: string): string | null {
+  return !n ? "Give a name" : n.length > 64 ? "At most 64 characters" : SKILL_NAME_RE.test(n) ? null : "Lowercase letters, digits and single hyphens";
+}
+
+/** A spec-compliant name from an invalid one ("My_Skill" → "my-skill"). */
+export function suggestName(name: string): string {
+  return name.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64).replace(/-+$/, "") || "skill";
+}
+
 export function formatSize(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10 * 1024 ? 1 : 0)} KB`;
@@ -135,7 +148,7 @@ export function formatSize(n: number): string {
 
 /** Strip the YAML frontmatter block from SKILL.md for the rendered view. */
 export function stripFrontmatter(md: string): string {
-  return md.replace(/^﻿?---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
+  return md.replace(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
 }
 
 // ── A dropped folder → a zip (stored) ──

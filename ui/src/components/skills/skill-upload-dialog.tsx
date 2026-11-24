@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type DragEvent } from "react";
+import { useRef, useState, type DragEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { AlertTriangle, CheckCircle2, FolderUp, Loader2, Upload, XCircle, ChevronDown, ChevronRight, Bot, Package } from "lucide-react";
 import { useAgents, useSkillBundleUpload } from "@polpo-ai/react";
@@ -10,11 +10,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { archiveFromFiles, filesFromDataTransfer, formatSize } from "@/lib/skill-files";
+import { archiveFromFiles, filesFromDataTransfer, formatSize, skillNameError as nameError, suggestName } from "@/lib/skill-files";
 
-/** The Agent Skills spec's name rule. */
-const NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
-const nameError = (n: string) => (!n ? "Give a name" : n.length > 64 ? "At most 64 characters" : NAME_RE.test(n) ? null : "Lowercase letters, digits and single hyphens");
 const isNameError = (e: string) => e.startsWith("The name ") || e.startsWith("The skill has no name");
 
 type Choice = "replace" | "rename" | "skip";
@@ -86,14 +83,14 @@ export function SkillUploadDialog({ open, onOpenChange, defaultPool = "agent" }:
   };
 
   const taken = (s: SkillBundleSkill) => s.exists[pool][scope];
-  const rows = useMemo(() => (preview?.skills ?? []).map((s) => {
+  const rows = (preview?.skills ?? []).map((s) => {
     const c = choices[s.name] ?? { include: true, conflict: "replace" as Choice, rename: s.name };
     const mustRename = s.errors.some(isNameError);
     const blocking = s.errors.filter((e) => !isNameError(e));
     const renaming = mustRename || (taken(s) && c.conflict === "rename");
     const renameError = renaming ? nameError(c.rename) : null;
     return { s, c, mustRename, blocking, renaming, renameError };
-  }), [preview, choices, pool, scope]); // eslint-disable-line react-hooks/exhaustive-deps
+  });
 
   const selected = rows.filter((r) => r.c.include && r.blocking.length === 0 && !(taken(r.s) && r.c.conflict === "skip" && !r.mustRename));
   const canInstall = selected.length > 0 && selected.every((r) => !r.renameError) && !upload.isInstalling;
@@ -319,7 +316,3 @@ function InstallSummary({ result, pool, onOpen }: { result: SkillBundleInstallRe
   );
 }
 
-/** A spec-compliant name from an invalid one ("My_Skill" → "my-skill"). */
-export function suggestName(name: string): string {
-  return name.toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64).replace(/-+$/, "") || "skill";
-}

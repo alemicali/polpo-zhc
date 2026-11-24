@@ -276,7 +276,7 @@ export interface SkillFrontmatter {
 
 /** Parse SKILL.md's frontmatter strictly (YAML), or explain why it cannot. */
 export function readSkillFrontmatter(raw: string): { ok: true; fm: SkillFrontmatter; body: string } | { ok: false; error: string } {
-  const text = raw.replace(/^﻿/, "").replace(/\r\n/g, "\n");
+  const text = raw.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
   const m = text.match(/^---\n([\s\S]*?)\n---(?:\n|$)([\s\S]*)$/);
   if (!m) return { ok: false, error: "SKILL.md has no YAML frontmatter (it must start with a --- block with name and description)" };
   let data: unknown;
@@ -314,12 +314,12 @@ export function specNameErrors(name: string): string[] {
 
 /** A spec-compliant name derived from any text ("My Skill_v2" → "my-skill-v2"). */
 export function slugSkillName(text: string): string {
-  return text.toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64).replace(/-+$/, "");
+  return text.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64).replace(/-+$/, "");
 }
 
 /** SKILL.md with its frontmatter `name` set (added when missing); the rest is kept byte for byte. */
 export function setFrontmatterName(raw: string, name: string): string {
-  const m = raw.match(/^(﻿?---\r?\n)([\s\S]*?)(\r?\n---)/);
+  const m = raw.match(/^(\uFEFF?---\r?\n)([\s\S]*?)(\r?\n---)/);
   if (!m) return `---\nname: ${name}\n---\n${raw}`;
   const fmText = m[2];
   const next = /^name\s*:.*$/m.test(fmText) ? fmText.replace(/^name\s*:.*$/m, `name: ${name}`) : `name: ${name}\n${fmText}`;

@@ -141,7 +141,8 @@ function normalizeAllowedTools(value: unknown): string[] | undefined {
     return out.length > 0 ? out : undefined;
   }
   if (typeof value === "string") {
-    const out = value.split(",").map(t => t.trim()).filter(Boolean);
+    // the Agent Skills spec writes it space-separated ("Bash(git:*) Read"); older skills comma-separated
+    const out = value.split(value.includes(",") ? "," : /\s+/).map(t => t.trim()).filter(Boolean);
     return out.length > 0 ? out : undefined;
   }
   return undefined;

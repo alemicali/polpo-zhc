@@ -32,6 +32,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-24-skill-bundles",
+    date: "2026-11-24",
+    kind: "new",
+    title: "Carica skill complete (.skill e .zip) e sfoglia i loro file",
+    summary: "Da Skills → Carica trascini un file .skill o .zip, o una cartella: vedi in anteprima nome, descrizione, file ed eventuali problemi, poi installi. Ogni skill ora si apre come un browser di file.",
+    body: [
+      "- **Carica una skill**: un file `.skill` (come quelli creati da Claude), uno `.zip` o una cartella con `SKILL.md` più `scripts/`, `references/`, `assets/`. Anche più skill in un solo archivio.",
+      "- **Anteprima prima di installare**: per ogni skill nome, descrizione, file e dimensioni, errori (bloccano) e avvisi sul formato Agent Skills. Scegli dove installarla (agenti o Polpo, questo progetto o tutti), cosa fare se il nome esiste già (sostituisci, installa con un altro nome, salta) e a quali agenti assegnarla.",
+      "- **Sicura**: archivi fino a 30 MB e 1000 file; percorsi fuori dalla cartella, link simbolici e zip bomb vengono rifiutati, i file di sistema (`__MACOSX`, `.DS_Store`) ignorati, i permessi di esecuzione non mantenuti.",
+      "- **Sfoglia i file**: la pagina della skill mostra l'albero dei file; un clic apre il file al posto di SKILL.md (markdown, codice evidenziato, JSON, immagini, PDF) e il link si può condividere. I link relativi dentro SKILL.md aprono il file. Scarichi un file o tutta la skill come .skill o .zip. Funziona anche per le skill di Polpo (Impostazioni → Orchestrator).",
+      "- **Gli agenti li usano davvero**: il prompt indica la cartella della skill e i suoi file, da leggere o eseguire solo quando servono; con Claude Code, Codex e OpenCode i file di testo viaggiano insieme alla skill.",
+      "- Anche da MCP (`polpo_skill_upload_prepare` → `polpo_skill_upload_finalize`, `polpo_skill_files`, `polpo_skill_file_read`), dalla chat con Polpo (anche da un allegato), da REST (`POST /api/v1/skills/upload`) e dall'SDK (`useSkillBundleUpload`, `useSkillFiles`).",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri Skills", to: "/skills" },
+  },
+  {
     id: "2026-11-24-spotlight-ai",
     date: "2026-11-24",
     kind: "new",

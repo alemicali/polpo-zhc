@@ -3,7 +3,7 @@
  * page as a file browser (tree, the selected file in place of SKILL.md, ?file= deep links, relative
  * links in SKILL.md, downloads).
  */
-import { act, useState, type ComponentProps, type ReactNode } from "react";
+import { act, useEffect, useState, type ComponentProps, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -45,8 +45,8 @@ vi.mock("@polpo-ai/react", () => ({
   }),
   // the upload hook with the real state machine, the API faked
   useSkillBundleUpload: () => {
-    const [current, setCurrent] = useState<any>(null);
-    const [result, setResult] = useState<any>(null);
+    const [current, setCurrent] = useState<unknown>(null);
+    const [result, setResult] = useState<unknown>(null);
     return {
       current, result, isUploading: false, isInstalling: false, error: null,
       preview: async (file: Blob, filename: string) => { const p = await previewFn(file, filename); setCurrent(p); return p; },
@@ -74,13 +74,17 @@ vi.mock("@/components/shared/agent-avatar", () => ({ AgentAvatar: () => null }))
 
 import { TooltipProvider } from "../src/components/ui/tooltip";
 import { SkillDetailPage } from "../src/pages/skill-detail";
-import { SkillUploadDialog, suggestName } from "../src/components/skills/skill-upload-dialog";
-import { buildFileTree, crc32, resolveSkillLink, skillFileKind, stripFrontmatter, zipStored, fenced, archiveFromFiles } from "../src/lib/skill-files";
+import { SkillUploadDialog } from "../src/components/skills/skill-upload-dialog";
+import { buildFileTree, crc32, resolveSkillLink, skillFileKind, stripFrontmatter, zipStored, fenced, archiveFromFiles, suggestName } from "../src/lib/skill-files";
 
 let container: HTMLDivElement;
 let root: Root;
-let location = "";
-function Where() { location = `${useLocation().pathname}${useLocation().search}`; return null; }
+const where = { current: "" };
+function Where() {
+  const loc = useLocation();
+  useEffect(() => { where.current = `${loc.pathname}${loc.search}`; });
+  return null;
+}
 
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -158,7 +162,7 @@ test("the skill page: SKILL.md by default, tree navigation replaces it, ?file= d
   // a file in the tree replaces SKILL.md in the main pane, and the URL says which
   await act(async () => { q('[data-path="scripts/run.py"]')!.click(); });
   await flush();
-  expect(location).toBe("/skills/alpha?file=scripts%2Frun.py");
+  expect(where.current).toBe("/skills/alpha?file=scripts%2Frun.py");
   expect(q('[data-testid="skill-file-view"]')!.getAttribute("data-kind")).toBe("code");
   expect(q('[data-testid="skill-file-view"]')!.textContent).toContain("print('hi')");
   expect(q('[data-testid="skill-file-view"]')!.textContent).not.toContain("# Alpha");
@@ -181,14 +185,14 @@ test("?file= opens a file directly; a relative link in SKILL.md opens that file 
   // its own relative link goes back to SKILL.md
   await act(async () => { q('[data-skill-file="SKILL.md"]')!.click(); });
   await flush();
-  expect(location).toBe("/skills/alpha");
+  expect(where.current).toBe("/skills/alpha");
   expect(q('[data-testid="skill-file-view"]')!.textContent).toContain("# Alpha");
   // SKILL.md's link to the reference opens it; the external one stays external
   const external = byText("the site", "a")!;
   expect(external.getAttribute("target")).toBe("_blank");
   await act(async () => { q('[data-skill-file="references/api.md"]')!.click(); });
   await flush();
-  expect(location).toBe("/skills/alpha?file=references%2Fapi.md");
+  expect(where.current).toBe("/skills/alpha?file=references%2Fapi.md");
   expect(q('[data-testid="skill-file-view"]')!.textContent).toContain("# API reference");
   // raw markdown on demand
   await act(async () => { (q('[aria-label="Raw"]') as HTMLButtonElement).click(); });

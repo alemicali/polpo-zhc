@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ComponentProps, type ReactNode } from "react";
 import {
   ChevronDown, ChevronRight, Download, File, FileCode, FileImage, FileJson, FileText, FileVideo, FileAudio, Folder, FolderOpen,
   Loader2, Code, Eye,
@@ -28,22 +28,17 @@ function FileIcon({ path, className }: { path: string; className?: string }) {
 
 export function SkillFileTree({ files, selected, onSelect }: { files: SkillFile[]; selected: string; onSelect: (path: string) => void }) {
   const tree = useMemo(() => buildFileTree(files), [files]);
-  // folders open: the first level, and the way to the selected file
-  const [open, setOpen] = useState<Set<string>>(() => new Set(tree.children.filter((c) => c.kind === "dir").map((c) => c.path)));
-  useEffect(() => {
-    const need = ancestorsOf(selected);
-    setOpen((prev) => (need.every((p) => prev.has(p)) ? prev : new Set([...prev, ...need])));
-  }, [selected]);
-  const toggle = (path: string) => setOpen((prev) => {
-    const next = new Set(prev);
-    if (next.has(path)) next.delete(path); else next.add(path);
-    return next;
-  });
+  // folders the person opened or closed; by default the first level is open. The way to the
+  // selected file is always open (a link may select a file deep in a closed folder).
+  const [toggled, setToggled] = useState<Map<string, boolean>>(() => new Map());
+  const reveal = new Set(ancestorsOf(selected));
+  const isOpenDir = (node: TreeNode) => reveal.has(node.path) || (toggled.get(node.path) ?? !node.path.includes("/"));
+  const toggle = (node: TreeNode) => setToggled((prev) => new Map(prev).set(node.path, !isOpenDir(node)));
 
   const render = (node: TreeNode, depth: number): ReactNode => node.children.map((child) => {
     const pad = { paddingLeft: `calc(${depth} * 0.875rem + 0.5rem)` };
     if (child.kind === "dir") {
-      const isOpen = open.has(child.path);
+      const isOpen = isOpenDir(child);
       return (
         <li key={`d:${child.path}`}>
           <button
@@ -51,7 +46,7 @@ export function SkillFileTree({ files, selected, onSelect }: { files: SkillFile[
             className="flex w-full min-w-0 items-center gap-1.5 rounded-xs py-1 pr-2 text-left text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground"
             style={pad}
             aria-expanded={isOpen}
-            onClick={() => toggle(child.path)}
+            onClick={() => toggle(child)}
           >
             {isOpen ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
             {isOpen ? <FolderOpen className="h-3.5 w-3.5 shrink-0 text-primary/70" /> : <Folder className="h-3.5 w-3.5 shrink-0 text-primary/70" />}
@@ -90,8 +85,6 @@ export function SkillFileTree({ files, selected, onSelect }: { files: SkillFile[
 
 /** Render markdown whose relative links open files of the skill in place. */
 function SkillMarkdown({ text, fromPath, known, onOpen }: { text: string; fromPath: string; known: Set<string>; onOpen: (path: string) => void }) {
-  const onOpenRef = useRef(onOpen);
-  onOpenRef.current = onOpen;
   const components = useMemo<ComponentProps<typeof MessageResponse>["components"]>(() => ({
     a: ({ href, children, node: _node, ...rest }: ComponentProps<"a"> & { node?: unknown }) => {
       const target = resolveSkillLink(href, fromPath, known);
@@ -102,7 +95,7 @@ function SkillMarkdown({ text, fromPath, known, onOpen }: { text: string; fromPa
             href={`?file=${encodeURIComponent(target)}`}
             data-skill-file={target}
             className="text-primary underline underline-offset-2"
-            onClick={(e) => { e.preventDefault(); onOpenRef.current(target); }}
+            onClick={(e) => { e.preventDefault(); onOpen(target); }}
           >
             {children}
           </a>
@@ -110,7 +103,7 @@ function SkillMarkdown({ text, fromPath, known, onOpen }: { text: string; fromPa
       }
       return <a {...rest} href={href} target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2">{children}</a>;
     },
-  }), [fromPath, known]);
+  }), [fromPath, known, onOpen]);
   // MessageResponse re-renders on children/mode only: key on what the links depend on
   return <MessageResponse key={`${fromPath}:${known.size}`} mode="static" components={components}>{text}</MessageResponse>;
 }
@@ -133,14 +126,16 @@ export interface SkillFileViewerProps {
 export function SkillFileViewer({ path, file, files, skillBody, fileUrl, readText, onOpen }: SkillFileViewerProps) {
   const kind = skillFileKind(path);
   const known = useMemo(() => new Set(files.map((f) => f.path)), [files]);
-  const [raw, setRaw] = useState(false);
+  // raw markdown is per file: opening another file shows it rendered
+  const [rawFor, setRawFor] = useState<string | null>(null);
+  const raw = rawFor === path;
+  const setRaw = (on: boolean) => setRawFor(on ? path : null);
   const [loaded, setLoaded] = useState<{ path: string; text?: string; error?: string } | null>(null);
   const isText = TEXT_KINDS.includes(kind);
   const tooBig = (file?.size ?? 0) > MAX_INLINE_BYTES;
   const useBody = path === "SKILL.md" && !raw && skillBody !== undefined;
   const needsText = isText && !tooBig && !useBody;
 
-  useEffect(() => { setRaw(false); }, [path]);
   useEffect(() => {
     if (!needsText || loaded?.path === path) return;
     let cancelled = false;

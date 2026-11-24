@@ -11,7 +11,9 @@ import {
   SkillBundleError, crc32, installSkillBundle, listSkillFiles, parseSkillBundle, readSkillFrontmatter, readZipArchive,
   resolveSkillFile, setFrontmatterName, specNameErrors, writeZipArchive, zipSkillDir, readSkillTextFiles,
 } from "../llm/skill-bundle.js";
-import { buildSkillPrompt, installSkills, loadAgentSkills, assignSkillToAgent } from "../llm/skills.js";
+import { buildSkillPrompt, installSkills, loadAgentSkills, assignSkillToAgent, parseSkillFrontmatter } from "../llm/skills.js";
+import { harnessSkill } from "../adapters/harness-engine.js";
+import { globalSkillPoolReadable } from "../adapters/engine.js";
 import { skillRoutes } from "../server/routes/skills.js";
 import { handleMcpRequest, type ApiResponse, type McpDeps } from "../server/mcp.js";
 import { expectValidOutput } from "./helpers/mcp-output.js";
@@ -269,6 +271,21 @@ describe("runtime: agents see bundled files", () => {
     const text = readSkillTextFiles(skills[0].dir!);
     expect(text.files).toEqual([{ path: "references/api.md", content: "# API" }]);
     expect(text.skipped).toEqual(["assets/logo.png"]);
+    // harnesses: text files travel with the skill, binaries are named
+    const h = harnessSkill(skills[0]);
+    expect(h.files).toEqual([{ path: "references/api.md", content: "# API" }]);
+    expect(h.content).toContain("not available in this runtime (binary or too large): assets/logo.png");
+  });
+
+  it("a skill from the global pool makes that pool readable for the agent; allowed-tools space-separated", () => {
+    const file = join(tmp, "gl.skill");
+    writeFileSync(file, zipOf({ "gl/SKILL.md": skillMd("gl"), "gl/references/r.md": "r" }));
+    installSkills(file, polpoDir, { global: true });
+    const cwd = join(tmp, "project");
+    expect(globalSkillPoolReadable(cwd, polpoDir, { name: "dev", skills: ["gl"] } as never)).toBe(join(home, ".polpo", "skills"));
+    expect(globalSkillPoolReadable(cwd, polpoDir, { name: "dev", skills: [] } as never)).toBeUndefined();
+    expect(parseSkillFrontmatter("---\nname: x\ndescription: y\nallowed-tools: Bash(git:*) Read\n---\n")?.allowedTools).toEqual(["Bash(git:*)", "Read"]);
+    expect(parseSkillFrontmatter("---\nname: x\ndescription: y\nallowed-tools: read, write\n---\n")?.allowedTools).toEqual(["read", "write"]);
   });
 });
 
