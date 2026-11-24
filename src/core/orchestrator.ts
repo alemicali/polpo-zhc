@@ -89,6 +89,10 @@ import { TelegramGatewayAdapter } from "../notifications/telegram-gateway-adapte
 import { WebhookGatewayAdapter } from "../notifications/webhook-gateway-adapter.js";
 import { WhatsAppBridge, WhatsAppChannel } from "../notifications/channels/whatsapp.js";
 import { WhatsAppGatewayAdapter } from "../notifications/whatsapp-gateway-adapter.js";
+import { WaBusinessService, registerWaBusinessService } from "../notifications/whatsapp-business-service.js";
+import { WaBusinessGatewayAdapter } from "../notifications/whatsapp-business-gateway-adapter.js";
+import { FileWaBusinessStore } from "../stores/file-whatsapp-business-store.js";
+import { resolveWaBusinessSettings, type WaBusinessStore } from "@polpo-ai/core/whatsapp-business";
 import { WhatsAppStore } from "../stores/whatsapp-store.js";
 import type { WhatsAppMessageStore } from "@polpo-ai/core/whatsapp-store";
 import { FilePeerStore } from "./peer-store.js";
@@ -216,6 +220,9 @@ export class Orchestrator extends TypedEmitter {
   private webhookGateways = new Map<string, { gateway: ChannelGateway; adapter: WebhookGatewayAdapter }>();
   private whatsappBridge?: WhatsAppBridge;
   private whatsappStore?: WhatsAppMessageStore;
+  /** WhatsApp Business (Meta Cloud API) channels: webhook, inbox, sends, templates, approvals. */
+  private waBusiness?: WaBusinessService;
+  private waBusinessStore?: WaBusinessStore;
   private peerStore?: PeerStore;
   private teamStore!: TeamStore;
   private agentStore!: AgentStore;
@@ -587,6 +594,8 @@ export class Orchestrator extends TypedEmitter {
     this.backgroundWaitMgr?.setContinuation(handler);
   }
   getWhatsAppStore(): WhatsAppMessageStore | undefined { return this.whatsappStore; }
+  /** The WhatsApp Business service (undefined before init). */
+  getWaBusiness(): WaBusinessService | undefined { return this.waBusiness; }
   getWhatsAppBridge(): WhatsAppBridge | undefined { return this.whatsappBridge; }
 
   /** Re-point the orchestrator at a different project directory (before init). */
@@ -1154,6 +1163,7 @@ export class Orchestrator extends TypedEmitter {
     }
 
     this.startWebhookGateways();
+    this.startWaBusiness();
 
     // Initialize escalation manager if configured
     if (this.config.settings.escalationPolicy) {
@@ -2165,6 +2175,9 @@ export class Orchestrator extends TypedEmitter {
     this.whatsappBridge?.stop();
     this.whatsappStore?.close();
     this.whatsappStore = undefined;
+    this.waBusiness?.dispose();
+    registerWaBusinessService(this.polpoDir, undefined);
+    this.waBusiness = undefined;
     this.notificationServer?.close();
     this.approvalMgr?.dispose();
     this.notificationRouter?.dispose();
@@ -2313,6 +2326,7 @@ export class Orchestrator extends TypedEmitter {
     }
 
     this.startWebhookGateways();
+    this.startWaBusiness();
 
     // Escalation manager
     if (this.config.settings.escalationPolicy) {
@@ -2688,6 +2702,69 @@ export class Orchestrator extends TypedEmitter {
       const target = channelConfig.gateway.agent ? `agent: ${channelConfig.gateway.agent}` : "orchestrator";
       this.emit("log", { level: "info", message: `Webhook channel gateway "${key}" ready (${target})` });
     }
+  }
+
+  // ── WhatsApp Business (Meta Cloud API) ──
+
+  /**
+   * The instance's WhatsApp Business service (created once, reading the configuration live) and a
+   * gateway per whatsapp-business channel with gateway.enableInbound. Customers (business.audience,
+   * the default) talk only with gateway.agent, never use commands and are never told about pairing;
+   * operators may use commands. Called at start and on every reload.
+   */
+  private startWaBusiness(): void {
+    if (!this.waBusiness) {
+      this.waBusinessStore = this.waBusinessStore ?? this.drizzleStores?.waBusinessStore ?? new FileWaBusinessStore(this.polpoDir);
+      const store = this.waBusinessStore;
+      this.waBusiness = new WaBusinessService({
+        polpoDir: () => this.polpoDir,
+        channels: () => this.config.settings.notifications?.channels ?? {},
+        store: () => store,
+        vault: () => this.vaultStore,
+        emit: (event, payload) => { this.emit(event, payload as never); },
+        log: (level, message) => this.emit("log", { level, message: `[whatsapp-business] ${message}` }),
+        publicBase: () => process.env.POLPO_PUBLIC_URL?.trim() || undefined,
+        instance: () => {
+          const port = Number(process.env.POLPO_PORT ?? process.env.PORT);
+          return Number.isFinite(port) && port > 0 ? { port } : {};
+        },
+      });
+      registerWaBusinessService(this.polpoDir, this.waBusiness);
+      this.waBusiness.start();
+    }
+    const service = this.waBusiness;
+    service.clearGateways();
+    const channels = this.config.settings.notifications?.channels ?? {};
+    for (const [key, channelConfig] of Object.entries(channels)) {
+      if (channelConfig?.type !== "whatsapp-business" || !channelConfig.gateway?.enableInbound) continue;
+      const business = resolveWaBusinessSettings(channelConfig.business);
+      const customers = business.audience === "customers";
+      if (customers && !channelConfig.gateway.agent) {
+        this.emit("log", { level: "warn", message: `WhatsApp Business "${key}": inbound is on but gateway.agent is not set: customers' messages are stored, not answered` });
+        continue;
+      }
+      this.peerStore = this.peerStore ?? this.drizzleStores?.peerStore ?? new FilePeerStore(this.polpoDir);
+      const operators = new Set(business.operators);
+      const gatewayConfig = customers
+        ? { dmPolicy: "open" as const, ...channelConfig.gateway, commands: channelConfig.gateway.commands === "none" ? "none" as const : "operators" as const }
+        : { dmPolicy: "allowlist" as const, ...channelConfig.gateway, allowFrom: [...new Set([...(channelConfig.gateway.allowFrom ?? []), ...operators])] };
+      const gateway = new ChannelGateway({
+        orchestrator: this,
+        peerStore: this.peerStore!,
+        sessionStore: this.sessionStore,
+        channelConfig: { ...channelConfig, gateway: gatewayConfig },
+        approvalResolver: customers ? undefined : this.createApprovalResolver(),
+        onTyping: (chatId) => service.typing(key, chatId),
+        key,
+        customerMode: customers,
+        isOperator: (externalId) => operators.has(externalId),
+      });
+      gateway.setPartialResponseHandler(async (chatId, text) => { await service.sendReply(key, chatId, text); });
+      if (!customers) gateway.setReplyRouter((target, event) => this.routeChannelReply(target, event));
+      service.setGateway(key, new WaBusinessGatewayAdapter(gateway));
+      this.emit("log", { level: "info", message: `WhatsApp Business channel "${key}" ready (${customers ? `customers → ${channelConfig.gateway.agent}` : "operators"})` });
+    }
+    void service.drain();
   }
 
   // ── WhatsApp Bridge ──
