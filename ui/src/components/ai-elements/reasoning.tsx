@@ -7,7 +7,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import { BrainIcon, ChevronDownIcon } from "lucide-react";
+import { ChevronRightIcon } from "lucide-react";
 import type { ComponentProps, ReactNode } from "react";
 import {
   createContext,
@@ -137,7 +137,8 @@ export const Reasoning = memo(
     return (
       <ReasoningContext.Provider value={contextValue}>
         <Collapsible
-          className={cn("not-prose mt-2 mb-4", className)}
+          className={cn("not-prose my-1.5 min-w-0 text-small", className)}
+          data-testid="reasoning"
           onOpenChange={handleOpenChange}
           open={isOpen}
           {...props}
@@ -157,12 +158,12 @@ export type ReasoningTriggerProps = ComponentProps<
 
 const defaultGetThinkingMessage = (isStreaming: boolean, duration?: number) => {
   if (isStreaming || duration === 0) {
-    return <Shimmer duration={1}>Thinking...</Shimmer>;
+    return <Shimmer as="span" duration={1}>Thinking…</Shimmer>;
   }
   if (duration === undefined) {
-    return <p>Thought for a few seconds</p>;
+    return <span>Thought for a few seconds</span>;
   }
-  return <p>Thought for {duration} seconds</p>;
+  return <span>Thought for {duration} {duration === 1 ? "second" : "seconds"}</span>;
 };
 
 export const ReasoningTrigger = memo(
@@ -177,19 +178,19 @@ export const ReasoningTrigger = memo(
     return (
       <CollapsibleTrigger
         className={cn(
-          "flex w-full items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground",
+          "group/line flex max-w-full items-center gap-1.5 text-left text-muted-foreground transition-colors hover:text-foreground",
           className
         )}
         {...props}
       >
         {children ?? (
           <>
-            <BrainIcon className="size-4" />
             {getThinkingMessage(isStreaming, duration)}
-            <ChevronDownIcon
+            <ChevronRightIcon
+              aria-hidden
               className={cn(
-                "size-4 transition-transform",
-                isOpen ? "rotate-180" : "rotate-0"
+                "size-3 shrink-0 transition-transform motion-reduce:transition-none",
+                isOpen ? "rotate-90" : "rotate-0"
               )}
             />
           </>
@@ -209,8 +210,9 @@ export const ReasoningContent = memo(
   ({ className, children, ...props }: ReasoningContentProps) => (
     <CollapsibleContent
       className={cn(
-        "mt-4 text-sm",
-        "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 text-muted-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
+        // One light, compact box below the line, like the tool-call details
+        "mt-1 max-h-72 overflow-auto rounded-control bg-muted/30 px-2.5 py-1.5 text-small",
+        "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 text-muted-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in motion-reduce:animate-none",
         className
       )}
       {...props}

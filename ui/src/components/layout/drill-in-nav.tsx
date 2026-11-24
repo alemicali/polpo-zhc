@@ -533,7 +533,7 @@ function PanelSlot({ panel, live, collapsed, sheet, onExpand, onOpenChat }: {
     <div
       role="region"
       aria-label="Chat history"
-      className={cn("flex min-h-0 flex-col overflow-hidden rounded-lg border", sheet ? "h-96 border-border/50" : "-mx-1 flex-1 border-sidebar-border")}
+      className={cn("flex min-h-0 flex-col", !sheet && "flex-1")}
     >
       <Suspense
         fallback={(
@@ -542,7 +542,7 @@ function PanelSlot({ panel, live, collapsed, sheet, onExpand, onOpenChat }: {
           </div>
         )}
       >
-        <ChatHistoryPanel onOpenChat={onOpenChat} />
+        <ChatHistoryPanel onOpenChat={onOpenChat} surface={sheet ? "sheet" : "sidebar"} />
       </Suspense>
     </div>
   );
