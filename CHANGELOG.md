@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **⋯ menu: theme as three icons, palettes as swatches.** The Theme submenu didn't open on hover in some browsers; the ⋯ menu now shows light / dark / system as a tri-state icon toggle and the palettes as a row of swatches, right in the menu.
+
 ### Changed
 - **Theme and layout live in the header's ⋯ menu.** The standalone theme button and the sidebar / chat-first layout toggle are gone from both headers: ⋯ now has a **Theme** submenu (light / dark / system and the palette) and a **Layout** section (Sidebar, Chat-first), next to Install app, Ink Hub, GitHub, the sidebar style and Log out.
 

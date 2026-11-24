@@ -33,9 +33,6 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
@@ -150,12 +147,79 @@ export function ThemeMenu({ className }: { className?: string }) {
   );
 }
 
+/** Light / dark / system as three icons in one row (inside the ⋯ menu: no submenu to hover). */
+function ThemeTriState() {
+  const { theme, setTheme } = useTheme();
+  const modes = [
+    { id: "light" as const, label: "Light", icon: Sun },
+    { id: "dark" as const, label: "Dark", icon: Moon },
+    { id: "system" as const, label: "System", icon: Monitor },
+  ];
+  return (
+    <div className="flex items-center justify-between gap-2 px-2 py-1.5">
+      <span className="text-xs text-muted-foreground">Theme</span>
+      <div role="radiogroup" aria-label="Theme" className="flex items-center gap-0.5 rounded-pill bg-muted/60 p-0.5">
+        {modes.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            type="button"
+            role="radio"
+            aria-checked={theme === id}
+            aria-label={label}
+            title={label}
+            onClick={() => setTheme(id)}
+            className={cn(
+              "inline-flex h-6 w-6 items-center justify-center rounded-pill transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              theme === id ? "bg-background text-foreground shadow-control" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Icon className="h-3.5 w-3.5" />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** The palettes as swatches in one row (inside the ⋯ menu). */
+function PaletteRow() {
+  const { resolved } = useTheme();
+  const { palette, setPalette } = usePalette();
+  return (
+    <div className="flex items-center justify-between gap-2 px-2 py-1.5">
+      <span className="flex items-center gap-1.5 text-xs text-muted-foreground"><PaletteIcon className="h-3 w-3" /> Palette</span>
+      <div role="radiogroup" aria-label="Palette" className="flex flex-wrap items-center justify-end gap-1">
+        {PALETTES.map((p) => {
+          const swatch = resolved === "dark" ? p.swatchDark : p.swatchLight;
+          return (
+            <button
+              key={p.id}
+              type="button"
+              role="radio"
+              aria-checked={palette === p.id}
+              aria-label={p.name}
+              title={`${p.name} — ${p.blurb}`}
+              onClick={() => setPalette(p.id)}
+              className={cn(
+                "relative inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-pill ring-1 ring-border/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                palette === p.id && "ring-2 ring-primary",
+              )}
+              style={{ backgroundColor: swatch[0] }}
+            >
+              <span className="h-2.5 w-2.5 rounded-pill" style={{ backgroundColor: swatch[1] }} />
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /** ⋯ — the secondary entries of the header. */
 export function HeaderMoreMenu({ className, showSidebarStyle = true }: { className?: string; showSidebarStyle?: boolean }) {
   const [installOpen, setInstallOpen] = useState(false);
   const sidebarStyle = useSidebarStyle();
   const layoutMode = useLayoutMode();
-  const { resolved } = useTheme();
   const { available: canLogOut, busy: loggingOut, logout } = useInstanceLogout();
   return (
     <>
@@ -186,14 +250,8 @@ export function HeaderMoreMenu({ className, showSidebarStyle = true }: { classNa
             </a>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger className="gap-2.5 text-xs">
-              {resolved === "dark" ? <Moon className="h-3.5 w-3.5" /> : <Sun className="h-3.5 w-3.5" />} Theme
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="min-w-[220px] bg-popover/95 backdrop-blur-surface border-border/50">
-              <ThemeMenuItems />
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
+          <ThemeTriState />
+          <PaletteRow />
           <DropdownMenuLabel className="text-label text-muted-foreground/70">Layout</DropdownMenuLabel>
           <DropdownMenuItem onSelect={() => setLayoutMode("sidebar")} className="gap-2.5 text-xs">
             <PanelLeft className="h-3.5 w-3.5" /> Sidebar
