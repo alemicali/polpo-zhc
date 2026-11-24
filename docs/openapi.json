@@ -4541,10 +4541,10 @@
                   ]
                 }
               ],
-              "description": "Alias for `summary=true`. Returns a slim projection (id, name, status, schedule, deadline, endDate, qualityThreshold, budgetUsd, pauseReason, cost, timestamps, taskCount, promptPreview)."
+              "description": "Alias for `summary=true`. Returns a slim projection (id, name, status, schedule, deadline, endDate, qualityThreshold, budgetUsd, pauseReason, owner, cost, timestamps, taskCount, promptPreview)."
             },
             "required": false,
-            "description": "Alias for `summary=true`. Returns a slim projection (id, name, status, schedule, deadline, endDate, qualityThreshold, budgetUsd, pauseReason, cost, timestamps, taskCount, promptPreview).",
+            "description": "Alias for `summary=true`. Returns a slim projection (id, name, status, schedule, deadline, endDate, qualityThreshold, budgetUsd, pauseReason, owner, cost, timestamps, taskCount, promptPreview).",
             "name": "slim",
             "in": "query"
           }

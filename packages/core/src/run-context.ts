@@ -209,6 +209,8 @@ export function buildRunContext(i: BuildRunContextInput): TaskRunContext {
     if (cli.model) ctx.model = cli.model;
     ctx.auth = { kind: "subscription" };
     ctx.permissionMode = cli.permissionMode ?? "allow-all";
+    if (cli.effort) ctx.effort = cli.effort;
+    if (cli.maxBudgetUsd) ctx.budgetUsd = cli.maxBudgetUsd;
   } else if (i.agent.model) {
     ctx.model = i.agent.model;
   }
@@ -292,7 +294,7 @@ function describeScopeShort(scope: TaskToolScope): string {
 export function describeTaskRun(ctx: TaskRunContext): string {
   const engine = ctx.engine === "polpo" ? "Polpo" : ctx.engine === "claude-code" ? "Claude Code" : ctx.engine === "opencode" ? "OpenCode"
     : ctx.engine === "claude-cli" ? "Claude Code (CLI)" : ctx.engine === "codex-cli" ? "Codex (CLI)" : "Codex";
-  const kind = ctx.auth?.kind === "bedrock" ? "Bedrock" : ctx.auth?.kind === "vertex" ? "Vertex" : ctx.auth?.kind === "ai-gateway" ? "AI Gateway" : ctx.auth?.kind === "gateway" ? "gateway" : "API key";
+  const kind = ctx.auth?.kind === "bedrock" ? "Bedrock" : ctx.auth?.kind === "vertex" ? "Vertex" : ctx.auth?.kind === "ai-gateway" ? "AI Gateway" : ctx.auth?.kind === "gateway" ? "gateway" : ctx.auth?.kind === "subscription" ? "a personal subscription" : "API key";
   const auth = ctx.auth ? ` via ${kind}${ctx.auth.provider && ctx.auth.kind === "api-key" ? ` (${ctx.auth.provider})` : ""}${ctx.auth.region ? ` (${ctx.auth.region})` : ""}` : "";
   const where = ctx.computer.kind === "host" && ctx.computer.id === "host"
     ? "this server"

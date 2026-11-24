@@ -90,6 +90,9 @@ export interface AgentCliEngine {
   account?: string;
   model?: string;
   permissionMode?: HarnessPermissionMode;
+  effort?: HarnessEffort;
+  /** Claude Code only: --max-budget-usd. */
+  maxBudgetUsd?: number;
   args?: string[];
 }
 export interface CliAccount { id: string; cli: CliId; computer: string; configDir: string; owner: string; label?: string }
@@ -150,6 +153,10 @@ export interface HarnessSession {
   key: string;
   agent: string;
   harness: HarnessId;
+  /** "cli": a CLI engine run (the official program signed in with a person's account). */
+  engine?: "harness" | "cli";
+  cli?: CliId;
+  account?: string;
   computerId: string;
   scope: "task" | "chat";
   taskId?: string;
