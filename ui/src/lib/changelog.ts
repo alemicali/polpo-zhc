@@ -32,6 +32,25 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-24-custom-mcp-servers",
+    date: "2026-11-24",
+    kind: "new",
+    title: "Server MCP tuoi, ospitati da Polpo: diventano connettori",
+    summary: "Polpo costruisce un server MCP per qualsiasi API (dalla documentazione, da una descrizione o da un modello come Printful), lo ospita e lo aggiunge ai connettori. Bozza, test, versioni, deploy e rollback.",
+    body: [
+      "- **Crea un server** da Connettori → **Server ospitati**: da un'**API** (URL OpenAPI o documentazione incollata: Polpo propone pochi strumenti pensati per i compiti, non uno per endpoint), da una **descrizione** (strumenti in codice), **vuoto**, o dal modello **Printful** con un clic.",
+      "- **Strumenti HTTP dichiarativi** eseguiti da Polpo: metodo, URL, parametri, corpo, cosa tenere della risposta, messaggi d'errore; la credenziale viene dal **vault** (mai scritta nel server) e parte **solo verso i domini consentiti**, con timeout, limiti di dimensione e nuovi tentativi su 429/5xx.",
+      "- **Strumenti in codice** (`handler(input, ctx)`, anche con pacchetti npm fino a 100 MB) girano in un processo isolato con bubblewrap: vedono solo la loro cartella, niente vault né file dell'istanza, rete solo verso i domini dichiarati, con limiti di memoria e tempo.",
+      "- **Test**: prova uno strumento con un input di esempio e vedi richiesta (segreti mascherati), risposta e tempi; salva i casi di test, che girano a ogni pubblicazione. Gli strumenti distruttivi o con approvazione non partono mai da soli.",
+      "- **Versioni**: bozza → pubblica (1.2.0) → deploy, rollback e storico con le differenze, come per gli agenti.",
+      "- **Diventa un connettore** alla prima pubblicazione (\"Ospitato da Polpo · v1.2.0\"): lo assegni agli agenti, scegli gli strumenti, e gli strumenti che chiedono approvazione passano da **Approvazioni** prima di girare.",
+      "- **Privato o pubblico**: privato resta dentro l'istanza; pubblico è raggiungibile da chiunque all'indirizzo `/mcp/servers/<id>` con la chiave dell'istanza, con limiti di richieste, log e interruttore di emergenza; gli strumenti distruttivi restano spenti.",
+      "- Anche da API, MCP (`polpo_mcp_server_*`), chat con Polpo (\"crea un connettore per Printful\") e SDK.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i server ospitati", to: "/connectors?tab=servers" },
+  },
+  {
     id: "2026-11-24-agent-versions",
     date: "2026-11-24",
     kind: "new",
