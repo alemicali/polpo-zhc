@@ -4,7 +4,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { renderView } from "../../widgets/work-card/view";
-import { brandMark } from "../../widgets/shared/brand";
+import { brandMark, modelWithEngine } from "../../widgets/shared/brand";
 import { buildMissionCard, buildTaskCard } from "../../src/server/mcp-work-card";
 
 const run = {
@@ -37,6 +37,14 @@ describe("the work card (MCP App)", () => {
     const marks = [...root.querySelectorAll("[data-brand]")].map((e) => e.getAttribute("data-brand"));
     expect(marks).toEqual(expect.arrayContaining(["claude-code", "bedrock", "daytona"]));
     expect(root.textContent).toContain("Sonnet 4.5");
+    // the run line: the model, then the engine's mark and type
+    const latest = root.querySelector(".run .model-engine")!;
+    expect(latest.querySelector(".model-name")!.textContent).toBe("Sonnet 4.5");
+    expect(latest.querySelector(".engine-mark")!.getAttribute("data-engine-kind")).toBe("harness");
+    expect(latest.querySelector(".engine-mark [data-brand='claude-code']")).not.toBeNull();
+    expect(latest.querySelector(".engine-label")!.textContent).toBe("Claude Code Harness");
+    expect(latest.textContent!.indexOf("Sonnet 4.5")).toBeLessThan(latest.textContent!.indexOf("Claude Code Harness"));
+    expect(latest.getAttribute("title")).toContain("Auth: Bedrock");
     expect(root.textContent).toContain("GPU box");
     expect(root.textContent).toContain("$0.42 of $2");
     expect(root.textContent).toContain("Collect data");
@@ -96,6 +104,10 @@ describe("the work card (MCP App)", () => {
     expect(bar.getAttribute("aria-valuenow")).toBe("124");
     expect(bar.classList.contains("bar-over")).toBe(true);
     expect(root.querySelector(".chips [data-brand='claude-code']")).not.toBeNull();
+    // task rows: the model with the engine's mark only (compact), its type in the tooltip
+    const rowMark = root.querySelector(".row .model-engine .engine-mark")!;
+    expect(rowMark.getAttribute("aria-label")).toBe("Claude Code Harness");
+    expect(rowMark.querySelector(".engine-label")).toBeNull();
     const rows = [...root.querySelectorAll(".row")].map((r) => r.textContent ?? "");
     expect(rows[0]).toContain("Write report");
     expect(rows[0]).toContain("non ritentato");
@@ -108,6 +120,20 @@ describe("the work card (MCP App)", () => {
     const daytona = brandMark("daytona");
     expect([...daytona.querySelectorAll("img")].map((i) => i.className)).toEqual(["mark mark-img mark-light", "mark mark-img mark-dark"]);
     expect(brandMark("e2b").tagName).toBe("IMG");
+  });
+
+  it("model · engine for every engine kind (Polpo, a harness, a CLI), compact or full", () => {
+    const polpo = modelWithEngine("gpt-6", { mark: "polpo", label: "Polpo", kind: "polpo", id: "polpo" });
+    expect(polpo.textContent).toBe("gpt-6·🐙Polpo");
+    const oc = modelWithEngine("kimi-k3.1", { mark: "opencode", label: "OpenCode Harness", kind: "harness" });
+    expect(oc.querySelector("[data-brand='opencode']")).not.toBeNull();
+    expect(oc.querySelector(".engine-label")!.textContent).toBe("OpenCode Harness");
+    const cli = modelWithEngine("claude-sonnet-4-6", { mark: "claude-code", label: "Claude Code CLI", kind: "cli" }, { compact: true, auth: "personal plan" });
+    expect(cli.querySelector(".engine-label")).toBeNull();
+    expect(cli.querySelector(".engine-mark")!.getAttribute("aria-label")).toBe("Claude Code CLI");
+    expect(cli.title).toBe("Model: claude-sonnet-4-6\nEngine: Claude Code CLI\nAuth: personal plan");
+    // no model: the marker alone
+    expect(modelWithEngine(undefined, { mark: "codex", label: "Codex CLI" }).querySelector(".model-name")).toBeNull();
   });
 
   it("a task with a tool scope: a badge and what its runs get", () => {

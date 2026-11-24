@@ -8,7 +8,8 @@
 import type { TaskRunContext } from "@polpo-ai/core/run-context";
 import { taskFailure, type TaskFailure } from "@polpo-ai/core/task-failure";
 import { agentColorIndex } from "@polpo-ai/core/appearance";
-import { ENGINE_LABELS, agentEngine, computerLabel, engineMark, formatUsd, modelLabel, runCostUsd, runView, type BrandMark, type RunView } from "./mcp-run-view.js";
+import { engineKindOf, engineMarkLabel, modelWithEngineText } from "@polpo-ai/core/engine-label";
+import { agentEngine, computerLabel, engineMark, formatUsd, modelLabel, runCostUsd, runView, type BrandMark, type RunView } from "./mcp-run-view.js";
 
 export type AgentCardStatus = "working" | "idle" | "waiting";
 
@@ -18,7 +19,7 @@ export interface AgentCardTask {
   status: string;
   updatedAt?: string;
   /** Where and with what its latest run executed. */
-  run?: Pick<RunView, "engine" | "engineLabel" | "engineMark" | "modelLabel" | "auth" | "computer" | "costUsd">;
+  run?: Pick<RunView, "engine" | "engineLabel" | "engineKind" | "engineMark" | "modelLabel" | "auth" | "computer" | "costUsd">;
   /** Why it failed (the labelled reason) and whether it was retried. */
   failure?: TaskFailure;
   /** Its runs get only part of the agent's tools (Task.toolScope). */
@@ -69,7 +70,7 @@ export interface AgentCard {
   agent: {
     name: string; displayName?: string; role?: string; model?: string; timezone?: string;
     /** Its engine: Polpo's own or an agent harness (Claude Code, Codex, OpenCode), with the mark the card draws. */
-    engine?: { id: string; label: string; mark: BrandMark; model?: string; modelLabel?: string };
+    engine?: { id: string; /** "Polpo", "Claude Code Harness", "Codex CLI". */ label: string; kind?: string; mark: BrandMark; model?: string; modelLabel?: string };
     /** The computer its chats and tasks run on (defaultComputer): "this server" or its id. */
     computer?: string;
     /** Its colour: the look's agent colour 1…10 (identity.color, else from its name), for the avatar. */
@@ -152,7 +153,7 @@ function cardTask(t: InputTask): AgentCardTask {
     id: t.id, title: t.title, status: t.status,
     ...(t.updatedAt ? { updatedAt: t.updatedAt } : {}),
     ...(v ? { run: {
-      engine: v.engine, engineLabel: v.engineLabel, engineMark: v.engineMark, computer: v.computer,
+      engine: v.engine, engineLabel: v.engineLabel, engineKind: v.engineKind, engineMark: v.engineMark, computer: v.computer,
       ...(v.modelLabel ? { modelLabel: v.modelLabel } : {}), ...(v.auth ? { auth: v.auth } : {}), ...(cost !== undefined ? { costUsd: cost } : {}),
     } } : {}),
     ...(failure ? { failure } : {}),
@@ -265,18 +266,19 @@ function engineOf(agent: AgentCardInput["agent"]): NonNullable<AgentCard["agent"
   const e = agentEngine(agent.engine);
   const model = e.id === "polpo" ? agent.model : e.model;
   const label = modelLabel(model);
-  return { id: e.id, label: ENGINE_LABELS[e.id] ?? e.id, mark: engineMark(e.id), ...(model ? { model } : {}), ...(label ? { modelLabel: label } : {}) };
+  return { id: e.id, label: engineMarkLabel(e.id), kind: engineKindOf(e.id), mark: engineMark(e.id), ...(model ? { model } : {}), ...(label ? { modelLabel: label } : {}) };
 }
 
 /** The card as text, for the model and for clients that do not show apps. */
 export function agentCardText(card: AgentCard): string {
   const name = card.agent.displayName ? `${card.agent.displayName} (${card.agent.name})` : card.agent.name;
   const lines = [`${name}${card.agent.role ? ` — ${card.agent.role}` : ""}: ${card.status === "working" ? "working" : card.status === "waiting" ? "waiting for a person" : "idle"}.`];
-  if (card.agent.engine && card.agent.engine.id !== "polpo") lines.push(`Engine: ${card.agent.engine.label}${card.agent.engine.modelLabel ? ` (${card.agent.engine.modelLabel})` : ""}${card.agent.computer ? ` on ${card.agent.computer}` : ""}.`);
+  // the model it runs, then its engine and type: "Model: Sonnet 4.5 (Claude Code · Harness) on gpu-box."
+  if (card.agent.engine) lines.push(`Model: ${modelWithEngineText(card.agent.engine.modelLabel, card.agent.engine.id, "default")}${card.agent.computer ? ` on ${card.agent.computer}` : ""}.`);
   if (card.current) {
     const run = card.current.run;
     lines.push(`${card.current.active ? "Working on" : "Last finished"}: ${card.current.title} [${card.current.status}] (${card.current.id})`
-      + `${run ? ` with ${run.engineLabel}${run.modelLabel ? ` ${run.modelLabel}` : ""} on ${run.computer.label}${run.costUsd !== undefined ? `, ${formatUsd(run.costUsd)}` : ""}` : ""}.`);
+      + `${run ? ` with ${modelWithEngineText(run.modelLabel, run.engine)} on ${run.computer.label}${run.costUsd !== undefined ? `, ${formatUsd(run.costUsd)}` : ""}` : ""}.`);
     if (card.current.failure) lines.push(`It failed: ${card.current.failure.reason}${card.current.failure.retryable ? "" : " (not retried: a re-run would fail the same way)"}.`);
   }
   lines.push(`Today: ${card.today.done} done, ${card.today.failed} failed, ${card.today.waiting} waiting for a person.`);

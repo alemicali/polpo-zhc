@@ -16,6 +16,7 @@ import type { MissionCost, MissionCostSummary } from "@polpo-ai/core/mission-cos
 import { taskFailure, type TaskFailure } from "@polpo-ai/core/task-failure";
 import { computeTaskCost, type TaskCost } from "@polpo-ai/core/task-cost";
 import { describeTaskToolScope, type TaskToolScope } from "@polpo-ai/core/task-tool-scope";
+import { engineTypeText, modelWithEngineText } from "@polpo-ai/core/engine-label";
 import { ENGINE_LABELS, engineMark, formatMs, formatUsd, runView, runViewLine, type BrandMark, type RunView } from "./mcp-run-view.js";
 
 export interface CardKey { createdAt: number; seq: number }
@@ -74,7 +75,7 @@ export interface TaskCardCost {
 }
 
 export interface MissionCardTask extends CardTaskRef {
-  lastRun?: Pick<RunView, "engine" | "engineLabel" | "engineMark" | "modelLabel" | "computer">;
+  lastRun?: Pick<RunView, "engine" | "engineLabel" | "engineKind" | "engineMark" | "modelLabel" | "computer">;
   costUsd?: number;
 }
 
@@ -246,7 +247,7 @@ export function buildMissionCard(input: {
       const cost = totalCost(t);
       return {
         ...ref(t),
-        ...(v ? { lastRun: { engine: v.engine, engineLabel: v.engineLabel, engineMark: v.engineMark, ...(v.modelLabel ? { modelLabel: v.modelLabel } : {}), computer: v.computer } } : {}),
+        ...(v ? { lastRun: { engine: v.engine, engineLabel: v.engineLabel, engineKind: v.engineKind, engineMark: v.engineMark, ...(v.modelLabel ? { modelLabel: v.modelLabel } : {}), computer: v.computer } } : {}),
         ...(cost !== undefined ? { costUsd: cost } : {}),
       };
     }),
@@ -287,7 +288,7 @@ export function missionCardText(card: MissionCard): string {
   const counts = Object.entries(card.counts).map(([k, v]) => `${v} ${k}`).join(", ");
   lines.push(`Tasks: ${counts || "none yet"}`);
   for (const t of card.tasks.slice(0, 20)) {
-    lines.push(`- ${t.id} [${t.status}] ${t.title}${t.assignTo ? ` → ${t.assignTo}` : ""}${t.toolScoped ? " · tools restricted" : ""}${t.lastRun ? ` (${t.lastRun.engineLabel}${t.lastRun.modelLabel ? ` ${t.lastRun.modelLabel}` : ""})` : ""}${t.failure ? `: ${failureText(t.failure)}` : ""}`);
+    lines.push(`- ${t.id} [${t.status}] ${t.title}${t.assignTo ? ` → ${t.assignTo}` : ""}${t.toolScoped ? " · tools restricted" : ""}${t.lastRun ? ` (${t.lastRun.modelLabel ? modelWithEngineText(t.lastRun.modelLabel, t.lastRun.engine) : engineTypeText(t.lastRun.engine)})` : ""}${t.failure ? `: ${failureText(t.failure)}` : ""}`);
   }
   return lines.join("\n");
 }

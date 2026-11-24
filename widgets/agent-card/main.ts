@@ -20,7 +20,7 @@ import {
   type McpUiHostContext,
 } from "@modelcontextprotocol/ext-apps";
 import type { AgentCard, AgentCardRoutineItem, AgentCardTask } from "../../src/server/mcp-agent-card.js";
-import { brandMark } from "../shared/brand.js";
+import { modelWithEngine } from "../shared/brand.js";
 import { applyInstanceAppearance } from "../shared/theme.js";
 
 // ── Text ─────────────────────────────────────────────────────────────────
@@ -141,8 +141,9 @@ function header(c: AgentCard, s: Strings): HTMLElement {
     h("div", { class: "who" },
       h("div", { class: "name" }, name),
       h("div", { class: "role" }, [c.agent.role, c.agent.displayName ? c.agent.name : undefined].filter(Boolean).join(" · ")),
-      c.agent.engine ? h("div", { class: "role marks" }, brandMark(c.agent.engine.mark, 14),
-        [c.agent.engine.label, c.agent.engine.modelLabel, c.agent.computer ? `${s.on} ${c.agent.computer}` : undefined].filter(Boolean).join(" · ")) : null),
+      // the model it runs, then its engine (mark + Polpo / Harness / CLI), then its computer
+      c.agent.engine ? h("div", { class: "role marks agent-model" }, modelWithEngine(c.agent.engine.modelLabel, c.agent.engine),
+        c.agent.computer ? h("span", { class: "muted" }, `· ${s.on} ${c.agent.computer}`) : null) : null),
     h("span", { class: `chip chip-${c.status === "working" ? "info" : c.status === "waiting" ? "warning" : "neutral"}` }, s[c.status]));
 }
 
@@ -170,8 +171,8 @@ function taskSummary(x: AgentCardTask, s: Strings): HTMLElement {
   const cost = r?.costUsd === undefined ? "" : r.costUsd < 0.01 ? `$${r.costUsd.toFixed(4)}` : `$${r.costUsd.toFixed(2)}`;
   return h("div", { class: "task-sum" },
     h("div", {}, x.title, x.toolScoped ? h("span", { class: "chip chip-sm chip-info" }, s.toolsRestricted) : null),
-    r ? h("div", { class: "muted small marks" }, brandMark(r.engineMark, 14),
-      [`${r.engineLabel}${r.modelLabel ? ` ${r.modelLabel}` : ""}`, r.auth ? r.auth.label : "", `${s.on} ${r.computer.label}`, cost].filter(Boolean).join(" · ")) : null,
+    r ? h("div", { class: "muted small marks" }, modelWithEngine(r.modelLabel, { mark: r.engineMark, label: r.engineLabel, kind: r.engineKind, id: r.engine }, { auth: r.auth?.label }),
+      h("span", {}, [r.auth ? r.auth.label : "", `${s.on} ${r.computer.label}`, cost].filter(Boolean).join(" · "))) : null,
     x.failure ? h("div", { class: "small fail-text" }, `${s.failedBecause}: ${x.failure.reason}${x.failure.retryable ? "" : ` (${s.notRetried})`}`) : null);
 }
 
