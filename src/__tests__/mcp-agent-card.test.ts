@@ -18,7 +18,7 @@ describe("agent card", () => {
     expect(card).toMatchObject({ status: "idle", today: { done: 0, failed: 0, waiting: 0 }, goal: { title: "Help Alessio eat well" }, drive: true });
     expect(card.current).toBeUndefined();
     expect(card.next).toBeUndefined();
-    expect(agentCardText(card)).toBe("Coach Ada (coach) — Health coach: idle.\nToday: 0 done, 0 failed, 0 waiting for a person.\nMain goal: Help Alessio eat well.");
+    expect(agentCardText(card)).toBe("Coach Ada (coach) — Health coach: idle.\nModel: default (Polpo).\nToday: 0 done, 0 failed, 0 waiting for a person.\nMain goal: Help Alessio eat well.");
   });
 
   it("counts today in the agent's timezone and shows the task at hand", () => {

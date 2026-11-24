@@ -29,6 +29,7 @@ import {
 } from "./kit.js";
 import { setupHandoff } from "./setup.js";
 import { CLAUDE_SUBSCRIPTION_REFUSAL, OPENCODE_PROVIDER_IDS, OPENCODE_SUBSCRIPTION_REFUSAL } from "@polpo-ai/core/harnesses";
+import { engineTypeText } from "@polpo-ai/core/engine-label";
 
 type HarnessItem = {
   id: string; name: string; enabled: boolean; auth?: string; credentialRef?: { owner: string; service: string }; credentialFound?: boolean;
@@ -112,7 +113,7 @@ export const harnessLine = (h: HarnessItem) => `- ${h.name} (${h.id}): ${h.enabl
   + (h.brokering ? `, key ${h.brokering === "relay" ? "brokered by Polpo's relay (not in the VM)" : h.brokering === "in-vm" ? "in the VM (no POLPO_PUBLIC_URL)" : "in the VM (Claude Code on Bedrock/Vertex signs requests)"}` : "")
   + (h.agents.length ? ` · agents: ${h.agents.join(", ")}` : "");
 
-const sessionLine = (s: Session) => `- ${s.key} · ${s.agent} on ${s.computerId} (${s.engine === "cli" ? `${s.cli === "codex" ? "Codex" : "Claude Code"} CLI, account ${s.account ?? "?"}` : s.harness}): ${s.state}${s.live ? " (live)" : ""}`
+const sessionLine = (s: Session) => `- ${s.key} · ${s.agent} on ${s.computerId} (${s.engine === "cli" ? `${engineTypeText(s.cli === "codex" ? "codex-cli" : "claude-cli")}, account ${s.account ?? "?"}` : engineTypeText(s.harness)}): ${s.state}${s.live ? " (live)" : ""}`
   + `${s.bootstrappedAt ? `, bootstrapped ${s.bootstrappedAt}${s.bootstrapMs ? ` in ${Math.round(s.bootstrapMs / 1000)} s` : ""}` : ""}`
   + `${s.lastDetachAt ? `, detached ${s.lastDetachAt}` : ""}${s.lastResumeAt ? `, resumed ${s.lastResumeAt}` : ""}`
   + `, ${s.turns} turn(s), ${s.engine === "cli" ? `${(s.tokens ? s.tokens.input + s.tokens.output + s.tokens.cacheRead + s.tokens.cacheWrite : 0)} tokens on the plan` : `$${s.costUsd.toFixed(4)}`}${s.resumable ? ", resumable" : ""}${s.lastError ? `, error: ${s.lastError}` : ""}`;

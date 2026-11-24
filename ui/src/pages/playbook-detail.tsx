@@ -31,6 +31,7 @@ import {
 } from "@/pages/mission-detail";
 import { parseMissionData, type MissionTaskDef } from "@/lib/mission-data";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
+import { AgentModelWithEngine } from "@/components/shared/model-with-engine";
 
 // ── Parameter detail card ──
 
@@ -110,7 +111,7 @@ export function PlaybookDetailPage() {
   // Optional volatile team declared inline in the playbook mission
   const missionTeam: unknown = (playbook?.mission as { team?: unknown } | undefined)?.team;
   const volatileTeam = Array.isArray(missionTeam)
-    ? (missionTeam as Array<{ name: string; role?: string; model?: string }>)
+    ? (missionTeam as Array<{ name: string; role?: string; model?: string; engine?: unknown }>)
     : null;
 
   const taskDefs = parsed?.tasks ?? [];
@@ -299,7 +300,7 @@ export function PlaybookDetailPage() {
                         <div className="min-w-0">
                           <span className="text-xs font-semibold">{member.name}</span>
                           {member.role && <p className="text-micro text-muted-foreground mt-0.5 line-clamp-2">{member.role}</p>}
-                          {member.model && <code className="text-micro font-mono text-muted-foreground/60">{member.model}</code>}
+                          {!!(member.model || member.engine) && <p className="flex text-micro text-muted-foreground"><AgentModelWithEngine agent={member} mono size={12} testId="playbook-member-model" /></p>}
                         </div>
                       </div>
                     ))}

@@ -53,8 +53,12 @@ test("an agent harness run: Claude Code mark, model via Bedrock, the Daytona v2 
   const card = q('[data-testid="run-context-card"]')!;
   expect(card.textContent).toContain("Run 2 of 2");
   expect(card.textContent).toContain("continuation");
-  expect(q('[data-testid="run-engine"]')!.textContent).toBe("Claude Code");
-  expect(q('[data-testid="run-model"]')!.textContent).toBe("Haiku 4.5 via Bedrock");
+  // the model, then the engine marker (mark + type), then how it authenticated
+  expect(q('[data-testid="run-model"]')!.textContent).toBe("Haiku 4.5");
+  expect(q('[data-testid="run-engine"]')!.textContent).toBe("Claude Code Harness");
+  expect(q('[data-testid="run-engine"] [data-testid="engine-mark"]')!.getAttribute("title")).toContain("Auth: Bedrock · us-east-1");
+  expect(q('[data-testid="run-auth"]')!.textContent).toContain("via Bedrock");
+  expect(q('[data-testid="run-history-r1"] [data-testid="engine-mark"]')!.getAttribute("data-engine-kind")).toBe("harness");
   expect(q('[data-brand="claude-code"]', card)).not.toBeNull();
   expect(q('[data-brand="bedrock"]', card)).not.toBeNull();
   expect(card.textContent).toContain("us-east-1");
@@ -81,7 +85,8 @@ test("an agent harness run: Claude Code mark, model via Bedrock, the Daytona v2 
 
 test("a run on Polpo's engine on this server: the model, direct egress, the model cost, no harness session or budget", async () => {
   await render(<RunContextCard runs={[nativeRun]} />);
-  expect(q('[data-testid="run-engine"]')!.textContent).toBe("Polpo");
+  expect(q('[data-testid="run-engine"]')!.textContent).toBe("🐙Polpo");
+  expect(q('[data-testid="run-engine"] [data-testid="engine-mark"]')!.getAttribute("data-engine")).toBe("polpo");
   expect(q('[data-testid="run-model"]')!.textContent).toBe("Sonnet 4.5");
   expect(q('[data-testid="run-computer"]')!.textContent).toBe("This server");
   expect(q('[data-testid="run-computer"]')!.tagName).toBe("SPAN");

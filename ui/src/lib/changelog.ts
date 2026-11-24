@@ -48,6 +48,21 @@ export const CHANGELOG: ChangelogEntry[] = [
     cta: { label: "Apri Impostazioni → Harness", to: "/config?section=harnesses" },
   },
   {
+    id: "2026-11-24-engine-badge-everywhere",
+    date: "2026-11-24",
+    kind: "improved",
+    title: "Accanto a ogni modello, il motore che lo esegue",
+    summary: "Ovunque compare un modello vedi subito il logo e il tipo di motore: Polpo, Harness (Claude Code, Codex, OpenCode) o CLI (Claude Code, Codex con il tuo abbonamento).",
+    body: [
+      "- **Modello · motore**: per esempio `claude-sonnet-4-6 · Claude Code CLI`, `kimi-k3.1 · OpenCode Harness`, `gpt-6 · Polpo`, con il logo del motore.",
+      "- **Dettagli al passaggio del mouse**: motore, come gira e come si autentica (chiave API, Bedrock, Vertex, gateway, account dell'abbonamento), mai le credenziali.",
+      "- **Ovunque**: schede e elenco degli agenti, organigramma, pagina dell'agente e la sua scheda Motore, intestazione della chat e scelta dell'agente, dettagli del task e le sue esecuzioni, computer, sessioni harness, impostazioni (modello di Polpo, nuovo agente, test della connessione), ricerca, playbook.",
+      "- **Nella cronologia** vedi il motore che ha davvero eseguito ogni run, anche se poi l'agente è cambiato.",
+      "- Anche nelle schede MCP (agente, task, missione) e nei testi di MCP e della chat con Polpo: `modello (Claude Code · CLI)`.",
+    ].join("\n"),
+    highlight: true,
+  },
+  {
     id: "2026-11-24-more-menu-theme-layout",
     date: "2026-11-24",
     kind: "improved",

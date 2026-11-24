@@ -5,7 +5,7 @@
  */
 import type { CardTaskRef, MissionCard, TaskCard, WorkCard } from "../../src/server/mcp-work-card.js";
 import type { RunView } from "../../src/server/mcp-run-view.js";
-import { brandMark } from "../shared/brand.js";
+import { brandMark, modelWithEngine } from "../shared/brand.js";
 
 // ── Text ─────────────────────────────────────────────────────────────────
 
@@ -111,7 +111,8 @@ function bar(used: number, label: string, over: boolean): HTMLElement {
 function runLine(r: Pick<RunView, "engine" | "engineLabel" | "engineMark" | "modelLabel" | "computer"> & Partial<RunView>, s: Strings, detail = false): HTMLElement {
   const computer = r.computer;
   return h("div", { class: "run" },
-    h("span", { class: "marks" }, brandMark(r.engineMark, 16), h("span", { class: "run-engine" }, r.engineLabel), r.modelLabel ? h("span", { class: "muted" }, r.modelLabel) : null),
+    // the model, then the engine that ran it (mark + Polpo / Harness / CLI)
+    modelWithEngine(r.modelLabel, { mark: r.engineMark, label: r.engineLabel, kind: r.engineKind, id: r.engine }, { size: 16, auth: r.auth?.label }),
     r.auth ? h("span", { class: "marks" }, h("span", { class: "muted" }, s.via), brandMark(r.auth.mark, 14), h("span", {}, `${r.auth.label}${r.auth.region ? ` (${r.auth.region})` : ""}`)) : null,
     h("span", { class: "marks" }, h("span", { class: "muted" }, s.on), brandMark(computer.mark, 14), h("span", {}, computer.label), computer.kindLabel !== "Host" ? h("span", { class: "muted" }, computer.kindLabel) : null),
     detail && r.egress ? h("span", { class: "marks" }, r.egress.tailscale ? brandMark("tailscale", 14) : null, h("span", { class: "muted" }, `${s.egress} ${r.egress.mode === "proxy" ? r.egress.label : s.direct}`)) : null,
@@ -133,8 +134,10 @@ function taskRow(x: CardTaskRef & { lastRun?: MissionCard["tasks"][number]["last
     h("div", { class: "row-main" },
       h("div", {}, x.title, x.toolScoped ? h("span", { class: "chip chip-sm chip-info" }, s.toolsRestricted) : null),
       h("div", { class: "muted small marks" },
-        x.lastRun ? brandMark(x.lastRun.engineMark, 14) : null,
-        [x.assignTo, x.lastRun ? `${x.lastRun.engineLabel}${x.lastRun.modelLabel ? ` ${x.lastRun.modelLabel}` : ""}` : "", x.lastRun ? x.lastRun.computer.label : "", usd(x.costUsd)].filter(Boolean).join(" · ")),
+        x.assignTo ? h("span", {}, x.assignTo) : null,
+        // a list row: the model with the engine's mark only (its label in the tooltip)
+        x.lastRun ? modelWithEngine(x.lastRun.modelLabel, { mark: x.lastRun.engineMark, label: x.lastRun.engineLabel, kind: x.lastRun.engineKind, id: x.lastRun.engine }, { compact: true }) : null,
+        h("span", {}, [x.lastRun ? x.lastRun.computer.label : "", usd(x.costUsd)].filter(Boolean).join(" · "))),
       x.failure ? h("div", { class: "small danger-text" }, `${x.failure.reason}${x.failure.retryable ? "" : ` (${s.notRetried.toLowerCase()})`}`) : null),
     chip(s, x.status));
 }

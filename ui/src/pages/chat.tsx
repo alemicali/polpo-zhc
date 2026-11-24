@@ -135,6 +135,7 @@ import { useChatQueue, migrateNewSessionQueue, NEW_SESSION_QUEUE_KEY } from "@/h
 import { composerKeyAction, mergeDraft, onComposerRestore, pendingSteers, usePendingSteers } from "@/hooks/use-chat-steering";
 import { useBackgroundWaits } from "@/hooks/use-background-waits";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
+import { AgentModelWithEngine, EngineMark } from "@/components/shared/model-with-engine";
 import { useAgents, useEvents, useSkills, usePolpo } from "@polpo-ai/react";
 import type { AgentConfig, Mission, PlaybookInfo, SkillWithAssignment, Task } from "@polpo-ai/react";
 import { cn } from "@/lib/utils";
@@ -2189,11 +2190,13 @@ function ChatToolbar({
                 <span className="truncate text-sm font-semibold leading-5 text-foreground">
                   {agentConfig.identity?.displayName ?? agentConfig.name}
                 </span>
+                <AgentModelWithEngine agent={agentConfig} compact size={12} className="text-micro text-muted-foreground" testId="chat-header-model" />
               </>
             ) : (
               <>
                 <span className="shrink-0 text-sm leading-none">🐙</span>
                 <span className="truncate text-sm font-semibold leading-5 text-foreground">{orchestratorName}</span>
+                <EngineMark engine="polpo" compact size={12} />
               </>
             )}
           </div>
@@ -2282,11 +2285,13 @@ function ChatToolbar({
               <span className="truncate text-sm font-semibold leading-5 text-foreground">
                 {agentConfig.identity?.displayName ?? agentConfig.name}
               </span>
+              <AgentModelWithEngine agent={agentConfig} size={12} className="text-micro text-muted-foreground" testId="chat-header-model" />
             </>
           ) : (
             <>
               <span className="shrink-0 text-sm leading-none">🐙</span>
               <span className="truncate text-sm font-semibold leading-5 text-foreground">{orchestratorName}</span>
+              <EngineMark engine="polpo" size={12} className="text-micro text-muted-foreground" />
             </>
           )}
         </div>
@@ -2418,6 +2423,7 @@ function ChatEmptyState() {
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{a.identity?.displayName ?? a.name}</p>
                   {a.role && <p className="text-caption text-muted-foreground truncate">{a.role}</p>}
+                  <p className="flex text-caption text-muted-foreground"><AgentModelWithEngine agent={a} compact size={11} testId="chat-picker-model" /></p>
                 </div>
                 {selectedAgent === a.name && <Check className="h-3.5 w-3.5 text-primary shrink-0" />}
               </DropdownMenuItem>

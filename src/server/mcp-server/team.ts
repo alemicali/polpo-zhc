@@ -4,6 +4,7 @@
  * instance and with which tools.
  */
 import { z } from "zod";
+import { agentEffectiveModel, agentEngineIdOf, modelWithEngineText } from "@polpo-ai/core/engine-label";
 import { MAX_LOGO_BYTES, fetchPublicImage, sniffImage } from "./config.js";
 import {
   DESTRUCTIVE, READ, UPDATE, WRITE, apiError, apiGet, apiSend, confirmParam, enc, fail, looseObject, ok, qs, short,
@@ -123,7 +124,7 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
     const connectorLine = connectorToolsLine(a.connectorTools, stale);
     const text = [
       `${a.name}${a.identity?.displayName ? ` (${a.identity.displayName}${a.identity.title ? `, ${a.identity.title}` : ""})` : ""}: ${a.role ?? "no role"}`,
-      `model: ${a.model ?? "default"}${a.reportsTo ? ` · reports to ${a.reportsTo}` : ""}`,
+      `model: ${modelWithEngineText(agentEffectiveModel(a), agentEngineIdOf(a.engine), "default")}${a.reportsTo ? ` · reports to ${a.reportsTo}` : ""}`,
       `tools: ${a.allowedTools?.join(", ") ?? "defaults"} · skills: ${a.skills?.join(", ") || "none"}`,
       ...(connectorLine ? [connectorLine] : []),
       ...(a.engine && typeof a.engine === "object"

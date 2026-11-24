@@ -5,6 +5,7 @@
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { AgentConfig, PolpoState } from "../core/types.js";
 import { HOOK_EVENT_CATALOG, HOOK_EVENT_GLOBS, todayLine } from "@polpo-ai/core";
+import { agentEffectiveModel, agentEngineIdOf, modelWithEngineText } from "@polpo-ai/core/engine-label";
 import { discoverSkills, loadOrchestratorSkills, buildSkillPrompt, type SkillInfo } from "./skills.js";
 import { buildModelListingForPrompt, listModels, resolveModelSpec } from "./pi-client.js";
 import { readSystemContext } from "./orchestrator-tools.js";
@@ -1863,7 +1864,7 @@ export async function buildChatSystemPrompt(
     parts.push(`Agents:`);
     for (const a of team.agents) {
       const dn = a.identity?.displayName;
-      let line = `  - ${a.name}${dn ? ` (${dn})` : ""}: ${a.role || "general"} (${a.model || "default model"})`;
+      let line = `  - ${a.name}${dn ? ` (${dn})` : ""}: ${a.role || "general"} (${modelWithEngineText(agentEffectiveModel(a), agentEngineIdOf(a.engine), "default model")})`;
       if (a.reportsTo) line += ` → reports to: ${a.reportsTo}`;
       if (a.skills?.length) line += ` [skills: ${a.skills.join(", ")}]`;
       const caps = describeAgentCapabilities(a, availableAgentSkills);

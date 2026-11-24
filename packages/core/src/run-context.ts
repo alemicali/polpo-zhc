@@ -15,6 +15,7 @@ import type { ComputerConfig, ComputerKind } from "./computers.js";
 import type { SandboxProviderId } from "./sandbox.js";
 import type { TaskToolScope } from "./task-tool-scope.js";
 import { agentCliEngine } from "./cli-engine.js";
+import { engineTypeText, modelWithEngineText } from "./engine-label.js";
 
 /** "claude-cli" / "codex-cli": the official program signed in with a person's account (agent.engine { type: "cli" }). */
 export type RunEngine = "polpo" | HarnessId | "claude-cli" | "codex-cli";
@@ -292,8 +293,8 @@ function describeScopeShort(scope: TaskToolScope): string {
 
 /** One line describing a run, for text outputs (MCP). */
 export function describeTaskRun(ctx: TaskRunContext): string {
-  const engine = ctx.engine === "polpo" ? "Polpo" : ctx.engine === "claude-code" ? "Claude Code" : ctx.engine === "opencode" ? "OpenCode"
-    : ctx.engine === "claude-cli" ? "Claude Code (CLI)" : ctx.engine === "codex-cli" ? "Codex (CLI)" : "Codex";
+  // the model, then its engine and type: "claude-sonnet-4-6 (Claude Code · CLI)", "gpt-6 (Polpo)"
+  const engine = ctx.model ? modelWithEngineText(ctx.model, ctx.engine) : engineTypeText(ctx.engine);
   const kind = ctx.auth?.kind === "bedrock" ? "Bedrock" : ctx.auth?.kind === "vertex" ? "Vertex" : ctx.auth?.kind === "ai-gateway" ? "AI Gateway" : ctx.auth?.kind === "gateway" ? "gateway" : ctx.auth?.kind === "subscription" ? "a personal subscription" : "API key";
   const auth = ctx.auth ? ` via ${kind}${ctx.auth.provider && ctx.auth.kind === "api-key" ? ` (${ctx.auth.provider})` : ""}${ctx.auth.region ? ` (${ctx.auth.region})` : ""}` : "";
   const where = ctx.computer.kind === "host" && ctx.computer.id === "host"
@@ -306,7 +307,7 @@ export function describeTaskRun(ctx: TaskRunContext): string {
   const usd = ctx.cost?.harnessUsd ?? ctx.cost?.modelUsd;
   const cost = usd !== undefined ? `$${usd.toFixed(4)}${ctx.budgetUsd ? ` of $${ctx.budgetUsd}` : ""}` : ctx.budgetUsd ? `budget $${ctx.budgetUsd}` : "";
   return [
-    `${ctx.runId} [${ctx.status}]${ctx.continuation ? " continuation" : ""} ${engine}${ctx.model ? ` ${ctx.model}` : ""}${auth}`,
+    `${ctx.runId} [${ctx.status}]${ctx.continuation ? " continuation" : ""} ${engine}${auth}`,
     `on ${where}`, egress, session, cost,
     ctx.toolScope ? `tools ${describeScopeShort(ctx.toolScope)}` : "",
     ctx.durationMs !== undefined ? `${Math.round(ctx.durationMs / 1000)} s` : "",

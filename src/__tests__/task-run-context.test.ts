@@ -142,6 +142,6 @@ describe("run context helpers", () => {
     const done = finishRunContext(merged, { status: "completed", endedAt: "2026-11-22T10:00:30.000Z", exitCode: 0 }, { cost: { harnessUsd: 0.02 } });
     expect(done).toMatchObject({ status: "completed", durationMs: 30_000, cost: { harnessUsd: 0.02 }, session: { resumed: true } });
     expect(summarizeTaskRun(done)).toEqual({ engine: "claude-code", model: "us.anthropic.claude-haiku-4-5-20251001-v1:0", computerId: "coder-box", computerName: "Coder box", computerKind: "daytona", provider: "daytona", status: "completed" });
-    expect(describeTaskRun(done)).toBe("r1 [completed] Claude Code us.anthropic.claude-haiku-4-5-20251001-v1:0 via Bedrock (us-east-1) · on computer coder-box (daytona v2) · egress home via Tailscale · resumed session (1.3 s) · $0.0200 of $2 · 30 s");
+    expect(describeTaskRun(done)).toBe("r1 [completed] us.anthropic.claude-haiku-4-5-20251001-v1:0 (Claude Code · Harness) via Bedrock (us-east-1) · on computer coder-box (daytona v2) · egress home via Tailscale · resumed session (1.3 s) · $0.0200 of $2 · 30 s");
   });
 });

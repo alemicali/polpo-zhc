@@ -22,6 +22,7 @@ import { Loader2, Plus, FolderPlus, Trash2, ChevronDown, X } from "lucide-react"
 import { useAsyncAction } from "@/hooks/use-polpo";
 import { useAgentsPage } from "./agents-page-context";
 import { ModelPicker } from "@/components/shared/model-picker";
+import { ModelWithEngine } from "@/components/shared/model-with-engine";
 import { useAuthStatus } from "@polpo-ai/react";
 import { cn } from "@/lib/utils";
 
@@ -124,9 +125,9 @@ export function AddAgentDialog() {
                     aria-expanded={modelOpen}
                     className="flex-1 justify-between font-normal"
                   >
-                    <span className={cn("truncate", !model && "text-muted-foreground")}>
-                      {model || "Use project default"}
-                    </span>
+                    {/* a new agent runs on Polpo's engine; a harness or a CLI is chosen on its page */}
+                    <ModelWithEngine model={model || undefined} fallback="Use project default" engine="polpo" size={14}
+                      modelClassName={cn(!model && "text-muted-foreground")} testId="new-agent-model" />
                     <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
                   </Button>
                 </PopoverTrigger>

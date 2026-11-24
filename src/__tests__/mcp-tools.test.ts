@@ -361,13 +361,13 @@ describe("tasks", () => {
     expect(text).toMatch(/tool_use: register_outcome \(Polpo tool\)/);
     expect(text).toMatch(/usage: 144154 in, 431 out, 95726 cache read, \$0\.0723 \(claude-code\)/);
     expect(text).toMatch(/log: Claude Code session started in 14\.8 s/);
-    expect(text).toMatch(/runs:\n- r1 \[completed\] Claude Code us\.anthropic\.claude-haiku[^\n]* via Bedrock \(us-east-1\) · on computer coder-box \(daytona v2\) · egress home via Tailscale · new session \(14\.8 s\) · \$0\.0723 of \$2/);
+    expect(text).toMatch(/runs:\n- r1 \[completed\] us\.anthropic\.claude-haiku[^\n]* \(Claude Code · Harness\) via Bedrock \(us-east-1\) · on computer coder-box \(daytona v2\) · egress home via Tailscale · new session \(14\.8 s\) · \$0\.0723 of \$2/);
     expect(logs.structuredContent.runs).toEqual([expect.objectContaining({ engine: "claude-code", computer: expect.objectContaining({ id: "coder-box" }) })]);
 
     const got = await call(deps(f), "polpo_task_get", { id: "t9", activity: 0 });
     expectValidOutput(got);
     expect(got.structuredContent.runs).toEqual([expect.objectContaining({ engine: "claude-code", auth: { kind: "bedrock", region: "us-east-1" }, session: { resumed: false, bootstrapMs: 14800 } })]);
-    expect(got.content[0].text).toMatch(/runs \(where and with what\):\n- r1 \[completed\] Claude Code/);
+    expect(got.content[0].text).toMatch(/runs \(where and with what\):\n- r1 \[completed\] us\.anthropic\.claude-haiku[^\n]* \(Claude Code · Harness\)/);
     // a task on Polpo's engine without runs recorded yet: an empty list
     expect((await call(deps(f), "polpo_task_get", { id: "t1", activity: 0 })).structuredContent.runs).toEqual([]);
   });

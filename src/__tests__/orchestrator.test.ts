@@ -317,7 +317,7 @@ describe("Orchestrator", () => {
       const got = await executeOrchestratorTool("get_task", { id: task.id }, orchestrator);
       expect(got).toContain(`Failed: ${stderr} (not retried: a re-run would fail the same way)`);
       expect(got).toContain(`Depends on: Collect [pending] (${dep.id})`);
-      expect(got).toContain("Claude Code claude-sonnet-4-5 via Bedrock · on computer gpu (daytona v2)");
+      expect(got).toContain("claude-sonnet-4-5 (Claude Code · Harness) via Bedrock · on computer gpu (daytona v2)");
       const list = await executeOrchestratorTool("list_tasks", { status: "failed" }, orchestrator);
       expect(list).toContain(`— failed (model_access): ${stderr} (not retried)`);
     });

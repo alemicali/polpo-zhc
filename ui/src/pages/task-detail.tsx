@@ -81,6 +81,7 @@ import { AppliedRulesPanel } from "@/components/shared/applied-rules-panel";
 import type { AnyRule, ScopedRules } from "@/lib/applied-rules";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { RunContextCard, TaskCostBadge } from "@/components/shared/run-context";
+import { AgentModelWithEngine, RunModelWithEngine } from "@/components/shared/model-with-engine";
 import { taskCostOf } from "@/lib/task-cost";
 import { TaskToolScopeCard } from "@/components/tasks/task-tool-scope";
 import { TaskChatView } from "@/components/tasks/task-chat-view";
@@ -1630,6 +1631,17 @@ export function TaskDetailPage() {
                         <span className="truncate text-muted-foreground">{identity?.displayName ? `@${task.assignTo}` : task.assignTo}</span>
                       </Link>
                     </dd>
+                    {/* what ran last (as recorded), else what its agent is set to */}
+                    {(task.runs?.length || agentConfig) && (
+                      <>
+                        <dt className="text-xs text-muted-foreground">Model</dt>
+                        <dd className="flex min-w-0">
+                          {task.runs?.length
+                            ? <RunModelWithEngine run={task.runs[task.runs.length - 1]!} mono size={13} testId="task-model" />
+                            : <AgentModelWithEngine agent={agentConfig} fallback="default" mono size={13} testId="task-model" />}
+                        </dd>
+                      </>
+                    )}
                     {task.group && (
                       <>
                         <dt className="text-xs text-muted-foreground">Mission</dt>
