@@ -13,6 +13,8 @@ import { WebhookChannel } from "./channels/webhook.js";
 import { WhatsAppChannel } from "./channels/whatsapp.js";
 import { PushChannel } from "./channels/push.js";
 import { ExpoPushChannel } from "./channels/expo-push.js";
+import { WaBusinessChannel } from "./channels/whatsapp-business.js";
+import { waBusinessServiceFor } from "./whatsapp-business-service.js";
 import { expoTokenStoreFor } from "../stores/notification-device-stores.js";
 
 export type { NotificationChannel, Notification, OutcomeAttachment } from "./types.js";
@@ -95,7 +97,7 @@ export class NotificationRouter {
     // Create channel instances
     for (const [id, channelConfig] of Object.entries(config.channels)) {
       try {
-        const channel = this.createChannel(channelConfig);
+        const channel = this.createChannel(channelConfig, id);
         this.channels.set(id, channel);
         this.channelConfigs.set(id, channelConfig);
       } catch (err) {
@@ -723,7 +725,7 @@ export class NotificationRouter {
   /**
    * Create a channel instance from config.
    */
-  private createChannel(config: NotificationChannelConfig): NotificationChannel {
+  private createChannel(config: NotificationChannelConfig, id = "default"): NotificationChannel {
     switch (config.type) {
       case "slack":
         return new SlackChannel(config);
@@ -736,6 +738,9 @@ export class NotificationRouter {
         return new WhatsAppChannel(config, this.polpoDir);
       case "webhook":
         return new WebhookChannel(config);
+      case "whatsapp-business":
+        // the instance's WhatsApp Business service applies the window, opt-out and caps
+        return new WaBusinessChannel(id, () => waBusinessServiceFor(this.polpoDir));
       case "push":
         if (!this.polpoDir) throw new Error("Push channel requires polpoDir (pass it via init())");
         return new PushChannel(config, this.polpoDir);

@@ -62,6 +62,7 @@ import {
 } from "./schema/registries.js";
 import { brainItemsPg, brainItemsSqlite } from "./schema/company-brain.js";
 import { conversationChecksPg, conversationChecksSqlite } from "./schema/conversation-checks.js";
+import { wabizContactsPg, wabizContactsSqlite, wabizMessagesPg, wabizMessagesSqlite, wabizProcessedPg, wabizProcessedSqlite } from "./schema/whatsapp-business.js";
 import { schedulesPg, schedulesSqlite, leasesPg, leasesSqlite, taskWatchersPg, taskWatchersSqlite } from "./schema/scheduling.js";
 import { artifactsPg, artifactsSqlite } from "./schema/artifacts.js";
 import {
@@ -107,6 +108,7 @@ import { DrizzleScheduleStore, DrizzleLeaseStore, DrizzleTaskWatcherStore } from
 import { DrizzleArtifactStore } from "./stores/artifact-store.js";
 import { DrizzleCompanyBrainStore } from "./stores/company-brain-store.js";
 import { DrizzleWhatsAppStore } from "./stores/whatsapp-store.js";
+import { DrizzleWaBusinessStore } from "./stores/whatsapp-business-store.js";
 import { DrizzleChatQueueStore } from "./stores/chat-queue-store.js";
 import { DrizzleRoomStore } from "./stores/room-store.js";
 
@@ -175,6 +177,7 @@ export interface DrizzleStores {
   leaseStore: DrizzleLeaseStore;
   taskWatcherStore: DrizzleTaskWatcherStore;
   artifactStore: DrizzleArtifactStore & ArtifactStore;
+  waBusinessStore: DrizzleWaBusinessStore;
 }
 
 // ── PostgreSQL factory ────────────────────────────────────────────────
@@ -225,6 +228,7 @@ export function createPgStores(db: any): DrizzleStores {
     leaseStore: new DrizzleLeaseStore(db, leasesPg),
     taskWatcherStore: new DrizzleTaskWatcherStore(db, taskWatchersPg, "pg"),
     artifactStore: new DrizzleArtifactStore(db, artifactsPg, "pg"),
+    waBusinessStore: new DrizzleWaBusinessStore(db, { contacts: wabizContactsPg, messages: wabizMessagesPg, processed: wabizProcessedPg }, "pg"),
   };
 }
 
@@ -276,6 +280,7 @@ export function createSqliteStores(db: any): DrizzleStores {
     leaseStore: new DrizzleLeaseStore(db, leasesSqlite),
     taskWatcherStore: new DrizzleTaskWatcherStore(db, taskWatchersSqlite, "sqlite"),
     artifactStore: new DrizzleArtifactStore(db, artifactsSqlite, "sqlite"),
+    waBusinessStore: new DrizzleWaBusinessStore(db, { contacts: wabizContactsSqlite, messages: wabizMessagesSqlite, processed: wabizProcessedSqlite }, "sqlite"),
   };
 }
 
@@ -327,6 +332,9 @@ export const pgSchema = {
   chatQueueSettings: chatQueueSettingsPg,
   rooms: roomsPg,
   roomMessages: roomMessagesPg,
+  wabizContacts: wabizContactsPg,
+  wabizMessages: wabizMessagesPg,
+  wabizProcessed: wabizProcessedPg,
 };
 
 export const sqliteSchema = {
@@ -375,4 +383,7 @@ export const sqliteSchema = {
   chatQueueSettings: chatQueueSettingsSqlite,
   rooms: roomsSqlite,
   roomMessages: roomMessagesSqlite,
+  wabizContacts: wabizContactsSqlite,
+  wabizMessages: wabizMessagesSqlite,
+  wabizProcessed: wabizProcessedSqlite,
 };

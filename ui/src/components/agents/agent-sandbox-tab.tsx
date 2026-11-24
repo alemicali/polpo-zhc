@@ -17,7 +17,7 @@ import { useComputers } from "@/hooks/use-computers";
 import { useAgentDetail } from "./agent-detail-context";
 
 /** Same list as the server (EXTERNAL_CONTENT_TOOLS in @polpo-ai/core/sandbox). */
-const EXTERNAL_CONTENT_TOOLS = ["browser_*", "http_fetch", "http_download", "search_*", "email_*", "whatsapp_*", "web_*"];
+const EXTERNAL_CONTENT_TOOLS = ["browser_*", "http_fetch", "http_download", "search_*", "email_*", "whatsapp_*", "wabiz_*", "web_*"];
 
 function readsExternal(tools: string[] | undefined): boolean {
   // no list means every core tool, http_fetch included
