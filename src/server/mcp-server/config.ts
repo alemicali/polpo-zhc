@@ -8,7 +8,7 @@ import { isIP } from "node:net";
 import { z } from "zod";
 import {
   APPEARANCE_CASES, APPEARANCE_PALETTES, APPEARANCE_THEMES, APPEARANCE_TOKENS, APPEARANCE_TOKEN_NAMES, EGRESS_PROXY_NAME, EGRESS_PROXY_URL, parseAppearanceSettings,
-  APPEARANCE_NUMBER_RANGES, APPEARANCE_FONT_HOSTS, APPEARANCE_BUNDLED_FONTS, APPEARANCE_PRELOADED_FONTS, APPEARANCE_MAX_WEB_FONTS, unloadedFontFamilies,
+  APPEARANCE_NUMBER_RANGES, APPEARANCE_FONT_HOSTS, APPEARANCE_BUNDLED_FONTS, APPEARANCE_PRELOADED_FONTS, APPEARANCE_MAX_WEB_FONTS, unloadedFontFamilies, SIDEBAR_STYLES,
   type AppearanceSettings,
 } from "@polpo-ai/core";
 import { isPrivateAddress } from "../oauth.js";
@@ -197,6 +197,7 @@ const appearanceOutput = z.object({
   palette: z.enum(APPEARANCE_PALETTES).optional(),
   custom: z.object({ enabled: z.boolean(), derive: z.boolean().optional(), light: tokenMapOutput.optional(), dark: tokenMapOutput.optional() }).passthrough().optional(),
   fonts: z.array(webFontShape.passthrough()).optional(),
+  sidebarStyle: z.enum(SIDEBAR_STYLES).optional(),
 }).passthrough();
 
 /** Where the dashboard's fonts come from: what a font stack can name without adding a web font. */
@@ -262,11 +263,11 @@ async function appearanceNow(deps: McpDeps): Promise<AppearanceSettings> {
 type TokensPatch = { enabled?: boolean; derive?: boolean; light?: Record<string, unknown>; dark?: Record<string, unknown>; replace?: boolean };
 
 /** The appearance after a change: theme and palette set or removed (null), tokens merged (null removes one) or replaced. */
-export function mergeAppearance(before: AppearanceSettings, change: { theme?: string | null; palette?: string | null; tokens?: TokensPatch; fonts?: unknown[] | null }): Record<string, unknown> {
+export function mergeAppearance(before: AppearanceSettings, change: { theme?: string | null; palette?: string | null; sidebarStyle?: string | null; tokens?: TokensPatch; fonts?: unknown[] | null }): Record<string, unknown> {
   const out = JSON.parse(JSON.stringify(before ?? {})) as Record<string, unknown> & { custom?: Record<string, unknown> };
   if (change.fonts === null || (Array.isArray(change.fonts) && change.fonts.length === 0)) delete out.fonts;
   else if (change.fonts !== undefined) out.fonts = change.fonts;
-  for (const key of ["theme", "palette"] as const) {
+  for (const key of ["theme", "palette", "sidebarStyle"] as const) {
     if (change[key] === null) delete out[key];
     else if (change[key] !== undefined) out[key] = change[key];
   }
@@ -300,6 +301,7 @@ export function appearanceChanges(before: AppearanceSettings, after: AppearanceS
     const out: Record<string, unknown> = {};
     if (a.theme !== undefined) out.theme = a.theme;
     if (a.palette !== undefined) out.palette = a.palette;
+    if (a.sidebarStyle !== undefined) out.sidebarStyle = a.sidebarStyle;
     if (a.custom) {
       out["custom.enabled"] = a.custom.enabled;
       out["custom.derive"] = a.custom.derive !== false;
@@ -322,6 +324,7 @@ function describeAppearance(a: AppearanceSettings): string {
     parts.push(`custom tokens ${a.custom.enabled ? "on" : "off"}${a.custom.derive === false ? " (no derive)" : ""} (light: ${names(a.custom.light)}; dark: ${names(a.custom.dark)})`);
   }
   if (a.fonts?.length) parts.push(`web fonts ${a.fonts.map((f) => `${f.family} (${f.source === "google" ? `Google${f.weights ? ` ${f.weights}` : ""}` : f.url})`).join(", ")}`);
+  if (a.sidebarStyle) parts.push(`${a.sidebarStyle} sidebar`);
   return parts.join(" · ") || "the built-in default (dark, tide)";
 }
 
@@ -481,7 +484,8 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
     title: "Get the branding and appearance",
     description: "The instance's branding and default look everyone sees in the dashboard: product name, tagline, logo and dark-mode logo, "
       + "how the logo is framed (logoFrame: box, the default tile, or none, bare); "
-      + "the default theme (light, dark, system), palette and custom design tokens per mode (colours, fonts, radius, shadows), and the web fonts it loads. "
+      + "the default theme (light, dark, system), palette and custom design tokens per mode (colours, fonts, radius, shadows), the web fonts it loads, "
+      + "and the default navigation sidebar (appearance.sidebarStyle: classic, the default, or drill-in). "
       + "font_sources says which families a font stack can name as they are: bundled (self-hosted, e.g. Inter Tight), preloaded (declared by the dashboard), "
       + "or any other one once added as a web font (polpo_branding_update fonts) from web_font_hosts. "
       + "A person may still customize their own browser.",
@@ -512,7 +516,7 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
   tool("config", "polpo_branding_update", {
     title: "Update the branding and appearance",
     description: "Change what everyone sees in the dashboard: the product name, the tagline, the logo, the dark-mode logo, how the logo is framed, and the default look "
-      + "(theme, palette, custom design tokens per mode). Only the fields given change; an empty string restores a default name or tagline. "
+      + "(theme, palette, custom design tokens per mode, the navigation sidebar style). Only the fields given change; an empty string restores a default name or tagline. "
       + "A logo comes from a public https URL (fetched by the server), a file of the instance, or base64 data; PNG, JPEG, WebP or GIF up to 4 MB; "
       + "null removes it. Tokens: colours (#rrggbb, oklch(…), hsl(…), rgb(…)), fonts (a CSS font stack, e.g. \"Inter Tight\", sans-serif), radius (0–24 px; radiusCard for cards and tiles, radiusControl for buttons, inputs, selects: 0–32 px, default from radius), shadows (shadowCard on cards, shadowRaised on popovers, menus, tooltips, shadowDialog on dialogs and sheets: default shadowRaised); "
       + "the primary button: buttonPrimaryBg (a solid fill, default primary) or buttonGradient { from, to, angle } (a linear gradient), buttonPrimaryForeground (its text, derived readable), shadowButtonPrimary (its box-shadow, e.g. a glow 0 0 20px oklch(0.6 0.2 290 / 40%); default none; on hover the shadowGlowStrong glow in the primary adds to it); hover is derived; "
@@ -530,6 +534,7 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
       + "surfaceBlur and overlayBlur (0–24 px backdrop blur of glassy bars and the dialog scrim), glowBlur (0–96 px, the soft halos); "
       + "nothing in the dashboard is fixed: every colour, size, weight, corner, shadow and blur is one of these tokens; "
       + "a token set to null goes back to the palette's; with derive on (default) the dashboard fills the rest (text on primary, ring, sidebar…). "
+      + "sidebar_style: the navigation sidebar everyone gets by default, classic (every page in one list, the default) or drill-in (Work, Team, Content, Tools, Settings open their pages as a second level inside the sidebar, with a Back row); each person may still pick their own in Configuration → Appearance. "
       + "The result lists what changed. Needs the admin scope.",
     inputSchema: {
       product_name: z.string().max(80).optional().describe("The product name in the navigation ('' for the default)"),
@@ -540,6 +545,7 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
       logo_frame: z.enum(["box", "none"]).nullable().optional().describe("How the logo is shown: box (in a tile, the default) or none (bare, same height, no background); null: the default"),
       theme: z.enum(APPEARANCE_THEMES).nullable().optional().describe("The default theme; null: the built-in default (dark)"),
       palette: z.enum(APPEARANCE_PALETTES).nullable().optional().describe("The default palette; null: the built-in default (tide)"),
+      sidebar_style: z.enum(SIDEBAR_STYLES).nullable().optional().describe("The default navigation sidebar: classic or drill-in; null: the built-in default (classic)"),
       tokens: z.object({
         enabled: z.boolean().optional().describe("Apply the custom tokens (default: true when tokens are given)"),
         derive: z.boolean().optional().describe("Fill the tokens not given from those given (default true)"),
@@ -549,21 +555,21 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
       }).strict().optional().describe("Custom design tokens per mode"),
       fonts: z.array(webFontShape.strict()).max(APPEARANCE_MAX_WEB_FONTS).nullable().optional()
         .describe("The web fonts to load (replaces the list; [] or null: none). E.g. [{ family: \"Manrope\", source: \"google\", weights: \"400;600;700\" }]"),
-      reset_appearance: z.boolean().optional().describe("true: drop the instance's default look (theme, palette, tokens and web fonts) before applying the rest"),
+      reset_appearance: z.boolean().optional().describe("true: drop the instance's default look (theme, palette, tokens, web fonts and sidebar style) before applying the rest"),
     },
     outputSchema: { changed: z.array(z.string()), branding: z.object({ ...brandingOutput }), appearance: appearanceOutput, unloaded_fonts: z.array(z.string()).optional() },
     annotations: UPDATE,
-  }, async ({ product_name, tagline, logo, logo_dark, remove_logo, logo_frame, theme, palette, tokens, fonts, reset_appearance }) => {
-    const touchesAppearance = theme !== undefined || palette !== undefined || tokens !== undefined || fonts !== undefined || reset_appearance === true;
+  }, async ({ product_name, tagline, logo, logo_dark, remove_logo, logo_frame, theme, palette, sidebar_style, tokens, fonts, reset_appearance }) => {
+    const touchesAppearance = theme !== undefined || palette !== undefined || sidebar_style !== undefined || tokens !== undefined || fonts !== undefined || reset_appearance === true;
     if (product_name === undefined && tagline === undefined && logo === undefined && logo_dark === undefined && !remove_logo && logo_frame === undefined && !touchesAppearance) {
-      return fail("Nothing to change: give product_name, tagline, logo, logo_dark, logo_frame, theme, palette, tokens, fonts or reset_appearance.");
+      return fail("Nothing to change: give product_name, tagline, logo, logo_dark, logo_frame, theme, palette, sidebar_style, tokens, fonts or reset_appearance.");
     }
     if (logo && remove_logo) return fail("Give either logo or remove_logo, not both.");
     // the appearance first (pure validation): if it is not valid, nothing changes
     let nextAppearance: AppearanceSettings | null | undefined;
     const before = touchesAppearance ? await appearanceNow(deps) : {};
     if (touchesAppearance) {
-      const merged = mergeAppearance(reset_appearance ? {} : before, { theme, palette, tokens, fonts });
+      const merged = mergeAppearance(reset_appearance ? {} : before, { theme, palette, sidebarStyle: sidebar_style, tokens, fonts });
       try {
         nextAppearance = parseAppearanceSettings(merged);
       } catch (err) {

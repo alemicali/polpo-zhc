@@ -55,6 +55,8 @@ export interface InstanceAppearance {
   palette?: string;
   custom?: { enabled?: boolean; derive?: boolean; light?: TokenMap; dark?: TokenMap };
   fonts?: WebFont[];
+  /** The navigation sidebar everyone gets by default (settings.appearance.sidebarStyle; classic when unset). */
+  sidebarStyle?: "classic" | "drill-in";
 }
 
 /** The instance's branding as the API gives it (public display fields; settings.branding). */

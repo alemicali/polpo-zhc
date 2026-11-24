@@ -1,9 +1,10 @@
 import { useLocation } from "react-router-dom";
 import { InkHubButton } from "@/components/layout/ink-hub-button";
-import { Sun, Moon, Monitor, MessageCircle, Github, Columns2, Menu, Palette as PaletteIcon, Check, History, Trash2, ChevronsLeft, UsersRound } from "lucide-react";
+import { Sun, Moon, Monitor, MessageCircle, Github, Columns2, Menu, Palette as PaletteIcon, Check, History, Trash2, ChevronsLeft, UsersRound, ListTree, PanelLeft } from "lucide-react";
 import { useProjectInfo } from "@/hooks/use-polpo";
 import { useChatActions, useChatPageSessionsOpen, useChatState, useSidebarOpen, sidebarActions, chatPageSessionActions } from "@/hooks/chat-context";
 import { setLayoutMode } from "@/hooks/use-layout-mode";
+import { setSidebarStyle, useSidebarStyle } from "@/hooks/use-sidebar-style";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -34,6 +35,8 @@ import { requestNewGroup, setActiveChatRoom, useActiveChatRoom, useActiveChatRoo
 
 function ChatHeaderCenter() {
   const sessionsOpen = useChatPageSessionsOpen();
+  // the drill-in sidebar's Chat level shows the threads (the toggle has nothing to show)
+  const historyInSidebar = useSidebarStyle() === "drill-in";
   const { messages, isLoading, sessionId, sessions, selectedAgent } = useChatState();
   const { newSession, clear } = useChatActions();
   const { agents } = useAgents();
@@ -54,6 +57,7 @@ function ChatHeaderCenter() {
     <div className="hidden w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 lg:grid">
       <div className="flex min-w-0 shrink-0 items-center gap-2">
         <div className="flex shrink-0 items-center gap-1">
+          {!historyInSidebar && (
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -72,6 +76,7 @@ function ChatHeaderCenter() {
               {sessionsOpen ? "Hide threads" : "Threads"}
             </TooltipContent>
           </Tooltip>
+          )}
           <NewChatMenu
             className="h-8 w-8 rounded-lg hover:bg-accent/50"
             onNewChat={() => {
@@ -143,6 +148,7 @@ export function Header() {
   const { info } = useProjectInfo();
   const sidebarOpen = useSidebarOpen();
   const isOnChatPage = pathname === "/chat";
+  const sidebarStyle = useSidebarStyle();
 
   return (
     <>
@@ -266,6 +272,18 @@ export function Header() {
                 </DropdownMenuItem>
               );
             })}
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-label text-muted-foreground/70">
+              Sidebar
+            </DropdownMenuLabel>
+            <DropdownMenuItem onSelect={() => setSidebarStyle("classic")} className="gap-2.5 text-xs">
+              <PanelLeft className="h-3.5 w-3.5" /> Classic
+              {sidebarStyle === "classic" && <Check className="ml-auto h-3 w-3 text-primary" />}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setSidebarStyle("drill-in")} className="gap-2.5 text-xs">
+              <ListTree className="h-3.5 w-3.5" /> Drill-in (new)
+              {sidebarStyle === "drill-in" && <Check className="ml-auto h-3 w-3 text-primary" />}
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
         {/* Layout mode toggle */}

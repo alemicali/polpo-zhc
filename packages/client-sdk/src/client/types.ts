@@ -1049,7 +1049,16 @@ export interface AppearanceConfig {
   palette?: "tide" | "lovable" | "chatgpt" | "claude" | "brutal" | "editorial" | "redline" | "cyber" | "mono";
   custom?: { enabled: boolean; derive?: boolean; light?: AppearanceTokens; dark?: AppearanceTokens };
   fonts?: AppearanceWebFont[];
+  /**
+   * The navigation sidebar everyone gets by default: "classic" (every page in one list, the
+   * default) or "drill-in" (top-level entries open their pages as a second level in the sidebar).
+   * A person may still choose their own in the dashboard.
+   */
+  sidebarStyle?: SidebarStyle;
 }
+
+/** The dashboard's navigation sidebar style (settings.appearance.sidebarStyle). */
+export type SidebarStyle = "classic" | "drill-in";
 
 export interface PolpoSettings {
   maxRetries: number;

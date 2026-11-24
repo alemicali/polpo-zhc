@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, memo } from "react";
+import { useState, useEffect } from "react";
 import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -28,7 +28,7 @@ import {
   Radio,
   MessagesSquare,
 } from "lucide-react";
-import { useEvents, usePolpo } from "@polpo-ai/react";
+import { usePolpo } from "@polpo-ai/react";
 import { useProjectInfo } from "@/hooks/use-polpo";
 import { cn } from "@/lib/utils";
 import { BrandMark } from "@/components/shared/brand-mark";
@@ -40,6 +40,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { openWhatsNew } from "@/hooks/use-whats-new-drawer";
+import { useSidebarStyle } from "@/hooks/use-sidebar-style";
+import { PendingBadge } from "./pending-badge";
+import { DrillInNav } from "./drill-in-nav";
+import { SidebarStyleBanner } from "./sidebar-style-banner";
 
 type NavItem = { to: string; icon: typeof LayoutDashboard; label: string; external?: boolean };
 type NavSection = { section: string; items: NavItem[] };
@@ -127,54 +131,6 @@ const statusConfig: Record<string, { color: string; pulse: boolean; label: strin
 };
 
 const STORAGE_KEY = "polpo-sidebar-collapsed";
-
-/** Lightweight pending-approval counter — fetches directly from client to avoid
- *  the useApprovals → useEvents → useSyncExternalStore re-render loop. */
-const APPROVAL_EVENTS = ["approval:requested", "approval:resolved", "approval:rejected", "approval:timeout"];
-
-const PendingBadge = memo(function PendingBadge({ collapsed }: { collapsed: boolean }) {
-  const { client, connectionStatus } = usePolpo();
-  const { events } = useEvents(APPROVAL_EVENTS, 1);
-  const [count, setCount] = useState(0);
-
-  const fetchCount = useCallback(() => {
-    if (!client) return;
-    client.getApprovals("pending")
-      .then((list: unknown[]) => setCount(list.length))
-      .catch(() => {});
-  }, [client]);
-
-  useEffect(() => {
-    if (connectionStatus !== "connected") return;
-    fetchCount();
-    const recover = () => {
-      if (document.visibilityState === "visible") fetchCount();
-    };
-    const id = window.setInterval(recover, 120_000);
-    document.addEventListener("visibilitychange", recover);
-    return () => {
-      window.clearInterval(id);
-      document.removeEventListener("visibilitychange", recover);
-    };
-  }, [connectionStatus, fetchCount]);
-
-  const latestEventId = events.at(-1)?.id;
-  useEffect(() => {
-    if (latestEventId) fetchCount();
-  }, [fetchCount, latestEventId]);
-
-  if (count === 0) return null;
-
-  return collapsed ? (
-    <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-pill bg-warning text-micro font-bold text-warning-foreground px-1">
-      {count}
-    </span>
-  ) : (
-    <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-pill bg-warning text-micro font-bold text-warning-foreground px-1.5">
-      {count}
-    </span>
-  );
-});
 
 // ── Nav item variants ──
 
@@ -268,6 +224,7 @@ export function Sidebar() {
   const { info } = useProjectInfo();
   const branding = useInstanceBranding();
   const status = statusConfig[connectionStatus];
+  const sidebarStyle = useSidebarStyle();
 
   const [collapsed, setCollapsed] = useState(() => {
     try {
@@ -326,7 +283,11 @@ export function Sidebar() {
       </div>
 
       {/* Navigation — scrolls when the items exceed the viewport height */}
+      {sidebarStyle === "drill-in" ? (
+        <DrillInNav variant="sidebar" collapsed={collapsed} onExpand={() => setCollapsed(false)} className="flex-1 min-h-0" />
+      ) : (
       <nav
+        aria-label="Main navigation"
         className={cn(
           "flex-1 min-h-0 flex flex-col overflow-y-auto overflow-x-hidden overscroll-contain",
           collapsed ? "items-center py-3 gap-1" : "p-3 gap-1"
@@ -353,6 +314,10 @@ export function Sidebar() {
           </div>
         ))}
       </nav>
+      )}
+
+      {/* Try the other sidebar / switch back (dismissible) */}
+      {!collapsed && <SidebarStyleBanner className="mx-3 mb-2 shrink-0" />}
 
       {/* What's new — pinned near the bottom */}
       <div className={cn("shrink-0 border-t border-sidebar-border", collapsed ? "flex justify-center py-2" : "px-3 py-2")}>

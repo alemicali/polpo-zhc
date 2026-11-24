@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -101,6 +102,8 @@ import { HOOK_EVENT_CATALOG, HOOK_EVENT_GLOBS } from "@polpo-ai/core/hook-events
 import { GateFormDialog, type ApprovalGateDraft, type LifecycleHook as GateLifecycleHook } from "@/components/config/gate-form-dialog";
 import { followInstanceDefault, kit, setInstanceAppearance, useResolvedAppearance, type InstanceAppearance } from "@/lib/appearance";
 import { AppearanceEditor } from "@/components/config/appearance-editor";
+import { SidebarStyleSettings } from "@/components/config/sidebar-style-settings";
+import type { SidebarStyle } from "@/hooks/use-sidebar-style";
 import { toast } from "sonner";
 import { BrandMark } from "@/components/shared/brand-mark";
 import { DEFAULT_PRODUCT_NAME, DEFAULT_PRODUCT_TAGLINE, productName, useInstanceBranding } from "@/lib/branding";
@@ -2067,12 +2070,13 @@ function LogoPicker({ label, hint, value, busy, onChange, onUpload, onRemove, up
   );
 }
 
-function AppearanceTab({ branding, onUpdateBranding, onUploadLogo, onRemoveLogo, onSaveInstanceAppearance }: {
+function AppearanceTab({ branding, onUpdateBranding, onUploadLogo, onRemoveLogo, onSaveInstanceAppearance, onSaveSidebarStyle }: {
   branding?: BrandingConfig;
   onUpdateBranding: (branding: BrandingConfig) => Promise<void>;
   onUploadLogo: (file: File, variant: "light" | "dark") => Promise<void>;
   onRemoveLogo: (variant: "light" | "dark") => Promise<void>;
   onSaveInstanceAppearance: (appearance: InstanceAppearance | null) => Promise<void>;
+  onSaveSidebarStyle: (style: SidebarStyle) => Promise<void>;
 }) {
   const [productName, setProductName] = useState(branding?.productName ?? "");
   // the logo previews sit on the look's own page background in each mode (custom, else the palette's)
@@ -2180,6 +2184,8 @@ function AppearanceTab({ branding, onUpdateBranding, onUploadLogo, onRemoveLogo,
           </div>
         </div>
       </section>
+
+      <SidebarStyleSettings onSaveInstanceDefault={onSaveSidebarStyle} />
 
       <AppearanceEditor onSaveInstanceDefault={onSaveInstanceAppearance} />
     </div>
@@ -3024,6 +3030,19 @@ export function ConfigPage() {
     const requested = readSetupParams().section;
     return baseSections.find((section) => section.id === requested)?.id ?? "general";
   });
+  // ?section= follows the section shown (the sidebar's Settings links point at it, and highlight it)
+  const [searchParams, setSearchParams] = useSearchParams();
+  const sectionParam = searchParams.get("section");
+  const [seenSectionParam, setSeenSectionParam] = useState(sectionParam);
+  if (seenSectionParam !== sectionParam) {
+    setSeenSectionParam(sectionParam);
+    const linked = baseSections.find((section) => section.id === sectionParam)?.id;
+    if (linked && linked !== activeSection) setActiveSection(linked);
+  }
+  const selectSection = (id: SectionId) => {
+    setActiveSection(id);
+    if (sectionParam !== id) setSearchParams({ section: id }, { replace: true });
+  };
   // a link from an assistant (setup_url): scroll to the field to fill and focus it
   useEffect(() => focusSetupField(readSetupParams()), [activeSection]);
 
@@ -3197,7 +3216,7 @@ export function ConfigPage() {
           {sections.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
-              onClick={() => setActiveSection(id)}
+              onClick={() => selectSection(id)}
               className={cn(
                 "flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer",
                 activeSection === id
@@ -3356,9 +3375,12 @@ export function ConfigPage() {
               toast.success("Logo removed");
             }}
             onSaveInstanceAppearance={async (appearance) => {
+              // the sidebar style is set on its own (above the look): saving or clearing the look keeps it
+              const sidebarStyle = (settings.appearance as InstanceAppearance | undefined)?.sidebarStyle;
+              const next = sidebarStyle ? { ...(appearance ?? {}), sidebarStyle } : appearance;
               const result = await api("/config/settings", {
                 method: "PATCH",
-                body: JSON.stringify({ appearance }),
+                body: JSON.stringify({ appearance: next }),
               });
               if (!result.ok) throw new Error(result.error ?? "Failed to save the instance appearance");
               if (result.data) setOptimistic(result.data); else await refetch();
@@ -3366,6 +3388,20 @@ export function ConfigPage() {
               // this browser follows the new default (nothing of its own left over)
               followInstanceDefault();
               toast.success(appearance ? "Saved as the instance default: everyone sees it now" : "Instance default cleared");
+            }}
+            onSaveSidebarStyle={async (sidebarStyle) => {
+              const current = { ...((settings.appearance as InstanceAppearance | undefined) ?? {}) };
+              // classic is the built-in default: no need to store it
+              if (sidebarStyle === "classic") delete current.sidebarStyle;
+              else current.sidebarStyle = sidebarStyle;
+              const result = await api("/config/settings", {
+                method: "PATCH",
+                body: JSON.stringify({ appearance: Object.keys(current).length ? current : null }),
+              });
+              if (!result.ok) throw new Error(result.error ?? "Failed to save the instance sidebar");
+              if (result.data) setOptimistic(result.data); else await refetch();
+              setInstanceAppearance((result.data?.settings?.appearance as InstanceAppearance | undefined) ?? {});
+              toast.success(`Instance default: the ${sidebarStyle === "classic" ? "classic" : "drill-in"} sidebar`);
             }}
           />
         )}
