@@ -48,6 +48,8 @@ export { usePreferences } from "./hooks/use-preferences.js";
 export type { UsePreferencesReturn } from "./hooks/use-preferences.js";
 export { useSearch } from "./hooks/use-search.js";
 export type { UseSearchOptions, UseSearchReturn } from "./hooks/use-search.js";
+export { useSearchAsk } from "./hooks/use-search-ask.js";
+export type { UseSearchAskReturn, SearchAskState } from "./hooks/use-search-ask.js";
 export { useAssessmentProgress } from "./hooks/use-assessment-progress.js";
 
 // Re-export client SDK for convenience (backward compat — consumers can also use @polpo-ai/sdk directly)
@@ -210,6 +212,12 @@ export type {
   SearchGroup,
   SearchResponse,
   SearchOptions,
+  SearchAskPage,
+  SearchAskCommand,
+  SearchAskIntent,
+  SearchAskResult,
+  SearchAskEvent,
+  SearchAskOptions,
   SkillInfo,
   LoadedSkill,
   SkillWithAssignment,

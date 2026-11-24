@@ -4,14 +4,20 @@
  * message that matched and who said it, tasks, agents, files…) grouped by type, with a preview of
  * the selected one on the right.
  *
- * Keyboard: ↑ ↓ move, ↵ opens, ⌘/Ctrl ↵ opens in a new tab, Tab / Shift Tab jump between groups,
- * Esc closes. Prefixes narrow the search: > commands, / pages, @ agents, # tasks, chat: file: …
+ * Ask Polpo: Enter on the "Ask Polpo" row (first when the words read like a request, last
+ * otherwise) or ⌘/Ctrl ↵ from anywhere sends the words to Polpo's model (POST /search/ask): it
+ * answers in a line, picks the results worth opening and opens a page or runs a view command by
+ * itself; anything that changes data is a button (lib/spotlight-ask.ts). An obvious "vai a X" /
+ * "go to X" naming a page opens it at once, without the model.
+ *
+ * Keyboard: ↑ ↓ move, ↵ opens, ⌘/Ctrl ↵ asks Polpo, ⇧ ↵ opens in a new tab, Tab / Shift Tab jump
+ * between groups, Esc closes. Prefixes narrow the search: > commands, / pages, @ agents, # tasks, chat: file: …
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Command as CommandPrimitive } from "cmdk";
-import { AlertCircle, ArrowRight, Clock, CornerDownLeft, History, Loader2, Search, X, type LucideIcon } from "lucide-react";
-import { useSearch, type SearchRange, type SearchResult, type SearchType } from "@polpo-ai/react";
+import { AlertCircle, ArrowRight, Clock, CornerDownLeft, History, Loader2, Search, Sparkles, X, type LucideIcon } from "lucide-react";
+import { useSearch, useSearchAsk, type SearchAskIntent, type SearchRange, type SearchResult, type SearchType, type UseSearchAskReturn } from "@polpo-ai/react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { useChatActions } from "@/hooks/chat-context";
@@ -24,6 +30,7 @@ import {
   PALETTE_PREFIXES, clearRecents, getRecents, localMatch, pageEntries, parsePaletteQuery, recentFromResult, rememberItem, rememberSearch, shortAge,
   type RecentItem,
 } from "@/lib/global-search";
+import { askCommands, askPages, automaticIntent, isDashboardRoute, isViewCommand, looksLikeRequest, matchNavigation } from "@/lib/spotlight-ask";
 import { cn } from "@/lib/utils";
 import { matchActions, paletteActions, type PaletteContext } from "./palette-actions";
 import { Highlighted, Kbd, KindIcon, StatusBadge } from "./search-parts";
@@ -144,6 +151,40 @@ function SkeletonRows() {
   );
 }
 
+/** One line when Polpo cannot answer (the search keeps working). */
+function askErrorText(error: (Error & { code?: string }) | null): string {
+  if (!error) return "";
+  if (error.code === "NO_MODEL") return "Polpo's model isn't configured (Settings → Orchestrator) — search still works.";
+  if (error.code === "RATE_LIMITED") return "Too many questions in a minute — try again shortly; search still works.";
+  return `Polpo couldn't answer: ${error.message.replace(/\s+/g, " ").slice(0, 160)} — search still works.`;
+}
+
+/** Polpo's answer, as it streams (above the results it picked). */
+function AskAnswer({ state }: { state: UseSearchAskReturn }) {
+  if (state.status === "error") {
+    return (
+      <div className="mx-2 mb-1 flex items-start gap-2 rounded-control border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive" role="alert" data-testid="ask-error">
+        <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span className="min-w-0 truncate">{askErrorText(state.error)}</span>
+      </div>
+    );
+  }
+  const asking = state.status === "asking";
+  return (
+    <div className="mx-2 mb-1 rounded-control border border-primary/25 bg-primary/5 px-3 py-2.5" aria-live="polite" aria-busy={asking} data-testid="ask-answer">
+      <div className="mb-1 flex items-center gap-1.5 text-micro font-medium text-primary">
+        <Sparkles className="h-3.5 w-3.5" />
+        Polpo
+        {asking && <Loader2 className="h-3 w-3 animate-spin" aria-label="Polpo is answering" />}
+      </div>
+      <p className="whitespace-pre-wrap text-sm text-foreground">
+        {state.answer || (asking ? (state.activity ?? "Thinking…") : state.items.length ? "Here is what I found." : "Nothing more to add.")}
+      </p>
+      {asking && state.answer && state.activity && <p className="mt-1 text-micro text-muted-foreground">{state.activity}</p>}
+    </div>
+  );
+}
+
 export function SearchPalette() {
   const { open, query: initialQuery, seq } = useSearchPalette();
   const navigate = useNavigate();
@@ -209,7 +250,55 @@ export function SearchPalette() {
     navigate(entry.url);
   }, [navigate, parsed.text, query]);
 
-  const groups: PaletteGroup[] = useMemo(() => {
+  // ── Ask Polpo ──
+  const polpo = useSearchAsk();
+  const location = useLocation();
+  const openRef = useRef(open);
+  useEffect(() => { openRef.current = open; }, [open]);
+
+  /** Do what an intent says (a click, or an automatic one): open a route, run a command, hand off to a chat. */
+  const runIntent = useCallback((intent: SearchAskIntent) => {
+    if (intent.kind === "navigate" || intent.kind === "open") {
+      if (!isDashboardRoute(intent.route)) return;
+      closeSearchPalette();
+      navigate(intent.route);
+      return;
+    }
+    if (intent.kind === "command") {
+      const action = actions.find((a) => a.id === intent.id);
+      if (!action) return;
+      action.run(ctx, intent.argument);
+      closeSearchPalette();
+      return;
+    }
+    // a change: a new chat with Polpo, with the message (the person clicked it)
+    ctx.newChat(intent.message);
+    closeSearchPalette();
+  }, [actions, ctx, navigate]);
+
+  const askPolpo = useCallback(async (raw: string) => {
+    const q = raw.trim();
+    if (!q) return;
+    rememberSearch(q);
+    // the fast path: an obvious "vai a X" naming a page opens it, no model
+    const page = matchNavigation(q, pages);
+    if (page) {
+      rememberItem({ key: `page:${page.to}`, kind: "page", title: page.label, subtitle: page.section, url: page.to });
+      closeSearchPalette();
+      navigate(page.to);
+      return;
+    }
+    const result = await polpo.ask(q, { route: `${location.pathname}${location.search}`, pages: askPages(pages), commands: askCommands(actions) });
+    if (!result || !openRef.current) return;
+    // navigation and view-only commands run by themselves; nothing that changes data does
+    const auto = automaticIntent(result.intents);
+    if (auto) runIntent(auto);
+  }, [polpo, pages, actions, location.pathname, location.search, navigate, runIntent]);
+
+  /** Polpo's answer belongs to the words in the box. */
+  const askShown = polpo.status !== "idle" && polpo.question === query.trim();
+
+  const searchGroups: PaletteGroup[] = useMemo(() => {
     const out: PaletteGroup[] = [];
     const text = parsed.text;
     const actionEntries = (limit: number): PaletteEntry[] => matchActions(actions, text).slice(0, limit).map(({ action, argument, highlights }) => {
@@ -283,6 +372,37 @@ export function SearchPalette() {
     return out;
   }, [parsed, actions, pages, recents, data, ctx]);
 
+  // Polpo's group: its answer (results it picked, buttons for what needs a click), or the row that asks it
+  const autoIntent = askShown ? automaticIntent(polpo.intents) : null;
+  const groups: PaletteGroup[] = useMemo(() => {
+    const text = parsed.text;
+    if (askShown) {
+      const entries: PaletteEntry[] = [
+        ...polpo.items.map((r) => ({ ...resultEntry(r), key: `ask-result:${r.type}:${r.id}` })),
+        ...polpo.intents.filter((i) => i !== autoIntent).map((i, n): PaletteEntry => ({
+          key: `ask-intent:${n}`,
+          kind: "action",
+          icon: Sparkles,
+          title: i.kind === "handoff" ? i.label
+            : i.kind === "command" ? (i.argument ? `${i.label}: “${i.argument}”` : i.label)
+            : `Open ${i.label}`,
+          hint: i.kind === "handoff" ? `Asks Polpo in a new chat: “${i.message.slice(0, 120)}”`
+            : i.kind === "command" && !isViewCommand(i.id) ? "Runs only when you pick it" : undefined,
+          run: () => runIntent(i),
+        })),
+      ];
+      return [{ id: "ask", label: "Polpo", entries }, ...searchGroups];
+    }
+    if (parsed.scope !== "all" || !text) return searchGroups;
+    const page = matchNavigation(text, pages);
+    const row: PaletteEntry = page
+      ? { key: "ask:go", kind: "page", title: `Go to ${page.label}`, subtitle: page.section, icon: page.icon ?? ArrowRight, url: page.to }
+      : { key: "ask:polpo", kind: "action", title: `Ask Polpo: “${text}”`, hint: "Polpo searches, answers and takes you there", icon: Sparkles, run: () => { void askPolpo(text); }, keepOpen: true };
+    const group: PaletteGroup = { id: "ask", label: "Polpo", entries: [row] };
+    // first when the words read like a request (or nothing else is there), else last
+    return page || looksLikeRequest(text) || !searchGroups.length ? [group, ...searchGroups] : [...searchGroups, group];
+  }, [askShown, autoIntent, polpo.items, polpo.intents, parsed, pages, searchGroups, runIntent, askPolpo]);
+
   const entries = useMemo(() => groups.flatMap((g) => g.entries), [groups]);
   const byKey = useMemo(() => new Map(entries.map((e) => [e.key, e])), [entries]);
 
@@ -309,7 +429,14 @@ export function SearchPalette() {
       if (next?.entries[0]) setSelected(next.entries[0].key);
       return;
     }
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && selectedEntry?.url) {
+    // ⌘/Ctrl ↵: ask Polpo, whatever is selected
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      void askPolpo(query);
+      return;
+    }
+    // ⇧ ↵: open the selected result in a new tab
+    if (e.key === "Enter" && e.shiftKey && selectedEntry?.url) {
       e.preventDefault();
       finish(selectedEntry, true);
       return;
@@ -317,7 +444,7 @@ export function SearchPalette() {
   };
 
   const showSkeleton = serverWanted && !!parsed.text && isLoading && !data;
-  const nothing = !!parsed.text && !entries.length && !isLoading && !error;
+  const nothing = !!parsed.text && !entries.some((e) => !e.key.startsWith("ask")) && !isLoading && !error && !askShown;
   const showPreview = isDesktop();
   const shortcut = searchShortcutLabel();
   const activeChip = CHIPS.find((c) => c.prefix && parsed.prefix === c.prefix)?.prefix ?? (parsed.prefix === "task:" ? "#" : parsed.prefix === "agent:" ? "@" : "");
@@ -330,8 +457,10 @@ export function SearchPalette() {
           "gap-0 overflow-hidden p-0",
           // full screen on phones, a centred panel above
           "max-sm:inset-0 max-sm:h-[100dvh] max-sm:max-h-none max-sm:w-full max-sm:max-w-none max-sm:translate-x-0 max-sm:translate-y-0 max-sm:rounded-none max-sm:border-0",
-          "sm:top-[12vh] sm:h-[min(640px,76vh)] sm:max-w-4xl sm:translate-y-0",
+          // a large, prominent panel: wide, up to most of the height, the preview taking more room
+          "sm:top-[7vh] sm:h-[min(860px,86vh)] sm:max-w-[min(72rem,calc(100vw-4rem))] sm:translate-y-0",
         )}
+        data-testid="search-palette"
         onOpenAutoFocus={(e) => { e.preventDefault(); inputRef.current?.focus(); }}
       >
         <DialogTitle className="sr-only">Search</DialogTitle>
@@ -350,9 +479,13 @@ export function SearchPalette() {
             <CommandPrimitive.Input
               ref={inputRef}
               value={query}
-              onValueChange={setQuery}
-              placeholder="Search chats, tasks, agents, files… or type > for commands"
-              className="h-14 min-w-0 flex-1 bg-transparent text-base outline-hidden placeholder:text-muted-foreground"
+              onValueChange={(v) => {
+                setQuery(v);
+                // new words: an answer still streaming for the old ones stops
+                if (polpo.status === "asking" && v.trim() !== polpo.question) polpo.cancel();
+              }}
+              placeholder="Search everything, or ask Polpo… (> commands)"
+              className="h-16 min-w-0 flex-1 bg-transparent text-lg outline-hidden placeholder:text-muted-foreground"
               aria-label="Search everything"
             />
             {isLoading && parsed.text && <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" aria-label="Searching" />}
@@ -386,13 +519,14 @@ export function SearchPalette() {
           </div>
 
           <div className="flex min-h-0 flex-1">
-            <CommandPrimitive.List ref={listRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-2 md:max-w-[52%] md:border-r md:border-border/60">
+            <CommandPrimitive.List ref={listRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-2 md:max-w-[46%] md:border-r md:border-border/60" data-testid="search-results">
               {groups.map((g) => (
                 <CommandPrimitive.Group
                   key={g.id}
                   heading={g.label}
                   className="mb-1 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:text-label [&_[cmdk-group-heading]]:text-muted-foreground"
                 >
+                  {g.id === "ask" && askShown && <AskAnswer state={polpo} />}
                   {g.entries.map((e) => (
                     <CommandPrimitive.Item
                       key={e.key}
@@ -442,7 +576,8 @@ export function SearchPalette() {
           <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/60 px-4 py-2 text-micro text-muted-foreground max-sm:hidden">
             <span className="flex items-center gap-1"><Kbd>↑</Kbd><Kbd>↓</Kbd> move</span>
             <span className="flex items-center gap-1"><Kbd>↵</Kbd> open</span>
-            <span className="flex items-center gap-1"><Kbd>{shortcut.startsWith("⌘") ? "⌘" : "Ctrl"} ↵</Kbd> new tab</span>
+            <span className="flex items-center gap-1"><Kbd>{shortcut.startsWith("⌘") ? "⌘" : "Ctrl"} ↵</Kbd> ask Polpo</span>
+            <span className="flex items-center gap-1"><Kbd>⇧ ↵</Kbd> new tab</span>
             <span className="flex items-center gap-1"><Kbd>Tab</Kbd> next group</span>
             <span className="ml-auto flex items-center gap-2 font-mono">
               <span><b className="text-foreground/80">&gt;</b> commands</span>

@@ -32,6 +32,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-24-spotlight-ai",
+    date: "2026-11-24",
+    kind: "new",
+    title: "⌘K più grande, e ora chiedi a Polpo",
+    summary: "Scrivi una domanda o una richiesta nella ricerca e premi Invio su «Ask Polpo» (o ⌘/Ctrl+Invio): Polpo cerca, risponde in una riga, ti mostra i risultati giusti e ti porta dove serve.",
+    body: [
+      "- **Più spazio**: la finestra di ricerca è più larga e più alta, con l'anteprima a destra più ampia; da telefono resta a schermo intero.",
+      "- **Chiedi a Polpo**: «quali task sono falliti ieri?», «apri la chat con coach», «dove configuro Telegram?». Invio sulla riga **Ask Polpo** (in cima quando scrivi una domanda) o **⌘/Ctrl+Invio** da qualsiasi punto. La risposta arriva mentre viene scritta, con i risultati scelti da Polpo da aprire; i risultati normali restano sotto.",
+      "- **Ti porta lì**: aprire una pagina o un risultato e i comandi che cambiano solo la vista (tema, barra laterale, una sezione delle impostazioni) li fa da solo. Tutto ciò che crea o modifica qualcosa (un task, una missione, un agente, un messaggio) resta un pulsante: parte solo se lo scegli, in una nuova chat con Polpo.",
+      "- **Istantaneo per le cose ovvie**: «vai agli artefatti», «apri le impostazioni dei canali», «go to tasks» aprono subito la pagina, senza chiamare il modello.",
+      "- Usa il modello dell'orchestratore (Impostazioni → Orchestrator), con gli stessi provider e le stesse chiavi di Polpo; i token finiscono nei costi come le chat. Se il modello non è configurato lo dice in una riga e la ricerca continua a funzionare. Nuova scheda: ora è ⇧+Invio.",
+      "- Anche da MCP (`polpo_search_ask`), REST (`POST /api/v1/search/ask`) e SDK (`useSearchAsk`).",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Prova ⌘K", to: "/dashboard?search=" },
+  },
+  {
     id: "2026-11-24-novita-stack-polish",
     date: "2026-11-24",
     kind: "improved",

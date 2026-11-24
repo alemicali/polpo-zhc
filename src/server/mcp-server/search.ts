@@ -3,7 +3,7 @@
  */
 import { z } from "zod";
 import { SEARCH_TYPES } from "../search/engine.js";
-import { READ, apiError, apiGet, ok, qs, type McpDeps, type Register } from "./kit.js";
+import { READ, apiError, apiGet, apiSend, dashboardLink, ok, qs, type McpDeps, type Register } from "./kit.js";
 
 interface Hit {
   type: string;
@@ -87,5 +87,47 @@ export function registerSearchTools(tool: Register, deps: McpDeps): void {
     if (data.partial.length) lines.push(`(Still loading: ${data.partial.join(", ")}. Search again in a moment for them.)`);
     if (data.nextCursor) lines.push(`(More: cursor ${data.nextCursor})`);
     return ok(lines.join("\n") || `Nothing found for "${q}".`, { groups: data.groups, partial: data.partial, next_cursor: data.nextCursor });
+  });
+
+  const intent = z.object({
+    kind: z.enum(["navigate", "open", "command", "handoff"]), label: z.string(), auto: z.boolean(),
+    route: z.string().optional(), key: z.string().optional(), id: z.string().optional(), argument: z.string().optional(), message: z.string().optional(),
+  }).passthrough();
+
+  tool("core", "polpo_search_ask", {
+    title: "Ask the search",
+    description: "Ask in plain words (Italian or English) what to find or where to go, as Enter does in the dashboard's ⌘K: Polpo's model "
+      + "searches the instance, answers in a line or two and returns the results worth opening plus intents — a dashboard page to open "
+      + "(navigate/open, with its route and a dashboard link), a palette command, or a suggested change (handoff: a message for Polpo). "
+      + "Nothing is executed: intents are only returned. Use polpo_search for plain keyword results and polpo_ask to have Polpo act.",
+    inputSchema: {
+      q: z.string().min(1).max(500).describe("The request, e.g. 'which tasks failed yesterday?' or 'apri le impostazioni dei canali'"),
+    },
+    outputSchema: {
+      answer: z.string(),
+      items: z.array(item),
+      intents: z.array(intent).describe("What the dashboard would do: auto ones at once, the others as buttons. Not executed here."),
+      fast_path: z.boolean().describe("Answered without the model (an obvious 'go to X')"),
+    },
+    annotations: READ,
+  }, async ({ q }) => {
+    const r = await apiSend(deps, "POST", "/search/ask", { q });
+    if (!r.ok) return apiError(r, "Asking the search", r.code === "NO_MODEL" ? "Set Polpo's model in Settings → Orchestrator, or use polpo_search." : undefined);
+    const data = r.data as { answer: string; items: Hit[]; intents: Array<{ kind: string; label: string; auto: boolean; route?: string; key?: string; id?: string; argument?: string; message?: string }>; fastPath: boolean };
+    const lines: string[] = [];
+    if (data.answer) lines.push(data.answer);
+    if (data.items.length) {
+      lines.push("", "Results:");
+      for (const h of data.items) lines.push(`- ${h.title}${h.subtitle ? ` (${h.subtitle})` : ""} [${handle(h)}] ${dashboardLink(deps, h.url)}`);
+    }
+    if (data.intents.length) {
+      lines.push("", "Suggested:");
+      for (const i of data.intents) {
+        if (i.kind === "navigate" || i.kind === "open") lines.push(`- Open ${i.label}: ${dashboardLink(deps, i.route ?? "/")}`);
+        else if (i.kind === "command") lines.push(`- Command ${i.id}${i.argument ? ` “${i.argument}”` : ""} (${i.label})`);
+        else lines.push(`- ${i.label}: ask Polpo “${i.message ?? ""}” (polpo_ask)`);
+      }
+    }
+    return ok(lines.join("\n").trim() || `Nothing for "${q}".`, { answer: data.answer, items: data.items, intents: data.intents, fast_path: data.fastPath });
   });
 }

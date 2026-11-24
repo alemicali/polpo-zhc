@@ -7,6 +7,9 @@ import type {
   MemberPreferencesResponse,
   SearchOptions,
   SearchResponse,
+  SearchAskEvent,
+  SearchAskOptions,
+  SearchAskResult,
   VaultEntryMeta,
   Task,
   Mission,
@@ -694,6 +697,53 @@ export class PolpoClient {
     const json = (await res.json()) as ApiResult<SearchResponse>;
     if (!json.ok) throw new PolpoApiError(json.error, json.code, res.status, json.details);
     return json.data;
+  }
+
+  /**
+   * Ask Polpo from the search (POST /search/ask): the orchestrator's model searches, answers in a
+   * line or two, picks the results worth opening and returns intents (pages to open, commands,
+   * suggested changes). Nothing is executed by the server. With onEvent the answer streams.
+   */
+  async searchAsk(q: string, opts: SearchAskOptions = {}): Promise<SearchAskResult> {
+    const { onEvent, signal, ...context } = opts;
+    const res = await this.fetchFn(this.apiUrl("/search/ask"), {
+      method: "POST",
+      headers: { ...this.headers, "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ q, ...context, ...(onEvent ? { stream: true } : {}) }),
+      ...(signal ? { signal } : {}),
+    });
+    if (!onEvent || !(res.headers.get("content-type") ?? "").includes("text/event-stream")) {
+      const json = (await res.json()) as ApiResult<SearchAskResult>;
+      if (!json.ok) throw new PolpoApiError(json.error, json.code, res.status, json.details);
+      return json.data;
+    }
+    const reader = res.body?.getReader();
+    if (!reader) throw new PolpoApiError("No response body", "INTERNAL_ERROR", 500);
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let result: SearchAskResult | undefined;
+    let failure: { error: string; code?: string } | undefined;
+    const handle = (line: string) => {
+      if (!line.startsWith("data:")) return;
+      let event: SearchAskEvent;
+      try { event = JSON.parse(line.slice(5).trim()) as SearchAskEvent; } catch { return; }
+      if (event.type === "done") result = event.result;
+      if (event.type === "error") failure = event;
+      onEvent(event);
+    };
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) handle(line.trim());
+    }
+    if (buffer.trim()) handle(buffer.trim());
+    if (failure) throw new PolpoApiError(failure.error, (failure.code ?? "INTERNAL_ERROR") as never, 502);
+    if (!result) throw new PolpoApiError("The answer was cut short", "INTERNAL_ERROR", 502);
+    return result;
   }
 
   // ── Schedules ─────────────────────────────────────────────

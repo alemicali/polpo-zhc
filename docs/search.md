@@ -2,7 +2,8 @@
 
 One box that finds everything on the instance — the dashboard's **⌘K / Ctrl+K** palette, the REST
 endpoint `GET /api/v1/search`, the MCP tool `polpo_search`, Polpo's chat tool `search` and the
-SDKs (`client.search()`, `useSearch()`) all use the same engine (`src/server/search`).
+SDKs (`client.search()`, `useSearch()`) all use the same engine (`src/server/search`). The same
+box also **asks Polpo** in plain words (↵ on *Ask Polpo*, or ⌘↵): see [Ask Polpo](#ask-polpo).
 
 ## In the dashboard
 
@@ -16,8 +17,10 @@ SDKs (`client.search()`, `useSearch()`) all use the same engine (`src/server/sea
 - **As you type**: pages and commands appear at once (they are matched in the browser), then the
   server's results grouped by type, best group first. The request is debounced (120 ms) and every
   newer query cancels the one in flight.
-- **Keyboard**: ↑ / ↓ move, ↵ opens, ⌘↵ / Ctrl↵ opens in a new tab, Tab / Shift+Tab jump to the
-  next / previous group, Esc closes.
+- **Keyboard**: ↑ / ↓ move, ↵ opens, **⌘↵ / Ctrl↵ asks Polpo** (see [Ask Polpo](#ask-polpo)),
+  ⇧↵ opens in a new tab, Tab / Shift+Tab jump to the next / previous group, Esc closes.
+- **Size**: a large panel on desktop (up to 72rem wide and 86% of the height, the preview pane
+  taking a bit more than half), full screen on phones.
 - **Prefixes** (also the chips under the box):
 
   | Prefix | Searches |
@@ -33,6 +36,72 @@ SDKs (`client.search()`, `useSearch()`) all use the same engine (`src/server/sea
   task's status, agent, last run and cost; a mission's status, tasks and cost; an agent's role,
   model and status; an artifact's thumbnail (SVG, HTML without scripts) or first lines; a file's
   first lines or image; a table's columns.
+
+## Ask Polpo
+
+The same box takes requests in plain words, in Italian or English: *"quali task sono falliti ieri?"*,
+*"apri la chat con coach"*, *"where do I set up Telegram?"*, *"vai agli artefatti"*.
+
+- **How to ask**: as soon as there are words, the palette shows an **Ask Polpo: "…"** row — first
+  when the words read like a request (a question mark, a question word, a verb like *vai / apri /
+  mostra / go / open / show*, or four words and more), last otherwise, so plain keywords still open
+  the best result with ↵. ↵ on that row, or **⌘↵ / Ctrl↵ from anywhere**, sends the words.
+- **The fast path**: *"vai agli artifatti"*, *"apri le impostazioni dei canali"*, *"go to tasks"*,
+  *"open channels settings"* — a verb then exactly a page's name (articles skipped, Italian names
+  folded) — becomes a **Go to …** row and opens the page at once, without the model.
+- **The answer** streams at the top of the list (a line or two), with the results Polpo picked as
+  rows to open (with their preview); the normal search results stay below.
+- **What runs by itself**: opening a dashboard page or a result, and commands that only change the
+  view (theme, sidebar style, What's new, new group, a Settings section). The palette closes and
+  the router navigates. **What never does**: anything that creates or changes data or sends a
+  message (a task, a mission, an agent, a chat message…) is a row you pick — it opens a new chat
+  with Polpo with the message, like the *New task* command. The dashboard enforces this on its own
+  side too: only relative dashboard routes and view commands ever run without a click, whatever
+  the server answers.
+- **No model**: if Polpo's model is not configured (Settings → Orchestrator) or fails, one line
+  says so and the search keeps working.
+
+### The engine
+
+`POST /api/v1/search/ask` (`src/server/search/ask.ts`) calls the **orchestrator's model**
+(`settings.orchestratorModel`, its primary) through the same auth-aware client as Polpo's chat
+(`streamSimpleWithAuth`: API keys, OAuth profiles, custom providers and gateways, provider
+cooldowns). Its tools:
+
+| Tool | Does |
+|---|---|
+| `search(query, types?)` | the global search (this engine), up to 8 results shown to the model as `[type:id] type · title (details) → route — "snippet"` |
+| `suggest_results(keys)` | the results to show, best first (up to 6; without it, the first ones found) |
+| `navigate(route, label?)` | an intent to open a page — only a relative route under a known page or a result (`/config?section=channels`, `/agents/coach`); ends the turn |
+| `open_result(key)` | an intent to open a result; ends the turn |
+| `run_command(id, argument?)` | a palette command: run at once if it only changes the view, else a button |
+| `suggest_action(label, message)` | a button that hands the change to a new Polpo chat |
+
+**Limits**: 4 model rounds (the last without tools), 3 searches, 700 output tokens per round, 25 s
+in all, questions up to 500 characters, 20 questions a minute per client (on top of the API's
+general limit). **Secrets**: the question, the page and every tool result go through the search's
+redaction (`maskSecrets`) before the model sees them; results are already read as the dashboard
+reads them (no vault values or tokens). **Cost**: the tokens and cost are recorded like Polpo's chat
+turns, with source `search_ask` (token usage store, `token-usage:recorded`).
+
+### REST
+
+```
+POST /api/v1/search/ask
+{ "q": "dove configuro telegram?", "route": "/dashboard", "pages": [...], "commands": [...], "stream": true }
+```
+
+- `q` (1–500 characters); `route` — the page the person is on; `pages` (`{ id?, label, to, section? }`,
+  default: the built-in list) and `commands` (`{ id, label, hint?, argument?, confirm? }` — `confirm`:
+  changes data, only ever a button) — what the dashboard can open and run.
+- Without `stream`: `{ ok: true, data: { answer, items, intents, fastPath, rounds, usage? } }`.
+  With `stream: true`: Server-Sent Events whose `data` is `{ type, … }`: `status` (`text`), `delta`
+  (`text`), `results` (`items`), `intent` (`intent`), then `done` (`result`) or `error` (`error`, `code`).
+- Intents: `{ kind: "navigate", route, label, auto }`, `{ kind: "open", route, label, key, auto }`,
+  `{ kind: "command", id, label, argument?, auto }`, `{ kind: "handoff", label, message, auto: false }`.
+  `auto: true` is what the dashboard runs at once; the server itself never runs anything.
+- Errors: `503` `NO_MODEL` (no orchestrator model — the fast path still answers) or `NOT_READY`;
+  `502` `LLM_ERROR` / `TIMEOUT`; `429` `RATE_LIMITED`; `400` for an empty or too long question.
 
 ## What it searches
 
@@ -106,6 +175,15 @@ the background). A client that aborts the request (a newer keystroke) stops the 
 
 - **MCP**: `polpo_search` (toolset `core`, scope `polpo:read`) — the groups as text with bolded
   snippets and the ids the other tools take, plus the same structure.
-- **Polpo in chat**: `search` (group *chats*, found by `tools_search`).
+- **MCP, asking**: `polpo_search_ask` (toolset `core`, scope `polpo:read`) — `{ q }` → the answer,
+  the results with dashboard links and the intents as text and as `{ answer, items, intents,
+  fast_path }`. Intents are only returned: nothing is opened or run.
+- **Polpo in chat**: `search` (group *chats*, found by `tools_search`). There is no chat tool for
+  asking: in chat Polpo *is* the model that answers, with the same `search` tool (an exception in
+  `MCP_EXCEPTIONS`).
 - **SDK**: `client.search(q, { types, limit, perType, cursor, signal })`; React
   `useSearch(q, { types, limit, perType, debounceMs, enabled })` → `{ data, isLoading, error }`.
+  Asking: `client.searchAsk(q, { route, pages, commands, onEvent, signal })` (with `onEvent` it
+  streams) → `{ answer, items, intents, fastPath, rounds, usage }`; React `useSearchAsk()` →
+  `{ status, question, answer, activity, items, intents, result, error, ask, cancel, reset }`
+  (running intents is up to the caller).

@@ -251,6 +251,7 @@ export const MCP_EQUIVALENTS: Record<string, string> = {
 export const MCP_EXCEPTIONS: Record<string, string> = {
   polpo_ask: "asks Polpo itself: in chat the person is already talking to Polpo",
   polpo_answer: "answers Polpo's own questions and previews: in chat the person answers directly",
+  polpo_search_ask: "asks Polpo's model to search and pick results, as Enter in ⌘K: in chat Polpo is already that model and has the search tool itself",
   polpo_api_search: "the read-only REST fallback for MCP clients without a specific tool; Polpo has a specific tool for every area",
   polpo_api_get: "the read-only REST fallback for MCP clients without a specific tool; Polpo has a specific tool for every area",
   agent_card_refresh: "refreshes the agent card widget (an MCP App) in the client; Polpo reads the same with agent_get and get_agent_drive",

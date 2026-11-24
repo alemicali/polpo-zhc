@@ -228,6 +228,77 @@
           }
         ]
       },
+      "SearchAskResult": {
+        "type": "object",
+        "properties": {
+          "answer": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SearchResult"
+            }
+          },
+          "intents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SearchAskIntent"
+            }
+          },
+          "fastPath": {
+            "type": "boolean",
+            "description": "Answered without the model (an obvious \"go to X\")"
+          },
+          "rounds": {
+            "type": "number"
+          },
+          "usage": {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "inputTokens": {
+                "type": "number"
+              },
+              "outputTokens": {
+                "type": "number"
+              },
+              "cacheReadTokens": {
+                "type": "number"
+              },
+              "cacheWriteTokens": {
+                "type": "number"
+              },
+              "totalTokens": {
+                "type": "number"
+              },
+              "cost": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "inputTokens",
+              "outputTokens",
+              "cacheReadTokens",
+              "cacheWriteTokens",
+              "totalTokens",
+              "cost"
+            ]
+          }
+        },
+        "required": [
+          "answer",
+          "items",
+          "intents",
+          "fastPath",
+          "rounds"
+        ]
+      },
       "SearchResult": {
         "type": "object",
         "properties": {
@@ -325,6 +396,51 @@
           "title",
           "url",
           "score"
+        ]
+      },
+      "SearchAskIntent": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "navigate",
+              "open",
+              "command",
+              "handoff"
+            ]
+          },
+          "route": {
+            "type": "string",
+            "description": "navigate / open: the dashboard route"
+          },
+          "key": {
+            "type": "string",
+            "description": "open: the result (type:id)"
+          },
+          "id": {
+            "type": "string",
+            "description": "command: the palette command's id"
+          },
+          "argument": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string",
+            "description": "handoff: the message for a new Polpo chat"
+          },
+          "auto": {
+            "type": "boolean",
+            "description": "true: the dashboard does it at once (navigation, view-only commands); false: a button the person clicks"
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "auto"
         ]
       },
       "MemberPreferences": {
@@ -17385,6 +17501,199 @@
                   "required": [
                     "ok",
                     "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/search/ask": {
+      "post": {
+        "tags": [
+          "Search"
+        ],
+        "summary": "Ask Polpo from the search",
+        "description": "Sends the request to the orchestrator's model (settings.orchestratorModel) with the global search as a tool. It answers briefly, picks the results worth opening and returns intents: navigation and view-only commands (auto: true) that the dashboard runs at once, and buttons (auto: false) for anything that changes data, never run here. An obvious \"go to X\" / \"vai a X\" naming a page is answered without the model. With stream: true the answer comes as Server-Sent Events whose data is {type: status|delta|results|intent|done|error, …}. Rate limited; bounded rounds, tokens and time.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "q": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500,
+                    "description": "The question or request, in any words (Italian, English…)"
+                  },
+                  "route": {
+                    "type": "string",
+                    "maxLength": 300,
+                    "description": "The page the person is on"
+                  },
+                  "pages": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "maxLength": 80
+                        },
+                        "label": {
+                          "type": "string",
+                          "maxLength": 80
+                        },
+                        "to": {
+                          "type": "string",
+                          "maxLength": 300
+                        },
+                        "section": {
+                          "type": "string",
+                          "maxLength": 120
+                        }
+                      },
+                      "required": [
+                        "label",
+                        "to"
+                      ]
+                    },
+                    "maxItems": 200,
+                    "description": "The dashboard's pages (default: the built-in list)"
+                  },
+                  "commands": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "maxLength": 80
+                        },
+                        "label": {
+                          "type": "string",
+                          "maxLength": 120
+                        },
+                        "hint": {
+                          "type": "string",
+                          "maxLength": 200
+                        },
+                        "argument": {
+                          "type": "boolean"
+                        },
+                        "confirm": {
+                          "type": "boolean",
+                          "description": "Changes data: only ever suggested"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "label"
+                      ]
+                    },
+                    "maxItems": 80,
+                    "description": "The palette's commands the assistant may run or suggest"
+                  },
+                  "stream": {
+                    "type": "boolean",
+                    "description": "true: Server-Sent Events (status, delta, results, intent, done, error)"
+                  }
+                },
+                "required": [
+                  "q"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The answer (JSON), or its events (stream: true)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/SearchAskResult"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "data: {type, …} per event, the last one done or error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The model failed or took too long",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Search not ready, or Polpo's model not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
                   ]
                 }
               }

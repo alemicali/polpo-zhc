@@ -1,7 +1,8 @@
 /**
  * The search palette (⌘K): the shortcut, the sidebar field (above Dashboard) and the mobile icon,
  * pages and commands found at once, the server's groups, the keyboard (arrows, Tab between groups,
- * Enter), prefixes, the preview, recents (storage blocked too) and the phone layout.
+ * Enter), prefixes, the preview, recents (storage blocked too), the phone layout, and asking Polpo
+ * (the larger panel, Enter / ⌘Enter, the streamed answer, intents run or offered, the fast path, errors).
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -33,7 +34,8 @@ const RESULTS = {
 };
 RESULTS.items = RESULTS.groups.flatMap((g) => g.items) as never;
 
-vi.mock("@polpo-ai/react", () => ({
+vi.mock("@polpo-ai/react", async () => ({
+  useSearchAsk: (await import("./helpers/search-ask-mock")).useSearchAskMock,
   useSearch: (q: string, opts: { types?: string[]; enabled?: boolean }) => {
     if (opts.enabled !== false && q) searchCalls.push({ q, ...(opts.types ? { types: opts.types } : {}) });
     return { data: q && /invo/i.test(q) ? RESULTS : q ? { ...RESULTS, groups: [], items: [], query: q } : null, isLoading: false, error: null };
@@ -60,9 +62,11 @@ import { GlobalSearch } from "../src/components/search/search-palette";
 import { MobileSearchButton } from "../src/components/search/sidebar-search-button";
 import { Sidebar } from "../src/components/layout/sidebar";
 import { openSearchPalette, resetSearchPaletteForTests } from "../src/hooks/use-search-palette";
-import { clearRecents, parsePaletteQuery } from "../src/lib/global-search";
+import { clearRecents, pageEntries, parsePaletteQuery } from "../src/lib/global-search";
 import { matchActions, paletteActions } from "../src/components/search/palette-actions";
 import { resetSidebarStyleForTests } from "../src/hooks/use-sidebar-style";
+import { askCalls, resetAskMock, setAskScript } from "./helpers/search-ask-mock";
+import { automaticIntent, looksLikeRequest, matchNavigation } from "../src/lib/spotlight-ask";
 
 let desktop = true;
 
@@ -82,6 +86,7 @@ beforeEach(() => {
   clearRecents();
   resetSearchPaletteForTests();
   resetSidebarStyleForTests();
+  resetAskMock();
 });
 
 afterEach(() => {
@@ -171,7 +176,7 @@ describe("results", () => {
     expect(selectedText()).toContain("Tasks");
     type("invoice");
     const dialog = screen.getByRole("dialog");
-    expect(headings()).toEqual(["Chats", "Tasks"]);
+    expect(headings()).toEqual(["Chats", "Tasks", "Polpo"]); // a single word: "Ask Polpo" comes last
     // the chat with who said it and the matched words marked
     const list = dialog.querySelector("[cmdk-list]") as HTMLElement;
     expect(within(list).getByText("Taxes 2026")).toBeTruthy();
@@ -181,7 +186,7 @@ describe("results", () => {
     expect(within(dialog).getByText(/Show all 9 chats/)).toBeTruthy();
   });
 
-  test("arrows move, Tab jumps to the next group, Enter opens, ⌘Enter opens in a new tab", async () => {
+  test("arrows move, Tab jumps to the next group, Enter opens, ⇧Enter opens in a new tab", async () => {
     const open = vi.fn();
     vi.stubGlobal("open", open);
     renderApp();
@@ -193,7 +198,7 @@ describe("results", () => {
     expect(selectedText()).toContain("Invoice run");
     press("Tab", { shiftKey: true });
     expect(selectedText()).toContain("Taxes 2026");
-    press("Enter", { metaKey: true });
+    press("Enter", { shiftKey: true });
     expect(open).toHaveBeenCalledWith("/chat?session=s1", "_blank", "noopener");
     press("ArrowDown");
     expect(selectedText()).toContain("Show all 9 chats");
@@ -286,5 +291,152 @@ describe("recents", () => {
     act(() => openSearchPalette());
     await screen.findByRole("dialog");
     expect(screen.getByText("Recently opened")).toBeTruthy();
+  });
+});
+
+describe("Ask Polpo", () => {
+  const TASK = RESULTS.groups[1]!.items[0]!;
+
+  async function openWith(q: string) {
+    renderApp();
+    act(() => openSearchPalette());
+    await screen.findByRole("dialog");
+    type(q);
+  }
+
+  test("the palette is a large panel, full screen on phones, the preview taking more room", async () => {
+    await openWith("");
+    const panel = screen.getByTestId("search-palette");
+    expect(panel.className).toContain("sm:h-[min(860px,86vh)]");
+    expect(panel.className).toContain("sm:max-w-[min(72rem,calc(100vw-4rem))]");
+    expect(panel.className).toContain("max-sm:h-[100dvh]");
+    expect(screen.getByTestId("search-results").className).toContain("md:max-w-[46%]");
+    expect(input().className).toContain("h-16");
+    // the footer documents the keys
+    const footer = screen.getByRole("dialog").textContent ?? "";
+    expect(footer).toContain("ask Polpo");
+    expect(footer).toContain("new tab");
+  });
+
+  test("Enter on a request asks Polpo: the answer streams with the results it picked, the search stays", async () => {
+    let finish: () => void = () => {};
+    setAskScript((_q, emit) => new Promise((resolve) => {
+      emit({ type: "delta", text: "Un task è fallito: " });
+      emit({ type: "delta", text: "Invoice run." });
+      emit({ type: "results", items: [TASK] });
+      finish = () => resolve({ answer: "Un task è fallito: Invoice run.", items: [TASK], intents: [], fastPath: false, rounds: 2 });
+    }));
+    await openWith("quali task sono falliti con le invoice?");
+    expect(headings()[0]).toBe("Polpo");
+    expect(selectedText()).toContain("Ask Polpo: “quali task sono falliti con le invoice?”");
+    press("Enter");
+    expect(askCalls).toHaveLength(1);
+    expect(askCalls[0]!.q).toBe("quali task sono falliti con le invoice?");
+    expect(askCalls[0]!.opts.route).toBe("/dashboard");
+    // the dashboard's pages and commands, the ones changing data marked
+    const commands = askCalls[0]!.opts.commands as Array<{ id: string; confirm?: boolean }>;
+    expect(commands.find((c) => c.id === "theme")?.confirm).toBeUndefined();
+    expect(commands.find((c) => c.id === "new-task")?.confirm).toBe(true);
+    expect((askCalls[0]!.opts.pages as Array<{ to: string }>).some((p) => p.to === "/config?section=channels")).toBe(true);
+    const answer = await screen.findByTestId("ask-answer");
+    expect(answer.textContent).toContain("Un task è fallito: Invoice run.");
+    expect(answer.getAttribute("aria-busy")).toBe("true");
+    await act(async () => { finish(); });
+    await waitFor(() => expect(screen.getByTestId("ask-answer").getAttribute("aria-busy")).toBe("false"));
+    // its result is a row to open; the server's groups are still below
+    const polpoGroup = document.querySelector("[cmdk-group]") as HTMLElement;
+    expect(polpoGroup.textContent).toContain("Invoice run");
+    expect(headings()).toEqual(["Polpo", "Chats", "Tasks"]);
+    expect(screen.getByRole("dialog")).toBeTruthy();
+  });
+
+  test("⌘/Ctrl Enter asks from anywhere, even with a result selected", async () => {
+    setAskScript(async () => ({ answer: "ok", items: [], intents: [], fastPath: false, rounds: 1 }));
+    await openWith("invoice");
+    expect(selectedText()).toContain("Taxes 2026");
+    press("Enter", { ctrlKey: true });
+    expect(askCalls.map((c) => c.q)).toEqual(["invoice"]);
+    expect(await screen.findByTestId("ask-answer")).toBeTruthy();
+    expect(screen.getByTestId("where").textContent).toBe("/dashboard");
+  });
+
+  test("a navigation intent opens the page with the router and closes the palette", async () => {
+    setAskScript(async () => ({
+      answer: "Apro i canali.", items: [], fastPath: false, rounds: 1,
+      intents: [{ kind: "navigate", route: "/config?section=channels", label: "Channels", auto: true }],
+    }));
+    await openWith("dove si configura telegram?");
+    press("Enter");
+    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/config?section=channels"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  test("changes are only buttons: nothing runs until clicked, whatever the server says", async () => {
+    setAskScript(async () => ({
+      answer: "Posso chiederlo a Polpo.", items: [], fastPath: false, rounds: 2,
+      intents: [
+        { kind: "command", id: "new-task", label: "New task", argument: "fix the login", auto: true },
+        { kind: "handoff", label: "Create the task", message: "Create a task: fix the login", auto: false },
+        { kind: "navigate", route: "https://evil.example", label: "Elsewhere", auto: true },
+      ],
+    }));
+    await openWith("crea un task per sistemare il login");
+    press("Enter");
+    await screen.findByText("Create the task");
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(newSession).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(screen.getByTestId("where").textContent).toBe("/dashboard");
+    expect(screen.getAllByText("New task: “fix the login”").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByText("Create the task"));
+    expect(newSession).toHaveBeenCalled();
+    expect(send).toHaveBeenCalledWith("Create a task: fix the login");
+    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/chat"));
+  });
+
+  test("an obvious “vai a X” opens the page at once, without asking the model", async () => {
+    await openWith("vai agli artifatti");
+    expect(headings()[0]).toBe("Polpo");
+    expect(selectedText()).toContain("Go to Artifacts");
+    press("Enter");
+    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/artifacts"));
+    expect(askCalls).toEqual([]);
+
+    act(() => openSearchPalette());
+    await screen.findByRole("dialog");
+    type("apri le impostazioni dei canali");
+    press("Enter", { metaKey: true });
+    await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/config?section=channels"));
+    expect(askCalls).toEqual([]);
+  });
+
+  test("without Polpo's model: one clear line, and the search keeps working", async () => {
+    setAskScript(async () => { throw Object.assign(new Error("not configured"), { code: "NO_MODEL" }); });
+    await openWith("invoice?");
+    press("Enter", { ctrlKey: true });
+    const alert = await screen.findByTestId("ask-error");
+    expect(alert.textContent).toContain("Polpo's model isn't configured (Settings → Orchestrator)");
+    expect(alert.textContent).toContain("search still works");
+    expect(headings()).toEqual(["Polpo", "Chats", "Tasks"]);
+    expect(screen.getByRole("dialog").textContent).toContain("Invoice run");
+  });
+
+  test("the rules: requests vs words, the fast path, and what may run by itself", () => {
+    expect(looksLikeRequest("invoice")).toBe(false);
+    expect(looksLikeRequest("invoice march")).toBe(false);
+    expect(looksLikeRequest("which tasks failed?")).toBe(true);
+    expect(looksLikeRequest("dove sono gli artefatti")).toBe(true);
+    expect(looksLikeRequest("apri la chat con coach")).toBe(true);
+    const pages = pageEntries();
+    expect(matchNavigation("go to tasks", pages)?.to).toBe("/tasks");
+    expect(matchNavigation("open channels settings", pages)?.to).toBe("/config?section=channels");
+    expect(matchNavigation("apri la chat con coach", pages)).toBeNull();
+    expect(automaticIntent([
+      { kind: "navigate", route: "//evil.example", label: "x", auto: true },
+      { kind: "command", id: "new-agent", label: "New agent", auto: true },
+      { kind: "handoff", label: "x", message: "y", auto: false },
+    ])).toBeNull();
+    expect(automaticIntent([{ kind: "command", id: "theme", label: "Dark", auto: true }])).toMatchObject({ id: "theme" });
+    expect(automaticIntent([{ kind: "open", route: "/tasks/t1", label: "t", key: "task:t1", auto: true }])).toMatchObject({ route: "/tasks/t1" });
   });
 });
