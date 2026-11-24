@@ -19,6 +19,7 @@ import { registerSetupTools } from "../server/mcp-server/setup.js";
 import { registerComputerTools } from "../server/mcp-server/computers.js";
 import { registerWaBusinessTools } from "../server/mcp-server/whatsapp-business.js";
 import { registerConnectorTools } from "../server/mcp-server/connectors.js";
+import { registerMcpServerTools } from "../server/mcp-server/mcp-servers.js";
 import { registerChannelTools } from "../server/mcp-server/channels.js";
 import { registerChannelSetupTools } from "../server/mcp-server/channel-setup.js";
 import { registerSettingsTools } from "../server/mcp-server/settings.js";
@@ -53,6 +54,17 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_connector_update", name: "connector_update", group: "connectors" },
   { mcp: "polpo_connector_test", name: "connector_test", group: "connectors" },
   { mcp: "polpo_connector_disconnect", name: "connector_disconnect", group: "connectors" },
+  // Hosted MCP servers: Polpo builds and serves its own ("create a connector for Printful")
+  { mcp: "polpo_mcp_servers_list", name: "mcp_servers_list", group: "hosted-servers" },
+  { mcp: "polpo_mcp_server_get", name: "mcp_server_get", group: "hosted-servers" },
+  { mcp: "polpo_mcp_server_create", name: "mcp_server_create", group: "hosted-servers" },
+  { mcp: "polpo_mcp_server_generate", name: "mcp_server_generate", group: "hosted-servers" },
+  { mcp: "polpo_mcp_server_update", name: "mcp_server_update", group: "hosted-servers" },
+  { mcp: "polpo_mcp_server_test", name: "mcp_server_test", group: "hosted-servers" },
+  { mcp: "polpo_mcp_server_publish", name: "mcp_server_publish", group: "hosted-servers" },
+  { mcp: "polpo_mcp_server_deploy", name: "mcp_server_deploy", group: "hosted-servers" },
+  { mcp: "polpo_mcp_server_logs", name: "mcp_server_logs", group: "hosted-servers" },
+  { mcp: "polpo_mcp_server_delete", name: "mcp_server_delete", group: "hosted-servers" },
   // Agent harnesses (Claude Code, Codex, OpenCode)
   { mcp: "polpo_harnesses_get", name: "harnesses_get", group: "harnesses" },
   { mcp: "polpo_harnesses_update", name: "harnesses_update", group: "harnesses" },
@@ -331,7 +343,7 @@ function capture(): Map<string, Captured> {
     if (wanted.has(name)) out.set(name, { spec: spec as unknown as ToolSpec<z.ZodRawShape>, handler: handler as unknown as Captured["handler"] });
   };
   for (const register of [
-    registerSetupTools, registerTeamTools, registerConnectorTools, registerHarnessTools, registerComputerTools, registerConfigTools,
+    registerSetupTools, registerTeamTools, registerConnectorTools, registerMcpServerTools, registerHarnessTools, registerComputerTools, registerConfigTools,
     registerSettingsTools, registerChannelTools, registerChannelSetupTools, registerRoomTools, registerChatTools, registerAutomationTools,
     registerMissionTools, registerDataTools, registerBrainTools, registerSkillTools, registerWaBusinessTools, registerSearchTools,
   ]) register(tool, deps);

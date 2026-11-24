@@ -555,3 +555,67 @@ describe("REST routes", () => {
     await manager.closeAll();
   });
 });
+
+describe("MCP tools (polpo_mcp_server_*) and Polpo's chat tools", () => {
+  let dir: string;
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("create from template, get, test (dry run for create_order), publish, deploy back, logs, delete with confirm; changes need admin", async () => {
+    const { handleMcpRequest } = await import("../server/mcp.js");
+    const { expectValidOutput } = await import("./helpers/mcp-output.js");
+    dir = mkdtempSync(join(tmpdir(), "polpo-mcp-tools-"));
+    const vault = memoryVault({ "polpo-infra/printful": { token: TOKEN } });
+    const fetch = vi.fn(async () => json(200, { code: 200, result: { categories: [{ id: 1, title: "A" }] } }));
+    const manager = new ConnectorManager({ polpoDir: dir, vaultStore: vault, log: () => undefined });
+    const service = new McpServerService({ polpoDir: dir, vault: () => vault, connectors: () => manager, runtime: () => ({ fetch, resolve }) });
+    const routes = mcpServerRoutes({ service: () => service, llm: () => async () => "{}", actor: () => "mcp:test", publicBase: () => "https://polpo.test" });
+    const api = async (method: string, path: string, body?: unknown) => {
+      const res = await routes.request(path.replace(/^\/api\/v1\/mcp-servers/, "") || "/", { method, headers: { "content-type": "application/json" }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
+      return { status: res.status, body: await res.json(), headers: res.headers };
+    };
+    const deps = (scopes: string[] = ["polpo:admin"]) => ({ api, version: "x", toolsets: ["connectors"], principal: { kind: "oauth" as const, actor: "t", scopes } });
+    const rpc = async (d: ReturnType<typeof deps>, method: string, params: Record<string, unknown> = {}) => (await (await handleMcpRequest(new Request("http://localhost/mcp", {
+      method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-protocol-version": "2025-06-18" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    }), d as never)).json()).result;
+    const call = async (name: string, args: Record<string, unknown> = {}, d = deps()) => {
+      const result = await rpc(d, "tools/call", { name, arguments: args });
+      await expectValidOutput(d as never, async () => (await rpc(d, "tools/list")).tools, name, result);
+      return result;
+    };
+    const readOnly = (await rpc(deps(["polpo:read", "polpo:work", "polpo:connectors"]), "tools/list")).tools.map((t: { name: string }) => t.name).filter((n: string) => n.includes("mcp_server"));
+    expect(readOnly.sort()).toEqual(["polpo_mcp_server_get", "polpo_mcp_server_logs", "polpo_mcp_servers_list"]);
+
+    const created = await call("polpo_mcp_server_create", { template: "printful" });
+    expect(created.structuredContent).toMatchObject({ id: "printful", problems: [] });
+    expect(created.content[0].text).toMatch(/polpo-infra/);
+    const got = await call("polpo_mcp_server_get", { id: "printful" });
+    expect(got.content[0].text).toMatch(/secret token: vault polpo-infra\/printful field token — set/);
+    expect(got.content[0].text).toMatch(/create_order \(http POST \/orders\) \[needs approval\]/);
+    const dry = await call("polpo_mcp_server_test", { id: "printful", tool: "create_order", input: { recipient: { name: "A", address1: "x", city: "y", country_code: "IT", zip: "1" }, items: [{ variant_id: 1, quantity: 1 }] } });
+    expect(dry.content[0].text).toMatch(/^Not sent/);
+    expect(fetch).not.toHaveBeenCalled();
+    expect((await call("polpo_mcp_server_test", { id: "printful", all: true })).structuredContent).toMatchObject({ passed: 3, failed: 0, skipped: 0 });
+    expect((await call("polpo_mcp_server_update", { id: "printful", visibility: "public" })).isError).toBe(true);
+    const pub = await call("polpo_mcp_server_publish", { id: "printful", note: "first" });
+    expect(pub.structuredContent).toMatchObject({ version: "1.0.0", deployed: { action: "initial" } });
+    await call("polpo_mcp_server_update", { id: "printful", spec: { ...PRINTFUL_TEMPLATE.spec, description: "v2" } });
+    expect((await call("polpo_mcp_server_publish", { id: "printful", deploy: true })).structuredContent.version).toBe("1.0.1");
+    const withDiff = await call("polpo_mcp_server_get", { id: "printful", versions: true, diff: { from: "1.0.0", to: "1.0.1" } });
+    expect(withDiff.structuredContent.diff.changes).toEqual([{ field: "description", kind: "changed" }]);
+    expect((await call("polpo_mcp_server_deploy", { id: "printful", rollback: true })).structuredContent).toMatchObject({ to: "1.0.0", action: "rollback" });
+    expect((await call("polpo_mcp_server_logs", { id: "printful" })).structuredContent.logs.length).toBeGreaterThan(0);
+    expect((await call("polpo_mcp_server_delete", { id: "printful" })).isError).toBe(true);
+    expect((await call("polpo_mcp_server_delete", { id: "printful", confirm: true })).structuredContent).toEqual({ removed: true });
+    expect(manager.store.get("printful")).toBeUndefined();
+    await manager.closeAll();
+  });
+
+  it("Polpo's chat gets them as deferred tools (hosted-servers group)", async () => {
+    dir = mkdtempSync(join(tmpdir(), "polpo-mcp-x-"));
+    const { bridgedTools, BRIDGED_TOOLS } = await import("../llm/polpo-mcp-bridge.js");
+    const names = bridgedTools().map((t) => t.name).filter((n) => n.startsWith("mcp_server"));
+    expect(names).toContain("mcp_server_create");
+    expect(BRIDGED_TOOLS.filter((t) => t.name.startsWith("mcp_server")).every((t) => t.group === "hosted-servers")).toBe(true);
+  });
+});

@@ -146,6 +146,8 @@ describe("Polpo MCP server", () => {
       "polpo_schedules_list", "polpo_schedule_create", "polpo_schedule_update", "polpo_schedule_delete", "polpo_schedule_run",
       "polpo_checks_list", "polpo_check_create", "polpo_check_update", "polpo_check_cancel", "polpo_check_delete",
       "polpo_connectors_list", "polpo_connector_catalog", "polpo_connector_add", "polpo_connector_update", "polpo_connector_test", "polpo_connector_connect", "polpo_connector_disconnect", "polpo_connector_remove",
+      "polpo_mcp_servers_list", "polpo_mcp_server_get", "polpo_mcp_server_create", "polpo_mcp_server_generate", "polpo_mcp_server_update", "polpo_mcp_server_test",
+      "polpo_mcp_server_publish", "polpo_mcp_server_deploy", "polpo_mcp_server_logs", "polpo_mcp_server_delete",
       "polpo_channels_list", "polpo_channel_test", "polpo_message_send", "polpo_notification_rule_save", "polpo_notification_rule_delete",
       "polpo_computers_list", "polpo_computer_get", "polpo_computer_webhooks", "polpo_computer_save", "polpo_computer_control", "polpo_egress_status", "polpo_computer_delete",
       "polpo_wabiz_status", "polpo_wabiz_events", "polpo_wabiz_templates", "polpo_wabiz_conversation", "polpo_wabiz_send", "polpo_wabiz_send_template", "polpo_wabiz_approval",

@@ -31,6 +31,7 @@ import { registerSearchTools } from "./mcp-server/search.js";
 import { registerSkillTools } from "./mcp-server/skills.js";
 import { registerAutomationTools, registerWatcherTools } from "./mcp-server/automation.js";
 import { registerConnectorTools } from "./mcp-server/connectors.js";
+import { registerMcpServerTools } from "./mcp-server/mcp-servers.js";
 import { registerChannelTools, registerVaultTools } from "./mcp-server/channels.js";
 import { registerAppTools } from "./mcp-server/apps.js";
 import { registerComputerTools } from "./mcp-server/computers.js";
@@ -86,6 +87,7 @@ export function createPolpoMcpServer(deps: McpDeps, catalog?: ToolScope[]): McpS
   registerSkillTools(tool, deps);
   registerAutomationTools(tool, deps);
   registerConnectorTools(tool, deps);
+  registerMcpServerTools(tool, deps);
   registerChannelTools(tool, deps);
   registerBrainTools(tool, deps);
   registerLearningTools(tool, deps);
