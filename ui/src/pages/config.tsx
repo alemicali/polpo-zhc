@@ -35,7 +35,6 @@ import {
   Bookmark,
   Bell,
   Shield,
-  Send,
   Hash,
   Eye,
   Zap,
