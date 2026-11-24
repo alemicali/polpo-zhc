@@ -8,14 +8,14 @@
  * Esc closes. Prefixes narrow the search: > commands, / pages, @ agents, # tasks, chat: file: …
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Command as CommandPrimitive } from "cmdk";
 import { AlertCircle, ArrowRight, Clock, CornerDownLeft, History, Loader2, Search, X, type LucideIcon } from "lucide-react";
 import { useSearch, type SearchRange, type SearchResult, type SearchType } from "@polpo-ai/react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { useChatActions } from "@/hooks/chat-context";
-import { closeSearchPalette, searchShortcutLabel, useSearchPalette, useSearchShortcut } from "@/hooks/use-search-palette";
+import { closeSearchPalette, openSearchPalette, searchShortcutLabel, useSearchPalette, useSearchShortcut } from "@/hooks/use-search-palette";
 import { useTheme } from "@/hooks/use-theme";
 import { setSidebarStyle, useSidebarStyle } from "@/hooks/use-sidebar-style";
 import { openWhatsNew } from "@/hooks/use-whats-new-drawer";
@@ -464,6 +464,17 @@ export function SearchPalette() {
 export function GlobalSearch() {
   useSearchShortcut();
   const { open } = useSearchPalette();
+  // a link may open it (?search=<query>, e.g. What's new): open, then drop the parameter
+  const location = useLocation();
+  const navigate = useNavigate();
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (!params.has("search")) return;
+    openSearchPalette(params.get("search") ?? "");
+    params.delete("search");
+    const rest = params.toString();
+    navigate({ pathname: location.pathname, search: rest ? `?${rest}` : "" }, { replace: true });
+  }, [location.pathname, location.search, navigate]);
   // nothing mounted (no search hook running) until it is first opened
   const [used, setUsed] = useState(false);
   useEffect(() => { if (open) setUsed(true); }, [open]);

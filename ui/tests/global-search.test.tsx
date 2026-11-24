@@ -148,6 +148,17 @@ describe("opening", () => {
   });
 });
 
+test("a link with ?search= opens it (the What's new button)", async () => {
+  render(
+    <MemoryRouter initialEntries={["/dashboard?search=invoice"]}>
+      <TooltipProvider><GlobalSearch /><Where /></TooltipProvider>
+    </MemoryRouter>,
+  );
+  await screen.findByRole("dialog");
+  expect(input().value).toBe("invoice");
+  expect(screen.getByTestId("where").textContent).toBe("/dashboard");
+});
+
 describe("results", () => {
   test("the empty state offers commands; typing shows pages at once and the server's groups", async () => {
     renderApp();

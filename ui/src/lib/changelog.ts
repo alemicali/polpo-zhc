@@ -32,6 +32,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-24-global-search",
+    date: "2026-11-24",
+    kind: "new",
+    title: "Cerca tutto con ⌘K: chat, task, agenti, file e comandi",
+    summary: "Una sola casella sopra Dashboard (o ⌘K / Ctrl+K ovunque) trova le chat anche dentro i messaggi, i task, le missioni, gli agenti, gli artefatti, i file, i dati, le pagine e i comandi, con l'anteprima a destra.",
+    body: [
+      "- **⌘K / Ctrl+K** da qualsiasi pagina, oppure il campo **Cerca…** in cima alla barra laterale (in entrambi gli stili); da telefono l'icona della lente in alto, a schermo intero.",
+      "- **Dentro le chat**: trova il messaggio esatto, chi l'ha scritto e le parole evidenziate; nell'anteprima vedi i messaggi intorno. Funziona anche senza accenti, al plurale o con un errore di battitura («fatture», «citta», «deplyo»).",
+      "- **Tutto il resto**: gruppi, agenti, task e missioni con lo stato, programmazioni, playbook, approvazioni, artefatti (anche il contenuto), file, fonti dati, viste e tabelle, connettori, skill, memoria, Company Brain, computer, app, canali, membri ed eventi recenti. Chiavi e token non vengono mai cercati né mostrati.",
+      "- **Prefissi**: `>` comandi (nuova chat, nuovo task «> new task …», tema, barra laterale, sezioni delle impostazioni), `/` pagine, `@` agenti, `#` task, `chat:`, `file:`, `mission:`… Oppure i filtri sotto la casella.",
+      "- **Da tastiera**: ↑ ↓ per muoverti, Invio per aprire, ⌘/Ctrl+Invio in una nuova scheda, Tab per saltare al gruppo successivo, Esc per chiudere. Le ricerche e gli elementi aperti di recente sono lì quando la casella è vuota.",
+      "- Anche per Polpo in chat (strumento `search`), da MCP (`polpo_search`), REST (`GET /api/v1/search`) e SDK (`useSearch`).",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Prova ⌘K", to: "/dashboard?search=" },
+  },
+  {
     id: "2026-11-24-whatsapp-business",
     date: "2026-11-24",
     kind: "new",

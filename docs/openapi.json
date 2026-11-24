@@ -228,6 +228,105 @@
           }
         ]
       },
+      "SearchResult": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "chat",
+              "room",
+              "agent",
+              "task",
+              "mission",
+              "schedule",
+              "playbook",
+              "approval",
+              "artifact",
+              "file",
+              "data",
+              "connector",
+              "skill",
+              "memory",
+              "brain",
+              "computer",
+              "app",
+              "channel",
+              "member",
+              "event"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "titleHighlights": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "description": "Matched [start, end) ranges in the title"
+          },
+          "subtitle": {
+            "type": "string"
+          },
+          "snippet": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "highlights": {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2
+                }
+              }
+            },
+            "required": [
+              "text",
+              "highlights"
+            ],
+            "description": "The matching passage (secrets masked) and its matched [start, end) ranges"
+          },
+          "url": {
+            "type": "string",
+            "description": "Dashboard route that opens the item"
+          },
+          "updatedAt": {
+            "type": "string"
+          },
+          "score": {
+            "type": "number"
+          },
+          "meta": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            },
+            "description": "Type details: agent, status, messageId, author, columns…"
+          }
+        },
+        "required": [
+          "type",
+          "id",
+          "title",
+          "url",
+          "score"
+        ]
+      },
       "MemberPreferences": {
         "type": "object",
         "properties": {
@@ -17268,6 +17367,224 @@
           },
           "404": {
             "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/search": {
+      "get": {
+        "tags": [
+          "Search"
+        ],
+        "summary": "Search everything",
+        "description": "Search chats (message text included), groups, agents, tasks, missions, schedules, playbooks, approvals, artifacts, files, data, connectors, skills, memory, the company brain, computers, apps, channels, members and recent events. Results are grouped by type; words match as prefixes, without diacritics, plurals folded, one typo forgiven in longer words. Vault values and tokens are never searched or shown.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Words to find"
+            },
+            "required": false,
+            "description": "Words to find",
+            "name": "q",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated types: chat, room, agent, task, mission, schedule, playbook, approval, artifact, file, data, connector, skill, memory, brain, computer, app, channel, member, event"
+            },
+            "required": false,
+            "description": "Comma-separated types: chat, room, agent, task, mission, schedule, playbook, approval, artifact, file, data, connector, skill, memory, brain, computer, app, channel, member, event",
+            "name": "types",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Results per page (default 40, max 100)"
+            },
+            "required": false,
+            "description": "Results per page (default 40, max 100)",
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Results per type when several types are searched (default 6)"
+            },
+            "required": false,
+            "description": "Results per type when several types are searched (default 6)",
+            "name": "perType",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "nextCursor of the previous page"
+            },
+            "required": false,
+            "description": "nextCursor of the previous page",
+            "name": "cursor",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Results grouped by type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "query": {
+                          "type": "string"
+                        },
+                        "took": {
+                          "type": "number"
+                        },
+                        "partial": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "chat",
+                              "room",
+                              "agent",
+                              "task",
+                              "mission",
+                              "schedule",
+                              "playbook",
+                              "approval",
+                              "artifact",
+                              "file",
+                              "data",
+                              "connector",
+                              "skill",
+                              "memory",
+                              "brain",
+                              "computer",
+                              "app",
+                              "channel",
+                              "member",
+                              "event"
+                            ]
+                          }
+                        },
+                        "groups": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": [
+                                  "chat",
+                                  "room",
+                                  "agent",
+                                  "task",
+                                  "mission",
+                                  "schedule",
+                                  "playbook",
+                                  "approval",
+                                  "artifact",
+                                  "file",
+                                  "data",
+                                  "connector",
+                                  "skill",
+                                  "memory",
+                                  "brain",
+                                  "computer",
+                                  "app",
+                                  "channel",
+                                  "member",
+                                  "event"
+                                ]
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "total": {
+                                "type": "number"
+                              },
+                              "items": {
+                                "type": "array",
+                                "items": {
+                                  "$ref": "#/components/schemas/SearchResult"
+                                }
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "label",
+                              "total",
+                              "items"
+                            ]
+                          }
+                        },
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/SearchResult"
+                          }
+                        },
+                        "nextCursor": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      },
+                      "required": [
+                        "query",
+                        "took",
+                        "partial",
+                        "groups",
+                        "items",
+                        "nextCursor"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown type",
             "content": {
               "application/json": {
                 "schema": {
