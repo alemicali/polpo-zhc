@@ -172,7 +172,7 @@ export const computersApi = {
   },
   /** An agent's default computer ("host" or "" for this server) and the computers it may use. */
   assign: (agent: string, defaultComputer: string, computers?: string[]) =>
-    request<unknown>(`/agents/${encodeURIComponent(agent)}`, json("PATCH", { defaultComputer: defaultComputer === "host" ? "" : defaultComputer, ...(computers ? { computers } : {}) })),
+    request<unknown>(`/agents/${encodeURIComponent(agent)}`, json("PATCH", { defaultComputer: defaultComputer === "host" ? "" : defaultComputer, ...(computers ? { computers } : {}), publish: false })),
 };
 
 // ── Presentation ──────────────────────────────────────────────────────────

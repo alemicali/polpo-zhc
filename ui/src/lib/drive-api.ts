@@ -87,7 +87,7 @@ const agentPath = (name: string) => `/drive/${encodeURIComponent(name)}`;
 export const driveApi = {
   get: (agent: string) => request<DriveData>(agentPath(agent)),
   save: (agent: string, drive: DriveSettings) =>
-    request<unknown>(`/agents/${encodeURIComponent(agent)}`, { method: "PATCH", body: JSON.stringify({ drive }) }),
+    request<unknown>(`/agents/${encodeURIComponent(agent)}`, { method: "PATCH", body: JSON.stringify({ drive, publish: false }) }),
   saveSelf: (agent: string, portrait: string) =>
     request<unknown>(`${agentPath(agent)}/self`, { method: "PUT", body: JSON.stringify({ portrait }) }),
   reflectNow: (agent: string) => request<{ entry: ReflectionEntry }>(`${agentPath(agent)}/reflect`, { method: "POST" }),

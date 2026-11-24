@@ -64,6 +64,8 @@ export interface OrchestratorContext {
   readonly sessionStore: SessionStore;
   readonly teamStore: TeamStore;
   readonly agentStore: AgentStore;
+  /** Agent versions (drafts, published versions, the production pointer): resolves pinned versions. */
+  readonly agentVersions?: import("./agent-versions.js").AgentVersioning;
   readonly hooks: HookRegistry;
   config: PolpoConfig;
   readonly workDir: string;

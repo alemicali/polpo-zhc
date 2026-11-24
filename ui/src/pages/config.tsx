@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { AgentVersioningSetting } from "@/components/config/agent-versioning-setting";
 import {
   Select,
   SelectContent,
@@ -1760,6 +1761,12 @@ export function ConfigPage() {
                 {settings.volatileCleanup && <Row label="Volatile Cleanup" value={settings.volatileCleanup} mono />}
               </div>
             </section>
+
+            {/* ── Agent versions ── */}
+            <AgentVersioningSetting
+              autoDeploy={(settings as { agents?: { versioning?: { autoDeployApiUpdates?: boolean } } }).agents?.versioning?.autoDeployApiUpdates !== false}
+              onSaved={() => void refetch()}
+            />
 
             {/* ── Retry Policy ── */}
             {settings.defaultRetryPolicy && (

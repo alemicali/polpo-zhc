@@ -141,6 +141,13 @@
       "when": 1795549293196,
       "tag": "0019_mission_owner",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1795554783915,
+      "tag": "0020_agent_versions",
+      "breakpoints": true
     }
   ]
 }

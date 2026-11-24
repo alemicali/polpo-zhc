@@ -39,6 +39,8 @@ export { useSkillFiles } from "./hooks/use-skill-files.js";
 export type { UseSkillFilesReturn } from "./hooks/use-skill-files.js";
 export { useSkillVersions } from "./hooks/use-skill-versions.js";
 export type { UseSkillVersionsReturn } from "./hooks/use-skill-versions.js";
+export { useAgentVersions, useAgentDeploys } from "./hooks/use-agent-versions.js";
+export type { UseAgentVersionsReturn, UseAgentDeploysReturn } from "./hooks/use-agent-versions.js";
 export { useSkillBundleUpload } from "./hooks/use-skill-bundle-upload.js";
 export { useArtifactUpload, ARTIFACT_UPLOAD_PART_BYTES } from "./hooks/use-artifact-upload.js";
 export type { UseArtifactUploadReturn } from "./hooks/use-artifact-upload.js";
@@ -246,6 +248,15 @@ export type {
   SkillVersionFiles,
   SkillFileDiff,
   SkillVersionDiff,
+  AgentVersionBump,
+  AgentFieldChange,
+  AgentVersion,
+  AgentVersionState,
+  AgentVersioningSummary,
+  AgentVersionList,
+  AgentVersionDiff,
+  AgentDeployEntry,
+  AgentPublishResult,
   SkillRestoreResult,
   NotificationChannelType,
   NotificationChannelConfig,

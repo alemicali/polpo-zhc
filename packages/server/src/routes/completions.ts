@@ -517,6 +517,8 @@ export interface CompletionRouteDeps {
   /** What a messaging channel can do, for turns that come from one (internal x-polpo-chat-origin). */
   channelTurnPrompt?: (origin: ConversationCheckTarget) => string | undefined;
   getAgents: () => Promise<any[]>;
+  /** The agent a chat uses: production's config, or a published version ("name@1.2.0" in `agent`). */
+  resolveAgent?: (name: string, ref?: string) => Promise<{ agent: any; version?: string } | undefined>;
   getConfig: () => any;
   getMemoryStore: () => any;
   getSessionStore: () => any;
@@ -682,6 +684,12 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
 
     // ── Parse body ──
     const body = c.req.valid("json") as z.infer<typeof completionRequestSchema>;
+    // "writer@1.2.0": chat with a published version instead of production's
+    let agentRef: string | undefined;
+    if (body.agent) {
+      const at = body.agent.lastIndexOf("@");
+      if (at > 0) { agentRef = body.agent.slice(at + 1) || undefined; body.agent = body.agent.slice(0, at); }
+    }
     const agentMode = !!body.agent;
 
     // Per-request tool-loop cap. Defaults to DEFAULT_MAX_TURNS; agent-direct
@@ -708,8 +716,16 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
 
     if (agentMode) {
       // ── Agent-direct mode ──
-      const agents = await deps.getAgents();
-      const agentConfig = agents.find((a: any) => a.name === body.agent);
+      let agentConfig: any;
+      if (deps.resolveAgent) {
+        try {
+          agentConfig = (await deps.resolveAgent(body.agent!, agentRef))?.agent;
+        } catch (err) {
+          return c.json({ error: { message: err instanceof Error ? err.message : String(err), type: "invalid_request_error", code: "agent_version_not_found" } }, 404);
+        }
+      } else {
+        agentConfig = (await deps.getAgents()).find((a: any) => a.name === body.agent);
+      }
       if (!agentConfig) {
         return c.json({ error: { message: `Agent "${body.agent}" not found`, type: "invalid_request_error", code: "agent_not_found" } }, 404);
       }

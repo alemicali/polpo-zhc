@@ -52,7 +52,10 @@ export const TaskToolScopeSchema = z.object({
 export const CreateTaskSchema = z.object({
   title: z.string().min(1),
   description: z.string().min(1),
+  /** The agent's name; "name@1.2.0" pins the task to that published version. */
   assignTo: z.string().min(1),
+  /** A published version of the agent to run (e.g. "1.2.0"); absent: the one deployed to production. */
+  agentVersion: z.string().regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/, "a version: major.minor.patch").optional(),
   /** Create task as draft (won't be picked up by orchestrator until moved to pending). Default: false. */
   draft: z.boolean().optional(),
   expectations: z.array(z.any()).optional(),
@@ -253,6 +256,13 @@ export const UpdateSettingsSchema = z.object({
   dependencyResults: z.object({
     perTaskChars: z.number().int().min(240).max(200_000).optional(),
     totalChars: z.number().int().min(480).max(1_000_000).optional(),
+  }).strict().nullable().optional(),
+  /** Agent configuration management: versioning (null removes it: defaults). */
+  agents: z.object({
+    versioning: z.object({
+      /** API/MCP updates without publish/deploy flags also publish and deploy to production (default true). */
+      autoDeployApiUpdates: z.boolean().optional(),
+    }).strict().optional(),
   }).strict().nullable().optional(),
   orchestratorModel: z.union([z.string(), ModelConfigSchema]).optional(),
   /** The orchestrator's display name (default "Polpo"); null or "" restores the default. */
@@ -639,6 +649,17 @@ export const UpdateAgentSchema = z.object({
   engine: AgentEngineSchema.nullable().optional(),
   emailAllowedDomains: z.array(z.string()).optional(),
   team: z.string().optional(),
+  // ── Versioning (see docs/agent-versions.mdx) ──
+  /** false: only the draft changes. true: the draft is also published as a new version. Absent: settings.agents.versioning.autoDeployApiUpdates decides (default: publish and deploy). */
+  publish: z.boolean().optional(),
+  /** true: publish and deploy the new version to production in the same call. */
+  deploy: z.boolean().optional(),
+  /** The semver bump of the published version (default: the suggested one). */
+  bump: z.enum(["major", "minor", "patch"]).optional(),
+  /** An explicit version number for the published version (above the latest), e.g. "2.0.0". */
+  version: z.string().regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/, "a version: major.minor.patch").optional(),
+  /** Release note of the published version (and the deploy). */
+  note: z.string().max(2000).optional(),
 });
 
 export const RenameTeamSchema = z.object({

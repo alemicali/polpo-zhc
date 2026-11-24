@@ -97,6 +97,12 @@ import type {
   SkillVersionList,
   SkillVersionFiles,
   SkillVersionDiff,
+  AgentVersion,
+  AgentVersionBump,
+  AgentVersionDiff,
+  AgentVersionList,
+  AgentDeployEntry,
+  AgentPublishResult,
   SkillRestoreResult,
   NotificationChannelConfig,
   NotificationRecord,
@@ -886,8 +892,9 @@ export class PolpoClient {
     return this.get<AgentConfig[]>("/agents");
   }
 
-  getAgent(name: string): Promise<AgentConfig> {
-    return this.get<AgentConfig>(`/agents/${encodeURIComponent(name)}`);
+  /** An agent as production runs it; view "draft": its draft (working copy), as the dashboard edits it. */
+  getAgent(name: string, opts: { view?: "production" | "draft" } = {}): Promise<AgentConfig> {
+    return this.get<AgentConfig>(`/agents/${encodeURIComponent(name)}${opts.view === "draft" ? "?view=draft" : ""}`);
   }
 
   addAgent(req: AddAgentRequest, teamName?: string): Promise<{ added: boolean }> {
@@ -901,6 +908,66 @@ export class PolpoClient {
 
   updateAgent(name: string, req: UpdateAgentRequest): Promise<AgentConfig> {
     return this.patch<AgentConfig>(`/agents/${encodeURIComponent(name)}`, req);
+  }
+
+  // ── Agent versions ──
+
+  /** An agent's published versions (newest first), production pointer and draft state. */
+  getAgentVersions(name: string): Promise<AgentVersionList> {
+    return this.get<AgentVersionList>(`/agents/${encodeURIComponent(name)}/versions`);
+  }
+
+  /** One version with its config: a semver, "production" or "draft". */
+  getAgentVersion(name: string, version: string): Promise<AgentVersion> {
+    return this.get<AgentVersion>(`/agents/${encodeURIComponent(name)}/versions/${encodeURIComponent(version)}`);
+  }
+
+  /** Diff two refs (a version, "production", "draft"); to defaults to the draft. */
+  diffAgentVersions(name: string, opts: { from?: string; to?: string } = {}): Promise<AgentVersionDiff> {
+    const q = new URLSearchParams();
+    if (opts.from) q.set("from", opts.from);
+    if (opts.to) q.set("to", opts.to);
+    const qs = q.toString();
+    return this.get<AgentVersionDiff>(`/agents/${encodeURIComponent(name)}/diff${qs ? `?${qs}` : ""}`);
+  }
+
+  /** Publish the draft as a new version (deploy: true also deploys it to production). */
+  publishAgent(name: string, req: { bump?: AgentVersionBump; version?: string; note?: string; deploy?: boolean } = {}): Promise<AgentPublishResult> {
+    return this.post<AgentPublishResult>(`/agents/${encodeURIComponent(name)}/publish`, req);
+  }
+
+  /** Move a stale draft onto what production runs now (after a rollback or deploy). */
+  rebaseAgentDraft(name: string): Promise<{ from?: string; to?: string; dropped: boolean }> {
+    return this.post<{ from?: string; to?: string; dropped: boolean }>(`/agents/${encodeURIComponent(name)}/draft/rebase`);
+  }
+
+  /** Throw away the draft's unpublished changes. */
+  discardAgentDraft(name: string): Promise<{ discarded: boolean }> {
+    return this.del<{ discarded: boolean }>(`/agents/${encodeURIComponent(name)}/draft`);
+  }
+
+  /** Deploy a published version to production. */
+  deployAgentVersion(name: string, version: string, note?: string): Promise<AgentDeployEntry> {
+    return this.post<AgentDeployEntry>(`/agents/${encodeURIComponent(name)}/deploy`, { version, ...(note ? { note } : {}) });
+  }
+
+  /** Roll production back to the previous deploy (or to a version). */
+  rollbackAgent(name: string, opts: { to?: string; note?: string } = {}): Promise<AgentDeployEntry> {
+    return this.post<AgentDeployEntry>(`/agents/${encodeURIComponent(name)}/rollback`, opts);
+  }
+
+  /** The deploy history, newest first (withDiff: each with its diff). */
+  getAgentDeploys(name: string, opts: { limit?: number; withDiff?: boolean } = {}): Promise<AgentDeployEntry[]> {
+    const q = new URLSearchParams();
+    if (opts.limit) q.set("limit", String(opts.limit));
+    if (opts.withDiff) q.set("diff", "true");
+    const qs = q.toString();
+    return this.get<AgentDeployEntry[]>(`/agents/${encodeURIComponent(name)}/deploys${qs ? `?${qs}` : ""}`);
+  }
+
+  /** One deploy with its diff. */
+  getAgentDeploy(name: string, id: string): Promise<AgentDeployEntry & { diff: AgentVersionDiff }> {
+    return this.get<AgentDeployEntry & { diff: AgentVersionDiff }>(`/agents/${encodeURIComponent(name)}/deploys/${encodeURIComponent(id)}`);
   }
 
   getTeams(): Promise<Team[]> {

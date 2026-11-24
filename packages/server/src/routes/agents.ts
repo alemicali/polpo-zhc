@@ -5,6 +5,8 @@ import { normalizeConnectorTools, unknownComputersProblem, type FileSystem } fro
 import { AddAgentSchema, UpdateAgentSchema, RenameTeamSchema, AddTeamSchema } from "../schemas.js";
 import { redactAgentConfig, redactTeam, sanitizeTranscriptEntry } from "../security.js";
 import { buildETag, contentFingerprint, handleConditional } from "../etag.js";
+import { registerAgentVersionRoutes, versionErrorResponse, type AgentVersionDeps } from "./agent-versions.js";
+import { AGENT_FIELD_CLASSIFICATION } from "@polpo-ai/core/agent-versions";
 
 interface IndexedRunLog {
   file: string;
@@ -84,8 +86,40 @@ export function agentRoutes(getDeps: () => {
   fs?: FileSystem;
   /** The instance's computer ids (settings.computers), to check agents' computers and defaultComputer. */
   computerIds?: () => string[];
+  /**
+   * Agent versioning (draft → publish → deploy). Absent: updates are written live as before.
+   */
+  versions?: AgentVersionDeps & {
+    /** Change the draft and, as asked, publish and deploy (see Orchestrator.updateAgentVersioned). */
+    update: (name: string, updates: any, opts: { actor: string; mode: "draft" | "publish" | "deploy"; bump?: "major" | "minor" | "patch"; version?: string; note?: string }) => Promise<{ agent: any; draftChanged: boolean; published?: any; deployed?: any }>;
+    /** settings.agents.versioning.autoDeployApiUpdates (default true). */
+    autoDeploy: () => boolean;
+  };
 }): OpenAPIHono {
   const app = new OpenAPIHono();
+
+  /** The update mode a PATCH asks for (publish / deploy flags, else the instance setting). */
+  const updateMode = (deps: { versions?: { autoDeploy: () => boolean } }, body: { publish?: boolean; deploy?: boolean }): "draft" | "publish" | "deploy" => {
+    if (body.deploy === true) return "deploy";
+    if (body.publish === true) return "publish";
+    if (body.publish === false) return "draft";
+    return deps.versions?.autoDeploy() === false ? "draft" : "deploy";
+  };
+
+  /** The versioning state shown with an agent (production version, latest, draft). */
+  const versionState = async (deps: { versions?: AgentVersionDeps }, agent: any) => {
+    if (!deps.versions || agent?.volatile) return undefined;
+    try {
+      const st = await deps.versions.versioning().state(agent.name);
+      return {
+        production: st.production, latest: st.latest, pointers: st.pointers, versions: st.versions,
+        draft: { exists: st.draft.exists, hasChanges: st.draft.hasChanges, changedFields: st.draft.changes.map((c) => c.field),
+          ...(st.draft.baseVersion ? { baseVersion: st.draft.baseVersion } : {}), stale: st.draft.stale, ...(st.draft.warning ? { warning: st.draft.warning } : {}),
+          ...(st.draft.updatedAt ? { updatedAt: st.draft.updatedAt, updatedBy: st.draft.updatedBy } : {}),
+          ...(st.draft.suggestedBump ? { suggestedBump: st.draft.suggestedBump, nextVersion: st.draft.nextVersion } : {}) },
+      };
+    } catch { return undefined; }
+  };
 
   /** An error for computers/defaultComputer naming a computer the instance does not have, else null. */
   const badComputers = (deps: { computerIds?: () => string[] }, body: { computers?: string[]; defaultComputer?: string }): string | null => {
@@ -462,6 +496,9 @@ export function agentRoutes(getDeps: () => {
     return c.json({ ok: true, data: entries });
   });
 
+  // /agents/:name/versions, /diff, /draft, /publish, /deploy, /rollback, /deploys (after the static routes)
+  registerAgentVersionRoutes(app, () => getDeps());
+
   // PATCH /agents/:name — update agent (registered after static routes to avoid conflicts with /team)
   const updateAgentRoute = createRoute({
     method: "patch",
@@ -497,6 +534,10 @@ export function agentRoutes(getDeps: () => {
     }
 
     const body = c.req.valid("json");
+    // identity changes merge into the draft's identity when the update goes to the draft
+    const identityBase = deps.versions && !existing.volatile && body.identity
+      ? ((await deps.versions.versioning().draftConfig(name).catch(() => undefined))?.config.identity ?? existing.identity)
+      : existing.identity;
     const computersError = badComputers(deps, { computers: body.computers ?? undefined, defaultComputer: body.defaultComputer || undefined });
     if (computersError) return c.json({ ok: false, error: computersError, code: "VALIDATION_ERROR" }, 400);
 
@@ -537,19 +578,34 @@ export function agentRoutes(getDeps: () => {
       // "polpo" or null: back to Polpo's own engine
       ...(body.engine !== undefined && { engine: body.engine && body.engine !== "polpo" ? body.engine : undefined }),
       ...(body.emailAllowedDomains !== undefined && { emailAllowedDomains: body.emailAllowedDomains }),
-      ...(body.identity && { identity: { ...(existing.identity ?? {}), ...body.identity } }),
+      ...(body.identity && { identity: { ...(identityBase ?? {}), ...body.identity } }),
       ...(body.team !== undefined && { team: body.team }),
     };
 
+    let versioning: Record<string, unknown> | undefined;
     try {
-      await deps.updateAgent(name, updates);
+      if (deps.versions && !existing.volatile) {
+        // draft → (publish) → (deploy): the flags, else settings.agents.versioning.autoDeployApiUpdates
+        const mode = updateMode(deps, body);
+        const result = await deps.versions.update(name, updates, {
+          actor: deps.versions.actor(c), mode,
+          ...(body.bump ? { bump: body.bump } : {}), ...(body.version ? { version: body.version } : {}), ...(body.note ? { note: body.note } : {}),
+        });
+        versioning = {
+          mode, draftChanged: result.draftChanged,
+          ...(result.published ? { published: { version: result.published.version, bump: result.published.bump, changedFields: result.published.changes.map((ch: { field: string }) => ch.field) } } : {}),
+          ...(result.deployed ? { deployed: result.deployed } : {}),
+        };
+      } else {
+        await deps.updateAgent(name, updates);
+      }
     } catch (err) {
-      if ((err as Error)?.name === "HarnessConfigError") return c.json({ ok: false, error: (err as Error).message, code: "VALIDATION_ERROR" }, 400);
-      throw err;
+      return versionErrorResponse(c, err);
     }
 
     const updated = (await deps.getAgents()).find(a => a.name === name);
-    return c.json({ ok: true, data: updated ? redactAgentConfig(updated) : null }, 200);
+    const state = updated ? await versionState(deps, updated) : undefined;
+    return c.json({ ok: true, data: updated ? { ...redactAgentConfig(updated), ...(state ? { versioning: { ...state, ...versioning } } : {}) } : null }, 200);
   });
 
   // GET /agents/:name — single agent detail (registered after static routes to avoid conflicts)
@@ -558,8 +614,10 @@ export function agentRoutes(getDeps: () => {
     path: "/{name}",
     tags: ["Agents"],
     summary: "Get agent",
+    description: "The agent as production runs it, with `versioning` (production version, latest, draft state). `view=draft`: its draft (working copy) instead, as the dashboard edits it.",
     request: {
       params: z.object({ name: z.string() }),
+      query: z.object({ view: z.enum(["production", "draft"]).optional() }),
     },
     responses: {
       200: {
@@ -576,11 +634,20 @@ export function agentRoutes(getDeps: () => {
   app.openapi(getAgentRoute, async (c) => {
     const deps = getDeps();
     const { name } = c.req.valid("param");
-    const agent = (await deps.getAgents()).find(a => a.name === name);
+    const { view } = c.req.valid("query");
+    let agent = (await deps.getAgents()).find(a => a.name === name);
     if (!agent) {
       return c.json({ ok: false, error: "Agent not found", code: "NOT_FOUND" }, 404);
     }
-    return c.json({ ok: true, data: redactAgentConfig(agent) }, 200);
+    // the production config (or the draft's), with its version, the pointers and the draft's state
+    const versioning = await versionState(deps, agent);
+    if (view === "draft" && versioning && deps.versions) {
+      const { config } = await deps.versions.versioning().draftConfig(name);
+      // the draft's versioned fields over the agent's own (name, createdAt, mission fields)
+      const own = Object.fromEntries(Object.entries(agent).filter(([k]) => AGENT_FIELD_CLASSIFICATION[k as keyof typeof AGENT_FIELD_CLASSIFICATION] !== "versioned"));
+      agent = { ...own, ...config, name };
+    }
+    return c.json({ ok: true, data: { ...redactAgentConfig(agent), ...(versioning ? { versioning: { ...versioning, ...(view === "draft" ? { view: "draft" } : {}) } } : {}) } }, 200);
   });
 
   // ── POST /agents/:name/avatar — upload agent avatar ──
@@ -620,9 +687,13 @@ export function agentRoutes(getDeps: () => {
     if (!fs.writeFileBuffer) return c.json({ ok: false, error: "This filesystem cannot store binary files" }, 501);
     await fs.writeFileBuffer(avatarPath, bytes);
 
-    // Update agent identity with avatar path
+    // Update agent identity with avatar path (a versioned change: the same rules as PATCH)
     const identity = { ...(agent.identity ?? {}), avatar: relativePath };
-    await deps.updateAgent(name, { identity });
+    if (deps.versions && !agent.volatile) {
+      await deps.versions.update(name, { identity }, { actor: deps.versions.actor(c), mode: updateMode(deps, {}), note: "Avatar changed" });
+    } else {
+      await deps.updateAgent(name, { identity });
+    }
 
     return c.json({ ok: true, data: { avatar: relativePath } }, 200);
   });
@@ -636,7 +707,11 @@ export function agentRoutes(getDeps: () => {
 
     if (agent.identity?.avatar) {
       const identity = { ...agent.identity, avatar: undefined };
-      await deps.updateAgent(name, { identity });
+      if (deps.versions && !agent.volatile) {
+        await deps.versions.update(name, { identity }, { actor: deps.versions.actor(c), mode: updateMode(deps, {}), note: "Avatar removed" });
+      } else {
+        await deps.updateAgent(name, { identity });
+      }
     }
 
     return c.json({ ok: true }, 200);

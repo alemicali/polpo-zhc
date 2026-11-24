@@ -16,6 +16,8 @@ The global search (⌘K in the dashboard, `GET /api/v1/search`, `polpo_search`) 
 
 The official WhatsApp Business channel (Meta Cloud API: setup, the 24-hour window, templates, approvals, the Funnel command, retention) is documented in [whatsapp-business.md](whatsapp-business.md).
 
+Agent versions — drafts, semver versions, deploying to production, rollback, the deploy history with diffs, pinning a task or chat to a version (`writer@1.2.0`) and the API compatibility setting — are documented in [agent-versions.md](agent-versions.md).
+
 Agent harnesses (Claude Code and Codex as an agent's engine, inside its computer) are documented in [harnesses.md](harnesses.md).
 
 Skills — the Agent Skills format, uploading `.skill` / `.zip` bundles (validation, limits, conflicts), browsing a skill's files, and how agents read bundled references and run scripts — are documented in [skills.md](skills.md).

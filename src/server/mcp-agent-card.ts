@@ -73,6 +73,9 @@ export interface AgentCard {
     engine?: { id: string; /** "Polpo", "Claude Code Harness", "Codex CLI". */ label: string; kind?: string; mark: BrandMark; model?: string; modelLabel?: string };
     /** The computer its chats and tasks run on (defaultComputer): "this server" or its id. */
     computer?: string;
+    /** The published version production runs (agent versions), and whether its draft has unpublished changes. */
+    version?: string;
+    draftChanges?: boolean;
     /** Its colour: the look's agent colour 1…10 (identity.color, else from its name), for the avatar. */
     color: number;
   };
@@ -108,6 +111,8 @@ export interface AgentCardInput {
     engine?: unknown;
     defaultComputer?: string;
     connectorTools?: Record<string, "*" | string[]>;
+    /** GET /agents/{name}: production version and draft state. */
+    versioning?: { production?: string; draft?: { hasChanges?: boolean } };
   };
   tasks: Array<{
     id: string; title: string; status: string; assignTo?: string; updatedAt?: string; createdAt?: string;
@@ -238,6 +243,8 @@ export function buildAgentCard(input: AgentCardInput): AgentCard {
       ...(timezone ? { timezone } : {}),
       engine: engineOf(agent),
       ...(agent.defaultComputer ? { computer: computerLabel({ id: agent.defaultComputer, kind: agent.defaultComputer === "host" ? "host" : "computer" }) } : {}),
+      ...(agent.versioning?.production ? { version: agent.versioning.production } : {}),
+      ...(agent.versioning?.draft?.hasChanges ? { draftChanges: true } : {}),
       color: agentColorIndex(agent.name, agent.identity?.color),
     },
     status: waitingTasks + proposals > 0 ? "waiting" : active ? "working" : "idle",
@@ -275,6 +282,7 @@ export function agentCardText(card: AgentCard): string {
   const lines = [`${name}${card.agent.role ? ` — ${card.agent.role}` : ""}: ${card.status === "working" ? "working" : card.status === "waiting" ? "waiting for a person" : "idle"}.`];
   // the model it runs, then its engine and type: "Model: Sonnet 4.5 (Claude Code · Harness) on gpu-box."
   if (card.agent.engine) lines.push(`Model: ${modelWithEngineText(card.agent.engine.modelLabel, card.agent.engine.id, "default")}${card.agent.computer ? ` on ${card.agent.computer}` : ""}.`);
+  if (card.agent.version) lines.push(`Version ${card.agent.version} in production${card.agent.draftChanges ? " (its draft has unpublished changes)" : ""}.`);
   if (card.current) {
     const run = card.current.run;
     lines.push(`${card.current.active ? "Working on" : "Last finished"}: ${card.current.title} [${card.current.status}] (${card.current.id})`

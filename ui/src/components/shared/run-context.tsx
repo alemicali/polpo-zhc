@@ -123,6 +123,11 @@ function RunDetail({ run, computer }: { run: TaskRunContext; computer?: Computer
         <span className="inline-flex min-w-0 font-medium" data-testid="run-engine">
           <EngineMark engine={runEngineInfo(run).engine} model={run.model} size={18} />
         </span>
+        {run.agentVersion && (
+          <Badge variant="outline" className="font-mono text-micro font-normal" title={`${run.agent ?? "The agent"} at version ${run.agentVersion}`} data-testid="run-agent-version">
+            {run.agent ? `${run.agent}@` : "v"}{run.agentVersion}
+          </Badge>
+        )}
         {run.auth && (
           <span className="inline-flex items-center gap-1 text-muted-foreground" data-testid="run-auth"
             title={`${AUTH_LABELS[run.auth.kind] ?? run.auth.kind}${run.auth.provider && run.auth.kind === "api-key" ? ` · ${run.auth.provider}` : ""}${run.auth.region ? ` · ${run.auth.region}` : ""}`}>
@@ -309,6 +314,7 @@ export function RunContextCard({ runs, cost: given, computers, className }: { ru
                     <span className="w-5 shrink-0 tabular-nums text-muted-foreground">{i + 1}</span>
                     <span className="hidden w-28 shrink-0 tabular-nums text-muted-foreground sm:inline" data-testid="run-history-time">{shortTime(r.startedAt)}</span>
                     <RunModelWithEngine run={r} pretty compact size={12} className="min-w-0" testId="run-history-model" />
+                    {r.agentVersion && <span className="shrink-0 font-mono text-muted-foreground" data-testid="run-history-agent-version">v{r.agentVersion}</span>}
                     <BrandIcon name={computerBrand(r.computer)} size={12} />
                     <span className="truncate text-muted-foreground">{r.computer.name ?? r.computer.id}</span>
                     {r.continuation && <span className="text-muted-foreground">continuation</span>}

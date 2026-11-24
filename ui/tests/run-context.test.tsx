@@ -99,6 +99,13 @@ test("a run on Polpo's engine on this server: the model, direct egress, the mode
   expect(q('[data-brand="claude-code"]')).toBeNull();
 });
 
+test("the agent version the run used, next to the model and engine", async () => {
+  await render(<RunContextCard runs={[{ ...nativeRun, agent: "writer", agentVersion: "1.2.0" }]} />);
+  expect(q('[data-testid="run-agent-version"]')!.textContent).toBe("writer@1.2.0");
+  await render(<RunContextCard runs={[nativeRun]} />);
+  expect(q('[data-testid="run-agent-version"]')).toBeNull();
+});
+
 test("no runs: no card", async () => {
   await render(<RunContextCard runs={undefined} />);
   expect(q('[data-testid="run-context-card"]')).toBeNull();

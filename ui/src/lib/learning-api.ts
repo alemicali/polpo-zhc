@@ -43,7 +43,7 @@ const agentPath = (name: string) => `/learning/${encodeURIComponent(name)}`;
 export const learningApi = {
   get: (agent: string) => request<{ learning: LearningSettings; changes: LearningChange[] }>(agentPath(agent)),
   save: (agent: string, learning: LearningSettings) =>
-    request<unknown>(`/agents/${encodeURIComponent(agent)}`, { method: "PATCH", body: JSON.stringify({ learning }) }),
+    request<unknown>(`/agents/${encodeURIComponent(agent)}`, { method: "PATCH", body: JSON.stringify({ learning, publish: false }) }),
   reviewNow: (agent: string) => request<{ changes: LearningChange[] }>(`${agentPath(agent)}/review`, { method: "POST" }),
   revert: (agent: string, id: string) =>
     request<{ change: LearningChange }>(`${agentPath(agent)}/changes/${encodeURIComponent(id)}/revert`, { method: "POST" }),

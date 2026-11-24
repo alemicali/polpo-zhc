@@ -13,6 +13,7 @@ export { DrizzleDelayStore } from "./delay-store.js";
 export { DrizzleConfigStore } from "./config-store.js";
 export { DrizzleTeamStore } from "./team-store.js";
 export { DrizzleAgentStore } from "./agent-store.js";
+export { DrizzleAgentVersionStore } from "./agent-version-store.js";
 export { DrizzleVaultStore } from "./vault-store.js";
 export { DrizzlePlaybookStore } from "./playbook-store.js";
 export { DrizzleAttachmentStore } from "./attachment-store.js";

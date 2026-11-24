@@ -9,11 +9,10 @@ export interface UseAgentReturn {
   refetch: () => Promise<void>;
 }
 
-/**
- * Fetch a single agent by name from the `/agents/:name` endpoint.
- */
-export function useAgent(name: string): UseAgentReturn {
+/** An agent as production runs it; `view: "draft"`: its draft (working copy) with the versioning state. */
+export function useAgent(name: string, opts: { view?: "production" | "draft" } = {}): UseAgentReturn {
   const { client } = usePolpoContext();
+  const view = opts.view;
   const [agent, setAgent] = useState<AgentConfig | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
@@ -21,13 +20,13 @@ export function useAgent(name: string): UseAgentReturn {
   const fetchAgent = useCallback(async () => {
     try {
       setError(null);
-      const data = await client.getAgent(name);
+      const data = await client.getAgent(name, view ? { view } : {});
       setAgent(data);
     } catch (err) {
       setError(err as Error);
       setAgent(null);
     }
-  }, [client, name]);
+  }, [client, name, view]);
 
   useEffect(() => {
     setIsLoading(true);

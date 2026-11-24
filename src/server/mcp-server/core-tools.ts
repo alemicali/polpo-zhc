@@ -33,14 +33,17 @@ async function loadAgentCard(deps: McpDeps, name: string): Promise<{ ok: true; c
   const list = (agents.data as AgentCardAgent[]) ?? [];
   const agent = list.find((a) => a.name === name) ?? list.find((a) => a.name.toLowerCase() === name.toLowerCase() || a.identity?.displayName?.toLowerCase() === name.toLowerCase());
   if (!agent) return { ok: false, error: `No agent "${name}". Agents: ${list.map((a) => a.name).join(", ") || "none"}` };
-  const [tasks, drive, connectors, appearance] = await Promise.all([
+  const [tasks, drive, connectors, appearance, detail] = await Promise.all([
     deps.api("GET", "/api/v1/tasks").then(unwrap),
     deps.api("GET", `/api/v1/drive/${enc(agent.name)}`).then(unwrap),
     deps.api("GET", "/api/v1/connectors").then(unwrap),
     cardAppearance(deps),
+    // its production version and draft state (agent versions)
+    deps.api("GET", `/api/v1/agents/${enc(agent.name)}`).then(unwrap),
   ]);
+  const versioning = detail.ok ? (detail.data as { versioning?: AgentCardAgent["versioning"] })?.versioning : undefined;
   const card = buildAgentCard({
-    agent,
+    agent: versioning ? { ...agent, versioning } : agent,
     tasks: tasks.ok ? (tasks.data as Parameters<typeof buildAgentCard>[0]["tasks"]) ?? [] : [],
     ...(drive.ok ? { drive: drive.data as Parameters<typeof buildAgentCard>[0]["drive"] } : {}),
     ...(connectors.ok ? { connectors: (connectors.data as { connectors?: Parameters<typeof buildAgentCard>[0]["connectors"] })?.connectors ?? [] } : {}),
