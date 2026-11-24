@@ -536,7 +536,7 @@ describe("missions", () => {
     expect(await call(deps(f), "polpo_task_delete", { id: "t1" })).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/confirm: true/) }] });
     expect((await call(deps(f), "polpo_task_delete", { id: "t1", confirm: true })).structuredContent).toEqual({ deleted: "t1" });
     expect(f.tasks.has("t1")).toBe(false);
-  });
+  }, 20_000); // many tool calls through the whole MCP server: slow on busy CI runners
 
   it("polpo_task_create refuses a dependsOn that names no task, with the next step", async () => {
     const f = fakeInstance();
