@@ -1,5 +1,4 @@
 import { Link, useLocation } from "react-router-dom";
-import { ChatAttachments } from "@/components/chat-attachments";
 import {
   Fragment,
   lazy,
@@ -116,22 +115,20 @@ import {
 import type { PromptInputMessage } from "@/components/ai-elements/prompt-input";
 import { useChatState, useChatActions, useChatInputDisabled } from "@/hooks/chat-context";
 import { setChatPageSessionsOpen, useChatPageSessionsOpen } from "@/hooks/chat-context";
-import { WidgetCard, WidgetPendingCard } from "@/components/widget-card";
-import { ArtifactChatCard } from "@/components/artifacts/artifact-chat-card";
-import { ArtifactGeneration } from "@/components/artifacts/artifact-generation";
 import { budgetText } from "@/lib/mission-preview";
-import { artifactIdOf } from "@/lib/artifacts-api";
 import { WhatsAppPreviewCard, EmailPreviewCard } from "@/components/send-preview-card";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
-import type { AskUserQuestion, AskUserAnswer, MessageSegment, ToolCallInfo, MissionPreviewData, MissionPreviewAction, VaultPreviewData, VaultPreviewAction, SetDesignData, WidgetRenderData } from "@/hooks/use-polpo";
+import type { AskUserQuestion, AskUserAnswer, MessageSegment, MissionPreviewData, MissionPreviewAction, VaultPreviewData, VaultPreviewAction, SetDesignData } from "@/hooks/use-polpo";
 import { FilePreviewDialog } from "@/components/shared/file-preview";
 import { useFilePreview } from "@/components/shared/use-file-preview";
 import { mimeFromPath } from "@/components/shared/file-preview-utils";
-import { CollapsibleUserMessage } from "@/components/shared/collapsible-user-message";
-import { ToolCallList, ToolInvocation, ToolCallGroup } from "@/components/ai-elements/tool";
+import { AssistantSegments, ChatAssistantAvatar, ChatUserBubble } from "@/components/chat/chat-message-parts";
+import { chatTimeAgo } from "@/lib/chat-time";
+import { CHAT_COMPOSER_CLASS } from "@/lib/chat-composer";
+import { ToolCallList } from "@/components/ai-elements/tool";
 import { ChatSandboxContext, type ChatSandboxInfo } from "@/components/sandbox/sandbox-context";
 import { sandboxApi } from "@/lib/sandbox-api";
-import { MentionPopover, MentionText, type MentionPopoverHandle, type MentionFile, type MentionTrigger } from "@/components/ai-elements/mention-popover";
+import { MentionPopover, type MentionPopoverHandle, type MentionFile, type MentionTrigger } from "@/components/ai-elements/mention-popover";
 import { Queue, PendingSteers } from "@/components/ai-elements/queue";
 import { BackgroundWaits } from "@/components/ai-elements/background-waits";
 import { useChatQueue, migrateNewSessionQueue, NEW_SESSION_QUEUE_KEY } from "@/hooks/use-chat-queue";
@@ -146,7 +143,6 @@ import { useOrchestratorName } from "@/lib/orchestrator-name";
 import { useChatFirstSessionsOpen, setChatFirstSessionsOpen, useLayoutMode } from "@/hooks/use-layout-mode";
 import { useSidebarStyle } from "@/hooks/use-sidebar-style";
 import { toast } from "sonner";
-import { formatDistanceToNow } from "date-fns";
 import { kit, useAppearance, type AppearanceSettings, type AppearanceThemeSettings } from "@/lib/appearance";
 import {
   clearAppPreviewContext,
@@ -178,12 +174,6 @@ const MissionPreviewDialog = lazy(() =>
   import("@/components/mission-preview-dialog").then((module) => ({ default: module.MissionPreviewDialog })),
 );
 
-/** Like formatDistanceToNow but returns "just now" for < 30 s */
-function chatTimeAgo(date: Date): string {
-  const diffMs = Date.now() - date.getTime();
-  if (diffMs < 30_000) return "just now";
-  return formatDistanceToNow(date, { addSuffix: true });
-}
 
 // ── Per-session UI-state caches (browser-tab semantics) ────────────────
 //
@@ -2721,12 +2711,7 @@ function ChatMessages() {
                 <div className="mx-auto max-w-3xl">
                   <div className="flex justify-end">
                     <div className="max-w-[85%]">
-                      <div className="rounded-2xl rounded-br-sm bg-primary text-primary-foreground px-4 py-2.5">
-                        <ChatAttachments attachments={msg.attachments} />
-                        <CollapsibleUserMessage key={msg.id} text={msg.content}>
-                          <MentionText text={msg.content} variant="inverted" />
-                        </CollapsibleUserMessage>
-                      </div>
+                      <ChatUserBubble key={msg.id} text={msg.content} attachments={msg.attachments} />
                       <div className="flex items-center justify-end gap-1.5 mt-1">
                         {msg.ts && (
                           <span className="text-micro text-muted-foreground">
@@ -2776,15 +2761,7 @@ function ChatMessages() {
                 <div className="mx-auto max-w-3xl">
                   <Message from="assistant">
                     <div className="flex gap-3">
-                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-pill bg-primary/10 mt-0.5 text-sm">
-                        {assistantAvatar ? (
-                          <AgentAvatar avatar={assistantAvatar} name={assistantName} size="sm" />
-                        ) : currentAgent ? (
-                          <AgentAvatar name={assistantName} size="sm" />
-                        ) : (
-                          <>🐙</>
-                        )}
-                      </div>
+                      <ChatAssistantAvatar avatar={assistantAvatar} name={assistantName} isAgent={!!currentAgent} />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
                           <p className="text-xs font-semibold">{assistantName}</p>
@@ -2796,119 +2773,7 @@ function ChatMessages() {
                         </div>
                         {/* Render segments chronologically, grouping consecutive tools and reasoning chunks */}
                         {msg.segments && msg.segments.length > 0 ? (
-                          (() => {
-                            // Mappa N-esimo render_widget segment → N-esimo
-                            // widget in msg.widgets. Garantisce che il widget
-                            // (sia preview live, sia finale) appaia nello
-                            // stesso punto cronologico del flusso, NON in
-                            // fondo al messaggio.
-                            const groups: Array<
-                              | { type: "text"; content: string }
-                              | { type: "thinking"; content: string }
-                              | { type: "tools"; tools: ToolCallInfo[] }
-                              | { type: "widget"; widget: WidgetRenderData; key: string }
-                              | { type: "widget-pending"; tool: ToolCallInfo }
-                              | { type: "artifact"; artifactId: string; updated: boolean; key: string }
-                              | { type: "artifact-pending"; tool: ToolCallInfo }
-                            > = [];
-                            const widgetsArr = msg.widgets ?? [];
-                            let widgetCounter = 0;
-                            for (const seg of msg.segments as MessageSegment[]) {
-                              if (seg.type === "text") {
-                                groups.push({ type: "text", content: seg.content });
-                              } else if (seg.type === "thinking") {
-                                const last = groups[groups.length - 1];
-                                if (last && last.type === "thinking") {
-                                  last.content += seg.content;
-                                } else {
-                                  groups.push({ type: "thinking", content: seg.content });
-                                }
-                              } else if (seg.type === "tool") {
-                                // an artifact made or changed here: a card that opens it beside the chat
-                                const madeArtifact = (seg.tool.name === "artifact_create" || seg.tool.name === "artifact_update") && seg.tool.state === "completed"
-                                  ? artifactIdOf(seg.tool.result) : undefined;
-                                if (madeArtifact) {
-                                  groups.push({ type: "artifact", artifactId: madeArtifact, updated: seg.tool.name === "artifact_update", key: seg.tool.id });
-                                } else if ((seg.tool.name === "artifact_create" || seg.tool.name === "artifact_update") &&
-                                  (seg.tool.state === "preparing" || seg.tool.state === "calling")) {
-                                  if (isStreaming) groups.push({ type: "artifact-pending", tool: seg.tool });
-                                  else groups.push({ type: "tools", tools: [{ ...seg.tool, state: "interrupted" }] });
-                                } else if (seg.tool.name === "render_widget") {
-                                  // Inline widget: trova il widget corrispondente
-                                  // in widgets[] (per-occorrenza) e renderizzalo
-                                  // qui, NON in fondo al messaggio. Se non c'è
-                                  // ancora un widget (caso "preparing" senza
-                                  // ancora abbastanza html), mostra un placeholder
-                                  // pending — sennò la struttura del messaggio
-                                  // "salta" quando arriva il primo batch.
-                                  const w = widgetsArr[widgetCounter];
-                                  if (w) {
-                                    groups.push({ type: "widget", widget: w, key: seg.tool.id });
-                                  } else if (seg.tool.state === "error") {
-                                    // Errore di validation backend → mostra la tool
-                                    // card normale per dare feedback (con il messaggio
-                                    // di errore visibile).
-                                    const last = groups[groups.length - 1];
-                                    if (last && last.type === "tools") last.tools.push(seg.tool);
-                                    else groups.push({ type: "tools", tools: [seg.tool] });
-                                  } else {
-                                    groups.push({ type: "widget-pending", tool: seg.tool });
-                                  }
-                                  widgetCounter += 1;
-                                } else {
-                                  const last = groups[groups.length - 1];
-                                  if (last && last.type === "tools") last.tools.push(seg.tool);
-                                  else groups.push({ type: "tools", tools: [seg.tool] });
-                                }
-                              }
-                            }
-                            return groups.map((g, gi) => {
-                              if (g.type === "text") {
-                                return (
-                                  <MessageContent key={`g-${gi}`}>
-                                    <MessageResponse mode={isStreaming ? "streaming" : "static"}>{g.content}</MessageResponse>
-                                  </MessageContent>
-                                );
-                              }
-                              if (g.type === "thinking") {
-                                return (
-                                  <Reasoning key={`r-${gi}`} isStreaming={isStreaming}>
-                                    <ReasoningTrigger />
-                                    <ReasoningContent>{g.content}</ReasoningContent>
-                                  </Reasoning>
-                                );
-                              }
-                              if (g.type === "widget") {
-                                return <WidgetCard key={`w-${g.key}`} widget={g.widget} />;
-                              }
-                              if (g.type === "artifact") {
-                                return <ArtifactChatCard key={`a-${g.key}`} artifactId={g.artifactId} updated={g.updated} />;
-                              }
-                              if (g.type === "artifact-pending") {
-                                return <ArtifactGeneration key={`a-${g.tool.id}`} tool={g.tool} />;
-                              }
-                              if (g.type === "widget-pending") {
-                                // Loader skeleton dedicato — il modello
-                                // sta scrivendo gli args del render_widget
-                                // ma il campo `html` non è ancora arrivato
-                                // (es. emette title/chrome prima). Niente
-                                // iframe, niente FOUC: un placeholder
-                                // statico finché il primo chunk html
-                                // parziale arriva e swappa al WidgetCard.
-                                return (
-                                  <WidgetPendingCard
-                                    key={`wp-${g.tool.id}`}
-                                    argsBytes={g.tool.argumentsText?.length}
-                                  />
-                                );
-                              }
-                              return g.tools.length === 1 ? (
-                                <ToolInvocation key={g.tools[0].id} tool={g.tools[0]} />
-                              ) : (
-                                <ToolCallGroup key={`tg-${gi}`} tools={g.tools} />
-                              );
-                            });
-                          })()
+                          <AssistantSegments segments={msg.segments as MessageSegment[]} widgets={msg.widgets} isStreaming={isStreaming} />
                         ) : (
                           <>
                             {msg.thinkingText && (
@@ -3638,7 +3503,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
             maxFiles={5}
             maxFileSize={15 * 1024 * 1024}
             onError={(err) => toast.error(err.message)}
-            className="[&_[data-slot=input-group]]:rounded-2xl [&_[data-slot=input-group]]:focus-within:ring-0 [&_[data-slot=input-group]]:focus-within:border-input"
+            className={CHAT_COMPOSER_CLASS}
           >
             <AttachmentPreview onCount={setAttachmentCount} />
             <PromptInputTextarea
