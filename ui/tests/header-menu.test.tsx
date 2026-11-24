@@ -82,10 +82,11 @@ function openMenu(trigger: HTMLElement) {
 }
 
 describe("the header", () => {
-  test("only the look and ⋯ on the right: no loose GitHub, Ink Hub, install QR, What's new or log-out icons", () => {
+  test("only ⋯ on the right: no loose theme, layout, GitHub, Ink Hub, install QR, What's new or log-out icons", () => {
     wrap(<Header />);
     const header = screen.getByRole("banner");
-    expect(within(header).getByRole("button", { name: "Theme" })).toBeTruthy();
+    expect(within(header).queryByRole("button", { name: "Theme" })).toBeNull();
+    expect(within(header).queryByRole("button", { name: /chat-first layout/ })).toBeNull();
     expect(within(header).getByRole("button", { name: "More" })).toBeTruthy();
     expect(within(header).queryByRole("link", { name: /GitHub/ })).toBeNull();
     expect(within(header).queryByRole("link", { name: /Ink Hub/ })).toBeNull();
@@ -110,6 +111,9 @@ describe("the header", () => {
     expect(items.slice(0, 3)).toEqual(["Install app", "Polpo Ink Hub", "GitHub"]);
     expect(items).toContain("Classic");
     expect(items).toContain("Drill-in (new)");
+    expect(items).toContain("Sidebar");
+    expect(items).toContain("Chat-first");
+    expect(within(menu).getByRole("menuitem", { name: /Theme/ })).toBeTruthy();
     expect(within(menu).getByRole("menuitem", { name: "GitHub" }).getAttribute("href")).toBe(GITHUB_URL);
     expect(within(menu).getByRole("menuitem", { name: "Polpo Ink Hub" }).getAttribute("target")).toBe("_blank");
     await waitFor(() => expect(within(screen.getByRole("menu")).getByRole("menuitem", { name: "Log out" })).toBeTruthy());

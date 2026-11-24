@@ -48,6 +48,15 @@ export const CHANGELOG: ChangelogEntry[] = [
     cta: { label: "Apri Impostazioni → Harness", to: "/config?section=harnesses" },
   },
   {
+    id: "2026-11-24-more-menu-theme-layout",
+    date: "2026-11-24",
+    kind: "improved",
+    title: "Tema e layout nel menu ⋯",
+    summary: "In alto a destra resta solo il menu ⋯: dentro ci sono anche il tema (chiaro, scuro, sistema e palette) e il cambio di layout tra barra laterale e chat-first.",
+    body: "- **Tema**: un sottomenu con modalità e palette.\n- **Layout**: Sidebar o Chat-first, con la spunta su quello attivo.\n- Restano nel menu anche Installa app, Ink Hub, GitHub, lo stile della barra laterale ed Esci.",
+    highlight: false,
+  },
+  {
     id: "2026-11-24-cli-engine",
     date: "2026-11-24",
     kind: "new",
