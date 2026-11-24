@@ -281,12 +281,14 @@ export type { VaultRef } from "./vault-ref.js";
 
 // Artifacts: documents, dashboards, designs, diagrams
 export {
-  ARTIFACT_TYPES, ARTIFACT_KINDS, MAX_ARTIFACT_BYTES, MAX_ARTIFACT_VERSIONS,
-  isArtifactType, artifactContentProblem, summarizeArtifact, matchesArtifactFilter,
-  applyArtifactPatch, buildArtifact, applyArtifactEdits,
+  ARTIFACT_TYPES, ARTIFACT_KINDS, MAX_ARTIFACT_BYTES, MAX_ARTIFACT_VERSIONS, DEFAULT_ARTIFACT_LIMITS, ARTIFACT_VIEWER_BYTES,
+  isArtifactType, artifactContentProblem, artifactSizeProblem, summarizeArtifact, matchesArtifactFilter,
+  applyArtifactPatch, buildArtifact, applyArtifactEdits, artifactLimits, setArtifactLimits, artifactSize,
+  artifactVersionUsage, pruneArtifactVersions, formatArtifactBytes, utf8Bytes,
 } from "./artifacts.js";
 export type {
   Artifact, ArtifactType, ArtifactVersion, ArtifactSummary, NewArtifact, ArtifactPatch, ArtifactFilter, ArtifactStore,
+  ArtifactBlobRef, ArtifactLimits, ArtifactSettings, ArtifactVersionUsage,
 } from "./artifacts.js";
 
 // Connectors: external tools over MCP (Linear, Notion, Google Workspace, custom servers)

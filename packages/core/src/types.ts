@@ -1063,6 +1063,13 @@ export interface PolpoSettings {
      */
     keys?: Array<{ name: string; keyRef: import("./vault-ref.js").VaultRef; scopes?: string[] }>;
   };
+  /**
+   * Artifact size limits: maxBytes (one content, default 100 MB), inlineBytes (larger contents are kept
+   * as blob files, default 256 KB), maxEditBytes (largest content changed in place or read by part,
+   * default 50 MB), maxTotalBytes (every artifact of the instance, default 20 GB) and versions
+   * { maxCount (30), maxTotalBytes (500 MB) } per artifact.
+   */
+  artifacts?: import("./artifacts.js").ArtifactSettings;
 }
 
 // === Polpo State (persisted in .polpo/state.json) ===

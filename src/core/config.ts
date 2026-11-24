@@ -6,6 +6,7 @@ import { getPolpoDir } from "./constants.js";
 import { normalizeOrchestratorName, ORCHESTRATOR_NAME_MAX_LENGTH } from "./orchestrator-name.js";
 import { normalizeVaultRef } from "@polpo-ai/core/vault-ref";
 import { parseStoredProvider } from "@polpo-ai/core/provider-config";
+import { setArtifactLimits } from "@polpo-ai/core/artifacts";
 import { sanitizeAppearanceSettings, isEmptyAppearance, parseEgressProxies, parseComputers, parseTailscaleSettings, computerEgressProblem, isRemoteComputer, COMPUTER_ID_PATTERN, HOST_COMPUTER_ID, parseHarnessesSettings, parseAgentEngine, connectorToolsProblems, normalizeConnectorTools, normalizeDependencyResultsSettings } from "@polpo-ai/core";
 
 const DEFAULT_SETTINGS: PolpoSettings = {
@@ -498,6 +499,24 @@ function parseSettings(raw: any): PolpoSettings {
     if (keys.length) mcp.keys = keys;
     if (mcp.toolsets || mcp.keys) settings.mcp = mcp;
   }
+  if (raw?.artifacts && typeof raw.artifacts === "object") {
+    // positive numbers only (anything else keeps the default), see ArtifactLimits
+    const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.floor(v) : undefined);
+    const a = raw.artifacts as Record<string, any>;
+    const artifacts: NonNullable<PolpoSettings["artifacts"]> = {};
+    for (const key of ["maxBytes", "inlineBytes", "maxEditBytes", "maxTotalBytes"] as const) {
+      const value = num(a[key]);
+      if (value !== undefined) artifacts[key] = value;
+    }
+    if (a.versions && typeof a.versions === "object") {
+      const maxCount = num(a.versions.maxCount);
+      const maxTotalBytes = num(a.versions.maxTotalBytes);
+      if (maxCount !== undefined || maxTotalBytes !== undefined) {
+        artifacts.versions = { ...(maxCount !== undefined ? { maxCount } : {}), ...(maxTotalBytes !== undefined ? { maxTotalBytes } : {}) };
+      }
+    }
+    settings.artifacts = artifacts;
+  }
 
   // Storage backend.
   // Default to "sqlite" so new installs get the indexed/transactional store
@@ -569,6 +588,8 @@ export async function parseConfig(workDir: string): Promise<PolpoConfig> {
   // polpo.json only contains: project, settings, providers.
 
   const settings = parseSettings(polpoConfig.settings ?? {});
+  // the artifact size limits in force in this process (settings.artifacts, defaults otherwise)
+  setArtifactLimits(settings.artifacts);
   const providers = polpoConfig.providers
     ? parseProviders(polpoConfig.providers as Record<string, unknown>)
     : undefined;

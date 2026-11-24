@@ -1549,6 +1549,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       return isTrustedApiCall(c.req.header(TRUSTED_API_CALL_HEADER)) ? `person:${currentEventOrigin()?.by ?? "mcp"}` : "person:dashboard";
     },
     emit: (payload) => orchestrator.emit("artifact:changed", payload),
+    // uploads from a file of the instance ({ path }): the same folders the Files page reads
+    fileRoots: () => [...new Set([o.getWorkDir(), o.getPolpoDir(), o.getAgentWorkDir()])],
   })));
   authed.route("/storage", storageRoutes(activeStorage, () => orchestrator.getAgentWorkDir()));
   authed.route("/brain", companyBrainRoutes(activeCompanyBrain));

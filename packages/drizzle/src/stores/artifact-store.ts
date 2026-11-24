@@ -50,7 +50,23 @@ export class DrizzleArtifactStore implements ArtifactStore {
     if (!current) return undefined;
     const old = current.versions.find((v) => v.version === version);
     if (!old) throw new Error(`No version ${version} of this artifact`);
-    return this.update(id, { content: old.content, expectedVersion: current.version, author, note: `restored version ${version}` });
+    return this.update(id, { content: old.content, ...(old.blob ? { blob: old.blob } : {}), expectedVersion: current.version, author, note: `restored version ${version}` });
+  }
+
+  async put(artifact: Artifact, options: { ifUpdatedAt?: string | null } = {}): Promise<boolean> {
+    const row = this.toRow(artifact);
+    if (options.ifUpdatedAt === null) {
+      const inserted = await this.db.insert(this.table).values(row).onConflictDoNothing().returning({ id: this.table.id });
+      return inserted.length > 0;
+    }
+    if (options.ifUpdatedAt !== undefined) {
+      const changed = await this.db.update(this.table).set(row)
+        .where(and(eq(this.table.id, artifact.id), eq(this.table.updatedAt, options.ifUpdatedAt)))
+        .returning({ id: this.table.id });
+      return changed.length > 0;
+    }
+    await this.db.insert(this.table).values(row).onConflictDoUpdate({ target: this.table.id, set: row });
+    return true;
   }
 
   async delete(id: string): Promise<boolean> {
