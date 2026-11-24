@@ -61,7 +61,9 @@ export interface Connector {
   account?: string;
   kind: "mcp";
   description?: string;
-  transport: { type: "http" | "sse" | "stdio"; url?: string; command?: string; args?: string[]; env?: Record<string, string>; headers?: Record<string, string> };
+  transport: { type: "http" | "sse" | "stdio" | "hosted"; url?: string; command?: string; args?: string[]; env?: Record<string, string>; headers?: Record<string, string>; serverId?: string };
+  /** Hosted servers: the version in production ("Hosted by Polpo · v1.2.0"). */
+  hostedVersion?: string;
   auth: { type: ConnectorAuthType; headerNames?: string[]; oauth?: ConnectorOAuthSettings };
   access: ConnectorAccess;
   enabled: boolean;

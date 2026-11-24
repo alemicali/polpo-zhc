@@ -23,6 +23,9 @@ vi.mock("@polpo-ai/react", async () => {
       return { events: filter?.length ? all.filter((e) => filter.includes(e.event)) : all };
     },
     useAgents: () => ({ agents: [{ name: "pm", identity: { displayName: "Marco" } }, { name: "dev" }], teams: [], isLoading: false }),
+    // hosted MCP servers (their own tests: hosted-servers.test.tsx)
+    useMcpServers: () => ({ servers: [], templates: [], isLoading: false, error: null, refetch: async () => {}, create: async () => ({ id: "x", problems: [] }), generate: async () => ({}) }),
+    useMcpServer: () => ({ server: undefined, versions: [], deploys: [], isLoading: false, error: null }),
   };
 });
 

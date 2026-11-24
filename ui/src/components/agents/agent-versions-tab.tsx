@@ -73,8 +73,11 @@ function DiffCell({ line }: { line?: DiffLine }) {
   );
 }
 
+/** What a version diff view shows (agent versions, hosted MCP server versions). */
+export interface VersionDiffLike { from?: string; to: string; changes: Array<{ field: string }>; unified: string; suggestedBump?: string }
+
 /** A version diff: changed fields, then the configuration's unified or split diff (red/green with the theme's tokens). */
-export function AgentVersionDiffView({ diff }: { diff: AgentVersionDiff }) {
+export function AgentVersionDiffView({ diff }: { diff: VersionDiffLike | AgentVersionDiff }) {
   const [mode, setMode] = useState<"unified" | "split">("unified");
   const lines = useMemo(() => parseUnified(diff.unified), [diff.unified]);
   return (

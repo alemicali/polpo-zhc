@@ -330,6 +330,7 @@ export function ConnectorDetailSheet({
 
   const endpoint = connector.transport.type === "stdio"
     ? [connector.transport.command, ...(connector.transport.args ?? [])].join(" ")
+    : connector.transport.type === "hosted" ? `Hosted by ${product}${connector.hostedVersion ? ` · v${connector.hostedVersion}` : ""}`
     : connector.transport.url;
 
   return (
