@@ -57,6 +57,7 @@ vi.mock("../src/components/agents/agent-detail-context", () => ({
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 import { AgentVersionsTab, AgentVersionBadges, actorLabel } from "../src/components/agents/agent-versions-tab";
+import { AgentVersioningSetting } from "../src/components/config/agent-versioning-setting";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -162,4 +163,22 @@ test("header badges: production version and draft has changes", async () => {
   expect(actorLabel("person:ada@example.com")).toBe("ada@example.com");
   expect(actorLabel("system:migration")).toBe("migration");
   expect(actorLabel("mcp:Claude")).toBe("MCP Claude");
+});
+
+test("settings: API/MCP updates published and deployed at once, switchable", async () => {
+  const calls: Array<{ url: string; method?: string; body: unknown }> = [];
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    calls.push({ url, method: init?.method, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+    return new Response(JSON.stringify({ ok: true, data: {} }), { status: 200, headers: { "content-type": "application/json" } });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const onSaved = vi.fn();
+  await act(async () => root.render(<AgentVersioningSetting autoDeploy onSaved={onSaved} />));
+  const sw = q('[aria-label="Publish and deploy API and MCP agent updates at once"]')!;
+  expect(sw.getAttribute("data-state")).toBe("checked");
+  await click(sw);
+  expect(calls.at(-1)).toMatchObject({ method: "PATCH", body: { agents: { versioning: { autoDeployApiUpdates: false } } } });
+  expect(calls.at(-1)!.url).toContain("/api/v1/config/settings");
+  expect(onSaved).toHaveBeenCalled();
+  vi.unstubAllGlobals();
 });
