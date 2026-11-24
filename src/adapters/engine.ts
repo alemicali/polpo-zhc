@@ -51,6 +51,7 @@ import { join, sep } from "node:path";
 import { resolveModel, resolveSummaryModel, streamSimpleWithAuth, completeSimpleWithAuth, enforceModelAllowlist } from "../llm/pi-client.js";
 import { createSystemTools, createAllTools, expandToolWildcards, ALL_EXTENDED_TOOL_NAMES } from "../tools/system-tools.js";
 import { canonicalPath } from "../tools/path-sandbox.js";
+import { getGlobalPolpoDir } from "../core/constants.js";
 import { createInkTools as createInkToolsFn } from "../tools/ink-tools.js";
 import { loadAgentSkills, buildSkillPrompt } from "../llm/skills.js";
 import { nanoid } from "nanoid";
@@ -360,6 +361,17 @@ export interface MailboxPromptInfo {
  * caller resolves it from the agent's vault before calling this (avoids a
  * vault dependency reaching into the prompt builder).
  */
+/**
+ * The global skill pool (~/.polpo/skills, resolved) when the agent has a skill from it, so its
+ * bundled files can be read; undefined otherwise (project skills are already reachable).
+ */
+export function globalSkillPoolReadable(cwd: string, polpoDir: string, agent: AgentConfig): string | undefined {
+  let pool: string;
+  try { pool = canonicalPath(join(getGlobalPolpoDir(), "skills")); } catch { return undefined; }
+  const skills = loadAgentSkills(cwd, polpoDir, agent.name, agent.skills);
+  return skills.some((s) => s.dir && (s.dir === pool || s.dir.startsWith(pool + sep))) ? pool : undefined;
+}
+
 export function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: string, outputDir?: string, allowedPaths?: string[], mailboxes?: MailboxPromptInfo[]): string {
   // Load skills (sync, Node.js filesystem)
   const skills = polpoDir
@@ -580,6 +592,11 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
     effectiveAllowedPaths = [...(effectiveAllowedPaths ?? [cwd]), whatsappMediaDir];
   }
 
+  // Skills from the global pool (~/.polpo/skills) assigned to this agent: their bundled files
+  // (references, scripts) must be readable like the project pool's (.polpo/skills, a protected-path exception)
+  const globalSkillsDir = globalSkillPoolReadable(cwd, ctx.polpoDir, agentConfig);
+  if (globalSkillsDir) effectiveAllowedPaths = [...(effectiveAllowedPaths ?? [cwd]), globalSkillsDir];
+
   // Volumes mounted on this machine: visible to file tools and commands at the same path
   const remoteRun = ctx?.sandbox?.provider === "daytona" || ctx?.sandbox?.provider === "e2b";
   const hostMounts = remoteRun ? [] : hostVolumeMounts(ctx?.volumes);
@@ -596,7 +613,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
         // output directory (copied back); here: the allowed paths as before
         writable: [...(outputDir ? [outputDir] : []), ...(remoteRun ? [] : (effectiveAllowedPaths ?? []).filter((p) => !hostMounts.some((m) => m.hostPath === p)))],
         // skills and playbooks may ship scripts the agent runs; the rest of .polpo stays hidden
-        readable: ctx.polpoDir ? [join(ctx.polpoDir, "skills"), join(ctx.polpoDir, "playbooks")] : [],
+        readable: ctx.polpoDir ? [join(ctx.polpoDir, "skills"), join(ctx.polpoDir, "playbooks"), ...(globalSkillsDir ? [globalSkillsDir] : [])] : [],
         // bound at their host directory by local workspaces, attached at /volumes/<name> in remote VMs
         volumes: ctx.volumes ?? [],
         hide: ctx.polpoDir ? [ctx.polpoDir] : [],

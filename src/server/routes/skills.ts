@@ -19,6 +19,7 @@ import {
   loadSkillIndex,
 } from "../../llm/skills.js";
 import { resolve } from "node:path";
+import { registerSkillBundleRoutes } from "./skill-bundles.js";
 
 
 /**
@@ -32,6 +33,9 @@ export function skillRoutes(getDeps: () => {
   emit: (event: "skill:changed", data: { scope: "agent" | "orchestrator"; action: "created" | "updated" | "deleted" | "installed" | "assigned" | "unassigned" | "indexed"; skillName?: string; agentName?: string; timestamp: string }) => void;
 }): OpenAPIHono {
   const app = new OpenAPIHono();
+
+  // Bundles: upload .skill/.zip archives, browse and download a skill's files (both pools)
+  registerSkillBundleRoutes(app, getDeps);
 
   // GET /skills — list skills with agent assignments
   const listSkillsRoute = createRoute({

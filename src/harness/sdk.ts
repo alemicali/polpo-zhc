@@ -312,7 +312,7 @@ export function createSdkHarnessRuntime(spec: HarnessRuntimeSpec): HarnessRuntim
     // gateway headers sent from the VM: only when they are not brokered (no relay reachable)
     ...(spec.auth.headers && Object.keys(spec.auth.headers).length ? { headers: { ...spec.auth.headers } } : {}),
     tools: buildTools(spec),
-    skills: spec.skills.map((s) => ({ name: s.name, description: s.description, content: s.content })),
+    skills: spec.skills.map((s) => ({ name: s.name, description: s.description, content: s.content, ...(s.files?.length ? { files: s.files } : {}) })),
     permissionMode: spec.permissionMode,
     ...(Object.keys(toolApproval).length ? { toolApproval } : {}),
     // the session works in the sandbox's working directory itself (the task's), not a subdirectory
