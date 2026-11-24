@@ -1644,6 +1644,81 @@ export interface SkillIndexEntry {
 /** The full skills index: maps skill names to their index metadata. */
 export type SkillIndex = Record<string, SkillIndexEntry>;
 
+/** Which skill pool: the agents' skills or Polpo's (the orchestrator's) own. */
+export type SkillPool = "agent" | "orchestrator";
+
+/** A file of a skill folder (relative POSIX path) with its size in bytes. */
+export interface SkillFileEntry {
+  path: string;
+  size: number;
+}
+
+/** The files of an installed skill (GET /skills/:name/files). */
+export interface SkillFileList {
+  name: string;
+  source: SkillInfo["source"];
+  files: SkillFileEntry[];
+  /** More files exist than listed (the list stops at 2000). */
+  truncated: boolean;
+  totalBytes: number;
+}
+
+/** A skill found in an uploaded .skill / .zip archive. */
+export interface SkillBundleSkill {
+  /** Frontmatter name (or the folder name when missing). */
+  name: string;
+  /** Its folder in the archive ("" when SKILL.md is at the root). */
+  folder: string;
+  description: string;
+  license?: string;
+  compatibility?: string;
+  allowedTools?: string[];
+  metadata?: Record<string, unknown>;
+  files: SkillFileEntry[];
+  totalBytes: number;
+  /** Block the install (a rename fixes name errors). */
+  errors: string[];
+  /** Deviations from the Agent Skills spec that do not block it. */
+  warnings: string[];
+  /** Whether the name is taken in each pool and scope. */
+  exists: Record<SkillPool, { project: boolean; global: boolean }>;
+}
+
+/** The preview of an uploaded archive (POST /skills/upload?dryRun=1). */
+export interface SkillBundlePreview {
+  /** Install it with installSkillBundle within 30 minutes. */
+  uploadId: string;
+  archiveName?: string;
+  skills: SkillBundleSkill[];
+  /** Junk dropped (__MACOSX, .DS_Store…). */
+  ignored: string[];
+  warnings: string[];
+  limits: { maxArchiveBytes: number; maxTotalBytes: number; maxFiles: number; maxFileBytes: number; maxPathLength: number };
+}
+
+/** How to install a skill bundle. */
+export interface SkillBundleInstallOptions {
+  pool?: SkillPool;
+  /** The global pool (~/.polpo) instead of this project's. */
+  global?: boolean;
+  /** When a skill with the same name exists (default "fail"). */
+  onConflict?: "fail" | "replace" | "skip";
+  /** Only these skills of the archive. */
+  skills?: string[];
+  /** Archive name → name to install as. */
+  renames?: Record<string, string>;
+  /** Agents to assign the installed skills to (agent pool). */
+  assignTo?: string[];
+}
+
+export interface SkillBundleInstallResult {
+  installed: Array<{ name: string; from: string; path: string; replaced: boolean; files: number }>;
+  skipped: Array<{ name: string; reason: string }>;
+  errors: Array<{ name: string; error: string }>;
+  assigned: Array<{ skill: string; agent: string }>;
+  assignErrors?: string[];
+}
+
 // === Chat Session types ===
 
 export interface ChatSession {
