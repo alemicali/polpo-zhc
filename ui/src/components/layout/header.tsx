@@ -1,8 +1,7 @@
 import { useLocation } from "react-router-dom";
-import { MessageCircle, Columns2, Menu, History, Trash2, ChevronsLeft, UsersRound } from "lucide-react";
+import { MessageCircle, Menu, History, Trash2, ChevronsLeft, UsersRound } from "lucide-react";
 import { useProjectInfo } from "@/hooks/use-polpo";
 import { useChatActions, useChatPageSessionsOpen, useChatState, useSidebarOpen, sidebarActions, chatPageSessionActions } from "@/hooks/chat-context";
-import { setLayoutMode } from "@/hooks/use-layout-mode";
 import { useSidebarStyle } from "@/hooks/use-sidebar-style";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,7 +9,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { HeaderMoreMenu, ThemeMenu } from "./header-actions";
+import { HeaderMoreMenu } from "./header-actions";
 import { BetaBadge } from "@/components/shared/beta-badge";
 import { isBetaPath } from "@/lib/beta";
 import { MobileNavSheet } from "./mobile-nav-sheet";
@@ -178,30 +177,12 @@ export function Header() {
         </div>
       )}
 
-      {/* Actions — the look and ⋯ (Install app, Ink Hub, GitHub, sidebar style, Log out). What's new
+      {/* Actions — ⋯ (Install app, Ink Hub, GitHub, theme, layout, sidebar style, Log out). What's new
           lives at the bottom of the sidebar (and of the MobileNavSheet drawer); the look is
           desktop-only: on mobile it lives in the drawer. */}
       <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
         <MobileSearchButton className="lg:hidden" />
-        <ThemeMenu className="hidden lg:inline-flex" />
         <HeaderMoreMenu />
-        {/* Layout mode toggle */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="hidden lg:inline-flex h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all"
-              onClick={() => setLayoutMode("chat-first")}
-            >
-              <Columns2 className="h-4 w-4" />
-              <span className="sr-only">Switch to chat-first layout</span>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="text-xs">
-            Switch to chat-first layout
-          </TooltipContent>
-        </Tooltip>
         {/* Chat sidebar toggle — hidden on /chat page and on mobile */}
         {!isOnChatPage && (
           <Tooltip>
