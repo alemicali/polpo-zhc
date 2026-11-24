@@ -2078,6 +2078,68 @@ export interface SearchOptions {
   signal?: AbortSignal;
 }
 
+// === Ask the search (POST /search/ask) ===
+
+/** A dashboard page the assistant may open. */
+export interface SearchAskPage {
+  id?: string;
+  label: string;
+  to: string;
+  section?: string;
+}
+
+/** A palette command the assistant may run (view-only) or suggest (confirm: it changes data). */
+export interface SearchAskCommand {
+  id: string;
+  label: string;
+  hint?: string;
+  argument?: boolean;
+  confirm?: boolean;
+}
+
+/**
+ * What to do after an answer. auto: true ones (navigation, view-only commands) the dashboard runs at
+ * once; the others are buttons the person clicks (never run by the server).
+ */
+export type SearchAskIntent =
+  | { kind: "navigate"; route: string; label: string; auto: boolean }
+  | { kind: "open"; route: string; label: string; key: string; auto: boolean }
+  | { kind: "command"; id: string; label: string; argument?: string; auto: boolean }
+  | { kind: "handoff"; label: string; message: string; auto: false };
+
+export interface SearchAskResult {
+  answer: string;
+  items: SearchResult[];
+  intents: SearchAskIntent[];
+  /** Answered without the model (an obvious "go to X"). */
+  fastPath: boolean;
+  rounds: number;
+  usage?: {
+    provider?: string; model?: string;
+    inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; totalTokens: number; cost: number;
+  };
+}
+
+export type SearchAskEvent =
+  | { type: "status"; text: string }
+  | { type: "delta"; text: string }
+  | { type: "results"; items: SearchResult[] }
+  | { type: "intent"; intent: SearchAskIntent }
+  | { type: "done"; result: SearchAskResult }
+  | { type: "error"; error: string; code?: string };
+
+export interface SearchAskOptions {
+  /** The page the person is on. */
+  route?: string;
+  /** The dashboard's pages (default: the server's list). */
+  pages?: SearchAskPage[];
+  /** The palette's commands the assistant may run or suggest. */
+  commands?: SearchAskCommand[];
+  /** Stream the answer: every event as it comes (text deltas, results, intents). */
+  onEvent?: (event: SearchAskEvent) => void;
+  signal?: AbortSignal;
+}
+
 // === Vault Preview (interactive credential review before saving) ===
 
 export interface VaultPreviewPayload {
