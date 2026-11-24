@@ -14,6 +14,13 @@ let codeRunner: CodeRunner | undefined;
 /** Default: the bubblewrap worker pool (Linux with bwrap); elsewhere code tools are unavailable. */
 let codeRunnerFactory: (() => CodeRunner) | undefined = () => new BwrapCodeRunner();
 
+let defaults: Partial<HostedRuntimeDeps> = {};
+
+/** Tests: the network every hosted call in this process uses (fetch, DNS). */
+export function setHostedDefaults(next: Partial<HostedRuntimeDeps>): void {
+  defaults = next;
+}
+
 export function setHostedApprovalHook(polpoDir: string, hook: ApprovalHook | undefined): void {
   if (hook) approvalHooks.set(polpoDir, hook);
   else approvalHooks.delete(polpoDir);
@@ -35,6 +42,6 @@ export function hostedDeps(polpoDir: string, vault: VaultStore | undefined, extr
   const runner = sharedCodeRunner();
   const hook = approvalHooks.get(polpoDir);
   return {
-    polpoDir, ...(vault ? { vault } : {}), ...(runner ? { codeRunner: runner } : {}), ...(hook ? { requestApproval: hook } : {}), ...extra,
+    ...defaults, polpoDir, ...(vault ? { vault } : {}), ...(runner ? { codeRunner: runner } : {}), ...(hook ? { requestApproval: hook } : {}), ...extra,
   };
 }

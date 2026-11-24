@@ -151,7 +151,7 @@ export class BwrapCodeRunner implements CodeRunner {
       });
     }
     for (const [k, v] of Object.entries(env)) args.push("--setenv", k, v);
-    args.push("--chdir", "/srv", node, `--max-old-space-size=${Math.max(32, memoryMb)}`, "--disable-proto=delete", "/run/polpo-worker/worker.cjs");
+    args.push("--chdir", "/srv", node, `--max-old-space-size=${Math.max(32, memoryMb)}`, "--disable-proto=delete", "--no-warnings", "/run/polpo-worker/worker.cjs");
     return args;
   }
 
