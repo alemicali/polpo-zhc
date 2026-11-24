@@ -19,7 +19,7 @@ export type AppearancePalette = (typeof APPEARANCE_PALETTES)[number];
 /**
  * The dashboard's navigation sidebar: classic (every page in one list) or drill-in (top-level
  * entries that open their pages as a second level inside the sidebar). The instance default is
- * settings.appearance.sidebarStyle (classic when unset); a person may choose their own.
+ * settings.appearance.sidebarStyle (drill-in when unset); a person may choose their own.
  */
 export const SIDEBAR_STYLES = ["classic", "drill-in"] as const;
 export type SidebarStyle = (typeof SIDEBAR_STYLES)[number];
@@ -312,7 +312,7 @@ export interface AppearanceSettings {
   custom?: AppearanceCustom;
   /** Web fonts to load (any mode's font stacks may name them). */
   fonts?: AppearanceWebFont[];
-  /** The navigation sidebar everyone gets by default (classic when unset). */
+  /** The navigation sidebar everyone gets by default (drill-in when unset). */
   sidebarStyle?: SidebarStyle;
 }
 

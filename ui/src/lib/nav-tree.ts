@@ -7,6 +7,9 @@
  *   instead of (or after) its children (`panel`: Chat shows the chat history);
  * - a **section** is a small header between the entries of a level.
  *
+ * A top-level node may be **pinned at the bottom** of the sidebar (`pin: "bottom"`: Settings), out of
+ * the top level's list, above the connection footer; it opens its level like any other group.
+ *
  * Nothing here is specific to two levels: a group's children may hold groups (an agent's tabs,
  * later). The classic sidebar keeps its own list (components/layout/sidebar.tsx);
  * ui/tests/drill-in-nav.test.tsx checks every page it reaches is reachable here too.
@@ -55,6 +58,8 @@ import {
 
 /** A count shown next to an entry (filled in by the sidebar). */
 export type NavBadge = "approvals";
+/** A label shown next to an entry: "beta" (a page still in beta). */
+export type NavTag = "beta";
 /** A panel a group shows in its level (rendered by the sidebar). */
 export type NavPanel = "chat-history";
 
@@ -66,6 +71,7 @@ export interface NavLinkNode {
   /** The page: a path, optionally with a query (?section=…). */
   to: string;
   badge?: NavBadge;
+  tag?: NavTag;
 }
 
 export interface NavGroupNode {
@@ -80,6 +86,9 @@ export interface NavGroupNode {
   /** A panel shown in the level after its entries. */
   panel?: NavPanel;
   badge?: NavBadge;
+  tag?: NavTag;
+  /** Top level only: shown at the bottom of the sidebar instead of in the list. */
+  pin?: "bottom";
 }
 
 export interface NavSectionNode {
@@ -120,7 +129,7 @@ export const DRILL_IN_NAV: NavNode[] = [
   },
   {
     kind: "group", id: "content", label: "Content", icon: Shapes, children: [
-      link("artifacts", "Artifacts", Shapes, "/artifacts"),
+      { ...link("artifacts", "Artifacts", Shapes, "/artifacts"), tag: "beta" },
       link("files", "Files", FolderOpen, "/files"),
       link("data", "Data", Database, "/data"),
       link("brain", "Company Brain", BrainCircuit, "/brain"),
@@ -137,7 +146,7 @@ export const DRILL_IN_NAV: NavNode[] = [
     ],
   },
   {
-    kind: "group", id: "settings", label: "Settings", icon: Settings2, children: [
+    kind: "group", id: "settings", label: "Settings", icon: Settings2, pin: "bottom", children: [
       section("settings-workspace", "Workspace"),
       settings("general", "General", Hash),
       settings("appearance", "Appearance", Palette),
@@ -146,7 +155,8 @@ export const DRILL_IN_NAV: NavNode[] = [
       section("settings-models", "Models & agents"),
       settings("providers", "Providers", Key),
       settings("harnesses", "Harnesses", Cpu),
-      settings("agent", "Agent", Bot),
+      // the section configures Polpo itself, the master agent (its id stays "agent")
+      settings("agent", "Orchestrator", Bot),
       section("settings-execution", "Execution"),
       settings("sandbox", "Sandbox", Box),
       settings("computers", "Computers", Monitor),
@@ -164,6 +174,25 @@ export const DRILL_IN_NAV: NavNode[] = [
 /** The Configuration page's default section (what /config without ?section= shows). */
 const CONFIG_DEFAULT_SECTION = "general";
 
+/** Other names a Configuration section answers to in ?section= (the old or the new name). */
+export const CONFIG_SECTION_ALIASES: Readonly<Record<string, string>> = { orchestrator: "agent" };
+
+/** The Configuration section a ?section= value names (aliases resolved). */
+export function configSectionId(value: string | null | undefined): string | null {
+  if (!value) return null;
+  return CONFIG_SECTION_ALIASES[value] ?? value;
+}
+
+/** The top level's list (without the entries pinned at the bottom). */
+export function listedNodes(nodes: NavNode[]): NavNode[] {
+  return nodes.filter((node) => !(node.kind === "group" && node.pin));
+}
+
+/** The top-level entries pinned at the bottom of the sidebar. */
+export function pinnedNodes(nodes: NavNode[]): NavGroupNode[] {
+  return nodes.filter((node): node is NavGroupNode => node.kind === "group" && node.pin === "bottom");
+}
+
 /** The path part of a link target. */
 export function linkPath(to: string): string {
   const q = to.indexOf("?");
@@ -179,7 +208,9 @@ export function isLinkActive(to: string, pathname: string, search = ""): boolean
   const want = new URLSearchParams(to.slice(q + 1));
   const have = new URLSearchParams(search);
   for (const [key, value] of want) {
-    const current = have.get(key) ?? (path === "/config" && key === "section" ? CONFIG_DEFAULT_SECTION : null);
+    const current = path === "/config" && key === "section"
+      ? configSectionId(have.get(key)) ?? CONFIG_DEFAULT_SECTION
+      : have.get(key);
     if (current !== value) return false;
   }
   return true;

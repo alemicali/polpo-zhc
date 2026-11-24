@@ -485,7 +485,7 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
     description: "The instance's branding and default look everyone sees in the dashboard: product name, tagline, logo and dark-mode logo, "
       + "how the logo is framed (logoFrame: box, the default tile, or none, bare); "
       + "the default theme (light, dark, system), palette and custom design tokens per mode (colours, fonts, radius, shadows), the web fonts it loads, "
-      + "and the default navigation sidebar (appearance.sidebarStyle: classic, the default, or drill-in). "
+      + "and the default navigation sidebar (appearance.sidebarStyle: drill-in, the default when unset, or classic). "
       + "font_sources says which families a font stack can name as they are: bundled (self-hosted, e.g. Inter Tight), preloaded (declared by the dashboard), "
       + "or any other one once added as a web font (polpo_branding_update fonts) from web_font_hosts. "
       + "A person may still customize their own browser.",
@@ -534,7 +534,7 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
       + "surfaceBlur and overlayBlur (0–24 px backdrop blur of glassy bars and the dialog scrim), glowBlur (0–96 px, the soft halos); "
       + "nothing in the dashboard is fixed: every colour, size, weight, corner, shadow and blur is one of these tokens; "
       + "a token set to null goes back to the palette's; with derive on (default) the dashboard fills the rest (text on primary, ring, sidebar…). "
-      + "sidebar_style: the navigation sidebar everyone gets by default, classic (every page in one list, the default) or drill-in (Work, Team, Content, Tools, Settings open their pages as a second level inside the sidebar, with a Back row); each person may still pick their own in Configuration → Appearance. "
+      + "sidebar_style: the navigation sidebar everyone gets by default, drill-in (the default when unset: Work, Team, Content, Tools, Settings open their pages as a second level inside the sidebar, with a Back row) or classic (every page in one list); each person may still pick their own in Configuration → Appearance. "
       + "The result lists what changed. Needs the admin scope.",
     inputSchema: {
       product_name: z.string().max(80).optional().describe("The product name in the navigation ('' for the default)"),
@@ -545,7 +545,7 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
       logo_frame: z.enum(["box", "none"]).nullable().optional().describe("How the logo is shown: box (in a tile, the default) or none (bare, same height, no background); null: the default"),
       theme: z.enum(APPEARANCE_THEMES).nullable().optional().describe("The default theme; null: the built-in default (dark)"),
       palette: z.enum(APPEARANCE_PALETTES).nullable().optional().describe("The default palette; null: the built-in default (tide)"),
-      sidebar_style: z.enum(SIDEBAR_STYLES).nullable().optional().describe("The default navigation sidebar: classic or drill-in; null: the built-in default (classic)"),
+      sidebar_style: z.enum(SIDEBAR_STYLES).nullable().optional().describe("The default navigation sidebar: drill-in or classic; null: the built-in default (drill-in)"),
       tokens: z.object({
         enabled: z.boolean().optional().describe("Apply the custom tokens (default: true when tokens are given)"),
         derive: z.boolean().optional().describe("Fill the tokens not given from those given (default true)"),

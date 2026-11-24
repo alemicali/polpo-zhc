@@ -8,11 +8,13 @@ import { Megaphone } from "lucide-react";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { CHANGELOG } from "@/lib/changelog";
 import { markAllChangelogSeen, useChangelogUnreadSnapshot } from "@/hooks/use-whats-new";
-import { closeWhatsNew, setWhatsNewOpen, useWhatsNewOpen } from "@/hooks/use-whats-new-drawer";
+import { closeWhatsNew, setWhatsNewOpen, useWhatsNewFocus, useWhatsNewOpen } from "@/hooks/use-whats-new-drawer";
 import { ChangelogTimeline } from "./changelog-timeline";
 
 export function WhatsNewDrawer() {
   const open = useWhatsNewOpen();
+  // opened from a What's new card: that entry, unfolded and in view
+  const focusId = useWhatsNewFocus();
   const navigate = useNavigate();
   // what arrived since the last visit, read before opening marks it all as seen
   const unreadIds = useChangelogUnreadSnapshot(open);
@@ -41,6 +43,7 @@ export function WhatsNewDrawer() {
             compact
             entries={CHANGELOG}
             unreadIds={unreadIds}
+            focusId={focusId ?? undefined}
             onAction={(to) => {
               closeWhatsNew();
               navigate(to);

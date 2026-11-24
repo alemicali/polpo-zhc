@@ -1,6 +1,7 @@
 /**
  * DrillInNav — the drill-in sidebar: the top level lists Dashboard, Chat, Approvals and the
- * groups (Work, Team, Content, Tools, Settings); opening a group shows its entries as a new
+ * groups (Work, Team, Content, Tools); Settings is pinned at the bottom (above the connection
+ * footer, under `aboveBottom`: the What's new cards). Opening a group shows its entries as a new
  * level inside the sidebar, with a Back row on top. The tree is lib/nav-tree.ts (any depth).
  *
  * - Forward, the new level slides in from the right and the old one out to the left; back, the
@@ -32,6 +33,8 @@ import {
   findGroup,
   isLinkActive,
   isNodeActive,
+  listedNodes,
+  pinnedNodes,
   type NavBadge,
   type NavEntry,
   type NavGroupNode,
@@ -39,6 +42,7 @@ import {
   type NavPanel,
 } from "@/lib/nav-tree";
 import { PendingBadge } from "./pending-badge";
+import { BetaBadge } from "@/components/shared/beta-badge";
 
 const ChatHistoryPanel = lazy(() =>
   import("@/pages/chat").then((m) => ({ default: m.ChatHistoryPanel })),
@@ -103,13 +107,16 @@ export interface DrillInNavProps {
   className?: string;
   /** The tree (tests, later trees); the dashboard's by default. */
   tree?: NavNode[];
+  /** Shown above the entries pinned at the bottom (Settings): the What's new cards, the banner. */
+  aboveBottom?: ReactNode;
 }
 
-export function DrillInNav({ variant = "sidebar", collapsed = false, onNavigate, onExpand, className, tree = DRILL_IN_NAV }: DrillInNavProps) {
+export function DrillInNav({ variant = "sidebar", collapsed = false, onNavigate, onExpand, className, tree = DRILL_IN_NAV, aboveBottom }: DrillInNavProps) {
   const { pathname, search } = useLocation();
   const navigate = useNavigate();
   const headingId = useId();
   const levelRef = useRef<HTMLDivElement>(null);
+  const navRef = useRef<HTMLElement>(null);
   const trailIds = (p: string, s: string) => findActiveTrail(tree, p, s)?.map((g) => g.id) ?? null;
 
   // The level: a path of group ids from the top ([] = the top level). Opens where the route is.
@@ -158,12 +165,15 @@ export function DrillInNav({ variant = "sidebar", collapsed = false, onNavigate,
     if (stack.length) moveTo(stack.slice(0, -1), true);
   };
 
-  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    const root = levelRef.current;
+  // the level and the entries pinned at the bottom (Settings) are one list for the arrow keys
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    const root = navRef.current;
     const target = event.target as HTMLElement;
     if (!root || !root.contains(target)) return; // a menu or dialog portalled from inside
+    if (!levelRef.current?.contains(target) && !target.closest("[data-nav-pinned]")) return;
     if (target.closest("input, textarea, select, [contenteditable='true']")) return;
-    const items = [...root.querySelectorAll<HTMLElement>("[data-nav-back], [data-nav-item]")];
+    const items = [...root.querySelectorAll<HTMLElement>("[data-nav-back], [data-nav-item]")]
+      .filter((el) => !el.closest("[data-leaving-level]"));
     const index = items.indexOf(target);
     const onItem = index !== -1;
     const focusAt = (i: number) => {
@@ -228,32 +238,65 @@ export function DrillInNav({ variant = "sidebar", collapsed = false, onNavigate,
     />
   );
 
+  // Settings sits at the bottom of the sidebar, except inside its own level
+  const pinned = pinnedNodes(tree).filter((node) => node.id !== stack[0]);
+  const sheet = variant === "sheet";
+
   return (
     <nav
+      ref={navRef}
       aria-label="Main navigation"
       data-sidebar-style="drill-in"
+      onKeyDown={onKeyDown}
       className={cn("relative flex min-h-0 flex-col overflow-hidden", className)}
     >
-      <div
-        key={stack.join("/") || "top"}
-        ref={levelRef}
-        data-level={stack.at(-1) ?? "top"}
-        data-motion={transition ? transition.dir : "none"}
-        onKeyDown={onKeyDown}
-        className={cn("flex min-h-0 flex-1 flex-col", transition && ENTER[transition.dir])}
-      >
-        {level(stack, true)}
-      </div>
-      {transition && (
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         <div
-          aria-hidden="true"
-          inert
-          data-leaving-level={transition.from.at(-1) ?? "top"}
-          onAnimationEnd={() => setTransition((t) => (t?.id === transition.id ? null : t))}
-          className={cn("pointer-events-none absolute inset-0 flex flex-col", LEAVE[transition.dir])}
+          key={stack.join("/") || "top"}
+          ref={levelRef}
+          data-level={stack.at(-1) ?? "top"}
+          data-motion={transition ? transition.dir : "none"}
+          className={cn("flex min-h-0 flex-1 flex-col", transition && ENTER[transition.dir])}
         >
-          {level(transition.from, false)}
+          {level(stack, true)}
         </div>
+        {transition && (
+          <div
+            aria-hidden="true"
+            inert
+            data-leaving-level={transition.from.at(-1) ?? "top"}
+            onAnimationEnd={() => setTransition((t) => (t?.id === transition.id ? null : t))}
+            className={cn("pointer-events-none absolute inset-0 flex flex-col", LEAVE[transition.dir])}
+          >
+            {level(transition.from, false)}
+          </div>
+        )}
+      </div>
+      {aboveBottom}
+      {pinned.length > 0 && (
+        <ul
+          role="list"
+          aria-label="Settings and more"
+          data-nav-pinned
+          className={cn(
+            "flex shrink-0 flex-col gap-0.5 border-t",
+            sheet ? "border-border/50 px-1 pt-2" : "border-sidebar-border",
+            collapsed ? "items-center py-2" : !sheet && "px-3 py-2",
+          )}
+        >
+          {pinned.map((node) => (
+            <li key={node.id} className={cn(collapsed && "flex justify-center")}>
+              <Entry
+                node={node}
+                collapsed={collapsed}
+                sheet={sheet}
+                active={isNodeActive(node, pathname, search)}
+                onOpen={() => openGroup(node, [])}
+                onNavigate={onNavigate}
+              />
+            </li>
+          ))}
+        </ul>
       )}
     </nav>
   );
@@ -280,7 +323,7 @@ interface LevelProps {
 
 function Level({ path, tree, live, collapsed, variant, headingId, pathname, search, onOpenGroup, onBack, onNavigate, onExpand, onOpenChat }: LevelProps) {
   const group = path.length ? findGroup(tree, path[path.length - 1]) : undefined;
-  const entries: NavEntry[] = group ? group.children : tree;
+  const entries: NavEntry[] = group ? group.children : listedNodes(tree);
   const parent = path.length > 1 ? findGroup(tree, path[path.length - 2]) : undefined;
   const backLabel = `Back to ${parent?.label ?? "main menu"}`;
   const sheet = variant === "sheet";
@@ -419,6 +462,7 @@ function Entry({ node, collapsed, sheet, active, onOpen, onNavigate }: {
     <>
       <Icon className="h-4 w-4 shrink-0" />
       <span className="min-w-0 flex-1 truncate">{node.label}</span>
+      {node.tag === "beta" && <BetaBadge />}
       <Badge badge={node.badge} collapsed={false} />
       {isGroup && <ChevronRight aria-hidden className="h-4 w-4 shrink-0 opacity-50" />}
     </>

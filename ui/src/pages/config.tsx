@@ -59,7 +59,6 @@ import {
   AlertTriangle,
   LogIn,
   Keyboard,
-  Palette as PaletteIcon,
   Pencil,
   X,
   Plus,
@@ -71,8 +70,6 @@ import {
   Image as ImageIcon,
   Copy,
   type LucideIcon,
-  Box as SandboxIcon,
-  Plug,
 } from "lucide-react";
 import { notifyBrandingChanged, useConfig } from "@/hooks/use-polpo";
 import { ChannelLogo } from "@/components/shared/channel-logo";
@@ -104,6 +101,8 @@ import { followInstanceDefault, kit, setInstanceAppearance, useResolvedAppearanc
 import { AppearanceEditor } from "@/components/config/appearance-editor";
 import { SidebarStyleSettings } from "@/components/config/sidebar-style-settings";
 import type { SidebarStyle } from "@/hooks/use-sidebar-style";
+import { ConfigSectionBar } from "@/components/config/config-sections";
+import { findConfigSection, type ConfigSectionId } from "@/lib/config-sections";
 import { toast } from "sonner";
 import { BrandMark } from "@/components/shared/brand-mark";
 import { DEFAULT_PRODUCT_NAME, DEFAULT_PRODUCT_TAGLINE, productName, useInstanceBranding } from "@/lib/branding";
@@ -215,25 +214,7 @@ function arrayOrEmpty<T = unknown>(value: unknown): T[] {
 
 // ── Section definitions ──
 
-const baseSections = [
-  { id: "general", label: "General", icon: Hash },
-  { id: "members", label: "Members", icon: Users },
-  { id: "agent", label: "Agent", icon: Bot },
-  { id: "providers", label: "Providers", icon: Key },
-  { id: "channels", label: "Channels", icon: Send },
-  { id: "rules", label: "Rules", icon: Bell },
-  { id: "policies", label: "Policies", icon: Shield },
-  { id: "sandbox", label: "Sandbox", icon: SandboxIcon },
-  { id: "harnesses", label: "Harnesses", icon: Bot },
-  { id: "computers", label: "Computers", icon: Monitor },
-  { id: "mcp", label: "MCP access", icon: Plug },
-  { id: "appearance", label: "Appearance", icon: PaletteIcon },
-  { id: "sync", label: "Cloud sync", icon: CloudIcon },
-] as const;
-
-type SectionIdBase = (typeof baseSections)[number]["id"];
-
-type SectionId = SectionIdBase;
+type SectionId = ConfigSectionId;
 
 // ── Reusable display components ──
 
@@ -3026,22 +3007,19 @@ export function ConfigPage() {
   const { config, isLoading, error, refetch, setOptimistic } = useConfig();
   const { agents } = useAgents();
   const { authStatus, refetch: refetchAuth } = useAuthStatus();
-  const [activeSection, setActiveSection] = useState<SectionId>(() => {
-    const requested = readSetupParams().section;
-    return baseSections.find((section) => section.id === requested)?.id ?? "general";
-  });
+  const [activeSection, setActiveSection] = useState<SectionId>(() => findConfigSection(readSetupParams().section) ?? "general");
   // ?section= follows the section shown (the sidebar's Settings links point at it, and highlight it)
   const [searchParams, setSearchParams] = useSearchParams();
   const sectionParam = searchParams.get("section");
   const [seenSectionParam, setSeenSectionParam] = useState(sectionParam);
   if (seenSectionParam !== sectionParam) {
     setSeenSectionParam(sectionParam);
-    const linked = baseSections.find((section) => section.id === sectionParam)?.id;
+    const linked = findConfigSection(sectionParam);
     if (linked && linked !== activeSection) setActiveSection(linked);
   }
   const selectSection = (id: SectionId) => {
     setActiveSection(id);
-    if (sectionParam !== id) setSearchParams({ section: id }, { replace: true });
+    if (findConfigSection(sectionParam) !== id) setSearchParams({ section: id }, { replace: true });
   };
   // a link from an assistant (setup_url): scroll to the field to fill and focus it
   useEffect(() => focusSetupField(readSetupParams()), [activeSection]);
@@ -3134,7 +3112,6 @@ export function ConfigPage() {
   const hasPolicies = !!(escalation || sla || (gates && gates.length > 0));
 
   // Build visible sections — hide policies when empty (but always allow adding new gates from Policies tab when present, so we always show it)
-  const sections = baseSections;
   void hasPolicies;
 
   // ── Channel name list (used by rule/gate forms) ──
@@ -3210,29 +3187,16 @@ export function ConfigPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
-      {/* ── Tab bar ── */}
-      <div className="flex items-center gap-2 shrink-0">
-        <div className="flex items-center gap-1 overflow-x-auto scrollbar-none flex-1 pb-0.5">
-          {sections.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              onClick={() => selectSection(id)}
-              className={cn(
-                "flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors whitespace-nowrap shrink-0 cursor-pointer",
-                activeSection === id
-                  ? "bg-accent text-accent-foreground shadow-card"
-                  : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
-              )}
-            >
-              <Icon className="h-3.5 w-3.5 shrink-0" />
-              {label}
-            </button>
-          ))}
-        </div>
-        <Button variant="outline" size="sm" className="h-8 shrink-0" onClick={refetch}>
-          <RefreshCw className="h-3.5 w-3.5" />
-        </Button>
-      </div>
+      {/* ── Section bar (the drill-in sidebar lists the sections: the page shows the title) ── */}
+      <ConfigSectionBar
+        active={activeSection}
+        onSelect={selectSection}
+        actions={(
+          <Button variant="outline" size="sm" className="h-8 shrink-0" onClick={refetch} aria-label="Reload configuration">
+            <RefreshCw className="h-3.5 w-3.5" />
+          </Button>
+        )}
+      />
 
       {/* ── Tab content ── */}
       <div className="flex-1 overflow-auto pb-bottom-nav lg:pb-2 space-y-3">
@@ -3391,8 +3355,8 @@ export function ConfigPage() {
             }}
             onSaveSidebarStyle={async (sidebarStyle) => {
               const current = { ...((settings.appearance as InstanceAppearance | undefined) ?? {}) };
-              // classic is the built-in default: no need to store it
-              if (sidebarStyle === "classic") delete current.sidebarStyle;
+              // drill-in is the built-in default: no need to store it (classic is stored)
+              if (sidebarStyle === "drill-in") delete current.sidebarStyle;
               else current.sidebarStyle = sidebarStyle;
               const result = await api("/config/settings", {
                 method: "PATCH",
