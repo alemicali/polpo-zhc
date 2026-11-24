@@ -90,8 +90,10 @@ export function registerWaBusinessTools(tool: Register, deps: McpDeps): void {
       + "size, rate, not configured) or error, with the reason. Never message text: types, lengths and masked contacts only. id: one delivery in full.",
     inputSchema: {
       channel: channelParam,
-      outcome: z.array(z.enum(["accepted", "ignored", "rejected", "error"])).optional(),
-      limit: z.number().int().min(1).max(100).optional(), cursor: z.string().optional(), id: z.string().optional(),
+      outcome: z.array(z.enum(["accepted", "ignored", "rejected", "error"])).optional().describe("Only these outcomes"),
+      limit: z.number().int().min(1).max(100).optional().describe("How many (default 20)"),
+      cursor: z.string().optional().describe("next_cursor of the previous page"),
+      id: z.string().optional().describe("One delivery in full"),
     },
     outputSchema: { channel: z.string(), events: z.array(looseObject).optional(), event: looseObject.optional(), next_cursor: z.string().nullable().optional(), counts: looseObject.optional() },
     annotations: READ,
@@ -115,7 +117,7 @@ export function registerWaBusinessTools(tool: Register, deps: McpDeps): void {
     title: "WhatsApp Business templates",
     description: "The account's message templates (name, language, status: only APPROVED can be sent, category, body with its {{parameters}}), and which "
       + "categories this channel allows. refresh: sync from Meta first.",
-    inputSchema: { channel: channelParam, refresh: z.boolean().optional() },
+    inputSchema: { channel: channelParam, refresh: z.boolean().optional().describe("Sync from Meta first") },
     outputSchema: { channel: z.string(), templates: z.array(looseObject), synced_at: z.string().optional() },
     annotations: READ,
   }, async ({ channel, refresh }) => {
@@ -133,7 +135,7 @@ export function registerWaBusinessTools(tool: Register, deps: McpDeps): void {
     title: "A WhatsApp Business conversation",
     description: "A contact's conversation on a WhatsApp Business channel: recent messages, whether the 24-hour window is open (free-form messages) or "
       + "closed (templates only), opt-in and opt-out. Without `to`: the contacts, newest first.",
-    inputSchema: { channel: channelParam, to: toParam.optional(), limit: z.number().int().min(1).max(100).optional() },
+    inputSchema: { channel: channelParam, to: toParam.optional(), limit: z.number().int().min(1).max(100).optional().describe("How many messages (or contacts)") },
     outputSchema: { channel: z.string(), conversation: looseObject.optional(), contacts: z.array(looseObject).optional() },
     annotations: READ,
   }, async ({ channel, to, limit }) => {
@@ -158,7 +160,7 @@ export function registerWaBusinessTools(tool: Register, deps: McpDeps): void {
     title: "Send a WhatsApp Business message",
     description: "Send a free-form message to a contact of a WhatsApp Business channel: only inside the 24-hour window (the contact wrote in the last "
       + "24 hours); outside it use polpo_wabiz_send_template. Real and cannot be undone: show the person the message, then call with confirm: true.",
-    inputSchema: { channel: channelParam, to: toParam, text: z.string().min(1).max(20_000), confirm: confirmParam("send it (after the person saw it and agreed)") },
+    inputSchema: { channel: channelParam, to: toParam, text: z.string().min(1).max(20_000).describe("The message (Markdown becomes WhatsApp formatting)"), confirm: confirmParam("send it (after the person saw it and agreed)") },
     outputSchema: { sent: z.boolean(), ids: z.array(z.string()).optional() },
     annotations: SEND,
     scope: "polpo:messages",
@@ -205,8 +207,9 @@ export function registerWaBusinessTools(tool: Register, deps: McpDeps): void {
     description: "Templates agents (or Polpo) asked to send wait for an operator. action list (default): the sends waiting; approve: send it now (the rules "
       + "are checked again); reject: drop it. approve and reject need confirm: true after the person decided.",
     inputSchema: {
-      channel: channelParam, action: z.enum(["list", "approve", "reject"]).optional(), id: z.string().optional().describe("The queued send (pending_…)"),
-      reason: z.string().max(500).optional(), confirm: confirmParam("approve or reject it (the person decided)"),
+      channel: channelParam, action: z.enum(["list", "approve", "reject"]).optional().describe("list (default), approve or reject"),
+      id: z.string().optional().describe("The queued send (pending_…)"),
+      reason: z.string().max(500).optional().describe("reject: why"), confirm: confirmParam("approve or reject it (the person decided)"),
     },
     outputSchema: { channel: z.string(), pending: z.array(looseObject).optional(), result: looseObject.optional() },
     annotations: SEND,
