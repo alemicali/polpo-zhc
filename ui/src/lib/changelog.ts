@@ -32,6 +32,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-24-avatar-bytes",
+    date: "2026-11-24",
+    kind: "fixed",
+    title: "Le foto degli agenti si vedono di nuovo",
+    summary: "Caricando l'avatar di un agente, dalla dashboard, da Polpo o via MCP, il file veniva salvato come testo codificato invece che come immagine, e la foto non compariva. Ora viene salvata l'immagine vera.",
+    body: "- Vale per ogni modo di impostare l'avatar: caricamento dalla pagina dell'agente, Polpo in chat e `polpo_agent_avatar_set`.\n- Gli avatar caricati prima della correzione vanno ricaricati (o riparati dall'amministratore).",
+    highlight: false,
+  },
+  {
     id: "2026-11-24-spotlight-ai",
     date: "2026-11-24",
     kind: "new",
