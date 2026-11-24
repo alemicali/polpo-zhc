@@ -1,7 +1,7 @@
 /**
  * A small card at the bottom of the sidebar: on the classic sidebar it offers the drill-in one,
  * on the drill-in one it offers the way back. Dismissible (per style); after that the switch stays
- * in Configuration → Appearance and in the header's look menu.
+ * in Configuration → Appearance and in the header's ⋯ menu.
  */
 import { ListTree, PanelLeft, X } from "lucide-react";
 import { cn } from "@/lib/utils";

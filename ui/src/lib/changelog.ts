@@ -32,6 +32,21 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-24-header-menu-settings",
+    date: "2026-11-24",
+    kind: "improved",
+    title: "Intestazione più pulita, Novità in fondo alla barra, Settings in basso",
+    summary: "In alto a destra restano l'aspetto e un menu ⋯ con installa l'app, Polpo Ink Hub, GitHub, lo stile della barra e Esci. Le Novità diventano schede in fondo alla barra laterale; nella barra a livelli Settings si sposta in basso.",
+    body: [
+      "- **Menu ⋯ in alto a destra**: Installa l'app (il QR), Polpo Ink Hub, GitHub, lo stile della barra laterale (classica o a livelli) ed Esci, se l'istanza ha l'accesso con password. Le icone sparse non ci sono più; il menu dell'aspetto ha solo chiaro, scuro, sistema e la palette.",
+      "- **Novità come schede**: in fondo alla barra laterale (e nel menu del telefono) le ultime novità, quelle non lette per prime col loro pallino, impilate con un leggero effetto di profondità. Scorrono da sole ogni pochi secondi, si fermano quando ci passi sopra, si spostano con le frecce o con uno swipe; restano ferme se il sistema chiede movimento ridotto. Un clic apre il pannello Novità su quella voce. Con la barra compressa resta un'icona col pallino.",
+      "- **Settings in basso** nella barra a livelli, sopra lo stato della connessione: si apre come gli altri gruppi. La nuova sidebar è ora quella predefinita; si torna alla classica da Aspetto o dal banner in fondo alla barra.",
+      "- **Configurazione con la barra a livelli**: niente più schede in cima alla pagina (le sezioni sono già nella barra), solo il titolo della sezione. Con la barra classica le schede restano.",
+      "- **«Agent» diventa «Orchestrator»**: la sezione che configura Polpo, l'agente principale. I vecchi link (`?section=agent`) funzionano ancora.",
+      "- **Artifacts è in Beta**: lo dice un piccolo badge accanto alla voce e al titolo della pagina.",
+    ].join("\n"),
+  },
+  {
     id: "2026-11-24-global-search",
     date: "2026-11-24",
     kind: "new",

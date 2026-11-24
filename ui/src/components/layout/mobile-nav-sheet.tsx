@@ -13,7 +13,7 @@ import {
   LayoutDashboard,
   ListChecks,
   MessageCircle,
-  Megaphone,
+  Github,
   Monitor,
   Moon,
   ShieldCheck,
@@ -39,8 +39,10 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { useTheme } from "@/hooks/use-theme";
-import { WhatsNewDot } from "@/components/whats-new/whats-new-dot";
-import { openWhatsNew } from "@/hooks/use-whats-new-drawer";
+import { WhatsNewStack } from "@/components/whats-new/whats-new-stack";
+import { GITHUB_URL } from "./header-actions";
+import { BetaBadge } from "@/components/shared/beta-badge";
+import { isBetaPath } from "@/lib/beta";
 import { useSidebarStyle } from "@/hooks/use-sidebar-style";
 import { DrillInNav } from "./drill-in-nav";
 import { SidebarStyleBanner } from "./sidebar-style-banner";
@@ -83,7 +85,6 @@ const NAV_GROUPS: { title: string; items: { to: string; icon: typeof LayoutDashb
       { to: "/schedules", icon: CalendarClock, label: "Schedules" },
       { to: "/memory", icon: Brain, label: "Memory" },
       { to: "/config", icon: Settings2, label: "Config" },
-      { to: "/changelog", icon: Megaphone, label: "Novità" },
     ],
   },
 ];
@@ -125,21 +126,12 @@ export function MobileNavSheet({ children }: { children: ReactNode }) {
         </SheetHeader>
         <div className="space-y-5 px-1 pb-4">
           {drillIn && (
-            <>
-              <DrillInNav variant="sheet" onNavigate={() => setOpen(false)} />
-              <button
-                type="button"
-                onClick={() => {
-                  setOpen(false);
-                  openWhatsNew();
-                }}
-                className="flex w-full items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium text-foreground/80 transition-colors hover:bg-accent hover:text-foreground"
-              >
-                <Megaphone className="h-4 w-4" />
-                Novità
-                <WhatsNewDot className="ml-auto" />
-              </button>
-            </>
+            <DrillInNav
+              variant="sheet"
+              onNavigate={() => setOpen(false)}
+              // What's new sits above Settings, as in the sidebar
+              aboveBottom={<WhatsNewStack variant="sheet" onOpen={() => setOpen(false)} className="mb-2 mt-3 px-1" />}
+            />
           )}
           {!drillIn && NAV_GROUPS.map((group) => (
             <div key={group.title}>
@@ -153,14 +145,7 @@ export function MobileNavSheet({ children }: { children: ReactNode }) {
                     <NavLink
                       key={to}
                       to={to}
-                      onClick={(e) => {
-                        setOpen(false);
-                        // "Novità" opens the What's new drawer over the page
-                        if (to === "/changelog") {
-                          e.preventDefault();
-                          openWhatsNew();
-                        }
-                      }}
+                      onClick={() => setOpen(false)}
                       className={cn(
                         "flex flex-col items-center gap-1.5 rounded-xl p-2.5 text-caption font-medium transition-colors",
                         isActive
@@ -177,7 +162,7 @@ export function MobileNavSheet({ children }: { children: ReactNode }) {
                         )}
                       >
                         <Icon className="h-5 w-5" />
-                        {to === "/changelog" && <WhatsNewDot className="absolute -right-0.5 -top-0.5" />}
+                        {isBetaPath(to) && <BetaBadge className="absolute -right-2 -top-1.5 bg-background" />}
                       </span>
                       <span className="truncate tracking-wide">{label}</span>
                     </NavLink>
@@ -187,18 +172,31 @@ export function MobileNavSheet({ children }: { children: ReactNode }) {
             </div>
           ))}
 
+          {!drillIn && <WhatsNewStack variant="sheet" onOpen={() => setOpen(false)} className="px-1" />}
+
           <SidebarStyleBanner className="border-border/50 bg-muted/40 text-foreground" />
 
-          {/* Polpo Ink Hub — with the other app-level links, not in a nav section */}
-          <a
-            href={config.inkHubUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 rounded-xl px-2 py-2 text-caption font-medium text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <Store className="h-4 w-4" />
-            Polpo Ink Hub
-          </a>
+          {/* The app-level links (the header's ⋯ menu on desktop): Polpo Ink Hub, GitHub */}
+          <div className="flex flex-wrap items-center gap-1">
+            <a
+              href={config.inkHubUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 rounded-xl px-2 py-2 text-caption font-medium text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <Store className="h-4 w-4" />
+              Polpo Ink Hub
+            </a>
+            <a
+              href={GITHUB_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 rounded-xl px-2 py-2 text-caption font-medium text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <Github className="h-4 w-4" />
+              GitHub
+            </a>
+          </div>
 
           {/* Theme switcher — segmented control, lives at the bottom of the
               drawer so the most-used nav stays at thumb level. */}

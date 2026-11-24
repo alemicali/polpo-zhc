@@ -47,11 +47,11 @@ export function SidebarStyleSettings({ onSaveInstanceDefault }: {
             onValueChange={(value: string) => setSidebarStyle(value === "instance" ? null : value as SidebarStyle)}
           >
             <ToggleGroupItem value="instance">Instance default</ToggleGroupItem>
-            <ToggleGroupItem value="classic">Classic</ToggleGroupItem>
             <ToggleGroupItem value="drill-in">Drill-in</ToggleGroupItem>
+            <ToggleGroupItem value="classic">Classic</ToggleGroupItem>
           </SegmentedControl>
           <p className="text-caption text-muted-foreground">
-            Classic lists every page. Drill-in groups them: Work, Team, Content, Tools and Settings open their pages inside the sidebar, with a Back row.
+            Drill-in (the default) groups the pages: Work, Team, Content, Tools and Settings open them inside the sidebar, with a Back row. Classic lists every page.
           </p>
         </div>
         <div className="grid content-start gap-1.5">
@@ -66,11 +66,11 @@ export function SidebarStyleSettings({ onSaveInstanceDefault }: {
             disabled={!onSaveInstanceDefault || busy}
             onValueChange={(value: string) => void saveInstance(value as SidebarStyle)}
           >
-            <ToggleGroupItem value="classic"><PanelLeft className="h-4 w-4" />Classic</ToggleGroupItem>
             <ToggleGroupItem value="drill-in"><ListTree className="h-4 w-4" />Drill-in</ToggleGroupItem>
+            <ToggleGroupItem value="classic"><PanelLeft className="h-4 w-4" />Classic</ToggleGroupItem>
           </SegmentedControl>
           <p className="text-caption text-muted-foreground">
-            What everyone sees until they choose their own. Shared with every user.
+            What everyone sees until they choose their own (drill-in unless set to classic). Shared with every user.
           </p>
         </div>
       </div>

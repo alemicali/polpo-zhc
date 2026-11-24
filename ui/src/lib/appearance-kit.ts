@@ -55,7 +55,7 @@ export interface InstanceAppearance {
   palette?: string;
   custom?: { enabled?: boolean; derive?: boolean; light?: TokenMap; dark?: TokenMap };
   fonts?: WebFont[];
-  /** The navigation sidebar everyone gets by default (settings.appearance.sidebarStyle; classic when unset). */
+  /** The navigation sidebar everyone gets by default (settings.appearance.sidebarStyle; drill-in when unset). */
   sidebarStyle?: "classic" | "drill-in";
 }
 

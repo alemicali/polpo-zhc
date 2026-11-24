@@ -26,7 +26,7 @@ vi.mock("@/pages/chat", () => ({
 }));
 
 import {
-  DRILL_IN_NAV, activeTrail, findActiveTrail, isLinkActive, linkPath, navTargets,
+  DRILL_IN_NAV, activeTrail, configSectionId, findActiveTrail, isLinkActive, linkPath, listedNodes, navTargets, pinnedNodes,
 } from "../src/lib/nav-tree";
 import { DrillInNav } from "../src/components/layout/drill-in-nav";
 import { Sidebar } from "../src/components/layout/sidebar";
@@ -98,7 +98,7 @@ describe("the nav tree", () => {
   });
 
   test("every Configuration section has a Settings entry", () => {
-    const config = readFileSync(resolve(process.cwd(), "ui/src/pages/config.tsx"), "utf8");
+    const config = readFileSync(resolve(process.cwd(), "ui/src/lib/config-sections.ts"), "utf8");
     const block = config.slice(config.indexOf("const baseSections = ["), config.indexOf("] as const;", config.indexOf("const baseSections = [")));
     const sections = [...block.matchAll(/id: "([a-z]+)"/g)].map((m) => m[1]);
     expect(sections.length).toBeGreaterThan(10);
@@ -141,7 +141,57 @@ describe("drilling in and out", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Back to main menu" }));
     expect(level(container).dataset.level).toBe("top");
-    expect(within(level(container)).getByRole("button", { name: /Settings/ })).toBeTruthy();
+    // Settings is pinned at the bottom, out of the top level's list
+    expect(within(level(container)).queryByRole("button", { name: /Settings/ })).toBeNull();
+    expect(within(screen.getByRole("list", { name: "Settings and more" })).getByRole("button", { name: /Settings/ })).toBeTruthy();
+  });
+
+  test("Settings at the bottom: opens its level, hides while in it, comes back on Back", () => {
+    const { container } = renderNav("/dashboard", <DrillInNav aboveBottom={<div data-testid="above-bottom" />} />);
+    const pinned = screen.getByRole("list", { name: "Settings and more" });
+    // below the levels and below what sits above it (the What's new cards)
+    expect(level(container).compareDocumentPosition(pinned) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByTestId("above-bottom").compareDocumentPosition(pinned) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(listedNodes(DRILL_IN_NAV).map((n) => n.id)).not.toContain("settings");
+    expect(pinnedNodes(DRILL_IN_NAV).map((n) => n.id)).toEqual(["settings"]);
+
+    fireEvent.click(within(pinned).getByRole("button", { name: /Settings/ }));
+    expect(level(container).dataset.level).toBe("settings");
+    expect(screen.queryByRole("list", { name: "Settings and more" })).toBeNull();
+    for (const page of ["General", "Providers", "Orchestrator", "Channels", "MCP access"]) expect(screen.getByRole("link", { name: page })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Back to main menu" }));
+    expect(level(container).dataset.level).toBe("top");
+    expect(screen.getByRole("list", { name: "Settings and more" })).toBeTruthy();
+  });
+
+  test("Settings is current on a /config page; the rail shows it as an icon", () => {
+    renderNav("/tasks", <DrillInNav collapsed />);
+    const settings = within(screen.getByRole("list", { name: "Settings and more" })).getByRole("button", { name: "Settings" });
+    expect(settings.className).not.toContain("bg-sidebar-primary/10");
+    cleanup();
+    renderNav("/config?section=mcp", <DrillInNav collapsed />);
+    // inside the Settings level: the pinned row is the level itself
+    expect(screen.queryByRole("list", { name: "Settings and more" })).toBeNull();
+  });
+
+  test("the Orchestrator section: ?section=agent and the ?section=orchestrator alias both open it", () => {
+    renderNav("/config?section=agent");
+    const orchestrator = screen.getByRole("link", { name: "Orchestrator" });
+    expect(orchestrator.getAttribute("href")).toBe("/config?section=agent");
+    expect(orchestrator.getAttribute("aria-current")).toBe("page");
+    expect(screen.queryByRole("link", { name: "Agent" })).toBeNull();
+    cleanup();
+    renderNav("/config?section=orchestrator");
+    expect(screen.getByRole("link", { name: "Orchestrator" }).getAttribute("aria-current")).toBe("page");
+    expect(configSectionId("orchestrator")).toBe("agent");
+    expect(configSectionId("agent")).toBe("agent");
+    expect(isLinkActive("/config?section=agent", "/config", "?section=orchestrator")).toBe(true);
+  });
+
+  test("Artifacts carries a Beta badge (Content level)", () => {
+    renderNav("/artifacts");
+    expect(within(screen.getByRole("link", { name: /Artifacts/ })).getByTestId("beta-badge").textContent).toBe("Beta");
+    expect(within(screen.getByRole("link", { name: "Files" })).queryByTestId("beta-badge")).toBeNull();
   });
 
   test("a deep link opens its group, with the page current and no slide", () => {
@@ -297,37 +347,67 @@ describe("the preference", () => {
   const renderSidebar = (at = "/tasks") => renderNav(at, <Sidebar />);
   const classicShown = () => !!document.querySelector("nav[aria-label='Main navigation']:not([data-sidebar-style])");
 
-  test("classic by default, with a dismissible “Try the new sidebar” banner", () => {
-    renderSidebar();
-    expect(classicShown()).toBe(true);
-    expect(screen.getByText("Try the new sidebar")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
-    expect(screen.queryByText("Try the new sidebar")).toBeNull();
-    expect(localStorage.getItem(SIDEBAR_BANNER_STORAGE_KEY)).toBe("classic");
-  });
-
-  test("Try it switches to drill-in (kept), Switch back returns to classic", () => {
+  test("drill-in by default, with a dismissible “You're using the new sidebar · Switch back” banner", () => {
     const { container } = renderSidebar();
-    fireEvent.click(screen.getByRole("button", { name: "Try it" }));
     expect(container.querySelector("[data-sidebar-style='drill-in']")).not.toBeNull();
-    expect(localStorage.getItem(SIDEBAR_STYLE_STORAGE_KEY)).toBe("drill-in");
     // deep link: on /tasks the Work level is open
     expect(level(container).dataset.level).toBe("work");
     expect(screen.getByText(/You're using the new sidebar/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByText(/You're using the new sidebar/)).toBeNull();
+    expect(localStorage.getItem(SIDEBAR_BANNER_STORAGE_KEY)).toBe("drill-in");
+    // nothing stored for the style: the person follows the default
+    expect(localStorage.getItem(SIDEBAR_STYLE_STORAGE_KEY)).toBeNull();
+  });
+
+  test("Switch back goes to classic (kept); Try it returns to drill-in", () => {
+    const { container } = renderSidebar();
     fireEvent.click(screen.getByRole("button", { name: "Switch back" }));
     expect(classicShown()).toBe(true);
     expect(localStorage.getItem(SIDEBAR_STYLE_STORAGE_KEY)).toBe("classic");
+    expect(screen.getByText("Try the new sidebar")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Try it" }));
+    expect(container.querySelector("[data-sidebar-style='drill-in']")).not.toBeNull();
+    expect(localStorage.getItem(SIDEBAR_STYLE_STORAGE_KEY)).toBe("drill-in");
   });
 
-  test("the instance default applies until the person chooses", () => {
-    (globalThis as RuntimeWindow).__POLPO_RUNTIME_CONFIG__ = { appearance: { sidebarStyle: "drill-in" } };
+  test("a person's earlier choice of classic is kept", () => {
+    localStorage.setItem(SIDEBAR_STYLE_STORAGE_KEY, "classic");
+    resetSidebarStyleForTests();
+    renderSidebar();
+    expect(classicShown()).toBe(true);
+  });
+
+  test("an instance set to classic applies until the person chooses", () => {
+    (globalThis as RuntimeWindow).__POLPO_RUNTIME_CONFIG__ = { appearance: { sidebarStyle: "classic" } };
     resetSidebarStyleForTests();
     const { container } = renderSidebar();
-    expect(container.querySelector("[data-sidebar-style='drill-in']")).not.toBeNull();
-    act(() => setSidebarStyle("classic"));
     expect(classicShown()).toBe(true);
-    act(() => setSidebarStyle(null));
+    act(() => setSidebarStyle("drill-in"));
     expect(container.querySelector("[data-sidebar-style='drill-in']")).not.toBeNull();
+    act(() => setSidebarStyle(null));
+    expect(classicShown()).toBe(true);
+  });
+
+  test("classic: no What's new row, the What's new cards at the bottom; Artifacts is Beta", () => {
+    act(() => setSidebarStyle("classic"));
+    renderSidebar("/dashboard");
+    expect(screen.queryByText("Novità")).toBeNull();
+    expect(screen.getByTestId("whats-new-stack")).toBeTruthy();
+    expect(within(screen.getByRole("link", { name: /Artifacts/ })).getByTestId("beta-badge")).toBeTruthy();
+    // classic keeps Configuration in its list
+    expect(screen.getByRole("link", { name: /Configuration/ }).getAttribute("href")).toBe("/config");
+  });
+
+  test("drill-in: the banner and the What's new cards above Settings, at the bottom", () => {
+    act(() => setSidebarStyle("drill-in"));
+    renderSidebar("/dashboard");
+    const pinned = screen.getByRole("list", { name: "Settings and more" });
+    const stack = screen.getByTestId("whats-new-stack");
+    expect(stack.compareDocumentPosition(pinned) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText(/You're using the new sidebar/).compareDocumentPosition(stack) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // the connection footer stays last
+    expect(pinned.compareDocumentPosition(screen.getByText("Connected")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   test("with storage blocked the switch and the dismissal still work for the visit", () => {
@@ -336,10 +416,10 @@ describe("the preference", () => {
     vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => { throw new Error("blocked"); });
     resetSidebarStyleForTests();
     const { container } = renderSidebar();
-    expect(classicShown()).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Try it" }));
     expect(container.querySelector("[data-sidebar-style='drill-in']")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Switch back" }));
+    expect(classicShown()).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
-    expect(screen.queryByText(/You're using the new sidebar/)).toBeNull();
+    expect(screen.queryByText("Try the new sidebar")).toBeNull();
   });
 });

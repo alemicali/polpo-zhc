@@ -5,7 +5,8 @@
  * Two layers, like the layout mode and the look:
  * - this person's choice, kept in this browser (localStorage; unset = follow the instance);
  * - the instance default, settings.appearance.sidebarStyle (Configuration → Appearance, REST
- *   PATCH /config/settings { appearance }, MCP polpo_branding_update sidebar_style), classic when unset.
+ *   PATCH /config/settings { appearance }, MCP polpo_branding_update sidebar_style), drill-in when
+ *   unset (classic only when the instance sets it or the person picks it).
  *
  * Storage may be unavailable (private mode, blocked): every read and write is guarded and the
  * in-memory copy keeps working for the visit. The banners' dismissal lives here too.
@@ -16,7 +17,8 @@ import { APPEARANCE_CHANGE_EVENT, APPEARANCE_SCOPE_EVENT, getInstanceAppearance 
 
 export type SidebarStyle = "classic" | "drill-in";
 export const SIDEBAR_STYLES: readonly SidebarStyle[] = ["classic", "drill-in"];
-export const DEFAULT_SIDEBAR_STYLE: SidebarStyle = "classic";
+/** The built-in default (settings.appearance.sidebarStyle unset): the drill-in sidebar. */
+export const DEFAULT_SIDEBAR_STYLE: SidebarStyle = "drill-in";
 
 export const SIDEBAR_STYLE_STORAGE_KEY = "polpo-sidebar-style";
 export const SIDEBAR_BANNER_STORAGE_KEY = "polpo-sidebar-style-banner-dismissed";
@@ -60,7 +62,7 @@ export interface SidebarStyleState {
   style: SidebarStyle;
   /** This person's own choice, or null when following the instance. */
   user: SidebarStyle | null;
-  /** The instance default (classic when the instance sets none). */
+  /** The instance default (drill-in when the instance sets none). */
   instance: SidebarStyle;
   /** The banners dismissed (one per style). */
   dismissed: ReadonlySet<SidebarStyle>;

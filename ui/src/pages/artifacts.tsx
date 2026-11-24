@@ -4,6 +4,7 @@
  * viewer with the artifact running live, its versions (go back to any), its source, and download. The
  * former data views are here too, as artifacts of type "view".
  */
+import { BetaBadge } from "@/components/shared/beta-badge";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import {
@@ -173,7 +174,7 @@ function ArtifactGallery() {
 
   return (
     <div className={cn("mx-auto flex h-full min-h-0 w-full flex-col gap-3", layout === "preview" ? "max-w-[86rem]" : "max-w-5xl")}>
-      <h1 className="mb-1 font-heading text-2xl font-semibold tracking-tight">Artifacts</h1>
+      <h1 className="mb-1 flex items-center gap-2 font-heading text-2xl font-semibold tracking-tight">Artifacts <BetaBadge /></h1>
       <div className="flex flex-wrap items-center gap-2">
         <Tabs value={mine ? "mine" : "all"} onValueChange={value => {
           const next = new URLSearchParams(params);
