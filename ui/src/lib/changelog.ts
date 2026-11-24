@@ -32,6 +32,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-24-markdown-lists",
+    date: "2026-11-24",
+    kind: "fixed",
+    title: "Gli elenchi puntati non escono più a sinistra",
+    summary: "Negli elenchi puntati e numerati delle risposte i pallini finivano fuori dal messaggio, a sinistra: ora hanno di nuovo il loro rientro.",
+    body: "- Mancavano gli stili che il visualizzatore del markdown usa per gli elenchi; ora vengono inclusi, insieme a quelli di tabelle e blocchi di codice.",
+    highlight: false,
+  },
+  {
     id: "2026-11-24-spotlight-ai",
     date: "2026-11-24",
     kind: "new",

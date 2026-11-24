@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Bulleted and numbered lists in chat answers are indented again.** Streamdown's list classes (`list-inside`, `[li_&]:pl-6`) were never generated because Tailwind does not scan `node_modules`; `ui/src/index.css` now adds `@source "../node_modules/streamdown/dist/*.js"`, so bullets no longer hang outside the message on the left.
+
 ### Added
 - **Ask Polpo from ⌘K, and a larger palette.** The search palette is now a large panel (up to 72rem wide and 86% of the height, the preview pane wider; full screen on phones). Requests in plain words — Italian or English — go to Polpo. See [docs/search.md](docs/search.md#ask-polpo):
   - **Keys**: an **Ask Polpo: "…"** row (first when the words read like a request, last for plain keywords) — ↵ on it, or **⌘/Ctrl+↵ from anywhere** — asks; ⇧+↵ now opens a result in a new tab (was ⌘/Ctrl+↵). The footer lists the keys.
