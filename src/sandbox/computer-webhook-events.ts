@@ -16,8 +16,7 @@
  * signature or an authorization).
  */
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { CappedWebhookEventLog } from "../core/webhook-event-log.js";
 
 export type ComputerWebhookOutcome = "accepted" | "ignored" | "rejected" | "error";
 export const COMPUTER_WEBHOOK_OUTCOMES: readonly ComputerWebhookOutcome[] = ["accepted", "ignored", "rejected", "error"];
@@ -137,76 +136,29 @@ export function safeWebhookHeaders(header: (name: string) => string | undefined 
 
 export const newWebhookEventId = (now: number) => `whe_${now.toString(36)}${randomBytes(4).toString("hex")}`;
 
-const emptyCounts = (): Record<ComputerWebhookOutcome, number> => ({ accepted: 0, ignored: 0, rejected: 0, error: 0 });
-
-/** The capped per-provider log (newest first). */
+/** The capped per-provider log (newest first): the shared webhook event log, one file per provider. */
 export class ComputerWebhookEventLog {
-  constructor(private readonly polpoDir: () => string, private readonly max = COMPUTER_WEBHOOK_EVENTS_MAX) {}
-
-  private dir(): string { return join(this.polpoDir(), "computer-webhook-events"); }
-  private file(provider: string): string { return join(this.dir(), `${provider.replace(/[^a-z0-9-]/gi, "")}.json`); }
+  private readonly log: CappedWebhookEventLog<ComputerWebhookEventRecord, ComputerWebhookEventSummary>;
+  constructor(polpoDir: () => string, max = COMPUTER_WEBHOOK_EVENTS_MAX) {
+    this.log = new CappedWebhookEventLog(polpoDir, "computer-webhook-events", max, ({ payload: _p, headers: _h, ...summary }) => summary);
+  }
 
   /** Every kept entry, newest first. */
-  all(provider: string): ComputerWebhookEventRecord[] {
-    try {
-      const f = this.file(provider);
-      if (!existsSync(f)) return [];
-      const d = JSON.parse(readFileSync(f, "utf8")) as { version?: number; events?: ComputerWebhookEventRecord[] };
-      return Array.isArray(d?.events) ? d.events : [];
-    } catch {
-      return []; // a broken file starts over
-    }
-  }
-
-  private write(provider: string, events: ComputerWebhookEventRecord[]): void {
-    mkdirSync(this.dir(), { recursive: true });
-    const f = this.file(provider);
-    const tmp = `${f}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify({ version: 1, events: events.slice(0, this.max) }));
-    renameSync(tmp, f);
-  }
+  all(provider: string): ComputerWebhookEventRecord[] { return this.log.all(provider); }
 
   /** Add an entry (the oldest beyond the cap are dropped). */
-  add(record: ComputerWebhookEventRecord): void {
-    this.write(record.provider, [record, ...this.all(record.provider)]);
-  }
+  add(record: ComputerWebhookEventRecord): void { this.log.add(record.provider, record); }
 
   /** Change an entry (what Polpo did, once applied); false when it is no longer kept. */
-  update(provider: string, id: string, patch: Partial<ComputerWebhookEventRecord>): boolean {
-    const events = this.all(provider);
-    const i = events.findIndex((e) => e.id === id);
-    if (i < 0) return false;
-    events[i] = { ...events[i]!, ...patch };
-    this.write(provider, events);
-    return true;
-  }
+  update(provider: string, id: string, patch: Partial<ComputerWebhookEventRecord>): boolean { return this.log.update(provider, id, patch); }
 
-  get(provider: string, id: string): ComputerWebhookEventRecord | undefined {
-    return this.all(provider).find((e) => e.id === id);
-  }
+  get(provider: string, id: string): ComputerWebhookEventRecord | undefined { return this.log.get(provider, id); }
 
   /** Entries kept per outcome, and in all. */
-  counts(provider: string): { total: number; counts: Record<ComputerWebhookOutcome, number> } {
-    const all = this.all(provider);
-    const counts = emptyCounts();
-    for (const e of all) if (e.outcome in counts) counts[e.outcome]++;
-    return { total: all.length, counts };
-  }
+  counts(provider: string): { total: number; counts: Record<ComputerWebhookOutcome, number> } { return this.log.counts(provider); }
 
   /** A page of summaries, newest first; `cursor`: the last id of the previous page. */
   list(provider: string, o: { limit?: number; cursor?: string; outcomes?: readonly ComputerWebhookOutcome[] } = {}): ComputerWebhookEventPage {
-    const all = this.all(provider);
-    const counts = emptyCounts();
-    for (const e of all) if (e.outcome in counts) counts[e.outcome]++;
-    const filtered = o.outcomes?.length ? all.filter((e) => o.outcomes!.includes(e.outcome)) : all;
-    let start = 0;
-    if (o.cursor) {
-      const i = filtered.findIndex((e) => e.id === o.cursor);
-      start = i < 0 ? filtered.length : i + 1;
-    }
-    const limit = Math.max(1, Math.min(o.limit ?? 50, this.max));
-    const page = filtered.slice(start, start + limit).map(({ payload: _p, headers: _h, ...summary }) => summary);
-    const more = start + limit < filtered.length;
-    return { events: page, ...(more && page.length ? { nextCursor: page.at(-1)!.id } : {}), total: all.length, counts };
+    return this.log.list(provider, o);
   }
 }

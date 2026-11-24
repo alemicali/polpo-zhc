@@ -464,7 +464,7 @@ export interface AgentConfig {
   // Core tools (always available): read, write, edit, bash, glob, grep, ls, http_fetch, http_download, register_outcome, vault_get, vault_list.
   // Extended tool categories are activated via allowedTools (e.g. ["browser_*", "email_*"]).
   // No enable flags needed — if a tool name appears in allowedTools, it's loaded.
-  // Available extension categories: browser_*, email_*, image_*, video_*, audio_*, excel_*, pdf_*, docx_*, search_*, whatsapp_*, phone_*, data_*.
+  // Available extension categories: browser_*, email_*, image_*, video_*, audio_*, excel_*, pdf_*, docx_*, search_*, whatsapp_*, wabiz_* (WhatsApp Business, explicit only), phone_*, data_*.
   // Git and dependency operations should be done via bash.
 
   /** Browser profile name for persistent context (cookies, auth, localStorage).
@@ -1163,7 +1163,7 @@ export interface ApprovalRequest {
 // === Channel Gateway & Peer Identity ===
 
 /** Supported messaging channel types for inbound message routing. */
-export type ChannelType = "telegram" | "whatsapp" | "slack" | "discord" | "webchat" | "webhook";
+export type ChannelType = "telegram" | "whatsapp" | "whatsapp-business" | "slack" | "discord" | "webchat" | "webhook";
 
 /**
  * Peer identity — represents a person talking to the bot from a messaging channel.
@@ -1260,6 +1260,12 @@ export interface ChannelGatewayConfig {
   groupReplies?: "mentions" | "intent";
   /** groupReplies "intent": how sure the classifier must be (0–1) before the agent joins in. Default 0.7. */
   intentThreshold?: number;
+  /**
+   * Who may use slash commands (/help, /new, /agent, /pair…). "all" (default): everyone allowed to write;
+   * "operators": only operators (WhatsApp Business: business.operators; elsewhere: people paired or in allowFrom);
+   * "none": nobody, every message is chat. A WhatsApp Business channel facing customers always uses "operators".
+   */
+  commands?: "all" | "operators" | "none";
 }
 
 /** Channel a conversation reply is delivered through. */
@@ -1301,7 +1307,7 @@ export interface PresenceEntry {
 
 // === Notification System ===
 
-export type NotificationChannelType = "slack" | "email" | "telegram" | "whatsapp" | "webhook" | "push" | "expo-push";
+export type NotificationChannelType = "slack" | "email" | "telegram" | "whatsapp" | "whatsapp-business" | "webhook" | "push" | "expo-push";
 
 export interface NotificationChannelConfig {
   type: NotificationChannelType;
@@ -1344,6 +1350,20 @@ export interface NotificationChannelConfig {
   port?: number;
   /** SMTP from address. */
   from?: string;
+  /** WhatsApp Business (Meta Cloud API): the phone number's id. */
+  phoneNumberId?: string;
+  /** WhatsApp Business: the WhatsApp Business Account id (templates, subscriptions). */
+  wabaId?: string;
+  /** WhatsApp Business: Graph API version. Default "v23.0". */
+  graphApiVersion?: string;
+  /** WhatsApp Business: the system user's access token (vault reference, owner "$channels", set from the dashboard). */
+  accessTokenRef?: import("./vault-ref.js").VaultRefLike;
+  /** WhatsApp Business: the Meta app's secret, to verify webhook signatures (vault reference, owner "$channels"). */
+  appSecretRef?: import("./vault-ref.js").VaultRefLike;
+  /** WhatsApp Business: the webhook verify token (vault reference, owner "$channels"). */
+  verifyTokenRef?: import("./vault-ref.js").VaultRefLike;
+  /** WhatsApp Business: who it talks to, limits and policies (see whatsapp-business.ts). */
+  business?: import("./whatsapp-business.js").WaBusinessSettings;
   /** Channel gateway config — enables inbound message routing for this channel. */
   gateway?: ChannelGatewayConfig;
 }

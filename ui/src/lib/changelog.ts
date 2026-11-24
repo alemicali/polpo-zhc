@@ -32,6 +32,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-24-whatsapp-business",
+    date: "2026-11-24",
+    kind: "new",
+    title: "WhatsApp Business ufficiale: i clienti scrivono al tuo numero, risponde un agente",
+    summary: "Nuovo canale WhatsApp Business (Cloud API di Meta): i clienti scrivono al numero dell'azienda e risponde l'agente che scegli; i messaggi che inizi tu partono solo come modelli approvati, con approvazione e limiti giornalieri.",
+    body: [
+      "- **Impostazioni → Canali → WhatsApp Business (ufficiale)**: inserisci gli ID del numero e dell'account, il token, l'app secret e il verify token (puoi generarlo). I segreti vanno nel vault e non si rivedono più: vedi solo «salvato» o «da impostare».",
+      "- **Clienti**: chiunque scrive al numero e risponde solo l'agente del canale, mai Polpo; i comandi e l'abbinamento restano agli **operatori**.",
+      "- **La regola delle 24 ore**: messaggi liberi solo entro 24 ore dall'ultimo messaggio del cliente; fuori finestra solo **modelli approvati** da Meta, delle categorie che permetti, mai a chi ha scritto STOP o ANNULLA, entro i **limiti giornalieri**. Se a mandarli è un agente o Polpo, aspettano la tua **approvazione**.",
+      "- Il webhook verifica ogni consegna, la salva prima di rispondere a Meta e la elabora in ordine: niente si perde a un riavvio e niente si ripete. Il **registro eventi** mostra ogni consegna senza mai il testo dei messaggi.",
+      "- Stato dei messaggi (inviato, consegnato, letto, costo), conferme di lettura e «sta scrivendo…», conservazione dei dati per 90 giorni e cancellazione di un contatto.",
+      "- Anche da REST, MCP (`polpo_wabiz_*`), chat con Polpo e SDK. La guida, con il comando Tailscale Funnel per esporre il webhook, è in docs/whatsapp-business.md.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i canali", to: "/config?section=channels" },
+  },
+  {
     id: "2026-11-24-drill-in-sidebar",
     date: "2026-11-24",
     kind: "new",

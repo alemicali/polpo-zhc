@@ -296,6 +296,30 @@ export interface PolpoEventMap {
     computerId?: string;
   };
 
+  /**
+   * A message of a WhatsApp Business channel changed status: Meta's status webhooks (sent,
+   * delivered, read, failed), a send queued for approval, approved or rejected, an inbound message.
+   */
+  "channel:message-status": {
+    channel: string;
+    /** The message id (wamid, or the local id of a queued send). */
+    messageId: string;
+    status: string;
+    direction: "in" | "out";
+    /** The contact, masked (39•••••567). */
+    contact?: string;
+    error?: string;
+    pricingCategory?: string;
+  };
+  /** A WhatsApp Business webhook delivery was recorded in the channel's event log, or its processing finished. */
+  "channel:webhook": {
+    channel: string;
+    id: string;
+    action: "recorded" | "updated";
+    outcome: "accepted" | "ignored" | "rejected" | "error";
+    eventType?: string;
+  };
+
   // Company brain
   "brain:changed": import("./company-brain.js").BrainChangeEvent;
 

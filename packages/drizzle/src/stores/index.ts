@@ -33,3 +33,4 @@ export { DrizzleRoomStore } from "./room-store.js";
 export { DrizzleStorageRegistryStore } from "./storage-registry-store.js";
 export { DrizzleConversationCheckStore } from "./conversation-check-store.js";
 export { DrizzleScheduleStore, DrizzleLeaseStore, DrizzleTaskWatcherStore } from "./scheduling-store.js";
+export { DrizzleWaBusinessStore } from "./whatsapp-business-store.js";

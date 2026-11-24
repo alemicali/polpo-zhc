@@ -24,7 +24,7 @@ export const GATE_HOOKS = [
   "task:create", "task:spawn", "task:transition", "task:complete", "task:fail", "task:retry", "mission:execute", "mission:complete",
   "assessment:run", "assessment:complete", "quality:gate", "quality:sla", "schedule:trigger", "orchestrator:tick", "orchestrator:shutdown",
 ] as const;
-export const CHANNEL_TYPES = ["slack", "email", "telegram", "whatsapp", "webhook", "push"] as const;
+export const CHANNEL_TYPES = ["slack", "email", "telegram", "whatsapp", "whatsapp-business", "webhook", "push"] as const;
 
 /** A channel's secret fields: never accepted or returned here (capability URLs included). */
 const CHANNEL_SECRET_FIELDS = ["botToken", "apiKey", "webhookUrl", "url", "headers", "inboundSecret", "vapidPrivateKey"];
@@ -712,6 +712,20 @@ const gatewayInput = z.object({
   replyTo: z.object({ channel: z.string().min(1), chatId: z.string().optional(), echoInbound: z.boolean().optional() }).strict().optional(),
   groupReplies: z.enum(["mentions", "intent"]).optional(),
   intentThreshold: z.number().min(0).max(1).optional(),
+  commands: z.enum(["all", "operators", "none"]).optional().describe("Who may use slash commands (WhatsApp Business facing customers: operators only)"),
+}).strict();
+
+/** WhatsApp Business settings (no secrets: those are entered in the dashboard and kept in the vault). */
+const businessInput = z.object({
+  audience: z.enum(["customers", "operators"]).optional().describe("customers (default): anyone may write, answered only by gateway.agent; operators: the team"),
+  operators: z.array(z.string().min(1)).optional().describe("Operators' phone numbers (wa_id): commands and notifications"),
+  markRead: z.boolean().optional(), typing: z.boolean().optional(),
+  outsideWindow: z.enum(["template", "fail"]).optional().describe("A notification for someone outside the 24-hour window: the notification template, or fail (default)"),
+  notificationTemplate: z.object({ name: z.string().min(1), language: z.string().min(1), bodyParams: z.array(z.string()).optional() }).strict().optional(),
+  allowedCategories: z.array(z.enum(["UTILITY", "MARKETING", "AUTHENTICATION"])).optional().describe("Template categories agents may send (default UTILITY)"),
+  approveTemplates: z.boolean().optional().describe("Templates from agents and Polpo wait for an operator's approval (default true)"),
+  limits: z.object({ businessInitiatedPerDay: z.number().int().min(0).optional(), perAgentPerDay: z.record(z.string(), z.number().int().min(0)).optional() }).strict().optional(),
+  retentionDays: z.number().int().min(1).max(3650).optional(),
 }).strict();
 
 function registerChannelConfigTools(tool: Register, deps: McpDeps): void {
@@ -719,7 +733,7 @@ function registerChannelConfigTools(tool: Register, deps: McpDeps): void {
 
   tool("settings", "polpo_channel_save", {
     title: "Save a notification channel",
-    description: "Create or change a notification channel's setup (Telegram, Slack, email, WhatsApp, webhook, push): its fields "
+    description: "Create or change a notification channel's setup (Telegram, Slack, email, WhatsApp, WhatsApp Business (Meta Cloud API), webhook, push): its fields "
       + "(chat id, recipients, sender, SMTP host and port, WhatsApp profile, push options), the inbound gateway (who may write, which agent "
       + "answers, sessions). Only the fields given change. Secrets (bot token, API key, webhook URL, secret headers) never pass through "
       + "MCP — what is typed into an MCP client stays in its conversation history: the result lists the ones still missing with setup_url, "
@@ -738,6 +752,10 @@ function registerChannelConfigTools(tool: Register, deps: McpDeps): void {
       vapid_public_key: z.string().min(1).optional().describe("Push: the public key"),
       ttl: z.number().int().min(0).optional().describe("Push: seconds a notification is kept"),
       urgency: z.enum(["very-low", "low", "normal", "high"]).optional().describe("Push: delivery urgency"),
+      phone_number_id: z.string().regex(/^\d{5,30}$/).optional().describe("WhatsApp Business: the phone number's id (Meta)"),
+      waba_id: z.string().regex(/^\d{5,30}$/).optional().describe("WhatsApp Business: the WhatsApp Business Account id"),
+      graph_api_version: z.string().regex(/^v\d{1,3}\.\d{1,2}$/).optional().describe("WhatsApp Business: Graph API version (default v23.0)"),
+      business: businessInput.optional().describe("WhatsApp Business: audience, operators, window and template rules, caps, retention (replaces the current ones)"),
       gateway: gatewayInput.nullable().optional().describe("Inbound messages: replaces the gateway settings; null turns them off"),
     },
     outputSchema: { channel: looseObject, created: z.boolean(), needs_secrets: z.array(z.string()), setup_url: z.string() },
@@ -750,6 +768,7 @@ function registerChannelConfigTools(tool: Register, deps: McpDeps): void {
     const fields: Record<string, unknown> = {
       type: a.type, chatId: a.chat_id, to: a.to, from: a.from, provider: a.provider, host: a.host, port: a.port, profileDir: a.profile_dir,
       vapidSubject: a.vapid_subject, vapidPublicKey: a.vapid_public_key, ttl: a.ttl, urgency: a.urgency,
+      phoneNumberId: a.phone_number_id, wabaId: a.waba_id, graphApiVersion: a.graph_api_version, business: a.business,
     };
     // the stored channel as GET /config gives it (secrets masked: the server restores them)
     const next: Record<string, unknown> = { ...(current ?? {}) };
@@ -767,6 +786,18 @@ function registerChannelConfigTools(tool: Register, deps: McpDeps): void {
         : "Nothing was saved. Fix the field named in the error.");
     }
     const saved = ((r.data as { settings?: Settings })?.settings?.notifications?.channels?.[a.name] ?? next) as Record<string, unknown>;
+    if (saved.type === "whatsapp-business") {
+      // its secrets live in the vault ($channels): whether each is set comes from the channel's status
+      const st = await apiGet(deps, `/whatsapp-business/${enc(a.name)}/status`);
+      const secrets = (st.ok ? (st.data as { secrets?: Record<string, boolean> }).secrets : undefined) ?? { accessToken: false, appSecret: false, verifyToken: false };
+      const absent = Object.entries(secrets).filter(([, set]) => !set).map(([k]) => k);
+      const handoff = absent.length
+        ? setupHandoffs(deps, absent.map((k) => ({ target: { kind: "wabiz" as const, item: a.name, field: k }, what: k })))
+        : { setup_url: dashboardLink(deps, `/config?section=channels&channel=${enc(a.name)}`) };
+      return ok(`${current ? "Updated" : "Created"} WhatsApp Business channel ${a.name}.`
+        + `${absent.length ? ` It still needs ${absent.join(", ")} (secrets never pass through MCP). ${(handoff as { next_step: string }).next_step}` : " Check it with polpo_wabiz_status { test: true }."}`,
+      { channel: channelView(a.name, saved), created: !current, needs_secrets: absent, ...handoff });
+    }
     const missing = (CHANNEL_REQUIRED_SECRETS[String(saved.type)] ?? []).filter((oneOf) => !oneOf.some((k) => saved[k]));
     const needs = missing.map((oneOf) => oneOf.join(" or "));
     const handoff = missing.length
