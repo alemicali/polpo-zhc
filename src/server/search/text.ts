@@ -110,10 +110,10 @@ export function parseQuery(q: string): ParsedQuery {
 }
 
 /** How well one query term matches one word of a text (0: not at all). */
-export function termWordScore(term: QueryTerm, word: string): number {
+export function termWordScore(term: QueryTerm, word: string, wordStem?: string): number {
   if (word === term.text) return 1;
   if (word.startsWith(term.text)) return 0.85;
-  const ws = stem(word);
+  const ws = wordStem ?? stem(word);
   if (ws === term.stem) return 0.8;
   if (term.stem.length >= 3 && ws.startsWith(term.stem)) return 0.7;
   if (term.fuzzy && word.length >= FUZZY_MIN - 1) {

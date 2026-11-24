@@ -13,6 +13,7 @@
  * partial and answered from its cache the next time (stale-while-revalidate); a stale query
  * (the client aborted it) stops as soon as possible.
  */
+import { DocIndex } from "./doc-index.js";
 import { fold, matchScore, maskSecrets, parseQuery, snippet, termScore, words, highlightRanges, type ParsedQuery, type Range, type Snippet } from "./text.js";
 
 export const SEARCH_TYPES = [
@@ -194,7 +195,11 @@ export function scoreDoc(doc: SearchDoc, q: ParsedQuery, now = Date.now()): { sc
 /** A document as a result: scored, with its title highlights and a snippet when the content matched. */
 export function toResult(doc: SearchDoc, q: ParsedQuery, now = Date.now()): SearchResult | null {
   const { score, inBody } = scoreDoc(doc, q, now);
-  if (!score) return null;
+  return score ? buildResult(doc, q, score, inBody) : null;
+}
+
+/** A scored document as a result: its title highlights and, when the content matched, a snippet. */
+export function buildResult(doc: SearchDoc, q: ParsedQuery, score: number, inBody: boolean): SearchResult {
   const titleHighlights = highlightRanges(doc.title, q);
   const body = doc.body && (inBody || !titleHighlights.length) ? maskSecrets(doc.body) : undefined;
   const snip = body ? snippet(body, q) : undefined;
@@ -216,6 +221,8 @@ export function toResult(doc: SearchDoc, q: ParsedQuery, now = Date.now()): Sear
 
 interface CacheEntry {
   docs: SearchDoc[];
+  /** The documents' inverted index (built when they load). */
+  index?: DocIndex<SearchDoc>;
   at: number;
   loaded: boolean;
   refreshing?: Promise<SearchDoc[]>;
@@ -259,41 +266,42 @@ export class SearchEngine {
     }
   }
 
-  private docsOf(source: SearchSource): Promise<SearchDoc[]> {
+  private docsOf(source: SearchSource): Promise<{ docs: SearchDoc[]; index?: DocIndex<SearchDoc> }> {
     const entry = this.cache.get(source.type);
     const ttl = source.ttlMs ?? DEFAULT_TTL;
-    if (entry?.loaded && Date.now() - entry.at < ttl) return Promise.resolve(entry.docs);
-    if (entry?.refreshing) return entry.loaded ? Promise.resolve(entry.docs) : entry.refreshing;
+    if (entry?.loaded && Date.now() - entry.at < ttl) return Promise.resolve(entry);
+    if (entry?.refreshing) return entry.loaded ? Promise.resolve(entry) : entry.refreshing.then(() => this.cache.get(source.type) ?? { docs: [] });
     const refreshing = source.docs!().then((docs) => {
-      this.cache.set(source.type, { docs, at: Date.now(), loaded: true });
+      // the index is built here, while the old documents still answer
+      this.cache.set(source.type, { docs, index: new DocIndex(docs), at: Date.now(), loaded: true });
       return docs;
     }, (err) => {
       // keep what we had; try again next time
-      if (entry?.loaded) this.cache.set(source.type, { docs: entry.docs, at: entry.at, loaded: true });
+      if (entry?.loaded) this.cache.set(source.type, { ...entry, refreshing: undefined });
       else this.cache.delete(source.type);
       throw err;
     });
     refreshing.catch(() => undefined);
-    this.cache.set(source.type, { docs: entry?.docs ?? [], at: entry?.at ?? 0, loaded: !!entry?.loaded, refreshing });
+    this.cache.set(source.type, { docs: entry?.docs ?? [], index: entry?.index, at: entry?.at ?? 0, loaded: !!entry?.loaded, refreshing });
     // stale: answer from the old documents while they refresh
-    return entry?.loaded ? Promise.resolve(entry.docs) : refreshing;
+    return entry?.loaded ? Promise.resolve(entry) : refreshing.then(() => this.cache.get(source.type) ?? { docs: [] });
   }
 
-  private async runSource(source: SearchSource, q: ParsedQuery, limit: number, signal: AbortSignal): Promise<SearchResult[]> {
+  private async runSource(source: SearchSource, q: ParsedQuery, limit: number, signal: AbortSignal): Promise<{ results: SearchResult[]; total: number }> {
     const now = Date.now();
+    let total = 0;
     const [fromDocs, fromQuery] = await Promise.all([
-      source.docs ? this.docsOf(source).then((docs) => {
+      source.docs ? this.docsOf(source).then(({ docs, index }) => {
         if (signal.aborted) throw new AbortedError();
-        const out: SearchResult[] = [];
-        for (const d of docs) {
-          const r = toResult(d, q, now);
-          if (r) out.push(r);
-        }
-        return out;
+        const hits = (index ?? new DocIndex(docs)).search(q, now);
+        total = hits.length;
+        // highlights and snippets only for what can be shown
+        hits.sort((a, b) => b.score - a.score || (b.doc.updatedAt ?? "").localeCompare(a.doc.updatedAt ?? ""));
+        return hits.slice(0, limit).map((h) => buildResult(h.doc, q, h.score, h.inBody));
       }) : Promise.resolve([] as SearchResult[]),
       source.query ? source.query(q, { limit, signal }) : Promise.resolve([] as SearchResult[]),
     ]);
-    if (!fromQuery.length) return fromDocs;
+    if (!fromQuery.length) return { results: fromDocs, total };
     // the same item from both (a chat whose title and messages match): the best score, the snippet if any
     const byId = new Map<string, SearchResult>();
     for (const r of [...fromDocs, ...fromQuery]) {
@@ -307,7 +315,8 @@ export class SearchEngine {
         meta: { ...other.meta, ...best.meta },
       });
     }
-    return [...byId.values()];
+    const merged = [...byId.values()];
+    return { results: merged, total: Math.max(total + fromQuery.length - (fromDocs.length + fromQuery.length - merged.length), merged.length) };
   }
 
   async search(opts: SearchOptions): Promise<SearchResponse> {
@@ -331,7 +340,7 @@ export class SearchEngine {
     const sources = this.sources().filter((s) => !types || types.has(s.type));
     const budget = Math.max(50, opts.budgetMs ?? 800);
     const partial = new Set<SearchType>();
-    const byType = new Map<SearchType, SearchResult[]>();
+    const byType = new Map<SearchType, { results: SearchResult[]; total: number }>();
     let timer: NodeJS.Timeout | undefined;
     const deadline = new Promise<"timeout">((resolve) => { timer = setTimeout(() => resolve("timeout"), budget); });
     try {
@@ -341,7 +350,7 @@ export class SearchEngine {
           run.catch(() => undefined);
           const out = await Promise.race([run, deadline]);
           if (out === "timeout") { partial.add(source.type); return; }
-          if (out.length) byType.set(source.type, [...(byType.get(source.type) ?? []), ...out]);
+          if (out.results.length) byType.set(source.type, out);
         } catch (err) {
           if ((err as Error)?.name === "AbortError" || controller.signal.aborted) return;
           partial.add(source.type);
@@ -354,9 +363,9 @@ export class SearchEngine {
     if (outer?.aborted) throw new AbortedError();
 
     const groups: SearchGroup[] = [];
-    for (const [type, results] of byType) {
+    for (const [type, { results, total }] of byType) {
       results.sort((a, b) => b.score - a.score || (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
-      groups.push({ type, label: SEARCH_TYPE_LABELS[type], total: results.length, items: results.slice(0, perType) });
+      groups.push({ type, label: SEARCH_TYPE_LABELS[type], total: Math.max(total, results.length), items: results.slice(0, perType) });
     }
     groups.sort((a, b) => (b.items[0]?.score ?? 0) - (a.items[0]?.score ?? 0));
     // one page of the flattened list (a single type pages through all of its results)
