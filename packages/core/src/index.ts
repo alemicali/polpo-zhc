@@ -303,9 +303,9 @@ export {
   parseAppearanceSettings, parseAppearanceTokens, sanitizeAppearanceSettings, parseAppearanceToken, isEmptyAppearance,
   APPEARANCE_NUMBER_RANGES, APPEARANCE_GRADIENT_ANGLE, APPEARANCE_FONT_HOSTS, APPEARANCE_MAX_WEB_FONTS, APPEARANCE_FONT_FAMILY, APPEARANCE_BUNDLED_FONTS,
   APPEARANCE_PRELOADED_FONTS, normalizeFontWeights, normalizeFontUrl, webFontHref, parseWebFont, parseWebFonts, unloadedFontFamilies, parseAppearanceGradient,
-  AGENT_COLOR_COUNT, AGENT_COLOR_TOKEN, agentColorIndexFromName, agentColorIndex, WIDGET_TOKEN_NAMES, widgetAppearance,
+  AGENT_COLOR_COUNT, AGENT_COLOR_TOKEN, agentColorIndexFromName, agentColorIndex, WIDGET_TOKEN_NAMES, widgetAppearance, SIDEBAR_STYLES,
 } from "./appearance.js";
 export type {
   AppearanceTheme, AppearancePalette, AppearanceColors, AppearanceCustom, AppearanceSettings, AppearanceTokens, AppearanceTokenName,
-  AppearanceTokenGroup, AppearanceTokenKind, AppearanceWebFont, AppearanceGradient,
+  AppearanceTokenGroup, AppearanceTokenKind, AppearanceWebFont, AppearanceGradient, SidebarStyle,
 } from "./appearance.js";

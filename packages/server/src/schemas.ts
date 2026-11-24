@@ -270,7 +270,7 @@ export const UpdateSettingsSchema = z.object({
     logoFrame: z.enum(["box", "none", ""]).optional(),
   }).optional(),
   /**
-   * The dashboard's default look for everyone: { theme, palette, custom: { enabled, light, dark } }
+   * The dashboard's default look for everyone: { theme, palette, custom: { enabled, light, dark }, fonts, sidebarStyle }
    * (validated by parseAppearanceSettings); replaces it, null removes it.
    */
   appearance: z.record(z.string(), z.unknown()).nullable().optional(),

@@ -17,6 +17,17 @@ export const APPEARANCE_PALETTES = ["tide", "lovable", "chatgpt", "claude", "bru
 export type AppearancePalette = (typeof APPEARANCE_PALETTES)[number];
 
 /**
+ * The dashboard's navigation sidebar: classic (every page in one list) or drill-in (top-level
+ * entries that open their pages as a second level inside the sidebar). The instance default is
+ * settings.appearance.sidebarStyle (classic when unset); a person may choose their own.
+ */
+export const SIDEBAR_STYLES = ["classic", "drill-in"] as const;
+export type SidebarStyle = (typeof SIDEBAR_STYLES)[number];
+
+/** The fields of settings.appearance. */
+const APPEARANCE_FIELDS: readonly string[] = ["theme", "palette", "custom", "fonts", "sidebarStyle"];
+
+/**
  * How a token's value is checked: colour, font stack, radius (px; 0–24, card and control radius
  * 0–32; badge, pill and avatar 0–999, 999 = fully round), box-shadow, font size (rem 0.5–6 / px 8–96), font weight (100–900), letter-spacing (em
  * -0.1–0.3 / px -3–6, 0, normal), text case (uppercase, none, capitalize, lowercase), a gradient
@@ -301,6 +312,8 @@ export interface AppearanceSettings {
   custom?: AppearanceCustom;
   /** Web fonts to load (any mode's font stacks may name them). */
   fonts?: AppearanceWebFont[];
+  /** The navigation sidebar everyone gets by default (classic when unset). */
+  sidebarStyle?: SidebarStyle;
 }
 
 /** The font services a web font stylesheet may come from. */
@@ -531,6 +544,10 @@ export function parseAppearanceSettings(raw: unknown, path = "settings.appearanc
     if (!(APPEARANCE_PALETTES as readonly unknown[]).includes(r.palette)) throw new Error(`${path}.palette must be one of ${APPEARANCE_PALETTES.join(", ")}`);
     out.palette = r.palette as AppearancePalette;
   }
+  if (r.sidebarStyle !== undefined && r.sidebarStyle !== null) {
+    if (!(SIDEBAR_STYLES as readonly unknown[]).includes(r.sidebarStyle)) throw new Error(`${path}.sidebarStyle must be one of ${SIDEBAR_STYLES.join(", ")}`);
+    out.sidebarStyle = r.sidebarStyle as SidebarStyle;
+  }
   if (r.custom !== undefined && r.custom !== null) {
     if (typeof r.custom !== "object" || Array.isArray(r.custom)) throw new Error(`${path}.custom must be an object`);
     const c = r.custom as Record<string, unknown>;
@@ -551,14 +568,14 @@ export function parseAppearanceSettings(raw: unknown, path = "settings.appearanc
     const fonts = parseWebFonts(r.fonts, `${path}.fonts`);
     if (fonts.length) out.fonts = fonts;
   }
-  const unknown = Object.keys(r).filter((k) => !["theme", "palette", "custom", "fonts"].includes(k));
-  if (unknown.length) throw new Error(`${path}: unknown field ${unknown.join(", ")} (use theme, palette, custom, fonts)`);
+  const unknown = Object.keys(r).filter((k) => !APPEARANCE_FIELDS.includes(k));
+  if (unknown.length) throw new Error(`${path}: unknown field ${unknown.join(", ")} (use ${APPEARANCE_FIELDS.join(", ")})`);
   return out;
 }
 
 /** Is an appearance empty (nothing chosen: the built-in defaults)? */
 export function isEmptyAppearance(a: AppearanceSettings | undefined): boolean {
-  return !a || (a.theme === undefined && a.palette === undefined && a.custom === undefined && !a.fonts?.length);
+  return !a || (a.theme === undefined && a.palette === undefined && a.custom === undefined && !a.fonts?.length && a.sidebarStyle === undefined);
 }
 
 /**
@@ -576,7 +593,8 @@ export function sanitizeAppearanceSettings(raw: unknown, path = "settings.appear
   const attempt = (fn: () => void) => { try { fn(); } catch (err) { problems.push(err instanceof Error ? err.message : String(err)); } };
   attempt(() => { Object.assign(value, parseAppearanceSettings({ theme: r.theme }, path)); });
   attempt(() => { Object.assign(value, parseAppearanceSettings({ palette: r.palette }, path)); });
-  for (const k of Object.keys(r)) if (!["theme", "palette", "custom", "fonts"].includes(k)) problems.push(`${path}: unknown field ${k}`);
+  attempt(() => { Object.assign(value, parseAppearanceSettings({ sidebarStyle: r.sidebarStyle }, path)); });
+  for (const k of Object.keys(r)) if (!APPEARANCE_FIELDS.includes(k)) problems.push(`${path}: unknown field ${k}`);
   if (r.fonts !== undefined && r.fonts !== null) {
     if (!Array.isArray(r.fonts)) {
       problems.push(`${path}.fonts must be a list of web fonts`);

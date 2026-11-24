@@ -41,6 +41,9 @@ import {
 import { useTheme } from "@/hooks/use-theme";
 import { WhatsNewDot } from "@/components/whats-new/whats-new-dot";
 import { openWhatsNew } from "@/hooks/use-whats-new-drawer";
+import { useSidebarStyle } from "@/hooks/use-sidebar-style";
+import { DrillInNav } from "./drill-in-nav";
+import { SidebarStyleBanner } from "./sidebar-style-banner";
 
 /** Single source of truth for mobile nav entries — grouped semantically. */
 const NAV_GROUPS: { title: string; items: { to: string; icon: typeof LayoutDashboard; label: string }[] }[] = [
@@ -100,6 +103,7 @@ export function MobileNavSheet({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const { pathname } = useLocation();
   const { theme, setTheme } = useTheme();
+  const drillIn = useSidebarStyle() === "drill-in";
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
@@ -107,12 +111,37 @@ export function MobileNavSheet({ children }: { children: ReactNode }) {
       <SheetContent
         side="bottom"
         className="rounded-t-2xl pb-safe bg-popover/95 backdrop-blur-surface border-border/40 max-h-[85dvh] overflow-y-auto"
+        onEscapeKeyDown={(event) => {
+          // inside a drill-in level, Escape goes up a level instead of closing the drawer
+          const back = (event.target as HTMLElement | null)?.closest?.("[data-sidebar-style='drill-in']")?.querySelector<HTMLElement>("[data-nav-back]");
+          if (back) {
+            event.preventDefault();
+            back.click();
+          }
+        }}
       >
         <SheetHeader className="px-1">
           <SheetTitle className="text-sm font-bold tracking-tight">Navigate</SheetTitle>
         </SheetHeader>
         <div className="space-y-5 px-1 pb-4">
-          {NAV_GROUPS.map((group) => (
+          {drillIn && (
+            <>
+              <DrillInNav variant="sheet" onNavigate={() => setOpen(false)} />
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  openWhatsNew();
+                }}
+                className="flex w-full items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium text-foreground/80 transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <Megaphone className="h-4 w-4" />
+                Novità
+                <WhatsNewDot className="ml-auto" />
+              </button>
+            </>
+          )}
+          {!drillIn && NAV_GROUPS.map((group) => (
             <div key={group.title}>
               <div className="px-2 pb-2 text-label text-muted-foreground/60">
                 {group.title}
@@ -157,6 +186,8 @@ export function MobileNavSheet({ children }: { children: ReactNode }) {
               </div>
             </div>
           ))}
+
+          <SidebarStyleBanner className="border-border/50 bg-muted/40 text-foreground" />
 
           {/* Polpo Ink Hub — with the other app-level links, not in a nav section */}
           <a

@@ -107,6 +107,7 @@ export type {
   PolpoSettings,
   BrandingConfig,
   AppearanceConfig,
+  SidebarStyle,
   AppearanceTokens,
   ReasoningLevel,
   ModelConfig,
