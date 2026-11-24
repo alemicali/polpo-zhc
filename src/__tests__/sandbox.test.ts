@@ -286,6 +286,9 @@ describe("Polpo's tools", () => {
       getAgents: async () => agents,
       getConfig: () => ({ settings: { sandbox: { network: { mode: "allowlist", allow: ["github.com"] } } } }),
       updateAgent: async (name: string, updates: Record<string, unknown>) => { Object.assign(agents[0]!, updates); return agents[0]; },
+      // update_agent goes through versioning (draft → publish → deploy by default)
+      autoDeployApiUpdates: () => true,
+      updateAgentVersioned: async (_name: string, updates: Record<string, unknown>) => { Object.assign(agents[0]!, updates); return { agent: agents[0], draftChanged: true }; },
     } as any;
   }
 

@@ -1452,6 +1452,8 @@ export class Orchestrator extends TypedEmitter {
 
     // Sync config.teams from stores (authoritative source — agents.json / teams.json)
     await this.agentMgr.syncConfigCache();
+    // the team's agents start at 1.0.0 in production
+    await this.migrateAgentVersions();
 
     this.initVaultStore();
     await refreshCustomProviderSecretStatus();

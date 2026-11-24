@@ -8,6 +8,10 @@ import {
   type AgentConfig, type AgentUpdate, type AgentVersionStore,
 } from "@polpo-ai/core";
 import { TaskManager } from "@polpo-ai/core/task-manager";
+import { TaskRunner } from "@polpo-ai/core";
+import { TypedEmitter } from "../core/events.js";
+import { Orchestrator } from "../core/orchestrator.js";
+import { InMemoryRunStore, InMemoryTaskControlStore, InMemoryTaskStore, createTestAgent } from "./fixtures.js";
 import { FileAgentVersionStore } from "../stores/file-agent-version-store.js";
 
 /** A live agent store in memory: what production runs. */
@@ -302,5 +306,106 @@ describe("TaskManager: pinned agent versions", () => {
     expect(tasks[0]!.agentVersion).toBeUndefined();
     await tm.updateTaskAssignment(String(tasks[0]!.id), "writer@1.0.0");
     expect(tasks[0]!.agentVersion).toBe("1.0.0");
+  });
+});
+
+describe("TaskRunner: the agent version a run uses", () => {
+  /** Just enough of the orchestrator for spawnForTask (as task-run-context.test.ts). */
+  function runner(versioning: AgentVersioning, task: Record<string, unknown>) {
+    const spawned: Array<{ agent: AgentConfig }> = [];
+    const ctx = {
+      emitter: new TypedEmitter(),
+      polpoDir: "/tmp/polpo-test", agentWorkDir: "/tmp/polpo-test/work",
+      config: { project: "p", settings: {} },
+      hooks: { runBeforeSync: () => ({ cancelled: false }) },
+      agentStore: { getAgent: async () => { throw new Error("resolution goes through agentVersions"); } },
+      agentVersions: versioning,
+      memoryStore: { get: async () => "" },
+      sandboxProviders: () => new Set(["local"]),
+      spawner: { spawn: async (cfg: { agent: AgentConfig }) => { spawned.push(structuredClone(cfg)); return { pid: 1, configPath: "/tmp/c.json" }; }, isAlive: () => true, kill: () => {} },
+      runStore: { upsertRun: async () => undefined },
+      taskControlStore: { listDirections: async () => [] },
+      registry: {
+        transition: async (_id: string, to: string) => { task.status = to; },
+        updateTask: async (_id: string, patch: Record<string, unknown>) => { Object.assign(task, patch); return task; },
+        getTask: async () => task, getAllTasks: async () => [task], setState: async () => {},
+      },
+    } as never;
+    return { runner: new TaskRunner(ctx), spawned };
+  }
+
+  it("runs production by default, the pinned version when asked, and records it; a run keeps its config", async () => {
+    const { versioning } = setup();
+    await versioning.updateDraft("writer", { systemPrompt: "v2" }, "x");
+    await versioning.publish("writer", { actor: "x" });
+    await versioning.deploy("writer", "1.0.1", { actor: "x" });
+
+    const prodTask: Record<string, unknown> = { id: "t1", title: "A", description: "a", assignTo: "writer", status: "pending", phase: "execution", dependsOn: [] };
+    const prod = runner(versioning, prodTask);
+    await prod.runner.spawnForTask(prodTask as never);
+    expect(prod.spawned[0]!.agent.systemPrompt).toBe("v2");
+    expect((prodTask.runs as Array<{ agentVersion?: string }>)[0]!.agentVersion).toBe("1.0.1");
+
+    const pinnedTask: Record<string, unknown> = { id: "t2", title: "B", description: "b", assignTo: "writer", agentVersion: "1.0.0", status: "pending", phase: "execution", dependsOn: [] };
+    const pinned = runner(versioning, pinnedTask);
+    await pinned.runner.spawnForTask(pinnedTask as never);
+    expect(pinned.spawned[0]!.agent.systemPrompt).toBe(writer.systemPrompt);
+    expect((pinnedTask.runs as Array<{ agentVersion?: string }>)[0]!.agentVersion).toBe("1.0.0");
+
+    // production moves while the first run is in flight: its config (handed to the runner) stays
+    await versioning.rollback("writer", { actor: "x" });
+    expect(prod.spawned[0]!.agent.systemPrompt).toBe("v2");
+
+    const missing: Record<string, unknown> = { id: "t3", title: "C", description: "c", assignTo: "writer", agentVersion: "9.0.0", status: "pending", phase: "execution", dependsOn: [] };
+    const m = runner(versioning, missing);
+    await m.runner.spawnForTask(missing as never);
+    expect(missing.status).toBe("failed");
+    expect(m.spawned).toHaveLength(0);
+  });
+});
+
+describe("Orchestrator: agents under versioning", () => {
+  let workDir: string;
+  beforeEach(() => { workDir = mkdtempSync(join(tmpdir(), "polpo-orch-versions-")); });
+  afterEach(() => rmSync(workDir, { recursive: true, force: true }));
+
+  async function boot() {
+    const o = new Orchestrator({
+      workDir, store: new InMemoryTaskStore(), runStore: new InMemoryRunStore(), taskControlStore: new InMemoryTaskControlStore(),
+      assessFn: async () => ({ passed: true, checks: [], metrics: [], timestamp: new Date().toISOString() }),
+    });
+    await o.initInteractive("p", { name: "team", agents: [createTestAgent({ name: "agent-1", systemPrompt: "One." })] });
+    return o;
+  }
+
+  it("new agents start at 1.0.0; draft / publish / deploy modes; direct changes are recorded; pinned tasks", async () => {
+    const o = await boot();
+    const v = o.getAgentVersioning();
+    expect(await v.pointer("agent-1")).toBe("1.0.0");
+    await o.addAgent({ name: "agent-2", role: "Two" });
+    expect((await v.state("agent-2")).production).toBe("1.0.0");
+
+    // the dashboard: draft only, production untouched
+    let r = await o.updateAgentVersioned("agent-1", { systemPrompt: "Draft." }, { actor: "person:ada@example.com", mode: "draft" });
+    expect(r).toMatchObject({ draftChanged: true });
+    expect((await o.getAgents()).find((a) => a.name === "agent-1")!.systemPrompt).toBe("One.");
+    // an API client (auto-deploy, the default): publish + deploy
+    expect(o.autoDeployApiUpdates()).toBe(true);
+    r = await o.updateAgentVersioned("agent-1", { role: "Lead" }, { actor: "mcp:Claude", mode: "deploy", note: "via API" });
+    expect(r.published).toMatchObject({ version: "1.0.1", author: "mcp:Claude" });
+    expect(r.deployed).toMatchObject({ from: "1.0.0", to: "1.0.1" });
+    expect((await o.getAgents()).find((a) => a.name === "agent-1")).toMatchObject({ role: "Lead", systemPrompt: "Draft." });
+
+    // a direct change (an agent's own setting) becomes a deployed version
+    await o.updateAgent("agent-1", { voiceReplies: "voice" });
+    expect(await v.pointer("agent-1")).toBe("1.1.0");
+
+    // tasks pinned to a version
+    const t = await o.addTask({ title: "Pinned", description: "x", assignTo: "agent-1@1.0.0" });
+    expect(t).toMatchObject({ assignTo: "agent-1", agentVersion: "1.0.0" });
+    await expect(o.addTask({ title: "Bad", description: "x", assignTo: "agent-1@7.0.0" })).rejects.toThrow(/no published version/);
+
+    await o.removeAgent("agent-2");
+    expect(await v.store.listVersions("agent-2")).toEqual([]);
   });
 });

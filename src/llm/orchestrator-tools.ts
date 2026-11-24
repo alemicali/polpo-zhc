@@ -4502,16 +4502,20 @@ async function execUpdateAgent(polpo: Orchestrator, args: Record<string, unknown
   Object.assign(updates, platform.fields);
 
   // versioned: the draft, then (flags or the instance setting) publish and deploy
+  // (a host without versioning writes the agent live, as before)
+  const versioned = typeof polpo.updateAgentVersioned === "function";
   const mode = args.deploy === true ? "deploy" : args.publish === true ? "publish" : args.publish === false ? "draft"
-    : polpo.autoDeployApiUpdates() ? "deploy" : "draft";
+    : !versioned || polpo.autoDeployApiUpdates() ? "deploy" : "draft";
   delete (updates as Record<string, unknown>).publish;
   delete (updates as Record<string, unknown>).deploy;
   delete (updates as Record<string, unknown>).note;
   let result: Awaited<ReturnType<Orchestrator["updateAgentVersioned"]>>;
   try {
-    result = await polpo.updateAgentVersioned(name, updates as any, {
-      actor: "polpo", mode, ...(typeof args.note === "string" && args.note ? { note: args.note } : {}),
-    });
+    result = versioned
+      ? await polpo.updateAgentVersioned(name, updates as any, {
+        actor: "polpo", mode, ...(typeof args.note === "string" && args.note ? { note: args.note } : {}),
+      })
+      : { agent: await polpo.updateAgent(name, updates as any), draftChanged: false };
   } catch (err) {
     const message = engineError(err) ?? (err instanceof Error && err.name === "AgentVersionError" ? err.message : undefined);
     if (message) return `${message} Nothing was changed.`;
