@@ -329,7 +329,7 @@ export function WaBusinessLive({ channel }: { channel: string }) {
     }
   };
   return (
-    <div className="space-y-3 rounded-lg border border-border/40 bg-background/50 px-3 py-3" data-testid="wabiz-live" data-setup-item={channel}>
+    <div className="space-y-3" data-testid="wabiz-live" data-setup-item={channel}>
       <div className="flex flex-wrap items-center gap-2">
         <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-xs font-semibold">Meta connection</span>

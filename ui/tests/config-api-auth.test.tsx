@@ -50,7 +50,16 @@ describe("Configuration page", () => {
       .filter(([, line]) => /(^|[^A-Za-z.])fetch\(/.test(line) && !line.includes("apiFetch("));
     // the one allowed: the api() helper, which sets Authorization itself
     expect(bare.map(([n, line]) => `${n}: ${line.trim()}`)).toEqual([expect.stringContaining("const res = await fetch(`${appConfig.baseUrl}/api/v1${path}`")]);
-    expect(source).toMatch(/apiFetch\(`\$\{appConfig\.baseUrl\}\/api\/v1\/config\/channels\/\$\{encodeURIComponent\(name\)\}\/test`/);
     expect(source).toMatch(/apiFetch\(apiUrl\("\/api\/v1\/sync\/config"\)/);
+  });
+
+  it("the Channels section calls the API only through apiFetch (the channel test and the forms' api helper included)", () => {
+    const dir = [join(process.cwd(), "ui/src/components/channels"), join(process.cwd(), "src/components/channels")].find((d) => existsSync(d))!;
+    const read = (f: string) => readFileSync(join(dir, f), "utf-8");
+    for (const f of ["channels-section.tsx", "channel-forms.tsx", "channel-detail-sheet.tsx", "channel-catalog.ts", "channel-api.ts"]) {
+      expect(read(f).split("\n").filter((line) => /(^|[^A-Za-z.])fetch\(/.test(line) && !line.includes("apiFetch(")), f).toEqual([]);
+    }
+    expect(read("channels-section.tsx")).toMatch(/apiFetch\(`\$\{appConfig\.baseUrl\}\/api\/v1\/config\/channels\/\$\{encodeURIComponent\(name\)\}\/test`/);
+    expect(read("channel-api.ts")).toMatch(/await apiFetch\(apiUrl\(`\/api\/v1\$\{path\}`\)/);
   });
 });
