@@ -177,7 +177,7 @@ export function WhatsNewStack({
       <div className={cn("mb-1 flex items-center gap-1.5 px-1 text-label", sheet ? "text-muted-foreground/70" : "text-sidebar-foreground/50")}>
         <Megaphone aria-hidden className="h-3 w-3" />
         <span className="flex-1">{WHATS_NEW_STACK_LABEL}</span>
-        {unreadCount > 0 && <span className="text-primary">{unreadCount} unread</span>}
+        {unreadCount > 0 && <span className="text-primary">{unreadCount} {unreadCount === 1 ? "non letta" : "non lette"}</span>}
         {count > 1 && <span aria-hidden className="tabular-nums">{index + 1}/{count}</span>}
       </div>
       {/* the cards: the front one, two more behind it (lower, smaller, fainter) */}
@@ -195,7 +195,7 @@ export function WhatsNewStack({
               data-entry={entry.id}
               aria-hidden={front ? undefined : true}
               tabIndex={front ? 0 : -1}
-              aria-label={front ? `${CHANGELOG_KIND_LABEL[entry.kind]}: ${entry.title}${unread ? " (unread)" : ""}. Open in ${WHATS_NEW_STACK_LABEL}` : undefined}
+              aria-label={front ? `${CHANGELOG_KIND_LABEL[entry.kind]}: ${entry.title}${unread ? " (non letta)" : ""}. Apri in ${WHATS_NEW_STACK_LABEL}` : undefined}
               onClick={() => { openWhatsNewAt(entry.id); onOpen?.(); }}
               style={{
                 // lower, smaller and tilted away: the cards behind peek out under the front one

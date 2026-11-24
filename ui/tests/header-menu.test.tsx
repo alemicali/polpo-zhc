@@ -178,7 +178,7 @@ describe("the What's new cards", () => {
     expect(order).toEqual([list[1].id, list[2].id, list[3].id, list[0].id]);
     expect(front().textContent).toContain("Older B");
     expect(within(front()).getByTestId("whats-new-stack-unread")).toBeTruthy();
-    expect(screen.getByText("3 unread")).toBeTruthy();
+    expect(screen.getByText("3 non lette")).toBeTruthy();
     // the cards behind the front one are out of the accessibility tree and not focusable
     const behind = document.querySelector<HTMLElement>("[data-depth='1']")!;
     expect(behind.getAttribute("aria-hidden")).toBe("true");
@@ -192,7 +192,7 @@ describe("the What's new cards", () => {
     const stack = screen.getByRole("region", { name: "Novità" });
     expect(stack.dataset.testid).toBe("whats-new-stack");
     expect(within(stack).getByText("Novità")).toBeTruthy();
-    expect(front().getAttribute("aria-label")).toBe(`Nuovo: ${list[0].title} (unread). Open in Novità`);
+    expect(front().getAttribute("aria-label")).toBe(`Nuovo: ${list[0].title} (non letta). Apri in Novità`);
     // the kind: a small muted badge, not a coloured pill
     const badge = within(front()).getByTestId("whats-new-stack-kind");
     expect(badge.textContent).toBe("Nuovo");
