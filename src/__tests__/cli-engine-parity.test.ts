@@ -221,6 +221,17 @@ describe("harness sessions view", () => {
     expect((await h.done).stderr).toBe("Killed");
     expect(new HarnessSessionStore(s.polpoDir).get(key)?.state).toBe("stopped");
   });
+
+  it("the computer's machine going away (hibernation, rotation) fails the run as retryable", async () => {
+    const s = setup({ tools: [] });
+    const h = s.run(s.task("SLOW", "t3"));
+    await new Promise((r) => setTimeout(r, 700));
+    expect(await liveHarnessSessions.beforeVmGoes("host", "memory", "hibernation")).toBe(1);
+    const r = await h.done;
+    expect(r.exitCode).toBe(1);
+    expect(r.retryable).not.toBe(false);
+    expect(r.stderr).toMatch(/machine went away during the run \(hibernation\)/);
+  });
 });
 
 /** A fake remote computer: processes run here, with their input open (as Daytona v2 / E2B with stdin). */

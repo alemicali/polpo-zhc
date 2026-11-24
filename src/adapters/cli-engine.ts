@@ -178,6 +178,8 @@ export function spawnCliEngine(agentConfig: AgentConfig, task: Task, cwd: string
   let turnRunning = false;
   const followUps: Array<{ message: string; directionId?: string }> = [];
   let wake: ((why: "killed") => void) | undefined;
+  /** Set when the computer's VM went away under the run (hibernation, rotation, reset). */
+  let vmGone: string | undefined;
 
   const handle: AgentHandle = {
     agentName: agentConfig.name,
@@ -300,8 +302,17 @@ export function spawnCliEngine(agentConfig: AgentConfig, task: Task, cwd: string
       unregister = liveHarnessSessions.register({
         key, agent: agentConfig.name, computerId,
         suspend: async (_mode, reason) => {
-          transcript({ type: "log", message: `${name} stopped (${reason})` });
-          handle.kill();
+          if (reason === "stop" || reason === "reset") {
+            // a person stopped it from the sessions view: the run ends as killed
+            transcript({ type: "log", message: `${name} stopped (${reason})` });
+            handle.kill();
+            return;
+          }
+          // the computer's VM goes away (hibernation, rotation, reset): the program cannot follow
+          // it; the run fails retryable (its retry or continuation starts the program again there)
+          vmGone = reason;
+          transcript({ type: "log", message: `${name}: the computer's machine is going away (${reason}); the run stops and can be retried` });
+          await conv?.proc.kill().catch(() => undefined);
         },
       });
 
@@ -408,6 +419,7 @@ export function spawnCliEngine(agentConfig: AgentConfig, task: Task, cwd: string
       return { exitCode: 0, stdout: lastText || last?.text || "", stderr: "", duration: Date.now() - start };
     } catch (err) {
       if (killed) return killedResult();
+      if (vmGone) return fail(`The computer's machine went away during the run (${vmGone}): run the task again (a continuation resumes the CLI's conversation)`, true);
       const raw = [err instanceof Error ? err.message : String(err), ...errors, conv?.proc.stderrTail() ?? ""].filter(Boolean).join("\n");
       const c = engine ? classifyCliError(engine.cli, raw, account) : { message: raw, retryable: true };
       return fail(c.message, c.retryable);
