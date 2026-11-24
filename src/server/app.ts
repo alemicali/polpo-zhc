@@ -1542,7 +1542,22 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     recentEvents: () => sseBridge.recentEvents?.() ?? [],
   });
   const searchEngine = new SearchEngine(() => searchSources);
-  authed.route("/search", searchRoutes(() => (o.isInitialized ? searchEngine : undefined)));
+  // Ask Polpo from ⌘K (POST /search/ask): the orchestrator's model, a tighter rate limit (each call is an LLM call)
+  authed.use("/search/ask", rateLimitMiddleware(20, 60_000));
+  authed.route("/search", searchRoutes(() => (o.isInitialized ? searchEngine : undefined), () => ({
+    model: async () => {
+      const { orchestratorAskModel } = await import("./search/ask-llm.js");
+      return orchestratorAskModel(o.getConfig()?.settings?.orchestratorModel);
+    },
+    recordUsage: async (usage) => {
+      await (databaseStoresFor(activePolpoDir())?.tokenUsageStore ?? new FileTokenUsageStore(activePolpoDir())).record({
+        timestamp: new Date().toISOString(), source: "search_ask", provider: usage.provider, model: usage.model,
+        inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheReadTokens: usage.cacheReadTokens,
+        cacheWriteTokens: usage.cacheWriteTokens, totalTokens: usage.totalTokens, cost: usage.cost,
+      });
+      o.emit("token-usage:recorded", { timestamp: new Date().toISOString() });
+    },
+  })));
 
   authed.route("/vault", vaultRoutes(() => ({
     vaultStore: o.getVaultStore(),

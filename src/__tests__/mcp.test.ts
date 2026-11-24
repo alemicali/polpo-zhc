@@ -115,7 +115,7 @@ describe("Polpo MCP server", () => {
 
     const tools = (await rpc(deps, "tools/list")).body.result.tools as Array<{ name: string; annotations?: Record<string, unknown>; outputSchema?: unknown; inputSchema: { properties?: Record<string, { description?: string }> } }>;
     expect(tools.map((t) => t.name)).toEqual([
-      "polpo_ask", "polpo_agent_chat", "polpo_answer", "polpo_search",
+      "polpo_ask", "polpo_agent_chat", "polpo_answer", "polpo_search", "polpo_search_ask",
       "polpo_agents_list", "polpo_agent_show", "agent_card_refresh", "agent_intention_decide",
       "polpo_approvals_list", "polpo_approval_resolve",
       "polpo_tasks_list", "polpo_task_get", "polpo_task_create", "polpo_task_update", "polpo_task_retry", "polpo_task_kill", "polpo_task_delete", "polpo_task_direct", "polpo_task_wait", "polpo_task_logs",

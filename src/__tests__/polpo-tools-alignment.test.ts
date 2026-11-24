@@ -56,7 +56,7 @@ describe("coverage: every MCP tool has a Polpo counterpart", () => {
     expect([...bridged, ...Object.keys(MCP_EQUIVALENTS), ...Object.keys(MCP_EXCEPTIONS)].filter((n) => !known.has(n))).toEqual([]);
     // exceptions say why
     for (const reason of Object.values(MCP_EXCEPTIONS)) expect(reason.length).toBeGreaterThan(30);
-    expect(Object.keys(MCP_EXCEPTIONS).sort()).toEqual(["agent_card_refresh", "polpo_answer", "polpo_api_get", "polpo_api_search", "polpo_ask"]);
+    expect(Object.keys(MCP_EXCEPTIONS).sort()).toEqual(["agent_card_refresh", "polpo_answer", "polpo_api_get", "polpo_api_search", "polpo_ask", "polpo_search_ask"]);
   });
 
   it("every counterpart is one of Polpo's tools, and Polpo's tool names are unique", async () => {
