@@ -25,25 +25,16 @@ import { productName, useInstanceBranding } from "@/lib/branding";
 import { cn } from "@/lib/utils";
 import { notifySetupSaved, readSetupParams } from "@/lib/setup-link";
 import {
-  CHANNEL_CATALOG, channelEntry, channelState, channelSummary, channelSupportsInbound, filterChannelCatalog, filterChannels,
+  CHANNEL_CATALOG, channelEntry, channelState, channelSummary, channelSupportsInbound, filterChannelCatalog, filterChannels, timeAgo,
   type ChannelCatalogEntry, type ChannelLive,
 } from "./channel-catalog";
-import { channelApi } from "./channel-forms";
+import { channelApi } from "./channel-api";
 import { ChannelDetailSheet, ChannelStateBadge, type ChannelSheetTarget, type ChannelTestResult } from "./channel-detail-sheet";
 
 export interface ChannelApiAction {
   path: string;
   method: string;
   body?: unknown;
-}
-
-/** "2 min ago", "3 h ago", "5 d ago". */
-export function timeAgo(iso: string, now = Date.now()): string {
-  const s = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
-  if (s < 60) return "just now";
-  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
-  return `${Math.floor(s / 86400)} d ago`;
 }
 
 function ChannelRow({ name, ch, live, onManage }: { name: string; ch: NotificationChannelConfig; live: ChannelLive; onManage: () => void }) {

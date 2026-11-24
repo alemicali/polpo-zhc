@@ -26,9 +26,9 @@ vi.mock("@polpo-ai/react", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-import { ChannelsSection, timeAgo, type ChannelApiAction } from "../src/components/channels/channels-section";
+import { ChannelsSection, type ChannelApiAction } from "../src/components/channels/channels-section";
 import {
-  CHANNEL_CATALOG, channelState, filterChannelCatalog, filterChannels, nextChannelName,
+  CHANNEL_CATALOG, channelState, filterChannelCatalog, filterChannels, nextChannelName, timeAgo,
 } from "../src/components/channels/channel-catalog";
 
 const SAVED: Record<string, NotificationChannelConfig> = {

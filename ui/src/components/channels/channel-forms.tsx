@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ChannelAccessPanel, TelegramChatFinder, TelegramConnect, TelegramTokenCheck, type PolpoApi } from "@/components/config/telegram-connect";
+import { ChannelAccessPanel, TelegramChatFinder, TelegramConnect, TelegramTokenCheck } from "@/components/config/telegram-connect";
 import { AgentSessionOverrides } from "@/components/config/agent-session-overrides";
 import { WaBusinessFields } from "@/components/config/whatsapp-business-section";
 import { useAgentNames } from "@/hooks/use-agent-names";
@@ -26,24 +26,10 @@ import {
 } from "@/lib/push-notifications";
 import { cn } from "@/lib/utils";
 import { channelLabel } from "./channel-catalog";
+import { channelApi, isMaskedSecret } from "./channel-api";
 
-/** The instance's API ({ ok, data, error }), with the session cookie and the API key. */
-export const channelApi: PolpoApi = async (path, init) => {
-  try {
-    const headers = new Headers(init?.headers);
-    if (init?.body) headers.set("Content-Type", "application/json");
-    const res = await apiFetch(apiUrl(`/api/v1${path}`), { ...init, headers });
-    return await res.json();
-  } catch {
-    return { ok: false, error: "Could not connect to server" };
-  }
-};
 const api = channelApi;
 
-/** Secrets come back from the API masked ("••••1234"); saving them unchanged keeps the stored value. */
-export function isMaskedSecret(value?: string): boolean {
-  return !!value && value.includes("••••");
-}
 
 /** A section of the sheet: a heading and its content, no box around it. */
 export function SheetSection({ title, description, icon: Icon, action, children, testId }: {
