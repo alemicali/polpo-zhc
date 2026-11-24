@@ -201,7 +201,7 @@ function SheetBody({ target, channels, live, onOpenChange, onSave, onCreated, on
         </SheetSection>
 
         {draft.type === "whatsapp-business" && saved && savedName && (
-          <SheetSection title="Meta connection" icon={ShieldCheck} description="Secrets (stored in the vault), the callback URL, the Funnel command, webhook events and templates waiting for approval." testId="section-meta">
+          <SheetSection title="Meta Cloud API" icon={ShieldCheck} description="The connection to Meta: secrets (stored in the vault), the callback URL, the Funnel command, webhook events and templates waiting for approval." testId="section-meta">
             <WaBusinessLive channel={savedName} />
           </SheetSection>
         )}

@@ -32,6 +32,21 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-24-channels-like-connectors",
+    date: "2026-11-24",
+    kind: "improved",
+    title: "Canali come i connettori: elenco, catalogo e scheda per ogni canale",
+    summary: "La pagina Canali ora funziona come Connettori: i canali configurati in un elenco con stato, ingresso e agente, un catalogo per aggiungerne uno e una scheda con panoramica, passi di configurazione, impostazioni, instradamento, test e rimozione.",
+    body: [
+      "- **Configurati**: ogni canale è una riga con il marchio (Telegram, WhatsApp, WhatsApp Business, Slack, email, webhook, push), lo stato (connesso, riceve, da configurare, errore), se accetta messaggi in ingresso, l'agente che risponde e, per WhatsApp Business, l'ultima attività.",
+      "- **Aggiungi canale**: un catalogo con una riga di descrizione e i badge (ufficiale, non ufficiale con QR, bidirezionale o solo uscita), con la ricerca.",
+      "- **La scheda del canale**: panoramica, passi di configurazione, impostazioni, la connessione a Meta per WhatsApp Business (segreti, URL di callback, comando Tailscale Funnel, eventi, approvazioni), le notifiche push di questo browser, l'instradamento (agente, criterio DM, allowlist, abbinamento, conversazioni), **Invia test** e **Rimuovi** con conferma. Le impostazioni e le azioni sono le stesse di prima.",
+      "- I link dagli assistenti (`/config?section=channels&channel=<nome>`) aprono direttamente la scheda del canale; il test fallito da MCP rimanda alla scheda del canale.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i canali", to: "/config?section=channels" },
+  },
+  {
     id: "2026-11-24-whatsapp-business",
     date: "2026-11-24",
     kind: "new",

@@ -64,6 +64,7 @@ function ChannelRow({ name, ch, live, onManage }: { name: string; ch: Notificati
           {channelSummary(ch, getOrchestratorName(), live)}
         </span>
         <span className="mt-1 flex flex-wrap items-center gap-1.5">
+          <ChannelStateBadge state={state} className="text-micro sm:hidden" />
           {channelSupportsInbound(ch.type) && (
             <Badge variant="outline" className="text-micro font-normal text-muted-foreground">Inbound {gateway?.enableInbound ? "on" : "off"}</Badge>
           )}

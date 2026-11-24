@@ -595,7 +595,7 @@ export function DeliveryFields({ config, onChange, gatewayRunning, channelName, 
         <>
           <WaBusinessFields config={config} onChange={set} />
           {!(channelName && isSavedChannel) && (
-            <p className="text-caption text-muted-foreground">Save the channel, then enter its access token, app secret and verify token under Meta connection: they go to the vault and are never shown again.</p>
+            <p className="text-caption text-muted-foreground">Save the channel, then enter its access token, app secret and verify token under Meta Cloud API: they go to the vault and are never shown again.</p>
           )}
         </>
       )}
