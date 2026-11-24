@@ -661,6 +661,28 @@ const ChannelGatewaySchema = z.object({
   }).strict().optional(),
   groupReplies: z.enum(["mentions", "intent"]).optional(),
   intentThreshold: z.number().min(0).max(1).optional(),
+  commands: z.enum(["all", "operators", "none"]).optional(),
+}).strict();
+
+const VaultRefSchema = z.object({ owner: z.string().min(1), service: z.string().min(1) }).strict();
+
+/** WhatsApp Business settings (see @polpo-ai/core/whatsapp-business: defaults and rules). */
+const WaBusinessSettingsSchema = z.object({
+  audience: z.enum(["customers", "operators"]).optional(),
+  operators: z.array(z.string().min(1)).optional(),
+  markRead: z.boolean().optional(),
+  typing: z.boolean().optional(),
+  outsideWindow: z.enum(["template", "fail"]).optional(),
+  notificationTemplate: z.object({
+    name: z.string().min(1), language: z.string().min(1), bodyParams: z.array(z.string()).optional(),
+  }).strict().optional(),
+  allowedCategories: z.array(z.enum(["UTILITY", "MARKETING", "AUTHENTICATION"])).optional(),
+  approveTemplates: z.boolean().optional(),
+  limits: z.object({
+    businessInitiatedPerDay: z.number().int().min(0).optional(),
+    perAgentPerDay: z.record(z.string(), z.number().int().min(0)).optional(),
+  }).strict().optional(),
+  retentionDays: z.number().int().min(1).max(3650).optional(),
 }).strict();
 
 /** A value masked by GET /config ("••••1234"); the server restores the stored secret on save. */
@@ -669,7 +691,7 @@ const orMasked = <T extends z.ZodTypeAny>(schema: T, allowMasked: boolean) =>
   allowMasked ? z.union([schema, MaskedSecret]) : schema;
 
 const channelConfigSchema = (allowMasked: boolean) => z.object({
-  type: z.enum(["slack", "email", "telegram", "whatsapp", "webhook", "push"]),
+  type: z.enum(["slack", "email", "telegram", "whatsapp", "whatsapp-business", "webhook", "push"]),
   // Slack
   webhookUrl: orMasked(z.string().url(), allowMasked).optional(),
   // Email
@@ -695,6 +717,14 @@ const channelConfigSchema = (allowMasked: boolean) => z.object({
   vapidSubject: z.string().optional(),
   ttl: z.number().int().min(0).optional(),
   urgency: z.enum(["very-low", "low", "normal", "high"]).optional(),
+  // WhatsApp Business (Meta Cloud API): ids, and the secrets only as vault references ($channels)
+  phoneNumberId: z.string().regex(/^\d{5,30}$/).optional(),
+  wabaId: z.string().regex(/^\d{5,30}$/).optional(),
+  graphApiVersion: z.string().regex(/^v\d{1,3}\.\d{1,2}$/).optional(),
+  accessTokenRef: VaultRefSchema.optional(),
+  appSecretRef: VaultRefSchema.optional(),
+  verifyTokenRef: VaultRefSchema.optional(),
+  business: WaBusinessSettingsSchema.optional(),
   // Gateway
   gateway: ChannelGatewaySchema.optional(),
 });
