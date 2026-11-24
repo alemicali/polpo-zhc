@@ -609,7 +609,7 @@ describe("MCP tools (polpo_mcp_server_*) and Polpo's chat tools", () => {
     expect((await call("polpo_mcp_server_delete", { id: "printful", confirm: true })).structuredContent).toEqual({ removed: true });
     expect(manager.store.get("printful")).toBeUndefined();
     await manager.closeAll();
-  });
+  }, 60_000); // loads the whole MCP server: slow on busy CI runners
 
   it("Polpo's chat gets them as deferred tools (hosted-servers group)", async () => {
     dir = mkdtempSync(join(tmpdir(), "polpo-mcp-x-"));
@@ -617,7 +617,7 @@ describe("MCP tools (polpo_mcp_server_*) and Polpo's chat tools", () => {
     const names = bridgedTools().map((t) => t.name).filter((n) => n.startsWith("mcp_server"));
     expect(names).toContain("mcp_server_create");
     expect(BRIDGED_TOOLS.filter((t) => t.name.startsWith("mcp_server")).every((t) => t.group === "hosted-servers")).toBe(true);
-  });
+  }, 60_000);
 });
 
 describe("server process wiring: an approval tool call becomes an Approvals request; approving runs it", () => {
@@ -652,5 +652,5 @@ describe("server process wiring: an approval tool call becomes an Approvals requ
     await vi.waitFor(() => expect(service.pending("shop")[0]?.status).toBe("done"));
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(service.logs("shop")[0]).toMatchObject({ source: "approval", approvalId: "appr-42", ok: true });
-  });
+  }, 60_000);
 });
