@@ -34,7 +34,12 @@ export interface RemoteDriver {
    * this host process (and survives a memory snapshot). Optional: providers without a process API
    * leave it out, and harnesses refuse them.
    */
-  spawn?(command: string, opts: { cwd?: string; env?: Record<string, string> }): Promise<RemoteProcess>;
+  spawn?(command: string, opts: { cwd?: string; env?: Record<string, string>; stdin?: boolean }): Promise<RemoteProcess>;
+  /**
+   * An interactive terminal (PTY) in the VM running `command` (a sign-in flow). Optional: providers
+   * without PTYs leave it out.
+   */
+  pty?(command: string, opts: { cwd?: string; env?: Record<string, string>; cols: number; rows: number }): Promise<RemotePty>;
   /** Follow a process started by spawn again (after a host restart or a wake from a snapshot). */
   connectProcess?(id: string): Promise<RemoteProcess>;
   /**
@@ -68,6 +73,20 @@ export interface RemoteProcess {
   kill(): Promise<void>;
   /** Stop following its output (the process keeps running). */
   detach(): void;
+  /** Write to its input (started with `stdin: true` on a provider whose process API has stdin). */
+  writeStdin?(data: string): Promise<void>;
+  /** Close its input (EOF). */
+  closeStdin?(): Promise<void>;
+}
+
+/** An interactive terminal in a VM (RemoteDriver.pty). */
+export interface RemotePty {
+  /** What the terminal prints (raw bytes, escape sequences included). */
+  readonly output: AsyncIterable<Uint8Array>;
+  write(data: string): Promise<void>;
+  resize(cols: number, rows: number): Promise<void>;
+  kill(): Promise<void>;
+  wait(): Promise<{ exitCode: number }>;
 }
 
 export interface RemotePortEndpoint { url: string; headers?: Record<string, string>; expiresAt?: string }
@@ -529,6 +548,57 @@ class DaytonaV0Adapter implements RemoteAdapter {
 
 // ── E2B ─────────────────────────────────────────────────────────────────
 
+const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+/** A stream fed by callbacks (E2B delivers process output through onStdout / onData). */
+function pushStream(): { push(d: Uint8Array | string): void; end(): void; stream: ReadableStream<Uint8Array>; iterable: AsyncIterable<Uint8Array> } {
+  let ctl!: ReadableStreamDefaultController<Uint8Array>;
+  const stream = new ReadableStream<Uint8Array>({ start(c) { ctl = c; } });
+  const enc = new TextEncoder();
+  return {
+    push: (d) => { try { ctl.enqueue(typeof d === "string" ? enc.encode(d) : d); } catch { /* closed */ } },
+    end: () => { try { ctl.close(); } catch { /* closed */ } },
+    stream,
+    iterable: stream as unknown as AsyncIterable<Uint8Array>,
+  };
+}
+
+/**
+ * An E2B background command as a RemoteProcess: output from its callbacks, its exit from wait()
+ * (a VM that went away reads as killed, 137), input through sendStdin / closeStdin.
+ */
+export async function followE2bCommand(
+  mod: { CommandExitError?: new (...a: any[]) => Error },
+  start: (onStdout: (d: string) => void, onStderr: (d: string) => void) => Promise<any>,
+): Promise<RemoteProcess> {
+  const out = pushStream();
+  const err = pushStream();
+  let following = true;
+  const h = await start((d) => { if (following) out.push(d); }, (d) => { if (following) err.push(d); });
+  const done = (async () => {
+    try {
+      const r = await h.wait();
+      return { exitCode: typeof r?.exitCode === "number" ? r.exitCode : 0 };
+    } catch (e) {
+      const x = e as { exitCode?: number };
+      return { exitCode: typeof x?.exitCode === "number" ? x.exitCode : 137 };
+    } finally {
+      out.end();
+      err.end();
+    }
+  })();
+  return {
+    id: String(h.pid),
+    stdout: out.stream,
+    stderr: err.stream,
+    wait: () => done,
+    kill: async () => { await h.kill().catch(() => undefined); },
+    detach: () => { following = false; out.end(); err.end(); void h.disconnect?.().catch?.(() => undefined); },
+    writeStdin: async (data) => { await h.sendStdin(data); },
+    closeStdin: async () => { await h.closeStdin(); },
+  };
+}
+
 class E2BAdapter implements RemoteAdapter {
   readonly provider = "e2b" as const;
   readonly fastSuspend = true;
@@ -610,6 +680,26 @@ class E2BAdapter implements RemoteAdapter {
         sbx = await mod.Sandbox.connect(sbx.sandboxId, { ...conn, ...(lifetimeMinutes ? { timeoutMs: lifetimeMinutes * 60_000 } : {}) } as any);
       },
       destroy: async () => { await sbx.kill(); },
+      // a background command: its output streams while it runs, its input stays open on request
+      spawn: async (command, o) => followE2bCommand(mod, (onStdout, onStderr) => sbx.commands.run(command, {
+        background: true, cwd: o.cwd, envs: o.env, timeoutMs: 0, ...(o.stdin ? { stdin: true } : {}), onStdout, onStderr,
+      })),
+      connectProcess: async (id) => followE2bCommand(mod, (onStdout, onStderr) => sbx.commands.connect(Number(id), { timeoutMs: 0, onStdout, onStderr })),
+      pty: async (command, o) => {
+        const out = pushStream();
+        const h = await sbx.pty.create({ cols: o.cols, rows: o.rows, cwd: o.cwd, envs: o.env, timeoutMs: 0, onData: (d: Uint8Array) => out.push(d) });
+        const enc = new TextEncoder();
+        // the PTY starts a login shell: it runs the command and ends with it
+        await sbx.pty.sendInput(h.pid, enc.encode(`exec bash -lc ${shq(command)}\n`));
+        const done = h.wait().then((r: any) => ({ exitCode: r?.exitCode ?? 0 }), (e: any) => ({ exitCode: e?.exitCode ?? 1 })).finally(() => out.end());
+        return {
+          output: out.iterable,
+          write: async (data) => { await sbx.pty.sendInput(h.pid, enc.encode(data)); },
+          resize: async (cols, rows) => { await sbx.pty.resize(h.pid, { cols, rows }); },
+          kill: async () => { await h.kill().catch(() => undefined); },
+          wait: () => done,
+        };
+      },
     };
   }
 }

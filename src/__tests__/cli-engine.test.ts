@@ -194,7 +194,7 @@ describe("runner: Claude Code (fake CLI)", () => {
     expect(s.usage).toEqual([expect.objectContaining({ provider: "claude-cli", cost: 0, inputTokens: 100, outputTokens: 20, cacheReadTokens: 50, cacheWriteTokens: 10, totalTokens: 180 })]);
     expect(h.activity.runContext?.cost).toMatchObject({ costSource: "subscription", tokens: 180 });
     expect(h.sessionId).toBe("11111111-2222-3333-4444-555555555555");
-    const call = s.calls().find((c) => c.argv[0] === "-p");
+    const call = s.calls().find((c) => c.argv?.[0] === "-p");
     expect(call.configDir).toMatch(/\.polpo-cli\/claude\/ada-max$/);
     expect(call.anthropicKey ?? "").toBe("");
     expect(call.argv).toEqual(expect.arrayContaining(["--append-system-prompt", "--permission-mode", "bypassPermissions"]));
@@ -208,7 +208,7 @@ describe("runner: Claude Code (fake CLI)", () => {
     expect(s.usage).toHaveLength(2);
     const h2 = s.spawn(s.task(), { continuation: { message: "continue please", directionIds: [] } });
     expect((await h2.done).exitCode).toBe(0);
-    const resumed = s.calls().filter((c) => c.argv[0] === "-p").pop();
+    const resumed = s.calls().filter((c) => c.argv?.[0] === "-p").pop();
     expect(resumed.argv).toEqual(expect.arrayContaining(["--resume", "11111111-2222-3333-4444-555555555555"]));
   });
 
@@ -269,7 +269,7 @@ describe("runner: Codex (fake app server)", () => {
     expect(s.transcript.find((e) => e.type === "tool_result")).toMatchObject({ content: "a.txt\n", isError: false });
     expect(s.transcript.find((e) => e.type === "reasoning")).toMatchObject({ text: "Listing files" });
     expect(s.usage[0]).toMatchObject({ provider: "codex-cli", cost: 0, inputTokens: 100, cacheReadTokens: 20, outputTokens: 30, totalTokens: 150 });
-    expect(s.calls().find((c) => c.argv[0] === "app-server").codexHome).toMatch(/\.polpo-cli\/codex\/ada-gpt$/);
+    expect(s.calls().find((c) => c.argv?.[0] === "app-server").codexHome).toMatch(/\.polpo-cli\/codex\/ada-gpt$/);
     expect(h.sessionId).toBe("thr_1");
     expect(s.calls().find((c) => c.approvalReply)?.approvalReply).toEqual({ id: 900, result: { decision: "decline" } });
   });

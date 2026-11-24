@@ -4,8 +4,9 @@
  *
  * - This server: a child in its own process group (process-tree.ts: kill stops everything it
  *   started), stdin/stdout pipes for the stream-json / JSON-RPC protocol.
- * - A remote computer (a HarnessMachine with long-running processes): its process API has no
- *   stdin, so the program reads an inbox file through `tail -f`; sending a line appends to it.
+ * - A remote computer (a HarnessMachine with long-running processes): the protocol goes to the
+ *   program's stdin through the provider's process API (Daytona v2, E2B); without process input,
+ *   the program reads an inbox file through `tail -f` (sending a line appends to it).
  *
  * The environment carries nothing of the server's credentials (no ANTHROPIC_*, OPENAI_*, AWS_*,
  * tokens): the CLI uses the account's own sign-in, and only that.
@@ -17,6 +18,7 @@ import { CLI_CONFIG_ENV, type CliAccount, type CliId } from "@polpo-ai/core";
 import { killTree, spawnTree } from "../sandbox/process-tree.js";
 import { PROXY_VARS, pickEnv } from "../tools/safe-env.js";
 import type { HarnessMachine } from "../harness/sandbox-session.js";
+import type { RemoteProcess } from "../sandbox/remote-adapters.js";
 
 export interface CliProcess {
   /** stdout, line by line (ends when the program closes it). */
@@ -101,25 +103,31 @@ export const INBOX_EOF = "__POLPO_CLI_EOF__";
  * A CLI program on a remote computer: it reads `inbox` (a file in the VM) through `tail -f`, up to
  * the end marker; sending appends a line. `machine.spawn` gives its output.
  */
-export async function remoteCliProcess(machine: HarnessMachine, command: string, o: { cwd: string; env: Record<string, string>; inbox: string }): Promise<CliProcess> {
+export async function remoteCliProcess(machine: HarnessMachine, command: string, o: { cwd: string; env: Record<string, string>; inbox: string; preferStdin?: boolean }): Promise<CliProcess> {
+  if (o.preferStdin !== false) {
+    // the provider's process input (Daytona v2 stdin "open", E2B stdin): the protocol goes
+    // straight to the program, as the harness bridge's does; nothing is written to the VM's disk
+    const direct = await machine.spawn(command, { cwd: o.cwd, env: o.env, stdin: true });
+    if (direct.writeStdin && direct.closeStdin) {
+      return followRemote(direct, {
+        send: (line) => direct.writeStdin!(`${line}\n`),
+        endInput: () => direct.closeStdin!(),
+        kill: () => direct.kill(),
+      });
+    }
+    // no process input on this provider: this one cannot be talked to
+    await direct.kill().catch(() => undefined);
+  }
   await machine.exec(`mkdir -p "$(dirname ${q(o.inbox)})" && : > ${q(o.inbox)}`, {});
   const p = await machine.spawn(
     `tail -n +1 -f ${q(o.inbox)} | sed -u '/^${INBOX_EOF}$/q' | grep -v --line-buffered '^${INBOX_EOF}$' | ${command}`,
     { cwd: o.cwd, env: o.env },
   );
-  let stderr = "";
-  void (async () => {
-    try {
-      for await (const c of p.stderr as unknown as AsyncIterable<Uint8Array>) stderr = (stderr + Buffer.from(c).toString("utf8")).slice(-8000);
-    } catch { /* stopped following */ }
-  })();
   const append = async (line: string) => {
     const r = await machine.exec(`printf '%s\\n' ${q(line)} >> ${q(o.inbox)}`, {});
     if (r.exitCode !== 0) throw new Error(`Could not send to the CLI: ${r.stderr.slice(0, 200)}`);
   };
-  return {
-    lines: () => linesOf(p.stdout),
-    stderrTail: () => stderr,
+  return followRemote(p, {
     send: append,
     endInput: () => append(INBOX_EOF),
     kill: async () => {
@@ -127,6 +135,23 @@ export async function remoteCliProcess(machine: HarnessMachine, command: string,
       // tail -f outlives the pipeline's other end until its next write
       await machine.exec(`pkill -f -- ${q(`tail -n +1 -f ${o.inbox}`)} || true`, {}).catch(() => undefined);
     },
+  });
+}
+
+/** A remote process as a CliProcess, with its input through `io`. */
+function followRemote(p: RemoteProcess, io: { send(line: string): Promise<void>; endInput(): Promise<void>; kill(): Promise<void> }): CliProcess {
+  let stderr = "";
+  void (async () => {
+    try {
+      for await (const c of p.stderr as unknown as AsyncIterable<Uint8Array>) stderr = (stderr + Buffer.from(c).toString("utf8")).slice(-8000);
+    } catch { /* stopped following */ }
+  })();
+  return {
+    lines: () => linesOf(p.stdout),
+    stderrTail: () => stderr,
+    send: io.send,
+    endInput: io.endInput,
+    kill: io.kill,
     wait: () => p.wait(),
   };
 }

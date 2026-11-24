@@ -3,7 +3,9 @@
  * (https://code.claude.com/docs/en/cli-reference):
  *
  *   claude -p --input-format stream-json --output-format stream-json --verbose --replay-user-messages
- *          [--resume <session>] [--model <m>] --permission-mode <mode> --append-system-prompt <polpo>
+ *          [--resume <session>] [--model <m>] --permission-mode <mode> --strict-mcp-config
+ *          [--mcp-config <polpo tools> --allowedTools=mcp__polpo] [--effort e] [--max-budget-usd n]
+ *          --append-system-prompt <polpo>
  *
  * Input: one JSON line per user message, {"type":"user","message":{"role":"user","content":"…"}}.
  * The program keeps reading until its input closes; every message it takes is echoed back
@@ -12,7 +14,8 @@
  * [text | thinking | tool_use]}}, {"type":"user","message":{content:[tool_result]}}, and one
  * {"type":"result", subtype, is_error, result, usage, total_cost_usd, session_id} per turn.
  */
-import type { CliPermissionMode } from "@polpo-ai/core";
+import type { CliPermissionMode, HarnessEffort } from "@polpo-ai/core";
+import { CLI_TOOL_SERVER_NAME } from "./tool-server.js";
 import type { CliProcess } from "./process.js";
 import { ZERO_USAGE, type CliEvent, type CliSession, type CliTurnEnd, type CliUsage } from "./types.js";
 
@@ -23,11 +26,24 @@ export const CLAUDE_PERMISSION_MODES: Record<CliPermissionMode, string> = {
   "allow-reads": "default",
 };
 
-export function claudeArgs(o: { resume?: string; model?: string; permissionMode?: CliPermissionMode; instructions?: string; maxTurns?: number; extra?: string[] }): string[] {
+export function claudeArgs(o: {
+  resume?: string; model?: string; permissionMode?: CliPermissionMode; instructions?: string; maxTurns?: number; extra?: string[];
+  /** Polpo's tools: the --mcp-config JSON of the run's tool server (tool-server.ts). */
+  mcpConfig?: string;
+  effort?: HarnessEffort;
+  maxBudgetUsd?: number;
+}): string[] {
   const args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--replay-user-messages"];
   if (o.resume) args.push("--resume", o.resume);
   if (o.model) args.push("--model", o.model);
   args.push("--permission-mode", CLAUDE_PERMISSION_MODES[o.permissionMode ?? "allow-all"]);
+  // only Polpo's MCP server (as with the harness: no .mcp.json of the repository, no MCP servers of
+  // the account's own settings); its tools are allowed in every permission mode (Polpo governs them:
+  // the agent's tools, the task's tool scope, approvals)
+  args.push("--strict-mcp-config");
+  if (o.mcpConfig) args.push("--mcp-config", o.mcpConfig, `--allowedTools=mcp__${CLI_TOOL_SERVER_NAME}`);
+  if (o.effort) args.push("--effort", o.effort);
+  if (o.maxBudgetUsd) args.push("--max-budget-usd", String(o.maxBudgetUsd));
   if (o.instructions) args.push("--append-system-prompt", o.instructions);
   if (o.maxTurns) args.push("--max-turns", String(o.maxTurns));
   if (o.extra?.length) args.push(...o.extra);

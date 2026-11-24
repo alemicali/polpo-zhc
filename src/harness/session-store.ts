@@ -9,7 +9,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { HarnessId, VaultStore } from "@polpo-ai/core";
+import type { CliId, HarnessId, VaultStore } from "@polpo-ai/core";
 import { acquireFileLock } from "../sandbox/file-lock.js";
 import type { HarnessResumeState } from "./types.js";
 
@@ -22,6 +22,11 @@ export interface HarnessSessionStatus {
   key: string;
   agent: string;
   harness: HarnessId;
+  /** "cli": the CLI engine (the official program signed in with a person's account), else the harness engine. */
+  engine?: "harness" | "cli";
+  /** CLI engine: which program and which account. */
+  cli?: CliId;
+  account?: string;
   /** "host" or a computer id. */
   computerId: string;
   scope: "task" | "chat";

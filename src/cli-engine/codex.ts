@@ -15,7 +15,7 @@
  * The program never asks for approval (approvalPolicy "never"); a request it sends anyway is
  * declined.
  */
-import type { CliPermissionMode } from "@polpo-ai/core";
+import type { CliPermissionMode, HarnessEffort } from "@polpo-ai/core";
 import type { CliProcess } from "./process.js";
 import { ZERO_USAGE, type CliEvent, type CliSession, type CliTurnEnd, type CliUsage } from "./types.js";
 
@@ -25,8 +25,17 @@ export const CODEX_SANDBOX_MODES: Record<CliPermissionMode, string> = {
   "allow-reads": "read-only",
 };
 
-export function codexArgs(extra: string[] = []): string[] {
-  return ["app-server", ...extra];
+/** Polpo's effort levels as Codex's model_reasoning_effort ("max" is Codex's "xhigh"). */
+export const CODEX_EFFORTS: Record<HarnessEffort, string> = { low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "xhigh" };
+
+/**
+ * `codex [-c overrides] app-server [extra]`: `config` are root config overrides (Polpo's MCP
+ * server, the effort), which the app server takes like every subcommand.
+ */
+export function codexArgs(extra: string[] = [], o: { config?: string[]; effort?: HarnessEffort } = {}): string[] {
+  const config = [...(o.config ?? [])];
+  if (o.effort) config.push("-c", `model_reasoning_effort=${JSON.stringify(CODEX_EFFORTS[o.effort])}`);
+  return [...config, "app-server", ...extra];
 }
 
 type Json = Record<string, unknown>;
