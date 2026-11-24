@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Bulleted and numbered lists in chat answers are indented again.** Streamdown's list classes (`list-inside`, `[li_&]:pl-6`) were never generated because Tailwind does not scan `node_modules`; `ui/src/index.css` now adds `@source "../node_modules/streamdown/dist/*.js"`, so bullets no longer hang outside the message on the left.
+- **Agent avatars are stored as images again.** `POST /api/v1/agents/:name/avatar` (the dashboard upload, MCP `polpo_agent_avatar_set` and Polpo's tool) wrote the image's base64 text to `.polpo/avatars/<name>.<ext>` instead of its bytes, so the avatar never showed; it now writes the bytes (`writeFileBuffer`).
+
 ### Added
 - **Skill bundles: upload `.skill` / `.zip`, browse a skill's files, bundled files reach the agents.** Skills follow the [Agent Skills](https://agentskills.io/specification) format (a folder with `SKILL.md` plus `scripts/`, `references/`, `assets/`). See [docs/skills.md](docs/skills.md):
   - **Upload**: a `.skill` file (a zip of the skill folder, as Claude's skill-creator packages it), a `.zip` with the folder or the files at its root, several skills in one archive, or a folder dropped in the dashboard (zipped in the browser). Two steps: a **preview** (each skill's name, description, files and sizes, errors that block it and warnings, whether the name is taken in each pool) and the **install** (agents' or Polpo's pool, this project or global, on a taken name **replace** / **install as a new name** — `SKILL.md`'s `name:` rewritten — / **skip**, a subset of skills, agents to assign them to).
