@@ -20,6 +20,31 @@ if (argv[0] === "auth" && argv[1] === "status") {
 }
 if (argv[0] === "auth" && argv[1] === "logout") { console.log("Successfully logged out"); process.exit(0); }
 
+
+// Polpo's tools: the MCP server the run gives the program (streamable HTTP, JSON responses)
+async function mcpCall(url, headers, method, params, id) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-protocol-version": "2025-06-18", ...headers },
+    body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
+  });
+  const body = await res.text();
+  if (!res.ok) throw new Error(`MCP ${res.status}: ${body}`);
+  const m = JSON.parse(body);
+  if (m.error) throw new Error(m.error.message);
+  return m.result;
+}
+async function callPolpoTool(url, headers, name, args) {
+  await mcpCall(url, headers, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "fake", version: "1" } }, 1);
+  const list = await mcpCall(url, headers, "tools/list", {}, 2);
+  const r = await mcpCall(url, headers, "tools/call", { name, arguments: args }, 3);
+  return { text: (r.content ?? []).map((c) => c.text ?? "").join(""), isError: !!r.isError, tools: list.tools.map((t) => t.name) };
+}
+
+const mcpIdx = argv.indexOf("--mcp-config");
+const mcp = mcpIdx >= 0 ? JSON.parse(argv[mcpIdx + 1]).mcpServers.polpo : null;
+if (log) appendFileSync(log, JSON.stringify({ mcp: mcp ? { url: mcp.url, hasAuth: !!mcp.headers?.Authorization } : null, toolSearch: process.env.ENABLE_TOOL_SEARCH ?? null }) + "\n");
+
 const resumeIdx = argv.indexOf("--resume");
 const sessionId = resumeIdx >= 0 ? argv[resumeIdx + 1] : "11111111-2222-3333-4444-555555555555";
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
@@ -52,6 +77,23 @@ rl.on("line", (line) => {
   }
   if (text.includes("USAGE_LIMIT")) {
     result("Claude AI usage limit reached|1767225600", { is_error: true });
+    return;
+  }
+  const toolReq = /POLPO_TOOL (\S+) (\{.*\})/.exec(text);
+  if (toolReq) {
+    const [, name, json] = toolReq;
+    out({ type: "assistant", message: { id: "mt", role: "assistant", content: [{ type: "tool_use", id: "tp1", name: `mcp__polpo__${name}`, input: JSON.parse(json) }] }, session_id: sessionId });
+    const t = turn;
+    (mcp ? callPolpoTool(mcp.url, mcp.headers ?? {}, name, JSON.parse(json)) : Promise.reject(new Error("no Polpo MCP server")))
+      .then((r) => {
+        if (log) appendFileSync(log, JSON.stringify({ toolCall: name, result: r }) + "\n");
+        out({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "tp1", content: r.text, is_error: r.isError }] }, session_id: sessionId });
+        out({ type: "assistant", message: { id: "m2", role: "assistant", content: [{ type: "text", text: `Tool said: ${r.text}` }] }, session_id: sessionId });
+        result(`Tool said: ${r.text}`);
+      }, (e) => {
+        out({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "tp1", content: String(e.message), is_error: true }] }, session_id: sessionId });
+        result(`Tool failed: ${e.message} (turn ${t})`);
+      });
     return;
   }
   if (text.includes("SLOW")) {

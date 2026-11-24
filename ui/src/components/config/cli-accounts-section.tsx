@@ -1,8 +1,9 @@
 /**
  * Settings → Harnesses → CLI accounts: the CLI engine's personal sign-ins (the official Claude Code
  * and Codex programs). An account is a config directory on a computer; Polpo never sees a token.
- * "Sign in" opens a terminal on this server running `claude auth login` / `codex login
- * --device-auth` for that directory: the person completes Anthropic's / OpenAI's own sign-in.
+ * "Sign in" opens a terminal on the account's computer (this server, or a remote computer through
+ * its provider's PTY) running `claude auth login` / `codex login --device-auth` for that directory:
+ * the person completes Anthropic's / OpenAI's own sign-in.
  * Each row shows the installed version and who is signed in; "Install" runs the official installer.
  * A personal sign-in runs only work its owner started (Anthropic's and OpenAI's terms).
  */
@@ -34,7 +35,7 @@ export function CliAccountStatusBadge({ account }: { account: Pick<CliAccountVie
   return <Badge variant="outline" className="text-micro">not signed in</Badge>;
 }
 
-/** The sign-in terminal (this server) or the command to run on a remote computer. */
+/** The sign-in terminal on the account's computer (this server or a remote one). */
 export function CliSignInDialog({ account, onClose }: { account: CliAccountView | null; onClose: () => void }) {
   // what the server says for this account (kept per account: a stale answer is not shown for another)
   const [answer, setAnswer] = useState<{ id: string; login?: CliLogin; error?: string } | null>(null);
@@ -74,7 +75,8 @@ export function CliSignInDialog({ account, onClose }: { account: CliAccountView 
                 onConnectionChange={setState}
               />
             </div>
-            <p className="text-micro text-muted-foreground">Terminal: {state} · <code>{login.command}</code></p>
+            <p className="text-micro text-muted-foreground">Terminal{login.computer ? ` on ${login.computer}` : ""}: {state} · <code>{login.command}</code></p>
+            {login.note && <p className="text-micro text-muted-foreground" data-testid="cli-signin-remote-note">{login.note}</p>}
           </div>
         )}
       </DialogContent>

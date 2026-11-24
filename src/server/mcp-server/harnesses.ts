@@ -29,6 +29,7 @@ import {
 } from "./kit.js";
 import { setupHandoff } from "./setup.js";
 import { CLAUDE_SUBSCRIPTION_REFUSAL, OPENCODE_PROVIDER_IDS, OPENCODE_SUBSCRIPTION_REFUSAL } from "@polpo-ai/core/harnesses";
+import { engineTypeText } from "@polpo-ai/core/engine-label";
 
 type HarnessItem = {
   id: string; name: string; enabled: boolean; auth?: string; credentialRef?: { owner: string; service: string }; credentialFound?: boolean;
@@ -53,6 +54,9 @@ type Session = {
   key: string; agent: string; harness: string; computerId: string; scope: string; taskId?: string; state: string; live: boolean;
   sessionId?: string; bootstrappedAt?: string; bootstrapMs?: number; lastDetachAt?: string; lastResumeAt?: string; resumable: boolean;
   turns: number; costUsd: number; lastError?: string; updatedAt: string;
+  /** "cli": the CLI engine (the official program on a person's account): cli and account say which. */
+  engine?: "harness" | "cli"; cli?: string; account?: string; chatSessionId?: string;
+  tokens?: { input: number; output: number; cacheRead: number; cacheWrite: number };
 };
 
 const vaultRef = z.object({ owner: z.string().min(1).describe("The agent whose vault holds the entry"), service: z.string().min(1).describe("The entry's service name") });
@@ -109,10 +113,10 @@ export const harnessLine = (h: HarnessItem) => `- ${h.name} (${h.id}): ${h.enabl
   + (h.brokering ? `, key ${h.brokering === "relay" ? "brokered by Polpo's relay (not in the VM)" : h.brokering === "in-vm" ? "in the VM (no POLPO_PUBLIC_URL)" : "in the VM (Claude Code on Bedrock/Vertex signs requests)"}` : "")
   + (h.agents.length ? ` · agents: ${h.agents.join(", ")}` : "");
 
-const sessionLine = (s: Session) => `- ${s.key} · ${s.agent} on ${s.computerId} (${s.harness}): ${s.state}${s.live ? " (live)" : ""}`
+const sessionLine = (s: Session) => `- ${s.key} · ${s.agent} on ${s.computerId} (${s.engine === "cli" ? `${engineTypeText(s.cli === "codex" ? "codex-cli" : "claude-cli")}, account ${s.account ?? "?"}` : engineTypeText(s.harness)}): ${s.state}${s.live ? " (live)" : ""}`
   + `${s.bootstrappedAt ? `, bootstrapped ${s.bootstrappedAt}${s.bootstrapMs ? ` in ${Math.round(s.bootstrapMs / 1000)} s` : ""}` : ""}`
   + `${s.lastDetachAt ? `, detached ${s.lastDetachAt}` : ""}${s.lastResumeAt ? `, resumed ${s.lastResumeAt}` : ""}`
-  + `, ${s.turns} turn(s), $${s.costUsd.toFixed(4)}${s.resumable ? ", resumable" : ""}${s.lastError ? `, error: ${s.lastError}` : ""}`;
+  + `, ${s.turns} turn(s), ${s.engine === "cli" ? `${(s.tokens ? s.tokens.input + s.tokens.output + s.tokens.cacheRead + s.tokens.cacheWrite : 0)} tokens on the plan` : `$${s.costUsd.toFixed(4)}`}${s.resumable ? ", resumable" : ""}${s.lastError ? `, error: ${s.lastError}` : ""}`;
 
 export function registerHarnessTools(tool: Register, deps: McpDeps): void {
   tool("settings", "polpo_harnesses_get", {

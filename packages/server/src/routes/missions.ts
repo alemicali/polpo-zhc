@@ -23,7 +23,7 @@ const listMissionsRoute = createRoute({
         description: "If `true`, returns a slim projection: drops the (potentially large) `data` JSON blob and the full `prompt`, adds derived `taskCount` and truncated `promptPreview`. Default `false` for backwards compat — the web UI parses `mission.data` directly for now. Use this from mobile / bandwidth-sensitive clients.",
       }),
       slim: z.union([z.literal("true"), z.literal("false")]).optional().openapi({
-        description: "Alias for `summary=true`. Returns a slim projection (id, name, status, schedule, deadline, endDate, qualityThreshold, budgetUsd, pauseReason, cost, timestamps, taskCount, promptPreview).",
+        description: "Alias for `summary=true`. Returns a slim projection (id, name, status, schedule, deadline, endDate, qualityThreshold, budgetUsd, pauseReason, owner, cost, timestamps, taskCount, promptPreview).",
       }),
     }),
   },
@@ -450,6 +450,7 @@ export function missionRoutes(getDeps: () => {
           qualityThreshold: m.qualityThreshold,
           ...(m.budgetUsd !== undefined ? { budgetUsd: m.budgetUsd } : {}),
           ...(m.pauseReason ? { pauseReason: m.pauseReason } : {}),
+          ...(m.owner ? { owner: m.owner } : {}),
           ...(m.cost ? { cost: m.cost } : {}),
           createdAt: m.createdAt,
           updatedAt: m.updatedAt,

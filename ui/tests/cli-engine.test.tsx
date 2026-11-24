@@ -100,7 +100,7 @@ test("agent engine: picks Claude Code (CLI) with an account and saves { type: cl
   await act(async () => change(engine, "cli:claude"));
   await act(async () => change(q<HTMLSelectElement>('select[aria-label="CLI account"]'), "ada-claude"));
   expect(q<HTMLElement>('[data-testid="agent-engine-card"]').textContent).toContain("not signed in");
-  expect(q<HTMLElement>('[data-testid="agent-cli-note"]').textContent).toContain("only tasks its account's owner starts");
+  expect(q<HTMLElement>('[data-testid="agent-cli-note"]').textContent).toContain("only the work of its account's owner");
   await act(async () => change(q<HTMLInputElement>('input[aria-label="CLI model"]'), "opus"));
   const save = [...document.querySelectorAll("button")].find((b) => b.textContent?.includes("Save engine"))!;
   await act(async () => save.click());

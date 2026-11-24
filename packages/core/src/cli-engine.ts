@@ -9,8 +9,10 @@
  *   --device-auth`); Polpo streams the terminal and never reads the credential files.
  * - Policy (Anthropic's Claude Code legal and compliance page; OpenAI's Codex terms): a
  *   subscription login is personal. An account belongs to the member who signed in (`owner`) and
- *   runs only work that member started. It never serves other members, channel customers,
- *   schedules or instances that serve customers. Codex accounts may be shared by the instance
+ *   runs only work that member started: their tasks, the tasks of missions they start, the runs
+ *   of schedules they own (a schedule's owner is the member who created it), their chats. It
+ *   never serves other members, channel customers, ownerless work (an API key, a channel) or
+ *   instances that serve customers. Codex accounts may be shared by the instance
  *   (owner "instance") only when settings.harnesses.cli.allowInstanceCodex is set (with a warning).
  *   A Claude account owned by "instance" is accepted only on a personal installation (no member
  *   sign-in): the operator is then the only person using it.
@@ -18,6 +20,11 @@
  * Shared by the config file, the API, the MCP tools and the dashboard; the runtime is
  * src/cli-engine/ and src/adapters/cli-engine.ts.
  */
+import type { HarnessEffort } from "./harnesses.js";
+
+/** harnesses.ts HARNESS_EFFORTS, repeated: harnesses.ts imports this module (no runtime cycle). */
+const HARNESS_EFFORTS: readonly HarnessEffort[] = ["low", "medium", "high", "xhigh", "max"];
+
 // computers.ts constants, repeated here: importing computers.js would add an import cycle
 // (sandbox → computers → tailnet) that breaks `export *` under some loaders
 const HOST_COMPUTER_ID = "host";
@@ -74,6 +81,10 @@ export interface AgentCliEngine {
   permissionMode?: CliPermissionMode;
   /** Extra command-line flags passed to the CLI (validated: no flag that changes the account or the output protocol). */
   args?: string[];
+  /** Reasoning effort (Claude Code --effort, Codex model_reasoning_effort), as for the harness engine. */
+  effort?: HarnessEffort;
+  /** Claude Code --max-budget-usd: the run stops at this estimate (a subscription bills nothing; it bounds the work). */
+  maxBudgetUsd?: number;
 }
 
 export class CliConfigError extends Error {
@@ -159,10 +170,10 @@ export function isCliEngineInput(raw: unknown): boolean {
 
 /** agent.engine { type: "cli", ... } from raw input, or an error naming the field. */
 export function parseAgentCliEngine(raw: unknown, where = "engine"): AgentCliEngine {
-  if (!isCliEngineInput(raw)) throw new CliConfigError(`${where} must be { type: "cli", cli: "claude" | "codex", account?, model?, permissionMode?, args? }`);
+  if (!isCliEngineInput(raw)) throw new CliConfigError(`${where} must be { type: "cli", cli: "claude" | "codex", account?, model?, permissionMode?, effort?, maxBudgetUsd?, args? }`);
   const r = raw as Record<string, unknown>;
   for (const k of Object.keys(r)) {
-    if (!["type", "cli", "account", "model", "permissionMode", "args"].includes(k)) throw new CliConfigError(`${where}.${k} is not a CLI engine setting (cli, account, model, permissionMode, args)`);
+    if (!["type", "cli", "account", "model", "permissionMode", "effort", "maxBudgetUsd", "args"].includes(k)) throw new CliConfigError(`${where}.${k} is not a CLI engine setting (cli, account, model, permissionMode, effort, maxBudgetUsd, args)`);
   }
   const cli = str(r.cli);
   if (!cli || !(CLI_IDS as string[]).includes(cli)) throw new CliConfigError(`${where}.cli must be one of ${CLI_IDS.join(", ")}`);
@@ -178,6 +189,15 @@ export function parseAgentCliEngine(raw: unknown, where = "engine"): AgentCliEng
   if (r.permissionMode !== undefined && r.permissionMode !== null) {
     if (typeof r.permissionMode !== "string" || !(CLI_PERMISSION_MODES as string[]).includes(r.permissionMode)) throw new CliConfigError(`${where}.permissionMode must be one of ${CLI_PERMISSION_MODES.join(", ")}`);
     out.permissionMode = r.permissionMode as CliPermissionMode;
+  }
+  if (r.effort !== undefined && r.effort !== null && r.effort !== "") {
+    if (typeof r.effort !== "string" || !(HARNESS_EFFORTS as string[]).includes(r.effort)) throw new CliConfigError(`${where}.effort must be one of ${HARNESS_EFFORTS.join(", ")}`);
+    out.effort = r.effort as HarnessEffort;
+  }
+  if (r.maxBudgetUsd !== undefined && r.maxBudgetUsd !== null) {
+    if (typeof r.maxBudgetUsd !== "number" || !(r.maxBudgetUsd > 0) || r.maxBudgetUsd > 10_000) throw new CliConfigError(`${where}.maxBudgetUsd must be a positive number of US dollars`);
+    if (cli !== "claude") throw new CliConfigError(`${where}.maxBudgetUsd is a Claude Code setting (Codex has no budget limit)`);
+    out.maxBudgetUsd = r.maxBudgetUsd;
   }
   if (r.args !== undefined && r.args !== null) {
     if (!Array.isArray(r.args) || r.args.length > 20 || r.args.some((a) => typeof a !== "string" || !a || a.length > 300 || /[\0\r\n]/.test(a))) {
@@ -240,7 +260,7 @@ export function cliEngineProblem(
 export type CliWorkOrigin =
   /** A member (dashboard, API with their session, Polpo chat). */
   | "member"
-  /** A schedule. */
+  /** A schedule without an owner (a schedule's run carries its owner as the initiator). */
   | "schedule"
   /** A customer on a channel (WhatsApp/Telegram customer mode). */
   | "channel-customer"

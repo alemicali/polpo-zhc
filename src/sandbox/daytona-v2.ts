@@ -387,9 +387,29 @@ export class DaytonaV2Adapter implements RemoteAdapter {
         const handle = await sandbox.process.start({ argv: ["bash", "-c", command] }, {
           ...(opts.cwd ? { cwd: opts.cwd } : {}),
           ...(opts.env && Object.keys(opts.env).length ? { env: opts.env } : {}),
+          // open input: the CLI engine streams its protocol to the program's stdin
+          ...(opts.stdin ? { stdin: "open" as const } : {}),
           keepLogs: "until_cleanup",
         });
-        return followDaytonaProcess(handle as unknown as DaytonaProcessHandleLike);
+        return followDaytonaProcess(handle as unknown as DaytonaProcessHandleLike, { stdin: !!opts.stdin });
+      },
+      pty: async (command, opts) => {
+        const { handle, connection } = await sandbox.pty.attach(`bash -lc ${shq(command)}`, {
+          terminal: { cols: opts.cols, rows: opts.rows },
+          ...(opts.cwd ? { cwd: opts.cwd } : {}),
+          ...(opts.env && Object.keys(opts.env).length ? { env: opts.env } : {}),
+        });
+        const done = handle.wait().then(
+          (w) => ({ exitCode: w.exitCode ?? (w.signal ? 128 + (SIGNALS[w.signal] ?? 0) : 1) }),
+          () => ({ exitCode: 137 }),
+        ).finally(() => { try { connection.close(); } catch { /* closed */ } });
+        return {
+          output: connection.readable,
+          write: async (data) => { connection.write(data); },
+          resize: async (cols, rows) => { await handle.resize(cols, rows); },
+          kill: async () => { await handle.kill({ signal: "TERM", escalateAfterSeconds: 3, escalateTo: "KILL" }).catch(() => undefined); },
+          wait: () => done,
+        };
       },
       connectProcess: async (id) => followDaytonaProcess(sandbox.process.connect(id) as unknown as DaytonaProcessHandleLike),
       portEndpoint: (port, opts) => daytonaV2PortEndpoint(sandbox, port, opts),
@@ -434,7 +454,11 @@ export interface DaytonaProcessHandleLike {
   streamLogs(options?: { signal?: AbortSignal; cursor?: string }): AsyncIterable<{ type: string; cursor?: string; frame?: { cursor?: string; channel?: string; data?: string } }>;
   wait(): Promise<{ exitCode?: number | null; signal?: string | null }>;
   kill(options?: { signal?: "TERM" | "KILL"; escalateAfterSeconds?: number; escalateTo?: "KILL" }): Promise<void>;
+  writeStdin?(data: string | Uint8Array): Promise<void>;
+  closeStdin?(): Promise<void>;
 }
+
+const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
 /**
  * A Daytona v2 process as a RemoteProcess: stdout and stderr from its log stream (SSE, resumed
@@ -442,7 +466,7 @@ export interface DaytonaProcessHandleLike {
  * it (hibernated, deleted) reads as killed: wait() resolves 137 and never rejects (an unhandled
  * rejection there crashed the host in the spike).
  */
-export function followDaytonaProcess(handle: DaytonaProcessHandleLike): RemoteProcess {
+export function followDaytonaProcess(handle: DaytonaProcessHandleLike, o: { stdin?: boolean } = {}): RemoteProcess {
   const enc = new TextEncoder();
   let outCtl!: ReadableStreamDefaultController<Uint8Array>;
   let errCtl!: ReadableStreamDefaultController<Uint8Array>;
@@ -491,5 +515,9 @@ export function followDaytonaProcess(handle: DaytonaProcessHandleLike): RemotePr
     wait: () => done,
     kill: async () => { await handle.kill({ signal: "TERM", escalateAfterSeconds: 3, escalateTo: "KILL" }).catch(() => undefined); },
     detach: () => ac.abort(),
+    ...(o.stdin && handle.writeStdin && handle.closeStdin ? {
+      writeStdin: async (data: string) => { await handle.writeStdin!(data); },
+      closeStdin: async () => { await handle.closeStdin!(); },
+    } : {}),
   };
 }

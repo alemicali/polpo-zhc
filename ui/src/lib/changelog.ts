@@ -32,6 +32,22 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-24-cli-engine-parity",
+    date: "2026-11-24",
+    kind: "improved",
+    title: "Claude Code e Codex col tuo abbonamento: strumenti di Polpo, chat e computer remoti",
+    summary: "Gli agenti sul motore CLI ora usano gli strumenti di Polpo, rispondono in chat, lavorano anche su computer Daytona ed E2B e puoi accedere al tuo account su un computer remoto direttamente dalla dashboard.",
+    body: [
+      "- **Strumenti di Polpo**: connettori con i loro account, risultati del task, artefatti, memoria, dati, messaggi: il programma li usa come con gli altri motori, rispettando gli strumenti scelti per il task.",
+      "- **Chat con l'agente**: la risposta arriva in diretta (testo, ragionamento, strumenti usati), puoi scrivere mentre lavora e fermarlo; la conversazione continua da un messaggio all'altro. Email e messaggi WhatsApp ti vengono mostrati in anteprima e li invii tu.",
+      "- **Computer remoti**: Daytona v2 ed E2B. Da Impostazioni → Harness, **Accedi** apre il terminale sul computer dell'account: l'accesso resta sul disco di quel computer (anche dopo ibernazione o pausa; un reset o l'eliminazione lo cancellano).",
+      "- **Di chi è il lavoro**: i task creati dalla chat con Polpo, le missioni che avvii e le pianificazioni che crei sono tuoi, quindi il tuo abbonamento li esegue; i messaggi dai canali restano esclusi.",
+      "- **Sessioni**: le esecuzioni CLI compaiono tra le sessioni degli harness, dove puoi fermarle o azzerarle. Nella scheda Motore puoi scegliere anche l'impegno (effort) e, per Claude Code, un budget per esecuzione.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri Impostazioni → Harness", to: "/config?section=harnesses" },
+  },
+  {
     id: "2026-11-24-engine-badge-everywhere",
     date: "2026-11-24",
     kind: "improved",

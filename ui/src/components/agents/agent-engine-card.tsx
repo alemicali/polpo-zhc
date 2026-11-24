@@ -152,6 +152,14 @@ export function AgentEngineCard() {
                 <option value="allow-edits">Edits only</option>
                 <option value="allow-reads">Read only</option>
               </select>
+              <select aria-label="CLI effort" className={selectClass} value={cli.effort ?? ""} onChange={(e) => setCli({ effort: (e.target.value || undefined) as HarnessEffort | undefined })}>
+                <option value="">Default effort</option>
+                {(["low", "medium", "high", "xhigh", "max"] as const).map((x) => <option key={x} value={x}>{x}</option>)}
+              </select>
+              {cli.cli === "claude" && (
+                <Input className="h-8 w-32 text-xs" type="number" min={0} step={0.5} placeholder="Budget $/run" value={cli.maxBudgetUsd ?? ""}
+                  onChange={(e) => setCli({ maxBudgetUsd: e.target.value ? Number(e.target.value) : undefined })} aria-label="CLI budget per run (USD)" />
+              )}
             </>
           )}
           {harness && <BrandIcon name={harness.harness} size={16} />}
@@ -193,7 +201,7 @@ export function AgentEngineCard() {
         {cli && (
           <p className="text-muted-foreground" data-testid="agent-cli-note">
             {CLI_NAMES[cli.cli]} runs the official program on {computer === "host" ? "this server" : computer}, signed in with a person's own plan.
-            It runs only tasks its account's owner starts (Anthropic's and OpenAI's terms); its tokens are counted, not billed by Polpo.
+            It runs only the work of its account's owner (their tasks, missions, schedules and chats: Anthropic's and OpenAI's terms), with Polpo's tools; its tokens are counted, not billed by Polpo.
           </p>
         )}
         <CliSignInDialog account={signIn} onClose={() => { setSignIn(null); void harnessesApi.cliAccounts().then(setCliData).catch(() => undefined); }} />

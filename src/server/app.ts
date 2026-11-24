@@ -78,6 +78,7 @@ import { harnessSessionViews } from "../harness/control.js";
 import { forwardToRelay, HARNESS_RELAY_PATH } from "../harness/relay.js";
 import { computerManagerWithEvents, driverHost } from "../sandbox/computers.js";
 import { cliAccountRoutes } from "./routes/cli-accounts.js";
+import { cliChatRunner } from "../cli-engine/chat.js";
 import { computerWebhooksFor } from "../sandbox/computer-webhooks.js";
 import { computerWebhookAdminRoutes, computerWebhookInboundRoutes } from "./routes/computer-webhooks.js";
 import { waBusinessAdminRoutes, waBusinessWebhookRoutes } from "./routes/whatsapp-business.js";
@@ -367,6 +368,16 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       const r = agentConfig.reasoning ?? reasoning;
       return { model: m, streamOpts: buildStreamOpts(undefined, r, m.maxTokens) };
     },
+    // agents on the CLI engine: their chats run the official program with the agent's account
+    cliChat: (agentConfig: any) => cliChatRunner(agentConfig, {
+      polpoDir: o.getPolpoDir(),
+      workDir: () => o.getAgentWorkDir(),
+      settings: () => o.getConfig()?.settings,
+      vaultStore: () => o.getVaultStore(),
+      chatSandbox: (agent) => o.chatSandbox(agent),
+      chatOutputDir: (name) => o.chatOutputDir(name),
+      instanceAuth: () => isInstanceAuthEnabled(),
+    }),
     agentChatContext: async (agentConfig: any) => {
       const drive = o.getDriveManager();
       if (!agentConfig.drive?.enabled || !drive) return undefined;
@@ -710,7 +721,10 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   app.use("/v1/chat/completions", (c, next) => {
     // Polpo's connector_add needs the OAuth redirect URI as people reach this instance
     if (!currentEventOrigin()) notePublicOrigin(publicOrigin(c));
-    return currentEventOrigin() ? next() : withEventOrigin({ source: "api" }, () => next());
+    if (currentEventOrigin()) return next();
+    // the signed-in member chatting (instance sign-in): what Polpo's tools create is theirs (requestedBy, mission owner)
+    const email = c.get("polpoUserEmail" as never) as string | undefined;
+    return withEventOrigin({ source: "api", ...(email ? { by: email } : {}) }, () => next());
   });
   app.route("/v1/chat/completions", completionApp);
 

@@ -476,7 +476,44 @@ function completionResponse(id: string, content: string, promptTokens: number, c
  * The consumer provides LLM resolution and tool creation — this allows
  * the route to run on any runtime (Node.js with full tools, or edge with no tools).
  */
+/** What the CLI program does during a chat turn (CLI engine agents). */
+export type CliChatEvent =
+  | { type: "text"; text: string }
+  | { type: "reasoning"; text: string }
+  | { type: "tool-call"; id: string; name: string; input: unknown }
+  | { type: "tool-result"; id: string; name?: string; output: string; isError: boolean };
+
+export interface CliChatTurnResult {
+  text: string;
+  model?: string;
+  usage?: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; totalTokens: number };
+}
+
+/** An agent's chat on the CLI engine: one turn of the official program, its conversation resumed per chat session. */
+export interface CliChatRunner {
+  readonly cli: "claude" | "codex";
+  turn(o: {
+    sessionId: string | null;
+    prompt: string;
+    /** The chat so far, when the program has no conversation of this chat yet (text only). */
+    history?: string;
+    isFirstTurn?: boolean;
+    /** The signed-in member chatting (a personal account runs only its owner's chats). */
+    member?: string;
+    /** A channel turn (WhatsApp, Telegram…): never a personal account's work. */
+    origin?: ConversationCheckTarget;
+    signal: AbortSignal;
+    onEvent: (e: CliChatEvent) => void | Promise<void>;
+    /** Steers sent while the turn runs (asked while it works): the program reads them at once. */
+    takeSteers: () => Promise<string[]>;
+    /** A message to a person (email_send, whatsapp_send…): shown as a preview; returns what the program is told. */
+    preview: (toolName: string, input: Record<string, unknown>) => Promise<string>;
+  }): Promise<CliChatTurnResult>;
+}
+
 export interface CompletionRouteDeps {
+  /** Agents on the CLI engine (agent.engine { type: "cli" }): their chats run the official program. */
+  cliChat?: (agentConfig: any) => CliChatRunner | undefined;
   /** What a messaging channel can do, for turns that come from one (internal x-polpo-chat-origin). */
   channelTurnPrompt?: (origin: ConversationCheckTarget) => string | undefined;
   getAgents: () => Promise<any[]>;
@@ -666,6 +703,8 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
     let deferrableGroups: ToolGroupRule[] = POLPO_TOOL_GROUPS;
 
     const { piMessages, extraSystemParts } = convertMessages(body.messages);
+    /** The agent's chat runs on the CLI engine. */
+    let cliRunner: CliChatRunner | undefined;
 
     if (agentMode) {
       // ── Agent-direct mode ──
@@ -675,6 +714,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         return c.json({ error: { message: `Agent "${body.agent}" not found`, type: "invalid_request_error", code: "agent_not_found" } }, 404);
       }
 
+      cliRunner = deps.cliChat?.(agentConfig);
       agentCompactionSettings = agentConfig.compaction;
       progressiveMode = progressiveModeFor(agentConfig, toolsSettings);
       deferrableGroups = AGENT_TOOL_GROUPS;
@@ -683,6 +723,14 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
         maxTurns = Math.floor(agentConfig.maxTurns);
       }
 
+      if (cliRunner) {
+        // the program has its own prompt, model and tools (Polpo's are its MCP server)
+        fullSystemPrompt = "";
+        m = undefined;
+        streamOpts = {};
+        effectiveTools = [];
+        effectiveToolExecutor = async () => "Error: not available";
+      } else {
       // Build system prompt via dep
       const agentSystemPrompt = await deps.buildAgentPrompt(agentConfig);
       const conversationalPreamble = [
@@ -741,6 +789,7 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
       effectiveTools = tools;
       effectiveToolExecutor = executor;
       isInteractiveFn = isInteractive;
+      }
     } else {
       // ── Orchestrator mode (default) ──
       if (!deps.resolveOrchestratorContext) {
@@ -867,6 +916,253 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
     // Expose session ID to the client so it can track which session is active
     if (sessionId) {
       c.header("x-session-id", sessionId);
+    }
+
+    // ── Agents on the CLI engine: the official program answers (src/cli-engine/chat.ts) ──
+    // Its own tools and Polpo's (the run's MCP server), its own context handling (compaction),
+    // its own conversation resumed turn after turn. Streamed into the chat like any turn: text,
+    // reasoning, tool calls, steers, previews of messages to send.
+    if (cliRunner) {
+      if (body.compact) {
+        return c.json({ error: { message: "This agent runs on the CLI engine: the CLI manages its own context (no manual compaction)", type: "invalid_request_error", code: "cli_engine" } }, 400);
+      }
+      const member = (() => { const v = c.get("polpoUserEmail" as never) as unknown; return typeof v === "string" && v ? v.toLowerCase() : undefined; })();
+      const textOf = (content: unknown): string => typeof content === "string"
+        ? content
+        : Array.isArray(content) ? content.map((p: any) => (p?.type === "text" ? p.text : p?.type === "image" ? "[an image is attached]" : "")).filter(Boolean).join("\n") : "";
+      const userTurn = [...piMessages].reverse().find((x: any) => x.role === "user");
+      const history = piMessages.slice(0, userTurn ? piMessages.lastIndexOf(userTurn) : piMessages.length)
+        .filter((x: any) => x.role === "user" || x.role === "assistant")
+        .map((x: any) => `${x.role === "user" ? "User" : "You"}: ${textOf(x.content)}`).filter((l: string) => l.length > 6);
+      const cliPrompt = textOf(userTurn?.content) || "Continue.";
+      const runTurn = (o: { signal: AbortSignal; onEvent: (e: CliChatEvent) => void | Promise<void>; takeSteers: () => Promise<string[]>; preview: (toolName: string, input: Record<string, unknown>) => Promise<string> }) =>
+        cliRunner!.turn({
+          sessionId, prompt: cliPrompt, history: history.slice(-20).join("\n\n").slice(-20_000), isFirstTurn,
+          ...(member ? { member } : {}), ...(origin ? { origin } : {}), ...o,
+        });
+      const recordCliUsage = async (u: CliChatTurnResult["usage"], model: string | undefined) => {
+        if (!u || !deps.recordTokenUsage) return;
+        try {
+          await deps.recordTokenUsage({
+            timestamp: new Date().toISOString(), source: "agent_chat", provider: `${cliRunner!.cli}-cli`, model: model ?? cliRunner!.cli, sessionId: sessionId ?? undefined,
+            inputTokens: u.inputTokens, outputTokens: u.outputTokens, cacheReadTokens: u.cacheReadTokens, cacheWriteTokens: u.cacheWriteTokens, totalTokens: u.totalTokens, cost: 0,
+          });
+        } catch { /* metrics never fail the chat */ }
+      };
+      const previewOf = (toolName: string, args: Record<string, unknown>): { kind: string; payload: Record<string, unknown> } | undefined => {
+        if (toolName === "email_send") {
+          return { kind: "email_preview", payload: { email_preview: {
+            to: args.to, subject: args.subject, body: args.body, html: args.html, cc: args.cc, bcc: args.bcc, from: args.from, reply_to: args.reply_to, attachments: args.attachments,
+          } } };
+        }
+        if (toolName === "whatsapp_send") return { kind: "whatsapp_preview", payload: { whatsapp_preview: { kind: "text", to: args.to, message: args.message } } };
+        if (toolName === "whatsapp_send_file") {
+          return { kind: "whatsapp_preview", payload: { whatsapp_preview: {
+            kind: "file", to: args.to, path: args.path, caption: args.caption, mediaKind: args.mediaKind, mimeType: args.mimeType, fileName: args.fileName, viewOnce: args.viewOnce,
+          } } };
+        }
+        return undefined;
+      };
+      const PREVIEW_REPLY = "Shown to the person as a preview in this chat: they send it, change it or cancel it from there. It has NOT been sent yet. Do not call the tool again: end your answer now, saying what you prepared.";
+
+      if (!body.stream) {
+        let assistantMsgId: string | null = null;
+        if (sessionStore && sessionId) assistantMsgId = (await sessionStore.addMessage(sessionId, "assistant", "")).id;
+        const toolCallsAccum: any[] = [];
+        const segmentsAccum: MessageSegment[] = [];
+        let finalText = "";
+        let turnOutcome: TurnOutcome = "completed";
+        try {
+          const ac = new AbortController();
+          const r = await runTurn({
+            signal: ac.signal,
+            onEvent: (e) => {
+              if (e.type === "text") { finalText += (finalText ? "\n\n" : "") + e.text; appendTextSegment(segmentsAccum, e.text); }
+              else if (e.type === "tool-call") { ensureToolSegment(segmentsAccum, e.id); toolCallsAccum.push({ id: e.id, name: e.name, arguments: e.input, state: "calling" }); }
+              else if (e.type === "tool-result") { const t = toolCallsAccum.find((x) => x.id === e.id); if (t) Object.assign(t, { result: e.output, state: e.isError ? "error" : "completed" }); }
+            },
+            takeSteers: async () => [],
+            preview: async (name, args) => { turnOutcome = "interactive"; toolCallsAccum.push({ id: `preview-${nanoid(8)}`, name, arguments: args, state: "interrupted" }); return PREVIEW_REPLY; },
+          });
+          if (!finalText && r.text) { finalText = r.text; appendTextSegment(segmentsAccum, r.text); }
+          await recordCliUsage(r.usage, r.model);
+          return c.json({
+            id: completionId, object: "chat.completion", created: Math.floor(Date.now() / 1000), model: r.model ?? `${cliRunner.cli}-cli`,
+            choices: [{ index: 0, message: { role: "assistant", content: finalText }, finish_reason: "stop" }],
+            usage: { prompt_tokens: r.usage?.inputTokens ?? 0, completion_tokens: r.usage?.outputTokens ?? 0, total_tokens: (r.usage?.inputTokens ?? 0) + (r.usage?.outputTokens ?? 0) },
+          });
+        } catch (err) {
+          turnOutcome = "error";
+          return c.json({ error: { message: (err as Error).message, type: "server_error", code: "cli_engine_failed" } }, 502 as any);
+        } finally {
+          if (sessionStore && sessionId && assistantMsgId) {
+            await persistAssistantMessage(sessionStore, sessionId, assistantMsgId, finalText, redactVaultToolCalls(toolCallsAccum), segmentsAccum).catch(() => undefined);
+            deps.emit("message:added", { sessionId, messageId: assistantMsgId, role: "assistant" });
+          }
+          if (sessionId) await deps.turnScheduler?.turnFinished(sessionId, turnOutcome).catch(() => undefined);
+        }
+      }
+
+      const turnId = `turn-${nanoid(20)}`;
+      const registryEntry = streamRegistry.register(turnId, sessionId ?? "anon");
+      c.header("x-turn-id", turnId);
+      lease.transferred = true;
+      return streamSSE(c, async (stream) => {
+        const stopHeartbeat = lease.sessionId ? sessionLeases.heartbeat(lease.sessionId, lease.owner) : () => {};
+        registryEntry.abortController.signal.addEventListener("abort", () => {
+          stopHeartbeat();
+          if (lease.sessionId) sessionLeases.release(lease.sessionId, lease.owner);
+        }, { once: true });
+        let clientGone = false;
+        stream.onAbort(() => { clientGone = true; });
+        const abortController = registryEntry.abortController;
+        const emit = async (data: string) => {
+          streamRegistry.append(turnId, data);
+          if (clientGone) return;
+          try { await stream.writeSSE({ data }); } catch { clientGone = true; }
+        };
+        let lastStoredTs: string | undefined = userMessageTs;
+        let assistantMsgId: string | null = null;
+        let finalText = "";
+        const toolCallsAccum: any[] = [];
+        const segmentsAccum: MessageSegment[] = [];
+        let turnOutcome: TurnOutcome = "completed";
+        let carried: Array<{ id: string; content: string }> = [];
+        let carriedStored = 0;
+        const undelivered: PendingSteer[] = [];
+        let preview: { kind: string; payload: Record<string, unknown> } | undefined;
+        const placeholder = async (): Promise<string | null> => {
+          if (!sessionStore || !sessionId) return null;
+          await afterTimestamp(lastStoredTs);
+          const p = await sessionStore.addMessage(sessionId, "assistant", "");
+          lastStoredTs = p.ts;
+          return p.id;
+        };
+        const persistUser = async (steer: { id: string; content: string }) => {
+          let messageId: string | undefined;
+          if (sessionStore && sessionId) {
+            await afterTimestamp(lastStoredTs);
+            const saved = await sessionStore.addMessage(sessionId, "user", steer.content);
+            lastStoredTs = saved.ts;
+            messageId = saved.id;
+            deps.emit("message:added", { sessionId, messageId: saved.id, role: "user" });
+          }
+          return { id: steer.id, content: steer.content, ...(messageId ? { message_id: messageId } : {}) };
+        };
+        const steerReturnedChunk = () => sseChunk(completionId, {}, null, {
+          steer_returned: { reason: "turn_ended", scheduled: !!(deps.turnScheduler && sessionId), steers: undelivered.map((s) => ({ id: s.id, content: s.content })) },
+        });
+        try {
+          if (sessionId && deps.turnScheduler) carried = await deps.turnScheduler.takeCarryOver(sessionId);
+          const carriedApplied: Array<{ id: string; content: string; message_id?: string }> = [];
+          for (const steer of carried) { carriedApplied.push(await persistUser(steer)); carriedStored++; }
+          assistantMsgId = await placeholder();
+          await emit(sseChunk(completionId, { role: "assistant" }, null, { turn: { id: turnId, session_id: sessionId, assistant_message_id: assistantMsgId } }));
+          if (carriedApplied.length) {
+            await emit(sseChunk(completionId, {}, null, { steer_applied: { steers: carriedApplied, assistant_message_id: assistantMsgId, previous_assistant_message_id: null } }));
+          }
+          const r = await runTurn({
+            signal: abortController.signal,
+            onEvent: async (e) => {
+              if (abortController.signal.aborted) return;
+              if (e.type === "text") {
+                const delta = (finalText ? "\n\n" : "") + e.text;
+                finalText += delta;
+                appendTextSegment(segmentsAccum, delta);
+                await emit(sseChunk(completionId, { content: delta }));
+              } else if (e.type === "reasoning") {
+                appendThinkingSegment(segmentsAccum, e.text);
+                await emit(sseChunk(completionId, {}, null, { thinking: e.text }));
+              } else if (e.type === "tool-call") {
+                ensureToolSegment(segmentsAccum, e.id);
+                toolCallsAccum.push({ id: e.id, name: e.name, arguments: e.input, state: "calling" });
+                await emit(sseChunk(completionId, {}, null, { tool_call: { id: e.id, name: e.name, arguments: e.input, state: "calling" } }));
+              } else if (e.type === "tool-result") {
+                const t = toolCallsAccum.find((x) => x.id === e.id);
+                if (t) Object.assign(t, { result: e.output, state: e.isError ? "error" : "completed" });
+                await emit(sseChunk(completionId, {}, null, { tool_call: { id: e.id, name: t?.name ?? e.name ?? "tool", result: e.output, state: e.isError ? "error" : "completed" } }));
+              }
+            },
+            // steers sent while the program works go to it at once; in the chat they are user messages
+            takeSteers: async () => {
+              const steers = streamRegistry.takeSteers(turnId);
+              if (!steers.length) return [];
+              const previous = assistantMsgId;
+              if (sessionStore && sessionId && assistantMsgId) {
+                await persistAssistantMessage(sessionStore, sessionId, assistantMsgId, finalText, redactVaultToolCalls(toolCallsAccum), segmentsAccum);
+                deps.emit("message:added", { sessionId, messageId: assistantMsgId, role: "assistant" });
+              }
+              const applied: Array<{ id: string; content: string; message_id?: string }> = [];
+              for (const steer of steers) applied.push(await persistUser(steer));
+              assistantMsgId = await placeholder();
+              finalText = "";
+              toolCallsAccum.length = 0;
+              segmentsAccum.length = 0;
+              await emit(sseChunk(completionId, {}, null, { steer_applied: { steers: applied, assistant_message_id: assistantMsgId, previous_assistant_message_id: previous } }));
+              return steers.map((s) => (deps.resolveAttachmentReferences ? deps.resolveAttachmentReferences(s.content) : s.content));
+            },
+            // a message to a person (email_send, whatsapp_send…): previewed, the person sends it
+            preview: async (name, args) => {
+              const p = previewOf(name, args);
+              if (!p) return "Error: this action needs a person's confirmation, which this chat cannot ask for it";
+              preview = p;
+              toolCallsAccum.push({ id: `preview-${nanoid(8)}`, name, arguments: args, state: "interrupted" });
+              return PREVIEW_REPLY;
+            },
+          });
+          if (!finalText && r.text && !abortController.signal.aborted) {
+            finalText = r.text;
+            appendTextSegment(segmentsAccum, r.text);
+            await emit(sseChunk(completionId, { content: r.text }));
+          }
+          await recordCliUsage(r.usage, r.model);
+          if (abortController.signal.aborted) {
+            turnOutcome = "aborted";
+          } else {
+            undelivered.push(...streamRegistry.closeSteering(turnId));
+            if (undelivered.length > 0) await emit(steerReturnedChunk());
+            if (preview) {
+              turnOutcome = "interactive";
+              await emit(sseChunk(completionId, {}, preview.kind, preview.payload));
+            } else {
+              await emit(sseChunk(completionId, {}, "stop"));
+            }
+            await emit("[DONE]");
+          }
+        } catch (err) {
+          for (const steer of carried.slice(carriedStored)) undelivered.push({ ...steer, createdAt: Date.now() });
+          carriedStored = carried.length;
+          if (abortController.signal.aborted) {
+            turnOutcome = "aborted";
+          } else {
+            turnOutcome = "error";
+            undelivered.push(...streamRegistry.closeSteering(turnId));
+            if (undelivered.length > 0) await emit(steerReturnedChunk());
+            const message = (err as Error)?.message ?? "The CLI failed";
+            await emit(JSON.stringify({ error: { message, code: "cli_engine_failed" } }));
+            streamRegistry.error(turnId, message);
+          }
+        } finally {
+          streamRegistry.complete(turnId);
+          const discarded = streamRegistry.isDiscarded(turnId);
+          try {
+            if (turnOutcome === "aborted") for (const steer of carried.slice(carriedStored)) undelivered.push({ ...steer, createdAt: Date.now() });
+            if (!discarded && sessionStore && sessionId && assistantMsgId) {
+              await persistAssistantMessage(sessionStore, sessionId, assistantMsgId, finalText, redactVaultToolCalls(toolCallsAccum), segmentsAccum)
+                .catch((error) => console.warn("[completions] could not store the answer:", error instanceof Error ? error.message : error));
+              deps.emit("message:added", { sessionId, messageId: assistantMsgId, role: "assistant" });
+            }
+            const leftover = streamRegistry.closeSteering(turnId);
+            if (turnOutcome !== "aborted") undelivered.push(...leftover);
+            if (!discarded && sessionId && deps.turnScheduler) {
+              await deps.turnScheduler.turnFinished(sessionId, turnOutcome, undelivered.map((s) => ({ id: s.id, content: s.content })));
+            }
+          } finally {
+            stopHeartbeat();
+            if (lease.sessionId) sessionLeases.release(lease.sessionId, lease.owner);
+          }
+        }
+      }) as any;
     }
 
     // ── Progressive tool discovery ──

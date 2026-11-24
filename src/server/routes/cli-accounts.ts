@@ -172,7 +172,15 @@ export function cliAccountRoutes(deps: CliAccountRouteDeps): Hono {
     if (a.computer === HOST_COMPUTER_ID) {
       return c.json({ ok: true, data: { mode: "terminal", terminal: { agent: "cli-login", cli_account: a.id }, command } });
     }
-    return c.json({ ok: true, data: { mode: "command", computer: a.computer, command, note: `Open a terminal on computer "${a.computer}" and run the command: the CLI shows Anthropic's / OpenAI's sign-in link.` } });
+    // a remote computer: the same terminal, opened on that computer (its provider's PTY; started when needed)
+    if (!computers().some((x) => x.id === a.computer)) return c.json(err(`Unknown computer "${a.computer}"`, "UNAVAILABLE"), 409);
+    return c.json({
+      ok: true,
+      data: {
+        mode: "terminal", computer: a.computer, terminal: { agent: "cli-login", cli_account: a.id }, command,
+        note: `The sign-in runs in a terminal on computer "${a.computer}" (started if it is not running). The credentials stay on that computer's disk: hibernation (Daytona v2) and pause (E2B) keep them; a reset or a delete of the computer signs the account out, and an ephemeral sandbox cannot hold a sign-in.`,
+      },
+    });
   });
 
   app.post("/install", async (c) => {

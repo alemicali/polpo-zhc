@@ -956,7 +956,7 @@ export class ComputerManager {
       keepAlive: async () => {},
       destroy: async () => {},
       ...(inner.spawn ? {
-        spawn: (command: string, o: { cwd?: string; env?: Record<string, string> }) => onCurrent((d) => {
+        spawn: (command: string, o: { cwd?: string; env?: Record<string, string>; stdin?: boolean }) => onCurrent((d) => {
           if (!d.spawn) throw missing("start processes");
           return d.spawn(command, o);
         }),
@@ -968,6 +968,12 @@ export class ComputerManager {
         portEndpoint: (port: number, o?: { protocol?: "http" | "https" | "ws"; ttlSeconds?: number }) => onCurrent((d) => {
           if (!d.portEndpoint) throw missing("expose ports");
           return d.portEndpoint(port, o);
+        }),
+      } : {}),
+      ...(inner.pty ? {
+        pty: (command: string, o: { cwd?: string; env?: Record<string, string>; cols: number; rows: number }) => onCurrent((d) => {
+          if (!d.pty) throw missing("open terminals");
+          return d.pty(command, o);
         }),
       } : {}),
       hold: () => this.hold(c, () => inner),

@@ -90,6 +90,9 @@ export interface AgentCliEngine {
   account?: string;
   model?: string;
   permissionMode?: HarnessPermissionMode;
+  effort?: HarnessEffort;
+  /** Claude Code only: --max-budget-usd. */
+  maxBudgetUsd?: number;
   args?: string[];
 }
 export interface CliAccount { id: string; cli: CliId; computer: string; configDir: string; owner: string; label?: string }
@@ -103,7 +106,7 @@ export interface CliAccountReport {
 export interface CliAccountView extends CliAccount { report?: CliAccountReport; agents: string[]; manageable: boolean }
 export interface CliOverview { accounts: CliAccountView[]; allowInstanceCodex: boolean }
 export type CliLogin =
-  | { mode: "terminal"; terminal: { agent: "cli-login"; cli_account: string }; command: string }
+  | { mode: "terminal"; terminal: { agent: "cli-login"; cli_account: string }; command: string; computer?: string; note?: string }
   | { mode: "command"; computer: string; command: string; note: string };
 
 export function isCliEngine(e: unknown): e is AgentCliEngine {
@@ -150,6 +153,10 @@ export interface HarnessSession {
   key: string;
   agent: string;
   harness: HarnessId;
+  /** "cli": a CLI engine run (the official program signed in with a person's account). */
+  engine?: "harness" | "cli";
+  cli?: CliId;
+  account?: string;
   computerId: string;
   scope: "task" | "chat";
   taskId?: string;

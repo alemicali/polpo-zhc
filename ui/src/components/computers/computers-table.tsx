@@ -16,7 +16,7 @@ import { StatusBadge } from "@/components/computers/status-badge";
 import { BrandIcon } from "@/components/shared/brand-icon";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { EngineBadge } from "@/components/shared/run-context";
-import { HARNESS_NAMES, type HarnessSession } from "@/lib/harnesses-api";
+import { CLI_NAMES, HARNESS_NAMES, type HarnessSession } from "@/lib/harnesses-api";
 import { computerBrand } from "@/lib/run-context";
 import {
   availableActions, formatLastUsed, formatSnapshotSummary, kindLabel, type Computer, type ComputerAction,
@@ -59,7 +59,7 @@ function HarnessCell({ sessions }: { sessions: HarnessSession[] }) {
   const live = sessions.filter((s) => s.live).length;
   return (
     <span className="inline-flex items-center gap-1.5" data-testid="computer-harness-sessions"
-      title={sessions.map((s) => `${HARNESS_NAMES[s.harness]} · ${s.agent}${s.taskId ? ` · task ${s.taskId.slice(0, 8)}` : ""} · ${s.live ? "running" : s.state}`).join("\n")}>
+      title={sessions.map((s) => `${s.engine === "cli" ? CLI_NAMES[s.cli ?? "claude"] : HARNESS_NAMES[s.harness]} · ${s.agent}${s.taskId ? ` · task ${s.taskId.slice(0, 8)}` : ""} · ${s.live ? "running" : s.state}`).join("\n")}>
       {harnesses.map((h) => <BrandIcon key={h} name={h} size={14} />)}
       <span className="tabular-nums">{sessions.length}</span>
       {live > 0 && <span className="text-status-running">· {live} live</span>}
