@@ -39,7 +39,8 @@ import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { SkillFileTree, SkillFileViewer } from "@/components/skills/skill-file-browser";
-import { SkillVersionsPanel, versionAuthor, versionSourceLabel } from "@/components/skills/skill-versions";
+import { SkillVersionsPanel } from "@/components/skills/skill-versions";
+import { versionAuthor, versionSourceLabel } from "@/lib/skill-versions";
 import { formatSize } from "@/lib/skill-files";
 
 type ShownSkill = SkillInfo & { assignedTo?: string[] };

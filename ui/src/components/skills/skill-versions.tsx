@@ -1,30 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Download, Eye, GitCompare, History, Loader2, RotateCcw, ChevronDown, ChevronRight } from "lucide-react";
-import type { SkillVersion, SkillVersionDiff, SkillFileDiff, UseSkillVersionsReturn } from "@polpo-ai/react";
+import type { SkillVersionDiff, SkillFileDiff, UseSkillVersionsReturn } from "@polpo-ai/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { cn } from "@/lib/utils";
 import { formatSize } from "@/lib/skill-files";
-
-/** "person:ada@example.com" → "ada@example.com"; "mcp:Claude" → "Claude (MCP)". */
-export function versionAuthor(author: string): string {
-  if (author.startsWith("person:")) return author.slice("person:".length);
-  if (author.startsWith("mcp:")) return `${author.slice("mcp:".length)} (MCP)`;
-  if (author === "polpo") return "Polpo";
-  if (author === "cli") return "CLI";
-  return author;
-}
-
-const SOURCE_LABEL: Record<string, string> = {
-  create: "Created", upload: "Upload", git: "Git", local: "Local install", edit: "Edit", restore: "Restore", external: "Found on disk",
-};
-
-export function versionSourceLabel(v: Pick<SkillVersion, "source" | "restoredFrom">): string {
-  const label = SOURCE_LABEL[v.source] ?? v.source;
-  return v.source === "restore" && v.restoredFrom ? `${label} of v${v.restoredFrom}` : label;
-}
+import { versionAuthor, versionSourceLabel } from "@/lib/skill-versions";
 
 function when(iso: string): string {
   const d = new Date(iso);

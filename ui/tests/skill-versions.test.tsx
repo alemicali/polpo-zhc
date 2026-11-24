@@ -63,7 +63,7 @@ vi.mock("@/components/shared/agent-avatar", () => ({ AgentAvatar: () => null }))
 
 import { TooltipProvider } from "../src/components/ui/tooltip";
 import { SkillDetailPage } from "../src/pages/skill-detail";
-import { versionAuthor } from "../src/components/skills/skill-versions";
+import { versionAuthor, versionSourceLabel } from "../src/lib/skill-versions";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -203,4 +203,5 @@ test("a deleted skill shows its versions and can be restored", async () => {
   expect(q('[aria-label="Restore version 3"]')).toBeTruthy();
   expect(versionAuthor("person:ada@example.com")).toBe("ada@example.com");
   expect(versionAuthor("polpo")).toBe("Polpo");
+  expect(versionSourceLabel({ source: "restore", restoredFrom: 2 })).toBe("Restore of v2");
 });
