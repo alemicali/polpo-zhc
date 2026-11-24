@@ -710,7 +710,10 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   app.use("/v1/chat/completions", (c, next) => {
     // Polpo's connector_add needs the OAuth redirect URI as people reach this instance
     if (!currentEventOrigin()) notePublicOrigin(publicOrigin(c));
-    return currentEventOrigin() ? next() : withEventOrigin({ source: "api" }, () => next());
+    if (currentEventOrigin()) return next();
+    // the signed-in member chatting (instance sign-in): what Polpo's tools create is theirs (requestedBy, mission owner)
+    const email = c.get("polpoUserEmail" as never) as string | undefined;
+    return withEventOrigin({ source: "api", ...(email ? { by: email } : {}) }, () => next());
   });
   app.route("/v1/chat/completions", completionApp);
 

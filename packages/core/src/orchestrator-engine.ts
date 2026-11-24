@@ -80,13 +80,13 @@ export interface AssessmentOrchestratorPort {
  */
 export interface MissionExecutorPort {
   readonly ready: Promise<void>;
-  saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules; budgetUsd?: number }): Promise<Mission>;
+  saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules; budgetUsd?: number; owner?: string }): Promise<Mission>;
   getMission(missionId: string): Promise<Mission | undefined>;
   getMissionByName(name: string): Promise<Mission | undefined>;
   getAllMissions(): Promise<Mission[]>;
   updateMission(missionId: string, updates: Partial<Omit<Mission, "id">>): Promise<Mission>;
   deleteMission(missionId: string): Promise<boolean>;
-  executeMission(missionId: string): Promise<{ tasks: Task[]; group: string }>;
+  executeMission(missionId: string, opts?: { requestedBy?: string }): Promise<{ tasks: Task[]; group: string }>;
   resumeMission(missionId: string, opts?: { retryFailed?: boolean }): Promise<{ retried: number; pending: number }>;
   getResumableMissions(): Promise<Mission[]>;
   cleanupCompletedGroups(tasks: Task[]): Promise<void>;
@@ -655,7 +655,7 @@ export class OrchestratorEngine {
 
   // ── Mission Management (delegates to MissionExecutor) ───────────────
 
-  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules; budgetUsd?: number }): Promise<Mission> { return this.missionExec.saveMission(opts); }
+  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules; budgetUsd?: number; owner?: string }): Promise<Mission> { return this.missionExec.saveMission(opts); }
   async getMission(missionId: string): Promise<Mission | undefined> { return this.missionExec.getMission(missionId); }
   async getMissionByName(name: string): Promise<Mission | undefined> { return this.missionExec.getMissionByName(name); }
   async getAllMissions(): Promise<Mission[]> { return this.missionExec.getAllMissions(); }
@@ -801,7 +801,7 @@ export class OrchestratorEngine {
     }
     return mission;
   }
-  async executeMission(missionId: string): Promise<{ tasks: Task[]; group: string }> { return this.missionExec.executeMission(missionId); }
+  async executeMission(missionId: string, opts?: { requestedBy?: string }): Promise<{ tasks: Task[]; group: string }> { return this.missionExec.executeMission(missionId, opts); }
 
   // ── Checkpoints ────────────────────────────────────────────────────
 

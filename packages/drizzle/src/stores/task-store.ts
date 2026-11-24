@@ -178,6 +178,7 @@ export class DrizzleTaskStore implements TaskStore {
       executionCount: row.executionCount ?? 0,
       ...(row.budgetUsd ? { budgetUsd: Number(row.budgetUsd) } : {}),
       ...(row.pauseReason ? { pauseReason: row.pauseReason } : {}),
+      ...(row.owner ? { owner: row.owner } : {}),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -593,6 +594,7 @@ export class DrizzleTaskStore implements TaskStore {
       executionCount: mission.executionCount ?? 0,
       budgetUsd: mission.budgetUsd != null ? String(mission.budgetUsd) : null,
       pauseReason: mission.pauseReason ?? null,
+      owner: mission.owner ?? null,
       createdAt: mission.createdAt,
       updatedAt: mission.updatedAt,
     });
@@ -638,6 +640,7 @@ export class DrizzleTaskStore implements TaskStore {
     // present with undefined (or null) clears them
     if ("budgetUsd" in updates) values.budgetUsd = updates.budgetUsd != null ? String(updates.budgetUsd) : null;
     if ("pauseReason" in updates) values.pauseReason = updates.pauseReason ?? null;
+    if ("owner" in updates) values.owner = updates.owner ?? null;
 
     await this.db.update(this.schema.missions).set(values)
       .where(eq(this.schema.missions.id, missionId));

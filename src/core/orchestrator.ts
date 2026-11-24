@@ -32,7 +32,20 @@ import { MISSION_EDIT } from "@polpo-ai/core";
 import { agentEngineProblem, HarnessConfigError, parseAgentEngine } from "@polpo-ai/core";
 import { agentHarnessBudgetUsd, computeMissionCost, plannedAgentsOf, summarizeMissionCost, tasksOfMission, type MissionCost, type MissionCostSummary } from "@polpo-ai/core";
 import { daytonaApiVersion } from "@polpo-ai/core/sandbox";
-import { TypedEmitter, withEventOrigin } from "./events.js";
+import { TypedEmitter, currentEventOrigin, withEventOrigin } from "./events.js";
+
+const MEMBER_EMAIL = /^[^\s@:]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * The member (email) the code running now acts for: a person's API call, Polpo's chat or Polpo's
+ * MCP connector on their behalf. Not an agent's tools (`by` is the agent), a channel contact
+ * ("telegram:123") or a schedule: their work has no member unless it says so.
+ */
+export function originMember(): string | undefined {
+  const o = currentEventOrigin();
+  if (!o?.by || (o.source !== "api" && o.source !== "polpo")) return undefined;
+  return MEMBER_EMAIL.test(o.by) ? o.by.toLowerCase() : undefined;
+}
 import type { PolpoEventMap } from "@polpo-ai/core";
 import type { TaskStore } from "./task-store.js";
 import type { RunStore } from "./run-store.js";
@@ -1198,7 +1211,7 @@ export class Orchestrator extends TypedEmitter {
     // Initialize scheduler (always available — zero cost when no schedules exist)
     if (this.config.settings.enableScheduler !== false) {
       this.scheduler = new Scheduler(ctx);
-      this.scheduler.setExecutor((missionId) => withEventOrigin({ source: "schedule" }, () => this.missionExec.executeMission(missionId)));
+      this.scheduler.setExecutor((missionId) => this.runScheduledMission(missionId));
       this.scheduler.init();
     }
 
@@ -1490,7 +1503,10 @@ export class Orchestrator extends TypedEmitter {
     /** The member (email) who started it, when known (a CLI engine on a personal sign-in checks it). */
     requestedBy?: string;
   }): Promise<Task> {
-    const { toolScope, ...rest } = opts;
+    const { toolScope, ...given } = opts;
+    // the member this work is for: given, or the person whose call (dashboard, API, Polpo's chat) created it
+    const member = given.requestedBy ?? originMember();
+    const rest = { ...given, ...(member ? { requestedBy: member } : {}) };
     if (toolScope === undefined || toolScope === null) return this.engine.addTask(rest);
     const scope = await requireTaskToolScope(this.toolScopeHost(), opts.assignTo, toolScope, { live: true });
     return this.engine.addTask({ ...rest, ...(scope ? { toolScope: scope } : {}) });
@@ -1877,9 +1893,11 @@ export class Orchestrator extends TypedEmitter {
 
   // ─── Mission Management (delegates to OrchestratorEngine → MissionExecutor) ──
 
-  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules; budgetUsd?: number }): Promise<Mission> {
+  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules; budgetUsd?: number; owner?: string }): Promise<Mission> {
     await this.checkMissionToolScopes(opts.data);
-    return this.engine.saveMission(opts);
+    // its owner: the member who creates it (its schedule's runs are their work)
+    const owner = opts.owner ?? originMember();
+    return this.engine.saveMission({ ...opts, ...(owner ? { owner } : {}) });
   }
 
   /**
@@ -1914,7 +1932,9 @@ export class Orchestrator extends TypedEmitter {
   async getAllMissions(): Promise<Mission[]> { return this.engine.getAllMissions(); }
   async updateMission(missionId: string, updates: Partial<Omit<Mission, "id">>): Promise<Mission> {
     await this.checkMissionToolScopes(updates.data);
-    return this.engine.updateMission(missionId, updates);
+    // a schedule belongs to the member who sets it: its runs are their work
+    const member = updates.schedule && !("owner" in updates) ? originMember() : undefined;
+    return this.engine.updateMission(missionId, member ? { ...updates, owner: member } : updates);
   }
   async deleteMission(missionId: string): Promise<boolean> { return this.engine.deleteMission(missionId); }
 
@@ -2078,7 +2098,17 @@ export class Orchestrator extends TypedEmitter {
 
   async getResumableMissions(): Promise<Mission[]> { return this.engine.getResumableMissions(); }
   async resumeMission(missionId: string, opts?: { retryFailed?: boolean }): Promise<{ retried: number; pending: number }> { return this.engine.resumeMission(missionId, opts); }
-  async executeMission(missionId: string): Promise<{ tasks: Task[]; group: string }> { return this.engine.executeMission(missionId); }
+  /** Run a mission now: its tasks are for the member who started it (their API call or Polpo's chat), when known. */
+  async executeMission(missionId: string, opts: { requestedBy?: string } = {}): Promise<{ tasks: Task[]; group: string }> {
+    const requestedBy = opts.requestedBy ?? originMember();
+    return this.engine.executeMission(missionId, requestedBy ? { requestedBy } : {});
+  }
+
+  /** A schedule's run: its tasks are for the schedule's owner (the mission's owner), when it has one. */
+  private async runScheduledMission(missionId: string): Promise<unknown> {
+    const mission = await Promise.resolve(this.registry.getMission?.(missionId)).catch(() => undefined);
+    return withEventOrigin({ source: "schedule" }, () => this.missionExec.executeMission(missionId, mission?.owner ? { requestedBy: mission.owner } : {}));
+  }
 
   // ─── Checkpoints (delegates to OrchestratorEngine) ──
 
@@ -2364,7 +2394,7 @@ export class Orchestrator extends TypedEmitter {
     if (this.config.settings.enableScheduler !== false) {
       if (!this.scheduler) {
         this.scheduler = new Scheduler(ctx);
-        this.scheduler.setExecutor((missionId) => withEventOrigin({ source: "schedule" }, () => this.missionExec.executeMission(missionId)));
+        this.scheduler.setExecutor((missionId) => this.runScheduledMission(missionId));
       }
       this.scheduler.init();
     } else {

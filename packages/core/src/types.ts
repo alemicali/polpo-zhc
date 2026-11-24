@@ -743,6 +743,11 @@ export interface Mission {
   budgetUsd?: number;
   /** Why the mission is paused, when the orchestrator paused it on its own: "budget". */
   pauseReason?: MissionPauseReason;
+  /**
+   * The member (email) who created it, when known: its schedule's runs are this member's work
+   * (their tasks carry requestedBy = owner). A run a member starts by hand carries that member.
+   */
+  owner?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -1646,6 +1651,8 @@ export interface ScheduleEntry {
   nextRunAt?: string;
   /** Deadline offset — auto-set task/mission deadline to N ms after execution start. */
   deadlineOffsetMs?: number;
+  /** The member (email) who owns the schedule (the mission's owner): its runs' tasks carry requestedBy = owner. */
+  owner?: string;
   /** A run missed while the server was down: "once" (default) runs it at startup when it is at most one interval late, "none" skips to the next. */
   catchUp?: "none" | "once";
   /** How the last run went: started (in progress), completed, failed, skipped (a hook or another process), missed (server down), expired (endDate). */

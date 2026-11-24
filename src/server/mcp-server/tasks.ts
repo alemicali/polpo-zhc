@@ -42,6 +42,8 @@ type FullTask = TaskRow & {
   result?: { exitCode?: number; duration?: number; stdout?: string; stderr?: string; assessment?: { passed?: boolean; globalScore?: number; feedback?: string } };
   outcomes?: Array<{ type?: string; label?: string; path?: string; url?: string; text?: string }>;
   sideEffects?: boolean;
+  /** The member it is for (who started it, the mission's starter, the schedule's owner). */
+  requestedBy?: string;
   /** Where and with what each run executed (engine, model, computer, egress, session, cost), newest last. */
   runs?: TaskRunContext[];
   toolScope?: TaskToolScope;
@@ -245,6 +247,7 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
       `retries: ${t.retries ?? 0}/${t.maxRetries ?? "-"}${t.sideEffects ? " · side effects" : ""}`,
       ...(dependencies.length ? [`depends on: ${dependencies.map((d) => `${d.id} [${d.status}] ${short(d.title, 60)}`).join(", ")}`] : []),
       ...(failure ? [`failed: ${describeTaskFailure(failure)}`] : []),
+      ...(t.requestedBy ? [`for: ${t.requestedBy}`] : []),
       ...(t.toolScope ? [`tools: ${describeTaskToolScope(t.toolScope)}${t.toolScopeStale?.length ? ` · stale: ${t.toolScopeStale.join("; ")}` : ""}`] : []),
       `created ${t.createdAt ?? "?"} · updated ${t.updatedAt ?? "?"}`,
       "",

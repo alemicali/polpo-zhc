@@ -63,6 +63,7 @@ export const missionsSqlite = sqliteTable("missions", {
   executionCount: integer("execution_count").notNull().default(0),
   budgetUsd: text("budget_usd"),
   pauseReason: text("pause_reason"),
+  owner: text("owner"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 }, (table) => [
@@ -148,6 +149,7 @@ export const missionsPg = pgTable("missions", {
   executionCount: pgInteger("execution_count").notNull().default(0),
   budgetUsd: pgText("budget_usd"),
   pauseReason: pgText("pause_reason"),
+  owner: pgText("owner"),
   createdAt: pgText("created_at").notNull(),
   updatedAt: pgText("updated_at").notNull(),
 }, (table) => [

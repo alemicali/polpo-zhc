@@ -629,6 +629,8 @@ export interface Mission {
   budgetUsd?: number;
   /** Why the orchestrator paused it on its own: "budget". */
   pauseReason?: "budget";
+  /** The member (email) who created it or set its schedule: its scheduled runs are their work (tasks' requestedBy). */
+  owner?: string;
   /** What it cost so far: full on GET /missions/:id, compact (MissionCostSummary) in lists. */
   cost?: MissionCost | MissionCostSummary;
   createdAt: string;
@@ -693,6 +695,7 @@ export interface MissionSlim {
   qualityThreshold?: number;
   budgetUsd?: number;
   pauseReason?: "budget";
+  owner?: string;
   cost?: MissionCostSummary;
   createdAt: string;
   updatedAt: string;
@@ -960,6 +963,8 @@ export interface ScheduleEntry {
   lastRunAt?: string;
   nextRunAt?: string;
   deadlineOffsetMs?: number;
+  /** The member (email) who owns it (the mission's owner): its runs' tasks are that member's work. */
+  owner?: string;
   /** A run missed while the server was down: "once" runs it at startup (at most one interval late), "none" skips it. */
   catchUp?: "none" | "once";
   /** How the last run went: started (running), completed, failed, skipped, missed (server down), expired. */

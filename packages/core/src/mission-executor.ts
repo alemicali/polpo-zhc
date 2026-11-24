@@ -496,7 +496,7 @@ export class MissionExecutor {
     return this.resolveMissionForGroup(groupTasks, group);
   }
 
-  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules; budgetUsd?: number }): Promise<Mission> {
+  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules; budgetUsd?: number; owner?: string }): Promise<Mission> {
     if (!this.ctx.registry.saveMission) throw new Error("Store does not support missions");
     if (opts.budgetUsd !== undefined && !isValidBudgetUsd(opts.budgetUsd)) throw new Error("budgetUsd must be a positive number of USD");
     const requested = opts.name ?? (await this.ctx.registry.nextMissionName?.()) ?? `mission-${Date.now()}`;
@@ -508,6 +508,7 @@ export class MissionExecutor {
       status: opts.status ?? "draft",
       notifications: opts.notifications,
       ...(opts.budgetUsd !== undefined ? { budgetUsd: opts.budgetUsd } : {}),
+      ...(opts.owner ? { owner: opts.owner.toLowerCase() } : {}),
     });
     this.ctx.emitter.emit("mission:saved", { missionId: mission.id, name: mission.name, status: mission.status });
     return mission;
@@ -689,7 +690,11 @@ export class MissionExecutor {
     return state.recurring ? "recurring" : "scheduled";
   }
 
-  async executeMission(missionId: string): Promise<{ tasks: Task[]; group: string }> {
+  /**
+   * `requestedBy`: the member this run is for (who started it, or the schedule's owner): its tasks
+   * carry it (a CLI engine on a personal sign-in runs only its owner's work).
+   */
+  async executeMission(missionId: string, opts: { requestedBy?: string } = {}): Promise<{ tasks: Task[]; group: string }> {
     const mission = await this.ctx.registry.getMission?.(missionId);
     if (!mission) throw new Error("Mission not found");
     const executableStates = ["draft", "scheduled", "recurring", "failed", "cancelled"];
@@ -792,6 +797,7 @@ export class MissionExecutor {
         notifications: t.notifications,
         sideEffects: t.sideEffects,
         ...(normalizeTaskToolScope(t.toolScope) ? { toolScope: normalizeTaskToolScope(t.toolScope) } : {}),
+        ...(opts.requestedBy ? { requestedBy: opts.requestedBy.toLowerCase() } : {}),
       });
       titleToId.set(t.title, task.id);
       tasks.push(task);
