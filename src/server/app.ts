@@ -1373,6 +1373,18 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     getMissionCostSummaries: (missions: any[]) => o.getMissionCostSummaries(missions),
   })));
 
+  /** Who makes a request (versions of skills and agents, deploys): a person, Polpo's chat, an agent, or an MCP client. */
+  const requestAuthor = (c: { req: { header: (name: string) => string | undefined }; get: (key: never) => unknown }): string => {
+    if (isTrustedApiCall(c.req.header(TRUSTED_API_CALL_HEADER))) {
+      const origin = currentEventOrigin();
+      if (origin?.source === "polpo") return "polpo";
+      if (origin?.source === "agent" && origin.by) return origin.by;
+      return `mcp:${origin?.by ?? "client"}`;
+    }
+    const email = c.get("polpoUserEmail" as never) as string | undefined;
+    return email ? `person:${email}` : "person:dashboard";
+  };
+
   authed.route("/agents", agentRoutes(() => ({
     getAgents: () => o.getAgents(),
     addAgent: (agent: any, teamName?: string) => o.addAgent(agent, teamName),
@@ -1388,6 +1400,14 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     polpoDir: o.getPolpoDir(),
     computerIds: () => (o.getConfig()?.settings?.computers ?? []).map((c) => c.id),
     fs: new NodeFileSystem(),
+    versions: {
+      versioning: () => o.getAgentVersioning(),
+      update: (name, updates, opts) => o.updateAgentVersioned(name, updates, opts),
+      deploy: (name, version, opts) => o.deployAgentVersion(name, version, opts),
+      rollback: (name, opts) => o.rollbackAgentVersion(name, opts),
+      autoDeploy: () => o.autoDeployApiUpdates(),
+      actor: (c) => requestAuthor(c),
+    },
   })));
 
   authed.route("/events", eventRoutes(sseBridge));
@@ -1432,16 +1452,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     getAgents: () => o.getAgents(),
     emit: (event, data) => o.emit(event, data),
     // who changes a skill, recorded in its versions: a person, Polpo's chat, an agent, or an MCP client
-    author: (c) => {
-      if (isTrustedApiCall(c.req.header(TRUSTED_API_CALL_HEADER))) {
-        const origin = currentEventOrigin();
-        if (origin?.source === "polpo") return "polpo";
-        if (origin?.source === "agent" && origin.by) return origin.by;
-        return `mcp:${origin?.by ?? "client"}`;
-      }
-      const email = c.get("polpoUserEmail" as never) as string | undefined;
-      return email ? `person:${email}` : "person:dashboard";
-    },
+    author: (c) => requestAuthor(c),
   })));
 
   authed.route("/notifications", notificationRoutes(() => ({

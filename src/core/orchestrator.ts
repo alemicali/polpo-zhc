@@ -112,6 +112,11 @@ import { FilePeerStore } from "./peer-store.js";
 import type { PeerStore } from "./peer-store.js";
 import { FileTeamStore } from "../stores/file-team-store.js";
 import { FileAgentStore } from "../stores/file-agent-store.js";
+import { FileAgentVersionStore } from "../stores/file-agent-version-store.js";
+import {
+  AgentVersioning, AgentVersionError, PRODUCTION_POINTER, snapshotsEqual,
+  type AgentDeployEntry, type AgentVersion, type AgentVersionBump, type AgentVersionStore,
+} from "@polpo-ai/core/agent-versions";
 import type { TeamStore } from "./team-store.js";
 import type { AgentStore } from "./agent-store.js";
 import { EscalationManager } from "./escalation-manager.js";
@@ -126,7 +131,7 @@ import { DriveManager, FileDriveStore, type ReflectionRunner } from "./drive.js"
 import {
   assignSkillToAgent, createAgentSkill, loadSkillIndex, removeSkill, removeSkillFromIndex, unassignSkillFromAgent, updateSkillIndex,
 } from "../llm/skills.js";
-import { withSkillVersion } from "../llm/skill-versions.js";
+import { listSkillVersions, withSkillVersion } from "../llm/skill-versions.js";
 import type { ApprovalRequest, ApprovalStatus, ChannelReplyTarget, NotificationAction } from "./types.js";
 import { EncryptedVaultStore } from "../vault/encrypted-store.js";
 import type { VaultStore } from "./vault-store.js";
@@ -239,6 +244,8 @@ export class Orchestrator extends TypedEmitter {
   private waBusinessStore?: WaBusinessStore;
   private peerStore?: PeerStore;
   private teamStore!: TeamStore;
+  private agentVersionStore!: AgentVersionStore;
+  private agentVersions!: AgentVersioning;
   private agentStore!: AgentStore;
   private channelGateway?: ChannelGateway;
   private channelChatRunner?: ChannelChatRunner;
@@ -927,6 +934,7 @@ export class Orchestrator extends TypedEmitter {
     // Team & Agent stores — Drizzle when available, otherwise file-based
     this.teamStore = this.drizzleStores?.teamStore ?? new FileTeamStore(this.polpoDir);
     this.agentStore = this.drizzleStores?.agentStore ?? new FileAgentStore(this.polpoDir);
+    this.initAgentVersioning();
 
     // Vault first: custom provider keys live there ("$providers"), and the key check below
     // must see them (otherwise vault-only custom providers are reported as missing).
@@ -940,6 +948,10 @@ export class Orchestrator extends TypedEmitter {
 
     // Sync config.teams from stores (authoritative source — agents.json / teams.json)
     await this.agentMgr.syncConfigCache();
+
+    // Agents under versioning: 1.0.0 deployed to production for those without versions
+    // (idempotent), a new version for those changed outside it (CLI, file edits)
+    await this.migrateAgentVersions();
 
     this.playbookStore = this.withPlaybookEvents(this.drizzleStores?.playbookStore ?? new FilePlaybookStore(this.workDir, this.polpoDir));
   }
@@ -1040,6 +1052,7 @@ export class Orchestrator extends TypedEmitter {
       sessionStore: this.sessionStore,
       teamStore: this.teamStore,
       agentStore: this.agentStore,
+      agentVersions: this.agentVersions,
       hooks: this.hookRegistry,
       config: this.config,
       workDir: this.workDir,
@@ -1410,6 +1423,7 @@ export class Orchestrator extends TypedEmitter {
     // Team & Agent stores — Drizzle when available, otherwise file-based
     this.teamStore = this.drizzleStores?.teamStore ?? new FileTeamStore(this.polpoDir);
     this.agentStore = this.drizzleStores?.agentStore ?? new FileAgentStore(this.polpoDir);
+    this.initAgentVersioning();
 
     // Populate stores with the teams passed to initInteractive
     // (this is project creation, not migration — teams come from the caller)
@@ -1623,6 +1637,8 @@ export class Orchestrator extends TypedEmitter {
   getCodingSessionStore(): CodingSessionStore { return this.codingSessionStore; }
   getTeamStore(): TeamStore { return this.teamStore; }
   getAgentStore(): AgentStore { return this.agentStore; }
+  /** Agent versions: drafts, published versions, the production pointer, deploy history. */
+  getAgentVersioning(): AgentVersioning { return this.agentVersions; }
   /** Drizzle-backed AttachmentStore when storage is sqlite/postgres, undefined for file mode. */
   getAttachmentStore(): import("@polpo-ai/core/attachment-store").AttachmentStore | undefined {
     return this.drizzleStores?.attachmentStore;
@@ -1853,15 +1869,36 @@ export class Orchestrator extends TypedEmitter {
       if (!engine) delete agent.engine;
     }
     await this.engine.addAgent(agent, teamName);
+    // its first version: 1.0.0, deployed to production
+    if (!agent.volatile) await this.agentVersions.ensureInitial(agent.name, this.versionActor()).catch(() => undefined);
     await this.emitTeamSnapshot("agent:created", { agentName: agent.name, teamName });
     this.refreshDedicatedTelegramBots(agent.name);
   }
   async removeAgent(name: string): Promise<boolean> {
     const removed = await this.engine.removeAgent(name);
-    if (removed) await this.emitTeamSnapshot("agent:removed", { agentName: name });
+    if (removed) {
+      await this.agentVersions.forget(name).catch(() => undefined);
+      await this.emitTeamSnapshot("agent:removed", { agentName: name });
+    }
     return removed;
   }
+  /**
+   * Change an agent live (applies to its next runs right away). The change is recorded as a new
+   * published version deployed to production, so the history stays complete: Polpo's own tools,
+   * an agent changing its settings (voice replies, learning), skill assignment. People and API
+   * clients go through {@link updateAgentVersioned} (draft → publish → deploy).
+   */
   async updateAgent(name: string, updates: AgentUpdate): Promise<AgentConfig> {
+    const agent = await this.writeAgentLive(name, updates);
+    if (!agent.volatile) {
+      await this.agentVersions.recordLive(name, { actor: this.versionActor(), note: "Applied directly", updates })
+        .catch((err) => this.emit("log", { level: "warn", message: `Agent ${name}: could not record the change as a version: ${err instanceof Error ? err.message : String(err)}` }));
+    }
+    return agent;
+  }
+
+  /** Write an agent's live (production) config: engine checked, events, Telegram bots. */
+  private async writeAgentLive(name: string, updates: AgentUpdate): Promise<AgentConfig> {
     if ("engine" in updates || "defaultComputer" in updates) {
       const current = (await this.engine.getAgents()).find((a) => a.name === name);
       if (current) {
@@ -1873,6 +1910,113 @@ export class Orchestrator extends TypedEmitter {
     await this.emitTeamSnapshot("agent:updated", { agentName: agent.name });
     this.refreshDedicatedTelegramBots(agent.name);
     return agent;
+  }
+
+  /** Who is making a change now (attribution of versions and deploys). */
+  versionActor(fallback = "system"): string {
+    const origin = currentEventOrigin();
+    if (!origin) return fallback;
+    if (origin.source === "polpo") return "polpo";
+    if (origin.source === "agent" && origin.by) return origin.by;
+    if (origin.source === "schedule") return "system:schedule";
+    if (origin.by) return origin.by.includes(":") ? origin.by : `person:${origin.by}`;
+    return origin.source ? `system:${origin.source}` : fallback;
+  }
+
+  /** API/MCP updates without publish/deploy flags publish and deploy (settings.agents.versioning). */
+  autoDeployApiUpdates(): boolean {
+    return this.config?.settings?.agents?.versioning?.autoDeployApiUpdates !== false;
+  }
+
+  /**
+   * Change an agent through versioning: the changes go to its draft; then, as asked, the draft is
+   * published as a new version and deployed to production. `mode`:
+   *   - "draft": only the draft (the dashboard; publish and deploy are separate steps);
+   *   - "publish": draft + publish;
+   *   - "deploy": draft + publish + deploy to production (the immediate effect API clients had).
+   */
+  async updateAgentVersioned(name: string, updates: AgentUpdate, opts: {
+    actor: string;
+    mode: "draft" | "publish" | "deploy";
+    bump?: AgentVersionBump;
+    version?: string;
+    note?: string;
+  }): Promise<{ agent: AgentConfig; draftChanged: boolean; published?: AgentVersion; deployed?: AgentDeployEntry }> {
+    const current = (await this.engine.getAgents()).find((a) => a.name === name);
+    if (!current) throw new AgentVersionError(`Agent "${name}" not found`, "NOT_FOUND");
+    const { team, ...fields } = updates as AgentUpdate & { team?: string };
+    // team membership is not versioned: it applies right away
+    if (team !== undefined) await this.writeAgentLive(name, { team } as AgentUpdate);
+    if (current.volatile) {
+      // mission-scoped agents are not versioned
+      return { agent: Object.keys(fields).length ? await this.writeAgentLive(name, fields) : current, draftChanged: false };
+    }
+    let draftChanged = false;
+    if (Object.keys(fields).length) {
+      const before = (await this.agentVersions.draftConfig(name)).config;
+      // check the engine the draft would have (it must be runnable before it can be deployed)
+      if ("engine" in fields || "defaultComputer" in fields) {
+        const engine = this.checkAgentEngine({ ...current, ...before, ...fields, name } as AgentConfig);
+        if ("engine" in fields) (fields as AgentUpdate).engine = engine;
+      }
+      const draft = await this.agentVersions.updateDraft(name, fields, opts.actor);
+      draftChanged = !snapshotsEqual(before, draft.config);
+    }
+    let published: AgentVersion | undefined;
+    let deployed: AgentDeployEntry | undefined;
+    if (opts.mode !== "draft") {
+      const state = await this.agentVersions.state(name);
+      if (state.draft.hasChanges) {
+        published = await this.agentVersions.publish(name, { actor: opts.actor, bump: opts.bump, version: opts.version, note: opts.note });
+      }
+      if (opts.mode === "deploy") {
+        const target = published?.version ?? state.latest;
+        if (target && target !== state.production) deployed = await this.deployAgentVersion(name, target, { actor: opts.actor, note: opts.note });
+      }
+    }
+    const agent = (await this.engine.getAgents()).find((a) => a.name === name) ?? current;
+    if (!deployed) await this.emitTeamSnapshot("agent:updated", { agentName: name });
+    return { agent, draftChanged, ...(published ? { published } : {}), ...(deployed ? { deployed } : {}) };
+  }
+
+  /** Deploy a published version to production (or roll back): written live, recorded in the history. */
+  async deployAgentVersion(name: string, version: string, opts: { actor: string; note?: string }): Promise<AgentDeployEntry> {
+    return this.agentVersions.deploy(name, version, { actor: opts.actor, note: opts.note, pointer: PRODUCTION_POINTER });
+  }
+
+  async rollbackAgentVersion(name: string, opts: { actor: string; note?: string; to?: string }): Promise<AgentDeployEntry> {
+    return this.agentVersions.rollback(name, opts);
+  }
+
+  private initAgentVersioning(): void {
+    this.agentVersionStore = (this.drizzleStores as { agentVersionStore?: AgentVersionStore } | undefined)?.agentVersionStore
+      ?? new FileAgentVersionStore(this.polpoDir);
+    this.agentVersions = new AgentVersioning(this.agentVersionStore, {
+      getAgent: (name) => this.agentStore.getAgent(name),
+      getAgents: () => this.agentStore.getAgents(),
+      writeLive: (name, updates) => this.writeAgentLive(name, updates),
+    }, {
+      // skills pinned at the version current when the agent version is published
+      skillVersions: (skills) => {
+        const pins: Record<string, number> = {};
+        for (const name of skills) {
+          const current = listSkillVersions(this.polpoDir, { pool: "agent", name })?.current
+            ?? listSkillVersions(this.polpoDir, { pool: "agent", global: true, name })?.current;
+          if (current !== undefined) pins[name] = current;
+        }
+        return pins;
+      },
+    });
+  }
+
+  private async migrateAgentVersions(): Promise<void> {
+    try {
+      const { initialized, reconciled } = await this.agentVersions.migrateAll();
+      if (initialized.length) this.emit("log", { level: "info", message: `Agent versions: ${initialized.length} agent(s) at 1.0.0 in production (${initialized.join(", ")})` });
+      if (reconciled.length) this.emit("log", { level: "info", message: `Agent versions: recorded changes made outside versioning for ${reconciled.join(", ")}` });
+    } catch (err) {
+      this.emit("log", { level: "warn", message: `Agent versions: migration failed: ${err instanceof Error ? err.message : String(err)}` });
+    }
   }
   async findAgentTeam(name: string): Promise<Team | undefined> { return this.engine.findAgentTeam(name); }
   async addVolatileAgent(agent: AgentConfig, group: string): Promise<void> { return this.engine.addVolatileAgent(agent, group); }

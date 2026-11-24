@@ -1022,6 +1022,17 @@ export interface PolpoSettings {
   tools?: import("./progressive-tools.js").ToolsSettings;
   /** How much of their dependencies' results tasks receive in their prompt (characters per dependency, in total). */
   dependencyResults?: import("./dependency-results.js").DependencyResultsSettings;
+  /** Agent configuration management. */
+  agents?: {
+    versioning?: {
+      /**
+       * An API or MCP update without publish/deploy flags also publishes the draft and deploys it
+       * to production, so existing clients keep their immediate effect. Default true. The dashboard
+       * always goes through draft → publish → deploy.
+       */
+      autoDeployApiUpdates?: boolean;
+    };
+  };
   /** Where agents' tools run: default sandbox and what lower levels may choose. */
   sandbox?: import("./sandbox.js").SandboxSettings;
   /** Persistent machines agents work on (agent.defaultComputer); "host" (this server) is implicit. */
