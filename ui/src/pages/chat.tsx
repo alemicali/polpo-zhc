@@ -156,7 +156,8 @@ import type { AgentConfig, Mission, PlaybookInfo, SkillWithAssignment, Task } fr
 import { cn } from "@/lib/utils";
 import { config } from "@/lib/config";
 import { useOrchestratorName } from "@/lib/orchestrator-name";
-import { useChatFirstSessionsOpen, setChatFirstSessionsOpen } from "@/hooks/use-layout-mode";
+import { useChatFirstSessionsOpen, setChatFirstSessionsOpen, useLayoutMode } from "@/hooks/use-layout-mode";
+import { useSidebarStyle } from "@/hooks/use-sidebar-style";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import { kit, useAppearance, type AppearanceSettings, type AppearanceThemeSettings } from "@/lib/appearance";
@@ -4495,6 +4496,10 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
 
   // In embedded mode, session sidebar is controlled externally
   const externalSessionsOpen = useChatFirstSessionsOpen();
+  // The drill-in sidebar's Chat level already shows the history on desktop.
+  const sidebarStyle = useSidebarStyle();
+  const layoutMode = useLayoutMode();
+  const historyInSidebar = sidebarStyle === "drill-in" && layoutMode === "sidebar";
   const pageSessionsOpen = useChatPageSessionsOpen();
   const [compactSidebarOpen, setCompactSidebarOpen] = useState(false);
   const sidebarOpen = embedded ? externalSessionsOpen : compact ? compactSidebarOpen : pageSessionsOpen;
@@ -4624,7 +4629,8 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
             <div className={cn(
               embedded
                 ? "flex"
-                : "absolute inset-0 z-40 flex bg-background lg:static lg:inset-auto lg:z-auto lg:bg-transparent"
+                : "absolute inset-0 z-40 flex bg-background lg:static lg:inset-auto lg:z-auto lg:bg-transparent",
+              !embedded && historyInSidebar && "lg:hidden",
             )}>
               <SessionSidebar
                 sessions={visibleSessions}
@@ -4729,6 +4735,96 @@ export function ChatPage({ compact, embedded }: { compact?: boolean; embedded?: 
         }}
       />
     </div>
+  );
+}
+
+// ── ChatHistoryPanel ──
+//
+// The chat's history (groups, threads by agent or all, starred, new chat / new group) on its
+// own: the drill-in sidebar's Chat level. Opening a thread or a group loads it in the chat and
+// calls onOpenChat (the sidebar goes to /chat). New groups open the dialog of the chat page.
+
+export function ChatHistoryPanel({ onOpenChat }: { onOpenChat: () => void }) {
+  const { sessions, sessionsLoading, sessionId, streamingSessionIds } = useChatState();
+  const { loadSession, newSession, deleteSession, renameSession, setStarred, setSelectedAgent } = useChatActions();
+  const activeRoomId = useActiveChatRoom();
+  // the room list only (the open conversation is the chat page's)
+  const groups = useGroups(null);
+  const directory = useMemberDirectory();
+  const [renameTarget, setRenameTarget] = useState<{ id: string; title: string } | null>(null);
+
+  const visibleSessions = sessions.filter(
+    (s: { messageCount: number; title?: string }) => s.messageCount > 1 || (s.messageCount === 1 && s.title),
+  );
+
+  const handleSelect = useCallback((id: string) => {
+    setActiveChatRoom(null);
+    loadSession(id);
+    onOpenChat();
+  }, [loadSession, onOpenChat]);
+
+  const handleNew = useCallback((agent?: string) => {
+    setActiveChatRoom(null);
+    newSession();
+    setSelectedAgent(agent ?? null);
+    onOpenChat();
+  }, [newSession, onOpenChat, setSelectedAgent]);
+
+  const handleNewGroup = useCallback((agent?: string) => {
+    onOpenChat();
+    requestNewGroup(agent);
+  }, [onOpenChat]);
+
+  const handleSelectRoom = useCallback((id: string) => {
+    setActiveChatRoom(id);
+    onOpenChat();
+  }, [onOpenChat]);
+
+  if (sessionsLoading) {
+    return (
+      <div className="space-y-2 p-3" aria-busy="true">
+        <Skeleton className="h-4 w-24 rounded-xs" />
+        <Skeleton className="h-8 w-full rounded-md" />
+        <Skeleton className="h-8 w-full rounded-md" />
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <SessionSidebar
+        sessions={visibleSessions}
+        activeSessionId={activeRoomId ? null : sessionId}
+        streamingSessionIds={streamingSessionIds}
+        onSelect={handleSelect}
+        onNew={handleNew}
+        onNewGroup={handleNewGroup}
+        groupsSection={(
+          <GroupSidebarSection
+            rooms={groups.rooms}
+            loading={groups.roomsLoading}
+            error={groups.roomsError}
+            activeRoomId={activeRoomId}
+            unread={groups.unread}
+            resolve={directory.resolve}
+            onSelect={handleSelectRoom}
+            onNew={() => handleNewGroup()}
+            onRetry={() => { void groups.refreshRooms(); }}
+          />
+        )}
+        onDelete={deleteSession}
+        onRename={(id, title) => setRenameTarget({ id, title })}
+        onToggleStar={(id, starred) => { void setStarred(id, starred); }}
+        fullWidth
+      />
+      <RenameSessionDialog
+        target={renameTarget}
+        onClose={() => setRenameTarget(null)}
+        onSubmit={async (id, title) => {
+          await renameSession(id, title);
+        }}
+      />
+    </>
   );
 }
 

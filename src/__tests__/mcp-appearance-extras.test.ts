@@ -94,4 +94,27 @@ describe("appearance extras", () => {
     expect((await tool("polpo_branding_update", { reset_appearance: true })).isError).toBeFalsy();
   });
 
+  it("sets the default navigation sidebar (classic or drill-in), kept when the look changes", async () => {
+    expect((await tool("polpo_branding_get")).structuredContent.appearance.sidebarStyle).toBeUndefined();
+    const r = await tool("polpo_branding_update", { sidebar_style: "drill-in" });
+    expect(r.isError).toBeFalsy();
+    expect(r.structuredContent.changed).toEqual(["appearance.sidebarStyle"]);
+    expect(r.structuredContent.appearance.sidebarStyle).toBe("drill-in");
+    expect(text(r)).toContain("drill-in sidebar");
+    // the public route the dashboard reads (before sign-in too)
+    expect((await (await app.request("/api/v1/config/appearance")).json()).data.sidebarStyle).toBe("drill-in");
+    // changing the look keeps it
+    const themed = await tool("polpo_branding_update", { theme: "light" });
+    expect(themed.structuredContent.appearance).toMatchObject({ theme: "light", sidebarStyle: "drill-in" });
+    // a style that does not exist: refused, nothing changes
+    expect(await tool("polpo_branding_update", { sidebar_style: "tabs" })).toMatchObject({ isError: true });
+    // REST: the same field, validated
+    const bad = await app.request("/api/v1/config/settings", {
+      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ appearance: { sidebarStyle: "tabs" } }),
+    });
+    expect(bad.status).toBeGreaterThanOrEqual(400);
+    expect((await tool("polpo_branding_update", { sidebar_style: null })).structuredContent.appearance.sidebarStyle).toBeUndefined();
+    expect((await tool("polpo_branding_update", { reset_appearance: true })).isError).toBeFalsy();
+  });
+
 });

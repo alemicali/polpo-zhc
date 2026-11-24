@@ -32,6 +32,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-24-drill-in-sidebar",
+    date: "2026-11-24",
+    kind: "new",
+    title: "Nuova barra laterale a livelli (da provare)",
+    summary: "Una barra laterale più corta: Dashboard, Chat, Approvals e i gruppi Work, Team, Content, Tools e Settings, che si aprono come secondo livello con una riga Indietro. È facoltativa: la attivi e la disattivi quando vuoi.",
+    body: [
+      "- **Cinque gruppi al posto di una lista lunga**: Work (missioni, task, programmazioni, playbook, eventi), Team (agenti, conversazioni tra agenti, skill, memoria), Content (artefatti, file, dati, Company Brain), Tools (coding, terminale, app e anteprima, automazione del browser, computer) e Settings, con le sezioni della configurazione raggruppate (Workspace, Modelli e agenti, Esecuzione, Integrazioni).",
+      "- **Si apre nella barra stessa**: il gruppo scorre da destra, la riga **Indietro** in alto torna su. Niente animazione se il sistema chiede movimento ridotto.",
+      "- **Chat** apre la chat e mostra nella barra la cronologia: gruppi, thread per agente o tutti, preferiti, nuova chat o nuovo gruppo.",
+      "- **Segue la pagina**: da un link a /tasks la barra si apre su Work con Tasks evidenziato. Funziona anche con la barra compressa (solo icone) e nel menu del telefono.",
+      "- **Da tastiera**: frecce su e giù per muoverti, Invio o freccia destra per aprire un gruppo, freccia sinistra o Esc per tornare indietro.",
+      "- **Facoltativa e reversibile**: la classica resta quella predefinita. Prova la nuova dal riquadro in fondo alla barra («Try the new sidebar»), torni indietro con «Switch back». La scelta è tua e resta in questo browser; in Configurazione → Aspetto un amministratore sceglie quella predefinita per tutti (anche da REST, MCP `polpo_branding_update sidebar_style` e chiedendolo a Polpo).",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Scegli la barra laterale", to: "/config?section=appearance" },
+  },
+  {
     id: "2026-11-23-artifact-workspaces",
     date: "2026-11-23",
     kind: "new",

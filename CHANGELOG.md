@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Drill-in sidebar (opt-in).** A second navigation style for the sidebar layout: a short top level — Dashboard, Chat, Approvals (with its pending count) and the groups **Work**, **Team**, **Content**, **Tools** and **Settings** (Configuration's sections grouped as Workspace, Models & agents, Execution, Integrations) — where a group opens its pages as a second level inside the sidebar, with a Back row and a directional slide (none with `prefers-reduced-motion`). **Chat** opens the chat and shows its history (groups, threads, new chat / new group) in the sidebar. The level follows the route (a deep link to `/tasks` opens Work with Tasks current); keyboard: ↑/↓, Enter / → opens, ← / Escape goes back; the collapsed icon rail and the mobile drawer use the same levels. The tree is generic (`ui/src/lib/nav-tree.ts`: links, groups, section headers, badges, any depth), and a test checks every page the classic navigation reaches is reachable in it. See [docs/appearance.md](docs/appearance.md#navigation-sidebar).
+- **Sidebar style preference.** Each person chooses in Configuration → Appearance → Navigation sidebar, in the header's look menu, or from the banner at the bottom of the sidebar ("Try the new sidebar" / "You're using the new sidebar · Switch back", dismissible); kept in the browser. The instance default is `settings.appearance.sidebarStyle` (`classic` when unset, or `drill-in`): Configuration → Appearance, `PATCH /api/v1/config/settings { appearance }`, MCP and Polpo chat `polpo_branding_update { sidebar_style }` (shown by `polpo_branding_get` and the public `GET /api/v1/config/appearance`), `AppearanceConfig.sidebarStyle` / `SidebarStyle` in the SDKs. Classic stays the default.
+
+### Changed
+- **Configuration's section follows `?section=`** both ways: links to `/config?section=…` switch the section on an open page, and picking a section updates the address.
+
 ## [0.7.1] — 2026-11-23 — Artifact workspaces: Docs, Slides, Sheets, Design and Motion
 
 ### Added
