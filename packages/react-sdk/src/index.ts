@@ -37,6 +37,8 @@ export { useSkills } from "./hooks/use-skills.js";
 export { useOrchestratorSkills } from "./hooks/use-orchestrator-skills.js";
 export { useSkillFiles } from "./hooks/use-skill-files.js";
 export type { UseSkillFilesReturn } from "./hooks/use-skill-files.js";
+export { useSkillVersions } from "./hooks/use-skill-versions.js";
+export type { UseSkillVersionsReturn } from "./hooks/use-skill-versions.js";
 export { useSkillBundleUpload } from "./hooks/use-skill-bundle-upload.js";
 export type { UseSkillBundleUploadReturn } from "./hooks/use-skill-bundle-upload.js";
 export { useNotifications } from "./hooks/use-notifications.js";
@@ -234,6 +236,13 @@ export type {
   SkillBundlePreview,
   SkillBundleInstallOptions,
   SkillBundleInstallResult,
+  SkillVersionSource,
+  SkillVersion,
+  SkillVersionList,
+  SkillVersionFiles,
+  SkillFileDiff,
+  SkillVersionDiff,
+  SkillRestoreResult,
   NotificationChannelType,
   NotificationChannelConfig,
   ChannelGatewayConfig,
