@@ -197,6 +197,7 @@ export type {
   ComputerWebhookEventSummary,
   ComputerWebhookEvent,
   ComputerWebhookEventPage,
+  WaBusinessSettings,
   WaBizOutcome,
   WaBizSecretKind,
   WaBusinessStatus,

@@ -236,6 +236,7 @@ export type {
   AssessmentCheckStatus,
   TaskFilter,
   ComputerWebhookProvider,
+  WaBusinessSettings,
   WaBizOutcome,
   WaBizSecretKind,
   WaBusinessStatus,

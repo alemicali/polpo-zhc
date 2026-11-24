@@ -760,7 +760,7 @@ export interface MissionReport {
 // === Notifications ===
 
 export type NotificationSeverity = "info" | "warning" | "critical";
-export type NotificationChannelType = "slack" | "email" | "telegram" | "whatsapp" | "webhook" | "push";
+export type NotificationChannelType = "slack" | "email" | "telegram" | "whatsapp" | "whatsapp-business" | "webhook" | "push";
 export type NotificationStatus = "sent" | "failed";
 
 export type DmPolicy = "pairing" | "allowlist" | "open" | "disabled";
@@ -783,6 +783,28 @@ export interface ChannelGatewayConfig {
   groupReplies?: "mentions" | "intent";
   /** groupReplies "intent": how sure the classifier must be (0–1). Default 0.7. */
   intentThreshold?: number;
+  /** Who may use slash commands: all (default), operators, none. */
+  commands?: "all" | "operators" | "none";
+}
+
+/** WhatsApp Business settings (defaults in brackets). */
+export interface WaBusinessSettings {
+  /** customers [default]: answered only by gateway.agent; operators: the team. */
+  audience?: "customers" | "operators";
+  /** Operators' wa_ids (phone numbers with country code, digits). */
+  operators?: string[];
+  markRead?: boolean;
+  typing?: boolean;
+  /** A notification outside the 24-hour window: the template, or fail [default]. */
+  outsideWindow?: "template" | "fail";
+  notificationTemplate?: { name: string; language: string; bodyParams?: string[] };
+  /** [UTILITY] */
+  allowedCategories?: Array<"UTILITY" | "MARKETING" | "AUTHENTICATION">;
+  /** [true] */
+  approveTemplates?: boolean;
+  limits?: { businessInitiatedPerDay?: number; perAgentPerDay?: Record<string, number> };
+  /** [90] */
+  retentionDays?: number;
 }
 
 export interface NotificationChannelConfig {
@@ -806,6 +828,15 @@ export interface NotificationChannelConfig {
   host?: string;
   port?: number;
   from?: string;
+  /** WhatsApp Business: the phone number's id and the WhatsApp Business Account id (Meta). */
+  phoneNumberId?: string;
+  wabaId?: string;
+  graphApiVersion?: string;
+  /** WhatsApp Business: vault references of the secrets (owner "$channels"), set from the dashboard. */
+  accessTokenRef?: { owner: string; service: string };
+  appSecretRef?: { owner: string; service: string };
+  verifyTokenRef?: { owner: string; service: string };
+  business?: WaBusinessSettings;
   gateway?: ChannelGatewayConfig;
 }
 

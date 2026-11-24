@@ -18,6 +18,7 @@ const LOGO_BY_TYPE: Record<string, string | null> = {
   telegram: "logos:telegram",
   slack: "logos:slack-icon",
   whatsapp: "logos:whatsapp-icon",
+  "whatsapp-business": "logos:whatsapp-icon",
   // Email defaults to a generic envelope (provider-specific brand is decided
   // at the provider field, not at the channel level)
   email: "logos:google-gmail",
@@ -33,6 +34,7 @@ const FALLBACK_BY_TYPE: Record<string, LucideIcon> = {
   telegram: MessageSquare,
   slack: MessageSquare,
   whatsapp: MessageSquare,
+  "whatsapp-business": MessageSquare,
 };
 
 export function ChannelLogo({
