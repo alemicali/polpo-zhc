@@ -43,7 +43,7 @@ export type { ConfigStore } from "./config-store.js";
 export type { MemoryStore } from "./memory-store.js";
 export { agentMemoryScope } from "./memory-store.js";
 export type { LogStore, LogEntry, LogPruneResult, SessionInfo } from "./log-store.js";
-export type { CreateSessionOptions, SessionStore, Session, Message, MessageSegment, MessageRole, ToolCallInfo, ToolCallState, ForkSessionOptions, ForkSessionResult, ChatQueueItem, ChatQueueState, ChatQueueStore } from "./session-store.js";
+export type { CreateSessionOptions, SessionStore, Session, Message, MessageSegment, MessageRole, ToolCallInfo, ToolCallState, ForkSessionOptions, ForkSessionResult, ChatQueueItem, ChatQueueState, ChatQueueStore, MessageSearchQuery, MessageSearchHit } from "./session-store.js";
 export type { Room, RoomKind, RoomReplyMode, RoomSettings, RoomMessage, RoomAuthorKind, NewRoomMessage, RoomStore } from "./room-store.js";
 export type { CodingSessionStore, CodingSessionState, CodingWorkspace, CodingTerminal, CodingCodeServerSession } from "./coding-session-store.js";
 export type { ApprovalStore } from "./approval-store.js";

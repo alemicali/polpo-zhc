@@ -111,6 +111,9 @@ import { getArtifactStore } from "./artifact-runtime.js";
 import { storageRoutes } from "./routes/storage.js";
 import { getStorageRuntime } from "../storage/runtime.js";
 import { companyBrainRoutes } from "./routes/company-brain.js";
+import { searchRoutes } from "./routes/search.js";
+import { SearchEngine } from "./search/engine.js";
+import { buildSearchSources } from "./search/sources.js";
 import { FileAttachmentStore } from "../stores/file-attachment-store.js";
 import { saveChatUserMessage, resolveChatAttachmentReferences } from "./chat-attachments.js";
 import { transcribeSpeech } from "../tools/audio-tools.js";
@@ -1510,6 +1513,23 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   })));
   authed.route("/storage", storageRoutes(activeStorage, () => orchestrator.getAgentWorkDir()));
   authed.route("/brain", companyBrainRoutes(activeCompanyBrain));
+  // Global search (⌘K, polpo_search): every area, read as the dashboard reads it (src/server/search)
+  const searchSources = buildSearchSources({
+    api: async (path) => {
+      const res = await inProcessApi("GET", `/api/v1${path}`).catch(() => undefined);
+      const body = res?.body as { ok?: boolean; data?: unknown } | undefined;
+      return res && res.status < 400 && body?.ok ? body.data : undefined;
+    },
+    sessions: () => o.getSessionStore() ?? undefined,
+    rooms: () => o.getRoomStore() ?? undefined,
+    tasks: () => o.getStore().getAllTasks(),
+    missions: () => o.getAllMissions(),
+    artifacts: () => getArtifactStore(activePolpoDir()),
+    files: () => ({ roots: [o.getAgentWorkDir()], base: o.getWorkDir() }),
+    recentEvents: () => sseBridge.recentEvents?.() ?? [],
+  });
+  const searchEngine = new SearchEngine(() => searchSources);
+  authed.route("/search", searchRoutes(() => (o.isInitialized ? searchEngine : undefined)));
 
   authed.route("/vault", vaultRoutes(() => ({
     vaultStore: o.getVaultStore(),

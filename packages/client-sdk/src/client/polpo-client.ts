@@ -5,6 +5,8 @@ import type {
   AuthStatusResponse,
   MemberPreferencesPatch,
   MemberPreferencesResponse,
+  SearchOptions,
+  SearchResponse,
   VaultEntryMeta,
   Task,
   Mission,
@@ -658,6 +660,29 @@ export class PolpoClient {
   /** Merge fields into the signed-in member's preferences; returns the stored result. */
   updatePreferences(patch: MemberPreferencesPatch): Promise<MemberPreferencesResponse> {
     return this.patch<MemberPreferencesResponse>("/preferences", patch);
+  }
+
+  // ── Global search ─────────────────────────────────────────
+
+  /**
+   * Search everything (chats with their messages, agents, tasks, missions, artifacts, files, data…),
+   * grouped by type, best first. Pass a signal to cancel a stale query.
+   */
+  async search(q: string, opts: SearchOptions = {}): Promise<SearchResponse> {
+    const params = new URLSearchParams({ q });
+    if (opts.types?.length) params.set("types", opts.types.join(","));
+    if (opts.limit) params.set("limit", String(opts.limit));
+    if (opts.perType) params.set("perType", String(opts.perType));
+    if (opts.cursor) params.set("cursor", opts.cursor);
+    const res = await this.fetchFn(this.apiUrl(`/search?${params}`), {
+      method: "GET",
+      headers: { ...this.headers },
+      credentials: "include",
+      ...(opts.signal ? { signal: opts.signal } : {}),
+    });
+    const json = (await res.json()) as ApiResult<SearchResponse>;
+    if (!json.ok) throw new PolpoApiError(json.error, json.code, res.status, json.details);
+    return json.data;
   }
 
   // ── Schedules ─────────────────────────────────────────────

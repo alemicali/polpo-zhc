@@ -73,6 +73,26 @@ export interface ForkSessionResult {
   messageIds: Record<string, string>;
 }
 
+/** A full-text search over the messages of every session (SessionStore.searchMessages). */
+export interface MessageSearchQuery {
+  /**
+   * Words to find, already folded (lowercase, no diacritics, light stemming): a message matches
+   * when it contains every word, each as a word prefix ("agent" finds "agente", "agenti").
+   */
+  terms: string[];
+  /** Most hits (default 50), newest first. */
+  limit?: number;
+}
+
+export interface MessageSearchHit {
+  sessionId: string;
+  messageId: string;
+  role: MessageRole;
+  /** The message text (may be clipped by the store to a few kilobytes). */
+  content: string;
+  ts: string;
+}
+
 export interface SessionStore {
   create(title?: string, agent?: string, opts?: CreateSessionOptions): Promise<string>;
   addMessage(sessionId: string, role: MessageRole, content: string, toolCalls?: ToolCallInfo[], segments?: MessageSegment[]): Promise<Message>;
@@ -104,6 +124,12 @@ export interface SessionStore {
    */
   forkSession?(sessionId: string, messageId: string, opts?: ForkSessionOptions): Promise<ForkSessionResult | undefined>;
   prune(keepSessions: number): Promise<number>;
+  /**
+   * Messages of any session that contain every term (word prefixes), newest first. Optional: the
+   * SQL stores use the database's full-text index (SQLite FTS5, PostgreSQL tsvector); callers fall
+   * back to a bounded scan when it is missing.
+   */
+  searchMessages?(query: MessageSearchQuery): Promise<MessageSearchHit[]>;
   close(): Promise<void> | void;
 }
 

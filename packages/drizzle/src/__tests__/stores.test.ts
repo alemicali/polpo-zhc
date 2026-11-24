@@ -739,6 +739,53 @@ describe.each(DIALECTS)("%s", (dialect) => {
       expect(await stores.sessionStore.forkSession!(parent, "missing")).toBeUndefined();
       expect(await stores.sessionStore.forkSession!("missing", u2.id)).toBeUndefined();
     });
+
+    describe("searchMessages (full-text index)", () => {
+      it("finds word prefixes in every session, all words required, newest first", async () => {
+        const store = stores.sessionStore;
+        const a = await store.create("Launch plan", "growth");
+        const b = await store.create("Ops");
+        await store.addMessage(a, "user", "Prepara le missioni per il lancio di dicembre");
+        await store.addMessage(a, "assistant", "Ho preparato tre missioni: email, social e blog.");
+        await store.addMessage(b, "user", "La missione di ieri è fallita al deploy");
+        await store.addMessage(b, "assistant", "Nothing related here");
+
+        // "mission" (a stem) finds missione and missioni, in both sessions
+        const all = await store.searchMessages!({ terms: ["mission"] });
+        expect(all.map((h) => h.content)).toEqual([
+          "La missione di ieri è fallita al deploy",
+          "Ho preparato tre missioni: email, social e blog.",
+          "Prepara le missioni per il lancio di dicembre",
+        ]);
+        expect(all[0]).toMatchObject({ sessionId: b, role: "user" });
+        // every word must be there
+        expect((await store.searchMessages!({ terms: ["mission", "lanc"] })).map((h) => h.sessionId)).toEqual([a]);
+        expect(await store.searchMessages!({ terms: ["missing"] })).toEqual([]);
+        expect((await store.searchMessages!({ terms: ["mission"], limit: 1 }))).toHaveLength(1);
+      });
+
+      it("ignores operators in terms and follows updates and deletes", async () => {
+        const store = stores.sessionStore;
+        const s = await store.create();
+        const m = await store.addMessage(s, "assistant", "first draft");
+        expect(await store.searchMessages!({ terms: ['dr"af* OR (x'] })).toEqual([]);
+        expect(await store.searchMessages!({ terms: ["draft"] })).toHaveLength(1);
+        await store.updateMessage(s, m.id, "final version");
+        expect(await store.searchMessages!({ terms: ["draft"] })).toEqual([]);
+        expect((await store.searchMessages!({ terms: ["final"] }))[0]?.messageId).toBe(m.id);
+        await store.deleteSession(s);
+        expect(await store.searchMessages!({ terms: ["final"] })).toEqual([]);
+        expect(await store.searchMessages!({ terms: [] })).toEqual([]);
+      });
+
+      it("matches a stem typed without accents against accented words", async () => {
+        const store = stores.sessionStore;
+        const s = await store.create();
+        await store.addMessage(s, "user", "Perché la città è chiusa?");
+        // the search folds "perche" / "citta" to the stems "perch" / "citt"
+        expect(await store.searchMessages!({ terms: ["perch", "citt"] })).toHaveLength(1);
+      });
+    });
   });
 
   describe("DrizzleChatQueueStore", () => {

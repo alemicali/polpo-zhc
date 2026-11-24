@@ -28,6 +28,7 @@ import { registerAutomationTools } from "../server/mcp-server/automation.js";
 import { registerMissionTools } from "../server/mcp-server/missions.js";
 import { registerDataTools } from "../server/mcp-server/data.js";
 import { registerBrainTools } from "../server/mcp-server/knowledge.js";
+import { registerSearchTools } from "../server/mcp-server/search.js";
 import { registerSkillTools } from "../server/mcp-server/skills.js";
 import { registerTeamTools } from "../server/mcp-server/team.js";
 import { knownPublicOrigin } from "../mcp/runtime.js";
@@ -115,6 +116,8 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_room_messages", name: "room_messages", group: "rooms" },
   { mcp: "polpo_room_post", name: "room_post", group: "rooms" },
   { mcp: "polpo_room_wait", name: "room_wait", group: "rooms" },
+  // Global search (chats' messages, tasks, agents, files… everything, as ⌘K)
+  { mcp: "polpo_search", name: "search", group: "chats" },
   // Chat sessions
   { mcp: "polpo_chat_sessions_list", name: "chat_sessions_list", group: "chats" },
   { mcp: "polpo_chat_messages", name: "chat_messages", group: "chats" },
@@ -302,7 +305,7 @@ function capture(): Map<string, Captured> {
   for (const register of [
     registerSetupTools, registerTeamTools, registerConnectorTools, registerHarnessTools, registerComputerTools, registerConfigTools,
     registerSettingsTools, registerChannelTools, registerChannelSetupTools, registerRoomTools, registerChatTools, registerAutomationTools,
-    registerMissionTools, registerDataTools, registerBrainTools, registerSkillTools,
+    registerMissionTools, registerDataTools, registerBrainTools, registerSkillTools, registerSearchTools,
   ]) register(tool, deps);
   captured = out;
   return out;

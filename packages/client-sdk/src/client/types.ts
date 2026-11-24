@@ -1989,6 +1989,64 @@ export interface MemberPreferencesResponse {
   preferences: MemberPreferences;
 }
 
+// === Global search (GET /search) ===
+
+/** What the global search finds. */
+export type SearchType =
+  | "chat" | "room" | "agent" | "task" | "mission" | "schedule" | "playbook" | "approval" | "artifact" | "file"
+  | "data" | "connector" | "skill" | "memory" | "brain" | "computer" | "app" | "channel" | "member" | "event";
+
+/** A matched range [start, end) in a shown string. */
+export type SearchRange = [number, number];
+
+export interface SearchResult {
+  type: SearchType;
+  id: string;
+  title: string;
+  /** Matched ranges in the title. */
+  titleHighlights?: SearchRange[];
+  subtitle?: string;
+  /** The matching passage (secrets masked) and its matched ranges. */
+  snippet?: { text: string; highlights: SearchRange[] };
+  /** Dashboard route that opens the item. */
+  url: string;
+  updatedAt?: string;
+  score: number;
+  /** Type details: agent, status, messageId, author, role, columns, path… */
+  meta?: Record<string, unknown>;
+}
+
+export interface SearchGroup {
+  type: SearchType;
+  label: string;
+  /** Matches of this type (the group holds the best of them). */
+  total: number;
+  items: SearchResult[];
+}
+
+export interface SearchResponse {
+  query: string;
+  /** Milliseconds the search took on the server. */
+  took: number;
+  /** Types that did not answer in time (search again for them). */
+  partial: SearchType[];
+  groups: SearchGroup[];
+  items: SearchResult[];
+  nextCursor: string | null;
+}
+
+export interface SearchOptions {
+  /** Only these types (default: all). */
+  types?: SearchType[];
+  /** Results per page (default 40, max 100). */
+  limit?: number;
+  /** Results per type when several types are searched (default 6). */
+  perType?: number;
+  cursor?: string | null;
+  /** Abort a stale query (the person kept typing). */
+  signal?: AbortSignal;
+}
+
 // === Vault Preview (interactive credential review before saving) ===
 
 export interface VaultPreviewPayload {

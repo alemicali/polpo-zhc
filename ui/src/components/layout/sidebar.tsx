@@ -44,6 +44,7 @@ import { useSidebarStyle } from "@/hooks/use-sidebar-style";
 import { PendingBadge } from "./pending-badge";
 import { DrillInNav } from "./drill-in-nav";
 import { SidebarStyleBanner } from "./sidebar-style-banner";
+import { SidebarSearchButton } from "@/components/search/sidebar-search-button";
 
 type NavItem = { to: string; icon: typeof LayoutDashboard; label: string; external?: boolean };
 type NavSection = { section: string; items: NavItem[] };
@@ -281,6 +282,9 @@ export function Sidebar() {
           </div>
         )}
       </div>
+
+      {/* Search (⌘K) — above Dashboard, in both sidebar styles */}
+      <SidebarSearchButton collapsed={collapsed} />
 
       {/* Navigation — scrolls when the items exceed the viewport height */}
       {sidebarStyle === "drill-in" ? (

@@ -44,6 +44,8 @@ export type { UseVaultEntriesReturn } from "./hooks/use-vault-entries.js";
 export { useAuthStatus } from "./hooks/use-auth-status.js";
 export { usePreferences } from "./hooks/use-preferences.js";
 export type { UsePreferencesReturn } from "./hooks/use-preferences.js";
+export { useSearch } from "./hooks/use-search.js";
+export type { UseSearchOptions, UseSearchReturn } from "./hooks/use-search.js";
 export { useAssessmentProgress } from "./hooks/use-assessment-progress.js";
 
 // Re-export client SDK for convenience (backward compat — consumers can also use @polpo-ai/sdk directly)
@@ -200,6 +202,12 @@ export type {
   MemberPreferences,
   MemberPreferencesPatch,
   MemberPreferencesResponse,
+  SearchType,
+  SearchRange,
+  SearchResult,
+  SearchGroup,
+  SearchResponse,
+  SearchOptions,
   SkillInfo,
   LoadedSkill,
   SkillWithAssignment,
