@@ -32,6 +32,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-24-chat-history-clean",
+    date: "2026-11-24",
+    kind: "improved",
+    title: "Cronologia delle chat più pulita",
+    summary: "La cronologia delle chat è una lista semplice, senza riquadri: Nuova chat e ricerca in alto, poi le chat fissate, i gruppi e le recenti divise per giorno (Oggi, Ieri, ultimi 7 e 30 giorni, mesi).",
+    body: [
+      "- **Niente più riquadri**: la lista sta direttamente sulla barra laterale, con le stesse righe del menu. Una riga per chat, il titolo e basta; i puntini **⋯** compaiono al passaggio del mouse.",
+      "- **Nuova chat** in alto, con un piccolo menu per iniziarla con un agente o creare un **nuovo gruppo**. Sotto, la **ricerca** per titolo o per agente (tasto **/** quando la cronologia è attiva).",
+      "- **Fissate**: le chat che prima erano «preferite» ora si chiamano **fissate** e stanno in cima. Le fissi e le togli dal menu ⋯ (o con il tasto destro), dove trovi anche Rinomina ed Elimina, che ora chiede conferma.",
+      "- **Per chat o per agente**: di base le chat recenti sono divise per giorno, come in Claude. Dal piccolo pulsante accanto a «Recents» le raggruppi per agente (Polpo per primo), in sezioni che apri e chiudi. La scelta resta in questo browser.",
+      "- **Gruppi** come righe normali, senza il riquadro «New group». Un pallino segnala i messaggi nuovi; un altro le chat che stanno ancora rispondendo.",
+      "- **Da tastiera**: frecce su e giù per muoverti, Invio per aprire, Canc per eliminare (con conferma). È la stessa lista nella barra a livelli, nella pagina Chat e sul telefono.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri la chat", to: "/chat" },
+  },
+  {
     id: "2026-11-24-whatsapp-business",
     date: "2026-11-24",
     kind: "new",
