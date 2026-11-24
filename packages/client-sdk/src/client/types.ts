@@ -2600,8 +2600,11 @@ export interface Connector {
   account?: string;
   kind: "mcp";
   description?: string;
-  transport: { type: "http" | "sse" | "stdio"; url?: string; command?: string };
+  /** "hosted": a custom MCP server Polpo hosts itself (see McpHostedServer). */
+  transport: { type: "http" | "sse" | "stdio" | "hosted"; url?: string; command?: string; serverId?: string };
   auth: { type: "none" | "bearer" | "headers" | "oauth"; headerNames?: string[]; oauth?: { app?: string; scopes?: string[] } };
+  /** Hosted servers: the version in production ("Hosted by Polpo · v1.2.0"). */
+  hostedVersion?: string;
   /** Who may use it: agent names or "*", and Polpo itself. */
   access: { agents: string[] | "*"; polpo: boolean };
   enabled: boolean;
@@ -2828,3 +2831,126 @@ export interface WaBusinessTemplate {
 export type WaBusinessSendResult =
   | { status: "sent"; ids: string[] }
   | { status: "pending_approval"; id: string; note: string };
+
+
+// ── Hosted MCP servers ─────────────────────────────────────────────────
+
+/** A vault reference: an entry (owner + service) and one credential field. Never a value. */
+export interface McpSecretRef { owner: string; service: string; key: string }
+
+export type McpServerAuth =
+  | { type: "none" }
+  | { type: "bearer"; secret: string }
+  | { type: "header"; header: string; secret: string; prefix?: string }
+  | { type: "query"; param: string; secret: string }
+  | { type: "basic"; usernameSecret: string; passwordSecret: string }
+  | { type: "oauth2_client_credentials"; tokenUrl: string; clientIdSecret: string; clientSecretSecret: string; scopes?: string[] };
+
+export interface McpServerTool {
+  name: string;
+  title?: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+  annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; idempotentHint?: boolean; openWorldHint?: boolean };
+  requiresApproval?: boolean;
+  publicCallable?: boolean;
+  kind: "http" | "code";
+  http?: {
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; url: string; headers?: Record<string, string>; query?: Record<string, string>; body?: unknown;
+    bodyType?: "json" | "form"; response?: { pick?: string; fields?: string[]; maxChars?: number };
+    pagination?: { style: "offset" | "cursor" | "page"; param?: string; sizeParam?: string; nextPath?: string; totalPath?: string };
+    errors?: Array<{ status?: number | "4xx" | "5xx"; match?: string; message: string }>; retries?: number;
+  };
+  code?: { source: string };
+  uiResource?: string;
+}
+
+export interface McpServerSpec {
+  name: string;
+  description?: string;
+  icon?: string;
+  baseUrl?: string;
+  allowedDomains: string[];
+  secrets: Record<string, McpSecretRef>;
+  auth: McpServerAuth;
+  headers?: Record<string, string>;
+  limits?: Partial<Record<"timeoutMs" | "maxResponseBytes" | "maxResultChars" | "retries" | "memoryMb" | "concurrency" | "idleMs" | "depsMaxMb", number>>;
+  dependencies?: Record<string, string>;
+  tools: McpServerTool[];
+  resources?: Array<{ uri: string; name: string; description?: string; mimeType: string; text: string }>;
+}
+
+export interface McpServerSummary {
+  id: string;
+  name: string;
+  description?: string;
+  icon?: string;
+  visibility: "private" | "public";
+  disabled?: boolean;
+  onTestFailure?: "warn" | "block";
+  rateLimits?: { perIpPerMinute: number; globalPerMinute: number };
+  connectorId?: string;
+  template?: string;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+  toolCount: number;
+  production?: string;
+  latest?: string;
+  versionCount: number;
+  draftChanged: boolean;
+  pendingApprovals: number;
+  /** Public servers: POLPO_PUBLIC_URL/mcp/servers/<id>. */
+  publicUrl?: string;
+}
+
+export interface McpServerTestCase { id: string; name?: string; tool: string; input: Record<string, unknown>; expect?: "ok" | "error"; contains?: string }
+
+export interface McpHostedServer extends McpServerSummary {
+  draft: { spec: McpServerSpec; baseVersion?: string; updatedAt: string; updatedBy: string; problems: string[]; stale?: boolean } | null;
+  productionSpec?: McpServerSpec;
+  /** Which declared secrets are set in the vault (never their values). */
+  secrets: Record<string, boolean>;
+  tests: McpServerTestCase[];
+  rateLimits: { perIpPerMinute: number; globalPerMinute: number };
+}
+
+export interface McpServerTemplateInfo {
+  id: string; name: string; description: string; setup: string; docs?: string; toolCount: number; testCount: number;
+  tools: Array<{ name: string; title?: string; description: string; readOnly: boolean; requiresApproval: boolean }>;
+}
+
+export interface McpServerVersionInfo {
+  version: string; createdAt: string; author: string; note?: string; bump?: "major" | "minor" | "patch";
+  changes: Array<{ field: string; kind: "added" | "removed" | "changed" }>; toolCount: number; production: boolean;
+  build?: { depsBytes?: number; builtAt: string }; tests?: { passed: number; failed: number; skipped: number };
+}
+
+export interface McpServerDeploy { id: string; from?: string; to: string; action: "deploy" | "rollback" | "initial"; actor: string; note?: string; at: string }
+
+export interface McpServerDiff {
+  server: string; from?: string; to: string; changes: Array<{ field: string; kind: "added" | "removed" | "changed" }>; unified: string; suggestedBump?: "major" | "minor" | "patch";
+}
+
+export interface McpToolTestResult {
+  tool: string; ok: boolean; text: string; structured?: unknown; error?: string; status?: number; ms: number; attempts?: number;
+  request?: { method: string; url: string; headers: Record<string, string>; body?: string };
+  response?: string; skipped?: string; testId?: string; passed?: boolean;
+  pendingApproval?: { id: string; approvalId?: string };
+}
+
+export interface McpServerCallLog {
+  at: string; tool: string; source: "private" | "public" | "test" | "approval"; version?: string; ok: boolean; ms: number; status?: number; error?: string; ip?: string; approvalId?: string;
+}
+
+export interface McpPendingCall {
+  id: string; serverId: string; tool: string; input: Record<string, unknown>; version?: string; requestedAt: string; requestedBy?: string;
+  status: "pending" | "approved" | "rejected" | "done" | "failed"; approvalId?: string; resolvedAt?: string; resolvedBy?: string;
+  result?: { ok: boolean; text: string; error?: string };
+}
+
+export interface McpServerGenerateRequest { mode: "api" | "description"; url?: string; text?: string; goal?: string; name?: string; vaultOwner?: string; create?: boolean; id?: string }
+export interface McpServerGenerateResult {
+  id?: string; spec: McpServerSpec; problems: string[]; notes: string[]; source: { kind: "openapi" | "docs" | "description"; endpoints?: number; title?: string };
+}
