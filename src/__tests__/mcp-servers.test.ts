@@ -619,3 +619,38 @@ describe("MCP tools (polpo_mcp_server_*) and Polpo's chat tools", () => {
     expect(BRIDGED_TOOLS.filter((t) => t.name.startsWith("mcp_server")).every((t) => t.group === "hosted-servers")).toBe(true);
   });
 });
+
+describe("server process wiring: an approval tool call becomes an Approvals request; approving runs it", () => {
+  let dir: string;
+  afterEach(async () => {
+    setHostedDefaults({});
+    const { closeAllConnectorManagers } = await import("../mcp/manager.js");
+    await closeAllConnectorManagers();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("through the orchestrator's approvals and approval:resolved", async () => {
+    const { EventEmitter } = await import("node:events");
+    const { mcpServerServiceFor } = await import("../server/mcp-servers-runtime.js");
+    const { connectorManagerFor } = await import("../mcp/runtime.js");
+    dir = mkdtempSync(join(tmpdir(), "polpo-mcp-wiring-"));
+    const vault = memoryVault({ "polpo-infra/shop": { token: TOKEN } });
+    const fetch = vi.fn(async () => json(200, { deleted: true }));
+    setHostedDefaults({ fetch, resolve, sleep: noSleep });
+    const o = Object.assign(new EventEmitter(), {
+      getPolpoDir: () => dir, getVaultStore: () => vault, getConfig: () => ({ settings: {} }),
+      requestHumanApproval: vi.fn(async (opts: { gateId: string; gateName: string; payload: unknown }) => ({ id: "appr-42", ...opts })),
+    });
+    const service = mcpServerServiceFor(o as never);
+    service.create({ spec: spec() }, "x");
+    await service.publish("shop", {}, "x");
+    const r = await connectorManagerFor(o as never).callTool("shop", "delete_item", { id: "5" });
+    expect(JSON.stringify(r)).toMatch(/Queued for approval.*appr-42/);
+    expect(o.requestHumanApproval).toHaveBeenCalledWith(expect.objectContaining({ gateId: "mcp-server-call", gateName: "Shop · delete_item", payload: expect.objectContaining({ kind: "mcp_server_call", tool: "delete_item", input: { id: "5" } }) }));
+    expect(fetch).not.toHaveBeenCalled();
+    o.emit("approval:resolved", { requestId: "appr-42", status: "approved", resolvedBy: "person:a@b.c" });
+    await vi.waitFor(() => expect(service.pending("shop")[0]?.status).toBe("done"));
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(service.logs("shop")[0]).toMatchObject({ source: "approval", approvalId: "appr-42", ok: true });
+  });
+});
