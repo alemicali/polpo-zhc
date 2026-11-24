@@ -24,6 +24,7 @@ import { usePalette, PALETTES } from "@/lib/palette";
 import { PwaInstallQrButton } from "./pwa-install-qr-button";
 import { LogoutButton } from "./logout-button";
 import { MobileNavSheet } from "./mobile-nav-sheet";
+import { MobileSearchButton } from "@/components/search/sidebar-search-button";
 import { ChatTabs } from "./chat-tabs";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { useAgents } from "@polpo-ai/react";
@@ -191,6 +192,7 @@ export function Header() {
       {/* Actions — Phone (PWA install QR), GitHub and Theme are desktop-only.
           On mobile they live inside the MobileNavSheet drawer. */}
       <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+        <MobileSearchButton className="lg:hidden" />
         <div className="hidden lg:block">
           <PwaInstallQrButton />
         </div>

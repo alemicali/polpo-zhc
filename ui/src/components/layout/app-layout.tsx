@@ -13,6 +13,7 @@ import { resolveTitle } from "@/lib/page-titles";
 import { WhatsNewBar } from "@/components/whats-new/whats-new-bar";
 import { WhatsNewDrawer } from "@/components/whats-new/whats-new-drawer";
 import { AgentColorsSync } from "@/components/agents/agent-colors-sync";
+import { GlobalSearch } from "@/components/search/search-palette";
 
 /** Tool surfaces that should meet the surrounding pane edges. */
 function hasNoPagePadding(pathname: string): boolean {
@@ -47,6 +48,7 @@ export function AppLayout() {
         {!artifactEditor && <BottomNav />}
         <ChatNavigationEffects />
         <WhatsNewDrawer />
+        <GlobalSearch />
       </div>
     );
   }
@@ -75,6 +77,7 @@ export function AppLayout() {
       <ChatNavigationEffects />
       <ChatRoomRouteSync />
       <WhatsNewDrawer />
+      <GlobalSearch />
     </div>
   );
 }

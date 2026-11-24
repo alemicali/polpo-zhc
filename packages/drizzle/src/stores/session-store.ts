@@ -1,9 +1,17 @@
 import { eq, desc, asc, count as drizzleCount, isNull, and, gte, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import type { CreateSessionOptions, ForkSessionOptions, ForkSessionResult, SessionStore, Session, Message, MessageSegment, MessageRole, ToolCallInfo } from "@polpo-ai/core/session-store";
+import type { CreateSessionOptions, ForkSessionOptions, ForkSessionResult, MessageSearchHit, MessageSearchQuery, SessionStore, Session, Message, MessageSegment, MessageRole, ToolCallInfo } from "@polpo-ai/core/session-store";
 import { type Dialect, deserializeJson, affectedRows, pgSafe } from "../utils.js";
 
 type AnyTable = any;
+
+/** Characters of a message returned by searchMessages (enough for a snippet around the match). */
+const SEARCH_CONTENT_CHARS = 4000;
+
+/** A search term as the full-text syntaxes accept it: letters and digits only (no operators, quotes). */
+function ftsTerm(term: string): string {
+  return term.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+}
 
 export class DrizzleSessionStore implements SessionStore {
   constructor(
@@ -316,6 +324,29 @@ export class DrizzleSessionStore implements SessionStore {
       deleted++;
     }
     return deleted;
+  }
+
+  /**
+   * Full-text search over every message, newest first: SQLite through the FTS5 index
+   * (messages_fts, unicode61 without diacritics), PostgreSQL through the GIN index on
+   * to_tsvector('simple', content). Each term is a word prefix; all must match.
+   */
+  async searchMessages(query: MessageSearchQuery): Promise<MessageSearchHit[]> {
+    const terms = [...new Set(query.terms.map(ftsTerm).filter((t) => t.length > 0))].slice(0, 8);
+    if (!terms.length) return [];
+    const limit = Math.max(1, Math.min(query.limit ?? 50, 500));
+    const m = this.messages;
+    const match = this.dialect === "pg"
+      // the same expression as the index (literal config), so the planner uses it
+      ? sql`to_tsvector('simple', ${m.content}) @@ to_tsquery('simple', ${terms.map((t) => `${t}:*`).join(" & ")})`
+      : sql`rowid IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ${terms.map((t) => `"${t}"*`).join(" ")})`;
+    const rows: any[] = await this.db
+      .select({ id: m.id, sessionId: m.sessionId, role: m.role, ts: m.ts, content: sql<string>`substr(${m.content}, 1, ${SEARCH_CONTENT_CHARS})` })
+      .from(m)
+      .where(match)
+      .orderBy(desc(m.ts))
+      .limit(limit);
+    return rows.map((r) => ({ sessionId: r.sessionId, messageId: r.id, role: r.role as MessageRole, content: r.content ?? "", ts: r.ts }));
   }
 
   async close(): Promise<void> {
