@@ -123,6 +123,8 @@ import { FilePreviewDialog } from "@/components/shared/file-preview";
 import { useFilePreview } from "@/components/shared/use-file-preview";
 import { mimeFromPath } from "@/components/shared/file-preview-utils";
 import { AssistantSegments, ChatAssistantAvatar, ChatUserBubble } from "@/components/chat/chat-message-parts";
+import { chatTimeAgo } from "@/lib/chat-time";
+import { CHAT_COMPOSER_CLASS } from "@/lib/chat-composer";
 import { ToolCallList } from "@/components/ai-elements/tool";
 import { ChatSandboxContext, type ChatSandboxInfo } from "@/components/sandbox/sandbox-context";
 import { sandboxApi } from "@/lib/sandbox-api";
@@ -141,7 +143,6 @@ import { useOrchestratorName } from "@/lib/orchestrator-name";
 import { useChatFirstSessionsOpen, setChatFirstSessionsOpen, useLayoutMode } from "@/hooks/use-layout-mode";
 import { useSidebarStyle } from "@/hooks/use-sidebar-style";
 import { toast } from "sonner";
-import { formatDistanceToNow } from "date-fns";
 import { kit, useAppearance, type AppearanceSettings, type AppearanceThemeSettings } from "@/lib/appearance";
 import {
   clearAppPreviewContext,
@@ -173,12 +174,6 @@ const MissionPreviewDialog = lazy(() =>
   import("@/components/mission-preview-dialog").then((module) => ({ default: module.MissionPreviewDialog })),
 );
 
-/** Like formatDistanceToNow but returns "just now" for < 30 s */
-function chatTimeAgo(date: Date): string {
-  const diffMs = Date.now() - date.getTime();
-  if (diffMs < 30_000) return "just now";
-  return formatDistanceToNow(date, { addSuffix: true });
-}
 
 // ── Per-session UI-state caches (browser-tab semantics) ────────────────
 //
@@ -3508,7 +3503,7 @@ function ChatInput({ embedded = false }: { embedded?: boolean } = {}) {
             maxFiles={5}
             maxFileSize={15 * 1024 * 1024}
             onError={(err) => toast.error(err.message)}
-            className="[&_[data-slot=input-group]]:rounded-2xl [&_[data-slot=input-group]]:focus-within:ring-0 [&_[data-slot=input-group]]:focus-within:border-input"
+            className={CHAT_COMPOSER_CLASS}
           >
             <AttachmentPreview onCount={setAttachmentCount} />
             <PromptInputTextarea
