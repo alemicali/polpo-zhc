@@ -69,4 +69,28 @@ describe.each(DIALECTS)("artifacts on %s", (dialect) => {
     expect(rejected?.reason).toMatchObject({ name: "ArtifactEditConflictError" });
     expect(await store.get(doc.id)).toMatchObject({ version: 2, versions: [{ version: 1, content: "# Plan" }] });
   });
+
+  it("writes whole records conditionally (put) and keeps blob references through versions and restore", async () => {
+    const store = stores.artifactStore;
+    const blob = { sha256: "a".repeat(64), size: 300_000 };
+    const created = await store.create({ title: "Big", type: "doc", content: "", blob, excerpt: "# Big", createdBy: "polpo" });
+    expect(created).toMatchObject({ content: "", blob, size: 300_000, excerpt: "# Big" });
+    expect((await store.list())[0]).toMatchObject({ id: created.id, size: 300_000 });
+    expect((await store.list())[0]).not.toHaveProperty("excerpt");
+
+    const v2 = await store.update(created.id, { content: "# Small now" });
+    expect(v2).toMatchObject({ version: 2, content: "# Small now", versions: [{ version: 1, content: "", blob, size: 300_000 }] });
+    expect(v2).not.toHaveProperty("blob");
+    const v3 = await store.restore(created.id, 1);
+    expect(v3).toMatchObject({ version: 3, content: "", blob });
+
+    // put: only a new id with ifUpdatedAt null, only an unchanged record with a date
+    expect(await store.put!({ ...v3!, title: "Again" }, { ifUpdatedAt: null })).toBe(false);
+    expect(await store.put!({ ...v3!, title: "Stale" }, { ifUpdatedAt: "2000-01-01T00:00:00.000Z" })).toBe(false);
+    expect(await store.put!({ ...v3!, title: "Renamed" }, { ifUpdatedAt: v3!.updatedAt })).toBe(true);
+    expect((await store.get(created.id))!.title).toBe("Renamed");
+    expect(await store.put!({ ...v3!, id: "art_put000000001", title: "New" }, { ifUpdatedAt: null })).toBe(true);
+    expect(await store.put!({ ...v3!, id: "art_put000000001", title: "Upserted" })).toBe(true);
+    expect((await store.get("art_put000000001"))!.title).toBe("Upserted");
+  });
 });
