@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useState } from "react";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,12 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   ArrowLeft,
   Loader2,
@@ -20,12 +26,17 @@ import {
   HardDrive,
   Copy,
   Check,
+  Download,
+  Bookmark,
 } from "lucide-react";
-import { useSkills, useAgents, usePolpo } from "@polpo-ai/react";
-import type { SkillWithAssignment, Team, LoadedSkill } from "@polpo-ai/react";
-import { MessageResponse } from "@/components/ai-elements/message";
+import { useSkills, useOrchestratorSkills, useAgents, usePolpo, useSkillFiles } from "@polpo-ai/react";
+import type { SkillInfo, Team, LoadedSkill, SkillPool } from "@polpo-ai/react";
 import { cn } from "@/lib/utils";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
+import { SkillFileTree, SkillFileViewer } from "@/components/skills/skill-file-browser";
+import { formatSize } from "@/lib/skill-files";
+
+type ShownSkill = SkillInfo & { assignedTo?: string[] };
 
 // ── Copyable text ──
 
@@ -71,25 +82,28 @@ function SourceBadge({ source }: { source: string }) {
 
 function MetadataCard({
   skill,
+  pool,
   agentTeamMap,
   teams,
 }: {
-  skill: SkillWithAssignment;
+  skill: ShownSkill;
+  pool: SkillPool;
   agentTeamMap: Map<string, string>;
   teams: Team[];
 }) {
   const totalAgents = teams.reduce((s, t) => s + t.agents.length, 0);
+  const assignedTo = skill.assignedTo ?? [];
 
   // Teams using this skill
   const teamSet = new Set<string>();
-  for (const agent of skill.assignedTo) {
+  for (const agent of assignedTo) {
     const team = agentTeamMap.get(agent);
     if (team) teamSet.add(team);
   }
   const skillTeams = [...teamSet];
 
   return (
-    <Card className="sticky top-0">
+    <Card>
       <CardContent className="p-4 space-y-4">
         {/* Identity */}
         <div className="space-y-2">
@@ -107,41 +121,51 @@ function MetadataCard({
           )}
         </div>
 
-        <Separator />
-
-        {/* Agents */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-label text-muted-foreground">
-              Agents
-            </span>
-            <span className="text-micro text-muted-foreground tabular-nums">
-              {skill.assignedTo.length} / {totalAgents}
-            </span>
-          </div>
-          {skill.assignedTo.length > 0 ? (
-            <div className="flex flex-wrap gap-1">
-              {skill.assignedTo.map((agent) => {
-                const team = agentTeamMap.get(agent);
-                return (
-                  <Tooltip key={agent}>
-                    <TooltipTrigger asChild>
-                      <span>
-                        <Badge variant="secondary" className="text-micro gap-1">
-                          <AgentAvatar name={agent} size="xs" />
-                          {agent}
-                        </Badge>
-                      </span>
-                    </TooltipTrigger>
-                    {team && <TooltipContent className="text-xs">Team: {team}</TooltipContent>}
-                  </Tooltip>
-                );
-              })}
+        {pool === "orchestrator" ? (
+          <>
+            <Separator />
+            <p className="flex items-center gap-1.5 text-caption text-muted-foreground">
+              <Bookmark className="h-3 w-3" /> One of Polpo's own skills
+            </p>
+          </>
+        ) : (
+          <>
+            <Separator />
+            {/* Agents */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-label text-muted-foreground">
+                  Agents
+                </span>
+                <span className="text-micro text-muted-foreground tabular-nums">
+                  {assignedTo.length} / {totalAgents}
+                </span>
+              </div>
+              {assignedTo.length > 0 ? (
+                <div className="flex flex-wrap gap-1">
+                  {assignedTo.map((agent) => {
+                    const team = agentTeamMap.get(agent);
+                    return (
+                      <Tooltip key={agent}>
+                        <TooltipTrigger asChild>
+                          <span>
+                            <Badge variant="secondary" className="text-micro gap-1">
+                              <AgentAvatar name={agent} size="xs" />
+                              {agent}
+                            </Badge>
+                          </span>
+                        </TooltipTrigger>
+                        {team && <TooltipContent className="text-xs">Team: {team}</TooltipContent>}
+                      </Tooltip>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-caption text-muted-foreground/60 italic">Not assigned to any agent</p>
+              )}
             </div>
-          ) : (
-            <p className="text-caption text-muted-foreground/60 italic">Not assigned to any agent</p>
-          )}
-        </div>
+          </>
+        )}
 
         {/* Teams */}
         {skillTeams.length > 0 && (
@@ -220,17 +244,29 @@ function MetadataCard({
 
 // ── Main ──
 
+/**
+ * A skill as a file browser: its files as a tree, the selected file in the main pane (SKILL.md by
+ * default; ?file=references/api.md is linkable), relative links in markdown opening files in place,
+ * downloads of one file or the whole skill. ?pool=orchestrator shows one of Polpo's own skills.
+ */
 export function SkillDetailPage() {
   const { skillName } = useParams<{ skillName: string }>();
   const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const pool: SkillPool = params.get("pool") === "orchestrator" ? "orchestrator" : "agent";
+  const selected = params.get("file") || "SKILL.md";
   const { client } = usePolpo();
-  const { skills, isLoading: skillsLoading } = useSkills();
+  const agentSkills = useSkills();
+  const orchestratorSkills = useOrchestratorSkills();
+  const { skills, isLoading: skillsLoading } = pool === "orchestrator" ? orchestratorSkills : agentSkills;
   const { teams } = useAgents();
+  const files = useSkillFiles(skillName, pool);
 
   // Content results are tagged with the skill they belong to, so switching
   // skills shows the loader without resetting state inside the effect.
-  const [content, setContent] = useState<{ name: string; skill: LoadedSkill | null; error: string | null } | null>(null);
-  const contentLoading = !content || content.name !== skillName;
+  const contentKey = `${pool}:${skillName}`;
+  const [content, setContent] = useState<{ key: string; skill: LoadedSkill | null; error: string | null } | null>(null);
+  const contentLoading = !content || content.key !== contentKey;
   const loadedSkill = contentLoading ? null : content.skill;
   const contentError = contentLoading ? null : content.error;
 
@@ -242,26 +278,35 @@ export function SkillDetailPage() {
   }
 
   // Find the skill in the list
-  const skill = skills.find((s) => s.name === skillName);
+  const skill = (skills as ShownSkill[]).find((s) => s.name === skillName);
 
   // Fetch full content
   useEffect(() => {
     if (!skillName || !client) return;
     let cancelled = false;
-
-    client
-      .getSkillContent(skillName)
+    const load = pool === "orchestrator" ? client.getOrchestratorSkillContent(skillName) : client.getSkillContent(skillName);
+    load
       .then((data) => {
-        if (!cancelled) setContent({ name: skillName, skill: data, error: null });
+        if (!cancelled) setContent({ key: contentKey, skill: data, error: null });
       })
       .catch((err) => {
-        if (!cancelled) setContent({ name: skillName, skill: null, error: err?.message ?? "Failed to load skill content" });
+        if (!cancelled) setContent({ key: contentKey, skill: null, error: err?.message ?? "Failed to load skill content" });
       });
 
     return () => {
       cancelled = true;
     };
-  }, [skillName, client]);
+  }, [skillName, client, pool, contentKey]);
+
+  const openFile = useCallback((path: string) => {
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (path === "SKILL.md") next.delete("file"); else next.set("file", path);
+      return next;
+    });
+  }, [setParams]);
+
+  const readText = useCallback((path: string) => client.getSkillFileText(skillName ?? "", path, pool), [client, skillName, pool]);
 
   // Loading state
   if (skillsLoading || contentLoading) {
@@ -278,18 +323,22 @@ export function SkillDetailPage() {
       <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
         <Sparkles className="h-10 w-10 opacity-30" />
         <p className="text-sm">Skill "{skillName}" not found</p>
-        <Button variant="outline" size="sm" onClick={() => navigate("/skills")}>
+        <Button variant="outline" size="sm" onClick={() => navigate(pool === "orchestrator" ? "/config" : "/skills")}>
           <ArrowLeft className="h-3.5 w-3.5 mr-1.5" /> Back to Skills
         </Button>
       </div>
     );
   }
 
+  const fileList = files.data?.files ?? [{ path: "SKILL.md", size: 0 }];
+  const current = fileList.find((f) => f.path === selected);
+  const missing = !!files.data && !current;
+
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
       {/* ── Title bar ── */}
       <div className="flex items-center gap-3 shrink-0">
-        <Button variant="ghost" size="sm" onClick={() => navigate("/skills")}>
+        <Button variant="ghost" size="sm" aria-label="Back" onClick={() => navigate(pool === "orchestrator" ? "/config" : "/skills")}>
           <ArrowLeft className="h-4 w-4" />
         </Button>
 
@@ -302,44 +351,75 @@ export function SkillDetailPage() {
           </div>
           <div className="flex items-center gap-2 mt-0.5">
             <SourceBadge source={skill.source} />
-            {skill.assignedTo.length > 0 && (
+            {(skill.assignedTo?.length ?? 0) > 0 && (
               <span className="text-caption text-muted-foreground">
-                {skill.assignedTo.length} agent{skill.assignedTo.length !== 1 ? "s" : ""}
+                {skill.assignedTo!.length} agent{skill.assignedTo!.length !== 1 ? "s" : ""}
+              </span>
+            )}
+            {files.data && (
+              <span className="text-caption text-muted-foreground">
+                {files.data.files.length} file{files.data.files.length !== 1 ? "s" : ""} · {formatSize(files.data.totalBytes)}
               </span>
             )}
           </div>
         </div>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" className="h-8">
+              <Download className="h-3.5 w-3.5 mr-1.5" /> Download
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem asChild><a href={files.downloadUrl("skill")} download>{skill.name}.skill</a></DropdownMenuItem>
+            <DropdownMenuItem asChild><a href={files.downloadUrl("zip")} download>{skill.name}.zip</a></DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* ── Content grid ── */}
       <div className="flex-1 overflow-auto pb-bottom-nav lg:pb-2">
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-          {/* Left: Markdown content */}
-          <div className="lg:col-span-3 min-w-0">
-            {contentError ? (
-              <div className="rounded-lg border border-border/40 bg-card/80 p-6 text-center">
-                <p className="text-sm text-muted-foreground">{contentError}</p>
+          {/* Left: files and metadata */}
+          <div className="lg:col-span-1 space-y-4 min-w-0">
+            <nav aria-label="Files" className="rounded-lg border border-border/40 bg-card/80 p-2">
+              <div className="flex items-center justify-between px-2 pb-1.5">
+                <span className="text-label text-muted-foreground">Files</span>
+                {files.isLoading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
               </div>
-            ) : loadedSkill?.content ? (
-              <div className="rounded-lg border border-border/40 bg-card/80 p-6">
-                <MessageResponse mode="static">
-                  {loadedSkill.content}
-                </MessageResponse>
-              </div>
-            ) : (
-              <div className="rounded-lg border border-border/40 bg-card/80 p-6 text-center">
-                <p className="text-sm text-muted-foreground italic">This skill has no content</p>
-              </div>
-            )}
-          </div>
-
-          {/* Right: Metadata sidebar */}
-          <div className="lg:col-span-1">
+              <SkillFileTree files={fileList} selected={selected} onSelect={openFile} />
+              {files.data?.truncated && <p className="px-2 pt-1 text-micro text-muted-foreground">More files than shown: download the skill to see them all</p>}
+            </nav>
             <MetadataCard
               skill={skill}
+              pool={pool}
               agentTeamMap={agentTeamMap}
               teams={teams}
             />
+          </div>
+
+          {/* Main: the selected file (SKILL.md by default) */}
+          <div className="lg:col-span-3 min-w-0">
+            {contentError && selected === "SKILL.md" ? (
+              <div className="rounded-lg border border-border/40 bg-card/80 p-6 text-center">
+                <p className="text-sm text-muted-foreground">{contentError}</p>
+              </div>
+            ) : missing ? (
+              <div className="rounded-lg border border-border/40 bg-card/80 p-6 text-center space-y-3">
+                <p className="text-sm text-muted-foreground">"{selected}" is not a file of this skill</p>
+                <Button variant="outline" size="sm" onClick={() => openFile("SKILL.md")}>Open SKILL.md</Button>
+              </div>
+            ) : (
+              <SkillFileViewer
+                path={selected}
+                file={current}
+                files={fileList}
+                skillBody={loadedSkill?.content}
+                fileUrl={files.fileUrl}
+                readText={readText}
+                onOpen={openFile}
+              />
+            )}
           </div>
         </div>
       </div>
