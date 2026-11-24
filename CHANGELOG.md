@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **WhatsApp Business (official, Meta Cloud API) channel** — `type: "whatsapp-business"`, separate from the QR `whatsapp` one (see [docs/whatsapp-business.md](docs/whatsapp-business.md)):
+  - **Customers** write to the business number and only the channel's agent (`gateway.agent`, required) answers them, never Polpo; they cannot use commands and are never told about pairing. **Operators** (`business.operators`) use commands and get notifications. New `gateway.commands` (`all` | `operators` | `none`) for every channel.
+  - **Public webhook** `GET/POST /api/v1/channels/whatsapp-business/webhooks/:name`: Meta's verification (verify token in constant time), `X-Hub-Signature-256` over the raw body, 1 MB cap, a per-channel rate limit (outside the per-IP one), deliveries for another number ignored. Deliveries go to a **persisted inbox** before Meta gets its 200 and are processed in order: nothing lost across a restart, nothing handled twice (processed keys kept 7 days).
+  - **Rules**: free-form text only inside the 24-hour window (Meta's 131047 handled); business-initiated messages only as **approved templates** of the allowed categories (default utility), never to contacts who opted out (`STOP`, `ANNULLA`, `DISISCRIVIMI`…), within **daily caps** per channel and per agent. Templates from agents and Polpo **wait for an operator's approval** (`business.approveTemplates`, default on).
+  - Text, button and list replies reach the agent as text (other types as a placeholder); read receipts and the typing indicator; long replies split at 4096 characters; **statuses** (sent, delivered, read, failed, pricing) kept per message and announced as `channel:message-status`; a per-channel **event log** without message text (types, lengths, masked numbers), live as `channel:webhook`.
+  - Secrets only in the vault (owner `$channels`), written from the dashboard; the verify token can be generated. Notification rules deliver inside the window, or with `business.notificationTemplate` outside it.
+  - **Storage**: `wabiz_contacts`, `wabiz_messages`, `wabiz_processed` (migrations `0015_whatsapp_business` on SQLite, `0016_whatsapp_business` on PostgreSQL; `.polpo/whatsapp-business/store.json` on files); retention `business.retentionDays` (default 90), erase a contact.
+  - **Everywhere**: Settings → Channels → *WhatsApp Business (official)* (ids, audience, limits, secrets as stored / not set, callback URL and Tailscale Funnel command, event log, approvals, test with quality rating and tier); REST `/api/v1/whatsapp-business`; MCP `polpo_wabiz_status`, `_events`, `_templates`, `_conversation`, `_send`, `_send_template`, `_approval` and `polpo_channel_save` with setup hand-off; Polpo's chat (`wabiz_*`); agent tools `wabiz_send`, `wabiz_send_template`, `wabiz_templates`, `wabiz_conversation`, granted only explicitly (never by `whatsapp_*`); SDK methods and `useWaBusinessStatus`, `useWaTemplates`, `useWaConversation`.
+
+### Changed
+- The computers' webhook event log is now a shared capped event log (`src/core/webhook-event-log.ts`), also used by WhatsApp Business.
+
 ## [0.7.1] — 2026-11-23 — Artifact workspaces: Docs, Slides, Sheets, Design and Motion
 
 ### Added
