@@ -23,6 +23,8 @@ export interface SkillBundleDeps {
   workDir: string;
   getAgents: () => Promise<any[]>;
   emit: (event: "skill:changed", data: { scope: "agent" | "orchestrator"; action: "installed" | "assigned"; skillName?: string; agentName?: string; timestamp: string }) => void;
+  /** Who makes a request, recorded in the skills' versions. */
+  author?: (c: Context) => string;
 }
 
 const errorSchema = z.object({ ok: z.boolean(), error: z.string(), code: z.string().optional(), details: z.any().optional() });
@@ -66,7 +68,7 @@ export function registerSkillBundleRoutes(app: OpenAPIHono, getDeps: () => Skill
     const deps = getDeps();
     const pool: SkillPool = opts.pool ?? "agent";
     const result: BundleInstallResult = installSkillBundleToPool(deps.polpoDir, bundle, {
-      pool, global: opts.global, onConflict: (opts.onConflict ?? "fail") as ConflictPolicy,
+      pool, global: opts.global, onConflict: (opts.onConflict ?? "fail") as ConflictPolicy, author: deps.author?.(c) ?? "person:dashboard", source: "upload",
       ...(opts.skills?.length ? { skills: opts.skills } : {}), ...(opts.renames ? { renames: opts.renames } : {}),
     });
     const now = () => new Date().toISOString();

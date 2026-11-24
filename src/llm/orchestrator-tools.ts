@@ -5465,7 +5465,7 @@ function execCreateOrchestratorSkill(polpo: Orchestrator, args: Record<string, u
     return `Error: Orchestrator skill "${name}" already exists. Use update_orchestrator_skill to modify it.`;
   }
 
-  const path = createOrchestratorSkill(polpo.getPolpoDir(), name, description, content, { allowedTools });
+  const path = createOrchestratorSkill(polpo.getPolpoDir(), name, description, content, { allowedTools, author: "polpo" });
   emitSkillChanged(polpo, "orchestrator", "created", name);
   return `Created orchestrator skill "${name}" at ${path}`;
 }
@@ -5477,7 +5477,7 @@ function execUpdateOrchestratorSkill(polpo: Orchestrator, args: Record<string, u
   if (args.content !== undefined) updates.content = args.content as string;
   if (args.allowedTools !== undefined) updates.allowedTools = args.allowedTools as string[];
 
-  const ok = updateOrchestratorSkill(polpo.getPolpoDir(), name, updates);
+  const ok = updateOrchestratorSkill(polpo.getPolpoDir(), name, updates, false, "polpo");
   if (!ok) return `Error: Orchestrator skill "${name}" not found.`;
 
   emitSkillChanged(polpo, "orchestrator", "updated", name);
@@ -5488,7 +5488,7 @@ function execUpdateOrchestratorSkill(polpo: Orchestrator, args: Record<string, u
 
 function execRemoveOrchestratorSkill(polpo: Orchestrator, args: Record<string, unknown>): string {
   const name = args.name as string;
-  const ok = removeOrchestratorSkill(polpo.getPolpoDir(), name);
+  const ok = removeOrchestratorSkill(polpo.getPolpoDir(), name, false, "polpo");
   if (!ok) return `Error: Orchestrator skill "${name}" not found.`;
   emitSkillChanged(polpo, "orchestrator", "deleted", name);
   return `Removed orchestrator skill "${name}"`;
@@ -5499,7 +5499,7 @@ function execInstallOrchestratorSkill(polpo: Orchestrator, args: Record<string, 
   const skillNames = args.skillNames as string[] | undefined;
   const force = args.force as boolean | undefined;
 
-  const result = installOrchestratorSkills(source, polpo.getPolpoDir(), { skillNames, force });
+  const result = installOrchestratorSkills(source, polpo.getPolpoDir(), { skillNames, force, author: "polpo" });
   if (result.installed.length > 0) emitSkillChanged(polpo, "orchestrator", "installed");
 
   const lines: string[] = [];
@@ -5536,7 +5536,7 @@ function execInstallAgentSkill(polpo: Orchestrator, args: Record<string, unknown
   const skillNames = args.skillNames as string[] | undefined;
   const force = args.force as boolean | undefined;
 
-  const result = installSkills(source, polpo.getPolpoDir(), { skillNames, force });
+  const result = installSkills(source, polpo.getPolpoDir(), { skillNames, force, author: "polpo" });
   if (result.installed.length > 0) emitSkillChanged(polpo, "agent", "installed");
 
   const lines: string[] = [];
@@ -5576,14 +5576,14 @@ function execCreateAgentSkill(polpo: Orchestrator, args: Record<string, unknown>
     return `Error: Agent skill "${name}" already exists. Use install_agent_skill with force, or remove it first.`;
   }
 
-  const skillPath = createAgentSkill(polpoDir, name, description, content, { allowedTools });
+  const skillPath = createAgentSkill(polpoDir, name, description, content, { allowedTools, author: "polpo" });
   emitSkillChanged(polpo, "agent", "created", name);
   return `Created agent skill "${name}" at ${skillPath}. Assign it to agents with update_agent (add to their skills array).`;
 }
 
 function execRemoveAgentSkill(polpo: Orchestrator, args: Record<string, unknown>): string {
   const name = args.name as string;
-  const ok = removeSkill(polpo.getPolpoDir(), name);
+  const ok = removeSkill(polpo.getPolpoDir(), name, false, "polpo");
   if (!ok) return `Error: Agent skill "${name}" not found.`;
   emitSkillChanged(polpo, "agent", "deleted", name);
   return `Removed agent skill "${name}"`;

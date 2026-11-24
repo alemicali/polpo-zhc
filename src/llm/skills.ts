@@ -46,6 +46,7 @@ import {
   installSkillBundle, listSkillFiles, parseSkillBundle,
   type BundleInstallOptions, type BundleInstallResult, type ParsedSkillBundle, type SkillFileEntry,
 } from "./skill-bundle.js";
+import { markSkillDeleted, withSkillVersion, type SkillVersionSource } from "./skill-versions.js";
 
 // ── Types ──
 
@@ -590,11 +591,13 @@ export function installSkills(
     skillNames?: string[];
     global?: boolean;
     force?: boolean;
+    /** Who installs (recorded in the skills' versions). */
+    author?: string;
   } = {},
 ): InstallResult {
   // A local .skill / .zip archive
   const archive = localSkillArchive(source);
-  if (archive) return installArchiveFile(archive, skillPoolDir(polpoDir, "agent", options.global), options);
+  if (archive) return installArchiveFile(archive, polpoDir, "agent", options);
 
   const result: InstallResult = { installed: [], skipped: [], errors: [] };
   let parsed: ParsedSource;
@@ -680,12 +683,14 @@ export function installSkills(
       }
 
       try {
-        // Remove existing if force
-        if (existsSync(targetDir)) {
-          rmSync(targetDir, { recursive: true, force: true });
-        }
-        // Copy skill directory
-        cpSync(skill.path, targetDir, { recursive: true });
+        withSkillVersion(polpoDir, { pool: "agent", global: options.global, name: skill.name }, { author: options.author, source: parsed.type === "github" ? "git" : "local" }, () => {
+          // Remove existing if force
+          if (existsSync(targetDir)) {
+            rmSync(targetDir, { recursive: true, force: true });
+          }
+          // Copy skill directory
+          cpSync(skill.path, targetDir, { recursive: true });
+        });
         result.installed.push(skill);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -727,10 +732,15 @@ export function skillNamesIn(poolDir: string): Set<string> {
 export function installSkillBundleToPool(
   polpoDir: string,
   bundle: ParsedSkillBundle,
-  options: BundleInstallOptions & { pool?: SkillPool; global?: boolean } = {},
+  options: BundleInstallOptions & { pool?: SkillPool; global?: boolean; author?: string; source?: SkillVersionSource } = {},
 ): BundleInstallResult {
-  const dir = skillPoolDir(polpoDir, options.pool ?? "agent", options.global);
-  return installSkillBundle(bundle, dir, { ...options, existingNames: [...skillNamesIn(dir), ...(options.existingNames ?? [])] });
+  const pool = options.pool ?? "agent";
+  const dir = skillPoolDir(polpoDir, pool, options.global);
+  return installSkillBundle(bundle, dir, {
+    ...options,
+    existingNames: [...skillNamesIn(dir), ...(options.existingNames ?? [])],
+    wrap: (name, write) => withSkillVersion(polpoDir, { pool, global: options.global, name }, { author: options.author, source: options.source ?? "upload" }, write),
+  });
 }
 
 /** The absolute path of a local .skill / .zip file named by `source`, if it is one. */
@@ -740,7 +750,8 @@ function localSkillArchive(source: string): string | undefined {
   try { return lstatSync(abs).isFile() ? abs : undefined; } catch { return undefined; }
 }
 
-function installArchiveFile(file: string, targetBase: string, options: { skillNames?: string[]; force?: boolean }): InstallResult {
+function installArchiveFile(file: string, polpoDir: string, pool: SkillPool, options: { skillNames?: string[]; force?: boolean; global?: boolean; author?: string }): InstallResult {
+  const targetBase = skillPoolDir(polpoDir, pool, options.global);
   const result: InstallResult = { installed: [], skipped: [], errors: [] };
   let bundle: ParsedSkillBundle;
   try {
@@ -753,6 +764,7 @@ function installArchiveFile(file: string, targetBase: string, options: { skillNa
     ...(options.skillNames ? { skills: options.skillNames } : {}),
     onConflict: options.force ? "replace" : "skip",
     existingNames: skillNamesIn(targetBase),
+    wrap: (name, write) => withSkillVersion(polpoDir, { pool, global: options.global, name }, { author: options.author, source: "local" }, write),
   });
   const byName = new Map(bundle.preview.skills.map((s) => [s.name, s]));
   for (const i of r.installed) result.installed.push({ name: i.name, description: byName.get(i.from)?.description ?? "", path: i.path });
@@ -771,7 +783,7 @@ export function findSkillDir(cwd: string, polpoDir: string, name: string, pool: 
  * Remove a skill from the pool.
  * Returns true if removed, false if not found.
  */
-export function removeSkill(polpoDir: string, name: string, global = false): boolean {
+export function removeSkill(polpoDir: string, name: string, global = false, by?: string): boolean {
   const targetBase = global
     ? join(getGlobalPolpoDir(), "skills")
     : join(polpoDir, "skills");
@@ -779,6 +791,8 @@ export function removeSkill(polpoDir: string, name: string, global = false): boo
   const targetDir = join(targetBase, name);
 
   if (!existsSync(targetDir)) return false;
+  // its history stays (the state it had is its latest version), so it can be restored
+  markSkillDeleted(polpoDir, { pool: "agent", global, name }, by);
   rmSync(targetDir, { recursive: true, force: true });
   return true;
 }
@@ -793,19 +807,20 @@ export function createAgentSkill(
   name: string,
   description: string,
   content: string,
-  options?: { allowedTools?: string[]; global?: boolean },
+  options?: { allowedTools?: string[]; global?: boolean; author?: string },
 ): string {
   const targetBase = options?.global
     ? join(getGlobalPolpoDir(), "skills")
     : join(polpoDir, "skills");
   assertSafeSkillName(name);
   const targetDir = join(targetBase, name);
-  mkdirSync(targetDir, { recursive: true });
-
-  // Single-line frontmatter values: a newline in the description must not
-  // be able to inject keys such as allowed-tools.
-  const skillMd = buildSkillFrontmatter(name, description, options?.allowedTools) + content;
-  writeFileSync(join(targetDir, "SKILL.md"), skillMd, "utf-8");
+  withSkillVersion(polpoDir, { pool: "agent", global: options?.global, name }, { author: options?.author, source: "create" }, () => {
+    mkdirSync(targetDir, { recursive: true });
+    // Single-line frontmatter values: a newline in the description must not
+    // be able to inject keys such as allowed-tools.
+    const skillMd = buildSkillFrontmatter(name, description, options?.allowedTools) + content;
+    writeFileSync(join(targetDir, "SKILL.md"), skillMd, "utf-8");
+  });
   return targetDir;
 }
 
@@ -933,10 +948,12 @@ export function installOrchestratorSkills(
     skillNames?: string[];
     global?: boolean;
     force?: boolean;
+    /** Who installs (recorded in the skills' versions). */
+    author?: string;
   } = {},
 ): InstallResult {
   const archive = localSkillArchive(source);
-  if (archive) return installArchiveFile(archive, skillPoolDir(polpoDir, "orchestrator", options.global), options);
+  if (archive) return installArchiveFile(archive, polpoDir, "orchestrator", options);
 
   const result: InstallResult = { installed: [], skipped: [], errors: [] };
   let parsed: ParsedSource;
@@ -1016,10 +1033,12 @@ export function installOrchestratorSkills(
       }
 
       try {
-        if (existsSync(targetDir)) {
-          rmSync(targetDir, { recursive: true, force: true });
-        }
-        cpSync(skill.path, targetDir, { recursive: true });
+        withSkillVersion(polpoDir, { pool: "orchestrator", global: options.global, name: skill.name }, { author: options.author, source: parsed.type === "github" ? "git" : "local" }, () => {
+          if (existsSync(targetDir)) {
+            rmSync(targetDir, { recursive: true, force: true });
+          }
+          cpSync(skill.path, targetDir, { recursive: true });
+        });
         result.installed.push(skill);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -1039,7 +1058,7 @@ export function installOrchestratorSkills(
  * Remove a skill from the orchestrator's pool.
  * Returns true if removed, false if not found.
  */
-export function removeOrchestratorSkill(polpoDir: string, name: string, global = false): boolean {
+export function removeOrchestratorSkill(polpoDir: string, name: string, global = false, by?: string): boolean {
   const targetBase = global
     ? join(getGlobalPolpoDir(), ORCHESTRATOR_AGENT_DIR, "skills")
     : join(polpoDir, ORCHESTRATOR_AGENT_DIR, "skills");
@@ -1047,6 +1066,7 @@ export function removeOrchestratorSkill(polpoDir: string, name: string, global =
   const targetDir = join(targetBase, name);
 
   if (!existsSync(targetDir)) return false;
+  markSkillDeleted(polpoDir, { pool: "orchestrator", global, name }, by);
   rmSync(targetDir, { recursive: true, force: true });
   return true;
 }
@@ -1060,19 +1080,20 @@ export function createOrchestratorSkill(
   name: string,
   description: string,
   content: string,
-  options?: { allowedTools?: string[]; global?: boolean },
+  options?: { allowedTools?: string[]; global?: boolean; author?: string },
 ): string {
   const targetBase = options?.global
     ? join(getGlobalPolpoDir(), ORCHESTRATOR_AGENT_DIR, "skills")
     : join(polpoDir, ORCHESTRATOR_AGENT_DIR, "skills");
   assertSafeSkillName(name);
   const targetDir = join(targetBase, name);
-  mkdirSync(targetDir, { recursive: true });
-
-  // Single-line frontmatter values: a newline in the description must not
-  // be able to inject keys such as allowed-tools.
-  const skillMd = buildSkillFrontmatter(name, description, options?.allowedTools) + content;
-  writeFileSync(join(targetDir, "SKILL.md"), skillMd, "utf-8");
+  withSkillVersion(polpoDir, { pool: "orchestrator", global: options?.global, name }, { author: options?.author, source: "create" }, () => {
+    mkdirSync(targetDir, { recursive: true });
+    // Single-line frontmatter values: a newline in the description must not
+    // be able to inject keys such as allowed-tools.
+    const skillMd = buildSkillFrontmatter(name, description, options?.allowedTools) + content;
+    writeFileSync(join(targetDir, "SKILL.md"), skillMd, "utf-8");
+  });
   return targetDir;
 }
 
@@ -1085,8 +1106,11 @@ export function updateAgentSkill(
   name: string,
   updates: { description?: string; content?: string; allowedTools?: string[] },
   global = false,
+  author?: string,
 ): boolean {
-  return updateSkillIn(global ? join(getGlobalPolpoDir(), "skills") : join(polpoDir, "skills"), name, updates);
+  const targetBase = global ? join(getGlobalPolpoDir(), "skills") : join(polpoDir, "skills");
+  if (!isSafeSkillName(name) || !existsSync(join(targetBase, name, "SKILL.md"))) return false;
+  return withSkillVersion(polpoDir, { pool: "agent", global, name }, { author, source: "edit" }, () => updateSkillIn(targetBase, name, updates));
 }
 
 /**
@@ -1098,11 +1122,13 @@ export function updateOrchestratorSkill(
   name: string,
   updates: { description?: string; content?: string; allowedTools?: string[] },
   global = false,
+  author?: string,
 ): boolean {
   const targetBase = global
     ? join(getGlobalPolpoDir(), ORCHESTRATOR_AGENT_DIR, "skills")
     : join(polpoDir, ORCHESTRATOR_AGENT_DIR, "skills");
-  return updateSkillIn(targetBase, name, updates);
+  if (!isSafeSkillName(name) || !existsSync(join(targetBase, name, "SKILL.md"))) return false;
+  return withSkillVersion(polpoDir, { pool: "orchestrator", global, name }, { author, source: "edit" }, () => updateSkillIn(targetBase, name, updates));
 }
 
 function updateSkillIn(

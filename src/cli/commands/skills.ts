@@ -56,6 +56,7 @@ export function registerSkillsCommands(program: Command): void {
           skillNames: opts.skill,
           global: opts.global,
           force: opts.force,
+          author: "cli",
         });
 
         // Report installed
@@ -160,7 +161,7 @@ export function registerSkillsCommands(program: Command): void {
     .action((name: string, opts) => {
       try {
         const polpoDir = getPolpoDir(opts.dir);
-        const removed = removeSkill(polpoDir, name, opts.global);
+        const removed = removeSkill(polpoDir, name, opts.global, "cli");
 
         if (removed) {
           console.log(chalk.green(`  Removed skill: ${name}`));
@@ -331,6 +332,7 @@ export function registerSkillsCommands(program: Command): void {
         const result = installOrchestratorSkills(source, polpoDir, {
           skillNames: opts.skill,
           force: opts.force,
+          author: "cli",
         });
 
         for (const skill of result.installed) {
@@ -366,7 +368,7 @@ export function registerSkillsCommands(program: Command): void {
     .action((name: string, opts) => {
       try {
         const polpoDir = getPolpoDir(opts.dir);
-        const removed = removeOrchestratorSkill(polpoDir, name);
+        const removed = removeOrchestratorSkill(polpoDir, name, false, "cli");
 
         if (removed) {
           console.log(chalk.green(`  Removed orchestrator skill: ${name}`));
