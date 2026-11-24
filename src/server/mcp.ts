@@ -33,6 +33,7 @@ import { registerConnectorTools } from "./mcp-server/connectors.js";
 import { registerChannelTools, registerVaultTools } from "./mcp-server/channels.js";
 import { registerAppTools } from "./mcp-server/apps.js";
 import { registerComputerTools } from "./mcp-server/computers.js";
+import { registerWaBusinessTools } from "./mcp-server/whatsapp-business.js";
 import { registerHarnessTools } from "./mcp-server/harnesses.js";
 import { registerSettingsTools } from "./mcp-server/settings.js";
 import { registerChannelSetupTools } from "./mcp-server/channel-setup.js";
@@ -90,6 +91,7 @@ export function createPolpoMcpServer(deps: McpDeps, catalog?: ToolScope[]): McpS
   registerVaultTools(tool, deps);
   registerAppTools(tool, deps);
   registerComputerTools(tool, deps);
+  registerWaBusinessTools(tool, deps);
   registerHarnessTools(tool, deps);
   registerAdminTools(tool, deps);
   return server;
