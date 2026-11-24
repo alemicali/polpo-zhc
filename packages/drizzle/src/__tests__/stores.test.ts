@@ -745,10 +745,22 @@ describe.each(DIALECTS)("%s", (dialect) => {
         const store = stores.sessionStore;
         const a = await store.create("Launch plan", "growth");
         const b = await store.create("Ops");
-        await store.addMessage(a, "user", "Prepara le missioni per il lancio di dicembre");
-        await store.addMessage(a, "assistant", "Ho preparato tre missioni: email, social e blog.");
-        await store.addMessage(b, "user", "La missione di ieri è fallita al deploy");
-        await store.addMessage(b, "assistant", "Nothing related here");
+        // one second apart: the order by time is certain
+        vi.useFakeTimers({ toFake: ["Date"] });
+        try {
+          let t = Date.parse("2026-11-20T10:00:00Z");
+          for (const [sid, role, text] of [
+            [a, "user", "Prepara le missioni per il lancio di dicembre"],
+            [a, "assistant", "Ho preparato tre missioni: email, social e blog."],
+            [b, "user", "La missione di ieri è fallita al deploy"],
+            [b, "assistant", "Nothing related here"],
+          ] as const) {
+            vi.setSystemTime(new Date((t += 1000)));
+            await store.addMessage(sid, role, text);
+          }
+        } finally {
+          vi.useRealTimers();
+        }
 
         // "mission" (a stem) finds missione and missioni, in both sessions
         const all = await store.searchMessages!({ terms: ["mission"] });
