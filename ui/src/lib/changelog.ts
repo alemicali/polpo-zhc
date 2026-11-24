@@ -32,6 +32,21 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-24-chat-tool-calls-plain",
+    date: "2026-11-24",
+    kind: "improved",
+    title: "Strumenti in chat: righe di testo, non più schede",
+    summary: "In chat ogni strumento usato è una riga di testo grigio, come «Read file · src/app.ts» o «Used 4 tools, 1 failed»: un clic e si apre il dettaglio.",
+    body: [
+      "- **Una riga per strumento**: «Read file · src/app.ts», «Ran bash · npm test», «Searched the web for “…”». Niente più schede, bordi e badge.",
+      "- **Più strumenti di fila diventano una riga sola**: «Used 4 tools, 1 failed». Un clic apre un unico riquadro leggero con una riga per strumento; ogni riga si apre a sua volta.",
+      "- **Il dettaglio è testo semplice**: input e output in carattere monospaziato, le differenze di un file con le righe aggiunte e tolte colorate, immagini e file prodotti come prima, e un'icona per copiare quando passi sopra.",
+      "- **Dal vivo mentre lavora**: la riga dello strumento in corso ha un riflesso che scorre (fermo se il sistema chiede movimento ridotto), con avanzamento e tempo; l'input che arriva si vede mentre viene scritto.",
+      "- **Errori in chiaro**: la riga diventa rossa con il motivo breve; il messaggio completo è nel dettaglio.",
+      "- **Il ragionamento** («Thought for 4 seconds») segue lo stesso stile. Le schede da confermare (invio WhatsApp ed email, missioni, vault, design) restano com'erano, con i loro pulsanti.",
+    ].join("\n"),
+  },
+  {
     id: "2026-11-24-drill-in-sidebar",
     date: "2026-11-24",
     kind: "new",
