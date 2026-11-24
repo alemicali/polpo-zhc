@@ -112,6 +112,29 @@ describe("agent chats on the CLI engine", () => {
     expect(runs[1].argv).toEqual(expect.arrayContaining(["--resume", "11111111-2222-3333-4444-555555555555"]));
   });
 
+  it("a message typed while it works reaches the program at once (steer) and is stored as a user message", async () => {
+    const route = completionRoutes(deps);
+    const wrapped = new Hono();
+    wrapped.use("*", async (c, next) => { c.set("polpoUserEmail" as never, "ada@example.com" as never); await next(); });
+    wrapped.route("/", route);
+    const res = await wrapped.request("/", {
+      method: "POST", headers: { "content-type": "application/json", "x-session-id": "new" },
+      body: JSON.stringify({ agent: "coder", stream: true, messages: [{ role: "user", content: "STEER me" }] }),
+    });
+    const turnId = res.headers.get("x-turn-id")!;
+    const sessionId = res.headers.get("x-session-id")!;
+    const body = res.text();
+    await new Promise((r) => setTimeout(r, 700));
+    const accepted = await wrapped.request(`/steer/${turnId}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: "s1", content: "use pnpm" }) });
+    expect(accepted.status).toBe(202);
+    const chunks = (await body).split("\n").filter((l) => l.startsWith("data: ")).map((l) => l.slice(6)).filter((d) => d !== "[DONE]").map((d) => JSON.parse(d));
+    expect(chunks.some((c) => c.choices?.[0]?.steer_applied?.steers?.[0]?.content === "use pnpm")).toBe(true);
+    expect(chunks.map((c) => c.choices?.[0]?.delta?.content ?? "").join("")).toContain("Steered: use pnpm");
+    const msgs = await sessions.getMessages(sessionId);
+    expect(msgs.map((m: any) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
+    expect(msgs[2]!.content).toBe("use pnpm");
+  });
+
   it("non-streaming answers too", async () => {
     const r = await chat("Write out.txt", { stream: false });
     expect(r.status).toBe(200);
