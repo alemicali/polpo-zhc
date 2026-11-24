@@ -49,6 +49,23 @@ export const CHANGELOG: ChangelogEntry[] = [
     cta: { label: "Apri Impostazioni → Harness", to: "/config?section=harnesses" },
   },
   {
+    id: "2026-11-24-task-page-chat",
+    date: "2026-11-24",
+    kind: "improved",
+    title: "Pagina del task più pulita, e l'esecuzione si legge come una chat",
+    summary: "In cima al task restano solo titolo, stato e azioni; tutti i dettagli sono nella scheda Dettagli. In Esecuzione scegli tra Log e Chat: la chat mostra l'esecuzione come una conversazione e dal suo campo di testo guidi o continui il task.",
+    body: [
+      "- **Intestazione snella**: titolo, stato e le azioni (Metti in coda, Riprova, Stato, Ferma, Rivaluta). Niente altro sopra le schede.",
+      "- **Dettagli**: stato e fase, agente, missione, costo totale e per esecuzione, motore, modello e computer, strumenti del task, il motivo dell'errore (con \"Non ritentato\" quando riprovare non servirebbe), descrizione, output, verifiche, risultati prodotti, tentativi e dipendenze.",
+      "- **Esecuzione → Log**: l'elenco degli eventi di sempre, con il riquadro per dare indicazioni.",
+      "- **Esecuzione → Chat**: le istruzioni come primo messaggio, poi ragionamento, strumenti raggruppati (\"Used 4 tools, 1 failed ›\") e risposte, con le tue indicazioni come messaggi tuoi; ogni nuova esecuzione ha il suo separatore (\"Run 2 · retry\"). Si aggiorna mentre il task lavora.",
+      "- **Guida o continua dalla chat**: lo stesso campo di testo della chat manda un'indicazione al task in corso o lo fa ripartire; è disattivato, con il motivo, quando il task non può riceverne.",
+      "- La scelta Log/Chat resta per te su questo dispositivo, e i link portano direttamente lì (`?tab=execution&view=chat`).",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri Task", to: "/tasks" },
+  },
+  {
     id: "2026-11-24-skill-versions",
     date: "2026-11-24",
     kind: "new",
