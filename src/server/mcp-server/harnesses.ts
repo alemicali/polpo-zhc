@@ -17,6 +17,10 @@
  *   detach/resume, turns, cost so far.
  * - polpo_harness_session_control (polpo:work): stop (the conversation stays resumable) or reset
  *   (forgets it; confirm: true).
+ * - The CLI engine's accounts (personal Claude Code / Codex sign-ins: config directories on a
+ *   computer, never tokens) are part of polpo_harnesses_get (cli: accounts with version and
+ *   sign-in status) and polpo_harnesses_update (cli: add, remove, sign out, install, instance Codex).
+ *   Signing in is the person's own flow in a terminal: the tool gives the dashboard link and command.
  */
 import { z } from "zod";
 import {
@@ -33,6 +37,17 @@ type HarnessItem = {
   brokering?: "relay" | "in-vm" | "not-brokered";
 };
 type Overview = { allowHost: boolean; harnesses: HarnessItem[]; computers: string[]; relay?: { available: boolean; url?: string; path: string; warning?: string } };
+type CliAccountView = {
+  id: string; cli: string; computer: string; configDir: string; owner: string; label?: string; agents: string[];
+  report?: { installed: boolean; version?: string; status?: { signedIn: boolean; who?: string; method?: string; plan?: string; detail?: string }; error?: string };
+};
+type CliOverview = { accounts: CliAccountView[]; allowInstanceCodex: boolean };
+/** One CLI account, in words: where, whose, installed, signed in. */
+export const cliAccountLine = (a: CliAccountView) => `- CLI account ${a.id}${a.label ? ` (${a.label})` : ""}: ${a.cli === "claude" ? "Claude Code" : "Codex"} on ${a.computer}, owner ${a.owner}, dir ${a.configDir}`
+  + (a.report ? (a.report.installed
+    ? `, v${a.report.version ?? "?"}, ${a.report.status?.signedIn ? `signed in${a.report.status.who ? ` as ${a.report.status.who}` : ""}${a.report.status.plan ? ` (${a.report.status.plan})` : ""}` : "NOT signed in"}`
+    : `, NOT installed${a.report.error ? ` (${a.report.error})` : ""}`) : "")
+  + (a.agents.length ? ` · agents: ${a.agents.join(", ")}` : "");
 type TestResult = { ok: boolean; harness: string; auth?: string; model?: string; endpoint?: string; latencyMs: number; status?: number; errorKind?: string; error?: string; note?: string };
 type Session = {
   key: string; agent: string; harness: string; computerId: string; scope: string; taskId?: string; state: string; live: boolean;
@@ -113,12 +128,14 @@ export function registerHarnessTools(tool: Register, deps: McpDeps): void {
       test: z.enum(["claude-code", "codex", "opencode"]).optional().describe("Also test this harness's connection (one tiny model request from the Polpo server)"),
       agent: z.string().optional().describe("With test: use this agent's engine (its own key and model)"),
     },
-    outputSchema: { allowHost: z.boolean(), harnesses: z.array(harnessItem), computers: z.array(z.string()), test: z.record(z.string(), z.unknown()).optional() },
+    outputSchema: { allowHost: z.boolean(), harnesses: z.array(harnessItem), computers: z.array(z.string()), test: z.record(z.string(), z.unknown()).optional(), cli: z.record(z.string(), z.unknown()).optional() },
     annotations: { ...READ, openWorldHint: true },
   }, async ({ test, agent }) => {
     const r = await apiGet(deps, "/harnesses");
     if (!r.ok) return apiError(r, "Reading the harnesses");
     const o = r.data as Overview;
+    const cr = await apiGet(deps, "/harnesses/cli/accounts");
+    const cli = cr.ok ? (cr.data as CliOverview) : undefined;
     let t: TestResult | undefined;
     if (test) {
       const tr = await apiSend(deps, "POST", "/harnesses/test", { harness: test, ...(agent ? { agent } : {}) });
@@ -128,7 +145,10 @@ export function registerHarnessTools(tool: Register, deps: McpDeps): void {
     return ok([...o.harnesses.map(harnessLine), `Agents on this server may use a harness: ${o.allowHost ? "yes (isolated HOME)" : "no"}`,
       `Computers that can run one: ${o.computers.join(", ") || "none (create a Daytona v2 computer)"}`,
       ...(o.relay ? [o.relay.available ? `Model relay: ${o.relay.url}` : `Model relay: off — ${o.relay.warning}`] : []),
-      ...(t ? [`Connection test: ${testLine(t)}`] : [])].join("\n"), { ...(o as unknown as Record<string, unknown>), ...(t ? { test: t } : {}) });
+      ...(t ? [`Connection test: ${testLine(t)}`] : []),
+      ...(cli ? ["CLI engine accounts (personal sign-ins; agent.engine { type: \"cli\" }):", ...(cli.accounts.length ? cli.accounts.map(cliAccountLine) : ["- none"]),
+        `Instance Codex accounts: ${cli.allowInstanceCodex ? "allowed" : "not allowed"}`] : [])].join("\n"),
+    { ...(o as unknown as Record<string, unknown>), ...(t ? { test: t } : {}), ...(cli ? { cli: cli as unknown as Record<string, unknown> } : {}) });
   });
 
   tool("settings", "polpo_harnesses_update", {
@@ -172,12 +192,59 @@ export function registerHarnessTools(tool: Register, deps: McpDeps): void {
         gateway: gatewayInput.describe("For auth ai-gateway / gateway (null removes it)"),
         model: z.string().nullable().optional().describe("Default model, the provider's id (e.g. claude-sonnet-4-5, gpt-5, global.moonshotai.kimi-k3.1 on Bedrock, moonshotai/kimi-k2 on the AI Gateway or OpenRouter); null clears it"),
       }).nullable().optional().describe("OpenCode's settings (null removes them)"),
+      cli: z.object({
+        add_account: z.object({
+          cli: z.enum(["claude", "codex"]),
+          id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/).optional(),
+          computer: z.string().optional().describe("\"host\" (default) or a computer id"),
+          label: z.string().max(80).optional(),
+        }).optional().describe("Add a CLI account (a config directory on the computer; its owner is you). Then the person signs in: the result says how"),
+        remove_account: z.string().optional().describe("Remove this account (refused while agents use it)"),
+        sign_out: z.string().optional().describe("Sign this account out with the CLI's own command"),
+        install: z.object({ cli: z.enum(["claude", "codex"]), computer: z.string().optional() }).optional().describe("Install the CLI with its official installer (npm) on this server or a computer"),
+        allow_instance_codex: z.boolean().optional().describe("Codex accounts owned by \"instance\" may run any work of the instance (shared ChatGPT plan: check OpenAI's terms)"),
+      }).optional().describe("The CLI engine (official Claude Code / Codex signed in with a person's own plan). Polpo never sees a token: signing in is Anthropic's / OpenAI's own flow in a terminal"),
     },
     outputSchema: { harnesses: z.array(harnessItem), changed: z.array(z.string()) },
     annotations: UPDATE,
-  }, async ({ enabled, allow_host, claude_code, codex, opencode }) => {
-    if (enabled === undefined && allow_host === undefined && claude_code === undefined && codex === undefined && opencode === undefined) {
-      return fail("Nothing to change: give enabled, allow_host, claude_code, codex or opencode.");
+  }, async ({ enabled, allow_host, claude_code, codex, opencode, cli }) => {
+    if (enabled === undefined && allow_host === undefined && claude_code === undefined && codex === undefined && opencode === undefined && cli === undefined) {
+      return fail("Nothing to change: give enabled, allow_host, claude_code, codex, opencode or cli.");
+    }
+    if (cli && enabled === undefined && allow_host === undefined && claude_code === undefined && codex === undefined && opencode === undefined) {
+      const lines: string[] = [];
+      if (cli.install) {
+        const r = await apiSend(deps, "POST", "/harnesses/cli/install", cli.install);
+        const d = r.ok ? (r.data as { ok: boolean; version?: string; output?: string }) : undefined;
+        lines.push(d?.ok ? `Installed ${cli.install.cli}${d.version ? ` ${d.version}` : ""}.` : `Install failed: ${d?.output ?? (r as { error?: string }).error ?? "error"}`);
+      }
+      if (cli.add_account) {
+        const r = await apiSend(deps, "POST", "/harnesses/cli/accounts", cli.add_account);
+        if (!r.ok) return apiError(r, "Adding the CLI account");
+        const a = r.data as { id: string; cli: string; computer: string; configDir: string };
+        const login = await apiGet(deps, `/harnesses/cli/accounts/${enc(a.id)}/login`);
+        const how = login.ok ? (login.data as { command: string; mode: string }) : undefined;
+        lines.push(`Added CLI account ${a.id} (${a.configDir} on ${a.computer}). Sign in: the person opens Settings → Harnesses → CLI accounts → Sign in in the dashboard`
+          + `${how ? ` (or runs \`${how.command}\` on ${a.computer})` : ""} and completes ${a.cli === "claude" ? "Anthropic's" : "OpenAI's"} own sign-in. Polpo never sees the token.`);
+      }
+      if (cli.sign_out) {
+        const r = await apiSend(deps, "POST", `/harnesses/cli/accounts/${enc(cli.sign_out)}/logout`, {});
+        if (!r.ok) return apiError(r, "Signing the CLI account out");
+        lines.push(`Signed out ${cli.sign_out}.`);
+      }
+      if (cli.remove_account) {
+        const r = await apiSend(deps, "DELETE", `/harnesses/cli/accounts/${enc(cli.remove_account)}`);
+        if (!r.ok) return apiError(r, "Removing the CLI account");
+        lines.push(`Removed CLI account ${cli.remove_account} (its sign-in stays in its directory until signed out).`);
+      }
+      if (cli.allow_instance_codex !== undefined) {
+        const r = await apiSend(deps, "PATCH", "/harnesses/cli/settings", { allowInstanceCodex: cli.allow_instance_codex });
+        if (!r.ok) return apiError(r, "Changing the CLI settings");
+        lines.push(`Instance Codex accounts: ${cli.allow_instance_codex ? "allowed (a shared ChatGPT plan: check OpenAI's terms)" : "not allowed"}.`);
+      }
+      const after = await apiGet(deps, "/harnesses");
+      const o = (after.ok ? after.data : { harnesses: [] }) as Overview;
+      return ok(lines.join("\n") || "Nothing changed.", { harnesses: o.harnesses, changed: ["cli"] });
     }
     if (claude_code?.auth === "subscription") return fail(`${CLAUDE_SUBSCRIPTION_REFUSAL}. Nothing was changed.`);
     if (opencode?.auth === "subscription") return fail(`${OPENCODE_SUBSCRIPTION_REFUSAL}. Nothing was changed.`);

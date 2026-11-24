@@ -38,11 +38,13 @@ export interface RunView {
   durationMs?: number;
 }
 
-export const ENGINE_LABELS: Record<string, string> = { polpo: "Polpo", "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode" };
-const AUTH_LABELS: Record<string, string> = { bedrock: "Bedrock", vertex: "Vertex AI", "api-key": "API key", "ai-gateway": "Vercel AI Gateway", gateway: "model gateway" };
+export const ENGINE_LABELS: Record<string, string> = { polpo: "Polpo", "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", "claude-cli": "Claude Code (CLI)", "codex-cli": "Codex (CLI)" };
+const AUTH_LABELS: Record<string, string> = { bedrock: "Bedrock", vertex: "Vertex AI", "api-key": "API key", "ai-gateway": "Vercel AI Gateway", gateway: "model gateway", subscription: "personal plan" };
 const isHarness = (x: unknown): x is "claude-code" | "codex" | "opencode" => x === "claude-code" || x === "codex" || x === "opencode";
 
 export function engineMark(engine: string | undefined): BrandMark {
+  if (engine === "claude-cli") return "claude-code";
+  if (engine === "codex-cli") return "codex";
   return isHarness(engine) ? engine : "polpo";
 }
 
@@ -50,7 +52,8 @@ export function engineMark(engine: string | undefined): BrandMark {
 export function agentEngine(engine: unknown): { id: TaskRunContext["engine"]; model?: string } {
   if (isHarness(engine)) return { id: engine };
   if (engine && typeof engine === "object") {
-    const e = engine as { harness?: unknown; model?: unknown };
+    const e = engine as { harness?: unknown; model?: unknown; type?: unknown; cli?: unknown };
+    if (e.type === "cli" && (e.cli === "claude" || e.cli === "codex")) return { id: e.cli === "claude" ? "claude-cli" : "codex-cli", ...(typeof e.model === "string" && e.model ? { model: e.model } : {}) };
     if (isHarness(e.harness)) return { id: e.harness, ...(typeof e.model === "string" && e.model ? { model: e.model } : {}) };
   }
   return { id: "polpo" };
@@ -69,6 +72,7 @@ export function modelLabel(model: string | undefined): string | undefined {
 }
 
 export function authMark(kind: string | undefined, engine?: string, provider?: string): BrandMark {
+  if (kind === "subscription") return engine === "codex-cli" ? "openai" : "anthropic";
   if (kind === "bedrock") return "bedrock";
   if (kind === "vertex") return "vertex";
   if (engine === "opencode") return kind === "api-key" && provider === "anthropic" ? "anthropic" : kind === "api-key" && provider === "openai" ? "openai" : "api-key";

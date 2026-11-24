@@ -53,8 +53,17 @@ const agentFields = {
       credentialRef: z.object({ owner: z.string().min(1), service: z.string().min(1) }).optional()
         .describe("This agent's own key (cost separation): a vault entry (owner + service, never the key) that replaces the harness's API key or gateway key"),
     }),
-  ]).optional().describe("Its engine: \"polpo\" (Polpo's own, the default) or an official harness (Claude Code, Codex, OpenCode) running inside its computer "
-    + "(a Daytona v2 computer, set with defaultComputer). Credentials come from the harness settings (polpo_harnesses_update), never from here."),
+    z.object({
+      type: z.literal("cli").describe("The official CLI program (unmodified) signed in with a person's own account"),
+      cli: z.enum(["claude", "codex"]).describe("claude: Claude Code (claude.ai plan); codex: Codex (ChatGPT plan)"),
+      account: z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/).optional().describe("The CLI account (polpo_harnesses_get → cli.accounts); default: the only one of that CLI on the agent's computer"),
+      model: z.string().max(200).optional().describe("Model or alias for the CLI (e.g. opus, sonnet, gpt-5.5-codex); omit for the CLI's default"),
+      permissionMode: z.enum(["allow-all", "allow-edits", "allow-reads"]).optional().describe("What the CLI may do unattended (default allow-all)"),
+      args: z.array(z.string().max(300)).max(20).optional().describe("Extra command-line flags (not the account, protocol, session or instructions flags)"),
+    }),
+  ]).optional().describe("Its engine: \"polpo\" (Polpo's own, the default), an official harness (Claude Code, Codex, OpenCode) running inside its computer "
+    + "(a Daytona v2 computer, set with defaultComputer; credentials from polpo_harnesses_update, never from here), or { type: \"cli\" }: the official Claude Code / Codex "
+    + "program signed in with a person's own plan (a CLI account: polpo_harnesses_get). A personal sign-in runs only work its owner starts (Anthropic's and OpenAI's terms)."),
 };
 
 /** An error when browserEgress names a proxy the settings do not have, else null. */
@@ -117,7 +126,11 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
       `model: ${a.model ?? "default"}${a.reportsTo ? ` · reports to ${a.reportsTo}` : ""}`,
       `tools: ${a.allowedTools?.join(", ") ?? "defaults"} · skills: ${a.skills?.join(", ") || "none"}`,
       ...(connectorLine ? [connectorLine] : []),
-      ...(a.engine && typeof a.engine === "object" ? [`engine: ${(a.engine as { harness?: string }).harness} harness${(a.engine as { model?: string }).model ? ` (${(a.engine as { model?: string }).model})` : ""}`] : []),
+      ...(a.engine && typeof a.engine === "object"
+        ? [(a.engine as { type?: string }).type === "cli"
+          ? `engine: ${(a.engine as { cli?: string }).cli} CLI${(a.engine as { account?: string }).account ? ` (account ${(a.engine as { account?: string }).account})` : ""}${(a.engine as { model?: string }).model ? ` (${(a.engine as { model?: string }).model})` : ""}`
+          : `engine: ${(a.engine as { harness?: string }).harness} harness${(a.engine as { model?: string }).model ? ` (${(a.engine as { model?: string }).model})` : ""}`]
+        : []),
       ...(a.systemPrompt ? ["", short(a.systemPrompt, 3000)] : []),
     ].join("\n");
     return ok(text, { agent: a as Record<string, unknown>, ...(Object.keys(stale).length ? { stale_connector_tools: stale } : {}) });

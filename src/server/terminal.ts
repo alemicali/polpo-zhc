@@ -11,6 +11,9 @@ import { getPolpoDir } from "../core/constants.js";
 import type { Orchestrator } from "../core/orchestrator.js";
 import { AUTH_COOKIE_NAME, isInstanceAuthEnabled, validateSession } from "./auth/instance-auth.js";
 import { getEffectiveAllowedRoots } from "./coding-config-store.js";
+import { CLI_INSTANCE_OWNER, HOST_COMPUTER_ID, cliSettingsOf, type CliAccount } from "@polpo-ai/core";
+import { cliHostEnv, expandHome } from "../cli-engine/process.js";
+import { cliLoginCommand } from "../cli-engine/accounts.js";
 
 type NodePtyModule = typeof import("node-pty");
 type UpgradeServer = {
@@ -27,7 +30,7 @@ export interface TerminalSessionSnapshot {
   id: string;
   pid: number;
   cwd: string;
-  agentKind: "terminal" | "claude" | "codex";
+  agentKind: "terminal" | "claude" | "codex" | "cli-login";
   agentCommand?: string;
   startedAt: string;
   clients: number;
@@ -46,7 +49,7 @@ type RuntimeTerminalSession = {
   clients: Set<WebSocket>;
   buffer: string;
   cwd: string;
-  agentKind: "terminal" | "claude" | "codex";
+  agentKind: "terminal" | "claude" | "codex" | "cli-login";
   agentCommand?: string;
   startedAt: string;
 };
@@ -92,24 +95,30 @@ export function attachTerminalWebSocket(
 
   server.on("upgrade", onUpgrade);
 
-  wss.on("connection", async (ws: WebSocket, _req: IncomingMessage, query: Record<string, string | string[] | undefined>) => {
+  wss.on("connection", async (ws: WebSocket, req: IncomingMessage, query: Record<string, string | string[] | undefined>) => {
     try {
       const pty = await loadNodePty();
       const agentWorkDir = orchestrator.getAgentWorkDir();
-      const cwd = resolveTerminalCwd(agentWorkDir, firstValue(query.cwd), orchestrator.getPolpoDir());
       const shellPath = process.env.POLPO_TERMINAL_SHELL || process.env.SHELL || "/bin/bash";
       const cols = clampNumber(firstValue(query.cols), 20, 240, 100);
       const rows = clampNumber(firstValue(query.rows), 8, 80, 30);
       const agentKind = parseAgentKind(firstValue(query.agent));
       const agentSessionId = firstValue(query.agent_session_id) ?? "";
-      const agentCommandOverride = firstValue(query.agent_command);
-      const sessionId = normalizeSessionId(firstValue(query.session_id));
+      const agentCommandOverride = agentKind === "cli-login" ? undefined : firstValue(query.agent_command);
+      // a CLI account's sign-in: the official login command with that account's directory only
+      const login = agentKind === "cli-login"
+        ? cliLoginInvocation(orchestrator, firstValue(query.cli_account), terminalMember(req, activePolpoDir(orchestrator, opts)))
+        : undefined;
+      const cwd = login ? login.cwd : resolveTerminalCwd(agentWorkDir, firstValue(query.cwd), orchestrator.getPolpoDir());
+      const sessionId = login ? `cli-login-${login.account.id}` : normalizeSessionId(firstValue(query.session_id));
       const revision = clampNumber(firstValue(query.revision), 0, Number.MAX_SAFE_INTEGER, 0);
-      const { command, args } = buildAgentInvocation(agentKind, shellPath, {
-        override: agentCommandOverride,
-        sessionId: agentSessionId,
-        cwd,
-      });
+      const { command, args } = login
+        ? { command: "bash", args: ["-lc", login.command] }
+        : buildAgentInvocation(agentKind, shellPath, {
+          override: agentCommandOverride,
+          sessionId: agentSessionId,
+          cwd,
+        });
 
       let session = sessions.get(sessionId);
       if (session && session.revision !== revision) {
@@ -126,7 +135,8 @@ export function attachTerminalWebSocket(
           cols,
           rows,
           cwd,
-          env: {
+          // the sign-in gets the CLI's minimal environment (none of the server's credentials)
+          env: login ? { ...login.env, TERM: "xterm-256color", COLORTERM: "truecolor" } : {
             ...process.env,
             TERM: "xterm-256color",
             COLORTERM: "truecolor",
@@ -356,11 +366,42 @@ function safeCompare(a: string, b: string): boolean {
   return timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
-type AgentKind = "terminal" | "claude" | "codex";
+type AgentKind = "terminal" | "claude" | "codex" | "cli-login";
 
 function parseAgentKind(value: string | undefined): AgentKind {
-  if (value === "claude" || value === "codex") return value;
+  if (value === "claude" || value === "codex" || value === "cli-login") return value;
   return "terminal";
+}
+
+/** The signed-in member of a terminal request (instance sign-in cookie), if any. */
+function terminalMember(req: IncomingMessage, polpoDir: string): string | undefined {
+  if (!isInstanceAuthEnabled()) return undefined;
+  const token = parseCookie(req.headers.cookie ?? "")[AUTH_COOKIE_NAME];
+  return validateSession(polpoDir, token)?.email?.toLowerCase();
+}
+
+/**
+ * The sign-in terminal of a CLI account on this server: `claude auth login` / `codex login
+ * --device-auth` with the account's config directory and the CLI's minimal environment. Only the
+ * account's owner may open it (anyone for an "instance" account, or without member sign-in):
+ * the person signing in is the person whose plan runs the work.
+ */
+export function cliLoginInvocation(
+  orchestrator: Pick<Orchestrator, "getConfig">,
+  accountId: string | undefined,
+  member: string | undefined,
+  base: NodeJS.ProcessEnv = process.env,
+): { account: CliAccount; command: string; cwd: string; env: Record<string, string> } {
+  const account = cliSettingsOf(orchestrator.getConfig()?.settings)?.accounts.find((a) => a.id === accountId);
+  if (!account) throw new Error(`Unknown CLI account "${accountId ?? ""}"`);
+  if (account.computer !== HOST_COMPUTER_ID) throw new Error(`Account "${account.id}" is on computer "${account.computer}": sign in from a terminal on that computer`);
+  if (isInstanceAuthEnabled() && account.owner !== CLI_INSTANCE_OWNER && member !== account.owner) {
+    throw new Error(`Only ${account.owner} can sign in account "${account.id}": it is their personal sign-in`);
+  }
+  const env = cliHostEnv(account.cli, account, base);
+  const cwd = expandHome(account.configDir, env.HOME!);
+  mkdirSync(cwd, { recursive: true, mode: 0o700 });
+  return { account, command: cliLoginCommand(account), cwd, env };
 }
 
 /**
