@@ -235,6 +235,98 @@ function registerSkillBundleTools(tool: Register, deps: McpDeps): void {
   });
 }
 
+type SkillVersionItem = {
+  version: number; createdAt: string; author: string; source: string; files: number; totalBytes: number;
+  name?: string; description?: string; restoredFrom?: number;
+};
+type VersionList = { name: string; scope: string; versions: SkillVersionItem[]; current?: number; deletedAt?: string };
+type FileDiff = { path: string; status: "added" | "removed" | "changed"; sizeA?: number; sizeB?: number; binary?: boolean; diff?: string; additions?: number; deletions?: number; truncated?: boolean };
+
+const versionItem = z.object({
+  version: z.number(), created_at: z.string(), author: z.string(), source: z.string(), files: z.number(), total_bytes: z.number(),
+  description: z.string().optional(), restored_from: z.number().optional(), current: z.boolean(),
+});
+const by = (author: string) => author.replace(/^person:/, "");
+
+/** A skill's history (every change recorded as a copy of the folder), the diff of two versions, restore. */
+function registerSkillVersionTools(tool: Register, deps: McpDeps): void {
+  tool("skills", "polpo_skill_versions", {
+    title: "List a skill's versions",
+    description: "A skill's history, newest first: every change (create, edit, upload, git or local install, restore) with its number, date, "
+      + "who made it, how, file count and size. The latest is the current state; a deleted skill keeps its history for a while and can be restored. "
+      + "Compare two with polpo_skill_version_diff, bring one back with polpo_skill_restore.",
+    inputSchema: { name: z.string().min(1).describe("The skill's name"), pool: poolParam, limit: limitParam(20, 100) },
+    outputSchema: { name: z.string(), scope: z.string(), current: z.number().optional(), deleted_at: z.string().optional(), versions: z.array(versionItem), total: z.number() },
+    annotations: READ,
+  }, async ({ name, pool, limit }) => {
+    const r = await apiGet(deps, `${poolPath(pool)}/${enc(name)}/versions`);
+    if (!r.ok) return r.status === 404 ? notFound(name) : apiError(r, `Listing ${name}'s versions`);
+    const d = r.data as VersionList;
+    const items = d.versions.slice(0, limit ?? 20).map((v) => ({
+      version: v.version, created_at: v.createdAt, author: v.author, source: v.source, files: v.files, total_bytes: v.totalBytes,
+      ...(v.description ? { description: v.description } : {}), ...(v.restoredFrom !== undefined ? { restored_from: v.restoredFrom } : {}),
+      current: v.version === d.current,
+    }));
+    const lines = items.map((v) => `- v${v.version}${v.current ? " (current)" : ""} ${v.created_at.slice(0, 16).replace("T", " ")} by ${by(v.author)} (${v.source}${v.restored_from ? ` of v${v.restored_from}` : ""}): ${v.files} files, ${size(v.total_bytes)}`);
+    return ok(`${d.name}: ${d.versions.length} version${d.versions.length === 1 ? "" : "s"}${d.deletedAt ? ` (the skill was deleted ${d.deletedAt.slice(0, 10)}: restore a version to bring it back)` : ""}\n${lines.join("\n") || "No versions yet."}`
+      + `${d.versions.length > items.length ? `\n(${d.versions.length - items.length} older not shown)` : ""}`,
+    { name: d.name, scope: d.scope, ...(d.current ? { current: d.current } : {}), ...(d.deletedAt ? { deleted_at: d.deletedAt } : {}), versions: items, total: d.versions.length });
+  });
+
+  tool("skills", "polpo_skill_version_diff", {
+    title: "Compare two versions of a skill",
+    description: "What changed in a skill from version a to version b (polpo_skill_versions): files added, removed and changed, with a unified diff "
+      + "for text files (binary or very large files are only named).",
+    inputSchema: {
+      name: z.string().min(1).describe("The skill's name"),
+      a: z.number().int().min(1).describe("The older version"),
+      b: z.number().int().min(1).describe("The newer version"),
+      pool: poolParam,
+      max_chars: z.number().int().min(500).max(500_000).optional().describe("Longest diff text returned (default 40000)"),
+    },
+    outputSchema: {
+      a: z.number(), b: z.number(), unchanged: z.number(),
+      files: z.array(z.object({ path: z.string(), status: z.string(), binary: z.boolean().optional(), additions: z.number().optional(), deletions: z.number().optional(), truncated: z.boolean().optional() })),
+      diff: z.string(),
+    },
+    annotations: READ,
+  }, async ({ name, a, b, pool, max_chars }) => {
+    const r = await apiGet(deps, `${poolPath(pool)}/${enc(name)}/versions/${a}/diff/${b}`);
+    if (!r.ok) return r.status === 404 ? fail(`${r.error}. List the versions with polpo_skill_versions.`) : apiError(r, `Comparing versions of ${name}`);
+    const d = r.data as { files: FileDiff[]; unchanged: number };
+    const files = d.files.map(({ path, status, binary, additions, deletions, truncated }) => ({
+      path, status, ...(binary ? { binary } : {}), ...(additions !== undefined ? { additions } : {}), ...(deletions !== undefined ? { deletions } : {}), ...(truncated ? { truncated } : {}),
+    }));
+    const max = max_chars ?? 40_000;
+    let text = d.files.map((f) => f.diff ?? `${f.status === "added" ? "+++" : f.status === "removed" ? "---" : "~~~"} ${f.path}${f.binary ? " (binary)" : f.truncated ? " (too large to show)" : ""}\n`).join("");
+    const cut = text.length > max;
+    if (cut) text = `${text.slice(0, max)}\n[cut at ${max} characters]`;
+    const summary = files.map((f) => `- ${f.status} ${f.path}${f.additions !== undefined ? ` (+${f.additions} −${f.deletions})` : ""}${f.binary ? " (binary)" : ""}`).join("\n");
+    return ok(`${name} v${a} → v${b}: ${files.length ? `${files.length} file(s) differ, ${d.unchanged} unchanged` : "identical"}\n${summary}${text ? `\n\n${text}` : ""}`,
+      { a, b, unchanged: d.unchanged, files, diff: text });
+  });
+
+  tool("skills", "polpo_skill_restore", {
+    title: "Restore a version of a skill",
+    description: "Put an older version of a skill back (its whole folder), or bring back a deleted skill. The current state is kept as a version "
+      + "first, so a restore can itself be undone. Agents use the restored skill from their next run. Needs confirm: true.",
+    inputSchema: {
+      name: z.string().min(1).describe("The skill's name"),
+      version: z.number().int().min(1).describe("The version to restore (polpo_skill_versions)"),
+      pool: poolParam,
+      confirm: confirmParam("restore the version"),
+    },
+    outputSchema: { name: z.string(), restored_from: z.number(), version: z.number() },
+    annotations: DESTRUCTIVE,
+  }, async ({ name, version, pool, confirm }) => {
+    if (confirm !== true) return fail(`Restoring version ${version} of ${name} replaces its current files (they stay in the history): ask the person, then call again with confirm: true.`);
+    const r = await apiSend(deps, "POST", `${poolPath(pool)}/${enc(name)}/versions/${version}/restore`);
+    if (!r.ok) return r.status === 404 ? fail(`${r.error}. List the versions with polpo_skill_versions.`) : apiError(r, `Restoring version ${version} of ${name}`);
+    const d = r.data as { version: { version: number } };
+    return ok(`Restored ${name} to version ${version}: it is now version ${d.version.version}.`, { name, restored_from: version, version: d.version.version });
+  });
+}
+
 export function registerSkillTools(tool: Register, deps: McpDeps): void {
   tool("skills", "polpo_skills_list", {
     title: "List skills",
@@ -279,9 +371,14 @@ export function registerSkillTools(tool: Register, deps: McpDeps): void {
     const f = await apiGet(deps, `/skills/${enc(name)}/files`);
     const files = f.ok ? ((f.data as { files?: SkillFile[] }).files ?? []) : [];
     const bundled = files.filter((x) => x.path !== "SKILL.md");
-    return ok(`${s.name} (${s.source}): ${s.description}${s.allowedTools?.length ? `\ntools: ${s.allowedTools.join(", ")}` : ""}\n\n${s.content ?? ""}`
+    // its history: how many versions (polpo_skill_versions lists them)
+    const h = await apiGet(deps, `/skills/${enc(name)}/versions`);
+    const versions = h.ok ? ((h.data as VersionList).versions ?? []) : [];
+    const latest = versions[0];
+    return ok(`${s.name} (${s.source}): ${s.description}${s.allowedTools?.length ? `\ntools: ${s.allowedTools.join(", ")}` : ""}`
+      + `${versions.length ? `\nversions: ${versions.length} (current v${latest.version}, ${latest.createdAt.slice(0, 10)} by ${by(latest.author)}; see polpo_skill_versions)` : ""}\n\n${s.content ?? ""}`
       + (bundled.length ? `\n\n---\nBundled files (read one with polpo_skill_file_read):\n${bundled.slice(0, 100).map((x) => `- ${x.path} (${size(x.size)})`).join("\n")}${bundled.length > 100 ? "\n- …" : ""}` : ""),
-    { skill: { ...skill, files } });
+    { skill: { ...skill, files, versions: versions.length, ...(latest ? { current_version: latest.version } : {}) } });
   });
 
   tool("skills", "polpo_skill_create", {
@@ -377,7 +474,7 @@ export function registerSkillTools(tool: Register, deps: McpDeps): void {
 
   tool("skills", "polpo_skill_delete", {
     title: "Delete a skill",
-    description: "Remove a skill from the pool (agents that had it lose it). It cannot be undone. Needs confirm: true.",
+    description: "Remove a skill from the pool (agents that had it lose it). Its history is kept for a while (30 days by default): polpo_skill_restore brings it back. Needs confirm: true.",
     inputSchema: { name: z.string().min(1).describe("The skill's name"), confirm: confirmParam("delete the skill") },
     outputSchema: { name: z.string(), removed: z.boolean() },
     annotations: DESTRUCTIVE,
@@ -386,7 +483,7 @@ export function registerSkillTools(tool: Register, deps: McpDeps): void {
     if (!list.ok) return apiError(list, "Listing skills");
     const skill = list.skills.find((s) => s.name === name);
     if (!skill) return notFound(name);
-    if (confirm !== true) return fail(`Deleting skill ${name}${skill.assignedTo?.length ? ` (used by ${skill.assignedTo.join(", ")})` : ""} cannot be undone: ask the person, then call again with confirm: true.`);
+    if (confirm !== true) return fail(`Deleting skill ${name}${skill.assignedTo?.length ? ` (used by ${skill.assignedTo.join(", ")})` : ""} takes it from its agents (its versions are kept, so it can be restored): ask the person, then call again with confirm: true.`);
     const r = await apiSend(deps, "DELETE", `/skills/${enc(name)}${skill.source === "global" ? "?global=true" : ""}`);
     if (!r.ok) return apiError(r, `Deleting skill ${name}`);
     return ok(`Deleted skill ${name}.`, { name, removed: true });
@@ -425,4 +522,5 @@ export function registerSkillTools(tool: Register, deps: McpDeps): void {
   });
 
   registerSkillBundleTools(tool, deps);
+  registerSkillVersionTools(tool, deps);
 }

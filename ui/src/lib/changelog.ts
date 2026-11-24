@@ -32,6 +32,24 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-24-skill-versions",
+    date: "2026-11-24",
+    kind: "new",
+    title: "Le skill hanno le versioni: confronta e ripristina",
+    summary: "Ogni modifica a una skill (caricamento, modifica, installazione, ripristino) ora salva una versione di tutta la cartella: nella pagina della skill, Versioni mostra chi ha cambiato cosa e quando, le differenze tra due versioni e un ripristino con un clic.",
+    body: [
+      "- **Versioni automatiche**: creare, modificare, sostituire con un caricamento o un'installazione da git, ripristinare: ogni modifica salva una copia di tutti i file della skill, con data, autore (tu, Polpo, un agente, un client MCP) e origine. La versione più recente è lo stato attuale.",
+      "- **Confronta**: spunta due versioni e vedi i file aggiunti, rimossi e cambiati, con le righe modificate evidenziate.",
+      "- **Sfoglia e ripristina**: apri i file di una versione in sola lettura nello stesso browser di file, scaricala come .skill, o ripristinala (prima chiede conferma, e lo stato attuale resta tra le versioni: puoi sempre tornare indietro).",
+      "- **Skill eliminate**: la loro storia resta 30 giorni, quindi una skill cancellata per errore si può ripristinare dalla sua pagina.",
+      "- **Si tengono** le ultime 20 versioni e al massimo 50 MB per skill, fuori dalle cartelle che gli agenti vedono.",
+      "- **Pagina più comoda**: su schermo largo l'albero dei file e i dettagli della skill restano fermi mentre scorri un file lungo.",
+      "- Anche da MCP (`polpo_skill_versions`, `polpo_skill_version_diff`, `polpo_skill_restore`), dalla chat con Polpo, da REST (`/api/v1/skills/{name}/versions`) e dall'SDK (`useSkillVersions`).",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri Skills", to: "/skills" },
+  },
+  {
     id: "2026-11-24-skill-bundles",
     date: "2026-11-24",
     kind: "new",

@@ -20,6 +20,7 @@ import {
 } from "../../llm/skills.js";
 import { resolve } from "node:path";
 import { registerSkillBundleRoutes } from "./skill-bundles.js";
+import { registerSkillVersionRoutes } from "./skill-versions.js";
 
 
 /**
@@ -31,11 +32,16 @@ export function skillRoutes(getDeps: () => {
   workDir: string;
   getAgents: () => Promise<any[]>;
   emit: (event: "skill:changed", data: { scope: "agent" | "orchestrator"; action: "created" | "updated" | "deleted" | "installed" | "assigned" | "unassigned" | "indexed"; skillName?: string; agentName?: string; timestamp: string }) => void;
+  /** Who makes a request, recorded in the skills' versions (default "person:dashboard"). */
+  author?: (c: any) => string;
 }): OpenAPIHono {
   const app = new OpenAPIHono();
+  const authorOf = (c: any) => getDeps().author?.(c) ?? "person:dashboard";
 
   // Bundles: upload .skill/.zip archives, browse and download a skill's files (both pools)
   registerSkillBundleRoutes(app, getDeps);
+  // Versions: every change recorded; list, browse, diff, restore, download (both pools)
+  registerSkillVersionRoutes(app, getDeps);
 
   // GET /skills — list skills with agent assignments
   const listSkillsRoute = createRoute({
@@ -114,6 +120,7 @@ export function skillRoutes(getDeps: () => {
       skillNames: body.skillNames,
       global: body.global,
       force: body.force,
+      author: authorOf(c),
     });
     if (result.installed.length > 0) deps.emit("skill:changed", { scope: "agent", action: "installed", timestamp: new Date().toISOString() });
 
@@ -178,6 +185,7 @@ export function skillRoutes(getDeps: () => {
     const skillPath = createAgentSkill(polpoDir, body.name, body.description, body.content, {
       allowedTools: body.allowedTools,
       global: body.global,
+      author: authorOf(c),
     });
     deps.emit("skill:changed", { scope: "agent", action: "created", skillName: body.name, timestamp: new Date().toISOString() });
     return c.json({ ok: true, data: { name: body.name, path: skillPath } }, 201);
@@ -220,7 +228,7 @@ export function skillRoutes(getDeps: () => {
     const deps = getDeps();
     const { name } = c.req.valid("param");
     const { global, ...updates } = c.req.valid("json");
-    if (!updateAgentSkill(deps.polpoDir, name, updates, global)) {
+    if (!updateAgentSkill(deps.polpoDir, name, updates, global, authorOf(c))) {
       return c.json({ ok: false, error: `Skill "${name}" not found${global ? " in the global pool" : ""}`, code: "NOT_FOUND" }, 404);
     }
     deps.emit("skill:changed", { scope: "agent", action: "updated", skillName: name, timestamp: new Date().toISOString() });
@@ -256,7 +264,7 @@ export function skillRoutes(getDeps: () => {
     const { global: globalParam } = c.req.valid("query");
     const global = globalParam === "true";
 
-    const removed = removeSkill(polpoDir, name, global);
+    const removed = removeSkill(polpoDir, name, global, authorOf(c));
     if (!removed) {
       return c.json({ ok: false, error: "Skill not found", code: "NOT_FOUND" }, 404);
     }
@@ -457,6 +465,7 @@ export function skillRoutes(getDeps: () => {
 
     const skillPath = createOrchestratorSkill(polpoDir, body.name, body.description, body.content, {
       allowedTools: body.allowedTools,
+      author: authorOf(c),
     });
     deps.emit("skill:changed", { scope: "orchestrator", action: "created", skillName: body.name, timestamp: new Date().toISOString() });
     return c.json({ ok: true, data: { name: body.name, path: skillPath } }, 201);
@@ -500,7 +509,7 @@ export function skillRoutes(getDeps: () => {
     const { name } = c.req.valid("param");
     const body = c.req.valid("json");
 
-    const ok = updateOrchestratorSkill(polpoDir, name, body);
+    const ok = updateOrchestratorSkill(polpoDir, name, body, false, authorOf(c));
     if (!ok) {
       return c.json({ ok: false, error: `Skill "${name}" not found`, code: "NOT_FOUND" }, 404);
     }
@@ -534,7 +543,7 @@ export function skillRoutes(getDeps: () => {
     const polpoDir = deps.polpoDir;
     const { name } = c.req.valid("param");
 
-    const removed = removeOrchestratorSkill(polpoDir, name);
+    const removed = removeOrchestratorSkill(polpoDir, name, false, authorOf(c));
     if (!removed) {
       return c.json({ ok: false, error: "Skill not found", code: "NOT_FOUND" }, 404);
     }
@@ -615,6 +624,7 @@ export function skillRoutes(getDeps: () => {
     const result = installOrchestratorSkills(body.source, polpoDir, {
       skillNames: body.skillNames,
       force: body.force,
+      author: authorOf(c),
     });
     if (result.installed.length > 0) deps.emit("skill:changed", { scope: "orchestrator", action: "installed", timestamp: new Date().toISOString() });
 

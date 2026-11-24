@@ -97,7 +97,8 @@ images and PDFs shown, anything else offered as a download. The URL says which f
 (`/skills/pdf-tools?file=references/forms.md`), and **relative links** inside markdown
 (`[forms](references/forms.md)`, `../SKILL.md`) open that file in place. Download one file, or the
 whole skill as `.skill` / `.zip` (ready to upload elsewhere). Polpo's own skills open the same way
-(`/skills/<name>?pool=orchestrator`, from Configuration → Agent).
+(`/skills/<name>?pool=orchestrator`, from Configuration → Agent). On a wide screen the tree and the
+skill's details stay in view (sticky, with their own scroll) while a long file scrolls beside them.
 
 | Where | How |
 | --- | --- |
@@ -105,6 +106,47 @@ whole skill as `.skill` / `.zip` (ready to upload elsewhere). Polpo's own skills
 | MCP | `polpo_skill_files`, `polpo_skill_file_read` (text, or `encoding: "base64"` up to 4 MB); `polpo_skill_get` lists the bundled files too |
 | Polpo (chat) | `skill_files`, `skill_file_read`; `get_skill` shows the folder |
 | SDK | `client.getSkillFiles(name, pool)`, `client.getSkillFile/getSkillFileText(name, path, pool)`, `client.skillFileUrl(...)`, `client.skillDownloadUrl(...)`; React `useSkillFiles(name, pool)` |
+
+## Versions
+
+Every change Polpo makes to a skill is recorded as a **version**: a copy of the whole skill folder
+(every file, not just `SKILL.md`), like artifacts have. The current state of a skill is its latest
+version, so a replace, an edit or a restore can always be undone.
+
+- **What records a version**: creating a skill (dashboard, MCP, Polpo, an agent learning), editing it
+  (`PUT /skills/{name}`, `polpo_skill_update`, `skill_update`, an agent updating its own skill), an
+  install over it — upload with *replace*, git or local install with `force` — and a restore. Each
+  version has its number (never reused), date, **author** (`person:<email>` for the dashboard,
+  `mcp:<client>` for an MCP client, an agent's name, `polpo` for Polpo's chat, `cli`), **source**
+  (`create`, `upload`, `git`, `local`, `edit`, `restore`), file count, total size, and `SKILL.md`'s
+  `name` / `description` at that time. A change that leaves the files identical records nothing.
+- **Changes made outside Polpo** (files edited on disk, or a skill installed before versions existed)
+  are not lost: before any change, the folder on disk is compared with the latest version and, when
+  it differs, recorded first with source `external` (author `unknown`).
+- **Storage**: outside the skill pools, so agents never see it — `.polpo/skill-versions/<pool>/project/<name>/`
+  for a project skill, `~/.polpo/skill-versions/<pool>/global/<name>/` for a global one (`<pool>` is
+  `agent` or `orchestrator`); one folder per version (`1/`, `2/`, …) and an `index.json`.
+- **Retention**: the last **20** versions and at most **50 MB** per skill; the oldest go first, the
+  latest always stays. Environment overrides: `POLPO_SKILL_VERSIONS_KEEP`, `POLPO_SKILL_VERSIONS_MAX_MB`.
+- **Deleting a skill keeps its history** (the state it had is its latest version) for **30 days**
+  (`POLPO_SKILL_VERSIONS_DELETED_DAYS`), so a deleted skill can be restored; then the history is purged
+  (checked whenever a skill of that pool is deleted). A skill installed again under the same name
+  continues the same history. We chose this over dropping the history on delete: a delete is the
+  change people most want to undo, and keeping the last state costs one folder.
+- **Restore** puts a version's folder back (swapped in only once complete) and records the result as
+  a new version (source `restore`, `restoredFrom`); the state before it is recorded first, so a restore
+  can itself be undone. Restoring a deleted skill recreates it.
+- **Diff**: two versions compared file by file — added, removed, changed — with a unified diff
+  (3 lines of context) for text files; binary files are only named; files over 512 KB, or diffs past
+  the size cap (200 000 characters per file, 1 000 000 in all), are marked truncated.
+
+| Where | How |
+| --- | --- |
+| Dashboard | The skill page → **Versions**: the list (number, date, author, source, files, size; the current one marked); tick two to see their diff (files added / removed / changed, a coloured unified diff per file); the eye opens a version's files read-only in the same file browser (`?version=3`); **Restore** (asks first) and **Download** per version. A deleted skill's page shows its versions to restore it. |
+| REST | `GET /api/v1/skills/{name}/versions` (newest first, `current`, `deletedAt`, `retention`); `GET …/versions/{n}/files`; `GET …/versions/{n}/files/{path}` (raw, path-safe as the current files); `GET …/versions/{a}/diff/{b}`; `POST …/versions/{n}/restore`; `GET …/versions/{n}/download?format=skill\|zip`. The same under `/api/v1/skills/orchestrator/{name}/…`. `?scope=project\|global` picks the pool's scope (default: where the skill is, or where its history is). |
+| MCP | `polpo_skill_versions`, `polpo_skill_version_diff` (read scope); `polpo_skill_restore` (`polpo:admin`, `confirm: true`); `polpo_skill_get` says how many versions a skill has. `pool: "orchestrator"` for Polpo's own skills. |
+| Polpo (chat) | `skill_versions`, `skill_version_diff`, `skill_restore` (Skills tool group) |
+| SDK | `client.getSkillVersions(name, pool)`, `getSkillVersionFiles`, `getSkillVersionFileText`, `skillVersionFileUrl`, `diffSkillVersions(name, a, b, pool)`, `restoreSkillVersion(name, n, pool)`, `skillVersionDownloadUrl`; React `useSkillVersions(name, pool)` |
 
 ## How agents use bundled files
 

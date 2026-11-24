@@ -146,6 +146,10 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_skill_upload_finalize", name: "skill_upload_finalize", group: "skills" },
   { mcp: "polpo_skill_files", name: "skill_files", group: "skills" },
   { mcp: "polpo_skill_file_read", name: "skill_file_read", group: "skills" },
+  // Skill versions: history, diff, restore
+  { mcp: "polpo_skill_versions", name: "skill_versions", group: "skills" },
+  { mcp: "polpo_skill_version_diff", name: "skill_version_diff", group: "skills" },
+  { mcp: "polpo_skill_restore", name: "skill_restore", group: "skills" },
 ];
 
 /** MCP tools Polpo already covers with a tool of its own (or a parameter of one). */

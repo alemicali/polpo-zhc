@@ -1663,6 +1663,81 @@ export interface SkillFileList {
   totalBytes: number;
 }
 
+/** How a skill version came to be. "external": found on disk (the skill before versioning, or files changed outside Polpo). */
+export type SkillVersionSource = "create" | "upload" | "git" | "local" | "edit" | "restore" | "external";
+
+/** One version of a skill: a copy of the whole folder at that time. */
+export interface SkillVersion {
+  version: number;
+  createdAt: string;
+  /** "person:<email>", an agent's name, "polpo", "mcp:<client>", "cli" or "unknown". */
+  author: string;
+  source: SkillVersionSource;
+  files: number;
+  totalBytes: number;
+  /** SKILL.md's frontmatter at that time. */
+  name?: string;
+  description?: string;
+  /** The version a restore brought back. */
+  restoredFrom?: number;
+  hash: string;
+}
+
+/** A skill's history (GET /skills/:name/versions), newest first. */
+export interface SkillVersionList {
+  name: string;
+  pool: SkillPool;
+  scope: "project" | "global";
+  versions: SkillVersion[];
+  /** The current state's version (absent for a deleted skill). */
+  current?: number;
+  /** The skill was deleted: its history is kept until the grace period ends. */
+  deletedAt?: string;
+  deletedBy?: string;
+  retention: { maxVersions: number; maxBytes: number; deletedDays: number };
+}
+
+/** The files of one version (GET /skills/:name/versions/:n/files). */
+export interface SkillVersionFiles {
+  name: string;
+  version: SkillVersion;
+  files: SkillFileEntry[];
+  totalBytes: number;
+  truncated: boolean;
+}
+
+/** One file that differs between two versions. */
+export interface SkillFileDiff {
+  path: string;
+  status: "added" | "removed" | "changed";
+  sizeA?: number;
+  sizeB?: number;
+  binary?: boolean;
+  /** Unified diff from a to b (text files). */
+  diff?: string;
+  additions?: number;
+  deletions?: number;
+  /** No diff: the file is too large, or the diff was cut. */
+  truncated?: boolean;
+}
+
+/** The diff of two versions (GET /skills/:name/versions/:a/diff/:b). */
+export interface SkillVersionDiff {
+  skill: string;
+  a: SkillVersion;
+  b: SkillVersion;
+  files: SkillFileDiff[];
+  unchanged: number;
+  summary: { added: number; removed: number; changed: number };
+}
+
+/** A restore (POST /skills/:name/versions/:n/restore): the new version it recorded. */
+export interface SkillRestoreResult {
+  name: string;
+  restoredFrom: number;
+  version: SkillVersion;
+}
+
 /** A skill found in an uploaded .skill / .zip archive. */
 export interface SkillBundleSkill {
   /** Frontmatter name (or the folder name when missing). */

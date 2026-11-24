@@ -1416,6 +1416,17 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     workDir: o.getWorkDir(),
     getAgents: () => o.getAgents(),
     emit: (event, data) => o.emit(event, data),
+    // who changes a skill, recorded in its versions: a person, Polpo's chat, an agent, or an MCP client
+    author: (c) => {
+      if (isTrustedApiCall(c.req.header(TRUSTED_API_CALL_HEADER))) {
+        const origin = currentEventOrigin();
+        if (origin?.source === "polpo") return "polpo";
+        if (origin?.source === "agent" && origin.by) return origin.by;
+        return `mcp:${origin?.by ?? "client"}`;
+      }
+      const email = c.get("polpoUserEmail" as never) as string | undefined;
+      return email ? `person:${email}` : "person:dashboard";
+    },
   })));
 
   authed.route("/notifications", notificationRoutes(() => ({

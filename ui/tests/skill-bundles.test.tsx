@@ -43,6 +43,12 @@ vi.mock("@polpo-ai/react", () => ({
     fileUrl: fileUrl(name, pool),
     downloadUrl: (format = "skill") => `/api/v1/skills/${name}/download${format === "zip" ? "?format=zip" : ""}`,
   }),
+  // versions are tested in skill-versions.test.tsx
+  useSkillVersions: () => ({
+    data: undefined, isLoading: false, error: null, refetch: async () => undefined,
+    files: async () => ({ files: [] }), diff: async () => ({}), restore: async () => ({}),
+    fileUrl: () => "", readText: async () => "", downloadUrl: () => "",
+  }),
   // the upload hook with the real state machine, the API faked
   useSkillBundleUpload: () => {
     const [current, setCurrent] = useState<unknown>(null);

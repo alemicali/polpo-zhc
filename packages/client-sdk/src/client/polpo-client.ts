@@ -81,6 +81,10 @@ import type {
   SkillBundlePreview,
   SkillBundleInstallOptions,
   SkillBundleInstallResult,
+  SkillVersionList,
+  SkillVersionFiles,
+  SkillVersionDiff,
+  SkillRestoreResult,
   NotificationChannelConfig,
   NotificationRecord,
   NotificationStats,
@@ -1040,6 +1044,49 @@ export class PolpoClient {
   async getSkillFileText(name: string, path: string, pool?: SkillPool): Promise<string> {
     const { bytes } = await this.getSkillFile(name, path, pool);
     return new TextDecoder().decode(bytes);
+  }
+
+  // ── Skill versions ──
+
+  /** A skill's history, newest first: every change recorded as a copy of the folder (also for a deleted skill, while kept). */
+  getSkillVersions(name: string, pool?: SkillPool): Promise<SkillVersionList> {
+    return this.get<SkillVersionList>(`${this.skillBase(pool)}/${encodeURIComponent(name)}/versions`);
+  }
+
+  /** The files of one version of a skill. */
+  getSkillVersionFiles(name: string, version: number, pool?: SkillPool): Promise<SkillVersionFiles> {
+    return this.get<SkillVersionFiles>(`${this.skillBase(pool)}/${encodeURIComponent(name)}/versions/${version}/files`);
+  }
+
+  /** The URL of one file of a version (raw, with its content type). */
+  skillVersionFileUrl(name: string, version: number, path: string, opts: { pool?: SkillPool; download?: boolean } = {}): string {
+    const rel = path.split("/").map(encodeURIComponent).join("/");
+    return this.apiUrl(`${this.skillBase(opts.pool)}/${encodeURIComponent(name)}/versions/${version}/files/${rel}${opts.download ? "?download=1" : ""}`);
+  }
+
+  /** Read one text file of a version. */
+  async getSkillVersionFileText(name: string, version: number, path: string, pool?: SkillPool): Promise<string> {
+    const res = await this.fetchFn(this.skillVersionFileUrl(name, version, path, { pool }), { headers: { ...this.headers }, credentials: "include" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null) as { error?: string; code?: string } | null;
+      throw new PolpoApiError(body?.error ?? `Could not read ${path}`, (body?.code ?? "NOT_FOUND") as never, res.status);
+    }
+    return new TextDecoder().decode(await res.arrayBuffer());
+  }
+
+  /** What changed from version a to version b: files added, removed, changed, with unified diffs of text files. */
+  diffSkillVersions(name: string, a: number, b: number, pool?: SkillPool): Promise<SkillVersionDiff> {
+    return this.get<SkillVersionDiff>(`${this.skillBase(pool)}/${encodeURIComponent(name)}/versions/${a}/diff/${b}`);
+  }
+
+  /** Put a version back (or bring back a deleted skill); the current state is recorded first, the restore is a new version. */
+  restoreSkillVersion(name: string, version: number, pool?: SkillPool): Promise<SkillRestoreResult> {
+    return this.post<SkillRestoreResult>(`${this.skillBase(pool)}/${encodeURIComponent(name)}/versions/${version}/restore`);
+  }
+
+  /** The URL of a version as an archive (.skill by default, or .zip). */
+  skillVersionDownloadUrl(name: string, version: number, opts: { pool?: SkillPool; format?: "skill" | "zip" } = {}): string {
+    return this.apiUrl(`${this.skillBase(opts.pool)}/${encodeURIComponent(name)}/versions/${version}/download${opts.format === "zip" ? "?format=zip" : ""}`);
   }
 
   private async requestForm<T>(path: string, form: FormData): Promise<T> {

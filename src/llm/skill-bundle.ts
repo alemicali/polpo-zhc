@@ -455,6 +455,8 @@ export interface BundleInstallOptions {
   onConflict?: ConflictPolicy;
   /** Names that exist in the target pool (besides directories in targetBase). */
   existingNames?: Iterable<string>;
+  /** Runs each skill's write (e.g. to record the skill's versions around it). */
+  wrap?: (name: string, write: () => void) => void;
 }
 
 export interface BundleInstallResult {
@@ -491,7 +493,8 @@ export function installSkillBundle(bundle: ParsedSkillBundle, targetBase: string
     if (exists && policy === "fail") { result.errors.push({ name: skill.name, error: `A skill named "${target}" exists: replace it, install it under another name, or skip it` }); continue; }
     planned.add(target);
     try {
-      writeSkillDir(bundle.contents.get(skill.folder)!, targetBase, target, renamed);
+      const write = () => writeSkillDir(bundle.contents.get(skill.folder)!, targetBase, target, renamed);
+      if (opts.wrap) opts.wrap(target, write); else write();
       result.installed.push({ name: target, from: skill.name, path: dir, replaced: exists, files: skill.files.length });
     } catch (err) {
       result.errors.push({ name: skill.name, error: err instanceof Error ? err.message : String(err) });

@@ -140,6 +140,7 @@ describe("Polpo MCP server", () => {
       "polpo_memory_get", "polpo_memory_update",
       "polpo_skills_list", "polpo_skill_get", "polpo_skill_create", "polpo_skill_update", "polpo_skill_install", "polpo_skill_delete", "polpo_skill_assign",
       "polpo_skill_upload_prepare", "polpo_skill_upload_finalize", "polpo_skill_files", "polpo_skill_file_read",
+      "polpo_skill_versions", "polpo_skill_version_diff", "polpo_skill_restore",
       "polpo_schedules_list", "polpo_schedule_create", "polpo_schedule_update", "polpo_schedule_delete", "polpo_schedule_run",
       "polpo_checks_list", "polpo_check_create", "polpo_check_update", "polpo_check_cancel", "polpo_check_delete",
       "polpo_connectors_list", "polpo_connector_catalog", "polpo_connector_add", "polpo_connector_update", "polpo_connector_test", "polpo_connector_connect", "polpo_connector_disconnect", "polpo_connector_remove",
