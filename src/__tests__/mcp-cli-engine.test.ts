@@ -71,6 +71,9 @@ describe("CLI engine through MCP and REST", () => {
     const agent = (await api("/agents/agent-1")).data;
     expect(agent.engine).toEqual({ type: "cli", cli: "claude", account: "my-claude", model: "opus" });
     expect(text(await tool("polpo_agent_get", { name: "agent-1" }))).toMatch(/engine: claude CLI \(account my-claude\)/);
+    // the model it runs, followed by its engine and type
+    expect(text(await tool("polpo_agent_get", { name: "agent-1" }))).toMatch(/^model: opus \(Claude Code · CLI\)/m);
+    expect(text(await tool("polpo_agents_list"))).toMatch(/- agent-1[^\n]*\(opus \(Claude Code · CLI\)\)/);
 
     const bad = await tool("polpo_agent_update", { name: "agent-1", engine: { type: "cli", cli: "codex", account: "nope" } });
     expect(bad.isError).toBe(true);

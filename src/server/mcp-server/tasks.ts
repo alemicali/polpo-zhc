@@ -7,6 +7,7 @@ import { describeTaskFailure, taskFailure, type TaskFailure } from "@polpo-ai/co
 import { computeTaskCost, describeTaskCost, summarizeTaskCost, usdText, type TaskCost, type TaskCostSummary } from "@polpo-ai/core/task-cost";
 import { describeTaskToolScope, type TaskToolScope } from "@polpo-ai/core/task-tool-scope";
 import { parseSince } from "@polpo-ai/core/iso-duration";
+import { engineTypeText, modelWithEngineText } from "@polpo-ai/core/engine-label";
 import {
   BAD_CURSOR, DESTRUCTIVE, MAX_WAIT_SECONDS, READ, UPDATE, WRITE, apiError, apiGet, apiSend, confirmParam, cursorParam, decodeCursor,
   encodeCursor, enc, fail, limitParam, looseObject, ok, pageOutput, progress, qs, short, sleep,
@@ -72,13 +73,12 @@ export function toolScopeFromArgs(a: { connectors?: string[] | "none"; connector
 const TOOL_SCOPE_HINT = "The scope may only narrow what the agent has: polpo_connectors_list { agent } shows its connectors and tools, polpo_agents_get its allowedTools. "
   + "A scope never grants: when the agent has no access to a connector, offer the person to grant it first (polpo_connector_update { id, add_agents: [agent] }), then set the scope.";
 
-const ENGINE_NAMES: Record<string, string> = { polpo: "Polpo", "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode" };
 
 /** A row's total in a list line: " · $1.50 over 2 runs". */
 const costText = (c: TaskCostSummary | undefined) => (c?.runs && c.usd > 0 ? ` · ${usdText(c.usd)}${c.partial ? "+" : ""}${c.runs > 1 ? ` over ${c.runs} runs` : ""}` : "");
 
 export const taskLine = (t: TaskRow & { runs?: TaskRunContext[] }) => `- ${t.id} [${t.status}] ${short(t.title, 100)}${t.assignTo ? ` → ${t.assignTo}` : ""}${t.group ? ` (${t.group})` : ""}`
-  + `${t.lastRun && t.lastRun.engine !== "polpo" ? ` · ${ENGINE_NAMES[t.lastRun.engine] ?? t.lastRun.engine}${t.lastRun.computerId !== "host" ? ` on ${t.lastRun.computerName ?? t.lastRun.computerId}` : ""}` : ""}`
+  + `${t.lastRun && t.lastRun.engine !== "polpo" ? ` · ${t.lastRun.model ? modelWithEngineText(t.lastRun.model, t.lastRun.engine) : engineTypeText(t.lastRun.engine)}${t.lastRun.computerId !== "host" ? ` on ${t.lastRun.computerName ?? t.lastRun.computerId}` : ""}` : ""}`
   + costText(costOf(t))
   + `${t.updatedAt ? ` · updated ${t.updatedAt}` : ""}`
   + `${t.toolScope ? " · tools restricted" : ""}`

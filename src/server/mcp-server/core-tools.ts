@@ -3,6 +3,7 @@
  */
 import { z } from "zod";
 import { ARTIFACT_WORKSPACE_GUIDE } from "@polpo-ai/core/artifacts";
+import { agentEffectiveModel, agentEngineIdOf, engineTypeText, modelWithEngineText } from "@polpo-ai/core/engine-label";
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { agentCardText, buildAgentCard, type AgentCard } from "../mcp-agent-card.js";
@@ -85,7 +86,13 @@ function decodeText(bytes: Uint8Array): string | null {
   }
 }
 
-const agentItem = z.object({ name: z.string(), role: z.string().optional(), model: z.string().optional(), title: z.string().optional() }).passthrough();
+const agentItem = z.object({
+  name: z.string(), role: z.string().optional(),
+  model: z.string().optional().describe("The model it runs (a harness or CLI engine's own model; absent: the default)"),
+  engine: z.string().optional().describe("polpo, claude-code, codex, opencode (harnesses), claude-cli, codex-cli (official CLIs)"),
+  engine_label: z.string().optional().describe("Polpo, Claude Code · Harness, Codex · CLI…"),
+  title: z.string().optional(),
+}).passthrough();
 
 export function registerAgentTools(tool: Register, deps: McpDeps, server: McpServer, enabled: ReadonlySet<ToolsetName>, principal: McpPrincipal, catalog?: ToolScope[]): void {
   tool("core", "polpo_agents_list", {
@@ -97,9 +104,14 @@ export function registerAgentTools(tool: Register, deps: McpDeps, server: McpSer
   }, async () => {
     const r = await apiGet(deps, "/agents");
     if (!r.ok) return apiError(r, "Listing agents");
-    const agents = ((r.data as Array<{ name: string; role?: string; model?: string; identity?: { title?: string } }>) ?? [])
-      .map((a) => ({ name: a.name, ...(a.role ? { role: a.role } : {}), ...(a.model ? { model: a.model } : {}), ...(a.identity?.title ? { title: a.identity.title } : {}) }));
-    return ok(agents.map((a) => `- ${a.name}${a.role ? `: ${a.role}` : ""}${a.model ? ` (${a.model})` : ""}`).join("\n") || "No agents.", { items: agents });
+    // the model it runs and its engine: "claude-sonnet-4-6 (Claude Code · CLI)", "gpt-6 (Polpo)"
+    const agents = ((r.data as Array<{ name: string; role?: string; model?: string; engine?: unknown; identity?: { title?: string } }>) ?? [])
+      .map((a) => {
+        const model = agentEffectiveModel(a);
+        const engine = agentEngineIdOf(a.engine);
+        return { name: a.name, ...(a.role ? { role: a.role } : {}), ...(model ? { model } : {}), engine, engine_label: engineTypeText(engine), ...(a.identity?.title ? { title: a.identity.title } : {}) };
+      });
+    return ok(agents.map((a) => `- ${a.name}${a.role ? `: ${a.role}` : ""} (${modelWithEngineText(a.model, a.engine, "default model")})`).join("\n") || "No agents.", { items: agents });
   });
 
   // ── The agent card: an MCP App (interactive UI in Claude, ChatGPT…; text elsewhere) ──

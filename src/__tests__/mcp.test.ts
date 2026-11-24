@@ -292,8 +292,8 @@ describe("Polpo MCP server", () => {
   it("curated reads are compact text with structured content", async () => {
     const { api } = fakeApi();
     const agents = await call({ api, version: "x" }, "polpo_agents_list");
-    expect(agents.content[0].text).toBe("- coach: Health coach (anthropic:claude-opus-5-5)");
-    expect(agents.structuredContent.items).toEqual([{ name: "coach", role: "Health coach", model: "anthropic:claude-opus-5-5" }]);
+    expect(agents.content[0].text).toBe("- coach: Health coach (anthropic:claude-opus-5-5 (Polpo))");
+    expect(agents.structuredContent.items).toEqual([{ name: "coach", role: "Health coach", model: "anthropic:claude-opus-5-5", engine: "polpo", engine_label: "Polpo" }]);
     const tasks = await call({ api, version: "x" }, "polpo_tasks_list", { status: "in_progress", limit: 1 });
     expect(tasks.content[0].text).toMatch(/^- t2 \[in_progress\] Log meals → coach/);
     expect(tasks.structuredContent.next_cursor).toEqual(expect.any(String));

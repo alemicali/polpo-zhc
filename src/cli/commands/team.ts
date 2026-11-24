@@ -3,6 +3,7 @@ import chalk from "chalk";
 import { resolve } from "node:path";
 import { getPolpoDir } from "../../core/constants.js";
 import type { AgentConfig } from "../../core/types.js";
+import { agentEffectiveModel, agentEngineIdOf, modelWithEngineText } from "@polpo-ai/core/engine-label";
 import { createCliTeamAndAgentStores } from "../stores.js";
 
 export function registerTeamCommands(program: Command): void {
@@ -34,7 +35,7 @@ export function registerTeamCommands(program: Command): void {
 
         for (const agent of agents) {
           console.log(`  ${chalk.cyan(agent.name)}`);
-          if (agent.model) console.log(chalk.dim(`    model:      ${agent.model}`));
+          console.log(chalk.dim(`    model:      ${modelWithEngineText(agentEffectiveModel(agent), agentEngineIdOf(agent.engine), "default")}`));
           if (agent.role) console.log(chalk.dim(`    role:       ${agent.role}`));
           if (agent.reportsTo) console.log(chalk.dim(`    reportsTo:  ${agent.reportsTo}`));
           if (agent.createdAt) console.log(chalk.dim(`    createdAt:  ${agent.createdAt}`));
