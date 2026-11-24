@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState, type HTMLAttributes } from "react";
+import { useEffect, useRef, useState, type HTMLAttributes, type ReactNode } from "react";
 import {
   Collapsible,
   CollapsibleTrigger,
   CollapsibleContent,
 } from "@/components/ui/collapsible";
-import { Badge } from "@/components/ui/badge";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { FilePreviewDialog } from "@/components/shared/file-preview";
 import { useFilePreview } from "@/components/shared/use-file-preview";
@@ -18,37 +17,21 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { toast } from "sonner";
 import {
   Loader2,
-  CheckCircle2,
-  AlertCircle,
   ChevronRight,
-  Wrench,
-  FileText,
+  Check,
+  Copy,
+  ExternalLink,
   PictureInPicture2,
-  Box,
 } from "lucide-react";
 import { useChatSandbox } from "@/components/sandbox/sandbox-context";
 import { PLACEMENT_INFO, toolPlacement } from "@/lib/sandbox-api";
 import { EnvFromVaultChips } from "@/components/ai-elements/env-from-vault-chips";
 import { envFromVaultRefs } from "@/components/ai-elements/env-from-vault";
+import { describeTool, isRunning, toolErrorReason, type ToolCallInfo } from "./tool-summary";
 
 // ── Types ──
 
-export type ToolState = "preparing" | "calling" | "completed" | "error" | "interrupted";
-
-export interface ToolCallInfo {
-  id: string;
-  name: string;
-  argumentsText?: string;
-  arguments?: Record<string, unknown>;
-  result?: string;
-  progress?: {
-    message: string;
-    taskId?: string;
-    status?: string;
-    elapsedMs?: number;
-  };
-  state: ToolState;
-}
+export type { ToolState, ToolCallInfo, ToolSummary } from "./tool-summary";
 
 // ── Helpers ──
 
@@ -83,13 +66,6 @@ const INTERACTIVE_LABELS: Record<string, string> = {
   set_design: "Updating design…",
 };
 
-/** Convert tool_name to "Tool Name" */
-function formatToolName(name: string): string {
-  return name
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
 function formatProgress(progress: NonNullable<ToolCallInfo["progress"]>): string {
   const elapsed = typeof progress.elapsedMs === "number"
     ? ` · ${Math.max(0, Math.floor(progress.elapsedMs / 1000))}s`
@@ -97,112 +73,207 @@ function formatProgress(progress: NonNullable<ToolCallInfo["progress"]>): string
   return `${progress.status ?? progress.message}${elapsed}`;
 }
 
-function getStateIcon(state: ToolState) {
-  switch (state) {
-    case "preparing":
-      return <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />;
-    case "calling":
-      return <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />;
-    case "completed":
-      return <CheckCircle2 className="h-3.5 w-3.5 text-success" />;
-    case "error":
-      return <AlertCircle className="h-3.5 w-3.5 text-destructive" />;
-    case "interrupted":
-      return <AlertCircle className="h-3.5 w-3.5 text-warning" />;
-  }
+/** Output that reads best as monospace text (JSON, shell, files) rather than markdown. */
+const MONO_RESULT_TOOLS = new Set([
+  "bash", "read", "read_file", "write", "write_file", "edit", "edit_file", "glob", "grep", "grep_files", "ls",
+]);
+
+function looksLikeJson(text: string): boolean {
+  const t = text.trim();
+  if (!(t.startsWith("{") || t.startsWith("["))) return false;
+  try { JSON.parse(t); return true; } catch { return false; }
 }
 
-function getStateBadge(state: ToolState) {
-  switch (state) {
-    case "preparing":
-      return (
-        <Badge variant="outline" className="text-micro font-normal border-muted-foreground/30 text-muted-foreground">
-          Preparing
-        </Badge>
-      );
-    case "calling":
-      return (
-        <Badge variant="outline" className="text-micro font-normal border-primary/30 text-primary">
-          Running
-        </Badge>
-      );
-    case "completed":
-      return (
-        <Badge variant="outline" className="text-micro font-normal border-success/30 text-success">
-          Done
-        </Badge>
-      );
-    case "error":
-      return (
-        <Badge variant="outline" className="text-micro font-normal border-destructive/30 text-destructive">
-          Error
-        </Badge>
-      );
-    case "interrupted":
-      return (
-        <Badge variant="outline" className="text-micro font-normal border-warning/30 text-warning">
-          Waiting
-        </Badge>
-      );
-  }
+function looksLikeDiff(text: string): boolean {
+  return /^@@ .* @@/m.test(text) || (/^\+[^+]/m.test(text) && /^-[^-]/m.test(text) && /^(?:---|\+\+\+) /m.test(text));
 }
 
-// ── Components ──
+function prettyJson(text: string): string {
+  try { return JSON.stringify(JSON.parse(text), null, 2); } catch { return text; }
+}
 
-/** Where the tool ran: a small badge for sandboxed tools when the chat has a sandbox. */
-function SandboxBadge({ toolName }: { toolName: string }) {
+// ── Small pieces ──
+
+/** Copy icon that shows on hover of its section. */
+function CopyIcon({ text, label }: { text: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={(e) => {
+        e.stopPropagation();
+        void navigator.clipboard?.writeText(text).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1200);
+        }).catch(() => undefined);
+      }}
+      className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/section:opacity-100"
+    >
+      {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+    </button>
+  );
+}
+
+function Section({ title, copyText, children }: { title: string; copyText?: string; children: ReactNode }) {
+  return (
+    <div className="group/section min-w-0">
+      <div className="flex items-center gap-1 text-micro text-muted-foreground/70">
+        <span>{title}</span>
+        {copyText ? <CopyIcon text={copyText} label={`Copy ${title.toLowerCase()}`} /> : null}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+const MONO = "max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-caption";
+
+function DiffText({ text }: { text: string }) {
+  return (
+    <pre className={cn(MONO, "text-muted-foreground")}>
+      {text.split("\n").map((line, i) => (
+        <span
+          key={i}
+          className={cn(
+            "block",
+            line.startsWith("+") && !line.startsWith("+++") && "text-success",
+            line.startsWith("-") && !line.startsWith("---") && "text-destructive",
+            line.startsWith("@@") && "text-info",
+          )}
+        >
+          {line || " "}
+        </span>
+      ))}
+    </pre>
+  );
+}
+
+/** Where the tool ran: plain muted text for sandboxed tools when the chat has a sandbox. */
+function SandboxNote({ toolName }: { toolName: string }) {
   const sandbox = useChatSandbox();
   if (!sandbox || sandbox.provider === "local") return null;
   const placement = toolPlacement(toolName);
   if (placement === "host") return null;
   const where = sandbox.provider === "bwrap" ? "bubblewrap" : sandbox.provider === "e2b" ? "E2B" : sandbox.provider === "daytona" ? "Daytona" : sandbox.provider;
-  const label = `sandbox · ${where}`;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="inline-flex shrink-0 items-center gap-1 rounded-pill border border-chart-1/30 bg-chart-1/10 px-1.5 py-0 text-micro leading-4 text-chart-1">
-          <Box className="h-2.5 w-2.5" />{label}
-        </span>
+        <span className="shrink-0 text-caption text-muted-foreground/70">sandbox · {where}</span>
       </TooltipTrigger>
       <TooltipContent side="top" className="max-w-64 text-xs">{PLACEMENT_INFO[placement].description}</TooltipContent>
     </Tooltip>
   );
 }
 
+// ── Details (expanded) ──
+
+function ToolDetails({ tool }: { tool: ToolCallInfo }) {
+  const draftRef = useRef<HTMLPreElement>(null);
+
+  useEffect(() => {
+    if (!tool.argumentsText || !draftRef.current) return;
+    draftRef.current.scrollTop = draftRef.current.scrollHeight;
+  }, [tool.argumentsText]);
+
+  const args = tool.arguments && Object.keys(tool.arguments).length > 0 ? tool.arguments : undefined;
+  const argsText = args ? JSON.stringify(args, null, 2) : undefined;
+  const command = tool.name === "bash" && typeof args?.command === "string" ? args.command : undefined;
+  const result = tool.result;
+  const isError = tool.state === "error";
+  const mono = !!result && (MONO_RESULT_TOOLS.has(tool.name) || looksLikeJson(result) || isError);
+
+  const hasAnything = !!tool.progress || !!args || !!tool.argumentsText || !!result;
+  if (!hasAnything) {
+    return (
+      <p className="text-caption text-muted-foreground/70">
+        {isRunning(tool.state) ? "Waiting for input…" : "No input or output."}
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5" data-testid="tool-call-details">
+      {tool.state === "calling" && tool.progress && (
+        <p className="text-caption text-muted-foreground" title={tool.progress.message}>
+          {formatProgress(tool.progress)}
+        </p>
+      )}
+
+      {command !== undefined ? (
+        <Section title="Command" copyText={command}>
+          <pre className={cn(MONO, "text-muted-foreground")}>$ {command}</pre>
+        </Section>
+      ) : args && argsText ? (
+        <Section title="Input" copyText={argsText}>
+          <pre className={cn(MONO, "text-muted-foreground")}>{argsText}</pre>
+        </Section>
+      ) : null}
+
+      {!args && tool.argumentsText && (
+        <Section title="Input draft" copyText={tool.argumentsText}>
+          <pre ref={draftRef} className={cn(MONO, "text-muted-foreground")}>{tool.argumentsText}</pre>
+        </Section>
+      )}
+
+      {result && (
+        <Section title={isError ? "Error" : "Output"} copyText={result}>
+          {isError ? (
+            <pre className={cn(MONO, "text-destructive")}>{result}</pre>
+          ) : looksLikeDiff(result) ? (
+            <DiffText text={result} />
+          ) : mono ? (
+            <pre className={cn(MONO, "text-muted-foreground")}>{looksLikeJson(result) ? prettyJson(result) : result}</pre>
+          ) : (
+            <div className="max-h-48 overflow-auto text-caption text-muted-foreground">
+              <MessageResponse>{result}</MessageResponse>
+            </div>
+          )}
+          {!isError && <ToolResultArtifacts result={result} className="mt-1.5" />}
+        </Section>
+      )}
+    </div>
+  );
+}
+
+// ── One tool call: a muted line, details on click ──
+
 export interface ToolInvocationProps extends HTMLAttributes<HTMLDivElement> {
   tool: ToolCallInfo;
   defaultOpen?: boolean;
+  /** Inside a group's box: the details are plain indented text, no box of their own. */
+  nested?: boolean;
 }
 
 export function ToolInvocation({
   tool,
   defaultOpen,
+  nested = false,
   className,
   ...props
 }: ToolInvocationProps) {
+  // Live input streaming in: open so it can be watched; closed again once the call is done.
   const shouldOpenForStreamingInput = tool.state === "preparing" && !!tool.argumentsText;
-  const [open, setOpen] = useState(defaultOpen ?? (tool.state === "error" || shouldOpenForStreamingInput));
+  const [open, setOpen] = useState(defaultOpen ?? shouldOpenForStreamingInput);
   const [movingToBackground, setMovingToBackground] = useState(false);
-  const draftRef = useRef<HTMLPreElement>(null);
   const filePath = extractFilePath(tool);
   const vaultEnv = tool.name === "bash" ? envFromVaultRefs(tool.arguments) : [];
   const { previewState, openPreview, closePreview } = useFilePreview();
 
-  useEffect(() => {
-    if (shouldOpenForStreamingInput || tool.state === "error") {
+  // Adjusted during render when the inputs change (not on mount, so defaultOpen holds);
+  // manual toggles in between are kept until the next change.
+  const [prevAuto, setPrevAuto] = useState({ shouldOpenForStreamingInput, state: tool.state });
+  if (prevAuto.shouldOpenForStreamingInput !== shouldOpenForStreamingInput || prevAuto.state !== tool.state) {
+    setPrevAuto({ shouldOpenForStreamingInput, state: tool.state });
+    if (shouldOpenForStreamingInput) {
       setOpen(true);
     } else if (tool.state === "completed" || tool.state === "interrupted") {
       setOpen(false);
     }
-  }, [shouldOpenForStreamingInput, tool.state]);
+  }
 
-  useEffect(() => {
-    if (!open || !tool.argumentsText || !draftRef.current) return;
-    draftRef.current.scrollTop = draftRef.current.scrollHeight;
-  }, [open, tool.argumentsText]);
-
-  const handleFileClick = (e: React.MouseEvent) => {
-    e.stopPropagation(); // Don't toggle the collapsible
+  const handleFileClick = () => {
     if (!filePath) return;
     const basename = filePath.split("/").pop() ?? filePath;
     openPreview({
@@ -212,9 +283,7 @@ export function ToolInvocation({
     });
   };
 
-  const moveToBackground = async (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const moveToBackground = async () => {
     setMovingToBackground(true);
     try {
       const headers: Record<string, string> = { "content-type": "application/json" };
@@ -235,150 +304,126 @@ export function ToolInvocation({
     }
   };
 
-  // Interactive / client-side tools: show a minimal inline label while
-  // preparing with no input yet, then hide completely once executed
-  // (completed/error/etc.). When argument deltas arrive, fall through to
-  // the regular tool card so the generated payload can be previewed.
+  // Interactive / client-side tools: a muted "Asking a question…" line while preparing
+  // with no input yet, nothing once executed (their own card takes over). When argument
+  // deltas arrive, fall through to the regular line so the payload can be watched.
   const interactiveLabel = INTERACTIVE_LABELS[tool.name];
   if (interactiveLabel) {
     if (tool.state === "preparing" && !tool.argumentsText && !tool.arguments) {
       return (
-        <div className={cn("flex items-center gap-2 py-2 text-xs text-muted-foreground", className)} {...props}>
-          <Loader2 className="h-3 w-3 animate-spin" />
-          <span>{interactiveLabel}</span>
+        <div
+          className={cn("flex items-center gap-1.5 py-0.5 text-small text-muted-foreground", className)}
+          data-testid="tool-call"
+          data-tool-state={tool.state}
+          {...props}
+        >
+          <Loader2 className="h-3 w-3 shrink-0 animate-spin motion-reduce:animate-none" />
+          <span className="text-shimmer">{interactiveLabel}</span>
         </div>
       );
     }
-    if (tool.state !== "preparing") {
-      // Already executed — don't render anything
-      return null;
-    }
+    if (tool.state !== "preparing") return null;
   }
+
+  const summary = describeTool(tool);
+  const running = isRunning(tool.state);
+  const isError = tool.state === "error";
+  const reason = isError ? toolErrorReason(tool) : undefined;
 
   return (
     <>
-      <Collapsible open={open} onOpenChange={setOpen} {...props}>
-        <div
-          className={cn(
-            "rounded-lg border bg-card/50 text-card-foreground overflow-hidden my-4",
-            tool.state === "error" && "border-destructive/30",
-            tool.state === "calling" && "border-primary/20",
-            tool.state === "completed" && "border-border/50",
-            className,
-          )}
-        >
-          <CollapsibleTrigger className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-accent/30 transition-colors group">
-            <Wrench className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-            <span className="text-xs font-medium truncate">
-              {formatToolName(tool.name)}
+      <Collapsible
+        open={open}
+        onOpenChange={setOpen}
+        className={cn(nested ? "py-0.5" : "my-1.5", "min-w-0 text-small", className)}
+        data-testid="tool-call"
+        data-tool-state={tool.state}
+        {...props}
+      >
+        <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+          <CollapsibleTrigger
+            className="group/line flex min-w-0 items-center gap-1.5 text-left transition-colors hover:text-foreground"
+            data-testid="tool-call-line"
+            title={summary.text}
+          >
+            <span
+              className={cn(
+                "min-w-0 truncate",
+                running && "text-shimmer",
+                isError && "text-destructive",
+                tool.state === "interrupted" && "text-warning",
+              )}
+            >
+              {summary.text}
             </span>
-            {tool.state === "calling" && tool.progress && (
-              <span className="text-caption text-muted-foreground truncate" title={tool.progress.message}>
-                {formatProgress(tool.progress)}
+            {running && tool.state === "calling" && tool.progress && (
+              <span className="min-w-0 shrink truncate text-caption text-muted-foreground/70" title={tool.progress.message}>
+                · {formatProgress(tool.progress)}
               </span>
             )}
-            {/* File path for write/edit/read tools — shown in all states */}
-            {filePath && (
-              <button
-                onClick={handleFileClick}
-                className={cn(
-                  "flex items-center gap-1 text-caption truncate max-w-[50%]",
-                  tool.state === "completed"
-                    ? "text-primary hover:text-primary/80 hover:underline cursor-pointer"
-                    : "text-muted-foreground cursor-default",
-                )}
-                title={filePath}
-                disabled={tool.state !== "completed"}
-              >
-                <FileText className="h-3 w-3 shrink-0" />
-                <span className="truncate">{filePath.split("/").pop()}</span>
-              </button>
+            {isError && (
+              <span className="min-w-0 shrink truncate text-destructive/80" data-testid="tool-call-reason">
+                · {reason ?? "failed"}
+              </span>
             )}
-            <EnvFromVaultChips refs={vaultEnv} />
-            <span className="flex-1" />
-            <SandboxBadge toolName={tool.name} />
-            {tool.name === "wait_for_task" && tool.state === "calling" && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
-                    onClick={moveToBackground}
-                    disabled={movingToBackground}
-                    aria-label="Move wait to background"
-                  >
-                    {movingToBackground
-                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      : <PictureInPicture2 className="h-3.5 w-3.5" />}
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top" className="text-xs">Move wait to background</TooltipContent>
-              </Tooltip>
-            )}
-            {getStateIcon(tool.state)}
-            {getStateBadge(tool.state)}
-            <ChevronRight className="h-3 w-3 text-muted-foreground transition-transform group-data-[state=open]:rotate-90 shrink-0" />
+            {tool.state === "interrupted" && <span className="shrink-0 text-warning/80">· waiting</span>}
+            <ChevronRight
+              className="h-3 w-3 shrink-0 transition-transform group-data-[state=open]/line:rotate-90 motion-reduce:transition-none"
+              aria-hidden
+            />
           </CollapsibleTrigger>
-
-          <CollapsibleContent>
-            <div className="border-t border-border/40 px-3 py-2 space-y-2">
-              {/* Input arguments */}
-              {tool.arguments && Object.keys(tool.arguments).length > 0 && (
-                <div>
-                  <p className="text-label text-muted-foreground mb-1">
-                    Input
-                  </p>
-                  <div className="text-xs bg-muted/50 rounded-md px-2.5 py-1.5 max-h-32 overflow-y-auto">
-                    <MessageResponse>{`\`\`\`json\n${JSON.stringify(tool.arguments, null, 2)}\n\`\`\``}</MessageResponse>
-                  </div>
-                </div>
-              )}
-
-              {!tool.arguments && tool.argumentsText && (
-                <div>
-                  <p className="text-label text-muted-foreground mb-1">
-                    Input draft
-                  </p>
-                  <pre
-                    ref={draftRef}
-                    className="text-xs bg-muted/50 rounded-md px-2.5 py-1.5 max-h-32 overflow-y-auto whitespace-pre-wrap break-words font-mono"
-                  >
-                    {tool.argumentsText}
-                  </pre>
-                </div>
-              )}
-
-              {/* Result */}
-              {tool.result && (
-                <div>
-                  <p className="text-label text-muted-foreground mb-1">
-                    {tool.state === "error" ? "Error" : "Result"}
-                  </p>
-                  <div
-                    className={cn(
-                      "text-xs rounded-md px-2.5 py-1.5 max-h-48 overflow-y-auto",
-                      tool.state === "error"
-                        ? "bg-destructive/10 text-destructive"
-                        : "bg-muted/50",
-                    )}
-                  >
-                    <MessageResponse>{tool.result}</MessageResponse>
-                  </div>
-                  {tool.state !== "error" && <ToolResultArtifacts result={tool.result} className="mt-2" />}
-                </div>
-              )}
-            </div>
-          </CollapsibleContent>
+          {filePath && tool.state === "completed" && (
+            <button
+              type="button"
+              onClick={handleFileClick}
+              className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground"
+              title={`Open ${filePath}`}
+              aria-label={`Open ${filePath.split("/").pop()}`}
+            >
+              <ExternalLink className="h-3 w-3" />
+            </button>
+          )}
+          <EnvFromVaultChips refs={vaultEnv} />
+          <SandboxNote toolName={tool.name} />
+          {tool.name === "wait_for_task" && tool.state === "calling" && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-50"
+                  onClick={() => { void moveToBackground(); }}
+                  disabled={movingToBackground}
+                  aria-label="Move wait to background"
+                >
+                  {movingToBackground
+                    ? <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" />
+                    : <PictureInPicture2 className="h-3 w-3" />}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="text-xs">Move wait to background</TooltipContent>
+            </Tooltip>
+          )}
         </div>
+
+        <CollapsibleContent>
+          <div
+            className={cn(
+              "mt-1 min-w-0",
+              nested ? "pl-3" : "rounded-control bg-muted/30 px-2.5 py-1.5",
+            )}
+          >
+            <ToolDetails tool={tool} />
+          </div>
+        </CollapsibleContent>
       </Collapsible>
 
-      {/* File preview dialog (rendered per tool invocation, only mounts when active) */}
+      {/* File preview dialog (only mounts when active) */}
       <FilePreviewDialog preview={previewState} onClose={closePreview} />
     </>
   );
 }
 
-// ── Grouped tool calls (2+) — single collapsible row ──
+// ── Grouped tool calls (2+): "Used 4 tools ›", one light box with a line each ──
 
 export interface ToolCallGroupProps extends HTMLAttributes<HTMLDivElement> {
   tools: ToolCallInfo[];
@@ -389,97 +434,90 @@ function isHiddenInteractive(t: ToolCallInfo): boolean {
   return t.name in INTERACTIVE_LABELS && t.state !== "preparing";
 }
 
-/** Grouped collapsible for 2+ consecutive tool calls — shows a summary row */
 export function ToolCallGroup({ tools, className, ...props }: ToolCallGroupProps) {
   // Separate: interactive tools preparing (inline), hidden interactive (executed), visible tools
   const preparingInteractive = tools.filter((t) => t.name in INTERACTIVE_LABELS && t.state === "preparing");
   const visibleTools = tools.filter((t) => !isHiddenInteractive(t));
 
-  const activeCount = visibleTools.filter((t) => t.state === "calling" || t.state === "preparing").length;
-  const errorCount = visibleTools.filter((t) => t.state === "error").length;
-  const isCalling = activeCount > 0;
+  // Only non-interactive tools go in the group
+  const listTools = visibleTools.filter((t) => !(t.name in INTERACTIVE_LABELS));
+  const active = listTools.filter((t) => isRunning(t.state));
+  const errorCount = listTools.filter((t) => t.state === "error").length;
+  const isCalling = active.length > 0;
   const hasError = errorCount > 0;
+  const shouldOpenForStreamingInput = listTools.some((t) => t.state === "preparing" && !!t.argumentsText);
+  const [open, setOpen] = useState(shouldOpenForStreamingInput);
 
-  // Only non-interactive tools for the group card
-  const cardTools = visibleTools.filter((t) => !(t.name in INTERACTIVE_LABELS));
-  const shouldOpenForStreamingInput = cardTools.some((t) => t.state === "preparing" && !!t.argumentsText);
-  const [open, setOpen] = useState(hasError || shouldOpenForStreamingInput);
-
-  // Auto-open on errors / streaming input, auto-close when calls finish.
-  // Adjusted during render when the inputs change (no effect round-trip);
-  // manual toggles in between are kept until the next change.
-  const [prevAutoOpen, setPrevAutoOpen] = useState({ hasError, isCalling, shouldOpenForStreamingInput });
+  // Auto-open on streaming input, auto-close when calls finish. Adjusted during render
+  // when the inputs change (no effect round-trip); manual toggles in between are kept.
+  const [prevAutoOpen, setPrevAutoOpen] = useState({ isCalling, shouldOpenForStreamingInput });
   if (
-    prevAutoOpen.hasError !== hasError ||
     prevAutoOpen.isCalling !== isCalling ||
     prevAutoOpen.shouldOpenForStreamingInput !== shouldOpenForStreamingInput
   ) {
-    setPrevAutoOpen({ hasError, isCalling, shouldOpenForStreamingInput });
-    if (hasError || shouldOpenForStreamingInput) {
+    setPrevAutoOpen({ isCalling, shouldOpenForStreamingInput });
+    if (shouldOpenForStreamingInput) {
       setOpen(true);
     } else if (!isCalling) {
       setOpen(false);
     }
   }
 
-  const summaryIcon = isCalling
-    ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-    : hasError
-      ? <AlertCircle className="h-3.5 w-3.5 text-destructive" />
-      : <CheckCircle2 className="h-3.5 w-3.5 text-success" />;
-
-  const names = cardTools.map((t) => formatToolName(t.name));
-  // Show first 2 names + "and N more" if > 2
-  const preview = names.length <= 2
-    ? names.join(", ")
-    : `${names[0]}, ${names[1]} +${names.length - 2}`;
+  const n = listTools.length;
+  const current = isCalling ? describeTool(active[active.length - 1]).text : undefined;
 
   return (
     <>
-      {/* Interactive tools in preparing state — shown inline above the card */}
+      {/* Interactive tools in preparing state — shown inline above the group */}
       {preparingInteractive.map((tool) => (
         <ToolInvocation key={tool.id} tool={tool} />
       ))}
 
-      {/* Non-interactive tools — grouped card (skip if none left) */}
-      {cardTools.length > 0 && (
-        <Collapsible open={open} onOpenChange={setOpen} {...props}>
-          <div
-            className={cn(
-              "rounded-lg border bg-card/50 text-card-foreground overflow-hidden my-4",
-              isCalling && "border-primary/20",
-              hasError && "border-destructive/30",
-              !isCalling && !hasError && "border-border/50",
-              className,
-            )}
+      {n > 0 && (
+        <Collapsible
+          open={open}
+          onOpenChange={setOpen}
+          className={cn("my-1.5 min-w-0 text-small", className)}
+          data-testid="tool-call-group"
+          data-tool-state={isCalling ? "calling" : hasError ? "error" : "completed"}
+          {...props}
+        >
+          <CollapsibleTrigger
+            className="group/line flex min-w-0 max-w-full items-center gap-1.5 text-left text-muted-foreground transition-colors hover:text-foreground"
+            data-testid="tool-call-group-line"
           >
-            <CollapsibleTrigger className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-accent/30 transition-colors group">
-              <Wrench className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-              <span className="text-xs text-muted-foreground">
-                {isCalling ? `Working on ${cardTools.length} tools` : `Used ${cardTools.length} tools`}
-              </span>
-              <span className="text-micro text-muted-foreground/60 truncate flex-1">
-                {preview}
-              </span>
-              {summaryIcon}
-              <ChevronRight className="h-3 w-3 text-muted-foreground transition-transform group-data-[state=open]:rotate-90 shrink-0" />
-            </CollapsibleTrigger>
+            {/* Plain text, no status icons: "Used 4 tools, 1 failed ›" */}
+            <span className={cn("shrink-0", isCalling && "text-shimmer")}>
+              {`${isCalling ? "Using" : "Used"} ${n} ${n === 1 ? "tool" : "tools"}`}
+              {hasError && (
+                <span className="text-destructive" data-testid="tool-call-group-errors">
+                  {`, ${errorCount} failed`}
+                </span>
+              )}
+            </span>
+            {current && (
+              <span className="min-w-0 truncate text-caption text-muted-foreground/70">· {current}</span>
+            )}
+            <ChevronRight
+              className="h-3 w-3 shrink-0 transition-transform group-data-[state=open]/line:rotate-90 motion-reduce:transition-none"
+              aria-hidden
+            />
+          </CollapsibleTrigger>
 
-            <CollapsibleContent>
-              <div className="border-t border-border/40 px-2 py-2 space-y-1.5">
-                {cardTools.map((tool) => (
-                  <ToolInvocation key={tool.id} tool={tool} />
-                ))}
-              </div>
-            </CollapsibleContent>
-          </div>
+          <CollapsibleContent>
+            <div className="mt-1 min-w-0 rounded-control bg-muted/30 px-2.5 py-1">
+              {listTools.map((tool) => (
+                <ToolInvocation key={tool.id} tool={tool} nested />
+              ))}
+            </div>
+          </CollapsibleContent>
         </Collapsible>
       )}
     </>
   );
 }
 
-// ── Inline list of tool calls ──
+// ── Inline list of tool calls (messages without segments) ──
 
 export interface ToolCallListProps extends HTMLAttributes<HTMLDivElement> {
   tools: ToolCallInfo[];
@@ -487,12 +525,7 @@ export interface ToolCallListProps extends HTMLAttributes<HTMLDivElement> {
 
 export function ToolCallList({ tools, className, ...props }: ToolCallListProps) {
   if (tools.length === 0) return null;
+  if (tools.length > 1) return <ToolCallGroup tools={tools} className={className} {...props} />;
 
-  return (
-    <div className={cn("space-y-2 my-2.5", className)} {...props}>
-      {tools.map((tool) => (
-        <ToolInvocation key={tool.id} tool={tool} />
-      ))}
-    </div>
-  );
+  return <ToolInvocation tool={tools[0]} className={className} {...props} />;
 }
