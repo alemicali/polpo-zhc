@@ -79,6 +79,19 @@ import type {
   SkillPool,
   SkillFileList,
   SkillBundlePreview,
+  Artifact,
+  ArtifactType,
+  ArtifactVersionUsage,
+  ArtifactVersionInfo,
+  ArtifactSummary,
+  ArtifactChange,
+  ArtifactUpdateInput,
+  ArtifactCreateInput,
+  ArtifactReadOptions,
+  ArtifactRead,
+  ArtifactUploadOptions,
+  ArtifactUploadPart,
+  ArtifactStorageUsage,
   SkillBundleInstallOptions,
   SkillBundleInstallResult,
   SkillVersionList,
@@ -1087,6 +1100,115 @@ export class PolpoClient {
   /** The URL of a version as an archive (.skill by default, or .zip). */
   skillVersionDownloadUrl(name: string, version: number, opts: { pool?: SkillPool; format?: "skill" | "zip" } = {}): string {
     return this.apiUrl(`${this.skillBase(opts.pool)}/${encodeURIComponent(name)}/versions/${version}/download${opts.format === "zip" ? "?format=zip" : ""}`);
+  }
+
+  // ── Artifacts ────────────────────────────────────────────
+
+  private artifactPath(id: string): string {
+    return `/artifacts/${encodeURIComponent(id)}`;
+  }
+
+  /** A request with a raw body (a file), answered with { ok, data }. */
+  private async requestBody<T>(method: string, path: string, body: Blob | ArrayBuffer | Uint8Array, headers: Record<string, string> = {}): Promise<T> {
+    const res = await this.fetchFn(this.apiUrl(path), {
+      method, headers: { ...this.headers, "Content-Type": "application/octet-stream", ...headers }, body: body as BodyInit, credentials: "include",
+    });
+    const json = await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` })) as ApiResult<T>;
+    if (!json.ok) throw new PolpoApiError(json.error, json.code, res.status, json.details);
+    return json.data;
+  }
+
+  /** Artifacts, newest first (no contents). */
+  listArtifacts(filter: { type?: ArtifactType; kind?: string; q?: string; sessionId?: string; createdBy?: string; mine?: boolean } = {}): Promise<ArtifactSummary[]> {
+    const q = new URLSearchParams(Object.entries(filter).filter(([, v]) => v !== undefined && v !== false && v !== "").map(([k, v]) => [k, String(v)]));
+    return this.get<ArtifactSummary[]>(`/artifacts${q.size ? `?${q}` : ""}`);
+  }
+
+  /** One artifact with its versions; the content comes whole up to the viewer limit (content: false leaves it out). */
+  getArtifact(id: string, opts: { content?: boolean } = {}): Promise<Artifact> {
+    return this.get<Artifact>(`${this.artifactPath(id)}${opts.content === false ? "?content=none" : ""}`);
+  }
+
+  /** One version with its content (left out over the viewer limit: contentOmitted). */
+  getArtifactVersion(id: string, version: number): Promise<ArtifactVersionInfo & { contentOmitted?: boolean }> {
+    return this.get(`${this.artifactPath(id)}/versions/${version}`);
+  }
+
+  /** Read part of an artifact: a byte range, the outline, or a tab, slide(s), sheet range, board, page or scene. */
+  readArtifact(id: string, opts: ArtifactReadOptions = {}): Promise<ArtifactRead> {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(opts)) if (v !== undefined && v !== false) q.set(k, v === true ? "1" : String(v));
+    return this.get<ArtifactRead>(`${this.artifactPath(id)}/read${q.size ? `?${q}` : ""}`);
+  }
+
+  /** The URL of the content as a file (Range supported), of a version, or as a download. */
+  artifactContentUrl(id: string, opts: { version?: number; download?: boolean } = {}): string {
+    const q = new URLSearchParams();
+    if (opts.version) q.set("version", String(opts.version));
+    if (opts.download) q.set("download", "1");
+    return this.apiUrl(`${this.artifactPath(id)}/content${q.size ? `?${q}` : ""}`);
+  }
+
+  createArtifact(input: ArtifactCreateInput): Promise<Artifact> {
+    return this.post<Artifact>("/artifacts", input);
+  }
+
+  /**
+   * Change an artifact: { command: "update", old_str, new_str } (or updates[]) for a targeted change,
+   * { command: "rewrite", content } for a whole new content, append / prepend, patch (JSON Patch) or ops.
+   * With expectedVersion, refused (409) if it changed since.
+   */
+  updateArtifact(id: string, input: ArtifactUpdateInput): Promise<Artifact> {
+    return this.patch<Artifact>(this.artifactPath(id), input);
+  }
+
+  deleteArtifact(id: string): Promise<{ deleted: boolean }> {
+    return this.del(this.artifactPath(id));
+  }
+
+  restoreArtifact(id: string, version: number): Promise<Artifact> {
+    return this.post<Artifact>(`${this.artifactPath(id)}/restore/${version}`);
+  }
+
+  duplicateArtifact(id: string, version?: number): Promise<Artifact> {
+    return this.post<Artifact>(`${this.artifactPath(id)}/duplicate`, version ? { version } : {});
+  }
+
+  /** Storage used by every artifact of the instance, with the limits in force. */
+  getArtifactUsage(): Promise<ArtifactStorageUsage> {
+    return this.get<ArtifactStorageUsage>("/artifacts/usage");
+  }
+
+  /** Create an artifact from a file (streamed; the type is detected from the name and content unless given). */
+  uploadArtifact(file: Blob, opts: ArtifactUploadOptions = {}): Promise<Artifact> {
+    const q = new URLSearchParams();
+    const filename = opts.filename ?? (file as File).name;
+    for (const [k, v] of Object.entries({ ...opts, filename })) if (v) q.set(k, String(v));
+    return this.requestBody<Artifact>("POST", `/artifacts/upload${q.size ? `?${q}` : ""}`, file);
+  }
+
+  /** Replace an artifact's content with a file (the previous one becomes a version). */
+  replaceArtifactContent(id: string, file: Blob, opts: { expectedVersion?: number; filename?: string; note?: string } = {}): Promise<Artifact> {
+    const q = new URLSearchParams();
+    if (opts.expectedVersion) q.set("expectedVersion", String(opts.expectedVersion));
+    const filename = opts.filename ?? (file as File).name;
+    if (filename) q.set("filename", filename);
+    if (opts.note) q.set("note", opts.note);
+    return this.requestBody<Artifact>("PUT", `${this.artifactPath(id)}/content${q.size ? `?${q}` : ""}`, file);
+  }
+
+  /** Send one part of an upload (the first without appendTo; more: true until the last). */
+  uploadArtifactPart(part: Blob, opts: { appendTo?: string; more?: boolean; filename?: string } = {}): Promise<ArtifactUploadPart> {
+    const q = new URLSearchParams();
+    if (opts.appendTo) q.set("append_to", opts.appendTo);
+    if (opts.more) q.set("more", "true");
+    if (opts.filename) q.set("filename", opts.filename);
+    return this.requestBody<ArtifactUploadPart>("POST", `/artifacts/uploads${q.size ? `?${q}` : ""}`, part);
+  }
+
+  /** Create an artifact from a complete upload, or replace one's content (id). */
+  finalizeArtifactUpload(uploadId: string, opts: ArtifactUploadOptions & { id?: string; expectedVersion?: number } = {}): Promise<Artifact> {
+    return this.post<Artifact>(`/artifacts/uploads/${encodeURIComponent(uploadId)}/finalize`, opts);
   }
 
   private async requestForm<T>(path: string, form: FormData): Promise<T> {
