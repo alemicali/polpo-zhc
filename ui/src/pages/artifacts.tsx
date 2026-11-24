@@ -25,6 +25,7 @@ import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ArtifactTemplates } from "@/components/artifacts/artifact-templates";
 import { ArtifactsGrid } from "@/components/artifacts/artifacts-grid";
 import { ArtifactDetail } from "@/components/artifacts/artifact-detail";
+import { ArtifactDropZone, ArtifactUploadButton } from "@/components/artifacts/artifact-upload";
 import {
   ArtifactsPreviewLayout, ArtifactsTable, type ArtifactRowInfo,
 } from "@/components/artifacts/artifacts-browser";
@@ -173,7 +174,7 @@ function ArtifactGallery() {
   const filtered = q.trim() !== "" || filter !== "all" || pinnedOnly || days !== 0;
 
   return (
-    <div className={cn("mx-auto flex h-full min-h-0 w-full flex-col gap-3", layout === "preview" ? "max-w-[86rem]" : "max-w-5xl")}>
+    <ArtifactDropZone onUploaded={() => void load()} className={cn("mx-auto flex h-full min-h-0 w-full flex-col gap-3", layout === "preview" ? "max-w-[86rem]" : "max-w-5xl")}>
       <h1 className="mb-1 flex items-center gap-2 font-heading text-2xl font-semibold tracking-tight">Artifacts <BetaBadge /></h1>
       <div className="flex flex-wrap items-center gap-2">
         <Tabs value={mine ? "mine" : "all"} onValueChange={value => {
@@ -186,6 +187,7 @@ function ArtifactGallery() {
           <TabsList><TabsTrigger value="all">All</TabsTrigger><TabsTrigger value="mine">Yours</TabsTrigger></TabsList>
         </Tabs>
         <div className="ml-auto flex items-center gap-1.5">
+          <ArtifactUploadButton onUploaded={() => void load()} />
           <Button ref={searchTrigger} size="icon-sm" variant="ghost" aria-label="Search artifacts" title="Search artifacts"
             aria-expanded={searchOpen} aria-controls={searchOpen ? "artifact-search" : undefined} onClick={() => searchOpen ? closeSearch() : setSearchOpen(true)}>
             <Search className="size-4" />
@@ -262,7 +264,7 @@ function ArtifactGallery() {
         <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center text-sm text-muted-foreground">
           <Sparkles className="h-6 w-6" />
           <p>{filtered ? "No artifacts match." : "No artifacts yet."}</p>
-          {!filtered && <p className="max-w-sm text-xs">Choose a template above or ask {product} to create an artifact.</p>}
+          {!filtered && <p className="max-w-sm text-xs">Choose a template above, drop files here to upload them, or ask {product} to create an artifact.</p>}
         </div>
       ) : layout === "grid" ? (
         <ArtifactsGrid items={shown} info={info} actions={actions} now={now} />
@@ -273,6 +275,6 @@ function ArtifactGallery() {
         <ArtifactsPreviewLayout items={shown} selectedId={selectedId} onSelect={select} info={info} actions={actions} now={now}
           preview={selectedId ? <ArtifactDetail key={selectedId} id={selectedId} embedded onDeleted={() => void load()} /> : null} />
       )}
-    </div>
+    </ArtifactDropZone>
   );
 }

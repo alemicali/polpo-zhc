@@ -27,20 +27,33 @@ export function projectArtifactText(tool: ToolCallInfo, args: Record<string, unk
   if (typeof args.content === "string") {
     return { text: args.content, complete: typeof closed.content === "string" };
   }
-  if (base === undefined || !Array.isArray(args.edits) || !Array.isArray(closed.edits)) return;
+  const drafts = textUpdates(args);
+  const closedUpdates = textUpdates(closed);
+  if (base === undefined || !drafts || !closedUpdates) return;
 
   // Replay from the saved version every time, even if the transport delivers the same chunk twice.
   const edits: { find: string; replace: string }[] = [];
-  for (const [i, draft] of args.edits.entries()) {
-    const match = closed.edits[i]?.find;
+  for (const [i, draft] of drafts.entries()) {
+    const match = closedUpdates[i]?.find;
     if (typeof match !== "string" || !match || typeof draft?.replace !== "string") break;
-    if (!draft.replace && closed.edits[i]?.replace === undefined) break;
+    if (!draft.replace && closedUpdates[i]?.replace === undefined) break;
     edits.push({ find: match, replace: draft.replace });
   }
   if (!edits.length) return;
   try {
     const text = applyArtifactEdits(base, edits);
-    const complete = tool.state !== "preparing" || Array.isArray(parseObject(raw, 0).edits);
+    const complete = tool.state !== "preparing" || textUpdates(parseObject(raw, 0)) !== undefined;
     return { text, complete };
   } catch { return; }
+}
+
+type TextUpdate = { find?: unknown; replace?: unknown };
+
+/** The targeted changes of artifact_update in any of its forms: old_str/new_str, updates[], or the earlier edits[] (find/replace). */
+function textUpdates(args: Record<string, unknown>): TextUpdate[] | undefined {
+  const item = (value: unknown) => (value && typeof value === "object" ? value as Record<string, unknown> : {});
+  if (Array.isArray(args.edits)) return args.edits.map((e) => ({ find: item(e).find, replace: item(e).replace }));
+  if (Array.isArray(args.updates)) return args.updates.map((e) => ({ find: item(e).old_str, replace: item(e).new_str }));
+  if (args.old_str !== undefined || args.new_str !== undefined) return [{ find: args.old_str, replace: args.new_str }];
+  return undefined;
 }

@@ -60,6 +60,7 @@ const TOOL_VERBS: Record<string, [string, string]> = {
   image_generate: ["Generating image", "Generated image"],
   artifact_create: ["Creating artifact", "Created artifact"],
   artifact_update: ["Updating artifact", "Updated artifact"],
+  artifact_from_file: ["Publishing artifact from a file", "Published artifact from a file"],
   render_widget: ["Rendering widget", "Rendered widget"],
 };
 

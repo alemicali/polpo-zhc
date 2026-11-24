@@ -29,6 +29,16 @@ test("updates a middle paragraph incrementally without removing either side", ()
   expect(project(partial + ' to 10:30."}]}', base, "artifact_update")).toBe(base.replace("Meeting at 09:00.", "Meeting moved to 10:30."));
 });
 
+test("streams the Claude-style update (old_str → new_str, and updates[]) the same way", () => {
+  const base = "# Schedule\n\nMeeting at 09:00.\n\nLunch at 13:00.";
+  expect(project('{"id":"art_1","command":"update","old_str":"Meeting at 09', base, "artifact_update")).toBeUndefined();
+  const partial = '{"id":"art_1","command":"update","old_str":"Meeting at 09:00.","new_str":"Meeting moved';
+  expect(project(partial, base, "artifact_update")).toBe(base.replace("Meeting at 09:00.", "Meeting moved"));
+  expect(project(partial + ' to 10:30."}', base, "artifact_update")).toBe(base.replace("Meeting at 09:00.", "Meeting moved to 10:30."));
+  const several = '{"id":"art_1","updates":[{"old_str":"09:00","new_str":"10:30"},{"old_str":"13:00","new_str":"14';
+  expect(project(several, base, "artifact_update")).toBe("# Schedule\n\nMeeting at 10:30.\n\nLunch at 14.");
+});
+
 test("keeps an unchanged tail during a clear paragraph rewrite, then uses the complete value", () => {
   const base = "# Schedule\n\nOpening.\n\nOld paragraph.\n\nConclusion.";
   const partial = '{"id":"art_1","content":"# Schedule\\n\\nOpening.\\n\\nChanging the middle';
