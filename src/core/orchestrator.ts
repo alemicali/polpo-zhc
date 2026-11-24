@@ -114,7 +114,7 @@ import { FileTeamStore } from "../stores/file-team-store.js";
 import { FileAgentStore } from "../stores/file-agent-store.js";
 import { FileAgentVersionStore } from "../stores/file-agent-version-store.js";
 import {
-  AgentVersioning, AgentVersionError, PRODUCTION_POINTER, snapshotsEqual,
+  AgentVersioning, AgentVersionError, PRODUCTION_POINTER, parseAgentRef, snapshotsEqual,
   type AgentDeployEntry, type AgentVersion, type AgentVersionBump, type AgentVersionStore,
 } from "@polpo-ai/core/agent-versions";
 import type { TeamStore } from "./team-store.js";
@@ -1516,13 +1516,15 @@ export class Orchestrator extends TypedEmitter {
     toolScope?: unknown;
     /** The member (email) who started it, when known (a CLI engine on a personal sign-in checks it). */
     requestedBy?: string;
+    /** A published version of the assignee (absent: production); \`assignTo: "name@1.2.0"\` sets it too. */
+    agentVersion?: string;
   }): Promise<Task> {
     const { toolScope, ...given } = opts;
     // the member this work is for: given, or the person whose call (dashboard, API, Polpo's chat) created it
     const member = given.requestedBy ?? originMember();
     const rest = { ...given, ...(member ? { requestedBy: member } : {}) };
     if (toolScope === undefined || toolScope === null) return this.engine.addTask(rest);
-    const scope = await requireTaskToolScope(this.toolScopeHost(), opts.assignTo, toolScope, { live: true });
+    const scope = await requireTaskToolScope(this.toolScopeHost(), parseAgentRef(opts.assignTo).name, toolScope, { live: true });
     return this.engine.addTask({ ...rest, ...(scope ? { toolScope: scope } : {}) });
   }
 

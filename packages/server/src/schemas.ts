@@ -52,7 +52,10 @@ export const TaskToolScopeSchema = z.object({
 export const CreateTaskSchema = z.object({
   title: z.string().min(1),
   description: z.string().min(1),
+  /** The agent's name; "name@1.2.0" pins the task to that published version. */
   assignTo: z.string().min(1),
+  /** A published version of the agent to run (e.g. "1.2.0"); absent: the one deployed to production. */
+  agentVersion: z.string().regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/, "a version: major.minor.patch").optional(),
   /** Create task as draft (won't be picked up by orchestrator until moved to pending). Default: false. */
   draft: z.boolean().optional(),
   expectations: z.array(z.any()).optional(),

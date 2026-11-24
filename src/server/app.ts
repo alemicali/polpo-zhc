@@ -351,6 +351,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         transcribe: async (audio, filename) => (await transcribeSpeech(audio, filename, await speechVaultFor(o, options?.agent)))?.text ?? null,
       }),
     getAgents: () => o.getAgents(),
+    resolveAgent: (name: string, ref?: string) => o.getAgentVersioning().resolve(name, ref),
     getConfig: () => o.getConfig(),
     getMemoryStore: () => o.getMemoryStore(),
     getSessionStore: () => o.getSessionStore(),
