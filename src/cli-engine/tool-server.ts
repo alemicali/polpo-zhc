@@ -35,7 +35,12 @@ export const CLI_TOOL_TOKEN_ENV = "POLPO_MCP_TOKEN";
 const RELAY_TOKEN_HEADER = "x-polpo-relay-token";
 
 /** A tool call that needs a person's yes (chats): the tool runs only when it returns true. */
-export type CliToolApproval = (call: { toolName: string; toolCallId: string; input: unknown }) => Promise<{ approved: boolean; reason?: string }>;
+export type CliToolApproval = (call: { toolName: string; toolCallId: string; input: unknown }) => Promise<{
+  approved: boolean;
+  reason?: string;
+  /** Not run, and this is what the program is told instead (a chat's preview: the person sends it). */
+  message?: string;
+}>;
 
 export interface CliToolCallEvent {
   phase: "start" | "end";
@@ -126,7 +131,10 @@ export async function openCliToolServer(o: CliToolServerOptions): Promise<CliToo
         const answer = o.approve
           ? await o.approve({ toolName: name, toolCallId, input }).catch((err) => ({ approved: false, reason: (err as Error).message }))
           : { approved: false, reason: "This run cannot ask a person" };
-        if (!answer.approved) return end(`Not sent: the person did not approve ${name}${answer.reason ? ` (${answer.reason})` : ""}.`, true);
+        if (!answer.approved) {
+          if ("message" in answer && answer.message) return end(answer.message, false);
+          return end(`Not sent: the person did not approve ${name}${answer.reason ? ` (${answer.reason})` : ""}.`, true);
+        }
       }
       try {
         const out = textOf(await t.execute(input, { toolCallId, abortSignal: extra.signal }));
