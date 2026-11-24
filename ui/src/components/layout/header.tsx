@@ -14,6 +14,7 @@ import { HeaderMoreMenu, ThemeMenu } from "./header-actions";
 import { BetaBadge } from "@/components/shared/beta-badge";
 import { isBetaPath } from "@/lib/beta";
 import { MobileNavSheet } from "./mobile-nav-sheet";
+import { MobileSearchButton } from "@/components/search/sidebar-search-button";
 import { ChatTabs } from "./chat-tabs";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { useAgents } from "@polpo-ai/react";
@@ -181,6 +182,7 @@ export function Header() {
           lives at the bottom of the sidebar (and of the MobileNavSheet drawer); the look is
           desktop-only: on mobile it lives in the drawer. */}
       <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+        <MobileSearchButton className="lg:hidden" />
         <ThemeMenu className="hidden lg:inline-flex" />
         <HeaderMoreMenu />
         {/* Layout mode toggle */}

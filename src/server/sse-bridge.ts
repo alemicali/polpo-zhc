@@ -69,6 +69,11 @@ export class SSEBridge {
     };
   }
 
+  /** The latest events (oldest first, at most the buffer's size): the global search's "recent events". */
+  recentEvents(): readonly BufferedEvent[] {
+    return this.eventBuffer;
+  }
+
   /** Add an SSE client. Replays events since lastEventId if provided. */
   addClient(client: SSEClient, lastEventId?: string): void {
     this.clients.set(client.id, client);

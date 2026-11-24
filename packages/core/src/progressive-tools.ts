@@ -142,7 +142,7 @@ export const POLPO_TOOL_GROUPS: ToolGroupRule[] = [
   { id: "whatsapp-business", label: "WhatsApp Business (official number, Meta Cloud API): status, webhook events, templates, a contact's conversation and 24-hour window, sends, approving queued templates", prefixes: ["wabiz_"] },
   { id: "sync", label: "Cloud sync (R2 backup of the instance): status, settings, test, run, disconnect", prefixes: ["sync_"] },
   { id: "rooms", label: "Rooms: group chats of people and agents (list, create, change, delete, read, post, wait for replies)", prefixes: ["room_"], names: ["rooms_list"] },
-  { id: "chats", label: "Chat sessions: list, read, rename, star, delete", prefixes: ["chat_"] },
+  { id: "chats", label: "Search everything (chat messages, tasks, missions, agents, artifacts, files, data, skills, memory… as ⌘K) and chat sessions: list, read, rename, star, delete", prefixes: ["chat_"], names: ["search"] },
   { id: "automation", label: "Automation extras: run a schedule now, change or delete a recurring check", names: ["schedule_run", "check_update", "check_delete"] },
   {
     id: "learning", label: "Agent learning and drive",

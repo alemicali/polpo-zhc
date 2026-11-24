@@ -70,7 +70,9 @@ export function registerChannelTools(tool: Register, deps: McpDeps): void {
     const r = await apiSend(deps, "POST", `/config/channels/${enc(name)}/test`);
     if (!r.ok) return r.status === 404 ? fail(`There is no channel "${name}" running. List them with polpo_channels_list; set one up with polpo_channel_save (its secrets: ${setupUrl}).`) : apiError(r, `Testing channel ${name}`);
     const d = r.data as { success?: boolean; error?: string };
-    return ok(d.success ? `The test on ${name} was sent.` : `The test on ${name} failed: ${d.error ?? "unknown error"}. Check the channel in the dashboard (${setupUrl}).`,
+    // the link opens this channel's sheet (?channel=)
+    const channelUrl = dashboardLink(deps, `/config?section=channels&channel=${enc(name)}`);
+    return ok(d.success ? `The test on ${name} was sent.` : `The test on ${name} failed: ${d.error ?? "unknown error"}. Check the channel in the dashboard (${channelUrl}).`,
       { name, success: !!d.success, ...(d.error ? { error: d.error } : {}) });
   });
 
