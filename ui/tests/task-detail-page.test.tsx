@@ -1,4 +1,4 @@
-import { act } from "react";
+import { act, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { RunActivityEntry, Task, TaskDirection } from "@polpo-ai/react";
@@ -99,11 +99,11 @@ const transcript: RunActivityEntry[] = [
 
 let root: Root;
 let container: HTMLDivElement;
-let location = "";
+const probe = { location: "" };
 
 function LocationProbe() {
   const loc = useLocation();
-  location = `${loc.pathname}${loc.search}`;
+  useEffect(() => { probe.location = `${loc.pathname}${loc.search}`; }, [loc]);
   return null;
 }
 
@@ -216,7 +216,7 @@ describe("Execution tab", () => {
     await renderAt("/tasks/task-123456789abc");
     expect(q("[aria-label='Task direction']")).toBeNull();
     await openTab("Execution");
-    expect(location).toContain("tab=execution");
+    expect(probe.location).toContain("tab=execution");
     const execution = q("[data-testid=task-execution-tab]")!;
     expect(execution.querySelector("[aria-label='Task direction']")).not.toBeNull();
     expect(execution.textContent).toContain("Continue task");
@@ -229,7 +229,7 @@ describe("Execution tab", () => {
     await click(q("[data-testid=execution-view-chat]"));
     expect(q("[data-testid=task-chat-view]")).not.toBeNull();
     expect(localStorage.getItem(TASK_EXECUTION_VIEW_KEY)).toBe("chat");
-    expect(location).toContain("view=chat");
+    expect(probe.location).toContain("view=chat");
 
     // a fresh visit without ?view= opens the saved view
     await act(async () => root.unmount());
