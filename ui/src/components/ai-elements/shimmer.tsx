@@ -8,24 +8,23 @@ export interface TextShimmerProps {
   children: string;
   as?: ElementType;
   className?: string;
+  /** Kept for API compatibility; the sweep speed comes from the `.text-shimmer` class. */
   duration?: number;
   spread?: number;
 }
 
+/**
+ * Muted text with a light band sweeping over it: the "still working" look of a running tool
+ * call or of thinking. Colours are the theme tokens; under prefers-reduced-motion it is plain
+ * muted text (see `.text-shimmer` in index.css).
+ */
 const ShimmerComponent = ({
   children,
   as: Component = "p",
   className,
-  duration: _duration = 2,
-  spread: _spread = 2,
 }: TextShimmerProps) => {
   return (
-    <Component
-      className={cn(
-        "inline-block animate-pulse text-muted-foreground",
-        className
-      )}
-    >
+    <Component className={cn("inline-block text-shimmer", className)} data-shimmer="">
       {children}
     </Component>
   );

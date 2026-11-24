@@ -17,7 +17,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Plus, X, Star, StarOff, Pencil, Loader2 } from "lucide-react";
+import { Plus, X, Pin, PinOff, Pencil, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useChatActions, useChatSessionState } from "@/hooks/chat-context";
 import { setActiveChatRoom, useActiveChatRoom } from "@/hooks/use-chat-room";
@@ -159,9 +159,9 @@ function TabItem({ id, title, active, streaming, starred, onSelect, onClose, onR
             </span>
           )}
           {starred && (
-            <Star
-              aria-label="Starred"
-              className="h-3 w-3 shrink-0 fill-warning text-warning"
+            <Pin
+              aria-label="Pinned"
+              className="h-3 w-3 shrink-0 text-muted-foreground"
             />
           )}
           <span className="max-w-[140px] truncate leading-none">{truncated}</span>
@@ -188,13 +188,13 @@ function TabItem({ id, title, active, streaming, starred, onSelect, onClose, onR
         <ContextMenuItem onSelect={onToggleStar}>
           {starred ? (
             <>
-              <StarOff className="mr-2 h-3.5 w-3.5" />
-              Unstar
+              <PinOff className="mr-2 h-3.5 w-3.5" />
+              Unpin
             </>
           ) : (
             <>
-              <Star className="mr-2 h-3.5 w-3.5" />
-              Star
+              <Pin className="mr-2 h-3.5 w-3.5" />
+              Pin
             </>
           )}
         </ContextMenuItem>
