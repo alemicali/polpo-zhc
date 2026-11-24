@@ -103,7 +103,7 @@ export interface CliAccountReport {
 export interface CliAccountView extends CliAccount { report?: CliAccountReport; agents: string[]; manageable: boolean }
 export interface CliOverview { accounts: CliAccountView[]; allowInstanceCodex: boolean }
 export type CliLogin =
-  | { mode: "terminal"; terminal: { agent: "cli-login"; cli_account: string }; command: string }
+  | { mode: "terminal"; terminal: { agent: "cli-login"; cli_account: string }; command: string; computer?: string; note?: string }
   | { mode: "command"; computer: string; command: string; note: string };
 
 export function isCliEngine(e: unknown): e is AgentCliEngine {
