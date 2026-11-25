@@ -33,6 +33,7 @@ import { registerBrainTools } from "../server/mcp-server/knowledge.js";
 import { registerSearchTools } from "../server/mcp-server/search.js";
 import { registerSkillTools } from "../server/mcp-server/skills.js";
 import { registerTeamTools } from "../server/mcp-server/team.js";
+import { registerAgentSuiteTools } from "../server/mcp-server/agent-suites.js";
 import { registerArtifactTools } from "../server/mcp-server/core-tools.js";
 import { knownPublicOrigin } from "../mcp/runtime.js";
 
@@ -176,6 +177,13 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_agent_deploys", name: "agent_deploys", group: "agent-versions" },
   // Agent tests: check everything an agent has at its disposal, apply the one-click fixes
   { mcp: "polpo_agent_test", name: "agent_test", group: "agent-versions" },
+  // Agent suites: tests and evals with mocks, run against a version, read the reports
+  { mcp: "polpo_agent_suite_list", name: "agent_suite_list", group: "agent-versions" },
+  { mcp: "polpo_agent_suite_get", name: "agent_suite_get", group: "agent-versions" },
+  { mcp: "polpo_agent_suite_save", name: "agent_suite_save", group: "agent-versions" },
+  { mcp: "polpo_agent_suite_delete", name: "agent_suite_delete", group: "agent-versions" },
+  { mcp: "polpo_agent_suite_run", name: "agent_suite_run", group: "agent-versions" },
+  { mcp: "polpo_agent_suite_run_get", name: "agent_suite_run_get", group: "agent-versions" },
   // Large artifact contents: upload from a public URL, a file of the instance or base64 parts, then create or replace
   { mcp: "polpo_artifact_upload_prepare", name: "artifact_upload_prepare", group: "artifact-uploads" },
   { mcp: "polpo_artifact_upload_finalize", name: "artifact_upload_finalize", group: "artifact-uploads" },
@@ -351,7 +359,7 @@ function capture(): Map<string, Captured> {
     if (wanted.has(name)) out.set(name, { spec: spec as unknown as ToolSpec<z.ZodRawShape>, handler: handler as unknown as Captured["handler"] });
   };
   for (const register of [
-    registerSetupTools, registerTeamTools, registerConnectorTools, registerMcpServerTools, registerHarnessTools, registerComputerTools, registerConfigTools,
+    registerSetupTools, registerTeamTools, registerAgentSuiteTools, registerConnectorTools, registerMcpServerTools, registerHarnessTools, registerComputerTools, registerConfigTools,
     registerSettingsTools, registerChannelTools, registerChannelSetupTools, registerRoomTools, registerChatTools, registerAutomationTools,
     registerMissionTools, registerDataTools, registerBrainTools, registerSkillTools, registerWaBusinessTools, registerSearchTools,
     registerArtifactTools,
