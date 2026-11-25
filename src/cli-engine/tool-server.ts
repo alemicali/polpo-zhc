@@ -26,6 +26,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { HARNESS_RELAY_PATH, relaySocketDir, relaySocketPath } from "../harness/relay.js";
 import type { HarnessHostTool } from "../harness/types.js";
+import { captureSuiteToolHook } from "../core/agent-suite-context.js";
 
 /** The MCP server's name in the CLI: Claude Code names its tools mcp__polpo__<tool>, Codex polpo.<tool>. */
 export const CLI_TOOL_SERVER_NAME = "polpo";
@@ -100,6 +101,8 @@ export function polpoToolName(name: string): string | undefined {
 export async function openCliToolServer(o: CliToolServerOptions): Promise<CliToolServer> {
   const token = randomBytes(32).toString("base64url");
   const byName = new Map(o.tools.map((t) => [t.name, t]));
+  // an agent suite case opened this server: its tool mocks answer Polpo's tools (src/core/agent-suite-context.ts)
+  const suiteHook = captureSuiteToolHook();
   const servers: HttpServer[] = [];
   let socketPath: string | undefined;
 
@@ -137,7 +140,8 @@ export async function openCliToolServer(o: CliToolServerOptions): Promise<CliToo
         }
       }
       try {
-        const out = textOf(await t.execute(input, { toolCallId, abortSignal: extra.signal }));
+        const run = async () => textOf(await t.execute(input, { toolCallId, abortSignal: extra.signal }));
+        const out = suiteHook ? await suiteHook(name, (input ?? {}) as Record<string, unknown>, run, toolCallId) : await run();
         return end(out, /^Error: /.test(out));
       } catch (err) {
         return end(`Error: ${err instanceof Error ? err.message : String(err)}`, true);

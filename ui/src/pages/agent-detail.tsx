@@ -25,6 +25,7 @@ import {
   ChevronRight,
   Monitor,
   FlaskConical,
+  FlaskRound,
 } from "lucide-react";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { AgentModelWithEngine } from "@/components/shared/model-with-engine";
@@ -57,6 +58,7 @@ import { AgentTasksTab } from "@/components/agents/agent-tasks-tab";
 import { AgentMemoryTab } from "@/components/agents/agent-memory-tab";
 import { AgentVersionsTab, AgentVersionBadges } from "@/components/agents/agent-versions-tab";
 import { AgentTestsTab } from "@/components/agents/agent-tests-tab";
+import { AgentSuitesTab } from "@/components/agents/agent-suites-tab";
 
 // ── Breadcrumb ──
 
@@ -224,6 +226,10 @@ function AgentDetailContent() {
             <FlaskConical className="h-3.5 w-3.5 mr-1" />
             Tests
           </TabsTrigger>
+          <TabsTrigger value="suites">
+            <FlaskRound className="h-3.5 w-3.5 mr-1" />
+            Suites
+          </TabsTrigger>
           <TabsTrigger value="tasks">
             Tasks
             {taskStats.total > 0 && (
@@ -278,6 +284,9 @@ function AgentDetailContent() {
 
         <TabsContent value="tests" className="mt-2 min-w-0 flex-none">
           <AgentTestsTab />
+        </TabsContent>
+        <TabsContent value="suites" className="mt-2 min-w-0 flex-none">
+          <AgentSuitesTab />
         </TabsContent>
 
         <TabsContent value="tasks" className="mt-2 min-w-0 flex-none">

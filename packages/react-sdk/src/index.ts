@@ -43,6 +43,8 @@ export { useAgentVersions, useAgentDeploys } from "./hooks/use-agent-versions.js
 export type { UseAgentVersionsReturn, UseAgentDeploysReturn } from "./hooks/use-agent-versions.js";
 export { useAgentTests } from "./hooks/use-agent-tests.js";
 export type { UseAgentTestsReturn } from "./hooks/use-agent-tests.js";
+export { useAgentSuites, useAgentSuiteRun } from "./hooks/use-agent-suites.js";
+export type { UseAgentSuitesReturn, UseAgentSuiteRunReturn } from "./hooks/use-agent-suites.js";
 export { useMcpServers, useMcpServer } from "./hooks/use-mcp-servers.js";
 export type { UseMcpServersReturn, UseMcpServerReturn } from "./hooks/use-mcp-servers.js";
 export { useSkillBundleUpload } from "./hooks/use-skill-bundle-upload.js";
@@ -261,6 +263,7 @@ export type {
   AgentVersionDiff,
   AgentDeployEntry,
   AgentTestCheckId, AgentTestStatus, AgentTestFixAction, AgentTestItem, AgentTestCheckResult, AgentTestRun, AgentTestRunRequest,
+  AgentSuite, AgentSuiteInput, SuiteRun, SuiteRunRequest, SuiteDatasetImport, SuiteMockMode, ArgsMatchMode, ToolMock, ScriptedTurn, SuiteMocks, SuiteCaseInput, SuiteAssertion, SuiteAssertionType, SuiteScorer, SuiteBudgets, SuiteCase, SuiteDataset, SuiteVariantOverrides, SuiteRunStatus, SuiteCaseStatus, SuiteAssertionResult, SuiteTraceToolCall, SuiteTraceTurn, SuiteTrace, SuiteCaseResult, SuiteRunStats,
   AgentPublishResult,
   McpSecretRef, McpServerAuth, McpServerTool, McpServerSpec, McpServerSummary, McpHostedServer, McpServerTemplateInfo, McpServerTemplateSecret, McpServerTemplateStatus, McpServerSettingField, McpServerInstallRequest, McpServerInstallResult, McpServerTestCase,
   McpServerVersionInfo, McpServerDeploy, McpServerDiff, McpToolTestResult, McpServerCallLog, McpPendingCall, McpServerGenerateRequest, McpServerGenerateResult,

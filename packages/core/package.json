@@ -62,6 +62,10 @@
       "types": "./dist/agent-tests.d.ts",
       "import": "./dist/agent-tests.js"
     },
+    "./agent-suites": {
+      "types": "./dist/agent-suites.d.ts",
+      "import": "./dist/agent-suites.js"
+    },
     "./run-context": {
       "types": "./dist/run-context.d.ts",
       "import": "./dist/run-context.js"

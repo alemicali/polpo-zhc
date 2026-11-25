@@ -1,4 +1,5 @@
 import { PolpoApiError } from "./errors.js";
+import type { AgentSuite, AgentSuiteInput, SuiteRun, SuiteRunRequest, SuiteDatasetImport } from "./agent-suite-types.js";
 import type {
   Connector,
   ConnectorTool,
@@ -994,6 +995,65 @@ export class PolpoClient {
   /** Apply a one-click fix a check offered (e.g. grant a connector's access to the agent). */
   fixAgentTest(name: string, action: AgentTestFixAction): Promise<{ message: string }> {
     return this.post<{ message: string }>(`/agents/${encodeURIComponent(name)}/tests/fix`, action);
+  }
+
+  // ── Agent suites ──
+
+  /** The agent's test and eval suites. */
+  getAgentSuites(name: string): Promise<AgentSuite[]> {
+    return this.get<AgentSuite[]>(`/agents/${encodeURIComponent(name)}/suites`);
+  }
+
+  getAgentSuite(name: string, id: string): Promise<AgentSuite> {
+    return this.get<AgentSuite>(`/agents/${encodeURIComponent(name)}/suites/${encodeURIComponent(id)}`);
+  }
+
+  /** The suite as YAML (the YAML view) with its revision. */
+  getAgentSuiteYaml(name: string, id: string): Promise<{ yaml: string; revision: number }> {
+    return this.get<{ yaml: string; revision: number }>(`/agents/${encodeURIComponent(name)}/suites/${encodeURIComponent(id)}?format=yaml`);
+  }
+
+  /** Create a suite (409 when its id exists). */
+  createAgentSuite(name: string, suite: AgentSuiteInput | { yaml: string }): Promise<AgentSuite> {
+    return this.post<AgentSuite>(`/agents/${encodeURIComponent(name)}/suites`, suite);
+  }
+
+  /** Replace (or create) a suite; `revision` refuses the save when it changed meanwhile (409). */
+  saveAgentSuite(name: string, id: string, suite: AgentSuiteInput | { yaml: string }, revision?: number): Promise<AgentSuite> {
+    return this.put<AgentSuite>(`/agents/${encodeURIComponent(name)}/suites/${encodeURIComponent(id)}`, { ...suite, ...(revision !== undefined ? { revision } : {}) });
+  }
+
+  deleteAgentSuite(name: string, id: string): Promise<{ deleted: string }> {
+    return this.del<{ deleted: string }>(`/agents/${encodeURIComponent(name)}/suites/${encodeURIComponent(id)}`);
+  }
+
+  /** Import a dataset from CSV or JSON into a suite. */
+  importAgentSuiteDataset(name: string, id: string, req: SuiteDatasetImport): Promise<AgentSuite> {
+    return this.post<AgentSuite>(`/agents/${encodeURIComponent(name)}/suites/${encodeURIComponent(id)}/datasets/import`, req);
+  }
+
+  /** Run a suite (returns it running unless `wait`). */
+  runAgentSuite(name: string, id: string, req: SuiteRunRequest = {}): Promise<SuiteRun> {
+    return this.post<SuiteRun>(`/agents/${encodeURIComponent(name)}/suites/${encodeURIComponent(id)}/runs`, req);
+  }
+
+  /** The agent's suite runs, newest first, without traces. */
+  getAgentSuiteRuns(name: string, opts: { suite?: string; benchmark?: string; limit?: number } = {}): Promise<SuiteRun[]> {
+    const q = new URLSearchParams();
+    if (opts.suite) q.set("suite", opts.suite);
+    if (opts.benchmark) q.set("benchmark", opts.benchmark);
+    if (opts.limit) q.set("limit", String(opts.limit));
+    const s = q.toString();
+    return this.get<SuiteRun[]>(`/agents/${encodeURIComponent(name)}/suite-runs${s ? `?${s}` : ""}`);
+  }
+
+  /** One run with every case's assertions and trace. */
+  getAgentSuiteRun(name: string, runId: string): Promise<SuiteRun> {
+    return this.get<SuiteRun>(`/agents/${encodeURIComponent(name)}/suite-runs/${encodeURIComponent(runId)}`);
+  }
+
+  cancelAgentSuiteRun(name: string, runId: string): Promise<SuiteRun> {
+    return this.post<SuiteRun>(`/agents/${encodeURIComponent(name)}/suite-runs/${encodeURIComponent(runId)}/cancel`);
   }
 
   // ── Hosted MCP servers ──

@@ -7,6 +7,7 @@ import { redactAgentConfig, redactTeam, sanitizeTranscriptEntry } from "../secur
 import { buildETag, contentFingerprint, handleConditional } from "../etag.js";
 import { registerAgentVersionRoutes, versionErrorResponse, type AgentVersionDeps } from "./agent-versions.js";
 import { registerAgentTestRoutes, type AgentTestRouteDeps } from "./agent-tests.js";
+import { registerAgentSuiteRoutes, type AgentSuiteRouteDeps } from "./agent-suites.js";
 import { AGENT_FIELD_CLASSIFICATION } from "@polpo-ai/core/agent-versions";
 
 interface IndexedRunLog {
@@ -98,6 +99,8 @@ export function agentRoutes(getDeps: () => {
   };
   /** Agent tests (POST/GET /agents/:name/tests, …/fix). Absent: the routes answer 409. */
   tests?: AgentTestRouteDeps;
+  /** Agent suites (/agents/:name/suites…, /agents/:name/suite-runs…). Absent: the routes answer 409. */
+  suites?: AgentSuiteRouteDeps;
 }): OpenAPIHono {
   const app = new OpenAPIHono();
 
@@ -503,6 +506,8 @@ export function agentRoutes(getDeps: () => {
   registerAgentVersionRoutes(app, () => getDeps());
   // /agents/:name/tests (run, history, one run, fix)
   registerAgentTestRoutes(app, () => getDeps());
+  // /agents/:name/suites (suites, dataset import, runs) and /agents/:name/suite-runs
+  registerAgentSuiteRoutes(app, () => getDeps());
 
   // PATCH /agents/:name — update agent (registered after static routes to avoid conflicts with /team)
   const updateAgentRoute = createRoute({

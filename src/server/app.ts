@@ -108,6 +108,11 @@ import { isMcpToolName, toolResultText } from "../mcp/tools.js";
 import { connectorLabel } from "../mcp/view.js";
 import { AgentTalk } from "./agent-talk.js";
 import { agentTesterFor } from "./agent-tests-host.js";
+import { agentSuiteRunnerFor } from "./agent-suites-host.js";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import {
+  SUITE_PLACEHOLDER_MODEL, applySuiteOverrides, currentSuiteCase, suiteCompleteLLM, suiteStreamLLM, suiteToolExecutor,
+} from "../core/agent-suite-context.js";
 import { orchestratorName } from "../core/orchestrator-name.js";
 import { resolveBrowserEgress } from "../tools/browser-egress.js";
 import { appPreviewRoutes } from "./routes/app-preview.js";
@@ -359,12 +364,15 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       }),
     getAgents: () => o.getAgents(),
     // "writer@draft" (the Tests tab's smoke run): the draft over the live agent's runtime fields
+    // a suite case's variant (agent suites): its per-run overrides on top (nothing is saved)
     resolveAgent: async (name: string, ref?: string) => {
-      if (ref !== "draft") return o.getAgentVersioning().resolve(name, ref);
+      const overrides = currentSuiteCase()?.overrides;
+      const withOverrides = <T extends { agent: any } | undefined>(r: T): T => (r && overrides ? { ...r, agent: applySuiteOverrides(r.agent, overrides) } : r);
+      if (ref !== "draft") return withOverrides(await o.getAgentVersioning().resolve(name, ref));
       const live = (await o.getAgents()).find((a) => a.name === name);
       if (!live) return undefined;
       const { config } = await o.getAgentVersioning().draftConfig(name);
-      return { agent: { ...live, ...config, name } };
+      return withOverrides({ agent: { ...live, ...config, name } });
     },
     getConfig: () => o.getConfig(),
     getMemoryStore: () => o.getMemoryStore(),
@@ -374,12 +382,21 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     connectorNames: () => Object.fromEntries(connectorManagerFor(o).store.list().map((connector) => [connector.id, connectorLabel(connector)])),
     connectorApps: () => Object.fromEntries(connectorManagerFor(o).store.list().flatMap((connector) => (connector.catalogId ? [[connector.id, connector.catalogId]] : []))),
     recordTokenUsage: async (usage) => {
+      // a suite case's scripted turns are not spending
+      if (currentSuiteCase()?.mocksModel) return;
       await (databaseStoresFor(activePolpoDir())?.tokenUsageStore ?? new FileTokenUsageStore(activePolpoDir())).record(usage);
       o.emit("token-usage:recorded", { timestamp: new Date().toISOString() });
     },
     resolveAgentModel: async (agentConfig: any, reasoning?: string) => {
       const { resolveModel, buildStreamOpts } = await import("../llm/pi-client.js");
-      const m = resolveModel(agentConfig.model);
+      let m: any;
+      try {
+        m = resolveModel(agentConfig.model);
+      } catch (err) {
+        // a suite case that scripts the model runs offline: no provider needed
+        if (!currentSuiteCase()?.mocksModel) throw err;
+        m = SUITE_PLACEHOLDER_MODEL;
+      }
       const r = agentConfig.reasoning ?? reasoning;
       return { model: m, streamOpts: buildStreamOpts(undefined, r, m.maxTokens) };
     },
@@ -681,9 +698,11 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       // Whatever the agent's tools change is attributed to the agent
       const attributed = (name: string, args: Record<string, unknown>) =>
         withEventOrigin({ source: "agent", by: agentConfig.name }, () => executor(name, args));
-      return { tools, executor: attributed, isInteractive };
+      // agent suites: a case's tool mocks answer before anything runs (no side effect)
+      return { tools, executor: suiteToolExecutor(attributed), isInteractive };
     },
-    streamLLM: streamSimpleWithAuth as any,
+    // agent suites: scripted turns (model mock), observed real turns and budgets
+    streamLLM: suiteStreamLLM(streamSimpleWithAuth as any),
     // A tool call whose arguments do not match the tool's schema is returned to the model instead of run.
     // Only a validation failure counts: if the validator itself fails, the call goes through as before.
     validateToolArguments: (tool: any, call: any) => {
@@ -694,7 +713,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         return call.arguments;
       }
     },
-    completeLLM: completeSimpleWithAuth as any,
+    completeLLM: suiteCompleteLLM(completeSimpleWithAuth as any),
     resolveSummaryModel: (conversation: any, configured: string | undefined, promptTokens: number) =>
       resolveSummaryModel(conversation, configured, promptTokens),
     // only Telegram turns carry an origin (see ChannelGateway.checkTarget)
@@ -1429,6 +1448,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     removeAgent: async (name: string) => {
       const removed = await o.removeAgent(name);
       if (removed) await agentTester().forget(name).catch(() => undefined);
+      if (removed) await agentSuites().forget(name).catch(() => undefined);
       return removed;
     },
     updateAgent: (name: string, updates: any) => o.updateAgent(name, updates),
@@ -1461,7 +1481,23 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       actor: (c) => requestAuthor(c),
       member: (c) => c.get("polpoUserEmail" as never) as string | undefined,
     },
+    // the Suites tab: tests and evals with mocks, run against a version (docs/agent-suites.md)
+    suites: {
+      list: (name) => agentSuites().listSuites(name),
+      get: (name, id) => agentSuites().getSuite(name, id),
+      save: (name, input, opts) => agentSuites().saveSuite(name, input, opts),
+      remove: (name, id) => agentSuites().deleteSuite(name, id),
+      importDataset: (name, id, req, opts) => agentSuites().importDataset(name, id, req, opts),
+      startRun: (name, id, req, opts) => agentSuites().startRun(name, id, req, opts),
+      listRuns: (name, opts) => agentSuites().listRuns(name, opts),
+      getRun: (name, runId) => agentSuites().getRun(name, runId),
+      cancelRun: (name, runId) => agentSuites().cancelRun(name, runId),
+      toYaml: (value) => stringifyYaml(value, { lineWidth: 0 }),
+      fromYaml: (text) => parseYaml(text),
+      actor: (c) => requestAuthor(c),
+    },
   })));
+  const agentSuites = () => agentSuiteRunnerFor({ orchestrator: o, completions: (req) => completionApp.request(req) });
   const agentTester = () => agentTesterFor({
     orchestrator: o,
     computerManager: () => computerDeps.manager(),
