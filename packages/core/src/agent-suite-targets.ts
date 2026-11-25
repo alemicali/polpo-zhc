@@ -51,8 +51,8 @@ export interface HostedServerTest {
   name?: string;
   tool: string;
   input: Record<string, unknown>;
-  /** ok (default): the call must succeed; error: it must fail. */
-  expect?: "ok" | "error";
+  /** ok (default): the call must succeed; error: it must fail; any: no implicit check (the assertions decide). */
+  expect?: "ok" | "error" | "any";
   /** The result text must contain this. */
   contains?: string;
   /** More checks (text_contains, text_regex, http_called, tool_failed, max_duration…). */
@@ -87,7 +87,7 @@ const LEGACY_CONTAINS = "saved-contains";
 /** A saved test as a case: `expect` and `contains` become assertions (ids saved-expect, saved-contains). */
 export function hostedTestToCase(t: HostedServerTest): SuiteCase {
   const legacy: SuiteAssertion[] = [
-    t.expect === "error" ? { id: LEGACY_EXPECT, type: "tool_failed" } : { id: LEGACY_EXPECT, type: "no_tool_errors" },
+    ...(t.expect === "any" ? [] : [t.expect === "error" ? { id: LEGACY_EXPECT, type: "tool_failed" as const } : { id: LEGACY_EXPECT, type: "no_tool_errors" as const }]),
     ...(t.contains ? [{ id: LEGACY_CONTAINS, type: "text_contains" as const, value: t.contains, caseSensitive: true }] : []),
   ];
   return {
@@ -111,7 +111,7 @@ export function caseToHostedTest(c: SuiteCase): HostedServerTest {
   const rest = c.assertions.filter((a) => a.id !== LEGACY_EXPECT && a.id !== LEGACY_CONTAINS);
   return {
     id: c.id, ...(c.name && c.name !== c.input.tool ? { name: c.name } : {}), tool: c.input.tool, input: c.input.args ?? {},
-    ...(expect?.type === "tool_failed" ? { expect: "error" as const } : {}),
+    ...(expect?.type === "tool_failed" ? { expect: "error" as const } : expect ? {} : { expect: "any" as const }),
     ...(contains?.type === "text_contains" && typeof contains.value === "string" ? { contains: contains.value } : {}),
     ...(rest.length ? { assertions: rest } : {}),
     ...(c.scorers?.length ? { scorers: c.scorers } : {}),

@@ -341,7 +341,7 @@ export class McpServerService {
       return {
         id: typeof x.id === "string" && /^[\w-]{1,64}$/.test(x.id) ? x.id : randomUUID().slice(0, 8), tool: x.tool, input,
         ...(typeof x.name === "string" && x.name.trim() ? { name: x.name.trim().slice(0, 120) } : {}),
-        ...(x.expect === "error" ? { expect: "error" as const } : {}),
+        ...(x.expect === "error" ? { expect: "error" as const } : x.expect === "any" ? { expect: "any" as const } : {}),
         ...(typeof x.contains === "string" && x.contains ? { contains: x.contains } : {}),
         ...list("assertions"), ...list("scorers"), ...list("http"),
         ...(typeof x.mode === "string" ? { mode: x.mode } : {}),
@@ -455,7 +455,7 @@ export class McpServerService {
       if (!tool) { results.push({ ok: false, text: "", tool: test.tool, testId: test.id, error: `No tool "${test.tool}"`, ms: 0, passed: false }); continue; }
       if (isSensitiveTool(tool)) { results.push({ ok: true, text: "", tool: tool.name, testId: test.id, ms: 0, skipped: "destructive / approval tools never run automatically" }); continue; }
       const r = await runTool({ serverId: id, spec, ...(version ? { version } : {}), toolName: tool.name, input: test.input, source: "test", approved: true }, this.runtimeDeps());
-      const passed = (test.expect === "error" ? !r.ok : r.ok) && (!test.contains || r.text.includes(test.contains) || (r.error ?? "").includes(test.contains));
+      const passed = (test.expect === "error" ? !r.ok : test.expect === "any" ? true : r.ok) && (!test.contains || r.text.includes(test.contains) || (r.error ?? "").includes(test.contains));
       results.push({ ...r, tool: tool.name, testId: test.id, passed });
     }
     return {
