@@ -470,14 +470,14 @@ describe("Printful template (mocked API)", () => {
     expect(order).toMatchObject({ requiresApproval: true, annotations: { destructiveHint: true } });
     expect(order.http?.query).toBeUndefined();
     expect(PRINTFUL_TEMPLATE.spec.tools.filter((t) => t.annotations?.readOnlyHint).map((t) => t.name))
-      .toEqual(["list_catalog_categories", "list_catalog_products", "get_product", "get_variant", "get_shipping_rates", "get_mockup_result", "get_order", "list_orders"]);
+      .toEqual(["list_stores", "list_catalog_categories", "list_catalog_products", "get_product", "find_variant", "get_variant", "get_shipping_rates", "estimate_order_costs", "get_mockup_result", "get_order", "list_orders"]);
   });
 
   it("each read tool calls the right endpoint with the bearer token and returns a slim result", async () => {
     expect(JSON.parse((await run("list_catalog_categories", {})).text)).toEqual([{ id: 24, parent_id: 6, title: "T-Shirts" }]);
     const products = await run("list_catalog_products", { category_id: 24 });
-    expect(JSON.parse(products.text)[0]).toEqual({ id: 71, title: "Unisex Staple T-Shirt", type_name: "T-Shirt", brand: "Bella + Canvas", model: "3001", variant_count: 200 });
-    expect((await run("get_product", { product_id: 71 })).text).toMatch(/4012/);
+    expect(JSON.parse(products.text).items[0]).toEqual({ id: 71, title: "Unisex Staple T-Shirt", type_name: "T-Shirt", brand: "Bella + Canvas", model: "3001", variant_count: 200 });
+    expect(JSON.parse((await run("get_product", { product_id: 71 })).text)).toMatchObject({ id: 71, variant_count: 1, colors: ["Black"], sizes: ["M"] });
     expect((await run("get_variant", { variant_id: 4012 })).ok).toBe(true);
     const rates = await run("get_shipping_rates", { recipient: { country_code: "IT", zip: "20121" }, items: [{ variant_id: 4012, quantity: 1 }], currency: "EUR" });
     expect(rates.text).toMatch(/STANDARD/);
@@ -532,20 +532,20 @@ describe("REST routes", () => {
       const res = await app.request(path, { method, headers: { "content-type": "application/json" }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
       return { status: res.status, body: await res.json() as any };
     };
-    expect((await call("GET", "/templates")).body.data.templates[0]).toMatchObject({ id: "printful", toolCount: 10 });
+    expect((await call("GET", "/templates")).body.data.templates[0]).toMatchObject({ id: "printful", toolCount: 13 });
     const created = await call("POST", "/", { template: "printful" });
     expect(created.body.data).toMatchObject({ id: "printful", problems: [] });
     expect(created.body.data.setup).toMatch(/polpo-infra/);
     const got = await call("GET", "/printful");
     expect(got.body.data.secrets).toEqual({ token: true });
     expect(JSON.stringify(got.body)).not.toContain(TOKEN);
-    expect(got.body.data.tests).toHaveLength(3);
+    expect(got.body.data.tests).toHaveLength(4);
     const test = await call("POST", "/printful/test", { tool: "list_catalog_categories", input: {} });
     expect(test.body.data).toMatchObject({ ok: true, request: { url: "https://api.printful.com/categories", headers: { authorization: "••••" } } });
     const published = await call("POST", "/printful/publish", { note: "first" });
     expect(published.body.data).toMatchObject({ version: "1.0.0", deployed: { action: "initial" } });
     expect(manager.store.get("printful")?.transport.type).toBe("hosted");
-    expect((await call("GET", "/printful/versions")).body.data.versions[0]).toMatchObject({ version: "1.0.0", production: true, toolCount: 10 });
+    expect((await call("GET", "/printful/versions")).body.data.versions[0]).toMatchObject({ version: "1.0.0", production: true, toolCount: 13 });
     expect((await call("POST", "/printful/publish", {})).status).toBe(409);
     expect((await call("PATCH", "/printful", { visibility: "public" })).body.data.publicUrl).toBe("https://polpo.test/mcp/servers/printful");
     expect((await call("GET", "/nope")).status).toBe(404);
@@ -584,7 +584,7 @@ describe("MCP tools (polpo_mcp_server_*) and Polpo's chat tools", () => {
       return result;
     };
     const readOnly = (await rpc(deps(["polpo:read", "polpo:work", "polpo:connectors"]), "tools/list")).tools.map((t: { name: string }) => t.name).filter((n: string) => n.includes("mcp_server"));
-    expect(readOnly.sort()).toEqual(["polpo_mcp_server_get", "polpo_mcp_server_logs", "polpo_mcp_servers_list"]);
+    expect(readOnly.sort()).toEqual(["polpo_mcp_server_get", "polpo_mcp_server_logs", "polpo_mcp_server_templates", "polpo_mcp_servers_list"]);
 
     const created = await call("polpo_mcp_server_create", { template: "printful" });
     expect(created.structuredContent).toMatchObject({ id: "printful", problems: [] });
@@ -595,7 +595,7 @@ describe("MCP tools (polpo_mcp_server_*) and Polpo's chat tools", () => {
     const dry = await call("polpo_mcp_server_test", { id: "printful", tool: "create_order", input: { recipient: { name: "A", address1: "x", city: "y", country_code: "IT", zip: "1" }, items: [{ variant_id: 1, quantity: 1 }] } });
     expect(dry.content[0].text).toMatch(/^Not sent/);
     expect(fetch).not.toHaveBeenCalled();
-    expect((await call("polpo_mcp_server_test", { id: "printful", all: true })).structuredContent).toMatchObject({ passed: 3, failed: 0, skipped: 0 });
+    expect((await call("polpo_mcp_server_test", { id: "printful", all: true })).structuredContent).toMatchObject({ passed: 4, failed: 0, skipped: 0 });
     expect((await call("polpo_mcp_server_update", { id: "printful", visibility: "public" })).isError).toBe(true);
     const pub = await call("polpo_mcp_server_publish", { id: "printful", note: "first" });
     expect(pub.structuredContent).toMatchObject({ version: "1.0.0", deployed: { action: "initial" } });

@@ -2,7 +2,7 @@ import { PolpoApiError } from "./errors.js";
 import type {
   Connector,
   ConnectorTool,
-  McpServerSummary, McpServerTemplateInfo, McpHostedServer, McpServerSpec, McpServerGenerateRequest, McpServerGenerateResult,
+  McpServerSummary, McpServerTemplateInfo, McpServerInstallRequest, McpServerInstallResult, McpSecretRef, McpHostedServer, McpServerSpec, McpServerGenerateRequest, McpServerGenerateResult,
   McpServerTestCase, McpToolTestResult, McpServerVersionInfo, McpServerDeploy, McpServerDiff, McpServerCallLog, McpPendingCall,
   AuthStatusResponse,
   MemberPreferencesPatch,
@@ -983,6 +983,24 @@ export class PolpoClient {
     return this.get<{ templates: McpServerTemplateInfo[] }>("/mcp-servers/templates").then((d) => d.templates);
   }
 
+  /** One ready-made connector with its install status. */
+  getMcpServerTemplate(template: string): Promise<McpServerTemplateInfo> {
+    return this.get<McpServerTemplateInfo>(`/mcp-servers/templates/${encodeURIComponent(template)}`);
+  }
+
+  /**
+   * Install a ready-made connector: settings → secrets (saved to the vault, never returned) → agents →
+   * read-only tests → publish + deploy. An older installed revision becomes a draft with the diff.
+   */
+  installMcpServerTemplate(template: string, req: McpServerInstallRequest = {}): Promise<McpServerInstallResult> {
+    return this.post<McpServerInstallResult>(`/mcp-servers/templates/${encodeURIComponent(template)}/install`, req);
+  }
+
+  /** Save a hosted server's secret to the vault entry it names (write-only). */
+  saveMcpServerSecret(id: string, name: string, value: string): Promise<{ name: string; set: true; vault: McpSecretRef }> {
+    return this.put<{ name: string; set: true; vault: McpSecretRef }>(`/mcp-servers/${encodeURIComponent(id)}/secrets/${encodeURIComponent(name)}`, { value });
+  }
+
   getMcpServer(id: string): Promise<McpHostedServer> {
     return this.get<McpHostedServer>(`/mcp-servers/${encodeURIComponent(id)}`);
   }
@@ -997,7 +1015,7 @@ export class PolpoClient {
     return this.post<McpServerGenerateResult>("/mcp-servers/generate", req);
   }
 
-  updateMcpServerSettings(id: string, req: { visibility?: "private" | "public"; disabled?: boolean; onTestFailure?: "warn" | "block"; rateLimits?: { perIpPerMinute: number; globalPerMinute: number } }): Promise<McpServerSummary> {
+  updateMcpServerSettings(id: string, req: { visibility?: "private" | "public"; disabled?: boolean; onTestFailure?: "warn" | "block"; rateLimits?: { perIpPerMinute: number; globalPerMinute: number }; settings?: Record<string, string | number | boolean | null> }): Promise<McpServerSummary> {
     return this.patch<McpServerSummary>(`/mcp-servers/${encodeURIComponent(id)}`, req);
   }
 

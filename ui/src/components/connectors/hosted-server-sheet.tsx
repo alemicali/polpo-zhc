@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import { AlertTriangle, FlaskConical, Globe, History, Loader2, Play, Plus, Rocket, RotateCcw, Save, ScrollText, Settings2, Trash2, Wrench } from "lucide-react";
 import {
   useMcpServer,
-  type McpServerAuth, type McpServerCallLog, type McpServerDiff, type McpServerSpec, type McpServerTool, type McpPendingCall, type McpToolTestResult,
+  type McpHostedServer, type McpServerAuth, type McpServerCallLog, type McpServerDiff, type McpServerSpec, type McpServerTool, type McpPendingCall, type McpToolTestResult,
 } from "@polpo-ai/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ import { AgentVersionDiffView } from "@/components/agents/agent-versions-tab";
 import { Switch } from "./connector-bits";
 import { blankTool, hostedLabel, isSensitive, parseJson, pretty, sampleInput, schemaParams } from "@/lib/mcp-servers";
 import { productName, useInstanceBranding } from "@/lib/branding";
+import { SecretHelp, SecretInput, SettingInput, settingsPayload, type SettingValue } from "./template-fields";
 import { cn } from "@/lib/utils";
 
 const selectClass = "h-9 w-full rounded-md border bg-transparent px-2 text-sm";
@@ -201,6 +202,46 @@ function SettingsTab({ spec, onChange, secretsSet }: { spec: McpServerSpec; onCh
   );
 }
 
+/** The values this server runs with: its settings (no new version needed) and its secrets, written to the vault. */
+function ServerValues({ server, saveSecret, saveSettings, focus, busy }: {
+  server: McpHostedServer; focus?: string; busy: boolean;
+  saveSecret: (name: string, value: string) => Promise<void>;
+  saveSettings: (values: Record<string, string | number | boolean | null>) => Promise<void>;
+}) {
+  const [values, setValues] = useState<Record<string, SettingValue>>(() => ({ ...(server.settings ?? {}) }));
+  const spec = server.draft?.spec ?? server.productionSpec;
+  const secretNames = Object.keys(spec?.secrets ?? {});
+  if (!server.settingsSchema?.length && !secretNames.length) return null;
+  return (
+    <div className="space-y-4" data-testid="server-values">
+      {server.settingsSchema?.length > 0 && (
+        <div className="space-y-3">
+          <p className="text-sm font-medium">Settings <span className="font-normal text-muted-foreground">(used at once, no new version)</span></p>
+          {server.settingsSchema.map((f) => (
+            <SettingInput key={f.key} field={f} value={values[f.key]} disabled={busy} onChange={(v) => setValues((x) => ({ ...x, [f.key]: v }))} />
+          ))}
+          <Button size="sm" disabled={busy} onClick={() => void saveSettings(settingsPayload(values, server.settings ?? {}))}><Save className="h-3.5 w-3.5" /> Save settings</Button>
+        </div>
+      )}
+      {secretNames.length > 0 && (
+        <div className="space-y-3">
+          <p className="text-sm font-medium">Secrets <span className="font-normal text-muted-foreground">(written to the vault; never shown)</span></p>
+          {secretNames.map((name) => {
+            const info = server.templateInfo?.secrets[name];
+            return (
+              <div key={name} className="space-y-1.5">
+                <SecretInput name={name} label={info?.label ?? name} isSet={!!server.secrets[name]} focus={focus === `secret:${name}`} disabled={busy}
+                  onSave={(v) => saveSecret(name, v)} />
+                {info && <SecretHelp info={info} />}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TestTab({ spec, test, runTests, saveTest }: {
   spec: McpServerSpec;
   test: (req: { tool: string; input?: Record<string, unknown>; confirm?: boolean }) => Promise<McpToolTestResult>;
@@ -278,6 +319,8 @@ function TestTab({ spec, test, runTests, saveTest }: {
 export function HostedServerSheet({ id, open, onOpenChange }: { id: string | null; open: boolean; onOpenChange: (open: boolean) => void }) {
   const s = useMcpServer(id ?? undefined);
   const product = productName(useInstanceBranding());
+  // ?focus=secret:<name> (a setup link from MCP / Polpo's chat): open on the secret's input
+  const [focus] = useState(() => (typeof window === "undefined" ? undefined : new URLSearchParams(window.location.search).get("focus") ?? undefined));
   const server = s.server;
   // edits in progress (null: the saved draft)
   const [edited, setEdited] = useState<McpServerSpec | null>(null);
@@ -335,7 +378,7 @@ export function HostedServerSheet({ id, open, onOpenChange }: { id: string | nul
                 <ul className="list-disc pl-5">{server.draft!.problems.map((p) => <li key={p}>{p}</li>)}</ul>
               </div>
             )}
-            <Tabs defaultValue="tools" className="gap-4">
+            <Tabs defaultValue={focus?.startsWith("secret:") ? "settings" : "tools"} className="gap-4">
               <TabsList>
                 <TabsTrigger value="tools"><Wrench className="h-3.5 w-3.5" /> Tools</TabsTrigger>
                 <TabsTrigger value="settings"><Settings2 className="h-3.5 w-3.5" /> Settings</TabsTrigger>
@@ -359,6 +402,9 @@ export function HostedServerSheet({ id, open, onOpenChange }: { id: string | nul
               </TabsContent>
 
               <TabsContent value="settings" className="space-y-6">
+                <ServerValues server={server} busy={busy} focus={focus}
+                  saveSecret={(name, value) => act("Saved to the vault", () => s.saveSecret(name, value))}
+                  saveSettings={(values) => act("Settings saved", () => s.updateSettings({ settings: values }))} />
                 <SettingsTab spec={spec} onChange={edit} secretsSet={server.secrets} />
                 <div className="space-y-3 border-t pt-4">
                   <p className="text-sm font-medium">Visibility</p>

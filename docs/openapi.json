@@ -22722,11 +22722,276 @@
         "tags": [
           "MCP servers"
         ],
-        "summary": "Server templates",
-        "description": "Ready-made servers to create in one click (e.g. Printful). No secret is included: each names the vault entry to add.",
+        "summary": "Ready-made connectors (templates)",
+        "description": "The curated catalog of hosted connectors Polpo can install (Printful, Gelato, Printify…): vendor, category, revision, maturity (tested with the live API or not), the settings and secrets each needs (with the vendor's instructions; never values), read-only and approval tools, and where each stands here: available, draft, installed (server and version) or update_available.",
         "responses": {
           "200": {
             "description": "The templates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict (nothing to publish, already deployed, tests failed…)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers/templates/{template}": {
+      "get": {
+        "tags": [
+          "MCP servers"
+        ],
+        "summary": "One ready-made connector",
+        "description": "A template with its tools, settings, secrets' instructions, changelog and install status.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "template",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The template",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict (nothing to publish, already deployed, tests failed…)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers/templates/{template}/install": {
+      "post": {
+        "tags": [
+          "MCP servers"
+        ],
+        "summary": "Install a ready-made connector",
+        "description": "settings (validated), secrets (values saved straight to the vault, never returned; the dashboard sends them, MCP never does), agents (who the connector grants: a list or \"*\"; default none — Polpo only), then the template's read-only tests, then publish 1.0.0 + deploy. status: installed | needs_secrets (nothing published: missingSecrets) | tests_failed | draft (publish: false) | upgrade_draft (an older revision is installed: the new one is the draft, with the diff) | up_to_date.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "template",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": {
+                  "nullable": true
+                },
+                "description": "{ id?, settings?, secrets?, agents?, publish?, force? }"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The install",
             "content": {
               "application/json": {
                 "schema": {
@@ -23092,7 +23357,7 @@
           "MCP servers"
         ],
         "summary": "Change a server's settings",
-        "description": "visibility (\"private\": this instance only; \"public\": anyone with the URL, with the instance's credentials), disabled (kill switch), onTestFailure (\"warn\" | \"block\"), rateLimits { perIpPerMinute, globalPerMinute }.",
+        "description": "visibility (\"private\": this instance only; \"public\": anyone with the URL, with the instance's credentials), disabled (kill switch), onTestFailure (\"warn\" | \"block\"), rateLimits { perIpPerMinute, globalPerMinute }, settings (values of the settingsSchema, e.g. { store_id }: validated; null clears a key; no new version needed).",
         "parameters": [
           {
             "schema": {
@@ -23111,7 +23376,7 @@
                 "additionalProperties": {
                   "nullable": true
                 },
-                "description": "{ visibility?, disabled?, onTestFailure?, rateLimits? }"
+                "description": "{ visibility?, disabled?, onTestFailure?, rateLimits?, settings? }"
               }
             }
           }
@@ -23506,6 +23771,153 @@
         "responses": {
           "200": {
             "description": "Discarded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict (nothing to publish, already deployed, tests failed…)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers/{id}/secrets/{name}": {
+      "put": {
+        "tags": [
+          "MCP servers"
+        ],
+        "summary": "Save a secret to the vault",
+        "description": "{ value }: written to the vault entry the server names for this secret (other fields of the entry are kept). Write-only: the value is never returned or logged; the server's GET says only whether it is set.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": {
+                  "nullable": true
+                },
+                "description": "{ value }"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved (set: true)",
             "content": {
               "application/json": {
                 "schema": {
