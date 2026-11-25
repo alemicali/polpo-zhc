@@ -84,8 +84,35 @@ test("the list: empty state offers to create; servers show visibility, version a
   const row = container.querySelector('[data-testid="hosted-server-printful"]')!;
   expect(row.textContent).toMatch(/Public/);
   expect(row.textContent).toMatch(/v1\.2\.0 in production · draft has changes · 10 tools · 2 waiting for approval/);
-  await act(async () => (row as HTMLElement).click());
+  await act(async () => row.querySelector("button")!.click());
   expect(onOpen).toHaveBeenCalledWith("printful");
+});
+
+test("hosted servers are connector rows: Hosted by badge, status pill, the vendor's mark or a letter tile, the gear", async () => {
+  state.servers = [
+    { id: "printful", name: "Printful", icon: "printful", template: "printful", visibility: "private", toolCount: 10, production: "1.1.0", draftChanged: false, pendingApprovals: 0, versionCount: 2, createdAt: "", updatedAt: "", createdBy: "" },
+    // made before the Gelato template had an icon: its template's mark
+    { id: "gelato", name: "Gelato", icon: "🖨️", template: "gelato", visibility: "private", toolCount: 8, draftChanged: false, pendingApprovals: 0, versionCount: 0, createdAt: "", updatedAt: "", createdBy: "" },
+    { id: "my-api", name: "my API", visibility: "private", toolCount: 1, disabled: true, production: "1.0.0", draftChanged: false, pendingApprovals: 0, versionCount: 1, createdAt: "", updatedAt: "", createdBy: "" },
+  ];
+  const onOpen = vi.fn();
+  await act(async () => root.render(<HostedServersList onOpen={onOpen} onCreate={() => {}} />));
+  const row = (id: string) => container.querySelector(`[data-testid="hosted-server-${id}"]`)!;
+  for (const id of ["printful", "gelato", "my-api"]) {
+    expect(row(id).getAttribute("data-slot")).toBe("connector-row");
+    expect(row(id).querySelector(`[data-testid="hosted-server-badge-${id}"]`)!.textContent).toMatch(/^Hosted by /);
+  }
+  const pill = (id: string) => row(id).querySelector('[data-slot="status-pill"]')!;
+  expect([pill("printful").textContent, pill("printful").getAttribute("data-tone")]).toEqual(["Live v1.1.0", "success"]);
+  expect([pill("gelato").textContent, pill("gelato").getAttribute("data-tone")]).toEqual(["Draft", "muted"]);
+  expect([pill("my-api").textContent, pill("my-api").getAttribute("data-tone")]).toEqual(["Switched off", "muted"]);
+  expect(row("printful").querySelector("img")!.getAttribute("src")).toBe("/hosted-server-icons/printful.svg");
+  expect(row("gelato").querySelector("img")!.getAttribute("src")).toBe("/hosted-server-icons/gelato.svg");
+  // a custom server: the letter tile, like any custom connector without an icon
+  expect(row("my-api").querySelector("img")).toBeNull();
+  expect(row("my-api").querySelector('[data-testid="connector-letter-avatar"]')!.textContent).toBe("M");
+  await act(async () => (row("my-api").querySelector('[aria-label="Manage my API"]') as HTMLButtonElement).click());
+  expect(onOpen).toHaveBeenCalledWith("my-api");
 });
 
 test("create from the Printful template: one click, the setup step is said", async () => {
@@ -93,6 +120,7 @@ test("create from the Printful template: one click, the setup step is said", asy
   await act(async () => root.render(<TooltipProvider><CreateServerDialog open onOpenChange={() => {}} onCreated={onCreated} /></TooltipProvider>));
   const card = document.querySelector('[data-testid="template-printful"]')!;
   expect(card.textContent).toMatch(/1 need approval/);
+  expect(card.querySelector("img")!.getAttribute("src")).toBe("/hosted-server-icons/printful.svg");
   await act(async () => (card.querySelector("button") as HTMLButtonElement).click());
   await flush();
   expect(state.create).toHaveBeenCalledWith({ template: "printful" });
@@ -105,9 +133,15 @@ test("the editor: the hosted label, what blocks publishing, tool badges (approva
     connectorId: "printful", draft: { spec, updatedAt: "", updatedBy: "", problems: ["create_order: describe it better"] }, secrets: { token: false }, tests: [], rateLimits: { perIpPerMinute: 30, globalPerMinute: 300 },
   };
   state.test.mockResolvedValue({ tool: "create_order", ok: true, text: "Not sent", ms: 3, skipped: "Destructive or approval tool: not sent.", request: { method: "POST", url: "https://api.printful.com/orders", headers: { authorization: "••••" } } });
-  await act(async () => root.render(<TooltipProvider><HostedServerSheet id="printful" open onOpenChange={() => {}} /></TooltipProvider>));
+  const onOpenConnector = vi.fn();
+  await act(async () => root.render(<TooltipProvider><HostedServerSheet id="printful" open onOpenChange={() => {}} onOpenConnector={onOpenConnector} /></TooltipProvider>));
   await flush();
   expect(document.body.textContent).toMatch(/Hosted by .* · v1\.0\.0/);
+  // the connector sheet's header: the mark (a letter tile: no template icon here), the status pill, who can use it
+  expect(document.querySelector('[data-testid="hosted-server-status"] [data-slot="status-pill"]')?.textContent).toBe("Live v1.0.0");
+  await act(async () => button("Who can use it")!.click());
+  expect(onOpenConnector).toHaveBeenCalledWith("printful");
+  for (const tab of ["Tools", "Settings", "Test", "Versions", "Logs"]) expect([...document.querySelectorAll('[role="tab"]')].some((t) => t.textContent?.trim() === tab), tab).toBe(true);
   expect(document.querySelector('[data-testid="draft-problems"]')?.textContent).toMatch(/describe it better/);
   expect(document.querySelector('[data-testid="tool-create_order"]')?.textContent).toMatch(/approval/);
   expect(document.querySelector('[data-testid="tool-get_product"]')?.textContent).toMatch(/read-only/);

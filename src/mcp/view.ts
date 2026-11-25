@@ -4,6 +4,7 @@
  */
 import type { ConnectorConfig } from "@polpo-ai/core";
 import { CATALOG_ICON_FILES } from "./catalog-icons.generated.js";
+import { hostedServerIconUrls } from "../mcp-servers/icons.js";
 import { SECRET_KEYS } from "./secrets.js";
 
 export interface PublicConnector extends ConnectorConfig {
@@ -39,12 +40,22 @@ export function publicConnector(connector: ConnectorConfig, secretKeys: string[]
   };
 }
 
+/** A hosted connector's bundled official mark (its template's `icon`, kept as icon.simpleIcons), if any. */
+export function hostedBundledIcon(connector: Partial<Pick<ConnectorConfig, "icon" | "transport">>): { iconUrl?: string; iconDarkUrl?: string } {
+  return connector.transport?.type === "hosted" ? hostedServerIconUrls(connector.icon?.simpleIcons) : {};
+}
+
 /** Where a connector's icon is served (see PublicConnector.iconUrl). */
-export function connectorIconUrls(connector: Pick<ConnectorConfig, "id" | "catalogId" | "iconAsset">): { iconUrl?: string; iconDarkUrl?: string } {
+export function connectorIconUrls(
+  connector: Pick<ConnectorConfig, "id" | "catalogId" | "iconAsset"> & Partial<Pick<ConnectorConfig, "icon" | "transport">>,
+): { iconUrl?: string; iconDarkUrl?: string } {
   if (connector.catalogId) {
     const ext = CATALOG_ICON_FILES[connector.catalogId];
     return ext ? { iconUrl: `/connector-icons/${connector.catalogId}.${ext}` } : {};
   }
+  // a ready-made hosted server (Printful, Gelato…): its bundled official mark
+  const hosted = hostedBundledIcon(connector);
+  if (hosted.iconUrl) return hosted;
   const asset = connector.iconAsset;
   if (!asset) return {};
   const base = `/api/v1/connectors/${encodeURIComponent(connector.id)}/icon`;

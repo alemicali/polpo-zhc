@@ -20,6 +20,8 @@ import {
 import { firstJsonRpc, probeConnector, resourceMetadataFromChallenge } from "../mcp/probe.js";
 import { ConnectorManager } from "../mcp/manager.js";
 import { connectorIconUrls } from "../mcp/view.js";
+import { iconEligible } from "../mcp/icon-store.js";
+import { HOSTED_SERVER_ICON_FILES } from "../mcp-servers/icons.js";
 import { CATALOG_ICON_FILES } from "../mcp/catalog-icons.generated.js";
 import { CONNECTOR_CATALOG } from "../mcp/catalog.js";
 import { connectorRoutes } from "../server/routes/connectors.js";
@@ -510,6 +512,26 @@ describe("icons through the API", () => {
     expect(connectorIconUrls({ id: "x" })).toEqual({});
     expect(connectorIconUrls({ id: "x", iconAsset: { source: "mcp", mimeType: "image/png", hash: "abc", fetchedAt: "", dark: { mimeType: "image/svg+xml", hash: "def" } } }))
       .toEqual({ iconUrl: "/api/v1/connectors/x/icon?v=abc", iconDarkUrl: "/api/v1/connectors/x/icon?theme=dark&v=def" });
+  });
+
+  it("a ready-made hosted server's connector: its bundled official mark (dark variant included), never looked up", () => {
+    const hosted = (key: string): ConnectorConfig => ({
+      id: key, name: key, kind: "mcp", transport: { type: "hosted", serverId: key }, auth: { type: "none" }, access: { agents: [], polpo: true },
+      enabled: true, createdAt: "", status: "disconnected", icon: { simpleIcons: key },
+    });
+    expect(connectorIconUrls(hosted("printful"))).toEqual({ iconUrl: "/hosted-server-icons/printful.svg" });
+    expect(connectorIconUrls(hosted("gelato"))).toEqual({ iconUrl: "/hosted-server-icons/gelato.svg" });
+    expect(connectorIconUrls(hosted("printify"))).toEqual({ iconUrl: "/hosted-server-icons/printify.svg", iconDarkUrl: "/hosted-server-icons/printify-dark.svg" });
+    expect(iconEligible(hosted("printful"))).toBe(false);
+    // a custom hosted server: discovery / upload as for any custom connector
+    expect(connectorIconUrls(hosted("my-api"))).toEqual({});
+    expect(iconEligible(hosted("my-api"))).toBe(true);
+    // the key only counts on a hosted transport
+    expect(connectorIconUrls({ id: "x", icon: { simpleIcons: "printful" }, transport: { type: "http", url: "https://x.dev/mcp" } })).toEqual({});
+    const dir = join(__dirname, "..", "..", "ui", "public", "hosted-server-icons");
+    for (const files of Object.values(HOSTED_SERVER_ICON_FILES)) {
+      for (const file of [files.light, files.dark].filter(Boolean) as string[]) expect(existsSync(join(dir, file)), file).toBe(true);
+    }
   });
 });
 

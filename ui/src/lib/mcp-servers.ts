@@ -1,7 +1,7 @@
 /**
  * Hosted MCP servers in the dashboard: helpers shared by the list, the create dialog and the editor.
  */
-import type { McpServerInstallResult, McpServerSpec, McpServerTemplateInfo, McpServerTool } from "@polpo-ai/react";
+import type { McpServerInstallResult, McpServerSpec, McpServerSummary, McpServerTemplateInfo, McpServerTool } from "@polpo-ai/react";
 
 export function blankSpec(name: string): McpServerSpec {
   return { name, allowedDomains: [], secrets: {}, auth: { type: "none" }, tools: [] };
@@ -59,15 +59,29 @@ export function hostedLabel(product: string, version?: string): string {
   return `Hosted by ${product}${version ? ` · v${version}` : ""}`;
 }
 
-/** The status line of a template card. */
-export function templateStatusLabel(t: McpServerTemplateInfo): string {
+/** A status pill of the hosted servers, in the connectors' tones (see HostedStatusPill). */
+export interface HostedPill {
+  tone: "success" | "warning" | "destructive" | "muted";
+  kind: "installed" | "update" | "unfinished" | "available" | "draft" | "off";
+  label: string;
+}
+
+/** A template card's pill: "Installed v1.1.0", "Update available", "Install not finished", "Available". */
+export function templatePill(t: Pick<McpServerTemplateInfo, "status" | "installs">): HostedPill {
   const i = t.installs.find((x) => x.status === t.status) ?? t.installs[0];
   switch (t.status) {
-    case "installed": return `Installed · v${i?.production}`;
-    case "update_available": return `Installed · v${i?.production} · update available (revision ${t.revision})`;
-    case "draft": return "Install not finished";
-    default: return "Available";
+    case "installed": return { tone: "success", kind: "installed", label: i?.production ? `Installed v${i.production}` : "Installed" };
+    case "update_available": return { tone: "warning", kind: "update", label: "Update available" };
+    case "draft": return { tone: "warning", kind: "unfinished", label: "Install not finished" };
+    default: return { tone: "muted", kind: "available", label: "Available" };
   }
+}
+
+/** A hosted server row's pill: switched off, live (the production version) or a draft. */
+export function serverPill(s: Pick<McpServerSummary, "disabled" | "production">): HostedPill {
+  if (s.disabled) return { tone: "muted", kind: "off", label: "Switched off" };
+  if (s.production) return { tone: "success", kind: "installed", label: `Live v${s.production}` };
+  return { tone: "muted", kind: "draft", label: "Draft" };
 }
 
 /** What the install answered, for the dialog. */

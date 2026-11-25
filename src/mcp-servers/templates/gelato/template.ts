@@ -51,7 +51,7 @@ export const GELATO_TEMPLATE: McpServerTemplate = {
   name: "Gelato",
   vendor: "Gelato",
   category: "Print on demand",
-  icon: "🖨️",
+  icon: "gelato",
   description: "Gelato's print-on-demand catalog, prices, shipping methods and quotes, order status, and draft orders that a person approves.",
   docs: "https://dashboard.gelato.com/docs/",
   revision: 1,
@@ -70,7 +70,7 @@ export const GELATO_TEMPLATE: McpServerTemplate = {
     name: "Gelato",
     description: "Gelato's print-on-demand API: catalogs and products (search by attributes), prices, shipping methods, order quotes and status, and DRAFT orders "
       + "(a person approves each; drafts are never produced or charged until someone converts them in Gelato).",
-    icon: "🖨️",
+    icon: "gelato",
     allowedDomains: ["product.gelatoapis.com", "order.gelatoapis.com", "shipment.gelatoapis.com"],
     secrets: { api_key: { owner: "polpo-infra", service: "gelato", key: "api_key" } },
     auth: { type: "header", header: "X-API-KEY", secret: "api_key" },

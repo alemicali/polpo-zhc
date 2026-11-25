@@ -285,6 +285,11 @@ right. At the same revision, install only saves settings and access.
    `changelog`, `maturity` (`testedWithLiveApi: false` until someone runs it against the real API), a
    one-line `setup`, `secrets` (per secret of the spec: `label`, `howTo`, `url`, `scopes`,
    `recommendation`), the `spec` and `tests`.
+   `icon` (and the spec's `icon`) is the key of the vendor's official mark, bundled in
+   `ui/public/hosted-server-icons/` (SVG preferred, else PNG ≥ 128 px, from the vendor's own site or
+   press kit, the source URL in a comment) and listed in both `ui/src/lib/hosted-server-icons.ts` and
+   `src/mcp-servers/icons.ts` (add a `dark` file when the mark is dark on transparent). The cards, the
+   server editor and the connector it becomes show it; icons are never fetched at runtime.
 3. Curate, don't mirror the API: a few task-oriented tools with descriptions written for the model;
    read-only first (`readOnlyHint`); anything that creates, pays or ships gets `requiresApproval` and
    `destructiveHint`, and should create a draft / on-hold item the vendor never fulfils by itself; fix

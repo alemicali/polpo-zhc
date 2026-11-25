@@ -26,7 +26,7 @@ vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), err
 
 import { ReadyMadeConnectors } from "../src/components/connectors/ready-made-connectors";
 import { HostedServerSheet } from "../src/components/connectors/hosted-server-sheet";
-import { installOutcome, settingsPayload, templateStatusLabel } from "../src/lib/mcp-servers";
+import { installOutcome, settingsPayload, templatePill } from "../src/lib/mcp-servers";
 import { TooltipProvider } from "../src/components/ui/tooltip";
 
 const TOKEN = "pf_secret_token_123456";
@@ -82,13 +82,23 @@ test("the catalog: vendor, category, read-only and approval tools, maturity, sta
   expect(card.textContent).toMatch(/2 read-only: find_variant, get_product/);
   expect(card.textContent).toMatch(/Needs approval: create_order/);
   expect(card.textContent).toMatch(/Not yet tested with the live API · revision 2/);
-  expect(card.textContent).toMatch(/Available/);
-  expect(container.querySelector('[data-testid="ready-made-gelato"]')!.textContent).toMatch(/Installed · v1\.0\.0/);
-  expect(container.querySelector('[data-testid="ready-made-printify"]')!.textContent).toMatch(/update available \(revision 2\)/);
+  // the connectors' own card, grid and status pill
+  expect(card.getAttribute("data-slot")).toBe("connector-card");
+  expect(card.parentElement!.className).toBe("grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3");
+  const pill = (id: string) => container.querySelector(`[data-testid="ready-made-${id}"] [data-slot="status-pill"]`)!;
+  expect([pill("printful").textContent, pill("printful").getAttribute("data-tone")]).toEqual(["Available", "muted"]);
+  expect([pill("gelato").textContent, pill("gelato").getAttribute("data-tone")]).toEqual(["Installed v1.0.0", "success"]);
+  expect([pill("printify").textContent, pill("printify").getAttribute("data-tone")]).toEqual(["Update available", "warning"]);
+  expect(container.querySelector('[data-testid="ready-made-printify"]')!.textContent).toMatch(/v1\.2\.0 → revision 2/);
+  expect(card.querySelector('[data-testid="ready-made-hosted-printful"]')!.textContent).toMatch(/^Hosted by /);
+  // the vendor's bundled mark, never a remote image
+  expect(card.querySelector('[data-testid="connector-icon-bundled"] img')!.getAttribute("src")).toBe("/hosted-server-icons/printful.svg");
+  expect(button("Install")).toBeTruthy();
+  expect(container.querySelector('[data-testid="ready-made-printify"]')!.textContent).toMatch(/Update/);
   const open = [...container.querySelectorAll<HTMLButtonElement>('[data-testid="ready-made-gelato"] button')].find((b) => b.textContent === "Open")!;
   await act(async () => open.click());
   expect(onOpen).toHaveBeenCalledWith("gelato");
-  expect(templateStatusLabel(printful({ status: "draft", installs: [{ serverId: "printful", status: "draft" }] }) as never)).toBe("Install not finished");
+  expect(templatePill(printful({ status: "draft", installs: [{ serverId: "printful", status: "draft" }] }) as never)).toEqual({ tone: "warning", kind: "unfinished", label: "Install not finished" });
 });
 
 test("install: settings, the secret (sent once, never kept or shown), the agents chosen explicitly; the outcome", async () => {

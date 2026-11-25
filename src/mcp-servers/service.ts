@@ -13,6 +13,7 @@ import { McpServerInputError, normalizeSpec, specProblems } from "./validate.js"
 import { compareSemver, nextVersion, specChanges, specsEqual, suggestBump, unifiedSpecDiff } from "./versioning.js";
 import { effectiveSettings, validateSettings } from "./settings.js";
 import { MCP_SERVER_TEMPLATES, serverTemplate, type McpServerTemplate } from "./templates/index.js";
+import { HOSTED_SERVER_ICON_FILES } from "./icons.js";
 import {
   DEFAULT_RATE_LIMITS, isSensitiveTool, MCP_SERVER_ID_PATTERN,
   type McpSecretRef, type McpServerBump, type McpServerDeploy, type McpServerMeta, type McpServerSpec, type McpServerTestCase, type McpServerVersion,
@@ -640,7 +641,10 @@ export class McpServerService {
     if (!spec || !production) return undefined;
     const existing = meta.connectorId ? manager.store.get(meta.connectorId) : undefined;
     const bound = existing?.transport.type === "hosted" && existing.transport.serverId === id ? existing : undefined;
-    const icon = spec.icon && /^[a-z0-9]+$/.test(spec.icon) ? { simpleIcons: spec.icon } : undefined;
+    // the spec's icon key (a bundled official mark), else its template's (servers made before the template had one)
+    const iconKey = spec.icon && /^[a-z0-9]+$/.test(spec.icon) ? spec.icon
+      : meta.template && Object.hasOwn(HOSTED_SERVER_ICON_FILES, meta.template) ? meta.template : undefined;
+    const icon = iconKey ? { simpleIcons: iconKey } : undefined;
     if (bound) {
       manager.store.update(bound.id, {
         name: spec.name, ...(spec.description ? { description: spec.description } : {}), hostedVersion: production,

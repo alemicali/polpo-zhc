@@ -11,6 +11,11 @@ import { clearConnectorIconCache } from "../src/lib/connector-icon-cache";
 import { ConnectorDetailSheet } from "../src/components/connectors/connector-detail-sheet";
 import { CustomConnectorDialog } from "../src/components/connectors/custom-connector-dialog";
 import { applyDiscovery, EMPTY_CUSTOM_FORM, iconSourceLabel, type Connector, type ConnectorDiscovery } from "../src/lib/connectors-api";
+import { HOSTED_SERVER_ICONS, hostedServerIcon, hostedServerIconFor } from "../src/lib/hosted-server-icons";
+import { HOSTED_SERVER_ICON_FILES } from "../../src/mcp-servers/icons";
+import { MCP_SERVER_TEMPLATES } from "../../src/mcp-servers/templates/index";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 const REDIRECT = "https://polpo.example.com/api/v1/connectors/oauth/callback";
 
@@ -142,6 +147,55 @@ test("a dark variant is shown on a dark tile in dark mode", async () => {
   expect(container.querySelector('[data-testid="connector-icon-light"]')?.className).toContain("dark:hidden");
   expect(container.querySelector('[data-testid="connector-icon-dark"]')?.className).toContain("dark:inline-flex");
   expect(calls.map((c) => c.path)).toEqual(expect.arrayContaining(["/api/v1/connectors/acme/icon?v=l", "/api/v1/connectors/acme/icon?theme=dark&v=d"]));
+});
+
+// ── the ready-made hosted servers' official marks ──
+
+test("template icons resolve to the bundled vendor marks (Printful, Gelato, Printify with a dark variant), same map as the server", () => {
+  expect(hostedServerIcon("printful")).toEqual({ iconUrl: "/hosted-server-icons/printful.svg" });
+  expect(hostedServerIcon("gelato")).toEqual({ iconUrl: "/hosted-server-icons/gelato.svg" });
+  expect(hostedServerIcon("printify")).toEqual({ iconUrl: "/hosted-server-icons/printify.svg", iconDarkUrl: "/hosted-server-icons/printify-dark.svg" });
+  expect(hostedServerIcon("my-api")).toEqual({});
+  expect(hostedServerIcon("toString")).toEqual({});
+  expect(hostedServerIcon(undefined)).toEqual({});
+  expect(hostedServerIconFor({ icon: "🖨️", template: "gelato" })).toEqual({ iconUrl: "/hosted-server-icons/gelato.svg" });
+  // the files are in the repo (bundled, never fetched at runtime), each saying where it came from
+  const dir = join(process.cwd(), process.cwd().endsWith("/ui") ? "." : "ui", "public", "hosted-server-icons");
+  for (const [key, files] of Object.entries(HOSTED_SERVER_ICONS)) {
+    for (const file of [files.light, files.dark].filter(Boolean) as string[]) {
+      const svg = readFileSync(join(dir, file), "utf-8");
+      expect(svg, file).toMatch(/^<svg[\s>]/);
+      expect(svg, file).toMatch(/<!-- .*https:\/\/(?:[\w-]+\.)*(?:printful|printify|gelato)\.com\//s);
+      expect(svg, file).not.toMatch(/<script|\son\w+=/i);
+    }
+    expect(HOSTED_SERVER_ICON_FILES[key], key).toEqual(files);
+  }
+  expect(Object.keys(HOSTED_SERVER_ICON_FILES).sort()).toEqual(Object.keys(HOSTED_SERVER_ICONS).sort());
+  // every template names a bundled mark, so the connector it creates gets it too
+  for (const t of MCP_SERVER_TEMPLATES) {
+    expect(HOSTED_SERVER_ICONS[t.icon ?? ""], t.id).toBeDefined();
+    expect(t.spec.icon, t.id).toBe(t.icon);
+  }
+});
+
+test("a hosted connector's bundled mark (the server's iconUrl): shown as is, its dark variant on a dark tile, no API call", async () => {
+  await act(async () => root.render(<ConnectorIcon name="Printify" iconUrl="/hosted-server-icons/printify.svg" iconDarkUrl="/hosted-server-icons/printify-dark.svg" />));
+  await flush();
+  expect(container.querySelector('[data-testid="connector-icon-light"] img')?.getAttribute("src")).toBe("/hosted-server-icons/printify.svg");
+  expect(container.querySelector('[data-testid="connector-icon-dark"] img')?.getAttribute("src")).toBe("/hosted-server-icons/printify-dark.svg");
+  await act(async () => root.render(<ConnectorIcon name="Printful" iconUrl="/hosted-server-icons/printful.svg" />));
+  expect(container.querySelector('[data-testid="connector-icon-bundled"] img')?.getAttribute("src")).toBe("/hosted-server-icons/printful.svg");
+  expect(calls).toEqual([]);
+});
+
+test("a hosted connector's sheet: no icon editor for a bundled mark, and its server's tools, versions and logs one click away", async () => {
+  const hosted = connector("printful", { transport: { type: "hosted", serverId: "printful" }, auth: { type: "none" }, hostedVersion: "1.1.0", iconUrl: "/hosted-server-icons/printful.svg" });
+  const onOpenHostedServer = vi.fn();
+  await act(async () => root.render(<TooltipProvider><ConnectorDetailSheet connector={hosted} agents={[]} open onOpenChange={() => {}} onChanged={() => {}} onRemoved={() => {}} onReconnect={() => {}} onOpenHostedServer={onOpenHostedServer} /></TooltipProvider>));
+  await flush();
+  expect(document.querySelector('[data-testid="connector-icon-editor"]')).toBeNull();
+  await click(document.querySelector('[data-testid="open-hosted-server"]'));
+  expect(onOpenHostedServer).toHaveBeenCalledWith("printful");
 });
 
 test("icon source labels", () => {

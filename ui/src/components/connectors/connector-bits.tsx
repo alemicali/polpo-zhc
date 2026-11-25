@@ -1,5 +1,6 @@
 /** Small pieces shared by the Connectors page, the detail sheet and the agent page. */
-import { AlertTriangle, CheckCircle2, CircleDashed, ExternalLink, KeyRound, Loader2, PauseCircle, RotateCw } from "lucide-react";
+import { AlertTriangle, ArrowUpCircle, CheckCircle2, CircleDashed, ExternalLink, FilePen, KeyRound, Loader2, PauseCircle, RotateCw, type LucideIcon } from "lucide-react";
+import type { HostedPill } from "@/lib/mcp-servers";
 import { errorActionUrl } from "@polpo-ai/core/error-action";
 import { Switch as SwitchPrimitive } from "radix-ui";
 import { Badge } from "@/components/ui/badge";
@@ -56,24 +57,52 @@ export function Switch({
   );
 }
 
-const STATE_STYLE: Record<ConnectorCardState, { className: string; icon: typeof CheckCircle2 }> = {
-  connect: { className: "border-border text-muted-foreground", icon: CircleDashed },
-  needs_setup: { className: "border-warning/40 bg-warning/10 text-warning", icon: KeyRound },
-  connected: { className: "border-success/40 bg-success/10 text-success", icon: CheckCircle2 },
-  needs_auth: { className: "border-warning/40 bg-warning/10 text-warning", icon: KeyRound },
-  needs_reauth: { className: "border-warning/40 bg-warning/10 text-warning", icon: RotateCw },
-  error: { className: "border-destructive/40 bg-destructive/10 text-destructive", icon: AlertTriangle },
-  disabled: { className: "border-border text-muted-foreground", icon: PauseCircle },
-  not_connected: { className: "border-border text-muted-foreground", icon: CircleDashed },
+export type PillTone = "success" | "warning" | "destructive" | "muted";
+
+const TONE: Record<PillTone, string> = {
+  success: "border-success/40 bg-success/10 text-success",
+  warning: "border-warning/40 bg-warning/10 text-warning",
+  destructive: "border-destructive/40 bg-destructive/10 text-destructive",
+  muted: "border-border text-muted-foreground",
+};
+
+/**
+ * The status pill of every connector card and row ("Connected", "Sign-in needed", and the hosted
+ * servers' "Installed v1.1.0", "Update available", "Available"): one look, by tone.
+ */
+export function StatusPill({ tone, icon: Icon, label, busy, className }: {
+  tone: PillTone; icon: LucideIcon; label: string; busy?: boolean; className?: string;
+}) {
+  const Shown = busy ? Loader2 : Icon;
+  return (
+    <Badge variant="outline" data-slot="status-pill" data-tone={tone} className={cn("gap-1 text-caption font-medium", TONE[tone], className)}>
+      <Shown className={cn("h-3 w-3", busy && "animate-spin")} />
+      {label}
+    </Badge>
+  );
+}
+
+const STATE_STYLE: Record<ConnectorCardState, { tone: PillTone; icon: LucideIcon }> = {
+  connect: { tone: "muted", icon: CircleDashed },
+  needs_setup: { tone: "warning", icon: KeyRound },
+  connected: { tone: "success", icon: CheckCircle2 },
+  needs_auth: { tone: "warning", icon: KeyRound },
+  needs_reauth: { tone: "warning", icon: RotateCw },
+  error: { tone: "destructive", icon: AlertTriangle },
+  disabled: { tone: "muted", icon: PauseCircle },
+  not_connected: { tone: "muted", icon: CircleDashed },
 };
 
 export function StateBadge({ state, busy, className }: { state: ConnectorCardState; busy?: boolean; className?: string }) {
   const style = STATE_STYLE[state];
-  const Icon = busy ? Loader2 : style.icon;
-  return (
-    <Badge variant="outline" className={cn("gap-1 text-caption font-medium", style.className, className)}>
-      <Icon className={cn("h-3 w-3", busy && "animate-spin")} />
-      {STATE_LABEL[state]}
-    </Badge>
-  );
+  return <StatusPill tone={style.tone} icon={style.icon} label={STATE_LABEL[state]} busy={busy} className={className} />;
+}
+
+const HOSTED_ICON: Record<HostedPill["kind"], LucideIcon> = {
+  installed: CheckCircle2, update: ArrowUpCircle, unfinished: KeyRound, available: CircleDashed, draft: FilePen, off: PauseCircle,
+};
+
+/** A ready-made template's or a hosted server's status, in the connectors' pill. */
+export function HostedStatusPill({ pill, className }: { pill: HostedPill; className?: string }) {
+  return <StatusPill tone={pill.tone} icon={HOSTED_ICON[pill.kind]} label={pill.label} className={className} />;
 }
