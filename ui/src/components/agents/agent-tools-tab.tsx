@@ -9,7 +9,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Wrench,
   Sparkles,
@@ -37,7 +36,7 @@ export function AgentToolsTab() {
   } = useAgentDetail();
 
   return (
-    <ScrollArea className="h-full">
+    <div>
       <div className="space-y-6 pr-4 pb-bottom-nav lg:pb-4">
 
         {/* Allowed tools */}
@@ -194,6 +193,6 @@ export function AgentToolsTab() {
 
 
       </div>
-    </ScrollArea>
+    </div>
   );
 }

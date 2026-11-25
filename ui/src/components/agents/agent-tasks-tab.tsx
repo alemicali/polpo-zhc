@@ -6,7 +6,6 @@
 import { Link } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Star, ListChecks } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
@@ -56,7 +55,7 @@ export function AgentTasksTab() {
   const { state: { sortedTasks, taskStats } } = useAgentDetail();
 
   return (
-    <ScrollArea className="h-full">
+    <div>
       <div className="space-y-4 pr-4 pb-bottom-nav lg:pb-4">
         {/* Task stats bar */}
         {taskStats.total > 0 && (
@@ -108,6 +107,6 @@ export function AgentTasksTab() {
           </div>
         )}
       </div>
-    </ScrollArea>
+    </div>
   );
 }

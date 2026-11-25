@@ -45,8 +45,8 @@ export function AgentHeroCard() {
           <div className={cn("relative flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-card border-2 shadow-raised z-10", tc.border)}>
             <AgentAvatar avatar={identity?.avatar} name={agent.name} color={(identity as { color?: unknown } | undefined)?.color} size="xl" />
           </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-2">
               <h1 className="font-heading text-h2 truncate">
                 {identity?.displayName ?? agent.name}
               </h1>
@@ -55,7 +55,7 @@ export function AgentHeroCard() {
               )}
             </div>
             {identity?.displayName && identity.displayName !== agent.name && (
-              <p className="text-micro font-mono text-muted-foreground">@{agent.name}</p>
+              <p className="truncate text-micro font-mono text-muted-foreground" title={`@${agent.name}`}>@{agent.name}</p>
             )}
             <AgentModelWithEngine agent={agent} size={14} className="mt-0.5 text-caption text-muted-foreground" mono testId="agent-hero-model" />
             <AgentVersionBadges agent={agent} className="mt-1" />
@@ -71,8 +71,8 @@ export function AgentHeroCard() {
               </Badge>
             )}
             {agent.missionGroup && (
-              <Badge variant="outline" className="text-micro text-warning border-warning/30">
-                mission: {agent.missionGroup}
+              <Badge variant="outline" className="text-micro text-warning border-warning/30 min-w-0 max-w-full shrink">
+                <span className="min-w-0 truncate" title={agent.missionGroup}>mission: {agent.missionGroup}</span>
               </Badge>
             )}
           </div>
@@ -83,22 +83,22 @@ export function AgentHeroCard() {
           <div className="flex items-center gap-2 py-1.5">
             <Building2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <span className="text-muted-foreground shrink-0">Title</span>
-            <span className={cn("ml-auto truncate", identity?.title ? "text-foreground" : "text-muted-foreground/60 italic")}>{identity?.title || "not set"}</span>
+            <span title={identity?.title || undefined} className={cn("ml-auto min-w-0 truncate", identity?.title ? "text-foreground" : "text-muted-foreground/60 italic")}>{identity?.title || "not set"}</span>
           </div>
           <div className="flex items-center gap-2 py-1.5">
             <Building2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <span className="text-muted-foreground shrink-0">Company</span>
-            <span className={cn("ml-auto truncate", identity?.company ? "text-foreground" : "text-muted-foreground/60 italic")}>{identity?.company || "not set"}</span>
+            <span title={identity?.company || undefined} className={cn("ml-auto min-w-0 truncate", identity?.company ? "text-foreground" : "text-muted-foreground/60 italic")}>{identity?.company || "not set"}</span>
           </div>
           <div className="flex items-center gap-2 py-1.5">
             <Mail className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <span className="text-muted-foreground shrink-0">Email</span>
-            <span className={cn("ml-auto truncate font-mono", identity?.email ? "text-foreground" : "text-muted-foreground/60 italic")}>{identity?.email || "not set"}</span>
+            <span title={identity?.email || undefined} className={cn("ml-auto min-w-0 truncate font-mono", identity?.email ? "text-foreground" : "text-muted-foreground/60 italic")}>{identity?.email || "not set"}</span>
           </div>
           <div className="flex items-center gap-2 py-1.5">
             <MapPin className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <span className="text-muted-foreground shrink-0">Timezone</span>
-            <span className={cn("ml-auto", identity?.timezone ? "text-foreground" : "text-muted-foreground/60 italic")}>{identity?.timezone || "not set"}</span>
+            <span title={identity?.timezone || undefined} className={cn("ml-auto min-w-0 truncate", identity?.timezone ? "text-foreground" : "text-muted-foreground/60 italic")}>{identity?.timezone || "not set"}</span>
           </div>
           <div className="flex items-center gap-2 py-1.5">
             <Palette className="h-3.5 w-3.5 text-muted-foreground shrink-0" />

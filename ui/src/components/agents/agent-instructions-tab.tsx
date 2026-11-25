@@ -11,7 +11,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Copy, Eye, EyeOff, Terminal } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { cn } from "@/lib/utils";
@@ -22,7 +21,7 @@ export function AgentInstructionsTab() {
   const [showSystemPrompt, setShowSystemPrompt] = useState(false);
 
   return (
-    <ScrollArea className="h-full">
+    <div>
       <div className="space-y-4 pr-4 pb-bottom-nav lg:pb-4">
         {agent.systemPrompt ? (
           <Card className="py-0 gap-0 overflow-hidden">
@@ -85,6 +84,6 @@ export function AgentInstructionsTab() {
           </div>
         )}
       </div>
-    </ScrollArea>
+    </div>
   );
 }

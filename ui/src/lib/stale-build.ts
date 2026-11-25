@@ -20,9 +20,33 @@ export function reloadForNewBuild(): boolean {
     if (Date.now() - last < WINDOW_MS) return false;
     sessionStorage.setItem(KEY, String(Date.now()));
   } catch { /* storage blocked: still reload once */ }
-  void navigator.serviceWorker?.getRegistration?.().then((r) => r?.update()).catch(() => undefined);
-  window.location.reload();
+  void activateNewWorkerThenReload();
   return true;
+}
+
+/**
+ * The previous build is often served by the service worker while the new one waits: tell the
+ * waiting worker to take over (SKIP_WAITING), wait for it to control the page (at most 3 s), then
+ * reload. Without a service worker this is a plain reload.
+ */
+async function activateNewWorkerThenReload(): Promise<void> {
+  try {
+    const sw = navigator.serviceWorker;
+    const reg = await sw?.getRegistration?.();
+    if (sw && reg) {
+      await reg.update().catch(() => undefined);
+      const waiting = reg.waiting ?? reg.installing;
+      if (waiting) {
+        await new Promise<void>((resolve) => {
+          const done = () => resolve();
+          sw.addEventListener("controllerchange", done, { once: true });
+          setTimeout(done, 3000);
+          waiting.postMessage({ type: "SKIP_WAITING" });
+        });
+      }
+    }
+  } catch { /* fall through to the reload */ }
+  window.location.reload();
 }
 
 export function installStaleBuildRecovery(): void {

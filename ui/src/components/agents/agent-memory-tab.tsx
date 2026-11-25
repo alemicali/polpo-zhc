@@ -88,83 +88,87 @@ export function AgentMemoryTab() {
     );
   }
 
+  // The page scrolls as one; the editor is the one thing here that scrolls inside itself, so it
+  // gets a bounded height (most of the viewport) instead of stretching to an unbounded parent.
   return (
-    <Card className="flex flex-col flex-1 min-h-0 overflow-hidden">
-      <CardHeader className="flex flex-row items-center justify-between pb-3 shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
-            <Brain className="h-4 w-4 text-primary" />
-          </div>
-          <div>
-            <CardTitle className="text-sm">Agent Memory</CardTitle>
-            <div className="flex items-center gap-2 mt-0.5">
-              {!(memory?.exists) && (
-                <Badge variant="secondary" className="text-micro">New</Badge>
-              )}
-              {dirty && (
-                <Badge variant="outline" className="text-micro text-warning border-warning/30">
-                  Unsaved changes
-                </Badge>
-              )}
-              {content && <MemoryStats content={content} />}
+    <div className="pb-bottom-nav lg:pb-4">
+      <Card className="flex h-[70dvh] min-h-80 flex-col overflow-hidden" data-testid="agent-memory-editor">
+        <CardHeader className="flex flex-row items-center justify-between pb-3 shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
+              <Brain className="h-4 w-4 text-primary" />
+            </div>
+            <div>
+              <CardTitle className="text-sm">Agent Memory</CardTitle>
+              <div className="flex items-center gap-2 mt-0.5">
+                {!(memory?.exists) && (
+                  <Badge variant="secondary" className="text-micro">New</Badge>
+                )}
+                {dirty && (
+                  <Badge variant="outline" className="text-micro text-warning border-warning/30">
+                    Unsaved changes
+                  </Badge>
+                )}
+                {content && <MemoryStats content={content} />}
+              </div>
             </div>
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Tabs value={view} onValueChange={(v) => setView(v as "edit" | "preview")}>
-            <TabsList className="h-8">
-              <TabsTrigger value="edit" className="text-small">
-                <Pencil className="h-3 w-3" /> Edit
-              </TabsTrigger>
-              <TabsTrigger value="preview" className="text-small">
-                <Eye className="h-3 w-3" /> Preview
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-          <Button variant="outline" size="sm" onClick={refetch}>
-            <RefreshCw className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            size="sm"
-            onClick={handleSave}
-            disabled={!dirty || saving}
-            className="gap-1.5"
-          >
-            {saving ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Save className="h-3.5 w-3.5" />
-            )}
-            Save
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent className="flex-1 overflow-hidden">
-        {view === "edit" ? (
-          <Textarea
-            className="h-full min-h-0 font-mono text-sm resize-none"
-            placeholder={`Private memory for "${agent.identity?.displayName ?? agent.name}". Write agent-specific context: preferred patterns, lessons learned, tool preferences, etc.`}
-            value={content}
-            onChange={(e) => { setContent(e.target.value); setDirty(true); }}
-          />
-        ) : (
-          <ScrollArea className="h-full">
-            <div className="pr-4">
-              {content ? (
-                <div className="prose prose-sm dark:prose-invert max-w-none prose-headings:text-foreground prose-a:text-primary">
-                  <MessageResponse>{content}</MessageResponse>
-                </div>
+          <div className="flex items-center gap-2">
+            <Tabs value={view} onValueChange={(v) => setView(v as "edit" | "preview")}>
+              <TabsList className="h-8">
+                <TabsTrigger value="edit" className="text-small">
+                  <Pencil className="h-3 w-3" /> Edit
+                </TabsTrigger>
+                <TabsTrigger value="preview" className="text-small">
+                  <Eye className="h-3 w-3" /> Preview
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+            <Button variant="outline" size="sm" onClick={refetch}>
+              <RefreshCw className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleSave}
+              disabled={!dirty || saving}
+              className="gap-1.5"
+            >
+              {saving ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
               ) : (
-                <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-                  <Brain className="h-10 w-10 mb-3 opacity-40" />
-                  <p className="text-sm">No memory content yet</p>
-                  <p className="text-xs mt-1">Switch to Edit mode to add agent-specific context</p>
-                </div>
+                <Save className="h-3.5 w-3.5" />
               )}
-            </div>
-          </ScrollArea>
-        )}
-      </CardContent>
-    </Card>
+              Save
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="flex-1 min-h-0 overflow-hidden">
+          {view === "edit" ? (
+            <Textarea
+              className="h-full min-h-0 font-mono text-sm resize-none"
+              placeholder={`Private memory for "${agent.identity?.displayName ?? agent.name}". Write agent-specific context: preferred patterns, lessons learned, tool preferences, etc.`}
+              value={content}
+              onChange={(e) => { setContent(e.target.value); setDirty(true); }}
+            />
+          ) : (
+            <ScrollArea className="h-full">
+              <div className="pr-4">
+                {content ? (
+                  <div className="prose prose-sm dark:prose-invert max-w-none prose-headings:text-foreground prose-a:text-primary">
+                    <MessageResponse>{content}</MessageResponse>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+                    <Brain className="h-10 w-10 mb-3 opacity-40" />
+                    <p className="text-sm">No memory content yet</p>
+                    <p className="text-xs mt-1">Switch to Edit mode to add agent-specific context</p>
+                  </div>
+                )}
+              </div>
+            </ScrollArea>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
