@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **No more broken pages after a deploy.** The dashboard's service worker now takes over as soon as a new build arrives (`skipWaiting` + `clientsClaim`): a waiting worker kept serving the previous app shell, whose lazy chunks no longer exist, so pages like Agents failed with "Failed to fetch dynamically imported module". The stale-chunk recovery also activates a waiting worker before its one reload.
+
 ### Added
 - **Ready-made hosted connectors: a curated catalog to install in one step (Printful, Gelato, Printify).** Connectors → Hosted servers → "Ready-made (hosted by Polpo)" (docs/custom-mcp-servers.md, "Ready-made connectors").
   - **Template features of the hosted server model**: typed, non-secret **settings** (`settingsSchema`: string / number / enum / boolean with label, help, required, default, pattern, bounds) set at install and editable later without a new version, used as `{{settings.x}}` (and `ctx.settings` in code tools); variable fallbacks (`{{input.currency ?? settings.currency}}`); server-level default **query** and **scoped defaults** (`scopes.<name>.headers / query`, applied to the tools that list the scope — e.g. Printful's `X-PF-Store-Id: {{settings.store_id}}` on store endpoints); **output shaping** (`response.filters` by the tool's input, local `page` with `{ items, total, offset, limit, next_offset }`, `aggregates` count / unique / min / max / sum / value) and, when a result is still too long, whole list items kept with a count instead of JSON cut mid-item.
