@@ -706,7 +706,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       const state = await (async () => { try { return await o.getStore()?.getState() ?? null; } catch { return null; } })();
       let systemPrompt = await buildChatSystemPrompt(o, state);
       const settings = o.getConfig()?.settings;
-      const modelSpec = resolveModelSpec(requireOrchestratorModel(settings?.orchestratorModel));
+      const modelSpec = resolveModelSpec(effectiveOrchestratorModel(settings?.orchestratorModel) ?? settings?.orchestratorModel);
       const m = resolveModel(modelSpec);
       // Connectors granted to Polpo (access.polpo): their tools are appended to Polpo's static ones
       const connectorManager = connectorManagerFor(o);

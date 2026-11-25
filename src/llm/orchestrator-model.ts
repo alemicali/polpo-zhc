@@ -32,18 +32,15 @@ export class NoOrchestratorModelError extends Error {
 /** The configured orchestrator model, or the first model of a connected provider; undefined when none. */
 export function effectiveOrchestratorModel(configured: string | ModelConfig | undefined | null): string | ModelConfig | undefined {
   if (configured && resolveModelSpec(configured)) return configured;
-  let connected: string[];
   try {
-    connected = detectProviders().filter((p) => p.hasKey).map((p) => p.name);
-  } catch {
-    return undefined;
-  }
-  const ordered = [...PREFERRED_PROVIDERS.filter((p) => connected.includes(p)), ...connected.filter((p) => !PREFERRED_PROVIDERS.includes(p))];
-  for (const provider of ordered) {
-    const ids = listModels(provider).map((m) => m.id);
-    const id = (PREFERRED[provider] ?? []).find((candidate) => ids.includes(candidate)) ?? ids[0];
-    if (id) return `${provider}:${id}`;
-  }
+    const connected = detectProviders().filter((p) => p.hasKey).map((p) => p.name);
+    const ordered = [...PREFERRED_PROVIDERS.filter((p) => connected.includes(p)), ...connected.filter((p) => !PREFERRED_PROVIDERS.includes(p))];
+    for (const provider of ordered) {
+      const ids = listModels(provider).map((m) => m.id);
+      const id = (PREFERRED[provider] ?? []).find((candidate) => ids.includes(candidate)) ?? ids[0];
+      if (id) return `${provider}:${id}`;
+    }
+  } catch { /* provider catalog unavailable */ }
   return undefined;
 }
 
