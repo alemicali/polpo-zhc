@@ -4,7 +4,7 @@
  * Built from the REST shapes; the widget (widgets/suite-card) draws it, the text is for clients
  * without MCP Apps.
  */
-import { deployGateFailures, type AgentDeployGate, type SuiteBaselineComparison, type SuiteRun, type SuiteRunAggregates, type SuiteTrend } from "@polpo-ai/core/agent-suites";
+import { deployGateFailures, type AgentDeployGate, type SuiteBaselineComparison, type SuiteRun, type SuiteRunAggregates, type SuiteTrace, type SuiteTrend } from "@polpo-ai/core/agent-suites";
 
 export interface SuiteCardKey { createdAt: number; seq: number }
 
@@ -21,6 +21,8 @@ export interface SuiteListCard {
     baselineRunId?: string;
     /** A deploy gate: required before production (minimum pass rate, also run on publish). */
     gate?: { required: boolean; minPassRate: number; onPublish?: boolean };
+    /** Cases that replay a cassette, and multi-turn cases (a simulated or scripted user). */
+    cassettes?: number; simulated?: number;
   }>;
   /** The latest deploy gates (newest first): the required suites verifying versions. */
   gates?: SuiteCardGate[];
@@ -53,6 +55,14 @@ export interface SuiteRunCard {
     failed: string[];
     scores: Array<{ id: string; score: number; threshold: number; passed: boolean }>;
     change?: string; reasons?: string[]; flaky?: boolean; attempts?: number; passRate?: number;
+    /** A multi-turn case: the conversation (shortened) and why it stopped. */
+    transcript?: Array<{ role: string; content: string; simulated?: boolean }>;
+    simulator?: { stoppedBy: string; calls: number; model?: string };
+    /** Replayed from a cassette, or recorded into one. */
+    cassette?: { id: string; replayedCalls: number; unmatched: number };
+    recorded?: { cassetteId: string; calls: number; redactions: number };
+    /** A mission case: its tasks. */
+    tasks?: Array<{ title: string; agent: string; status: string }>;
   }>;
   baseline?: { runId: string; source: string; target?: string; version?: string; passRateDelta: number; scoreDelta?: number; costDelta: number; regressions: number; improvements: number };
   review?: { text: string; model?: string; at: string };
@@ -77,6 +87,21 @@ export interface SuiteTrendCard {
 
 export type SuiteCard = SuiteListCard | SuiteRunCard | SuiteTrendCard;
 
+/** The parts of a case's trace the card shows (phase 4: conversations, cassettes, mission tasks). */
+type CaseTraceIn = Partial<Pick<SuiteTrace, "transcript" | "simulator" | "cassette" | "recorded" | "tasks">>;
+
+/** A case's phase 4 extras for the card: the conversation (shortened), the cassette, the mission's tasks. */
+function caseExtras(trace: CaseTraceIn | undefined): Pick<SuiteRunCard["cases"][number], "transcript" | "simulator" | "cassette" | "recorded" | "tasks"> {
+  if (!trace) return {};
+  return {
+    ...(trace.transcript?.length ? { transcript: trace.transcript.slice(0, 12).map((m) => ({ role: m.role, content: m.content.length > 300 ? `${m.content.slice(0, 300)}…` : m.content, ...(m.simulated ? { simulated: true } : {}) })) } : {}),
+    ...(trace.simulator ? { simulator: { stoppedBy: trace.simulator.stoppedBy, calls: trace.simulator.calls, ...(trace.simulator.model ? { model: trace.simulator.model } : {}) } } : {}),
+    ...(trace.cassette ? { cassette: { id: trace.cassette.id, replayedCalls: trace.cassette.replayedCalls, unmatched: trace.cassette.unmatched.length } } : {}),
+    ...(trace.recorded ? { recorded: { cassetteId: trace.recorded.cassetteId, calls: trace.recorded.calls, redactions: trace.recorded.redactions } } : {}),
+    ...(trace.tasks?.length ? { tasks: trace.tasks.map((t) => ({ title: t.title, agent: t.agent, status: t.status })) } : {}),
+  };
+}
+
 type RunIn = Pick<SuiteRun, "id" | "agent" | "suiteId" | "suiteName" | "status" | "target" | "version" | "startedAt" | "stats" | "notes" | "error" | "isBaseline" | "repetitions" | "review"> & {
   variant: { label?: string };
   aggregates?: SuiteRunAggregates;
@@ -86,12 +111,13 @@ type RunIn = Pick<SuiteRun, "id" | "agent" | "suiteId" | "suiteName" | "status" 
     assertions?: Array<{ description: string; passed: boolean; message: string }>;
     scores?: Array<{ id: string; score: number; threshold: number; passed: boolean; description: string; reason?: string; error?: string }>;
     failed?: string[];
+    trace?: CaseTraceIn;
   }>;
 };
 
 export function buildSuiteListCard(input: {
   agent: string;
-  suites: Array<{ id: string; name: string; cases: Array<{ scorers?: unknown[] }>; datasets: unknown[]; defaultMode: string; scorers?: unknown[]; gate?: { required?: boolean; minPassRate?: number; onPublish?: boolean } }>;
+  suites: Array<{ id: string; name: string; cases: Array<{ scorers?: unknown[]; mocks?: { cassette?: unknown; simulatedUser?: unknown } }>; datasets: unknown[]; defaultMode: string; scorers?: unknown[]; gate?: { required?: boolean; minPassRate?: number; onPublish?: boolean } }>;
   runs: Array<Pick<SuiteRun, "id" | "suiteId" | "status" | "stats" | "startedAt" | "target" | "version" | "isBaseline"> & { aggregates?: { score?: number }; baseline?: { regressions: number } }>;
   gates?: Array<Pick<AgentDeployGate, "id" | "version" | "status" | "trigger" | "requestedAt" | "finishedAt" | "progress" | "suites" | "override">>;
   key: SuiteCardKey; link?: string;
@@ -111,6 +137,8 @@ export function buildSuiteListCard(input: {
         } } : {}),
         ...(base ? { baselineRunId: base.id } : {}),
         ...(s.gate?.required ? { gate: { required: true, minPassRate: s.gate.minPassRate ?? 1, ...(s.gate.onPublish ? { onPublish: true } : {}) } } : {}),
+        ...(s.cases.some((c) => c.mocks?.cassette) ? { cassettes: s.cases.filter((c) => c.mocks?.cassette).length } : {}),
+        ...(s.cases.some((c) => c.mocks?.simulatedUser) ? { simulated: s.cases.filter((c) => c.mocks?.simulatedUser).length } : {}),
       };
     }),
     ...(input.gates?.length ? { gates: input.gates.slice(0, 5).map((g) => ({
@@ -140,6 +168,7 @@ export function buildSuiteRunCard(input: { run: RunIn; key: SuiteCardKey; link?:
         scores: Object.entries(c.scores).map(([id, score]) => ({ id, score, threshold: results[0]?.scores?.find((x) => x.id === id)?.threshold ?? 1, passed: score >= (results[0]?.scores?.find((x) => x.id === id)?.threshold ?? 1) })),
         flaky: c.flaky, attempts: c.attempts, passRate: c.passRate,
         ...(d ? { change: d.change, reasons: d.reasons } : {}),
+        ...caseExtras(results[0]?.trace),
       };
     })
     : r.results.map((x) => {
@@ -151,6 +180,7 @@ export function buildSuiteRunCard(input: { run: RunIn; key: SuiteCardKey; link?:
         scores: (x.scores ?? []).map((s) => ({ id: s.id, score: s.score, threshold: s.threshold, passed: s.passed })),
         ...(agg?.flaky ? { flaky: true } : {}),
         ...(d ? { change: d.change, reasons: d.reasons } : {}),
+        ...caseExtras(x.trace),
       };
     });
   return {
@@ -208,6 +238,7 @@ export function suiteCardText(card: SuiteCard): string {
     return [`${card.agent}'s suites:`, ...card.suites.map((s) => `- ${s.name} [${s.id}] · ${s.cases} case(s) · ${s.scorers} scorer(s) · mode ${s.defaultMode}`
       + (s.lastRun ? ` · last ${s.lastRun.status} ${s.lastRun.passed}/${s.lastRun.total}${s.lastRun.score !== undefined ? ` score ${s.lastRun.score.toFixed(2)}` : ""}${s.lastRun.regressions ? ` · ${s.lastRun.regressions} regression(s)` : ""} (${s.lastRun.id})` : " · never run")
       + (s.baselineRunId ? ` · baseline ${s.baselineRunId}` : "")
+      + (s.cassettes ? ` · ${s.cassettes} replaying a cassette` : "") + (s.simulated ? ` · ${s.simulated} multi-turn` : "")
       + (s.gate?.required ? ` · REQUIRED to deploy (pass rate ≥ ${pct(s.gate.minPassRate)}${s.gate.onPublish ? ", also on publish" : ""})` : "")),
     ...(card.gates?.length ? ["Deploy gates:", ...card.gates.map((g) => `- ${g.version} · ${g.status === "running" ? `verifying ${g.progress.done}/${g.progress.total}` : g.status}`
       + `${g.override ? ` by ${g.override.by}: "${g.override.reason}"` : ""}${g.failed.length && g.status !== "passed" ? ` · ${g.failed.join(" · ").slice(0, 300)}` : ""} [${g.id}]`)] : [])].join("\n");
@@ -224,6 +255,10 @@ export function suiteCardText(card: SuiteCard): string {
   for (const c of card.cases) {
     lines.push(`${c.status === "passed" ? "✓" : c.status === "skipped" ? "–" : "✗"} ${c.name} [${c.key}]${c.score !== undefined ? ` ${c.score.toFixed(2)}` : ""}${c.change && c.change !== "unchanged" ? ` · ${c.change}` : ""}${c.flaky ? " · flaky" : ""}`);
     for (const f of c.failed.slice(0, 3)) lines.push(`   ✗ ${f.slice(0, 200)}`);
+    if (c.cassette) lines.push(`   ↺ replayed from ${c.cassette.id}: ${c.cassette.replayedCalls} call(s)${c.cassette.unmatched ? `, ${c.cassette.unmatched} unmatched` : ""}`);
+    if (c.recorded) lines.push(`   ● recorded into ${c.recorded.cassetteId}: ${c.recorded.calls} call(s), ${c.recorded.redactions} redacted`);
+    if (c.tasks) lines.push(`   tasks: ${c.tasks.map((t) => `${t.title} (${t.agent}) ${t.status}`).join(" → ")}`);
+    for (const m of c.transcript?.slice(0, 6) ?? []) lines.push(`   ${m.role === "user" ? "USER" : "AGENT"}${m.simulated ? " (simulated)" : ""}: ${m.content.slice(0, 160)}`);
   }
   if (card.review) lines.push("", card.review.text);
   return lines.join("\n");

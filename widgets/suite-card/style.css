@@ -27,3 +27,7 @@
 .key::before { content: ""; width: 14px; height: 2px; border-radius: var(--r-full); }
 .key-pass::before { background: var(--w-info); }
 .key-score::before { background: var(--w-accent); }
+.transcript { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; margin-top: 4px; border-radius: var(--r-sm); background: var(--fill); }
+.transcript .msg { overflow-wrap: anywhere; color: var(--fg2); }
+.transcript .msg-user b { color: var(--w-info); font-weight: var(--w-medium); }
+.transcript .msg-assistant b { color: var(--fg); font-weight: var(--w-medium); }

@@ -25,6 +25,8 @@ export const STRINGS = {
     status: { passed: "Passed", failed: "Failed", errored: "Errored", skipped: "Skipped", running: "Running", queued: "Queued", cancelled: "Cancelled" } as Record<string, string>,
     legendPass: "Pass rate", legendScore: "Score", error: "Could not load the card", superseded: "There is a newer card for this below",
     required: "Required to deploy", gatesTitle: "Deploy gates", onPublish: "also on publish",
+    conversation: "Conversation", simulated: "simulated", replayed: (n: number) => `↺ replayed ${n} call${n === 1 ? "" : "s"}`, unmatched: (n: number) => `${n} unmatched`,
+    recorded: "● recorded", cassettes: (n: number) => `${n} replaying a cassette`, multiTurn: (n: number) => `${n} multi-turn`, stoppedBy: "stopped by",
     gateStatus: { running: "Verifying", passed: "Passed", blocked: "Blocked", failed: "Failed", override: "Override", cancelled: "Cancelled", errored: "Errored" } as Record<string, string>,
   },
   it: {
@@ -40,6 +42,8 @@ export const STRINGS = {
     status: { passed: "Superato", failed: "Fallito", errored: "Errore", skipped: "Saltato", running: "In corso", queued: "In coda", cancelled: "Annullato" } as Record<string, string>,
     legendPass: "Superati", legendScore: "Punteggio", error: "Non riesco a caricare la scheda", superseded: "C'è una scheda più recente più sotto",
     required: "Obbligatoria per il deploy", gatesTitle: "Verifiche di deploy", onPublish: "anche alla pubblicazione",
+    conversation: "Conversazione", simulated: "simulato", replayed: (n: number) => `↺ ${n} chiamat${n === 1 ? "a riprodotta" : "e riprodotte"}`, unmatched: (n: number) => `${n} senza registrazione`,
+    recorded: "● registrato", cassettes: (n: number) => `${n} con cassetta`, multiTurn: (n: number) => `${n} multi-turno`, stoppedBy: "fermato da",
     gateStatus: { running: "In verifica", passed: "Superata", blocked: "Bloccato", failed: "Fallita", override: "Forzato", cancelled: "Annullata", errored: "Errore" } as Record<string, string>,
   },
 };
@@ -119,7 +123,7 @@ export function suitesView(c: SuiteListCard, str: Strings): HTMLElement {
       h("div", { class: "row-main" },
         h("div", {}, x.name, x.baselineRunId ? h("span", { class: "chip chip-sm chip-info" }, `★ ${str.isBaseline}`) : null,
           x.gate?.required ? h("span", { class: "chip chip-sm chip-warning", "data-gate": "required", title: `≥ ${pct(x.gate.minPassRate)}${x.gate.onPublish ? ` · ${str.onPublish}` : ""}` }, str.required) : null),
-        h("div", { class: "muted small" }, [str.cases(x.cases), x.scorers ? str.scorers(x.scorers) : "", x.lastRun
+        h("div", { class: "muted small" }, [str.cases(x.cases), x.scorers ? str.scorers(x.scorers) : "", x.cassettes ? str.cassettes(x.cassettes) : "", x.simulated ? str.multiTurn(x.simulated) : "", x.lastRun
           ? `${x.lastRun.passed}/${x.lastRun.total}${x.lastRun.score !== undefined ? ` · ${str.score.toLowerCase()} ${x.lastRun.score.toFixed(2)}` : ""} · ${target(x.lastRun.target, x.lastRun.version)}`
           : str.neverRun].filter(Boolean).join(" · ")),
         x.lastRun?.regressions ? h("div", { class: "small danger-text" }, `▼ ${str.regressions(x.lastRun.regressions)}`) : null),
@@ -179,7 +183,15 @@ export function runView(c: SuiteRunCard, str: Strings): HTMLElement {
         h("div", { class: "muted small" }, [x.key, x.score !== undefined ? `${str.score.toLowerCase()} ${x.score.toFixed(2)}` : "", x.attempts ? `${pct(x.passRate ?? 0)} · ${str.attempts(x.attempts)}` : "", usd(x.costUsd), dur(x.durationMs)].filter(Boolean).join(" · ")),
         ...x.failed.slice(0, env.full ? 8 : 2).map((f) => h("div", { class: "small danger-text fail-line" }, f)),
         x.reasons?.length && x.change !== "unchanged" ? h("div", { class: "small muted" }, x.reasons.join("; ")) : null,
-        env.full && x.scores.length ? h("div", { class: "chips" }, ...x.scores.map((sc) => h("span", { class: `chip chip-sm chip-${sc.passed ? "success" : "danger"}` }, `${sc.id} ${sc.score.toFixed(2)}`))) : null),
+        env.full && x.scores.length ? h("div", { class: "chips" }, ...x.scores.map((sc) => h("span", { class: `chip chip-sm chip-${sc.passed ? "success" : "danger"}` }, `${sc.id} ${sc.score.toFixed(2)}`))) : null,
+        x.cassette || x.recorded ? h("div", { class: "chips", "data-testid": "suite-cassette" },
+          x.cassette ? h("span", { class: "chip chip-sm chip-info", title: x.cassette.id }, str.replayed(x.cassette.replayedCalls)) : null,
+          x.cassette?.unmatched ? h("span", { class: "chip chip-sm chip-warning" }, str.unmatched(x.cassette.unmatched)) : null,
+          x.recorded ? h("span", { class: "chip chip-sm chip-neutral", title: x.recorded.cassetteId }, `${str.recorded} · ${x.recorded.calls}`) : null) : null,
+        x.tasks?.length ? h("div", { class: "small muted", "data-testid": "suite-tasks" }, x.tasks.map((t) => `${t.title} (${t.agent}) ${t.status === "done" ? "✓" : t.status === "failed" ? "✗" : "–"}`).join(" → ")) : null,
+        x.transcript?.length ? h("div", { class: "transcript", "data-testid": "suite-transcript" },
+          h("div", { class: "small muted" }, `${str.conversation}${x.simulator ? ` · ${str.stoppedBy} ${x.simulator.stoppedBy}` : ""}`),
+          ...x.transcript.slice(0, env.full ? 12 : 2).map((m) => h("div", { class: `small msg msg-${m.role}` }, h("b", {}, m.role === "user" ? `${m.simulated ? `${str.simulated} ` : ""}user: ` : "agent: "), m.content))) : null),
       h("span", { class: "chips" }, changeChip(str, x.change), chip(str, x.status)))))),
     c.review ? h("section", { "data-testid": "suite-review" }, h("h3", {}, str.reviewTitle), h("p", { class: "prose" }, env.full ? c.review.text : `${c.review.text.slice(0, 600)}${c.review.text.length > 600 ? "…" : ""}`)) : null,
     env.full && c.notes.length ? h("section", {}, h("h3", {}, str.notes), ...c.notes.map((n) => h("p", { class: "muted small" }, n))) : null,

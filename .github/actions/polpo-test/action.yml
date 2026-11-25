@@ -1,0 +1,115 @@
+name: Polpo suites
+description: >-
+  Run a Polpo instance's suites (agent tests and evals, a hosted MCP server's saved tests, a
+  mission's suites) through its REST API with `polpo test`, write JUnit XML and post a summary of
+  the runs to the job (and the PR checks). Fails the step when a run fails (or regressed, with
+  fail-on-regression). See docs/agent-suites.md, "polpo test and CI".
+author: OpenPolpo
+branding:
+  icon: check-circle
+  color: purple
+
+inputs:
+  url:
+    description: The instance's URL (https://polpo.example.com).
+    required: true
+  token:
+    description: An API key of the instance (keep it in a secret). Runs that use real tools need an admin key.
+    required: true
+  agent:
+    description: The agent whose suites run. Empty: every agent's (unless mcp-server or mission is given).
+    required: false
+    default: ""
+  suite:
+    description: Only this suite (its id).
+    required: false
+    default: ""
+  version:
+    description: production (default), draft, or a published version like 1.2.0.
+    required: false
+    default: ""
+  mode:
+    description: Run every case in this mode (all = offline, tools, model, none). Empty = each case's own.
+    required: false
+    default: ""
+  mcp-server:
+    description: A hosted MCP server's saved tests instead of an agent.
+    required: false
+    default: ""
+  mission:
+    description: A mission's suites instead of an agent.
+    required: false
+    default: ""
+  fail-on-regression:
+    description: Also fail when a run regressed versus its baseline.
+    required: false
+    default: "false"
+  allow-real-tools:
+    description: Confirm runs that use real tools (side effects possible; needs an admin key).
+    required: false
+    default: "false"
+  junit:
+    description: Where to write the JUnit XML report.
+    required: false
+    default: polpo-suites.xml
+  timeout:
+    description: How long to wait for the runs, in seconds.
+    required: false
+    default: "1800"
+  polpo-version:
+    description: The polpo-ai package version to run (npm).
+    required: false
+    default: latest
+  node-version:
+    description: The Node.js version.
+    required: false
+    default: "22"
+
+outputs:
+  exit-code:
+    description: 0 passed, 1 a run failed (or regressed), 2 could not run.
+    value: ${{ steps.test.outputs.exit-code }}
+  junit:
+    description: The JUnit XML report's path.
+    value: ${{ inputs.junit }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - id: test
+      shell: bash
+      env:
+        POLPO_URL: ${{ inputs.url }}
+        POLPO_TOKEN: ${{ inputs.token }}
+        INPUT_AGENT: ${{ inputs.agent }}
+        INPUT_SUITE: ${{ inputs.suite }}
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_MODE: ${{ inputs.mode }}
+        INPUT_MCP_SERVER: ${{ inputs.mcp-server }}
+        INPUT_MISSION: ${{ inputs.mission }}
+        INPUT_FAIL_ON_REGRESSION: ${{ inputs.fail-on-regression }}
+        INPUT_ALLOW_REAL_TOOLS: ${{ inputs.allow-real-tools }}
+        INPUT_JUNIT: ${{ inputs.junit }}
+        INPUT_TIMEOUT: ${{ inputs.timeout }}
+        POLPO_VERSION: ${{ inputs.polpo-version }}
+      run: |
+        args=(test)
+        [ -n "$INPUT_AGENT" ] && args+=("$INPUT_AGENT")
+        [ -n "$INPUT_SUITE" ] && args+=(--suite "$INPUT_SUITE")
+        [ -n "$INPUT_VERSION" ] && args+=(--version "$INPUT_VERSION")
+        [ -n "$INPUT_MODE" ] && args+=(--mode "$INPUT_MODE")
+        [ -n "$INPUT_MCP_SERVER" ] && args+=(--mcp-server "$INPUT_MCP_SERVER")
+        [ -n "$INPUT_MISSION" ] && args+=(--mission "$INPUT_MISSION")
+        [ "$INPUT_FAIL_ON_REGRESSION" = "true" ] && args+=(--fail-on-regression)
+        [ "$INPUT_ALLOW_REAL_TOOLS" = "true" ] && args+=(--allow-real-tools)
+        args+=(--remote "$POLPO_URL" --junit "$INPUT_JUNIT" --summary "$GITHUB_STEP_SUMMARY" --timeout "$INPUT_TIMEOUT")
+        set +e
+        npx --yes "polpo-ai@${POLPO_VERSION}" "${args[@]}"
+        code=$?
+        set -e
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        exit $code

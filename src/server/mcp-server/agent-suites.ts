@@ -28,7 +28,10 @@ type ToolCall = { name: string; args: Record<string, unknown>; result: string; i
 type Result = {
   key: string; caseName: string; status: string; mode: string; engine: string; error?: string; durationMs: number; costUsd: number;
   assertions?: Assertion[]; failed?: string[]; scores?: Score[]; score?: number; attempt?: number;
-  trace?: { turns: Array<{ text: string; mocked: boolean; toolCalls: Array<{ name: string }> }>; toolCalls: ToolCall[]; text: string; finishReason?: string; approvals: Array<{ tool: string; kind: string }>; notes: string[] };
+  trace?: { turns: Array<{ text: string; mocked: boolean; toolCalls: Array<{ name: string }> }>; toolCalls: ToolCall[]; text: string; finishReason?: string; approvals: Array<{ tool: string; kind: string }>; notes: string[];
+    transcript?: Array<{ role: string; content: string; simulated?: boolean }>; finalText?: string; simulator?: { model?: string; calls: number; stoppedBy: string };
+    http?: Array<{ method: string; url: string; status: number; mocked: string | false; mockId?: string }>; tasks?: Array<{ title: string; agent: string; status: string; error?: string; toolCalls: number; text: string }>;
+    cassette?: { id: string; replayedCalls: number; replayedTurns: number; unmatched: string[] }; recorded?: { cassetteId: string; calls: number; turns: number; redactions: number } };
 };
 type Run = {
   id: string; agent: string; suiteId: string; suiteName: string; target: string; version?: string; status: string; startedAt: string; finishedAt?: string;
@@ -127,7 +130,15 @@ function caseTrace(c: Result): string {
     lines.push(`tool ${tc.name}${tc.mocked ? ` [${tc.mocked}${tc.mockId ? ` ${tc.mockId}` : ""}]` : " [real]"}${tc.approval ? ` [approval ${tc.approval}]` : ""} ${short(JSON.stringify(tc.args), 300)}`);
     lines.push(`   → ${tc.isError ? "ERROR " : ""}${short(tc.result, 400)}`);
   }
-  lines.push(`reply: ${short(t.text, 1200) || "—"}`);
+  for (const h of t.http ?? []) lines.push(`http ${h.method} ${h.url} → ${h.status || "—"} [${h.mocked ? `${h.mocked}${h.mockId ? ` ${h.mockId}` : ""}` : "real"}]`);
+  for (const task of t.tasks ?? []) lines.push(`task ${task.title} (${task.agent}): ${task.status}${task.error ? ` — ${short(task.error, 200)}` : ""} · ${task.toolCalls} call(s)${task.text ? ` · ${short(task.text, 200)}` : ""}`);
+  if (t.cassette) lines.push(`cassette ${t.cassette.id}: ${t.cassette.replayedCalls} call(s) and ${t.cassette.replayedTurns} turn(s) replayed${t.cassette.unmatched.length ? `, unmatched: ${t.cassette.unmatched.join(", ")}` : ""}`);
+  if (t.recorded) lines.push(`recorded into the cassette ${t.recorded.cassetteId}: ${t.recorded.calls} call(s), ${t.recorded.turns} turn(s), ${t.recorded.redactions} value(s) redacted`);
+  if (t.transcript?.length) {
+    lines.push(`conversation (${t.transcript.length} messages${t.simulator ? `, the user ${t.simulator.calls ? `simulated by ${t.simulator.model ?? "Polpo's model"}` : "scripted"}, stopped by ${t.simulator.stoppedBy}` : ""}):`);
+    for (const m of t.transcript.slice(0, 40)) lines.push(`   ${m.role === "user" ? "USER" : "AGENT"}${m.simulated ? " (simulated)" : ""}: ${short(m.content, 400)}`);
+    lines.push(`final reply: ${short(t.finalText ?? "", 1200) || "—"}`);
+  } else lines.push(`reply: ${short(t.text, 1200) || "—"}`);
   if (t.finishReason) lines.push(`finish: ${t.finishReason}`);
   for (const n of t.notes) lines.push(`note: ${n}`);
   for (const a of c.assertions ?? []) {
@@ -436,5 +447,314 @@ export function registerAgentSuiteTools(tool: Register, deps: McpDeps): void {
     if (!r.ok) return r.status === 404 ? notFound(r, `There is no run "${run}" for ${agent}.`) : apiError(r, "Reviewing the run");
     const done = r.data as Run;
     return ok(`${done.review?.text ?? ""}\n\n${runHeader(done)}`, { review: (done.review ?? {}) as unknown as Record<string, unknown>, run: { id: done.id, status: done.status } });
+  });
+
+  registerPhase4SuiteTools(tool, deps, { isAdmin, suitesLink });
+}
+
+// ── phase 4: record / replay (cassettes), case generation, suites of other targets ──
+
+type Cassette = {
+  id: string; name: string; suiteId?: string; caseId?: string; revision: number; redactions: number; recordedAt: string; updatedAt: string;
+  source: { kind: string; runId?: string; sessionId?: string; taskId?: string; target?: string };
+  calls?: Array<{ id: string; turn: number; tool: string; args: Record<string, unknown>; response: string; isError: boolean; edited?: boolean; mock?: boolean }>;
+  turns?: Array<{ text: string; toolCalls: Array<{ name: string }> }>;
+  callCount?: number; turnCount?: number; tools?: string[];
+};
+
+function cassetteText(c: Cassette): string {
+  const lines = [`${c.name} [${c.id}] rev ${c.revision} · recorded ${c.recordedAt.slice(0, 16).replace("T", " ")} from ${c.source.kind}${c.source.sessionId ? ` ${c.source.sessionId}` : c.source.taskId ? ` ${c.source.taskId}` : c.source.runId ? ` ${c.source.runId}` : ""}`
+    + ` · ${c.calls?.length ?? c.callCount ?? 0} call(s), ${c.turns?.length ?? c.turnCount ?? 0} turn(s) · ${c.redactions} value(s) redacted${c.caseId ? ` · case ${c.suiteId}/${c.caseId}` : ""}`];
+  for (const call of c.calls ?? []) {
+    lines.push(`- ${call.id} · ${call.tool}${call.mock ? " [now a case mock]" : ""}${call.edited ? " [edited]" : ""} ${short(JSON.stringify(call.args), 200)}`);
+    lines.push(`   → ${call.isError ? "ERROR " : ""}${short(call.response, 300)}`);
+  }
+  return lines.join("\n");
+}
+
+type Proposal = { index: number; case?: { id: string; name: string; input: { message: string }; mode?: string; assertions: unknown[]; scorers?: unknown[]; dataset?: string }; dataset?: { id: string; rows: unknown[] }; category?: string; rationale?: string; error?: string };
+
+export function registerPhase4SuiteTools(tool: Register, deps: McpDeps, h: { isAdmin: () => boolean; suitesLink: (agent: string) => string | undefined }): void {
+  const notFound = (r: { error?: string }, fallback: string) => fail(r.error ?? fallback);
+
+  tool("team", "polpo_agent_suite_record", {
+    title: "Record a case (cassette)",
+    description: "Record a case's cassette: case runs it LIVE once (the agent's real model and real tools — side effects possible, admin only) and saves every model turn and tool call "
+      + "(arguments and results, secrets redacted: vault values, auth headers, tokens); from then on the case replays it offline and deterministically. Run it again to re-record (calls turned into mocks stay pinned). "
+      + "Or turn a REAL exchange into a case and its cassette (no live run, work scope is enough): from_session (a chat with the agent: its last user message, or message_index) or from_task (a task run's activity); the case is added to the suite.",
+    inputSchema: {
+      agent: z.string().min(1).describe("The agent's name (polpo_agents_list)"),
+      suite: z.string().min(1).describe("The suite's id (polpo_agent_suite_list)"),
+      case: z.string().optional().describe("The case to record live (its id)"),
+      target: z.string().optional().describe("production (default), draft, or a version"),
+      from_session: z.string().optional().describe("A chat session id (polpo_chat_sessions_list) with this agent: becomes a case + cassette"),
+      from_task: z.string().optional().describe("A task id whose run becomes a case + cassette"),
+      message_index: z.number().int().min(0).optional().describe("from_session: the user message to start from (default the last)"),
+      name: z.string().optional().describe("The new case's name (from_session / from_task)"),
+      wait_seconds: z.number().int().min(0).max(MAX_WAIT_SECONDS).optional().describe("How long to wait for a live recording (default 50 s)"),
+    },
+    outputSchema: { run: looseObject.optional(), case: looseObject.optional(), cassette: looseObject.optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    scope: "polpo:work",
+  }, async ({ agent, suite, case: caseId, target, from_session, from_task, message_index, name, wait_seconds }, extra) => {
+    if (from_session || from_task) {
+      const r = await apiSend(deps, "POST", `/agents/${enc(agent)}/suites/${enc(suite)}/cases/from-recording`, {
+        ...(from_session ? { sessionId: from_session } : {}), ...(from_task ? { taskId: from_task } : {}), ...(message_index !== undefined ? { messageIndex: message_index } : {}), ...(name ? { name } : {}),
+      });
+      if (!r.ok) return r.status === 404 ? notFound(r, `There is no suite "${suite}", chat or task.`) : apiError(r, "Recording the case");
+      const out = r.data as { case: { id: string; name: string }; cassette: Cassette };
+      return ok(`Added the case ${out.case.name} [${out.case.id}] to ${suite}: it replays the recorded exchange offline (mode all) and checks the same tool calls in order.\n${cassetteText(out.cassette)}\n${h.suitesLink(agent) ?? ""}`,
+        { case: out.case as unknown as Record<string, unknown>, cassette: out.cassette as unknown as Record<string, unknown> });
+    }
+    if (!caseId) return fail("Give case (record it live), or from_session / from_task (a real exchange).");
+    if (!h.isAdmin()) return fail("Recording runs the case live with real tools: it needs the admin scope (polpo:admin). Use from_session or from_task to record a real exchange instead.");
+    const r = await apiSend(deps, "POST", `/agents/${enc(agent)}/suites/${enc(suite)}/cases/${enc(caseId)}/record`, { ...(target ? { target } : {}), allowRealTools: true });
+    if (!r.ok) return r.status === 404 ? notFound(r, `There is no suite "${suite}" or case "${caseId}" for ${agent}.`) : apiError(r, "Recording the case");
+    let run = r.data as Run;
+    const until = Date.now() + (wait_seconds ?? 50) * 1000;
+    while ((run.status === "running" || run.status === "queued") && Date.now() < until && !extra?.signal?.aborted) {
+      await sleep(1000, extra?.signal);
+      const g = await apiGet(deps, `/agents/${enc(agent)}/suite-runs/${enc(run.id)}`);
+      if (g.ok) run = g.data as Run;
+    }
+    const recorded = (run.results as Array<Result & { trace?: { recorded?: { cassetteId: string; calls: number; turns: number; redactions: number } } }>).map((x) => x.trace?.recorded).filter(Boolean);
+    const still = run.status === "running" || run.status === "queued";
+    return ok(`${runReport(run)}\n${recorded.map((x) => `cassette ${x!.cassetteId}: ${x!.calls} call(s), ${x!.turns} turn(s), ${x!.redactions} value(s) redacted`).join("\n")}${still ? `\nStill recording: polpo_agent_suite_run_get with run "${run.id}".` : ""}`,
+      { run: run as unknown as Record<string, unknown> });
+  });
+
+  tool("team", "polpo_agent_suite_replay", {
+    title: "Replay cases (cassettes)",
+    description: "Run a suite's cases offline against their cassettes (mode all: the recorded model turns and tool results, no cost, no side effects): by default every case that has a cassette. "
+      + "A tool call no recording answers is blocked (or fails the case with cassette.onUnmatched: fail). Waits up to wait_seconds and returns the report.",
+    inputSchema: {
+      agent: z.string().min(1).describe("The agent's name"),
+      suite: z.string().min(1).describe("The suite's id"),
+      cases: z.array(z.string()).optional().describe("Only these case ids (default: the cases with a cassette)"),
+      target: z.string().optional().describe("production (default), draft, or a version"),
+      wait_seconds: z.number().int().min(0).max(MAX_WAIT_SECONDS).optional().describe("How long to wait (default 50 s)"),
+    },
+    outputSchema: { run: looseObject },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    scope: "polpo:work",
+  }, async ({ agent, suite, cases, target, wait_seconds }, extra) => {
+    let ids = cases;
+    if (!ids?.length) {
+      const s = await apiGet(deps, `/agents/${enc(agent)}/suites/${enc(suite)}`);
+      if (!s.ok) return s.status === 404 ? notFound(s, `There is no suite "${suite}" for ${agent}.`) : apiError(s, `Reading ${suite}`);
+      ids = (s.data as { cases: Array<{ id: string; mocks?: { cassette?: unknown } }> }).cases.filter((c) => c.mocks?.cassette).map((c) => c.id);
+      if (!ids.length) return fail(`No case of ${suite} has a cassette yet: record one with polpo_agent_suite_record.`);
+    }
+    const r = await apiSend(deps, "POST", `/agents/${enc(agent)}/suites/${enc(suite)}/runs`, { caseIds: ids, mode: "all", ...(target ? { target } : {}) });
+    if (!r.ok) return r.status === 404 ? notFound(r, `There is no suite "${suite}" for ${agent}.`) : apiError(r, `Replaying ${suite}`);
+    let run = r.data as Run;
+    const until = Date.now() + (wait_seconds ?? 50) * 1000;
+    while ((run.status === "running" || run.status === "queued") && Date.now() < until && !extra?.signal?.aborted) {
+      await sleep(1000, extra?.signal);
+      const g = await apiGet(deps, `/agents/${enc(agent)}/suite-runs/${enc(run.id)}`);
+      if (g.ok) run = g.data as Run;
+    }
+    return ok(runReport(run, { diffs: true }), { run: run as unknown as Record<string, unknown> });
+  });
+
+  tool("team", "polpo_agent_suite_cassette", {
+    title: "Read cassettes",
+    description: "An agent's cassettes (recorded exchanges its cases replay): without cassette, the list; with cassette (its id) or suite + case, every recorded call with its arguments and result (secrets redacted).",
+    inputSchema: {
+      agent: z.string().min(1).describe("The agent's name"),
+      cassette: z.string().optional().describe("A cassette id"),
+      suite: z.string().optional().describe("With case: the cassette that case replays"),
+      case: z.string().optional().describe("A case id (with suite)"),
+    },
+    outputSchema: { cassettes: z.array(looseObject).optional(), cassette: looseObject.nullable().optional() },
+    annotations: READ,
+  }, async ({ agent, cassette, suite, case: caseId }) => {
+    if (suite && caseId) {
+      const r = await apiGet(deps, `/agents/${enc(agent)}/suites/${enc(suite)}/cases/${enc(caseId)}/cassette`);
+      if (!r.ok) return r.status === 404 ? notFound(r, `There is no suite "${suite}" or case "${caseId}".`) : apiError(r, "Reading the cassette");
+      return r.data ? ok(cassetteText(r.data as Cassette), { cassette: r.data as Record<string, unknown> }) : ok(`${caseId} has no cassette yet: record it with polpo_agent_suite_record.`, { cassette: null });
+    }
+    if (cassette) {
+      const r = await apiGet(deps, `/agents/${enc(agent)}/cassettes/${enc(cassette)}`);
+      if (!r.ok) return r.status === 404 ? notFound(r, `There is no cassette "${cassette}" for ${agent}.`) : apiError(r, "Reading the cassette");
+      return ok(cassetteText(r.data as Cassette), { cassette: r.data as Record<string, unknown> });
+    }
+    const r = await apiGet(deps, `/agents/${enc(agent)}/cassettes`);
+    if (!r.ok) return r.status === 404 ? notFound(r, `There is no agent "${agent}".`) : apiError(r, "Reading the cassettes");
+    const list = r.data as Cassette[];
+    return ok(list.length ? list.map((c) => `${c.name} [${c.id}] · ${c.callCount} call(s) (${(c.tools ?? []).join(", ") || "no tools"}) · ${c.redactions} redacted · ${c.updatedAt.slice(0, 16).replace("T", " ")}${c.caseId ? ` · ${c.suiteId}/${c.caseId}` : ""}`).join("\n") : `${agent} has no cassettes yet.`,
+      { cassettes: list as unknown as Array<Record<string, unknown>> });
+  });
+
+  tool("team", "polpo_agent_suite_cassette_edit", {
+    title: "Edit a cassette",
+    description: "Edit a cassette's recorded calls: response (a new result; is_error), delete, or mark_as_mock (the call becomes a tool mock of its case, kept on re-recording). delete_cassette: true deletes the whole cassette. "
+      + "revision: the one you read (refused if it changed meanwhile).",
+    inputSchema: {
+      agent: z.string().min(1).describe("The agent's name"),
+      cassette: z.string().min(1).describe("The cassette id (polpo_agent_suite_cassette)"),
+      edits: z.array(z.object({
+        call: z.string().min(1).describe("The call's id"),
+        response: z.string().optional(), is_error: z.boolean().optional(), delete: z.boolean().optional(), mark_as_mock: z.boolean().optional(),
+      })).optional().describe("Per call: response (a new result, with is_error), delete, or mark_as_mock"),
+      delete_cassette: z.boolean().optional().describe("Delete the whole cassette"),
+      revision: z.number().int().optional().describe("The cassette revision you read (refused if it changed meanwhile)"),
+    },
+    outputSchema: { cassette: looseObject.nullable() },
+    annotations: WRITE,
+    scope: "polpo:work",
+  }, async ({ agent, cassette, edits, delete_cassette, revision }) => {
+    if (delete_cassette) {
+      const r = await apiSend(deps, "DELETE", `/agents/${enc(agent)}/cassettes/${enc(cassette)}`);
+      if (!r.ok) return r.status === 404 ? notFound(r, `There is no cassette "${cassette}".`) : apiError(r, "Deleting the cassette");
+      return ok(`Deleted the cassette ${cassette}: the cases that replayed it block their tool calls until recorded again.`, { cassette: null });
+    }
+    if (!edits?.length) return fail("Give edits (call + response / delete / mark_as_mock) or delete_cassette.");
+    const r = await apiSend(deps, "PATCH", `/agents/${enc(agent)}/cassettes/${enc(cassette)}`, {
+      edits: edits.map((e) => ({ callId: e.call, ...(e.response !== undefined ? { response: e.response } : {}), ...(e.is_error !== undefined ? { isError: e.is_error } : {}), ...(e.delete ? { delete: true } : {}), ...(e.mark_as_mock ? { markAsMock: true } : {}) })),
+      ...(revision !== undefined ? { revision } : {}),
+    });
+    if (!r.ok) return r.status === 404 ? notFound(r, `There is no cassette "${cassette}" (or no such call).`) : apiError(r, "Editing the cassette");
+    return ok(`Saved.\n${cassetteText(r.data as Cassette)}`, { cassette: r.data as Record<string, unknown> });
+  });
+
+  tool("team", "polpo_agent_suite_generate", {
+    title: "Generate cases (AI)",
+    description: "Polpo's model proposes test cases for an agent from its instructions, tools, skills and connectors (and brief, sample chats): input, mocks, assertions, scorers, dataset rows — happy paths, "
+      + "edge cases and adversarial / prompt-injection ones. Proposals are NOT saved: show them to the person, then send the ones they accept with accept (the case objects, and their datasets). "
+      + "rows_for_case: propose dataset rows for one case instead. Costs tokens.",
+    inputSchema: {
+      agent: z.string().min(1).describe("The agent's name"),
+      suite: z.string().optional().describe("The suite the cases are for (required with accept / rows_for_case)"),
+      count: z.number().int().min(1).max(20).optional().describe("How many cases (default 6)"),
+      brief: z.string().max(4000).optional().describe("What to focus on"),
+      sessions: z.array(z.string()).max(5).optional().describe("Chat session ids with the agent to draw from"),
+      include: z.array(z.enum(["happy", "edge", "adversarial"])).optional().describe("Kinds of cases (default all): happy paths, edge cases, adversarial / prompt injection"),
+      style: z.enum(["contract", "tools"]).optional().describe("contract (default, offline) or tools (real model, mocked tools)"),
+      accept: z.object({ cases: z.array(looseObject).min(1), datasets: z.array(looseObject).optional() }).optional().describe("Add these accepted cases (and datasets) to suite"),
+      rows_for_case: z.string().optional().describe("A case id: propose rows for its dataset"),
+      rows: z.number().int().min(1).max(50).optional().describe("How many rows (rows_for_case)"),
+    },
+    outputSchema: { proposals: z.array(looseObject).optional(), suite: looseObject.optional(), rows: z.array(looseObject).optional(), columns: z.array(z.string()).optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    scope: "polpo:work",
+  }, async ({ agent, suite, count, brief, sessions, include, style, accept, rows_for_case, rows }) => {
+    if (accept) {
+      if (!suite) return fail("accept needs suite (the suite to add the cases to).");
+      const r = await apiSend(deps, "POST", `/agents/${enc(agent)}/suites/${enc(suite)}/cases`, accept);
+      if (!r.ok) return r.status === 404 ? notFound(r, `There is no suite "${suite}" for ${agent}.`) : apiError(r, "Adding the cases");
+      const s = r.data as Suite;
+      return ok(`Added ${accept.cases.length} case(s) to ${s.name} [${s.id}] rev ${s.revision}: ${s.cases.length} case(s) now. Run it with polpo_agent_suite_run.`, { suite: s as unknown as Record<string, unknown> });
+    }
+    if (rows_for_case) {
+      if (!suite) return fail("rows_for_case needs suite.");
+      const r = await apiSend(deps, "POST", `/agents/${enc(agent)}/suites/${enc(suite)}/datasets/generate`, { caseId: rows_for_case, ...(rows ? { count: rows } : {}), ...(brief ? { brief } : {}) });
+      if (!r.ok) return r.status === 404 ? notFound(r, `There is no suite "${suite}" or case "${rows_for_case}".`) : apiError(r, "Generating rows");
+      const d = r.data as { datasetId?: string; columns: string[]; rows: Array<Record<string, unknown>> };
+      return ok(`Proposed ${d.rows.length} row(s)${d.datasetId ? ` for the dataset ${d.datasetId}` : ""} (not saved: import the ones you keep with polpo_agent_suite_save import_dataset):\n${d.rows.map((x) => JSON.stringify(x)).join("\n")}`,
+        { rows: d.rows, columns: d.columns });
+    }
+    const r = await apiSend(deps, "POST", `/agents/${enc(agent)}/suites/generate-cases`, {
+      ...(suite ? { suiteId: suite } : {}), ...(count ? { count } : {}), ...(brief ? { brief } : {}), ...(sessions?.length ? { sessionIds: sessions } : {}), ...(include ? { include } : {}), ...(style ? { style } : {}),
+    });
+    if (!r.ok) return r.status === 404 ? notFound(r, `There is no agent "${agent}".`) : apiError(r, "Generating cases");
+    const out = r.data as { proposals: Proposal[]; model?: string };
+    const lines = out.proposals.map((p) => p.case
+      ? `${p.index}. [${p.category ?? "case"}] ${p.case.name} [${p.case.id}] — "${short(p.case.input.message, 160)}" · ${p.case.assertions.length} assertion(s)${p.case.scorers?.length ? `, ${p.case.scorers.length} scorer(s)` : ""}${p.dataset ? `, ${p.dataset.rows.length} row(s)` : ""}${p.rationale ? `\n   why: ${short(p.rationale, 300)}` : ""}`
+      : `${p.index}. ✗ invalid: ${p.error}`);
+    return ok(`${out.proposals.length} proposal(s)${out.model ? ` by ${out.model}` : ""} — NOT saved. Ask the person which to keep, then call again with accept: { cases: [...], datasets: [...] }${suite ? "" : " and suite"}.\n${lines.join("\n")}`,
+      { proposals: out.proposals as unknown as Array<Record<string, unknown>> });
+  });
+
+  // ── suites of a hosted MCP server (its saved tests) or a mission ──
+
+  const base = (kind: "mcp-server" | "mission", id: string) => `${kind === "mcp-server" ? "/mcp-servers" : "/missions"}/${enc(id)}`;
+  const targetSchema = {
+    kind: z.enum(["mcp-server", "mission"]).describe("mcp-server: a hosted MCP server (its saved tests are its suite); mission: a mission (run in test mode with every agent mocked)"),
+    id: z.string().min(1).describe("The hosted server's id or the mission's id"),
+  };
+
+  tool("team", "polpo_target_suites", {
+    title: "Suites of a hosted server or a mission",
+    description: "The suites of a hosted MCP server (one: its saved tests — each calls a tool with arguments, its upstream API answered by HTTP mocks) or of a mission (cases that run its tasks in dependency order, "
+      + "each agent with its own mocks, checking task outcomes, order and who did what), with their latest runs. With run: that run's report (or case: one case's trace).",
+    inputSchema: { ...targetSchema, run: z.string().optional().describe("A run id: its report"), case: z.string().optional().describe("With run: a case's trace") },
+    outputSchema: { suites: z.array(looseObject).optional(), run: looseObject.optional(), result: looseObject.optional() },
+    annotations: READ,
+  }, async ({ kind, id, run, case: caseKey }) => {
+    if (run) {
+      const r = await apiGet(deps, `${base(kind, id)}/suite-runs/${enc(run)}`);
+      if (!r.ok) return r.status === 404 ? notFound(r, `There is no run "${run}".`) : apiError(r, "Reading the run");
+      const full = r.data as Run;
+      if (caseKey) {
+        const c = full.results.find((x) => x.key === caseKey || x.key.split("#")[0] === caseKey);
+        if (!c) return fail(`The run has no case "${caseKey}"`);
+        return ok(caseTrace(c), { result: c as unknown as Record<string, unknown> });
+      }
+      return ok(runReport(full, { diffs: true }), { run: full as unknown as Record<string, unknown> });
+    }
+    const r = await apiGet(deps, `${base(kind, id)}/suites`);
+    if (!r.ok) return r.status === 404 ? notFound(r, `There is no ${kind === "mcp-server" ? "hosted server" : "mission"} "${id}".`) : apiError(r, "Reading the suites");
+    const suites = r.data as Suite[];
+    const runs = await apiGet(deps, `${base(kind, id)}/suite-runs${qs({ limit: "30" })}`);
+    const latest = new Map<string, Run>();
+    for (const x of (runs.ok ? runs.data as Run[] : [])) if (!latest.has(x.suiteId)) latest.set(x.suiteId, x);
+    return ok(suites.length ? suites.map((s) => {
+      const last = latest.get(s.id);
+      return `${s.name} [${s.id}] · ${s.cases.length} case(s)${gateLine(s.gate)}${last ? ` · last ${MARK[last.status] ?? ""} ${last.status} ${last.stats.passed}/${last.stats.total - last.stats.skipped} (${last.id})` : " · never run"}`;
+    }).join("\n") : `No suites yet: create one with polpo_target_suite_save.`, { suites: suites.map((s) => ({ ...s, lastRun: latest.get(s.id) ?? null })) as unknown as Array<Record<string, unknown>> });
+  });
+
+  tool("team", "polpo_target_suite_save", {
+    title: "Save a hosted server's or a mission's suite",
+    description: "Save a suite of a hosted MCP server or a mission (same shape as polpo_agent_suite_save). Hosted server: one suite, id saved-tests (its saved tests: cases { name, input: { kind: tool, tool, args }, "
+      + "mocks?: { http: [{ method?, url (glob or substring), status?, body? }] }, assertions: [tool_failed, http_called, text_contains, …] }, mocks.http shared, gate: { required } to gate its deploys). "
+      + "Mission: cases { name, input: { kind: mission, message? }, mocks: { agents: { <agent>: { model?, tools? } } }, assertions: [task_status, task_order, task_agent, tool_called with agent, artifact_created, …], budgets }.",
+    inputSchema: { ...targetSchema, suite: looseObject.describe("The suite"), revision: z.number().int().optional().describe("The revision you edited (refused if it changed meanwhile)") },
+    outputSchema: { suite: looseObject },
+    annotations: WRITE,
+    scope: "polpo:work",
+  }, async ({ kind, id, suite, revision }) => {
+    const sid = typeof suite.id === "string" ? suite.id : kind === "mcp-server" ? "saved-tests" : undefined;
+    const body = { ...suite, ...(revision !== undefined ? { revision } : {}) };
+    const r = sid ? await apiSend(deps, "PUT", `${base(kind, id)}/suites/${enc(sid)}`, body) : await apiSend(deps, "POST", `${base(kind, id)}/suites`, body);
+    if (!r.ok) return r.status === 404 ? notFound(r, `There is no ${kind === "mcp-server" ? "hosted server" : "mission"} "${id}".`) : apiError(r, "Saving the suite");
+    const s = r.data as Suite;
+    return ok(`Saved ${s.name} [${s.id}] rev ${s.revision}: ${s.cases.length} case(s)${gateLine(s.gate)}. Run it with polpo_target_suite_run.`, { suite: s as unknown as Record<string, unknown> });
+  });
+
+  tool("team", "polpo_target_suite_run", {
+    title: "Run a hosted server's or a mission's suite",
+    description: "Run a suite of a hosted MCP server (target: draft by default, production or a version; HTTP mocked in mode all) or of a mission (its agents' production versions, each with its mocks). "
+      + "Real HTTP or real tools need the admin scope. Waits up to wait_seconds and returns the report.",
+    inputSchema: {
+      ...targetSchema,
+      suite: z.string().optional().describe("The suite id (a hosted server: saved-tests, the default)"),
+      target: z.string().optional().describe("Hosted server: draft (default), production or a version"),
+      cases: z.array(z.string()).optional().describe("Only these case ids"),
+      mode: z.enum(["none", "tools", "model", "all"]).optional().describe("Run every case in this mode (default each case's own; all: HTTP and tools mocked)"),
+      wait_seconds: z.number().int().min(0).max(MAX_WAIT_SECONDS).optional().describe("How long to wait for the run (default 50 s)"),
+    },
+    outputSchema: { run: looseObject },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    scope: "polpo:work",
+  }, async ({ kind, id, suite, target, cases, mode, wait_seconds }, extra) => {
+    const sid = suite ?? (kind === "mcp-server" ? "saved-tests" : undefined);
+    if (!sid) return fail("Give suite (polpo_target_suites).");
+    const r = await apiSend(deps, "POST", `${base(kind, id)}/suites/${enc(sid)}/runs`, {
+      ...(target ? { target } : {}), ...(cases?.length ? { caseIds: cases } : {}), ...(mode ? { mode } : {}), ...(h.isAdmin() ? { allowRealTools: true } : {}),
+    });
+    if (!r.ok) {
+      if (r.status === 403) return fail(`${r.error}${h.isAdmin() ? "" : " This connection does not have the admin scope (polpo:admin)."}`);
+      return r.status === 404 ? notFound(r, `There is no ${kind} "${id}" or suite "${sid}".`) : apiError(r, `Running ${sid}`);
+    }
+    let run = r.data as Run;
+    const until = Date.now() + (wait_seconds ?? 50) * 1000;
+    while ((run.status === "running" || run.status === "queued") && Date.now() < until && !extra?.signal?.aborted) {
+      await sleep(1000, extra?.signal);
+      const g = await apiGet(deps, `${base(kind, id)}/suite-runs/${enc(run.id)}`);
+      if (g.ok) run = g.data as Run;
+    }
+    return ok(runReport(run, { diffs: true }), { run: run as unknown as Record<string, unknown> });
   });
 }
