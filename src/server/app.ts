@@ -99,6 +99,7 @@ import { mcpServerServiceFor } from "./mcp-servers-runtime.js";
 import { handlePublicMcpRequest, RateLimiter, PUBLIC_MCP_SERVERS_PATH } from "../mcp-servers/public.js";
 import { hostedDeps } from "../mcp-servers/host.js";
 import { queryOrchestratorText } from "../llm/query.js";
+import { effectiveOrchestratorModel, requireOrchestratorModel } from "../llm/orchestrator-model.js";
 import {
   connectorManagerFor, connectorsPromptSection, notePublicOrigin, clientMetadataDocument, connectorDashboardBase, connectorPublicBase,
   CONNECTOR_CLIENT_METADATA_PATH, CONNECTOR_OAUTH_CALLBACK_PATH,
@@ -705,7 +706,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       const state = await (async () => { try { return await o.getStore()?.getState() ?? null; } catch { return null; } })();
       let systemPrompt = await buildChatSystemPrompt(o, state);
       const settings = o.getConfig()?.settings;
-      const modelSpec = resolveModelSpec(settings?.orchestratorModel);
+      const modelSpec = resolveModelSpec(effectiveOrchestratorModel(settings?.orchestratorModel) ?? settings?.orchestratorModel);
       const m = resolveModel(modelSpec);
       // Connectors granted to Polpo (access.polpo): their tools are appended to Polpo's static ones
       const connectorManager = connectorManagerFor(o);
@@ -1649,7 +1650,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   authed.route("/search", searchRoutes(() => (o.isInitialized ? searchEngine : undefined), () => ({
     model: async () => {
       const { orchestratorAskModel } = await import("./search/ask-llm.js");
-      return orchestratorAskModel(o.getConfig()?.settings?.orchestratorModel);
+      return orchestratorAskModel(effectiveOrchestratorModel(o.getConfig()?.settings?.orchestratorModel));
     },
     recordUsage: async (usage) => {
       await (databaseStoresFor(activePolpoDir())?.tokenUsageStore ?? new FileTokenUsageStore(activePolpoDir())).record({
@@ -1702,7 +1703,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   // Hosted MCP servers: build, test, publish, deploy; each becomes a connector (docs/custom-mcp-servers.md)
   authed.route("/mcp-servers", mcpServerRoutes({
     service: () => mcpServerServiceFor(o),
-    llm: () => async (prompt) => (await queryOrchestratorText(prompt, o.getConfig()?.settings?.orchestratorModel)).text,
+    llm: () => async (prompt) => (await queryOrchestratorText(prompt, requireOrchestratorModel(o.getConfig()?.settings?.orchestratorModel))).text,
     actor: (c) => requestAuthor(c),
     publicBase: (c) => connectorPublicBase(publicOrigin(c)),
     urlPolicy: () => ({ allowPrivateNetwork: false }),

@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+
+- Hosted MCP server generation (from API or description), Polpo chat, Spotlight ask and channel replies use the effective orchestrator model: the configured `settings.orchestratorModel`, else a model of a connected provider; with neither, a clear `NO_MODEL` error pointing to Settings → Orchestrator instead of "No model configured".
 - **No more broken pages after a deploy.** The dashboard's service worker now takes over as soon as a new build arrives (`skipWaiting` + `clientsClaim`): a waiting worker kept serving the previous app shell, whose lazy chunks no longer exist, so pages like Agents failed with "Failed to fetch dynamically imported module". The stale-chunk recovery also activates a waiting worker before its one reload.
 
 ### Added
