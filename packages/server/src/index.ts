@@ -26,6 +26,7 @@ export { checkToolCalls, invalidArgumentsResult, type ToolArgumentsValidator } f
 export { carryContextCheckpoint, checkpointText, contextCheckpointProjection, type CarryContextCheckpointResult, type CheckpointSession, inspectContextCheckpoint, loadContextCheckpoint, saveContextCheckpoint, type ContextCheckpoint, type ContextCheckpointInspection, type ContextCheckpointStore } from "./context-checkpoint.js";
 export { createSessionCompaction, type SessionCompaction, type SessionCompactorOptions } from "./session-compactor.js";
 export { agentRoutes } from "./routes/agents.js";
+export { AgentTestError, type AgentTestRouteDeps } from "./routes/agent-tests.js";
 export { eventRoutes, type EventBridge, type EventClient } from "./routes/events.js";
 export { configRoutes } from "./routes/config.js";
 export { fileRoutes, type FileRouteDeps } from "./routes/files.js";

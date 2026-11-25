@@ -106,6 +106,7 @@ import {
 import { isMcpToolName, toolResultText } from "../mcp/tools.js";
 import { connectorLabel } from "../mcp/view.js";
 import { AgentTalk } from "./agent-talk.js";
+import { agentTesterFor } from "./agent-tests-host.js";
 import { orchestratorName } from "../core/orchestrator-name.js";
 import { resolveBrowserEgress } from "../tools/browser-egress.js";
 import { appPreviewRoutes } from "./routes/app-preview.js";
@@ -356,7 +357,14 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         transcribe: async (audio, filename) => (await transcribeSpeech(audio, filename, await speechVaultFor(o, options?.agent)))?.text ?? null,
       }),
     getAgents: () => o.getAgents(),
-    resolveAgent: (name: string, ref?: string) => o.getAgentVersioning().resolve(name, ref),
+    // "writer@draft" (the Tests tab's smoke run): the draft over the live agent's runtime fields
+    resolveAgent: async (name: string, ref?: string) => {
+      if (ref !== "draft") return o.getAgentVersioning().resolve(name, ref);
+      const live = (await o.getAgents()).find((a) => a.name === name);
+      if (!live) return undefined;
+      const { config } = await o.getAgentVersioning().draftConfig(name);
+      return { agent: { ...live, ...config, name } };
+    },
     getConfig: () => o.getConfig(),
     getMemoryStore: () => o.getMemoryStore(),
     getSessionStore: () => o.getSessionStore(),
@@ -1439,7 +1447,27 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       // publish / discard do not write the live agent: refresh live clients (deploys already do)
       changed: (name, what) => { if (what !== "deployed") void o.notifyAgentChanged(name); },
     },
+    // the Tests tab: check everything the agent has at its disposal (docs/agent-tests.md)
+    tests: {
+      run: (name, req, opts) => agentTester().run(name, req, opts),
+      history: (name, limit) => agentTester().history(name, limit),
+      get: (name, id) => agentTester().get(name, id),
+      fix: (name, action) => agentTester().fix(name, action),
+      actor: (c) => requestAuthor(c),
+      member: (c) => c.get("polpoUserEmail" as never) as string | undefined,
+    },
   })));
+  const agentTester = () => agentTesterFor({
+    orchestrator: o,
+    computerManager: () => computerDeps.manager(),
+    onComputer: async (id, command, timeoutMs) => {
+      const computer = (o.getConfig()?.settings?.computers ?? []).find((x) => x.id === id);
+      if (!computer) return undefined;
+      return computerDeps.manager().whenRunning(computer, (d) => driverHost(d).exec(command, { timeoutMs }));
+    },
+    completions: (req) => completionApp.request(req),
+    instanceAuth: () => isInstanceAuthEnabled(),
+  });
 
   authed.route("/events", eventRoutes(sseBridge));
 
