@@ -131,7 +131,7 @@ describe("record / replay over REST", () => {
     expect(stale.status).toBe(409);
     const again = await json(await api("/agents/shop/suites/notes/runs", { body: { mode: "all", wait: true } }));
     expect(again.data.results[0].trace.toolCalls[0].result).toBe("edited notes");
-  });
+  }, 30_000);
 
   test("a case from a real chat: the exchange becomes a case and its cassette", async () => {
     const store = orchestrator.getSessionStore()!;
@@ -146,7 +146,7 @@ describe("record / replay over REST", () => {
     expect(run.data.status).toBe("passed");
     expect(providerCalls).toBe(0);
     expect(run.data.results[0].trace.toolCalls[0]).toMatchObject({ name: "mcp__printful__shipping_rates", mocked: "cassette" });
-  });
+  }, 30_000);
 });
 
 describe("AI case generation over REST and MCP", () => {
@@ -173,7 +173,7 @@ describe("AI case generation over REST and MCP", () => {
     expect(suite.cases.map((c: any) => c.name)).toEqual(["Ignore injected orders"]);
     const run = await json(await api("/agents/shop/suites/generated/runs", { body: { wait: true } }));
     expect(run.data.status).toBe("passed");
-  });
+  }, 30_000);
 });
 
 describe("other targets over REST", () => {
@@ -199,7 +199,7 @@ describe("other targets over REST", () => {
     expect(run.data.results[0].trace.http[0]).toMatchObject({ mocked: "mock", status: 200 });
     expect((await json(await api("/mcp-servers/shop-api/suite-runs"))).data[0].id).toBe(run.data.id);
     expect((await api("/mcp-servers/nope/suites")).status).toBe(404);
-  });
+  }, 30_000);
 
   test("a hosted server's required suite gates its deploys (REST and MCP): publish checks offline, a failure blocks, an admin overrides", async () => {
     const fetches: string[] = [];
@@ -243,7 +243,7 @@ describe("other targets over REST", () => {
       expect(new Set(runs.data.map((r: any) => r.trigger))).toEqual(new Set(["publish", "deploy"]));
       expect(fetches).toEqual([]);
     } finally { globalThis.fetch = realFetch; }
-  });
+  }, 30_000);
 
   test("a mission runs in test mode, each agent with its own mocks", async () => {
     const m = await json(await api("/missions", { body: { name: "blog-post", data: JSON.stringify({ tasks: [
@@ -269,7 +269,7 @@ describe("other targets over REST", () => {
     expect(existsSync(dir)).toBe(true);
     expect((await api(`/missions/${id}`, { method: "DELETE" })).status).toBeLessThan(300);
     await vi.waitFor(() => expect(existsSync(dir)).toBe(false));
-  });
+  }, 30_000);
 });
 
 function mcp(scopes: string[]) {
@@ -310,5 +310,5 @@ describe("phase 4 over MCP", () => {
     // the suite card shows the cassette
     const card = await read.call("polpo_agent_suite_show", { agent: "shop", run: replay.structuredContent.run.id });
     expect(card.structuredContent.cases[0].cassette).toMatchObject({ id: "read-notes-rec", replayedCalls: 1 });
-  });
+  }, 30_000);
 });

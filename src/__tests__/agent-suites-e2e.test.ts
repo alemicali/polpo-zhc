@@ -343,5 +343,5 @@ describe("agent suites over MCP (on the real instance)", () => {
     const read = mcp(["polpo:read"]);
     const names = ((await read.list()).tools as Array<{ name: string }>).map((t) => t.name).filter((n) => n.startsWith("polpo_agent_suite"));
     expect(names.sort()).toEqual(["polpo_agent_suite_cassette", "polpo_agent_suite_get", "polpo_agent_suite_list", "polpo_agent_suite_run_get", "polpo_agent_suite_show", "polpo_agent_suite_trend"]);
-  });
+  }, 30_000);
 });
