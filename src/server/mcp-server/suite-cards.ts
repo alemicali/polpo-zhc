@@ -7,7 +7,7 @@
 import { z } from "zod";
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { buildSuiteListCard, buildSuiteRunCard, buildSuiteTrendCard, suiteCardText, type SuiteCard } from "../mcp-suite-card.js";
+import { buildBenchmarkCard, buildCompareCard, buildSuiteListCard, buildSuiteRunCard, buildSuiteTrendCard, suiteCardText, type SuiteCard } from "../mcp-suite-card.js";
 import { SUITE_CARD_HTML } from "../mcp-widgets.generated.js";
 import { cardAppearance } from "./card-appearance.js";
 import { READ, allowed, dashboardLink, enc, fail, looseObject, unwrap, type McpDeps, type McpPrincipal, type ToolScope, type ToolsetName } from "./kit.js";
@@ -62,8 +62,28 @@ export async function loadSuiteCard(deps: McpDeps, args: { agent: string; suite?
   return { ok: true, card: appearance ? { ...card, appearance } : card };
 }
 
+/** A benchmark run's card (leaderboard and matrix), or one of its cases side by side (view compare, case). */
+export async function loadBenchmarkCard(deps: McpDeps, args: { run: string; view?: "benchmark" | "compare"; case?: string; variants?: string[] }): Promise<Loaded> {
+  const link = dashboardLink(deps, `/benchmarks?run=${enc(args.run)}`);
+  let card: SuiteCard;
+  if (args.view === "compare" || args.case) {
+    if (!args.case) return { ok: false, error: "The side by side view needs case (a key from the matrix)." };
+    const q = new URLSearchParams({ case: args.case, ...(args.variants?.length ? { variants: args.variants.join(",") } : {}) });
+    const r = await get(deps, `/benchmark-runs/${enc(args.run)}/compare?${q.toString()}`);
+    if (!r.ok) return { ok: false, error: r.status === 404 ? `There is no case "${args.case}" in the benchmark run "${args.run}".` : r.error };
+    card = buildCompareCard({ runId: args.run, comparison: r.data as Parameters<typeof buildCompareCard>[0]["comparison"], key: key(), ...(link ? { link } : {}) });
+  } else {
+    const r = await get(deps, `/benchmark-runs/${enc(args.run)}`);
+    if (!r.ok) return { ok: false, error: r.status === 404 ? `There is no benchmark run "${args.run}".` : r.error };
+    const rep = r.data as Parameters<typeof buildBenchmarkCard>[0];
+    card = buildBenchmarkCard({ run: rep.run, leaderboard: rep.leaderboard, matrix: rep.matrix, key: key(), ...(link ? { link } : {}) });
+  }
+  const appearance = await cardAppearance(deps);
+  return { ok: true, card: appearance ? { ...card, appearance } : card };
+}
+
 const output = z.object({
-  kind: z.enum(["suites", "run", "trend"]).optional(),
+  kind: z.enum(["suites", "run", "trend", "benchmark", "compare"]).optional(),
   key: z.object({ createdAt: z.number(), seq: z.number() }).passthrough().optional(),
   generatedAt: z.string().optional(),
   agent: z.string().optional(),
@@ -76,10 +96,13 @@ const output = z.object({
   review: looseObject.optional().describe("The AI review of the run (Markdown)"),
   points: z.array(looseObject).optional().describe("trend view: the runs over time"),
   byVersion: z.array(looseObject).optional(),
+  leaderboard: z.array(looseObject).optional().describe("benchmark view: the variants ranked (quality ± stddev, cost, latency, composite, Pareto front)"),
+  rows: z.array(looseObject).optional().describe("benchmark view: the case × variant matrix"),
+  columns: z.array(looseObject).optional().describe("compare view: one column per variant (tool calls and the answer diffed)"),
 }).passthrough();
 
 export function registerSuiteCards(server: McpServer, deps: McpDeps, enabled: ReadonlySet<ToolsetName>, principal: McpPrincipal, catalog?: ToolScope[]): void {
-  if (!allowed(enabled, principal, "team", READ, catalog, ["polpo_agent_suite_show"])) return;
+  if (!allowed(enabled, principal, "team", READ, catalog, ["polpo_agent_suite_show", "polpo_benchmark_show"])) return;
 
   registerAppResource(server, "Agent suite card", SUITE_CARD_URI, {
     description: "An agent's test and eval suites, a run's report (cases, assertions, scores, deltas versus the baseline, the AI review) or a suite's trend chart.",
@@ -108,6 +131,24 @@ export function registerSuiteCards(server: McpServer, deps: McpDeps, enabled: Re
     _meta: { ui: { resourceUri: SUITE_CARD_URI } },
   }, async (args) => {
     const r = await loadSuiteCard(deps, args);
+    return r.ok ? { content: [{ type: "text" as const, text: suiteCardText(r.card) }], structuredContent: r.card as unknown as Record<string, unknown> } : fail(r.error);
+  });
+
+  registerAppTool(server, "polpo_benchmark_show", {
+    title: "Show a benchmark",
+    description: "Show a benchmark run as a card: its progress and spend, the leaderboard (variants ranked by quality, cost and latency, the Pareto front, notes when differences are within noise) and the case × variant matrix; "
+      + "with case (a matrix key) — or view compare — that case side by side for 2–4 variants: their tool calls and answers with the differences highlighted. Use it when the person asks which variant (model, version, instructions) is better.",
+    inputSchema: {
+      run: z.string().min(1).describe("A benchmark run id (br-…: polpo_benchmark_get)"),
+      view: z.enum(["benchmark", "compare"]).optional().describe("benchmark (default) or compare"),
+      case: z.string().optional().describe("compare: a case's matrix key (agent/suite/case)"),
+      variants: z.array(z.string()).max(4).optional().describe("compare: 2–4 variant ids (default the first four)"),
+    },
+    annotations: { title: "Show a benchmark", ...READ },
+    outputSchema: output,
+    _meta: { ui: { resourceUri: SUITE_CARD_URI } },
+  }, async (args) => {
+    const r = await loadBenchmarkCard(deps, args);
     return r.ok ? { content: [{ type: "text" as const, text: suiteCardText(r.card) }], structuredContent: r.card as unknown as Record<string, unknown> } : fail(r.error);
   });
 }

@@ -31,3 +31,27 @@
 .transcript .msg { overflow-wrap: anywhere; color: var(--fg2); }
 .transcript .msg-user b { color: var(--w-info); font-weight: var(--w-medium); }
 .transcript .msg-assistant b { color: var(--fg); font-weight: var(--w-medium); }
+.lb-row .rank { flex: none; width: 20px; font-weight: var(--w-semibold); color: var(--fg2); font-variant-numeric: tabular-nums; }
+.lb-row .bar { flex: none; width: 72px; height: 6px; border-radius: var(--r-full); background: var(--fill2); overflow: hidden; }
+.lb-row .bar-fill { display: block; height: 100%; background: var(--w-accent); }
+.lb-row.is-pareto .bar-fill { background: var(--w-info); }
+.notes p { margin: 2px 0; }
+.matrix-wrap { overflow-x: auto; }
+.matrix { border-collapse: collapse; width: 100%; font-size: var(--t-xs); }
+.matrix th, .matrix td { padding: 4px 6px; border-bottom: var(--bw) solid var(--line); text-align: start; vertical-align: top; }
+.matrix thead th { color: var(--fg2); font-weight: var(--w-medium); }
+.matrix tr.spread th[scope="row"] { box-shadow: inset 2px 0 0 var(--w-warning); }
+.link-btn { background: none; border: 0; padding: 0; color: var(--fg); font: inherit; text-align: start; cursor: pointer; text-decoration: underline; text-decoration-color: var(--line2); }
+.link-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.compare-grid { display: grid; grid-template-columns: repeat(var(--cols), minmax(180px, 1fr)); gap: 12px; overflow-x: auto; }
+.compare-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 8px; border-radius: var(--r-sm); background: var(--fill); }
+.compare-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.calls { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: var(--t-xs); overflow-wrap: anywhere; }
+.call { padding: 2px 4px; border-radius: var(--r-xs); }
+.call.diff-changed { background: var(--w-warning-bg); }
+.call.diff-added { background: var(--w-info-bg); }
+.call.diff-missing { background: var(--w-danger-bg); }
+.answer { margin: 0; font-size: var(--t-xs); white-space: pre-wrap; overflow-wrap: anywhere; }
+.answer ins { background: var(--w-success-bg); color: var(--w-success); text-decoration: none; }
+.answer del { background: var(--w-danger-bg); color: var(--w-danger); }
+.compare-col .section-title { font-weight: var(--w-medium); color: var(--fg2); margin-top: 2px; }

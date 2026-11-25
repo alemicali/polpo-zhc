@@ -4,7 +4,10 @@
  * Built from the REST shapes; the widget (widgets/suite-card) draws it, the text is for clients
  * without MCP Apps.
  */
-import { deployGateFailures, type AgentDeployGate, type SuiteBaselineComparison, type SuiteRun, type SuiteRunAggregates, type SuiteTrace, type SuiteTrend } from "@polpo-ai/core/agent-suites";
+import {
+  deployGateFailures, type AgentDeployGate, type BenchmarkCaseComparison, type BenchmarkLeaderboard, type BenchmarkMatrix, type BenchmarkRun, type DiffSegment,
+  type SuiteBaselineComparison, type SuiteRun, type SuiteRunAggregates, type SuiteTrace, type SuiteTrend,
+} from "@polpo-ai/core/agent-suites";
 
 export interface SuiteCardKey { createdAt: number; seq: number }
 
@@ -85,7 +88,96 @@ export interface SuiteTrendCard {
   appearance?: Appearance;
 }
 
-export type SuiteCard = SuiteListCard | SuiteRunCard | SuiteTrendCard;
+/** A benchmark run: its progress, the leaderboard (Pareto front, noise notes) and the case × variant matrix. */
+export interface BenchmarkCard {
+  kind: "benchmark";
+  key: SuiteCardKey;
+  generatedAt: string;
+  /** The first variant's agent (the card's "agent" for the shared host code). */
+  agent: string;
+  run: {
+    id: string; name: string; status: string; stopReason?: string; startedAt: string;
+    progress: BenchmarkRun["progress"]; spentUsd: number; budgetUsd?: number; estimateUsd: number; repetitions: number;
+  };
+  qualityMetric: "score" | "passRate";
+  weights: BenchmarkLeaderboard["weights"];
+  leaderboard: Array<{ rank: number; variantId: string; label: string; quality: number; qualityStddev: number; passRate: number; costUsd: number; latencyP50Ms: number; latencyP95Ms: number; composite: number; pareto: boolean; flakiness: number }>;
+  notes: string[];
+  variants: Array<{ id: string; label: string }>;
+  rows: Array<{ key: string; name: string; suite: string; spread: boolean; cells: Record<string, { status: string; passed: number; attempts: number; score?: number }> }>;
+  moreRows?: number;
+  link?: string;
+  appearance?: Appearance;
+}
+
+/** One case of a benchmark side by side: each variant's tool calls (diffed) and answer (diffed). */
+export interface CompareCard {
+  kind: "compare";
+  key: SuiteCardKey;
+  generatedAt: string;
+  agent: string;
+  runId: string;
+  caseKey: string;
+  caseName: string;
+  reference: string;
+  columns: Array<{
+    variantId: string; label: string; status: string; score?: number; costUsd: number; durationMs: number; tokens: number;
+    toolCalls: Array<{ name: string; args: string; diff: string; argChanges?: string[]; isError: boolean; mocked: string | false }>;
+    missingCalls: string[];
+    text: string;
+    textDiff?: DiffSegment[];
+  }>;
+  link?: string;
+  appearance?: Appearance;
+}
+
+export type SuiteCard = SuiteListCard | SuiteRunCard | SuiteTrendCard | BenchmarkCard | CompareCard;
+
+export function buildBenchmarkCard(input: { run: BenchmarkRun; leaderboard: BenchmarkLeaderboard; matrix: BenchmarkMatrix; key: SuiteCardKey; link?: string; maxRows?: number }): BenchmarkCard {
+  const r = input.run;
+  const max = input.maxRows ?? 40;
+  // the rows where the variants disagree first: what the comparison is about
+  const rows = [...input.matrix.rows].sort((a, b) => Number(b.spread) - Number(a.spread));
+  return {
+    kind: "benchmark", key: input.key, generatedAt: new Date().toISOString(), agent: r.spec.variants[0]?.agent ?? "",
+    run: {
+      id: r.id, name: r.name, status: r.status, ...(r.stopReason ? { stopReason: r.stopReason } : {}), startedAt: r.startedAt,
+      progress: r.progress, spentUsd: r.spentUsd, ...(r.budgetUsd !== undefined ? { budgetUsd: r.budgetUsd } : {}), estimateUsd: r.estimate.costUsd, repetitions: r.spec.repetitions,
+    },
+    qualityMetric: input.leaderboard.qualityMetric, weights: input.leaderboard.weights,
+    leaderboard: input.leaderboard.entries.map((e) => ({
+      rank: e.rank, variantId: e.variantId, label: e.label, quality: e.quality, qualityStddev: e.qualityStddev, passRate: e.passRate, costUsd: e.costUsd,
+      latencyP50Ms: e.latencyP50Ms, latencyP95Ms: e.latencyP95Ms, composite: e.composite, pareto: e.pareto, flakiness: e.flakiness,
+    })),
+    notes: input.leaderboard.notes,
+    variants: input.matrix.variants,
+    rows: rows.slice(0, max).map((x) => ({
+      key: x.key, name: `${x.caseName}${x.row ? ` #${x.row}` : ""}`, suite: x.suiteName, spread: x.spread,
+      cells: Object.fromEntries(Object.entries(x.cells).map(([v, c]) => [v, { status: c.status, passed: c.passed, attempts: c.attempts, ...(c.score !== undefined ? { score: c.score } : {}) }])),
+    })),
+    ...(rows.length > max ? { moreRows: rows.length - max } : {}),
+    ...(input.link ? { link: input.link } : {}),
+  };
+}
+
+const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
+
+export function buildCompareCard(input: { runId: string; comparison: BenchmarkCaseComparison; key: SuiteCardKey; link?: string }): CompareCard {
+  const c = input.comparison;
+  return {
+    kind: "compare", key: input.key, generatedAt: new Date().toISOString(), agent: c.columns[0]?.owner ?? "", runId: input.runId,
+    caseKey: c.key, caseName: c.caseName, reference: c.reference,
+    columns: c.columns.map((x) => ({
+      variantId: x.variantId, label: x.label, status: x.status, ...(x.score !== undefined ? { score: x.score } : {}), costUsd: x.costUsd, durationMs: x.durationMs,
+      tokens: x.tokens.input + x.tokens.output,
+      toolCalls: x.toolCalls.slice(0, 30).map((t) => ({ name: t.name, args: cut(JSON.stringify(t.args), 300), diff: t.diff, ...(t.argChanges ? { argChanges: t.argChanges } : {}), isError: t.isError, mocked: t.mocked })),
+      missingCalls: x.missingCalls,
+      text: cut(x.finalText, 3000),
+      ...(x.textDiff ? { textDiff: x.textDiff.length > 400 ? [{ op: "same" as const, text: cut(x.finalText, 3000) }] : x.textDiff } : {}),
+    })),
+    ...(input.link ? { link: input.link } : {}),
+  };
+}
 
 /** The parts of a case's trace the card shows (phase 4: conversations, cassettes, mission tasks). */
 type CaseTraceIn = Partial<Pick<SuiteTrace, "transcript" | "simulator" | "cassette" | "recorded" | "tasks">>;
@@ -233,6 +325,18 @@ const signed = (n: number, d = 2) => `${n >= 0 ? "+" : "−"}${Math.abs(n).toFix
 
 /** The card as text (clients without MCP Apps, and the model). */
 export function suiteCardText(card: SuiteCard): string {
+  if (card.kind === "benchmark") {
+    const r = card.run;
+    return [
+      `${r.name} [${r.id}] · ${r.status}${r.stopReason ? ` (${r.stopReason})` : ""} · ${r.progress.runsDone}/${r.progress.runsTotal} runs · spent ${usd(r.spentUsd)}${r.budgetUsd !== undefined ? ` of $${r.budgetUsd.toFixed(2)}` : ""}`,
+      ...card.leaderboard.map((e) => `${e.rank}. ${e.label}${e.pareto ? " ◆" : ""} · ${card.qualityMetric === "score" ? "score" : "pass rate"} ${e.quality.toFixed(2)} ± ${e.qualityStddev.toFixed(2)} · ${usd(e.costUsd)}/rep · p50 ${(e.latencyP50Ms / 1000).toFixed(1)} s`),
+      ...card.notes.map((n) => `≈ ${n}`),
+      ...card.rows.map((x) => `${x.spread ? "≠" : " "} ${x.suite} · ${x.name}: ${card.variants.map((v) => { const c = x.cells[v.id]; return `${v.label} ${c?.status ?? "—"}${c?.score !== undefined ? ` ${c.score.toFixed(2)}` : ""}`; }).join(" | ")}`),
+    ].join("\n");
+  }
+  if (card.kind === "compare") {
+    return [`${card.caseName} [${card.caseKey}] side by side:`, ...card.columns.map((c) => `${c.label}: ${c.status}${c.score !== undefined ? ` ${c.score.toFixed(2)}` : ""} · ${usd(c.costUsd)} · tools ${c.toolCalls.map((t) => `${t.diff === "same" ? "" : t.diff === "added" ? "+" : "~"}${t.name}`).join(", ") || "none"}${c.missingCalls.length ? ` · missing ${c.missingCalls.join(", ")}` : ""} · ${c.text.slice(0, 300)}`)].join("\n");
+  }
   if (card.kind === "suites") {
     if (!card.suites.length) return `${card.agent} has no suites yet.`;
     return [`${card.agent}'s suites:`, ...card.suites.map((s) => `- ${s.name} [${s.id}] · ${s.cases} case(s) · ${s.scorers} scorer(s) · mode ${s.defaultMode}`

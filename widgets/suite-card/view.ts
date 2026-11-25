@@ -8,8 +8,12 @@
  *            baseline; each case with its failed checks, its change (▼ regressed, ▲ improved), flaky
  *            cases; the AI review
  *   trend    the suite's runs over time as a chart (pass rate and score), and by version
+ *   benchmark  a benchmark run: progress and spend, the leaderboard (Pareto front ◆, noise notes) and
+ *            the case × variant matrix; a row opens the case side by side
+ *   compare  one case for 2–4 variants in columns: tool calls (= same, ~ other arguments, + extra,
+ *            − missing) and the answers with the words added and removed highlighted
  */
-import type { SuiteCard, SuiteListCard, SuiteRunCard, SuiteTrendCard } from "../../src/server/mcp-suite-card.js";
+import type { BenchmarkCard, CompareCard, SuiteCard, SuiteListCard, SuiteRunCard, SuiteTrendCard } from "../../src/server/mcp-suite-card.js";
 
 export const STRINGS = {
   en: {
@@ -28,6 +32,13 @@ export const STRINGS = {
     conversation: "Conversation", simulated: "simulated", replayed: (n: number) => `↺ replayed ${n} call${n === 1 ? "" : "s"}`, unmatched: (n: number) => `${n} unmatched`,
     recorded: "● recorded", cassettes: (n: number) => `${n} replaying a cassette`, multiTurn: (n: number) => `${n} multi-turn`, stoppedBy: "stopped by",
     gateStatus: { running: "Verifying", passed: "Passed", blocked: "Blocked", failed: "Failed", override: "Override", cancelled: "Cancelled", errored: "Errored" } as Record<string, string>,
+    leaderboard: "Leaderboard", matrix: "Case × variant", pareto: "Pareto front", quality: "Quality", latency: "Latency p50", spent: "Spent", progress: "Runs",
+    sideBySide: "Side by side", back: "Leaderboard", askBench: "Which variant is best?", missing: "missing", answer: "Answer", toolCalls: "Tool calls", noTools: "no tool calls",
+    askBenchmark: (name: string, run: string) => `Which variant of the benchmark "${name}" (${run}) is best, and is the difference real or noise? (use polpo_benchmark_get)`,
+    askCompare: (c: string, run: string) => `Why do the variants differ on the case ${c} of the benchmark run ${run}? (use polpo_benchmark_compare)`,
+    benchStatus: { queued: "Queued", running: "Running", completed: "Completed", cancelled: "Cancelled", errored: "Errored" } as Record<string, string>,
+    cell: { passed: "✓", failed: "✗", mixed: "≈", errored: "‼", skipped: "–", missing: "" } as Record<string, string>,
+    moreRows: (n: number) => `${n} more case${n === 1 ? "" : "s"}`,
   },
   it: {
     open: "Apri", refresh: "Aggiorna", ask: "Spiega questo run", askSuites: "Chiedi", trend: "Andamento", report: "Ultimo run", suitesTitle: "Suite",
@@ -45,6 +56,13 @@ export const STRINGS = {
     conversation: "Conversazione", simulated: "simulato", replayed: (n: number) => `↺ ${n} chiamat${n === 1 ? "a riprodotta" : "e riprodotte"}`, unmatched: (n: number) => `${n} senza registrazione`,
     recorded: "● registrato", cassettes: (n: number) => `${n} con cassetta`, multiTurn: (n: number) => `${n} multi-turno`, stoppedBy: "fermato da",
     gateStatus: { running: "In verifica", passed: "Superata", blocked: "Bloccato", failed: "Fallita", override: "Forzato", cancelled: "Annullata", errored: "Errore" } as Record<string, string>,
+    leaderboard: "Classifica", matrix: "Caso × variante", pareto: "Fronte di Pareto", quality: "Qualità", latency: "Latenza p50", spent: "Speso", progress: "Run",
+    sideBySide: "Affiancati", back: "Classifica", askBench: "Qual è la variante migliore?", missing: "mancante", answer: "Risposta", toolCalls: "Chiamate ai tool", noTools: "nessuna chiamata",
+    askBenchmark: (name: string, run: string) => `Qual è la variante migliore del benchmark "${name}" (${run}), e la differenza è reale o rumore? (usa polpo_benchmark_get)`,
+    askCompare: (c: string, run: string) => `Perché le varianti si comportano diversamente sul caso ${c} del benchmark ${run}? (usa polpo_benchmark_compare)`,
+    benchStatus: { queued: "In coda", running: "In corso", completed: "Concluso", cancelled: "Annullato", errored: "Errore" } as Record<string, string>,
+    cell: { passed: "✓", failed: "✗", mixed: "≈", errored: "‼", skipped: "–", missing: "" } as Record<string, string>,
+    moreRows: (n: number) => `altri ${n} casi`,
   },
 };
 export type Strings = typeof STRINGS.en;
@@ -64,6 +82,8 @@ export interface ViewEnv {
   onRefresh?: () => void;
   /** Switch the card: a run's report, a suite's trend. */
   onShow?: (args: { suite?: string; run?: string; view: "suites" | "run" | "trend" }) => void;
+  /** Benchmark cards: the leaderboard, or one case side by side. */
+  onBench?: (args: { run: string; view: "benchmark" | "compare"; case?: string }) => void;
 }
 
 let env: ViewEnv = { full: false, canFullscreen: false, busy: false, superseded: false };
@@ -239,6 +259,62 @@ export function trendView(c: SuiteTrendCard, str: Strings): HTMLElement {
     actions(str, last ? [h("button", { class: "btn", disabled: env.superseded || env.busy, onclick: () => env.onShow?.({ run: last.runId, suite: c.suiteId, view: "run" }) }, str.report)] : []));
 }
 
+// ── Benchmark ──
+
+const CELL_TONE: Record<string, string> = { passed: "success", failed: "danger", mixed: "warning", errored: "warning", skipped: "neutral", missing: "neutral" };
+
+export function benchmarkView(c: BenchmarkCard, str: Strings): HTMLElement {
+  const r = c.run;
+  const running = r.status === "running" || r.status === "queued";
+  return h("div", { class: env.full ? "full" : "card", "data-benchmark": r.id },
+    header(r.name, [r.id, str.attempts(r.repetitions)].join(" · "), h("span", { class: `chip chip-${running ? "info" : r.status === "completed" ? "success" : "warning"}`, "data-status": r.status }, `${str.benchStatus[r.status] ?? r.status}${r.stopReason ? ` · ${r.stopReason}` : ""}`)),
+    h("div", { class: "kpis" },
+      kpi(str.progress, `${r.progress.runsDone}/${r.progress.runsTotal}`),
+      kpi(str.spent, usd(r.spentUsd), r.budgetUsd !== undefined ? h("span", { class: "delta" }, `/ ${usd(r.budgetUsd)}`) : null),
+      kpi(str.cost, usd(r.estimateUsd))),
+    c.leaderboard.length ? h("section", { "data-testid": "bench-leaderboard" }, h("h3", {}, str.leaderboard),
+      ...c.leaderboard.map((e) => h("div", { class: `row lb-row${e.pareto ? " is-pareto" : ""}`, "data-variant": e.variantId, "data-pareto": e.pareto ? "true" : "false" },
+        h("span", { class: "rank" }, String(e.rank)),
+        h("div", { class: "row-main" },
+          h("div", {}, e.label, e.pareto ? h("span", { class: "chip chip-sm chip-info", title: str.pareto }, "◆") : null, e.flakiness ? h("span", { class: "chip chip-sm chip-warning" }, `${str.flaky} ${pct(e.flakiness)}`) : null),
+          h("div", { class: "muted small" }, `${c.qualityMetric === "score" ? str.score : str.passRate} ${e.quality.toFixed(2)} ± ${e.qualityStddev.toFixed(2)} · ${usd(e.costUsd)} · ${dur(e.latencyP50Ms)} / p95 ${dur(e.latencyP95Ms)}`)),
+        h("div", { class: "bar", "aria-hidden": "true" }, h("span", { class: "bar-fill", style: `width:${Math.round(Math.max(0, Math.min(1, e.composite)) * 100)}%` }))))) : null,
+    c.notes.length ? h("div", { class: "notes small muted", "data-testid": "bench-notes" }, ...c.notes.map((n) => h("p", {}, `≈ ${n}`))) : null,
+    c.rows.length ? h("section", { "data-testid": "bench-matrix" }, h("h3", {}, str.matrix),
+      h("div", { class: "matrix-wrap" }, h("table", { class: "matrix" },
+        h("thead", {}, h("tr", {}, h("th", {}, ""), ...c.variants.map((v) => h("th", { title: v.id }, v.label)))),
+        h("tbody", {}, ...c.rows.map((row) => h("tr", { class: row.spread ? "spread" : "", "data-case": row.key },
+          h("th", { scope: "row" }, h("button", { class: "link-btn", disabled: env.superseded || env.busy, onclick: () => env.onBench?.({ run: r.id, view: "compare", case: row.key }) }, row.name), h("div", { class: "muted small" }, row.suite)),
+          ...c.variants.map((v) => {
+            const cell = row.cells[v.id];
+            const st = cell?.status ?? "missing";
+            return h("td", { "data-cell": st }, h("span", { class: `chip chip-sm chip-${CELL_TONE[st] ?? "neutral"}` }, `${str.cell[st] ?? ""}${cell && cell.attempts > 1 ? ` ${cell.passed}/${cell.attempts}` : ""}${cell?.score !== undefined ? ` ${cell.score.toFixed(2)}` : ""}`));
+          })))))),
+      c.moreRows ? h("p", { class: "muted small" }, str.moreRows(c.moreRows)) : null) : null,
+    actions(str, [], str.askBench));
+}
+
+function diffText(col: CompareCard["columns"][number]): HTMLElement {
+  if (!col.textDiff) return h("p", { class: "prose answer" }, col.text || "—");
+  return h("p", { class: "prose answer" }, ...col.textDiff.map((seg) => (seg.op === "same" ? seg.text : h(seg.op === "add" ? "ins" : "del", { class: `diff-${seg.op}` }, seg.text))));
+}
+
+export function compareView(c: CompareCard, str: Strings): HTMLElement {
+  return h("div", { class: env.full ? "full" : "card", "data-compare": c.caseKey },
+    header(`${c.caseName} · ${str.sideBySide}`, `${c.caseKey} · ${c.runId}`),
+    h("div", { class: "compare-grid", style: `--cols:${Math.max(1, c.columns.length)}` }, ...c.columns.map((col) => h("div", { class: "compare-col", "data-variant": col.variantId },
+      h("div", { class: "compare-head" }, h("div", { class: "name" }, col.label), chip(str, col.status)),
+      h("div", { class: "muted small" }, [col.score !== undefined ? `${str.score.toLowerCase()} ${col.score.toFixed(2)}` : "", usd(col.costUsd), dur(col.durationMs), `${col.tokens} tok`].filter(Boolean).join(" · ")),
+      h("div", { class: "section-title small" }, str.toolCalls),
+      col.toolCalls.length || col.missingCalls.length ? h("ul", { class: "calls" },
+        ...col.toolCalls.map((t) => h("li", { class: `call diff-${t.diff}`, "data-diff": t.diff, title: t.argChanges?.join(", ") ?? "" },
+          h("b", {}, `${t.diff === "added" ? "+ " : t.diff === "changed" ? "~ " : ""}${t.name}`), " ", h("span", { class: "muted" }, t.args))),
+        ...col.missingCalls.map((m) => h("li", { class: "call diff-missing", "data-diff": "missing" }, h("b", {}, `− ${m}`), " ", h("span", { class: "muted" }, str.missing)))) : h("p", { class: "muted small" }, str.noTools),
+      h("div", { class: "section-title small" }, str.answer),
+      diffText(col)))),
+    actions(str, [h("button", { class: "btn", disabled: env.superseded || env.busy, onclick: () => env.onBench?.({ run: c.runId, view: "benchmark" }) }, str.back)], str.ask));
+}
+
 // ── Render ──
 
 function skeleton(): HTMLElement {
@@ -254,7 +330,7 @@ export function renderView(root: HTMLElement, next: ViewEnv): void {
   root.replaceChildren(
     env.superseded ? h("div", { class: "banner" }, str.superseded) : "",
     env.error && !c ? h("div", { class: "card" }, h("p", { class: "danger" }, `${str.error}: ${env.error}`))
-      : c ? (c.kind === "run" ? runView(c, str) : c.kind === "trend" ? trendView(c, str) : suitesView(c, str)) : skeleton(),
+      : c ? (c.kind === "run" ? runView(c, str) : c.kind === "trend" ? trendView(c, str) : c.kind === "benchmark" ? benchmarkView(c, str) : c.kind === "compare" ? compareView(c, str) : suitesView(c, str)) : skeleton(),
   );
   root.classList.toggle("is-superseded", env.superseded);
   root.classList.toggle("is-full", env.full);

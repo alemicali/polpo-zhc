@@ -24,7 +24,11 @@ import type { SuiteCard } from "../../src/server/mcp-suite-card.js";
 import { renderView, stringsFor, type Strings } from "./view.js";
 import { applyInstanceAppearance } from "../shared/theme.js";
 
-type Args = { agent: string; suite?: string; run?: string; view?: "suites" | "run" | "trend" };
+type SuiteArgs = { agent: string; suite?: string; run?: string; view?: "suites" | "run" | "trend" };
+/** polpo_benchmark_show: a benchmark run (leaderboard, matrix) or one of its cases side by side. */
+type BenchArgs = { run: string; view?: "benchmark" | "compare"; case?: string; variants?: string[] };
+type Args = SuiteArgs | BenchArgs;
+const isBench = (a: Args | undefined): a is BenchArgs => !!a && !("agent" in a);
 
 const app = new App({ name: "polpo-suite-card", version: "1.0.0" }, { availableDisplayModes: ["inline", "fullscreen"] });
 const root = document.getElementById("root")!;
@@ -47,6 +51,7 @@ function render(): void {
     full: fullscreen(), canFullscreen: canFullscreen(), busy, superseded,
     onOpen: () => void openFull(), onAsk: () => void ask(), onRefresh: () => void load(args),
     onShow: (next) => { if (card) void load({ agent: card.agent, ...next }); },
+    onBench: (next) => void load(next),
   });
 }
 
@@ -56,13 +61,15 @@ async function openFull(): Promise<void> {
 
 async function ask(): Promise<void> {
   if (superseded || !card) return;
-  const text = card.kind === "run" ? t().explain(card.run.suiteName, card.run.id) : t().askAbout(card.agent);
+  const text = card.kind === "run" ? t().explain(card.run.suiteName, card.run.id)
+    : card.kind === "benchmark" ? t().askBenchmark(card.run.name, card.run.id)
+      : card.kind === "compare" ? t().askCompare(card.caseKey, card.runId) : t().askAbout(card.agent);
   await app.sendMessage({ role: "user", content: [{ type: "text", text }] }).catch(() => {});
 }
 
 function adopt(next: unknown): void {
   const c = next as SuiteCard | undefined;
-  if (!c || typeof c !== "object" || !["suites", "run", "trend"].includes((c as { kind?: string }).kind ?? "")) return;
+  if (!c || typeof c !== "object" || !["suites", "run", "trend", "benchmark", "compare"].includes((c as { kind?: string }).kind ?? "")) return;
   card = c;
   applyInstanceAppearance(c.appearance);
   error = undefined;
@@ -74,7 +81,7 @@ async function load(next: Args | undefined): Promise<void> {
   busy = true;
   render();
   try {
-    const res = await app.callServerTool({ name: "polpo_agent_suite_show", arguments: next as unknown as Record<string, unknown> });
+    const res = await app.callServerTool({ name: isBench(next) ? "polpo_benchmark_show" : "polpo_agent_suite_show", arguments: next as unknown as Record<string, unknown> });
     if (res.isError) throw new Error(res.content?.map((x) => ("text" in x ? x.text : "")).join(" ") || "error");
     args = next;
     adopt(res.structuredContent);
@@ -96,7 +103,11 @@ function tellModel(): void {
       + `${c.baseline ? `; versus the baseline: ${c.baseline.regressions} regression(s)` : ""}; failing: ${c.cases.filter((x) => x.status !== "passed").map((x) => x.key).join(", ") || "none"}.`
     : c.kind === "trend"
       ? `The person is looking at the trend of ${c.agent}'s suite ${c.suiteId} in Polpo (${c.points.length} runs).`
-      : `The person is looking at ${c.agent}'s suites in Polpo.`;
+      : c.kind === "benchmark"
+        ? `The person is looking at the benchmark run ${c.run.id} (${c.run.name}, ${c.run.status}) in Polpo; leaderboard: ${c.leaderboard.map((e) => `${e.rank}. ${e.label}`).join(", ")}.`
+        : c.kind === "compare"
+          ? `The person is comparing the case ${c.caseKey} of the benchmark run ${c.runId} side by side: ${c.columns.map((x) => `${x.label} ${x.status}`).join(", ")}.`
+          : `The person is looking at ${c.agent}'s suites in Polpo.`;
   void app.updateModelContext({ content: [{ type: "text", text }] }).catch(() => {});
 }
 
@@ -115,7 +126,7 @@ function isNewer(other: { createdAt: number; seq: number; instanceId: string }):
 
 function joinElection(): void {
   if (channel || !card || typeof BroadcastChannel === "undefined") return;
-  const id = card.kind === "run" ? card.run.id : card.kind === "trend" ? card.suiteId : "suites";
+  const id = card.kind === "run" ? card.run.id : card.kind === "trend" ? card.suiteId : card.kind === "benchmark" ? card.run.id : card.kind === "compare" ? `${card.runId}:${card.caseKey}` : "suites";
   channel = new BroadcastChannel(`polpo-suite-card:${card.agent}:${card.kind}:${id}`);
   const me = () => ({ ...card!.key, instanceId });
   channel.onmessage = (ev: MessageEvent) => {
@@ -144,6 +155,13 @@ function applyContext(next: Partial<McpUiHostContext>): void {
 }
 
 const fromInput = (a: Record<string, unknown> | undefined) => {
+  // polpo_benchmark_show's arguments
+  if (typeof a?.run === "string" && typeof a.agent !== "string") {
+    args = { run: a.run, ...(a.view === "benchmark" || a.view === "compare" ? { view: a.view } : {}), ...(typeof a.case === "string" ? { case: a.case } : {}),
+      ...(Array.isArray(a.variants) ? { variants: a.variants.filter((v): v is string => typeof v === "string") } : {}) };
+    if (!card) { pending = a.run; render(); }
+    return;
+  }
   if (typeof a?.agent !== "string") return;
   args = {
     agent: a.agent,
@@ -162,7 +180,10 @@ app.addEventListener("toolresult", (result) => {
   } else {
     card = undefined;
     adopt(result.structuredContent);
-    if (card && !args) args = { agent: (card as SuiteCard).agent };
+    if (card && !args) {
+      const c = card as SuiteCard;
+      args = c.kind === "benchmark" ? { run: c.run.id } : c.kind === "compare" ? { run: c.runId, view: "compare", case: c.caseKey } : { agent: c.agent };
+    }
     joinElection();
   }
   render();
