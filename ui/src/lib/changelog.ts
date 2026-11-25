@@ -32,6 +32,20 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-25-hosted-servers-like-connectors",
+    date: "2026-11-25",
+    kind: "improved",
+    title: "Server ospitati: stesso aspetto dei connettori, con i loghi ufficiali",
+    summary: "In Connettori → Server ospitati i connettori pronti e i tuoi server usano le stesse schede, righe e stati dei connettori, con i loghi di Printful, Gelato e Printify.",
+    body: [
+      "- **Connettori pronti** come le schede di Sfoglia: logo, fornitore e categoria, lo **stato** nella stessa etichetta dei connettori (\"Installato v1.1.0\", \"Aggiornamento disponibile\", \"Disponibile\") e il badge \"Ospitato da Polpo\".",
+      "- **I tuoi server ospitati** come le righe dei connettori collegati: \"Ospitato da Polpo\", visibilità, stato (\"Live\", bozza, spento) e l'ingranaggio per aprirli.",
+      "- **Il pannello del server** ha la stessa intestazione del pannello di un connettore, con le schede Strumenti, Impostazioni, Test, Versioni e Log e **Chi può usarlo**; dal connettore di un server ospitato apri strumenti, versioni e log con un clic.",
+      "- **Loghi ufficiali** di Printful, Gelato e Printify (con la variante per il tema scuro dove serve), inclusi nell'app e mai scaricati al volo; anche il connettore creato li usa. I server personalizzati mostrano l'iniziale, come gli altri connettori.",
+    ].join("\n"),
+    cta: { label: "Apri i server ospitati", to: "/connectors?tab=servers" },
+  },
+  {
     id: "2026-11-25-ready-made-connectors",
     date: "2026-11-25",
     kind: "new",
