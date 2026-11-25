@@ -81,7 +81,7 @@ export interface AgentSuiteDeps {
    * One chat turn with the agent (`agent`, `agent@draft`, `agent@1.2.0`) through the chat
    * completions pipeline, run inside the case's hooks; the chat is deleted afterwards.
    */
-  turn: (agentRef: string, messages: Array<{ role: string; content: string }>, hooks: SuiteCaseHooks) => Promise<SuiteTurnResult>;
+  turn: (agentRef: string, messages: Array<{ role: string; content: string }>, hooks: SuiteCaseHooks, opts?: { onText?: (delta: string) => void }) => Promise<SuiteTurnResult>;
   /** Runs at once on this instance (default 2). */
   maxRunningRuns?: number;
   /**
@@ -154,7 +154,7 @@ function scriptFor(plan: PlannedCase, cassette: SuiteCassetteRecord | undefined)
 }
 
 /** The hooks of one case (or one mission task): mocks, cassette, budgets and the trace being written. */
-class CaseRecorder implements SuiteCaseHooks {
+export class CaseRecorder implements SuiteCaseHooks {
   readonly mocksModel: boolean;
   readonly turns: SuiteTraceTurn[] = [];
   readonly toolCalls: SuiteTraceToolCall[] = [];
@@ -176,7 +176,13 @@ class CaseRecorder implements SuiteCaseHooks {
     readonly plan: PlannedCase,
     readonly overrides: SuiteRun["variant"]["overrides"],
     private readonly engine: SuiteEngine,
-    private readonly opts: { cassette?: SuiteCassetteRecord; agent?: string; cursor?: { n: number } } = {},
+    private readonly opts: {
+      cassette?: SuiteCassetteRecord; agent?: string; cursor?: { n: number };
+      /** The Playground's "real tools": a call no mock answers runs for real (any mode; the caller checked the admin). */
+      realUnmocked?: boolean;
+      /** Live events (the Playground streams them): each model turn and tool call as it happens. */
+      observer?: (e: { type: "turn"; turn: SuiteTraceTurn } | { type: "tool"; call: SuiteTraceToolCall }) => void;
+    } = {},
   ) {
     this.mocksModel = modeMocksModel(plan.mode);
     this.script = scriptFor(plan, opts.cassette);
@@ -216,8 +222,10 @@ class CaseRecorder implements SuiteCaseHooks {
   }
 
   recordTurn(turn: Omit<SuiteTraceTurn, "index">): void {
-    this.turns.push({ index: this.turns.length, ...turn, ...(this.opts.agent ? { agent: this.opts.agent } : {}) });
+    const t: SuiteTraceTurn = { index: this.turns.length, ...turn, ...(this.opts.agent ? { agent: this.opts.agent } : {}) };
+    this.turns.push(t);
     this.cost += turn.usage?.costUsd ?? 0;
+    try { this.opts.observer?.({ type: "turn", turn: t }); } catch { /* a listener's problem */ }
   }
 
   async toolCall(name: string, args: Record<string, unknown>, run: () => Promise<string>, callId?: string): Promise<string> {
@@ -231,7 +239,9 @@ class CaseRecorder implements SuiteCaseHooks {
       const isError = result.startsWith("Error:");
       const approval = !isError && /^Queued for approval/i.test(result) ? "queued" as const : undefined;
       if (approval) this.approvals.push({ tool: name, kind: approval, detail: result.slice(0, 300) });
-      this.toolCalls.push({ id, turn, name, args, result, isError, mocked, durationMs: Date.now() - t0, ...(approval ? { approval } : {}), ...(this.opts.agent ? { agent: this.opts.agent } : {}), ...extra });
+      const call: SuiteTraceToolCall = { id, turn, name, args, result, isError, mocked, durationMs: Date.now() - t0, ...(approval ? { approval } : {}), ...(this.opts.agent ? { agent: this.opts.agent } : {}), ...extra };
+      this.toolCalls.push(call);
+      try { this.opts.observer?.({ type: "tool", call }); } catch { /* a listener's problem */ }
       return result;
     };
     if (this.cancelled) return record(`Error: the test run was cancelled: ${name} did not run.`, "blocked");
@@ -258,7 +268,7 @@ class CaseRecorder implements SuiteCaseHooks {
         this.notes.push(`${name} has no recording in the cassette ${cassette.id} matching these arguments (match ${this.plan.mocks.cassette?.match ?? "exact"}): ${this.plan.mocks.cassette?.onUnmatched === "fail" ? "the case fails" : "blocked"}`);
         return record(`Error: ${name} has no recorded answer in this test's cassette for these arguments, so it did not run.`, "blocked");
       }
-      if (this.plan.mode === "tools" && this.plan.mocks.unmockedTools === "real") return record(await runReal(run), false);
+      if ((this.plan.mode === "tools" && this.plan.mocks.unmockedTools === "real") || this.opts.realUnmocked) return record(await runReal(run), false);
       this.notes.push(`${name} was called with no matching mock: blocked`);
       return record(`Error: ${name} is not mocked in this test (mode ${this.plan.mode}), so it did not run. No mock matched these arguments.`, "blocked");
     }
@@ -313,7 +323,7 @@ const usageOf = (turns: SuiteTraceTurn[]) => turns.reduce((u, t) => ({
 
 /** What a case runs against: an agent ref, a hosted server at a ref, a mission. */
 type RunContext =
-  | { kind: "agent"; agent: string; agentRef: string; engine: SuiteEngine }
+  | { kind: "agent"; agent: string; agentRef: string; engine: SuiteEngine; config?: AgentConfig }
   | { kind: "mcp-server"; server: string; ref: string; tools: Record<string, { kind: "http" | "code"; sensitive: boolean }>; allowRealTools: boolean; actor?: string }
   | { kind: "mission"; mission: string; name: string; tasks: MissionTaskLike[]; defaultAgent?: string; notes: string[] };
 
@@ -466,16 +476,9 @@ export class AgentSuiteRunner {
   private async runContext(owner: string, suite: AgentSuite, target: string, req: SuiteRunRequest, opts: RunOptions): Promise<{ ctx: RunContext; version?: string; notes: string[] }> {
     const kind = suite.target.kind;
     if (kind === "agent") {
-      const ref = target === "production" ? undefined : target;
-      let config: AgentConfig | undefined;
-      try { config = await this.deps.resolveAgent(owner, ref); } catch (err) { throw new AgentSuiteError(errorText(err), "NOT_FOUND"); }
-      if (!config) throw new AgentSuiteError(`Agent "${owner}" not found`, "NOT_FOUND");
-      const engine = engineOf(applySuiteOverrides(config, req.overrides));
-      const version = target === "production" ? await this.deps.productionVersion?.(owner).catch(() => undefined) : target === "draft" ? undefined : target;
-      const notes: string[] = [];
-      if (engine === "harness") notes.push("This agent runs its tasks on a harness; its chats (and these cases) run on Polpo's engine with its model.");
-      if (engine === "cli") notes.push("CLI engine: the official program's model cannot be scripted; Polpo's tools it calls are mocked, its own tools (Bash, Read, Edit…) run for real.");
-      return { ctx: { kind: "agent", agent: owner, agentRef: ref ? `${owner}@${ref}` : owner, engine }, ...(version ? { version } : {}), notes };
+      // a benchmark may run one agent's suite against another agent (variant.agent)
+      const agent = req.variant?.agent ?? owner;
+      return this.agentContext(agent, target, req.overrides, agent !== owner ? [`The cases of ${owner}'s suite ran against ${agent}.`] : []);
     }
     if (kind === "mcp-server") {
       const hosted = this.deps.targets?.mcpServer;
@@ -503,6 +506,21 @@ export class AgentSuiteRunner {
     throw new AgentSuiteError(`Suites that target a ${kind} are not supported yet`, "CONFLICT");
   }
 
+  /** An agent at a version (production, draft, 1.2.0) with overrides: what its cases run against. */
+  private async agentContext(agent: string, target: string, overrides: SuiteRunRequest["overrides"], notes: string[] = []): Promise<{ ctx: Extract<RunContext, { kind: "agent" }>; version?: string; notes: string[] }> {
+    const ref = target === "production" ? undefined : target;
+    let config: AgentConfig | undefined;
+    try { config = await this.deps.resolveAgent(agent, ref); } catch (err) { throw new AgentSuiteError(errorText(err), "NOT_FOUND"); }
+    if (!config) throw new AgentSuiteError(`Agent "${agent}" not found`, "NOT_FOUND");
+    const effective = applySuiteOverrides(config, overrides);
+    const engine = engineOf(effective);
+    const version = target === "production" ? await this.deps.productionVersion?.(agent).catch(() => undefined) : target === "draft" ? undefined : target;
+    const out = [...notes];
+    if (engine === "harness") out.push("This agent runs its tasks on a harness; its chats (and these cases) run on Polpo's engine with its model.");
+    if (engine === "cli") out.push("CLI engine: the official program's model cannot be scripted; Polpo's tools it calls are mocked, its own tools (Bash, Read, Edit…) run for real.");
+    return { ctx: { kind: "agent", agent, agentRef: ref ? `${agent}@${ref}` : agent, engine, config: effective }, ...(version ? { version } : {}), notes: out };
+  }
+
   /** The cassette each planned case replays (loaded once per run). */
   private async cassettesFor(owner: string, planned: PlannedCase[], run: SuiteRun): Promise<Map<string, SuiteCassetteRecord>> {
     const out = new Map<string, SuiteCassetteRecord>();
@@ -523,9 +541,31 @@ export class AgentSuiteRunner {
    * Start a run of a suite (or some of its cases) against the agent at `target`, with the variant's
    * overrides. Returns the run as soon as it is recorded; `done` resolves when it finishes.
    */
-  async startRun(agent: string, suiteId: string, req: SuiteRunRequest = {}, opts: RunOptions = {}): Promise<{ run: SuiteRun; done: Promise<SuiteRun> }> {
+  /**
+   * What a run would do, checked but not started: the suite, the planned cases, the context (the
+   * agent at its version with the overrides), whether it touches real tools or a real model. Throws
+   * what startRun would (unknown suite, version or case, real tools without the admin scope).
+   */
+  async preflight(agent: string, suiteId: string, req: SuiteRunRequest = {}, opts: RunOptions = {}): Promise<{
+    suite: AgentSuite; target: string; planned: PlannedCase[]; realTools: boolean; realModelCases: number; engine: SuiteEngine;
+    runAgent: string; config?: AgentConfig; version?: string; notes: string[];
+  }> {
+    const p = await this.prepare(agent, suiteId, req, opts);
+    return {
+      suite: p.suite, target: p.target, planned: p.planned, realTools: p.realTools, engine: p.ctx.kind === "agent" ? p.ctx.engine : "native",
+      realModelCases: p.planned.filter((x) => x.case.input.kind !== "tool" && !modeMocksModel(x.mode)).length,
+      runAgent: p.ctx.kind === "agent" ? p.ctx.agent : agent, ...(p.ctx.kind === "agent" && p.ctx.config ? { config: p.ctx.config } : {}),
+      ...(p.version ? { version: p.version } : {}), notes: p.notes,
+    };
+  }
+
+  private async prepare(agent: string, suiteId: string, req: SuiteRunRequest, opts: RunOptions) {
     const suite = await this.getSuite(agent, suiteId);
     const target = req.target?.trim() || (suite.target.kind === "mcp-server" ? "draft" : "production");
+    if (req.variant?.agent && req.variant.agent !== agent) {
+      if (suite.target.kind !== "agent") throw new AgentSuiteError("Only an agent's suite can run against another agent");
+      if (!(await this.deps.agents()).some((a) => a.name === req.variant!.agent)) throw new AgentSuiteError(`Agent "${req.variant.agent}" not found`, "NOT_FOUND");
+    }
     if (req.repetitions !== undefined && (!Number.isInteger(req.repetitions) || req.repetitions < 1 || req.repetitions > SUITE_LIMITS.maxRepetitions)) {
       throw new AgentSuiteError(`repetitions must be a whole number from 1 to ${SUITE_LIMITS.maxRepetitions}`);
     }
@@ -547,10 +587,16 @@ export class AgentSuiteRunner {
       throw new AgentSuiteError("This run would use real tools (a case in mode none or model, unmocked tools or HTTP run for real, or the CLI engine's own tools): "
         + "it needs the admin scope. Run it in mode all (offline) or tools (mocked tools), or ask an admin.", "FORBIDDEN");
     }
+    return { suite, target, ctx, version, notes, planned, realTools };
+  }
+
+  async startRun(agent: string, suiteId: string, req: SuiteRunRequest = {}, opts: RunOptions = {}): Promise<{ run: SuiteRun; done: Promise<SuiteRun> }> {
+    const { suite, target, ctx, version, notes, planned } = await this.prepare(agent, suiteId, req, opts);
+    const runAgent = ctx.kind === "agent" ? ctx.agent : agent;
     const variant: SuiteVariant = {
-      id: req.variant?.id ?? `${agent}@${target}${req.overrides ? `+${Object.keys(req.overrides).sort().join("+")}` : ""}`,
+      id: req.variant?.id ?? `${runAgent}@${target}${req.overrides ? `+${Object.keys(req.overrides).sort().join("+")}` : ""}`,
       ...(req.variant?.label ? { label: req.variant.label } : {}),
-      agent, version: target,
+      agent: runAgent, version: target,
       ...(req.overrides ? { overrides: req.overrides } : {}),
     };
     const run: SuiteRun = {
@@ -610,7 +656,8 @@ export class AgentSuiteRunner {
         await saving;
         if (recorded.length) await this.pointCasesAtCassettes(agent, suite.id, recorded, opts.actor).catch((err) => { run.notes.push(`The cases could not be pointed at their cassettes: ${errorText(err)}`); });
         run.status = cancelled ? "cancelled" : suiteRunStatus(run.results);
-        if (!cancelled && !req.record) {
+        // a benchmark compares its variants with each other, not with the suite's baseline
+        if (!cancelled && !req.record && !req.benchmarkRunId) {
           const cmp = await this.baselineFor(run, suite, req).catch((err) => { run.notes.push(`The comparison with the baseline failed: ${errorText(err)}`); return undefined; });
           if (cmp) run.baseline = cmp;
         }
@@ -1173,7 +1220,7 @@ export class AgentSuiteRunner {
       return b ? compareSuiteRuns(run, b, { source: "request", ...opts }) : undefined;
     }
     // recording runs are not baselines (they ran live once to make the cassettes)
-    const picked = pickSuiteBaseline((await this.deps.store.listRuns(run.agent, { suiteId: run.suiteId })).filter((r) => !r.record), run, suite.evals?.baseline ?? "previous");
+    const picked = pickSuiteBaseline((await this.deps.store.listRuns(run.agent, { suiteId: run.suiteId, excludeBenchmarks: true })).filter((r) => !r.record), run, suite.evals?.baseline ?? "previous");
     if (!picked) return undefined;
     const full = await this.deps.store.getRun(run.agent, picked.run.id) ?? picked.run;
     return compareSuiteRuns(run, full, { source: picked.source, ...opts });
@@ -1211,7 +1258,7 @@ export class AgentSuiteRunner {
     const suite = await this.getSuite(agent, run.suiteId).catch(() => undefined);
     const extra = this.compareOpts(suite, opts.tolerance);
     if (opts.baselineRunId) return compareSuiteRuns(run, await this.getRun(agent, opts.baselineRunId), { source: "request", ...extra });
-    const picked = pickSuiteBaseline(await this.deps.store.listRuns(agent, { suiteId: run.suiteId }), run, suite?.evals?.baseline ?? "previous");
+    const picked = pickSuiteBaseline(await this.deps.store.listRuns(agent, { suiteId: run.suiteId, excludeBenchmarks: true }), run, suite?.evals?.baseline ?? "previous");
     if (!picked) return undefined;
     return compareSuiteRuns(run, await this.deps.store.getRun(agent, picked.run.id) ?? picked.run, { source: picked.source, ...extra });
   }
@@ -1219,7 +1266,7 @@ export class AgentSuiteRunner {
   /** A suite's runs over time: score, pass rate, cost and latency per run and per version. */
   async trend(agent: string, suiteId: string, opts: { limit?: number } = {}): Promise<SuiteTrend> {
     await this.getSuite(agent, suiteId);
-    const runs = await this.deps.store.listRuns(agent, { suiteId, limit: Math.max(1, Math.min(SUITE_LIMITS.runsKept, opts.limit ?? 50)) });
+    const runs = await this.deps.store.listRuns(agent, { suiteId, excludeBenchmarks: true, limit: Math.max(1, Math.min(SUITE_LIMITS.runsKept, opts.limit ?? 50)) });
     return suiteTrend(suiteId, runs);
   }
 
@@ -1229,11 +1276,12 @@ export class AgentSuiteRunner {
     const run = await this.getRun(agent, runId);
     if (run.status === "running" || run.status === "queued") throw new AgentSuiteError("The run is still going: review it when it has finished");
     const isAgent = parseSuiteOwner(agent).kind === "agent";
-    const config = isAgent ? await this.deps.resolveAgent(agent, run.target === "production" ? undefined : run.target).catch(() => undefined)
-      ?? (await this.deps.agents()).find((a) => a.name === agent) : undefined;
+    const ranAgainst = run.variant.agent || agent;
+    const config = isAgent ? await this.deps.resolveAgent(ranAgainst, run.target === "production" ? undefined : run.target).catch(() => undefined)
+      ?? (await this.deps.agents()).find((a) => a.name === ranAgainst) : undefined;
     const info = config ? applySuiteOverrides(config, run.variant.overrides) : undefined;
     const prompt = suiteRunReviewPrompt(run, {
-      name: agent,
+      name: ranAgainst,
       ...(info?.systemPrompt ? { instructions: info.systemPrompt } : {}),
       ...(info?.allowedTools?.length ? { tools: info.allowedTools } : {}),
       ...(typeof info?.model === "string" ? { model: info.model } : {}),
@@ -1270,6 +1318,66 @@ export class AgentSuiteRunner {
 
   /** The agent was removed: drop its suites and runs. */
   forget(agent: string): Promise<void> { return this.deps.store.deleteAgent(agent); }
+
+  // ── Playground (phase 5): one exchange of a pane, through the same path and hooks as a case ──
+
+  /**
+   * One Playground turn: the agent at a version with the variant's overrides, the conversation so
+   * far plus the new message, the pane's mocks (tool mocks answer first; `realTools`: calls no mock
+   * answers run for real — the caller checked the admin and the confirmation — else they are
+   * blocked; `mode` all scripts the model from `mocks.model`). The chat turn is deleted afterwards,
+   * like a case's. `onText` streams the reply, `onEvent` each model turn and tool call.
+   */
+  async playgroundTurn(req: {
+    agent: string; version?: string; overrides?: SuiteVariant["overrides"];
+    messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+    mode: "all" | "tools"; mocks: SuiteMocks; realTools: boolean;
+    maxTurns?: number; maxDurationMs?: number;
+    onText?: (delta: string) => void;
+    onEvent?: (e: { type: "turn"; turn: SuiteTraceTurn } | { type: "tool"; call: SuiteTraceToolCall }) => void;
+    signal?: AbortSignal;
+  }): Promise<{ trace: SuiteTrace; error?: string; engine: SuiteEngine }> {
+    if (!(await this.deps.agents()).some((a) => a.name === req.agent)) throw new AgentSuiteError(`Agent "${req.agent}" not found`, "NOT_FOUND");
+    const { ctx } = await this.agentContext(req.agent, req.version ?? "production", req.overrides);
+    if (ctx.engine === "cli" && req.mode === "all") throw new AgentSuiteError(`${req.agent} runs on a CLI engine: its model cannot be scripted (turn the model mock off)`);
+    if (ctx.engine === "cli" && !req.realTools) throw new AgentSuiteError(`${req.agent} runs on a CLI engine: the program's own tools (Bash, Read, Edit…) always run for real, so this pane needs real tools (admins, after a confirmation)`, "FORBIDDEN");
+    const last = [...req.messages].reverse().find((m) => m.role === "user")?.content ?? "";
+    const plan: PlannedCase = {
+      key: "playground", baseKey: "playground",
+      case: { id: "playground", name: "Playground", input: { kind: "chat", message: last }, assertions: [] },
+      mode: req.mode, mocks: req.mocks,
+      budgets: { maxTurns: req.maxTurns ?? req.overrides?.maxTurns ?? SUITE_LIMITS.defaultMaxTurns, maxDurationMs: req.maxDurationMs ?? SUITE_LIMITS.defaultMaxDurationMs },
+    };
+    const recorder = new CaseRecorder(plan, req.overrides, ctx.engine, { realUnmocked: req.realTools, ...(req.onEvent ? { observer: req.onEvent } : {}) });
+    const onAbort = () => { recorder.cancelled = "stopped"; };
+    req.signal?.addEventListener("abort", onAbort, { once: true });
+    const t0 = Date.now();
+    let reply: SuiteTurnResult | undefined;
+    let error: string | undefined;
+    try {
+      reply = await within(plan.budgets.maxDurationMs + 30_000, this.deps.turn(ctx.agentRef, req.messages, recorder, req.onText ? { onText: req.onText } : undefined), "The turn");
+      absorbReply(recorder, reply);
+    } catch (err) {
+      error = errorText(err);
+      recorder.cancelled ??= "stopped";
+    } finally {
+      req.signal?.removeEventListener("abort", onAbort);
+    }
+    if (recorder.scriptExhausted && req.mocks.model?.onExhausted === "error" && !error) error = "The model script ended before the agent finished";
+    const usage = usageOf(recorder.turns);
+    const trace: SuiteTrace = {
+      input: req.messages,
+      turns: recorder.turns,
+      toolCalls: recorder.toolCalls.sort((a, b) => a.turn - b.turn),
+      text: reply?.text ?? "",
+      finishReason: recorder.stoppedBy ? "budget" : reply?.finishReason ?? (error ? "error" : undefined),
+      approvals: recorder.approvals,
+      usage: { ...usage, costUsd: Math.round(usage.costUsd * 1e6) / 1e6 },
+      durationMs: Date.now() - t0,
+      notes: recorder.notes,
+    };
+    return { trace, ...(error ? { error } : {}), engine: ctx.engine };
+  }
 
   /**
    * A hosted server's deploy gate: its suite against the version, with the gate's thresholds; the

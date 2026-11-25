@@ -28,6 +28,7 @@ export { createSessionCompaction, type SessionCompaction, type SessionCompactorO
 export { agentRoutes } from "./routes/agents.js";
 export { AgentTestError, type AgentTestRouteDeps } from "./routes/agent-tests.js";
 export { registerAgentSuiteRoutes, type AgentSuiteRouteDeps, type SuiteRouteTarget } from "./routes/agent-suites.js";
+export { benchmarkRoutes, type BenchmarkRouteDeps, type PlaygroundRouteEvent } from "./routes/benchmarks.js";
 export { eventRoutes, type EventBridge, type EventClient } from "./routes/events.js";
 export { configRoutes } from "./routes/config.js";
 export { fileRoutes, type FileRouteDeps } from "./routes/files.js";

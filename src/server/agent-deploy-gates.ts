@@ -275,7 +275,7 @@ export class AgentDeployGates implements AgentDeployGateHook {
 
   /** The run a suite's regressions are measured against: its marked baseline, else its latest finished run on production. */
   private async baselineRun(agent: string, suiteId: string): Promise<string | undefined> {
-    const runs = await this.store.listRuns(agent, { suiteId });
+    const runs = await this.store.listRuns(agent, { suiteId, excludeBenchmarks: true });
     return runs.find((r) => r.isBaseline)?.id
       ?? runs.find((r) => r.target === "production" && ["passed", "failed", "errored"].includes(r.status) && r.trigger !== "deploy" && r.trigger !== "publish")?.id
       ?? runs.find((r) => r.target === "production" && ["passed", "failed", "errored"].includes(r.status))?.id;

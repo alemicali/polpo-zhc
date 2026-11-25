@@ -51,6 +51,8 @@ export interface PolpoEventMap {
   /** An agent reviewed its conversations (learning): what it changed in its memory and own skills. */
   "agent:reflected": { agentName: string; trigger: "first" | "activity" | "daily" | "manual"; messages: number; summary: string; actions: string[]; timestamp: string };
   "agent:gate": { agentName: string; gateId: string; version: string; status: import("./agent-suite-gates.js").DeployGateStatus; trigger: import("./agent-suite-gates.js").DeployGateTrigger; progress: { done: number; total: number }; summary: string; timestamp: string };
+  /** A benchmark run (agent suites phase 5) started, progressed, finished, was cancelled or stopped by its budget cap. */
+  "benchmark:progress": { benchmarkRunId: string; benchmarkId?: string; name: string; status: import("./agent-suite-bench.js").BenchmarkRunStatus; stopReason?: "budget" | "cancelled" | "error"; progress: { runsDone: number; runsTotal: number; casesDone: number; casesTotal: number }; spentUsd: number; budgetUsd?: number; timestamp: string };
   "agent:learned": { agentName: string; messages: number; changes: { id: string; kind: "memory" | "skill-created" | "skill-updated"; target: string }[]; summary: string; timestamp: string };
   "team:created": { teamName: string; agents: AgentConfig[]; teams: Team[]; timestamp: string };
   "team:updated": { oldName?: string; teamName: string; agents: AgentConfig[]; teams: Team[]; timestamp: string };

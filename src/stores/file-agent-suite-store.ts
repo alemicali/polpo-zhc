@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEPLOY_GATE_LIMITS, SUITE_LIMITS, type AgentDeployGate, type AgentSuite, type AgentSuiteStore, type SuiteCassetteRecord, type SuiteRun, type SuiteRunListOptions } from "@polpo-ai/core/agent-suites";
+import { BENCHMARK_LIMITS, DEPLOY_GATE_LIMITS, SUITE_LIMITS, suiteRunMatches, suiteRunsToDrop, type AgentDeployGate, type AgentSuite, type AgentSuiteStore, type SuiteCassetteRecord, type SuiteRun, type SuiteRunListOptions } from "@polpo-ai/core/agent-suites";
 
 /**
  * File-based AgentSuiteStore, per agent under `.polpo/agent-suites/<agent>/`:
@@ -68,7 +68,7 @@ export class FileAgentSuiteStore implements AgentSuiteStore {
 
   async listRuns(agent: string, opts: SuiteRunListOptions = {}): Promise<SuiteRun[]> {
     return this.allRuns(agent)
-      .filter((r) => (!opts.suiteId || r.suiteId === opts.suiteId) && (!opts.benchmarkRunId || r.benchmarkRunId === opts.benchmarkRunId))
+      .filter((r) => suiteRunMatches(r, opts))
       .slice(0, Math.max(1, opts.limit ?? SUITE_LIMITS.runsKept));
   }
 
@@ -81,11 +81,9 @@ export class FileAgentSuiteStore implements AgentSuiteStore {
     const isNew = !existsSync(join(dir, `${encodeURIComponent(run.id)}.json`));
     FileAgentSuiteStore.writeJson(dir, `${encodeURIComponent(run.id)}.json`, run);
     if (!isNew) return;
-    // keep the newest runs only (a running one and a suite's marked baseline are never dropped)
-    const runs = this.allRuns(run.agent);
-    for (const old of runs.slice(SUITE_LIMITS.runsKept)) {
-      if (old.status === "running" || old.status === "queued" || old.isBaseline) continue;
-      rmSync(join(dir, `${encodeURIComponent(old.id)}.json`), { force: true });
+    // keep the newest runs only, benchmark runs counted apart (a running one and a suite's marked baseline are never dropped)
+    for (const id of suiteRunsToDrop(this.allRuns(run.agent), BENCHMARK_LIMITS.suiteRunsKept)) {
+      rmSync(join(dir, `${encodeURIComponent(id)}.json`), { force: true });
     }
   }
 
