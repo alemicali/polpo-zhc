@@ -12,7 +12,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { driveApi, type DriveAutonomy, type DriveData, type DriveSettings, type GoalHorizon, type Intention, type PlanItem } from "@/lib/drive-api";
 import { useAgentDetail } from "./agent-detail-context";
 
@@ -175,7 +174,7 @@ export function AgentDriveTab() {
   const stored = data.drive;
 
   return (
-    <ScrollArea className="h-full">
+    <div>
       <div className="pr-4 pb-bottom-nav lg:pb-4 space-y-4">
         <Card>
           <CardHeader className="pb-2">
@@ -341,6 +340,6 @@ export function AgentDriveTab() {
           </CardContent>
         </Card>
       </div>
-    </ScrollArea>
+    </div>
   );
 }

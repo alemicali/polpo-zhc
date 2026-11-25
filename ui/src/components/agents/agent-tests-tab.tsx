@@ -121,7 +121,7 @@ export function AgentTestsTab() {
   const latestRun = viewed ?? tests.latest;
 
   return (
-    <div className="space-y-4 overflow-auto pb-bottom-nav lg:pb-0" data-testid="agent-tests">
+    <div className="space-y-4 pb-bottom-nav lg:pb-4" data-testid="agent-tests">
       {/* Checks */}
       <section aria-label="Checks" className="rounded-lg border border-border/40 bg-card/80">
         <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border/40 px-4 py-3">

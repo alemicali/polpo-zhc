@@ -54,7 +54,7 @@ export function AgentHierarchyCard() {
             </p>
             <div className="flex items-center gap-2 rounded-md border border-border/30 bg-muted/10 px-3 py-2 text-xs text-muted-foreground">
               <AgentAvatar name={agent.reportsTo} size="md" iconClassName="shrink-0" />
-              <span className="font-mono">{agent.reportsTo}</span>
+              <span className="min-w-0 truncate font-mono" title={agent.reportsTo}>{agent.reportsTo}</span>
             </div>
           </div>
         )}

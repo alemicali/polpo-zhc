@@ -5,7 +5,6 @@
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Shield,
   Heart,
@@ -23,7 +22,7 @@ export function AgentOverviewTab() {
   const identity = agent.identity;
 
   return (
-    <ScrollArea className="h-full">
+    <div>
       <div className="space-y-6 pr-4 pb-bottom-nav lg:pb-4">
 
         {/* Bio */}
@@ -125,6 +124,6 @@ export function AgentOverviewTab() {
         </div>
 
       </div>
-    </ScrollArea>
+    </div>
   );
 }

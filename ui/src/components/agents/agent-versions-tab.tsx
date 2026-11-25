@@ -317,7 +317,7 @@ export function AgentVersionsTab() {
   const shownPair = pairDiff?.key === pairKey ? pairDiff : null;
 
   return (
-    <div className="space-y-4 overflow-auto pb-bottom-nav lg:pb-0" data-testid="agent-versions">
+    <div className="space-y-4 pb-bottom-nav lg:pb-4" data-testid="agent-versions">
       {/* Draft */}
       <section aria-label="Draft" className="rounded-lg border border-border/40 bg-card/80">
         <header className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
