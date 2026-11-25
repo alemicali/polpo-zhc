@@ -42,6 +42,11 @@ export const ASSERTION_TEMPLATES: Record<SuiteAssertionType, Record<string, unkn
   max_turns: { value: 10 },
   max_cost: { usd: 0.1 },
   max_duration: { ms: 60000 },
+  tool_failed: {},
+  http_called: { url: "" },
+  task_status: { task: "", status: "done" },
+  task_order: { tasks: ["", ""] },
+  task_agent: { task: "", agent: "" },
 };
 
 export const ASSERTION_LABELS: Record<SuiteAssertionType, string> = {
@@ -59,6 +64,11 @@ export const ASSERTION_LABELS: Record<SuiteAssertionType, string> = {
   max_turns: "Max model turns",
   max_cost: "Max cost",
   max_duration: "Max duration",
+  tool_failed: "A tool call fails",
+  http_called: "HTTP request sent (hosted servers)",
+  task_status: "Task status (missions)",
+  task_order: "Tasks in order (missions)",
+  task_agent: "Task done by (missions)",
 };
 
 export function blankCase(n: number): SuiteCase {

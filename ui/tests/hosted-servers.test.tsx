@@ -12,6 +12,8 @@ const state = vi.hoisted(() => ({
   publish: vi.fn(async () => ({ version: "1.0.0" })),
   updateSettings: vi.fn(async () => undefined),
   saveDraft: vi.fn(async () => ({ problems: [] })),
+  deploy: vi.fn(async () => ({})),
+  deploys: [] as unknown[],
 }));
 
 vi.mock("@polpo-ai/react", () => ({
@@ -23,10 +25,10 @@ vi.mock("@polpo-ai/react", () => ({
     isLoading: false, error: null, refetch: async () => {}, create: state.create, generate: state.generate,
   }),
   useMcpServer: () => ({
-    server: state.server, versions: [{ version: "1.0.0", production: true, createdAt: "2026-11-24T10:00:00Z", author: "person:a@b.c", changes: [], toolCount: 2 }], deploys: [],
+    server: state.server, versions: [{ version: "1.0.0", production: true, createdAt: "2026-11-24T10:00:00Z", author: "person:a@b.c", changes: [], toolCount: 2 }], deploys: state.deploys,
     isLoading: false, error: null, refetch: async () => {},
     saveDraft: state.saveDraft, discardDraft: async () => {}, updateSettings: state.updateSettings, test: state.test, runTests: async () => ({ results: [], passed: 0, failed: 0, skipped: 0 }),
-    saveTests: async () => {}, publish: state.publish, deploy: async () => ({}), rollback: async () => ({}),
+    saveTests: async () => {}, publish: state.publish, deploy: state.deploy, rollback: async () => ({}),
     diff: async () => ({ server: "printful", to: "draft", changes: [], unified: "" }), logs: async () => [], pending: async () => [], remove: async () => {},
   }),
 }));
@@ -46,6 +48,7 @@ beforeEach(() => {
   root = createRoot(container);
   state.servers = [];
   state.server = undefined;
+  state.deploys = [];
   vi.clearAllMocks();
 });
 afterEach(() => {
@@ -145,4 +148,41 @@ test("the editor: the hosted label, what blocks publishing, tool badges (approva
   expect(document.querySelector('[data-testid="draft-problems"]')?.textContent).toMatch(/describe it better/);
   expect(document.querySelector('[data-testid="tool-create_order"]')?.textContent).toMatch(/approval/);
   expect(document.querySelector('[data-testid="tool-get_product"]')?.textContent).toMatch(/read-only/);
+});
+
+test("a required suite blocks the deploy: published, not deployed; Deploy anyway with a reason; the history shows the gate", async () => {
+  state.server = {
+    id: "printful", name: "Printful", visibility: "private", toolCount: 2, production: "1.0.0", draftChanged: true, pendingApprovals: 0, versionCount: 1, createdAt: "", updatedAt: "u1", createdBy: "",
+    connectorId: "printful", draft: { spec, updatedAt: "", updatedBy: "", problems: [] }, secrets: { token: true }, tests: [], rateLimits: { perIpPerMinute: 30, globalPerMinute: 300 },
+  };
+  state.deploys = [
+    { id: "d2", from: "1.0.0", to: "1.0.1", action: "deploy", actor: "admin", at: "2026-11-25T10:00:00Z", gate: { decision: "override", reason: "hotfix", by: "admin" } },
+    { id: "d1", to: "1.0.0", action: "initial", actor: "admin", at: "2026-11-24T10:00:00Z", gate: { decision: "pass", runId: "sr-1" } },
+  ];
+  state.publish.mockResolvedValueOnce({ version: "1.1.0", deployBlocked: { reason: "Blocked by the suite: Item: text does not contain Lamp", runId: "sr-2", failures: ["Item: text does not contain Lamp"] } } as never);
+  await act(async () => root.render(<TooltipProvider><HostedServerSheet id="printful" open onOpenChange={() => {}} /></TooltipProvider>));
+  await flush();
+  const versions = [...document.querySelectorAll('[role="tab"]')].find((t) => t.textContent?.trim() === "Versions")!;
+  await act(async () => { versions.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })); });
+  await flush();
+  expect([...document.querySelectorAll('[data-testid="hosted-deploy-entry"]')].map((e) => e.textContent)).toEqual([
+    expect.stringContaining("override by admin: hotfix"), expect.stringContaining("suite passed"),
+  ]);
+  await act(async () => button("Publish")!.click());
+  await flush();
+  expect(state.publish).toHaveBeenCalledWith({ deploy: true });
+  const blocked = document.querySelector('[data-testid="hosted-gate-blocked"]')!;
+  expect(blocked.textContent).toContain("1.1.0 was not deployed");
+  expect(blocked.textContent).toContain("Item: text does not contain Lamp");
+  await act(async () => (document.querySelector('[data-testid="hosted-gate-override"]') as HTMLButtonElement).click());
+  await flush();
+  const reason = document.querySelector('[data-testid="override-reason"]') as HTMLTextAreaElement;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(reason, "upstream changed its field names");
+    reason.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => (document.querySelector('[data-testid="override-confirm"]') as HTMLButtonElement).click());
+  await flush();
+  expect(state.deploy).toHaveBeenCalledWith("1.1.0", undefined, { override: { reason: "upstream changed its field names" } });
+  expect(document.querySelector('[data-testid="hosted-gate-blocked"]')).toBeNull();
 });

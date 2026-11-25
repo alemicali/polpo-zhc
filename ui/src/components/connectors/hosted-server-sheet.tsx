@@ -6,7 +6,8 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, FlaskConical, Globe, History, Loader2, Play, Plus, Rocket, RotateCcw, Save, ScrollText, Settings2, Trash2, Users, Wrench } from "lucide-react";
+import { AlertTriangle, FlaskConical, FlaskRound, Globe, History, Loader2, Play, Plus, Rocket, RotateCcw, Save, ScrollText, Settings2, ShieldAlert, ShieldCheck, Trash2, Users, Wrench } from "lucide-react";
+import { TargetSuitesPanel } from "@/components/suites/target-suites-panel";
 import {
   useMcpServer,
   type McpHostedServer, type McpServerAuth, type McpServerCallLog, type McpServerDiff, type McpServerSpec, type McpServerTool, type McpPendingCall, type McpToolTestResult,
@@ -19,7 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
-import { AgentVersionDiffView } from "@/components/agents/agent-versions-tab";
+import { AgentVersionDiffView, OverrideDialog } from "@/components/agents/agent-versions-tab";
 import { HostedStatusPill, Switch } from "./connector-bits";
 import { ConnectorIcon } from "./connector-icon";
 import { hostedServerIconFor } from "@/lib/hosted-server-icons";
@@ -340,6 +341,24 @@ export function HostedServerSheet({ id, open, onOpenChange, onOpenConnector }: {
   const [logs, setLogs] = useState<McpServerCallLog[]>([]);
   const [pending, setPending] = useState<McpPendingCall[]>([]);
   const [confirm, setConfirm] = useState<null | "public" | "delete" | { rollback: true } | { deploy: string }>(null);
+  // a deploy the required suite (the saved tests' gate) blocked: why, and "Deploy anyway…" (admins)
+  const [blocked, setBlocked] = useState<{ version: string; reason: string; failures: string[]; runId?: string } | null>(null);
+  const [overrideFor, setOverrideFor] = useState<{ version: string; failed: string[] } | null>(null);
+  const [tab, setTab] = useState<string | undefined>(undefined);
+  const deploy = async (version: string) => {
+    setBusy(true);
+    try {
+      const d = await s.deploy(version);
+      setBlocked(null);
+      toast.success(`Deployed ${version}${d.gate?.decision === "pass" ? ": the suite passed" : ""}`);
+    } catch (reason) {
+      const e = reason as { code?: string; details?: { runId?: string; failures?: string[] }; message?: string };
+      if (e.code === "GATE_BLOCKED") {
+        setBlocked({ version, reason: e.message ?? "Blocked by the suite", failures: e.details?.failures ?? [], ...(e.details?.runId ? { runId: e.details.runId } : {}) });
+        toast.error(`${version} was not deployed: the suite failed`);
+      } else toast.error(errorText(reason));
+    } finally { setBusy(false); }
+  };
 
   useEffect(() => {
     if (!id || !server) return;
@@ -401,11 +420,12 @@ export function HostedServerSheet({ id, open, onOpenChange, onOpenConnector }: {
                 <ul className="list-disc pl-5">{server.draft!.problems.map((p) => <li key={p}>{p}</li>)}</ul>
               </div>
             )}
-            <Tabs defaultValue={focus?.startsWith("secret:") ? "settings" : "tools"} className="gap-4">
+            <Tabs value={tab ?? (focus?.startsWith("secret:") ? "settings" : "tools")} onValueChange={setTab} className="gap-4">
               <TabsList>
                 <TabsTrigger value="tools"><Wrench className="h-3.5 w-3.5" /> Tools</TabsTrigger>
                 <TabsTrigger value="settings"><Settings2 className="h-3.5 w-3.5" /> Settings</TabsTrigger>
                 <TabsTrigger value="test"><FlaskConical className="h-3.5 w-3.5" /> Test</TabsTrigger>
+                <TabsTrigger value="suite" data-testid="hosted-suite-tab"><FlaskRound className="h-3.5 w-3.5" /> Suite</TabsTrigger>
                 <TabsTrigger value="versions"><History className="h-3.5 w-3.5" /> Versions</TabsTrigger>
                 <TabsTrigger value="logs" onClick={() => { void s.logs(100).then(setLogs); void s.pending().then(setPending); }}><ScrollText className="h-3.5 w-3.5" /> Logs</TabsTrigger>
               </TabsList>
@@ -456,6 +476,10 @@ export function HostedServerSheet({ id, open, onOpenChange, onOpenConnector }: {
                   saveTest={(tool, input) => s.saveTests([...server.tests, { tool, input }])} />
               </TabsContent>
 
+              <TabsContent value="suite">
+                {id && <TargetSuitesPanel kind="mcp-server" id={id} />}
+              </TabsContent>
+
               <TabsContent value="versions" className="space-y-4">
                 {diff && <AgentVersionDiffView diff={diff} />}
                 <div className="grid gap-3 sm:grid-cols-[10rem_1fr]">
@@ -471,11 +495,29 @@ export function HostedServerSheet({ id, open, onOpenChange, onOpenConnector }: {
                   <Button disabled={busy || dirty || (server.draft?.problems.length ?? 0) > 0} onClick={() => void act("Published", async () => {
                     const r = await s.publish({ ...(bump ? { bump } : {}), ...(note ? { note } : {}), deploy: deployNow });
                     setNote("");
+                    if (r.deployBlocked) {
+                      setBlocked({ version: r.version, ...r.deployBlocked });
+                      toast.warning(`Published ${r.version}, not deployed: the suite failed`);
+                    } else setBlocked(null);
                     return r;
                   })}><Rocket className="h-4 w-4" /> Publish</Button>
                   {dirty && <span className="text-xs text-muted-foreground">Save the draft first</span>}
                   {server.production && <Button variant="outline" disabled={busy} onClick={() => setConfirm({ rollback: true })}><RotateCcw className="h-4 w-4" /> Roll back</Button>}
                 </div>
+                {blocked && (
+                  <div className="space-y-1 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm" data-testid="hosted-gate-blocked">
+                    <p className="flex items-center gap-1.5 font-medium text-destructive"><ShieldAlert className="h-4 w-4" /> {blocked.version} was not deployed: blocked by the suite</p>
+                    {blocked.failures.length > 0
+                      ? <ul className="space-y-0.5 text-xs text-destructive">{blocked.failures.map((f, i) => <li key={i}>✗ {f}</li>)}</ul>
+                      : <p className="text-xs text-destructive">{blocked.reason}</p>}
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <Button size="sm" variant="outline" className="h-7" onClick={() => setTab("suite")}>Open the suite</Button>
+                      <Button size="sm" variant="outline" className="h-7" disabled={busy} onClick={() => setOverrideFor({ version: blocked.version, failed: blocked.failures })} data-testid="hosted-gate-override">
+                        <ShieldAlert className="mr-1 h-3.5 w-3.5" /> Deploy anyway…
+                      </Button>
+                    </div>
+                  </div>
+                )}
                 <div className="space-y-1" aria-label="Versions">
                   {s.versions.map((v) => (
                     <div key={v.version} className="flex items-center gap-2 border-b py-2 text-sm last:border-b-0">
@@ -488,7 +530,13 @@ export function HostedServerSheet({ id, open, onOpenChange, onOpenConnector }: {
                 </div>
                 {s.deploys.length > 0 && (
                   <div className="space-y-1 text-xs text-muted-foreground" aria-label="Deploy history">
-                    {s.deploys.map((d) => <p key={d.id}>{new Date(d.at).toLocaleString()} · {d.action} {d.from ?? "∅"} → {d.to} · {d.actor}</p>)}
+                    {s.deploys.map((d) => (
+                      <p key={d.id} data-testid="hosted-deploy-entry">
+                        {new Date(d.at).toLocaleString()} · {d.action} {d.from ?? "∅"} → {d.to} · {d.actor}
+                        {d.gate?.decision === "pass" && <span className="text-success"> · <ShieldCheck className="inline h-3 w-3" /> suite passed</span>}
+                        {d.gate?.decision === "override" && <span className="text-warning"> · <ShieldAlert className="inline h-3 w-3" /> override by {d.gate.by ?? d.actor}{d.gate.reason ? `: ${d.gate.reason}` : ""}</span>}
+                      </p>
+                    ))}
                   </div>
                 )}
               </TabsContent>
@@ -533,9 +581,16 @@ export function HostedServerSheet({ id, open, onOpenChange, onOpenConnector }: {
             if (c === "public") void act("Public", () => s.updateSettings({ visibility: "public" }));
             else if (c === "delete") void act("Deleted", async () => { await s.remove(); onOpenChange(false); });
             else if (c && "rollback" in c) void act("Rolled back", () => s.rollback());
-            else if (c && "deploy" in c) void act(`Deployed ${c.deploy}`, () => s.deploy(c.deploy));
+            else if (c && "deploy" in c) void deploy(c.deploy);
           }}
         />
+        <OverrideDialog target={overrideFor} onOpenChange={(o) => { if (!o) setOverrideFor(null); }}
+          onConfirm={async (reason) => {
+            const version = overrideFor!.version;
+            await s.deploy(version, undefined, { override: { reason } });
+            setBlocked(null);
+            toast.success(`Deployed ${version} with an override`);
+          }} />
       </SheetContent>
     </Sheet>
   );

@@ -6,7 +6,7 @@
  */
 import { useState } from "react";
 import { toast } from "sonner";
-import { AlertOctagon, ArrowDownRight, ArrowUpRight, Ban, CheckCircle2, ChevronDown, ChevronRight, CircleSlash, Loader2, MinusCircle, Sparkles, Star, XCircle } from "lucide-react";
+import { AlertOctagon, ArrowDownRight, ArrowUpRight, Ban, Bot, CheckCircle2, ChevronDown, ChevronRight, CircleSlash, Disc3, Loader2, MinusCircle, Sparkles, Star, UserRound, XCircle } from "lucide-react";
 import { useAgentSuiteRun, type SuiteCaseDelta, type SuiteCaseResult, type SuiteCaseStatus, type SuiteRun, type SuiteRunStatus, type SuiteScoreResult } from "@polpo-ai/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,11 +31,85 @@ export function SuiteStatusIcon({ status, className }: { status: SuiteRunStatus 
   return <Icon className={cn("h-4 w-4 shrink-0", s.className, className)} aria-label={s.label} data-status={status} />;
 }
 
+/** A multi-turn case's conversation: the case's message, the simulated (or scripted) user's turns, the agent's replies. */
+function Transcript({ trace, agentName }: { trace: SuiteCaseResult["trace"]; agentName: string }) {
+  const sim = trace.simulator;
+  return (
+    <div className="space-y-2" data-testid="suite-transcript">
+      <p className="text-micro font-medium uppercase tracking-label text-muted-foreground">
+        Conversation · {trace.transcript!.length} messages{sim ? ` · user ${sim.calls ? `simulated${sim.model ? ` by ${sim.model}` : ""}` : "scripted"} · stopped by ${sim.stoppedBy}${sim.goalReached !== undefined ? (sim.goalReached ? " (goal reached)" : " (goal not reached)") : ""}${sim.costUsd ? ` · simulator ${formatUsd(sim.costUsd)}` : ""}` : ""}
+      </p>
+      {trace.transcript!.map((m, i) => m.role === "user" ? (
+        <div key={i} className="flex justify-end" data-testid="suite-transcript-user" data-simulated={!!m.simulated}>
+          <div className="max-w-[85%] space-y-0.5">
+            <ChatUserBubble text={m.content} />
+            <p className="flex items-center justify-end gap-1 text-micro text-muted-foreground"><UserRound className="h-3 w-3" />{m.simulated ? "simulated user" : i === 0 ? "the case's message" : "scripted"}{m.note ? ` · ${m.note}` : ""}</p>
+          </div>
+        </div>
+      ) : (
+        <div key={i} className="flex gap-2" data-testid="suite-transcript-agent">
+          <Bot className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-label={agentName} />
+          <div className="min-w-0 flex-1 text-xs"><MessageResponse>{m.content || "—"}</MessageResponse>{m.note ? <p className="text-micro text-muted-foreground">{m.note}</p> : null}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Phase 4 extras of a trace: a mission's tasks, a hosted server's HTTP calls, the cassette replayed or recorded. */
+function TraceExtras({ trace }: { trace: SuiteCaseResult["trace"] }) {
+  return (
+    <>
+      {trace.tasks?.length ? (
+        <ol className="space-y-1" data-testid="suite-trace-tasks" aria-label="Tasks">
+          {trace.tasks.map((t) => (
+            <li key={t.title} className="flex min-w-0 items-start gap-2 text-xs" data-status={t.status}>
+              <SuiteStatusIcon status={t.status === "done" ? "passed" : t.status === "failed" ? "failed" : "skipped"} />
+              <span className="min-w-0 break-words"><span className="font-medium">{t.title}</span> <span className="text-muted-foreground">· {t.agent} · {t.toolCalls} call(s) · {formatMs(t.durationMs)}{t.error ? ` — ${t.error}` : t.text ? ` — ${t.text.slice(0, 200)}` : ""}</span></span>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+      {trace.http?.length ? (
+        <ul className="space-y-0.5 font-mono text-micro" data-testid="suite-trace-http" aria-label="HTTP requests">
+          {trace.http.map((h, i) => (
+            <li key={i} className={cn("break-all", h.mocked === "blocked" ? "text-destructive" : "text-muted-foreground")}>
+              {h.method} {h.url} → {h.status || "—"} <span className="font-sans">{h.mocked === "mock" ? `(mock${h.mockId ? ` ${h.mockId}` : ""})` : h.mocked === "blocked" ? "(blocked: no HTTP mock)" : "(real)"}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {trace.cassette && (
+        <p className="text-caption text-muted-foreground" data-testid="suite-trace-cassette">
+          <Disc3 className="mr-1 inline h-3 w-3" />Replayed from <span className="font-mono">{trace.cassette.id}</span>: {trace.cassette.replayedCalls} call(s), {trace.cassette.replayedTurns} turn(s)
+          {trace.cassette.unmatched.length ? <span className="text-warning"> · no recording for {trace.cassette.unmatched.join(", ")}</span> : null}
+        </p>
+      )}
+      {trace.recorded && (
+        <p className="text-caption text-muted-foreground" data-testid="suite-trace-recorded">
+          <Disc3 className="mr-1 inline h-3 w-3" />Recorded into <span className="font-mono">{trace.recorded.cassetteId}</span>: {trace.recorded.calls} call(s), {trace.recorded.turns} turn(s), {trace.recorded.redactions} secret value(s) redacted
+        </p>
+      )}
+    </>
+  );
+}
+
 function CaseTrace({ result, agentName }: { result: SuiteCaseResult; agentName: string }) {
   const { user, segments } = traceAsChat(result.trace);
   const t = result.trace;
+  if (t.transcript?.length) {
+    return (
+      <div className="space-y-2" data-testid="suite-case-trace">
+        <Transcript trace={t} agentName={agentName} />
+        <TraceExtras trace={t} />
+        <p className="text-caption text-muted-foreground">{t.turns.length} model turn(s) · {t.toolCalls.length} tool call(s){t.toolCalls.length ? `: ${t.toolCalls.map((c) => `${c.name}${c.mocked ? ` (${c.mocked})` : ""}`).join(", ")}` : ""} · {formatUsd(t.usage.costUsd)} · {formatMs(t.durationMs)}</p>
+        {t.notes.map((n, i) => <p key={i} className="text-caption text-muted-foreground">{n}</p>)}
+      </div>
+    );
+  }
   return (
     <div className="space-y-1" data-testid="suite-case-trace">
+      <TraceExtras trace={t} />
       {user && (
         <div className="flex justify-end py-2">
           <div className="max-w-[85%]"><ChatUserBubble text={user} /></div>
@@ -163,7 +237,7 @@ function EvalSummary({ run }: { run: SuiteRun }) {
   );
 }
 
-function CaseRow({ result, agentName, delta }: { result: SuiteCaseResult; agentName: string; delta?: SuiteCaseDelta }) {
+function CaseRow({ result, agentName, delta, onOpenCassette }: { result: SuiteCaseResult; agentName: string; delta?: SuiteCaseDelta; onOpenCassette?: (caseId: string) => void }) {
   const [open, setOpen] = useState(result.status === "failed" || result.status === "errored");
   const failed = [...result.assertions.filter((a) => !a.passed).map((a) => a.description), ...(result.scores ?? []).filter((x) => !x.passed).map((x) => `${x.id} ${formatScore(x.score)} < ${x.threshold}`)];
   return (
@@ -207,26 +281,38 @@ function CaseRow({ result, agentName, delta }: { result: SuiteCaseResult; agentN
           )}
           {result.scores && result.scores.length > 0 && <CaseScores scores={result.scores} />}
           <CaseTrace result={result} agentName={agentName} />
+          {onOpenCassette && (
+            <Button variant="outline" size="sm" className="h-7" onClick={() => onOpenCassette(result.caseId)} data-testid="suite-case-cassette-open">
+              <Disc3 className="mr-1 h-3.5 w-3.5" /> {result.trace.cassette || result.trace.recorded ? "Cassette" : "Record a cassette"}
+            </Button>
+          )}
         </div>
       )}
     </li>
   );
 }
 
-export function AgentSuiteRunReport({ agentName, runId, onCancel, onClose, onSetBaseline, onReview }: {
-  agentName: string;
-  runId: string;
-  onCancel: (runId: string) => void;
+interface ReportActions {
+  onCancel?: (runId: string) => void;
   onClose: () => void;
   /** Mark (runId) or clear (null) the suite's baseline. */
   onSetBaseline?: (suiteId: string, runId: string | null) => Promise<void>;
   /** "Explain this run": an AI review stored on the run. */
   onReview?: (runId: string) => Promise<unknown>;
-}) {
+  /** Open a case's cassette (record, replay, edit): agent suites. */
+  onOpenCassette?: (suiteId: string, caseId: string) => void;
+}
+
+export function AgentSuiteRunReport({ agentName, runId, ...actions }: ReportActions & { agentName: string; runId: string }) {
   const { run, isLoading, error, refetch } = useAgentSuiteRun(agentName, runId);
-  const [busy, setBusy] = useState<"baseline" | "review" | null>(null);
   if (isLoading) return <div className="flex justify-center py-6"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>;
   if (error || !run) return <p className="px-4 py-3 text-caption text-destructive">{error?.message ?? "Run not found"}</p>;
+  return <SuiteRunReportView run={run} agentName={agentName} refetch={refetch} {...actions} />;
+}
+
+/** A run's report (any target: an agent, a hosted server's saved tests, a mission). */
+export function SuiteRunReportView({ run, agentName, refetch, onCancel, onClose, onSetBaseline, onReview, onOpenCassette }: ReportActions & { run: SuiteRun; agentName: string; refetch: () => Promise<void> }) {
+  const [busy, setBusy] = useState<"baseline" | "review" | null>(null);
   const s = run.stats;
   const pending = run.planned.length - run.results.length;
   const finished = !runIsLive(run) && run.status !== "cancelled";
@@ -250,7 +336,7 @@ export function AgentSuiteRunReport({ agentName, runId, onCancel, onClose, onSet
             {" · "}{formatUsd(s.costUsd)} · {formatMs(s.durationMs)} · {s.inputTokens + s.outputTokens} tokens{pending > 0 && runIsLive(run) ? ` · ${pending} to go` : ""}
           </p>
         </div>
-        {runIsLive(run) && <Button variant="outline" size="sm" onClick={() => onCancel(run.id)} data-testid="suite-run-cancel">Cancel</Button>}
+        {runIsLive(run) && onCancel && <Button variant="outline" size="sm" onClick={() => onCancel(run.id)} data-testid="suite-run-cancel">Cancel</Button>}
         {finished && onSetBaseline && (
           <Button variant={run.isBaseline ? "secondary" : "outline"} size="sm" disabled={busy !== null} aria-pressed={!!run.isBaseline} data-testid="suite-run-baseline"
             onClick={() => void act("baseline", () => onSetBaseline(run.suiteId, run.isBaseline ? null : run.id))}>
@@ -282,7 +368,7 @@ export function AgentSuiteRunReport({ agentName, runId, onCancel, onClose, onSet
         </div>
       )}
       <ul>
-        {run.results.map((r) => <CaseRow key={r.key} result={r} agentName={agentName} delta={deltas.get(r.key.replace(/~\d+$/, ""))} />)}
+        {run.results.map((r) => <CaseRow key={r.key} result={r} agentName={agentName} delta={deltas.get(r.key.replace(/~\d+$/, ""))} {...(onOpenCassette && (run.targetKind ?? "agent") === "agent" ? { onOpenCassette: (caseId: string) => onOpenCassette(run.suiteId, caseId) } : {})} />)}
       </ul>
     </section>
   );

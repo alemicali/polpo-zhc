@@ -293,7 +293,7 @@ function PendingGate({ gate, busy, onCancel, onOverride }: { gate: AgentDeployGa
 }
 
 /** Deploy anyway: an admin's override, with a mandatory reason (recorded in the deploy history). */
-function OverrideDialog({ target, onOpenChange, onConfirm }: {
+export function OverrideDialog({ target, onOpenChange, onConfirm }: {
   target: { version: string; failed: string[] } | null;
   onOpenChange: (open: boolean) => void;
   onConfirm: (reason: string) => Promise<void>;

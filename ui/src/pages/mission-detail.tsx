@@ -63,7 +63,8 @@ import { cn } from "@/lib/utils";
 import { cronToHuman } from "@/lib/cron";
 import { missionStatusStyles, taskStatusStyles, taskPhaseStyles } from "@/lib/status-tokens";
 import { JsonBlock } from "@/components/json-block";
-import { Calendar, Repeat, Bell } from "lucide-react";
+import { Calendar, Repeat, Bell, FlaskRound } from "lucide-react";
+import { TargetSuitesPanel } from "@/components/suites/target-suites-panel";
 import { useConfig } from "@/hooks/use-polpo";
 import { AppliedRulesPanel } from "@/components/shared/applied-rules-panel";
 import type { AnyRule, ScopedRules } from "@/lib/applied-rules";
@@ -1949,6 +1950,10 @@ export function MissionDetailView({
             <Bell className="h-3.5 w-3.5 mr-1.5" />
             Rules
           </TabsTrigger>
+          <TabsTrigger value="suites" data-testid="mission-suites-tab">
+            <FlaskRound className="h-3.5 w-3.5 mr-1.5" />
+            Suites
+          </TabsTrigger>
           <TabsTrigger value="raw">Raw JSON</TabsTrigger>
           {report && (
             <TabsTrigger value="report">
@@ -2065,6 +2070,10 @@ export function MissionDetailView({
         </TabsContent>
 
         {/* Raw JSON tab — full width code block with copy */}
+        <TabsContent value="suites" className="mt-4 flex-1 min-h-0">
+          <TargetSuitesPanel kind="mission" id={mission.id} />
+        </TabsContent>
+
         <TabsContent value="raw" className="mt-4 flex-1 min-h-0">
           <ScrollArea className="h-full">
             <div className="pr-4">

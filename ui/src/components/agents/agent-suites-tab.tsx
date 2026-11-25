@@ -7,7 +7,7 @@
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { FlaskRound, History, Loader2, Pencil, Play, Plus, ShieldCheck, Star, Trash2, TrendingUp } from "lucide-react";
+import { Disc3, FlaskRound, History, Loader2, Pencil, Play, Plus, ShieldCheck, Sparkles, Star, Trash2, TrendingUp, UsersRound } from "lucide-react";
 import { useAgentSuites, useAgentVersions, type AgentSuite, type SuiteMockMode } from "@polpo-ai/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,8 @@ import { useAgentDetail } from "./agent-detail-context";
 import { AgentSuiteEditor } from "./agent-suite-editor";
 import { AgentSuiteRunReport, SuiteStatusIcon } from "./agent-suite-run-report";
 import { AgentSuiteTrend } from "./agent-suite-trend";
+import { AgentSuiteCassette } from "./agent-suite-cassette";
+import { AgentSuiteGenerateDialog } from "./agent-suite-generate";
 
 function when(iso: string): string {
   const d = new Date(iso);
@@ -38,6 +40,8 @@ export function AgentSuitesTab() {
   const [trendOf, setTrendOf] = useState<AgentSuite | null>(null);
   const [confirm, setConfirm] = useState<{ kind: "real"; suite: AgentSuite } | { kind: "delete"; suite: AgentSuite } | null>(null);
   const [starting, setStarting] = useState<string | null>(null);
+  const [cassetteOf, setCassetteOf] = useState<{ suiteId: string; caseId: string } | null>(null);
+  const [adding, setAdding] = useState(false);
 
   const runs = suites.runs;
   const lastRun = useMemo(() => {
@@ -84,6 +88,7 @@ export function AgentSuitesTab() {
               {SUITE_MODES.map((m) => <SelectItem key={m.id} value={m.id}>{m.label}</SelectItem>)}
             </SelectContent>
           </Select>
+          <Button size="sm" variant="outline" disabled={!suites.suites?.length} onClick={() => setAdding(true)} data-testid="suite-add-cases"><Sparkles className="mr-1 h-3.5 w-3.5" /> Add cases</Button>
           <Button size="sm" onClick={() => setEditing({ key: Date.now() })} data-testid="suite-new"><Plus className="mr-1 h-3.5 w-3.5" /> New suite</Button>
         </header>
         {suites.error && <p className="px-4 py-3 text-caption text-destructive">{suites.error.message}</p>}
@@ -110,6 +115,8 @@ export function AgentSuitesTab() {
                     </p>
                     <p className="truncate text-caption text-muted-foreground">
                       {s.cases.length} case(s){s.datasets.length ? ` · ${s.datasets.length} dataset(s)` : ""} · {suiteModeLabel(s.defaultMode)}
+                      {s.cases.some((c) => c.mocks?.cassette) ? <span data-testid="suite-row-cassettes"> · <Disc3 className="inline h-3 w-3" /> {s.cases.filter((c) => c.mocks?.cassette).length} replaying</span> : null}
+                      {s.cases.some((c) => c.mocks?.simulatedUser) ? <span data-testid="suite-row-simulated"> · <UsersRound className="inline h-3 w-3" /> {s.cases.filter((c) => c.mocks?.simulatedUser).length} multi-turn</span> : null}
                       {last ? ` · last ${last.status} ${last.stats.passed}/${last.stats.total - last.stats.skipped}${last.aggregates?.score !== undefined ? ` · score ${formatScore(last.aggregates.score)}` : ""} (${runTargetLabel(last)})` : " · never run"}
                       {last?.baseline?.regressions ? <span className="text-destructive"> · {last.baseline.regressions} regression(s)</span> : null}
                     </p>
@@ -146,8 +153,18 @@ export function AgentSuitesTab() {
         <AgentSuiteRunReport agentName={agentName} runId={viewing} onClose={() => setViewing(null)}
           onCancel={(id) => void suites.cancel(id).catch((e) => toast.error((e as Error).message))}
           onSetBaseline={(suiteId, runId) => suites.setBaseline(suiteId, runId)}
-          onReview={(runId) => suites.review(runId)} />
+          onReview={(runId) => suites.review(runId)}
+          onOpenCassette={(suiteId, caseId) => setCassetteOf({ suiteId, caseId })} />
       )}
+
+      {cassetteOf && (
+        <AgentSuiteCassette key={`${cassetteOf.suiteId}/${cassetteOf.caseId}`} agentName={agentName} suiteId={cassetteOf.suiteId} caseId={cassetteOf.caseId}
+          caseName={suites.suites?.find((s) => s.id === cassetteOf.suiteId)?.cases.find((c) => c.id === cassetteOf.caseId)?.name}
+          onRecord={async (suiteId, caseId) => { const run = await suites.record(suiteId, caseId, target !== "production" ? { target } : {}); setViewing(run.id); return run; }}
+          onClose={() => setCassetteOf(null)} />
+      )}
+
+      {adding && <AgentSuiteGenerateDialog open={adding} onOpenChange={setAdding} suites={suites} />}
 
       <section aria-label="Runs" className="rounded-lg border border-border/40 bg-card/80" data-testid="suite-runs">
         <header className="flex items-center gap-2 border-b border-border/40 px-4 py-2">
