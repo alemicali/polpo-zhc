@@ -24,9 +24,9 @@ vi.mock("@polpo-ai/react", () => ({
 
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() }) }));
 
-import { ReadyMadeConnectors, installOutcome, templateStatusLabel } from "../src/components/connectors/ready-made-connectors";
+import { ReadyMadeConnectors } from "../src/components/connectors/ready-made-connectors";
 import { HostedServerSheet } from "../src/components/connectors/hosted-server-sheet";
-import { settingsPayload } from "../src/components/connectors/template-fields";
+import { installOutcome, settingsPayload, templateStatusLabel } from "../src/lib/mcp-servers";
 import { TooltipProvider } from "../src/components/ui/tooltip";
 
 const TOKEN = "pf_secret_token_123456";

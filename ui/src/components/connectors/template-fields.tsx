@@ -48,15 +48,6 @@ export function SettingInput({ field, value, onChange, disabled }: {
   );
 }
 
-/** Values to send: empty ones left out (null clears a stored value when `clear` lists it). */
-export function settingsPayload(values: Record<string, SettingValue>, stored: Record<string, unknown> = {}): Record<string, string | number | boolean | null> {
-  const out: Record<string, string | number | boolean | null> = {};
-  for (const [k, v] of Object.entries(values)) {
-    if (v === undefined || v === "") { if (stored[k] !== undefined) out[k] = null; continue; }
-    out[k] = v;
-  }
-  return out;
-}
 
 /** The vendor's instructions for a secret: where to create it, scopes, advice. */
 export function SecretHelp({ info }: { info: McpServerTemplateSecret }) {

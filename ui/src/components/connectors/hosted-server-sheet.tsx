@@ -21,9 +21,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { AgentVersionDiffView } from "@/components/agents/agent-versions-tab";
 import { Switch } from "./connector-bits";
-import { blankTool, hostedLabel, isSensitive, parseJson, pretty, sampleInput, schemaParams } from "@/lib/mcp-servers";
+import { blankTool, hostedLabel, isSensitive, parseJson, pretty, sampleInput, schemaParams, settingsPayload } from "@/lib/mcp-servers";
 import { productName, useInstanceBranding } from "@/lib/branding";
-import { SecretHelp, SecretInput, SettingInput, settingsPayload, type SettingValue } from "./template-fields";
+import { SecretHelp, SecretInput, SettingInput, type SettingValue } from "./template-fields";
 import { cn } from "@/lib/utils";
 
 const selectClass = "h-9 w-full rounded-md border bg-transparent px-2 text-sm";

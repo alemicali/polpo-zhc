@@ -10,27 +10,18 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AlertTriangle, ArrowUpCircle, CheckCircle2, Download, ExternalLink, FlaskConical, Loader2, ShieldCheck, ShieldAlert } from "lucide-react";
 import { useMcpServers, type McpServerInstallResult, type McpServerTemplateInfo } from "@polpo-ai/react";
+import { installOutcome, settingsPayload, templateStatusLabel } from "@/lib/mcp-servers";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ConnectorIcon } from "./connector-icon";
 import type { AgentOption } from "./connector-detail-sheet";
-import { SecretHelp, SecretInput, SettingInput, settingsPayload, type SettingValue } from "./template-fields";
+import { SecretHelp, SecretInput, SettingInput, type SettingValue } from "./template-fields";
 import { productName, useInstanceBranding } from "@/lib/branding";
 
 const iconSlug = (icon?: string) => (icon && /^[a-z0-9]+$/.test(icon) ? icon : undefined);
 
-/** The status line of a template card. */
-export function templateStatusLabel(t: McpServerTemplateInfo): string {
-  const i = t.installs.find((x) => x.status === t.status) ?? t.installs[0];
-  switch (t.status) {
-    case "installed": return `Installed · v${i?.production}`;
-    case "update_available": return `Installed · v${i?.production} · update available (revision ${t.revision})`;
-    case "draft": return "Install not finished";
-    default: return "Available";
-  }
-}
 
 function TemplateCard({ t, onInstall, onOpen }: { t: McpServerTemplateInfo; onInstall: () => void; onOpen: (id: string) => void }) {
   const install = t.installs[0];
@@ -97,23 +88,6 @@ export function ReadyMadeConnectors({ agents, onOpenServer }: { agents: AgentOpt
   );
 }
 
-/** What the install answered, for the dialog. */
-export function installOutcome(r: McpServerInstallResult): { tone: "ok" | "warn"; title: string; lines: string[] } {
-  switch (r.status) {
-    case "installed": return { tone: "ok", title: `Installed: ${r.id} v${r.version}`, lines: [`Read-only tests: ${r.tests?.passed ?? 0} passed${r.tests?.skipped ? `, ${r.tests.skipped} skipped` : ""}.`] };
-    case "needs_secrets": return { tone: "warn", title: "A secret is missing", lines: [`Paste ${r.missingSecrets?.join(", ")} and install again: nothing was published.`] };
-    case "tests_failed": return {
-      tone: "warn", title: "A read-only test failed — nothing was published",
-      lines: (r.tests?.results ?? []).filter((x) => x.passed === false).map((x) => `${x.tool}: ${x.error ?? x.text}`),
-    };
-    case "upgrade_draft": return {
-      tone: "ok", title: `Revision ${r.revision} is now the draft of ${r.id}`,
-      lines: [(r.diff?.changes ?? []).map((c) => `${c.kind} ${c.field}`).join(", ") || "No changes to the tools", "Review it and publish it from the Versions tab."],
-    };
-    case "up_to_date": return { tone: "ok", title: `${r.id} is up to date (v${r.version})`, lines: ["Settings and access saved."] };
-    default: return { tone: "ok", title: "Checks passed", lines: ["Kept as a draft."] };
-  }
-}
 
 export function InstallTemplateDialog({ template: t, agents, open, onOpenChange, onOpenServer }: {
   template: McpServerTemplateInfo; agents: AgentOption[]; open: boolean;
