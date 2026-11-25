@@ -2,8 +2,9 @@ name: Polpo suites
 description: >-
   Run a Polpo instance's suites (agent tests and evals, a hosted MCP server's saved tests, a
   mission's suites) through its REST API with `polpo test`, write JUnit XML and post a summary of
-  the runs to the job (and the PR checks). Fails the step when a run fails (or regressed, with
-  fail-on-regression). See docs/agent-suites.md, "polpo test and CI".
+  the runs to the job (and the PR checks). Fails the step when a run fails or regressed versus its
+  baseline (fail-on-regression: "false" only reports regressions). See docs/agent-suites.md,
+  "polpo test and CI".
 author: OpenPolpo
 branding:
   icon: check-circle
@@ -17,7 +18,7 @@ inputs:
     description: An API key of the instance (keep it in a secret). Runs that use real tools need an admin key.
     required: true
   agent:
-    description: The agent whose suites run. Empty: every agent's (unless mcp-server or mission is given).
+    description: "The agent whose suites run. Empty: every agent's (unless mcp-server or mission is given)."
     required: false
     default: ""
   suite:
@@ -41,9 +42,9 @@ inputs:
     required: false
     default: ""
   fail-on-regression:
-    description: Also fail when a run regressed versus its baseline.
+    description: Also fail when a run regressed versus its baseline (default true; "false" only reports regressions).
     required: false
-    default: "false"
+    default: "true"
   allow-real-tools:
     description: Confirm runs that use real tools (side effects possible; needs an admin key).
     required: false
