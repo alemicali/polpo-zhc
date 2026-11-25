@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Surfaces**: dashboard (suites, editor with cases, mocks, assertions, datasets, JSON and YAML views, run on production / draft / a version, runs, report, cancel); REST `…/agents/{name}/suites`, `…/suites/{id}` (`?format=yaml`), `…/datasets/import`, `…/runs`, `…/suite-runs[/{runId}[/cancel]]` (OpenAPI); MCP `polpo_agent_suite_list`, `_get`, `_save`, `_delete`, `_run`, `_run_get` (read / work scopes; real tools admin; scope matrix regenerated); Polpo's `agent_suite_*`; SDK (`getAgentSuites` … `cancelAgentSuiteRun`) and React `useAgentSuites`, `useAgentSuiteRun`.
 
 ### Fixed
+
+- Hosted MCP server generation (from API or description), Polpo chat, Spotlight ask and channel replies use the effective orchestrator model: the configured `settings.orchestratorModel`, else a model of a connected provider; with neither, a clear `NO_MODEL` error pointing to Settings → Orchestrator instead of "No model configured".
 - **No more broken pages after a deploy.** The dashboard's service worker now takes over as soon as a new build arrives (`skipWaiting` + `clientsClaim`): a waiting worker kept serving the previous app shell, whose lazy chunks no longer exist, so pages like Agents failed with "Failed to fetch dynamically imported module". The stale-chunk recovery also activates a waiting worker before its one reload.
 
 ### Added

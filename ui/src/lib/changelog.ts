@@ -48,6 +48,18 @@ export const CHANGELOG: ChangelogEntry[] = [
     cta: { label: "Apri un agente", to: "/agents" },
   },
   {
+    id: "2026-11-25-polpo-model-fallback",
+    date: "2026-11-25",
+    kind: "fixed",
+    title: "Generare un server da API usa il modello di Polpo",
+    summary: "\"Genera da API\" e \"Genera da descrizione\" usano il modello dell'orchestratore; se non è impostato, quello di un provider collegato, invece di fermarsi con \"No model configured\".",
+    body: [
+      "- **Server ospitati**: la generazione da API o da descrizione usa il modello impostato in Impostazioni → Orchestratore.",
+      "- **Se non è impostato**, Polpo usa un modello di un provider collegato (per esempio Claude Sonnet con una chiave Anthropic), come la chat di Polpo, Spotlight e i canali.",
+      "- **Senza modello né provider** l'errore dice dove impostarlo, invece di un messaggio tecnico.",
+    ].join("\n"),
+  },
+  {
     id: "2026-11-25-hosted-servers-like-connectors",
     date: "2026-11-25",
     kind: "improved",
