@@ -216,6 +216,7 @@ export type {
   AgentVersionList,
   AgentVersionDiff,
   AgentDeployEntry,
+  AgentDeployOutcome,
   McpSecretRef, McpServerAuth, McpServerTool, McpServerSpec, McpServerSummary, McpHostedServer, McpServerTemplateInfo, McpServerTemplateSecret, McpServerTemplateStatus, McpServerSettingField, McpServerInstallRequest, McpServerInstallResult, McpServerTestCase,
   McpServerVersionInfo, McpServerDeploy, McpServerDiff, McpToolTestResult, McpServerCallLog, McpPendingCall, McpServerGenerateRequest, McpServerGenerateResult,
   AgentPublishResult,
@@ -273,4 +274,5 @@ export type {
   AgentSuite, AgentSuiteInput, SuiteRun, SuiteRunRequest, SuiteDatasetImport, SuiteMockMode, ArgsMatchMode, ToolMock, ScriptedTurn, SuiteMocks, SuiteCaseInput, SuiteAssertion, SuiteAssertionType, SuiteScorer, SuiteBudgets, SuiteCase, SuiteDataset, SuiteVariantOverrides, SuiteRunStatus, SuiteCaseStatus, SuiteAssertionResult, SuiteTraceToolCall, SuiteTraceTurn, SuiteTrace, SuiteCaseResult, SuiteRunStats,
   ScorerSource, JudgeCriterion, SuiteScorerType, SuiteEvalSettings, SuiteScoreResult, SuiteScorerAggregate, SuiteCaseAggregate, SuiteRunAggregates,
   SuiteChange, SuiteScorerDelta, SuiteCaseDelta, SuiteBaselineComparison, SuiteRunReview, SuiteTrendPoint, SuiteTrend,
+  SuiteGate, DeployGateTrigger, DeployGateStatus, DeployGateSuiteStatus, DeployGateSuite, AgentDeployGate, AgentDeployGateRef, AgentVersionGateStatus,
 } from "./client/agent-suite-types.js";

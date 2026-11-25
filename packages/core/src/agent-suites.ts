@@ -24,6 +24,7 @@
  */
 import { unifiedLineDiff } from "./agent-versions.js";
 import type { SuiteBaselineComparison, SuiteRunAggregates, SuiteRunReview } from "./agent-suite-evals.js";
+import { DEPLOY_GATE_LIMITS, type AgentDeployGate } from "./agent-suite-gates.js";
 
 // ── Modes ────────────────────────────────────────────────────────────
 
@@ -327,16 +328,20 @@ export type SuiteTarget =
   | { kind: "mission"; mission: string }
   | { kind: "team"; team: string };
 
-/** Phase 3 (reserved): this suite as a deploy gate of its agent. */
+/** This suite as a deploy gate of its agent (docs/agent-suites.md, "CI gate"). */
 export interface SuiteGate {
   /** Must pass before a version is deployed to production. */
   required?: boolean;
   /** Minimum pass rate (0..1, default 1). */
   minPassRate?: number;
-  /** Largest pass-rate drop allowed versus production (0..1). */
+  /** Largest pass-rate (or overall score) drop allowed versus the baseline: the marked one, else the latest run on production (0..1). */
   maxRegression?: number;
-  /** Minimum mean score per scorer id. */
+  /** Minimum mean score per scorer id ("score": the run's overall score). */
   scoreThresholds?: Record<string, number>;
+  /** Also run it when a version is published (non-blocking: the version shows the result before it is deployed). */
+  onPublish?: boolean;
+  /** The gate may run this suite's real-tools cases (modes none / model, unmocked tools run for real). Admins only. */
+  allowRealTools?: boolean;
 }
 
 export interface AgentSuite {
@@ -358,7 +363,7 @@ export interface AgentSuite {
   scorers?: SuiteScorer[];
   /** Eval settings: judge model, repetitions, regression tolerance, baseline policy. */
   evals?: SuiteEvalSettings;
-  /** Phase 3 (reserved). */
+  /** A deploy gate: required before production, thresholds, run on publish. */
   gate?: SuiteGate;
   tags?: string[];
   /** Bumped on every save (a save with an older revision is refused). */
@@ -410,7 +415,7 @@ export interface SuiteVariant {
   overrides?: SuiteVariantOverrides;
 }
 
-export type SuiteRunTrigger = "manual" | "publish" | "schedule" | "ci" | "benchmark";
+export type SuiteRunTrigger = "manual" | "publish" | "deploy" | "schedule" | "ci" | "benchmark";
 
 export interface SuiteRunRequest {
   /** production (default), draft, or a published version (1.2.0). */
@@ -596,8 +601,8 @@ export interface SuiteRun {
   isBaseline?: boolean;
   /** An AI review of the run ("explain this run"): what failed or regressed and what to change. */
   review?: SuiteRunReview;
-  /** Phase 3 (reserved): the gate decision. */
-  gate?: { decision: "pass" | "fail" | "override"; reason?: string; by?: string };
+  /** A gate run (trigger deploy / publish): the gate's decision and the deploy gate it belongs to. */
+  gate?: { decision: "pass" | "fail" | "override"; reason?: string; by?: string; gateId?: string };
   notes: string[];
   error?: string;
 }
@@ -659,12 +664,17 @@ export interface AgentSuiteStore {
   listRuns(agent: string, opts?: SuiteRunListOptions): Promise<SuiteRun[]>;
   getRun(agent: string, id: string): Promise<SuiteRun | undefined>;
   saveRun(run: SuiteRun): Promise<void>;
+  /** Deploy gates (the suites run before a version reaches production), newest first. */
+  listGates(agent: string, opts?: { version?: string; limit?: number }): Promise<AgentDeployGate[]>;
+  getGate(agent: string, id: string): Promise<AgentDeployGate | undefined>;
+  saveGate(gate: AgentDeployGate): Promise<void>;
   deleteAgent(agent: string): Promise<void>;
 }
 
 export class InMemoryAgentSuiteStore implements AgentSuiteStore {
   private suites = new Map<string, Map<string, AgentSuite>>();
   private runs = new Map<string, SuiteRun[]>();
+  private gates = new Map<string, AgentDeployGate[]>();
   async listSuites(agent: string) { return [...(this.suites.get(agent)?.values() ?? [])].map(clone); }
   async getSuite(agent: string, id: string) { const s = this.suites.get(agent)?.get(id); return s ? clone(s) : undefined; }
   async saveSuite(suite: AgentSuite) {
@@ -685,7 +695,17 @@ export class InMemoryAgentSuiteStore implements AgentSuiteStore {
     // the newest runs, and every marked baseline
     this.runs.set(run.agent, list.filter((r, n) => n < SUITE_LIMITS.runsKept || r.isBaseline));
   }
-  async deleteAgent(agent: string) { this.suites.delete(agent); this.runs.delete(agent); }
+  async listGates(agent: string, opts: { version?: string; limit?: number } = {}) {
+    return (this.gates.get(agent) ?? []).filter((g) => !opts.version || g.version === opts.version).slice(0, opts.limit ?? DEPLOY_GATE_LIMITS.kept).map(clone);
+  }
+  async getGate(agent: string, id: string) { const g = this.gates.get(agent)?.find((x) => x.id === id); return g ? clone(g) : undefined; }
+  async saveGate(gate: AgentDeployGate) {
+    const list = (this.gates.get(gate.agent) ?? []).filter((g) => g.id !== gate.id);
+    list.push(clone(gate));
+    list.sort((a, b) => b.requestedAt.localeCompare(a.requestedAt));
+    this.gates.set(gate.agent, list.slice(0, DEPLOY_GATE_LIMITS.kept));
+  }
+  async deleteAgent(agent: string) { this.suites.delete(agent); this.runs.delete(agent); this.gates.delete(agent); }
 }
 
 function clone<T>(v: T): T { return JSON.parse(JSON.stringify(v)) as T; }
@@ -741,6 +761,17 @@ const strList = (v: unknown, where: string): string[] | undefined => {
   if (!Array.isArray(v) || v.some((x) => typeof x !== "string")) throw new AgentSuiteError(`${where} must be a list of strings`);
   return v as string[];
 };
+function parseScoreThresholds(v: unknown): Record<string, number> | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (!isObj(v)) throw new AgentSuiteError("gate.scoreThresholds must be an object: { scorerId: minimum mean score }");
+  const out: Record<string, number> = {};
+  for (const [k, x] of Object.entries(v)) {
+    if (typeof x !== "number" || !Number.isFinite(x) || x < 0 || x > 1) throw new AgentSuiteError(`gate.scoreThresholds.${k} must be a number from 0 to 1`);
+    out[k] = x;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 function compact<T extends object>(o: T): T {
   for (const k of Object.keys(o) as Array<keyof T>) if (o[k] === undefined) delete o[k];
   return o;
@@ -1099,8 +1130,11 @@ export function parseAgentSuite(input: unknown, agent: string, existing?: AgentS
       required: input.gate.required === true ? true : undefined,
       minPassRate: num(input.gate.minPassRate, "gate.minPassRate", { min: 0, max: 1 }),
       maxRegression: num(input.gate.maxRegression, "gate.maxRegression", { min: 0, max: 1 }),
-      scoreThresholds: isObj(input.gate.scoreThresholds) ? input.gate.scoreThresholds as Record<string, number> : undefined,
+      scoreThresholds: parseScoreThresholds(input.gate.scoreThresholds),
+      onPublish: input.gate.onPublish === true ? true : undefined,
+      allowRealTools: input.gate.allowRealTools === true ? true : undefined,
     });
+    if (!Object.keys(gate).length) gate = undefined;
   }
   return compact({
     id, agent, name,
@@ -1612,3 +1646,4 @@ export function caseFromTrace(trace: Pick<SuiteTrace, "input" | "toolCalls" | "t
 }
 
 export * from "./agent-suite-evals.js";
+export * from "./agent-suite-gates.js";

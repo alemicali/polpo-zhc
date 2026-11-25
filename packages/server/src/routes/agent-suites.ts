@@ -9,7 +9,7 @@ import {
 export interface AgentSuiteRouteDeps {
   list: (agent: string) => Promise<AgentSuite[]>;
   get: (agent: string, id: string) => Promise<AgentSuite>;
-  save: (agent: string, input: unknown, opts: { actor: string; revision?: number; create?: boolean }) => Promise<AgentSuite>;
+  save: (agent: string, input: unknown, opts: { actor: string; revision?: number; create?: boolean; admin?: boolean }) => Promise<AgentSuite>;
   remove: (agent: string, id: string) => Promise<void>;
   importDataset: (agent: string, id: string, req: { format: "csv" | "json"; text: string; id?: string; name?: string; mode?: "replace" | "append"; coerce?: boolean }, opts: { actor: string }) => Promise<AgentSuite>;
   /** Start a run; `done` resolves when it finishes. */
@@ -29,6 +29,8 @@ export interface AgentSuiteRouteDeps {
   toYaml: (value: unknown) => string;
   fromYaml: (text: string) => unknown;
   actor: (c: Context) => string;
+  /** An admin (may turn on gate.allowRealTools: deploy gates that run real tools). */
+  isAdmin?: (c: Context) => boolean;
 }
 
 const errorSchema = z.object({ ok: z.boolean(), error: z.string(), code: z.string() });
@@ -54,7 +56,7 @@ const runBody = z.object({
   variant: z.object({ id: z.string().optional(), label: z.string().optional() }).strict().optional(),
   benchmarkRunId: z.string().optional(),
   repetition: z.number().int().min(0).optional(),
-  trigger: z.enum(["manual", "publish", "schedule", "ci", "benchmark"]).optional(),
+  trigger: z.enum(["manual", "publish", "deploy", "schedule", "ci", "benchmark"]).optional(),
   wait: z.boolean().optional().describe("Wait for the run to finish (default false: the run is returned running)"),
   repetitions: z.number().int().min(1).max(10).optional().describe("Run every case this many times (mean, stddev and flakiness per case; default the suite's evals.repetitions, 1)"),
   baselineRunId: z.string().optional().describe("Compare with this run instead of the suite's baseline"),
@@ -143,7 +145,7 @@ export function registerAgentSuiteRoutes(app: OpenAPIHono, getDeps: () => { suit
     try {
       const deps = s();
       const { input } = suiteFromBody(deps, await c.req.json().catch(() => ({})));
-      return c.json({ ok: true, data: await deps.save(name, input, { actor: deps.actor(c), create: true }) }, 200);
+      return c.json({ ok: true, data: await deps.save(name, input, { actor: deps.actor(c), create: true, admin: deps.isAdmin?.(c) ?? false }) }, 200);
     } catch (err) { return errorResponse(c, err); }
   });
 
@@ -180,7 +182,7 @@ export function registerAgentSuiteRoutes(app: OpenAPIHono, getDeps: () => { suit
       const deps = s();
       const { input, revision } = suiteFromBody(deps, await c.req.json().catch(() => ({})));
       const body = input && typeof input === "object" ? { ...(input as Record<string, unknown>), id } : input;
-      return c.json({ ok: true, data: await deps.save(name, body, { actor: deps.actor(c), ...(revision !== undefined ? { revision } : {}) }) }, 200);
+      return c.json({ ok: true, data: await deps.save(name, body, { actor: deps.actor(c), admin: deps.isAdmin?.(c) ?? false, ...(revision !== undefined ? { revision } : {}) }) }, 200);
     } catch (err) { return errorResponse(c, err); }
   });
 

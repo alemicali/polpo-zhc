@@ -78,6 +78,13 @@ Vault values are never in a version: an agent's config only ever holds reference
 - The deploy history lists, newest first: when, who, from → to, the note, and a rollback marker. Each
   deploy opens its diff: per-field changes and a unified diff of the whole configuration rendered as
   YAML (keys sorted, long text such as the system prompt as a block, so it diffs line by line).
+- **Deploy gate**: when the agent has **required suites** (`gate.required`, docs/agent-suites.md "CI
+  gate"), a deploy first runs them against the version ("in verifica": pending, with progress,
+  cancellable) and moves production only if they pass; otherwise it is **blocked** and the history
+  records it (`action: "blocked"`, with what failed). An admin can deploy anyway with a reason (an
+  **override**, recorded with who, when and which gates failed). Rollbacks are never gated. Each
+  history entry verified by a gate carries `gate`; each version shows its latest gate (✓, ✗,
+  verifying, override), including **publish checks** (`gate.onPublish`).
 
 The pointer store is generic (`agent_pointers`, keyed by agent and pointer name); only `production`
 is used today.
@@ -100,8 +107,8 @@ used (`Task.runs[].agentVersion`), shown on the task's run card next to the mode
 | | |
 | --- | --- |
 | Dashboard | Agent page: header shows the production version and "Draft has changes"; **Versions** tab (draft with its diff, publish dialog with bump and note, discard; versions list, view one read-only, select two to diff; deploys: production, rollback, history with each deploy's diff, unified or split). Dashboard edits always go to the draft. Configuration → General → Agent versions holds the API setting below. |
-| REST | `GET /agents/{name}` (production config + `versioning`: production, latest, draft state with `baseVersion`, `stale`, `warning`; `?view=draft` returns the draft), `GET /agents/{name}/versions`, `GET /agents/{name}/versions/{version}` (`draft`, `production` accepted), `GET /agents/{name}/diff?from=&to=`, `DELETE /agents/{name}/draft`, `POST /agents/{name}/draft/rebase`, `POST /agents/{name}/publish`, `POST /agents/{name}/deploy`, `POST /agents/{name}/rollback`, `GET /agents/{name}/deploys[?diff=true]`, `GET /agents/{name}/deploys/{id}` |
-| MCP (admin) | `polpo_agent_versions` (warns about a stale draft), `polpo_agent_version_get`, `polpo_agent_version_diff`, `polpo_agent_draft` (rebase, or discard with `confirm: true`), `polpo_agent_publish`, `polpo_agent_deploy` and `polpo_agent_rollback` (destructive, `confirm: true`), `polpo_agent_deploys`; `polpo_agent_get` shows the version and draft state; `polpo_agent_update` takes `publish`, `deploy`, `bump`, `version`, `note`; the agent card shows the production version |
+| REST | `GET /agents/{name}` (production config + `versioning`: production, latest, draft state with `baseVersion`, `stale`, `warning`; `?view=draft` returns the draft), `GET /agents/{name}/versions`, `GET /agents/{name}/versions/{version}` (`draft`, `production` accepted), `GET /agents/{name}/diff?from=&to=`, `DELETE /agents/{name}/draft`, `POST /agents/{name}/draft/rebase`, `POST /agents/{name}/publish`, `POST /agents/{name}/deploy` (`override`, `wait`; `202` pending / `409` `GATE_BLOCKED` with required suites), `POST /agents/{name}/rollback`, `GET /agents/{name}/deploys[?diff=true]`, `GET /agents/{name}/deploys/{id}`, `GET /agents/{name}/deploy-gates[/{id}]`, `POST …/deploy-gates/{id}/cancel`, `POST …/deploy-gates/{id}/override` |
+| MCP (admin) | `polpo_agent_versions` (warns about a stale draft), `polpo_agent_version_get`, `polpo_agent_version_diff`, `polpo_agent_draft` (rebase, or discard with `confirm: true`), `polpo_agent_publish`, `polpo_agent_deploy` (returns the deploy gate: deployed, pending or blocked; `override_reason`, `cancel_gate`) and `polpo_agent_rollback` (destructive, `confirm: true`), `polpo_agent_deploys`, `polpo_agent_deploy_gates`; `polpo_agent_get` shows the version and draft state; `polpo_agent_update` takes `publish`, `deploy`, `bump`, `version`, `note`; the agent card shows the production version |
 | Polpo's chat | the same tools (`agent_versions`, `agent_draft`, `agent_publish`, `agent_deploy`, … in the "agent-versions" group); `update_agent` takes `publish`, `deploy`, `note` |
 | SDK | `client.getAgentVersions`, `getAgentVersion`, `diffAgentVersions`, `publishAgent`, `discardAgentDraft`, `rebaseAgentDraft`, `deployAgentVersion`, `rollbackAgent`, `getAgentDeploys`, `getAgentDeploy`; React `useAgentVersions` (with `rebaseDraft`), `useAgentDeploys`, `useAgent(name, { view: "draft" })` |
 
@@ -116,6 +123,11 @@ changed the agent at once. To keep existing clients working:
 | `publish: false` | only the draft (what the dashboard sends) |
 | `publish: true` | draft + publish (production unchanged) |
 | `deploy: true` | draft + publish + deploy to production |
+
+With required suites (the deploy gate), a "deploy" here publishes and then deploys through the
+gate: the response's `versioning.deployStatus` is `deployed`, `pending` (verifying) or `blocked`
+(published, not deployed: `versioning.gate` lists the failing gates, `versioning.warning` says it).
+`wait: true` waits for the verdict.
 
 `bump`, `version` and `note` apply to the published version. The response's `versioning` says what
 happened (`mode`, `draftChanged`, `published`, `deployed`, and the state). Turn the setting off

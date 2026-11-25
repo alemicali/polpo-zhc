@@ -117,6 +117,7 @@ import {
   AgentVersioning, AgentVersionError, PRODUCTION_POINTER, parseAgentRef,
   type AgentDeployEntry, type AgentVersion, type AgentVersionBump, type AgentVersionStore,
 } from "@polpo-ai/core/agent-versions";
+import type { AgentDeployGate, AgentDeployGateHook, AgentDeployOutcome, AgentDeployRequest } from "@polpo-ai/core/agent-suites";
 import type { TeamStore } from "./team-store.js";
 import type { AgentStore } from "./agent-store.js";
 import { EscalationManager } from "./escalation-manager.js";
@@ -246,6 +247,8 @@ export class Orchestrator extends TypedEmitter {
   private teamStore!: TeamStore;
   private agentVersionStore!: AgentVersionStore;
   private agentVersions!: AgentVersioning;
+  /** The deploy gate (required agent suites), set by the server: absent, deploys are immediate. */
+  private agentDeployGate?: AgentDeployGateHook;
   private agentStore!: AgentStore;
   private channelGateway?: ChannelGateway;
   private channelChatRunner?: ChannelChatRunner;
@@ -1949,7 +1952,9 @@ export class Orchestrator extends TypedEmitter {
     bump?: AgentVersionBump;
     version?: string;
     note?: string;
-  }): Promise<{ agent: AgentConfig; draftChanged: boolean; published?: AgentVersion; deployed?: AgentDeployEntry }> {
+    /** mode deploy through the gate: wait up to this long for the required suites (default: return pending). */
+    gateWaitMs?: number;
+  }): Promise<{ agent: AgentConfig; draftChanged: boolean; published?: AgentVersion; deployed?: AgentDeployEntry; deploy?: AgentDeployOutcome; check?: AgentDeployGate }> {
     const current = (await this.engine.getAgents()).find((a) => a.name === name);
     if (!current) throw new AgentVersionError(`Agent "${name}" not found`, "NOT_FOUND");
     const { team, ...fields } = updates as AgentUpdate & { team?: string };
@@ -1965,12 +1970,45 @@ export class Orchestrator extends TypedEmitter {
       const engine = this.checkAgentEngine({ ...current, ...before, ...fields, name } as AgentConfig);
       if ("engine" in fields) (fields as AgentUpdate).engine = engine;
     }
-    const { draftChanged, published, deployed } = await this.agentVersions.update(name, fields, {
-      actor: opts.actor, mode: opts.mode, bump: opts.bump, version: opts.version, note: opts.note,
+    // an agent with required suites: publish, then deploy through the gate (production moves when they pass)
+    const gated = opts.mode === "deploy" && !!this.agentDeployGate && await this.agentDeployGate.applies(name).catch(() => false);
+    const mode = gated ? "publish" : opts.mode;
+    const { draftChanged, published, deployed: direct } = await this.agentVersions.update(name, fields, {
+      actor: opts.actor, mode, bump: opts.bump, version: opts.version, note: opts.note,
     });
+    let deployed = direct;
+    let deploy: AgentDeployOutcome | undefined;
+    let check: AgentDeployGate | undefined;
+    if (gated && published && this.agentDeployGate) {
+      deploy = await this.agentDeployGate.request(name, published.version, {
+        actor: opts.actor, trigger: "api-update", ...(opts.note ? { note: opts.note } : {}), ...(opts.gateWaitMs ? { waitMs: opts.gateWaitMs } : {}),
+      });
+      if (deploy.status === "deployed" && deploy.entry) deployed = deploy.entry;
+      else if (deploy.status === "deployed" && deploy.gate?.deployId) deployed = (await this.agentVersions.deploys(name, { limit: 20 })).find((e) => e.id === deploy!.gate!.deployId);
+    } else if (opts.mode === "publish" && published && this.agentDeployGate) {
+      check = await this.agentDeployGate.published(name, published.version, opts.actor).catch(() => undefined);
+    }
     const agent = (await this.engine.getAgents()).find((a) => a.name === name) ?? current;
     if (!deployed) await this.emitTeamSnapshot("agent:updated", { agentName: name });
-    return { agent, draftChanged, ...(published ? { published } : {}), ...(deployed ? { deployed } : {}) };
+    return { agent, draftChanged, ...(published ? { published } : {}), ...(deployed ? { deployed } : {}), ...(deploy ? { deploy } : {}), ...(check ? { check } : {}) };
+  }
+
+  /** The server's deploy gate (required agent suites); undefined removes it. */
+  setAgentDeployGate(gate: AgentDeployGateHook | undefined): void { this.agentDeployGate = gate; }
+
+  /**
+   * Deploy a published version to production through the deploy gate: deployed now (no required
+   * suites, or an admin's override), pending (the required suites are running) or blocked.
+   */
+  async requestAgentDeploy(name: string, version: string, req: AgentDeployRequest): Promise<AgentDeployOutcome> {
+    if (this.agentDeployGate) return this.agentDeployGate.request(name, version, req);
+    const entry = await this.deployAgentVersion(name, version, { actor: req.actor, ...(req.note ? { note: req.note } : {}) });
+    return { status: "deployed", entry, message: `Deployed ${name}@${version} to production${entry.from ? ` (was ${entry.from})` : ""}.` };
+  }
+
+  /** A version was published (not deployed): its publish checks (suites with gate.onPublish). */
+  async agentVersionPublished(name: string, version: string, actor: string): Promise<AgentDeployGate | undefined> {
+    return this.agentDeployGate?.published(name, version, actor).catch(() => undefined);
   }
 
   /** Tell live clients an agent's versions changed (publish, draft discarded): agent:updated. */
@@ -1978,12 +2016,17 @@ export class Orchestrator extends TypedEmitter {
     await this.emitTeamSnapshot("agent:updated", { agentName: name });
   }
 
-  /** Deploy a published version to production (or roll back): written live, recorded in the history. */
-  async deployAgentVersion(name: string, version: string, opts: { actor: string; note?: string }): Promise<AgentDeployEntry> {
-    return this.agentVersions.deploy(name, version, { actor: opts.actor, note: opts.note, pointer: PRODUCTION_POINTER });
+  /**
+   * Deploy a published version to production, ungated (the deploy gate calls it when the suites
+   * pass): written live, recorded in the history. Requests go through {@link requestAgentDeploy}.
+   */
+  async deployAgentVersion(name: string, version: string, opts: { actor: string; note?: string; id?: string }): Promise<AgentDeployEntry> {
+    return this.agentVersions.deploy(name, version, { actor: opts.actor, note: opts.note, pointer: PRODUCTION_POINTER, ...(opts.id ? { id: opts.id } : {}) });
   }
 
+  /** Roll production back: never gated (it must always work); verifications in flight stop. */
   async rollbackAgentVersion(name: string, opts: { actor: string; note?: string; to?: string }): Promise<AgentDeployEntry> {
+    await this.agentDeployGate?.rollingBack(name, opts.actor).catch(() => undefined);
     return this.agentVersions.rollback(name, opts);
   }
 

@@ -1,6 +1,8 @@
 /* The agent suite card: on top of the cards' common look (agent-card/style.css); tokens only. */
 .danger-text { color: var(--w-danger); }
 .fail-line { overflow-wrap: anywhere; }
+.gates { display: flex; flex-direction: column; gap: 4px; }
+.gates .section-title { font-size: var(--t-xs); font-weight: var(--w-medium); color: var(--fg2); }
 .chips { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .chips .chip-sm, .row .chip-sm { margin-inline-start: 0; }
 .row-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }

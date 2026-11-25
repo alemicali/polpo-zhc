@@ -8528,6 +8528,9 @@
                   "note": {
                     "type": "string",
                     "maxLength": 2000
+                  },
+                  "wait": {
+                    "type": "boolean"
                   }
                 }
               }
@@ -9426,7 +9429,12 @@
                     "maxLength": 2000
                   },
                   "deploy": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Also deploy it to production (through the deploy gate when the agent has required suites)"
+                  },
+                  "wait": {
+                    "type": "boolean",
+                    "description": "With deploy: wait for the required suites to finish (default: the deploy is returned pending)"
                   }
                 }
               }
@@ -9435,7 +9443,7 @@
         },
         "responses": {
           "200": {
-            "description": "Published (and deployed)",
+            "description": "Published (and deployed, or its deploy pending / blocked by the required suites: `deployStatus`, `gate`; without deploy, `check`: the publish checks started)",
             "content": {
               "application/json": {
                 "schema": {
@@ -9516,7 +9524,7 @@
           "Agent versions"
         ],
         "summary": "Deploy a version to production",
-        "description": "Move the production pointer to a published version: everything that runs the agent without a pinned version (chats, tasks, missions, schedules, channels, MCP, Polpo) uses it from its next run; runs in flight keep theirs. Recorded in the deploy history with who, when, from → to and the note.",
+        "description": "Move the production pointer to a published version: everything that runs the agent without a pinned version (chats, tasks, missions, schedules, channels, MCP, Polpo) uses it from its next run; runs in flight keep theirs. Recorded in the deploy history with who, when, from → to and the note.\n\n**Deploy gate**: when the agent has required suites (`gate.required`), they run against the version first (trigger `deploy`) and the request answers `202` with the gate pending (`GET …/deploy-gates/{id}`, events `agent:gate`): production moves only when every one passes; otherwise the deploy is blocked and recorded in the history (`action: blocked`). `wait: true` waits for the verdict (`200` deployed, `409` `GATE_BLOCKED`). `override: { reason }` (admins only) deploys at once anyway, recording which gates had failed.",
         "parameters": [
           {
             "schema": {
@@ -9540,6 +9548,25 @@
                   "note": {
                     "type": "string",
                     "maxLength": 2000
+                  },
+                  "override": {
+                    "type": "object",
+                    "properties": {
+                      "reason": {
+                        "type": "string",
+                        "minLength": 3,
+                        "maxLength": 2000
+                      }
+                    },
+                    "required": [
+                      "reason"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Deploy even if the required suites fail (or without running them): admins only, the reason is recorded"
+                  },
+                  "wait": {
+                    "type": "boolean",
+                    "description": "Wait for the required suites (default: return the deploy pending, 202)"
                   }
                 },
                 "required": [
@@ -9551,7 +9578,166 @@
         },
         "responses": {
           "200": {
-            "description": "Deployed",
+            "description": "Deployed: the history entry, `status: deployed`, its `gate` when the suites verified it (or an override)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Pending: the required suites are running (`status: pending`, `gate`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "An override by someone who is not an admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent or version not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Blocked by the required suites (`GATE_BLOCKED`, with `data.gate`), or another version is being verified",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agents/{name}/deploy-gates": {
+      "get": {
+        "tags": [
+          "Agent versions"
+        ],
+        "summary": "Deploy gates",
+        "description": "The agent's deploy gates, newest first: the required suites run against a version before a deploy (trigger deploy / api-update) or when it is published (publish). Each: status (running — in verifica —, passed, blocked, failed, override, cancelled, errored), progress, each suite's run, pass rate, score, the reasons it failed and its failed cases, the override.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "version",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Gates",
             "content": {
               "application/json": {
                 "schema": {
@@ -9572,7 +9758,348 @@
             }
           },
           "404": {
-            "description": "Agent or version not found",
+            "description": "Agent not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agents/{name}/deploy-gates/{id}": {
+      "get": {
+        "tags": [
+          "Agent versions"
+        ],
+        "summary": "One deploy gate",
+        "description": "A gate with its progress (while running), each required suite's run and verdict, the deploy (or block) it led to. `wait` (seconds, up to 55): wait for it to finish first.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "nullable": true,
+              "minimum": 0,
+              "maximum": 55
+            },
+            "required": false,
+            "name": "wait",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The gate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agents/{name}/deploy-gates/{id}/cancel": {
+      "post": {
+        "tags": [
+          "Agent versions"
+        ],
+        "summary": "Cancel a verification",
+        "description": "Stop a gate that is running: its suite runs are cancelled and nothing is deployed (production is unchanged).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agents/{name}/deploy-gates/{id}/override": {
+      "post": {
+        "tags": [
+          "Agent versions"
+        ],
+        "summary": "Deploy anyway (override)",
+        "description": "Deploy a gate's version although its required suites did not pass (or are still running: they are cancelled). Admins only; the reason is mandatory. The deploy history records the override: who, when, the reason and which gates had failed.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 2000
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deployed with an override",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not an admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already deployed",
             "content": {
               "application/json": {
                 "schema": {
@@ -9606,7 +10133,7 @@
           "Agent versions"
         ],
         "summary": "Roll production back",
-        "description": "Deploy the version production ran before the current one (or `to`). A rollback is a deploy: it appears in the history with its diff.",
+        "description": "Deploy the version production ran before the current one (or `to`). A rollback is a deploy: it appears in the history with its diff. It is never gated by the required suites (it must always work); a verification in flight is cancelled.",
         "parameters": [
           {
             "schema": {
@@ -9719,7 +10246,7 @@
           "Agent versions"
         ],
         "summary": "Deploy history",
-        "description": "Every move of the production pointer, newest first: when, who, from → to, note, rollback marker. `diff=true` adds each deploy's diff (per-field changes and a unified diff of the config).",
+        "description": "Every move of the production pointer, newest first: when, who, from → to, note, rollback marker; deploys the required suites blocked (`action: blocked`). Each entry verified by a deploy gate carries `gate` (status, the suites and their runs, what failed, the override). `diff=true` adds each deploy's diff (per-field changes and a unified diff of the config).",
         "parameters": [
           {
             "schema": {
@@ -11049,6 +11576,7 @@
                     "enum": [
                       "manual",
                       "publish",
+                      "deploy",
                       "schedule",
                       "ci",
                       "benchmark"

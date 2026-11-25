@@ -39,8 +39,8 @@ export { useSkillFiles } from "./hooks/use-skill-files.js";
 export type { UseSkillFilesReturn } from "./hooks/use-skill-files.js";
 export { useSkillVersions } from "./hooks/use-skill-versions.js";
 export type { UseSkillVersionsReturn } from "./hooks/use-skill-versions.js";
-export { useAgentVersions, useAgentDeploys } from "./hooks/use-agent-versions.js";
-export type { UseAgentVersionsReturn, UseAgentDeploysReturn } from "./hooks/use-agent-versions.js";
+export { useAgentVersions, useAgentDeploys, useAgentDeployGates } from "./hooks/use-agent-versions.js";
+export type { UseAgentVersionsReturn, UseAgentDeploysReturn, UseAgentDeployGatesReturn } from "./hooks/use-agent-versions.js";
 export { useAgentTests } from "./hooks/use-agent-tests.js";
 export type { UseAgentTestsReturn } from "./hooks/use-agent-tests.js";
 export { useAgentSuites, useAgentSuiteRun, useAgentSuiteTrend } from "./hooks/use-agent-suites.js";
@@ -262,10 +262,12 @@ export type {
   AgentVersionList,
   AgentVersionDiff,
   AgentDeployEntry,
+  AgentDeployOutcome,
   AgentTestCheckId, AgentTestStatus, AgentTestFixAction, AgentTestItem, AgentTestCheckResult, AgentTestRun, AgentTestRunRequest,
   AgentSuite, AgentSuiteInput, SuiteRun, SuiteRunRequest, SuiteDatasetImport, SuiteMockMode, ArgsMatchMode, ToolMock, ScriptedTurn, SuiteMocks, SuiteCaseInput, SuiteAssertion, SuiteAssertionType, SuiteScorer, SuiteBudgets, SuiteCase, SuiteDataset, SuiteVariantOverrides, SuiteRunStatus, SuiteCaseStatus, SuiteAssertionResult, SuiteTraceToolCall, SuiteTraceTurn, SuiteTrace, SuiteCaseResult, SuiteRunStats,
   ScorerSource, JudgeCriterion, SuiteScorerType, SuiteEvalSettings, SuiteScoreResult, SuiteScorerAggregate, SuiteCaseAggregate, SuiteRunAggregates,
   SuiteChange, SuiteScorerDelta, SuiteCaseDelta, SuiteBaselineComparison, SuiteRunReview, SuiteTrendPoint, SuiteTrend,
+  SuiteGate, DeployGateTrigger, DeployGateStatus, DeployGateSuiteStatus, DeployGateSuite, AgentDeployGate, AgentDeployGateRef, AgentVersionGateStatus,
   AgentPublishResult,
   McpSecretRef, McpServerAuth, McpServerTool, McpServerSpec, McpServerSummary, McpHostedServer, McpServerTemplateInfo, McpServerTemplateSecret, McpServerTemplateStatus, McpServerSettingField, McpServerInstallRequest, McpServerInstallResult, McpServerTestCase,
   McpServerVersionInfo, McpServerDeploy, McpServerDiff, McpToolTestResult, McpServerCallLog, McpPendingCall, McpServerGenerateRequest, McpServerGenerateResult,

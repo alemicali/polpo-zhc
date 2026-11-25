@@ -8,13 +8,16 @@ agent's real execution path, and every run keeps a **trace** per case.
 Cases can also be **evals**: scorers give each case a score 0..1 (exact, numeric, similarity, JSON
 Schema, tool trajectory, cost, latency, an LLM judge, custom code), runs aggregate them, compare
 with a **baseline** run (regressions and improvements) and draw a **trend** over versions; an AI
-review explains a run (see [Evals](#evals-scorers-baselines-trends)). The same engine will run
-deploy **gates** and **benchmarks** later; the data model already has their fields (see
+review explains a run (see [Evals](#evals-scorers-baselines-trends)). Suites marked **required**
+are the agent's **CI gate**: they run against a version before it reaches production, and the
+deploy happens only if they pass (see [CI gate](#ci-gate-required-suites-before-production)). The
+same engine will run **benchmarks** later; the data model already has their fields (see
 [Later phases](#later-phases)).
 
 Suites live in `.polpo/agent-suites/<agent>/suites/<id>.json`, runs in
-`.polpo/agent-suites/<agent>/runs/<run>.json` (the newest 100 per agent). Removing an agent
-removes its suites and runs.
+`.polpo/agent-suites/<agent>/runs/<run>.json` (the newest 100 per agent), deploy gates in
+`.polpo/agent-suites/<agent>/gates/<id>.json` (the newest 200). Removing an agent removes its
+suites, runs and gates.
 
 ## Concepts
 
@@ -320,14 +323,90 @@ assertions and scorers with their reasons, the judge's reasoning, the trace, the
 expectation or mock is wrong. The agent's instructions and tools (of the version the run used, with
 its overrides) are part of the prompt. The review is stored on the run (`run.review`, Markdown).
 
+## CI gate: required suites before production
+
+A suite with `gate.required` is a **deploy gate** of its agent: before any version of the agent
+reaches production — from the dashboard, REST, MCP, Polpo's chat, or the auto-deploy of an API
+update — every required suite runs against that version (a run with `trigger: "deploy"`), and the
+production pointer moves **only if every one passes its gate**. Otherwise the deploy is **blocked**:
+production is unchanged and the deploy history records it (`action: "blocked"`, "Blocked by
+suites", with the failing suites, why, their failed cases and the runs to open).
+
+```yaml
+gate:
+  required: true          # every deploy of the agent waits for this suite
+  minPassRate: 1          # 0..1, default 1: every case must pass
+  maxRegression: 0.05     # largest drop of the pass rate or the overall score versus the baseline (default: not checked)
+  scoreThresholds:        # minimum mean per scorer id; "score" is the run's overall score
+    judge: 0.7
+    score: 0.8
+  onPublish: true         # also run when a version is published (a non-blocking check)
+  allowRealTools: false   # admins only: the gate may run the suite's real-tools cases
+```
+
+A suite **passes its gate** when its run finished (not cancelled, no run-level error) and:
+
+- its **pass rate** ≥ `minPassRate` (default 1);
+- with `maxRegression`: neither the pass rate nor the overall score dropped more than that
+  versus the **baseline** — the suite's marked baseline, else its latest finished run on production;
+- every **`scoreThresholds`** entry is met (the mean of that scorer over the run's cases; a scorer
+  with no scores fails).
+
+**Async: "in verifica".** Suites take time, so a deploy through the gate is **pending**: the request
+answers at once (`202`, `status: "pending"`, the gate) and production keeps running its version;
+the gate's progress (cases done / planned, each suite's status) is saved and sent live as the
+`agent:gate` event (SSE), so the dashboard updates as it goes. When every run ends, the gate
+deploys (passed) or records the block. A pending verification can be **cancelled** (nothing is
+deployed). Only one deploy per agent is verified at a time (another version waits: `409`); the
+runs share the instance's limit of **two suite runs at a time**.
+
+**Rollbacks are never gated**: a rollback must always work. It stops a verification in flight (which
+would otherwise deploy over it).
+
+**Real tools.** The gate never runs a suite whose cases would use real tools (modes `none` /
+`model`, unmocked tools run for real, the CLI engine's own tools) unless the suite has
+`gate.allowRealTools` — which only an **admin** can turn on (a dashboard member, the owner's key,
+an MCP client with `polpo:admin`, Polpo). Without it such a required suite does not run and blocks
+the deploy ("not run: it uses real tools"): make it offline (mode `all` or `tools`) or let it.
+
+**Override.** An **admin** can deploy anyway with a **mandatory reason**: the deploy history records
+the override (who, when, the reason, and which gates had failed or were not verified). Others are
+refused (`403`). An override on a verification still running cancels its runs first; an override
+with no gate deploys without running the suites ("not verified").
+
+**Publish checks.** Suites with `gate.onPublish` also run when a version is **published** (not
+deployed): a non-blocking check (`trigger: "publish"`) whose result is shown on the version
+(✓ passed, ✗ failed) before anyone deploys it.
+
+**API updates that auto-deploy** (`PATCH /agents/{name}` without flags while
+`settings.agents.versioning.autoDeployApiUpdates` is on, MCP `polpo_agent_update`, Polpo's
+`update_agent`): the change is published, then deployed through the gate. When the gate blocks it,
+the update **stays published, not deployed**, and the response says so: `versioning.deployStatus`
+(`pending` / `blocked`), `versioning.gate` (with the failing gates), `versioning.warning` ("Published
+as 1.3.0 but not deployed: Blocked by suites: …"). `wait: true` waits for the verdict.
+
+Changes written **live** — an agent changing its own settings, skill assignment, Ink installs, a
+file edit — are recorded as versions deployed at once (docs/agent-versions.md) and are not gated:
+they already run. A gate left running when the server restarts is finished as errored (nothing
+deployed): deploy again.
+
+Each gate run is a normal suite run (`trigger: "deploy"` or `"publish"`, target the version) with
+`run.gate = { decision: "pass" | "fail" | "override", reason?, by?, gateId }`.
+
+| Surface | How |
+|---|---|
+| Dashboard | Agent page → **Versions**: the required suites ("Deploys are verified first by …"), the deploy being verified (progress bar, each suite, **Cancel**, **Deploy anyway…**), each version's gate badge (✓ Suites passed, ✗ Blocked by suites / Check failed, Verifying n/m, Override), the deploy history's badges (blocked deploys struck through, overrides with their reason) whose rows open what failed with **Open run**; the deploy confirmation says the suites run first; a blocked deploy opens the override dialog (reason required). **Suites** tab: **Required** badge on the suites that gate deploys, the editor's **Gate** view (required, minimum pass rate, max regression, score thresholds, on publish, real tools), runs marked "Deploy gate" / "Publish check" with their decision |
+| REST | `POST /agents/{name}/deploy { version, note?, override?: { reason }, wait? }` → `200` deployed (`status: "deployed"`, the entry with its `gate`), `202` pending (`status: "pending"`, `gate`), `409` `GATE_BLOCKED` (`data`/`details`: `{ status, gate, entry }`), `403` an override by a non-admin; `POST …/publish { deploy?, wait? }` (`deployStatus`, `gate`; without deploy, `check`: the publish checks); `GET /agents/{name}/deploy-gates[?version=&limit=]`, `GET …/deploy-gates/{id}[?wait=seconds]`, `POST …/deploy-gates/{id}/cancel`, `POST …/deploy-gates/{id}/override { reason, note? }`; `GET …/versions` (each version's `gate`, `state.gate.requiredSuites`, `state.gate.pending`); `GET …/deploys` (each entry's `gate`, blocked deploys); `PATCH /agents/{name} { …, wait? }` (`versioning.deployStatus`, `gate`, `warning`); event `agent:gate` |
+| MCP | `polpo_agent_deploy` (admin) returns the gate: waits up to ~50 s, then deployed, still pending (with its id) or **blocked** (which suites failed, why, the failed cases, the runs); `override_reason` deploys anyway (admins); `cancel_gate` stops a verification. `polpo_agent_deploy_gates` (`polpo:read`): the required suites and the gates (one with `id`, `wait`). `polpo_agent_publish`, `polpo_agent_update` say when a deploy is pending or blocked; `polpo_agent_versions` and `polpo_agent_deploys` show each version's and deploy's gate; `polpo_agent_suite_list` marks required suites; the **suite card** (`polpo_agent_suite_show`) shows the Required badge and the latest deploy gates (verifying, passed, blocked, override). `gate` in `polpo_agent_suite_save` (`allowRealTools` needs `polpo:admin`) |
+| Polpo's chat | `agent_deploy` (with `override_reason`, `cancel_gate`), `agent_deploy_gates`, `agent_suite_save` with `gate`, `update_agent` (says when the deploy is pending or blocked) |
+| SDK | `deployAgentVersion(name, version, note?, { override?, wait? })` → `AgentDeployOutcome` (a blocked deploy throws `PolpoApiError` with code `GATE_BLOCKED`), `getAgentDeployGates`, `getAgentDeployGate(name, id, { waitSeconds })`, `cancelAgentDeployGate`, `overrideAgentDeployGate`; React `useAgentDeployGates(name)` → `{ data, pending, cancel, override }` (live on `agent:gate`), `useAgentDeploys().deploy(version, note, { override })` |
+
 ## Later phases
 
 Reserved in the model now, built later (no migration needed):
 
 - **Phase 2 — evals**: built (see [Evals](#evals-scorers-baselines-trends)).
-- **Phase 3 — gates**: `suite.gate` (`required`, `minPassRate`, `maxRegression` versus production,
-  `scoreThresholds`); `run.trigger: "publish"` and `run.gate` (`pass` / `fail` / `override` with the
-  reason, in the deploy history).
+- **Phase 3 — gates**: built (see [CI gate](#ci-gate-required-suites-before-production)).
 - **Phase 4**: `mocks.cassette` (record / replay), `mocks.simulatedUser`, generated datasets
   (`dataset.source.kind: "generated"`), `suite.target` other than an agent (hosted MCP server,
   mission, team).

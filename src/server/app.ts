@@ -108,7 +108,7 @@ import { isMcpToolName, toolResultText } from "../mcp/tools.js";
 import { connectorLabel } from "../mcp/view.js";
 import { AgentTalk } from "./agent-talk.js";
 import { agentTesterFor } from "./agent-tests-host.js";
-import { agentSuiteRunnerFor } from "./agent-suites-host.js";
+import { agentDeployGatesFor, agentSuiteRunnerFor } from "./agent-suites-host.js";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
   SUITE_PLACEHOLDER_MODEL, applySuiteOverrides, currentSuiteCase, suiteCompleteLLM, suiteStreamLLM, suiteToolExecutor,
@@ -1442,6 +1442,21 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     return email ? `person:${email}` : "person:dashboard";
   };
 
+  /**
+   * An admin may override a deploy gate and let a gate run real tools: instance members have no
+   * roles (every member configures the instance) and an API key is the owner's; an MCP client got
+   * here only with polpo:admin (the MCP layer checks), Polpo's chat is admin; an agent never is.
+   */
+  const requestIsAdmin = (c: { req: { header: (name: string) => string | undefined } }): boolean => {
+    if (isTrustedApiCall(c.req.header(TRUSTED_API_CALL_HEADER))) {
+      const origin = currentEventOrigin();
+      if (origin?.source === "agent") return false;
+      // an MCP client's call carries the scopes it acted under
+      return !origin?.scopes || origin.scopes.includes("polpo:admin") || origin.scopes.includes("polpo");
+    }
+    return true;
+  };
+
   authed.route("/agents", agentRoutes(() => ({
     getAgents: () => o.getAgents(),
     addAgent: (agent: any, teamName?: string) => o.addAgent(agent, teamName),
@@ -1465,10 +1480,27 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     versions: {
       versioning: () => o.getAgentVersioning(),
       update: (name, updates, opts) => o.updateAgentVersioned(name, updates, opts),
-      deploy: (name, version, opts) => o.deployAgentVersion(name, version, opts),
+      // through the deploy gate: the agent's required suites run first (docs/agent-suites.md, "CI gate")
+      deploy: (name, version, req) => o.requestAgentDeploy(name, version, req),
       rollback: (name, opts) => o.rollbackAgentVersion(name, opts),
       autoDeploy: () => o.autoDeployApiUpdates(),
       actor: (c) => requestAuthor(c),
+      isAdmin: (c) => requestIsAdmin(c),
+      gates: {
+        list: (name, opts) => deployGates().list(name, opts),
+        get: (name, id) => deployGates().get(name, id),
+        cancel: (name, id, actor) => deployGates().cancel(name, id, actor),
+        override: (name, id, req) => deployGates().override(name, id, req),
+        versionStatuses: (name) => deployGates().versionStatuses(name),
+        pending: (name) => deployGates().pending(name),
+        attach: (name, entries) => deployGates().attach(name, entries),
+        published: (name, version, actor) => deployGates().published(name, version, actor),
+        wait: (name, id, ms) => deployGates().wait(name, id, ms),
+        outcome: (gate) => deployGates().outcome(gate),
+        required: async (name) => (await deployGates().requiredSuites(name)).map((s) => ({
+          id: s.id, name: s.name, onPublish: s.gate?.onPublish === true, allowRealTools: s.gate?.allowRealTools === true,
+        })),
+      },
       // publish / discard do not write the live agent: refresh live clients (deploys already do)
       changed: (name, what) => { if (what !== "deployed") void o.notifyAgentChanged(name); },
     },
@@ -1501,9 +1533,18 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       toYaml: (value) => stringifyYaml(value, { lineWidth: 0 }),
       fromYaml: (text) => parseYaml(text),
       actor: (c) => requestAuthor(c),
+      isAdmin: (c) => requestIsAdmin(c),
     },
   })));
   const agentSuites = () => agentSuiteRunnerFor({ orchestrator: o, completions: (req) => completionApp.request(req) });
+  const deployGates = () => agentDeployGatesFor({ orchestrator: o, completions: (req) => completionApp.request(req) });
+  // every deploy (dashboard, REST, MCP, Polpo's chat, API updates that auto-deploy) goes through the required suites
+  o.setAgentDeployGate({
+    applies: (name) => deployGates().applies(name),
+    request: (name, version, req) => deployGates().request(name, version, req),
+    published: (name, version, actor) => deployGates().published(name, version, actor),
+    rollingBack: (name, actor) => deployGates().rollingBack(name, actor),
+  });
   const agentTester = () => agentTesterFor({
     orchestrator: o,
     computerManager: () => computerDeps.manager(),

@@ -50,6 +50,7 @@ export interface PolpoEventMap {
   "agent:removed": { agentName: string; agents: AgentConfig[]; teams: Team[]; timestamp: string };
   /** An agent reviewed its conversations (learning): what it changed in its memory and own skills. */
   "agent:reflected": { agentName: string; trigger: "first" | "activity" | "daily" | "manual"; messages: number; summary: string; actions: string[]; timestamp: string };
+  "agent:gate": { agentName: string; gateId: string; version: string; status: import("./agent-suite-gates.js").DeployGateStatus; trigger: import("./agent-suite-gates.js").DeployGateTrigger; progress: { done: number; total: number }; summary: string; timestamp: string };
   "agent:learned": { agentName: string; messages: number; changes: { id: string; kind: "memory" | "skill-created" | "skill-updated"; target: string }[]; summary: string; timestamp: string };
   "team:created": { teamName: string; agents: AgentConfig[]; teams: Team[]; timestamp: string };
   "team:updated": { oldName?: string; teamName: string; agents: AgentConfig[]; teams: Team[]; timestamp: string };

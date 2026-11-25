@@ -24,7 +24,8 @@ function app(opts: { autoDeploy?: boolean } = {}) {
         const r = await versioning.update(name, updates, o);
         return { agent: agents.get(name), ...r };
       },
-      deploy: (name: string, version: string, o: { actor: string; note?: string }) => versioning.deploy(name, version, o),
+      // no deploy gate here: deployed at once (the gate: agent-deploy-gates.test.ts)
+      deploy: async (name: string, version: string, o: { actor: string; note?: string }) => ({ status: "deployed" as const, entry: await versioning.deploy(name, version, o), message: "" }),
       rollback: (name: string, o: { actor: string; note?: string; to?: string }) => versioning.rollback(name, o),
       autoDeploy: () => opts.autoDeploy ?? true,
       actor: () => "person:ada@example.com",

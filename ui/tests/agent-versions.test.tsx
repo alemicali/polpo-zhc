@@ -53,11 +53,13 @@ vi.mock("@polpo-ai/react", () => ({
     isLoading: false, error: null, refetch: async () => undefined, ...versionsApi,
   }),
   useAgentDeploys: () => ({ data: DEPLOYS, isLoading: false, error: null, refetch: async () => undefined, ...deploysApi }),
+  // no required suites: no deploy gates (ui/tests/agent-deploy-gates.test.tsx has them)
+  useAgentDeployGates: () => ({ data: [], pending: undefined, isLoading: false, error: null, refetch: async () => undefined, get: vi.fn(), cancel: vi.fn(), override: vi.fn() }),
 }));
 vi.mock("../src/components/agents/agent-detail-context", () => ({
   useAgentDetail: () => ({ meta: { agentName: "writer" }, actions: { refetch: async () => undefined } }),
 }));
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
 
 import { AgentVersionsTab, AgentVersionBadges } from "../src/components/agents/agent-versions-tab";
 import { actorLabel } from "../src/lib/agent-versions";
