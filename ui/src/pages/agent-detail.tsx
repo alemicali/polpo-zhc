@@ -23,6 +23,7 @@ import {
   RefreshCw,
   ChevronRight,
   Monitor,
+  FlaskConical,
 } from "lucide-react";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { AgentModelWithEngine } from "@/components/shared/model-with-engine";
@@ -54,6 +55,7 @@ import { AgentDriveTab } from "@/components/agents/agent-drive-tab";
 import { AgentTasksTab } from "@/components/agents/agent-tasks-tab";
 import { AgentMemoryTab } from "@/components/agents/agent-memory-tab";
 import { AgentVersionsTab, AgentVersionBadges } from "@/components/agents/agent-versions-tab";
+import { AgentTestsTab } from "@/components/agents/agent-tests-tab";
 
 // ── Breadcrumb ──
 
@@ -185,6 +187,10 @@ function AgentDetailContent() {
               {agent.versioning?.draft.hasChanges && <span className="h-1.5 w-1.5 rounded-pill bg-warning" aria-label="Draft has changes" />}
             </span>
           </TabsTrigger>
+          <TabsTrigger value="tests">
+            <FlaskConical className="h-3.5 w-3.5 mr-1" />
+            Tests
+          </TabsTrigger>
           <TabsTrigger value="tasks">
             Tasks
             {taskStats.total > 0 && (
@@ -234,6 +240,10 @@ function AgentDetailContent() {
         </TabsContent>
         <TabsContent value="config" className="mt-4 flex-1 min-h-0">
           <AgentConfigTab />
+        </TabsContent>
+
+        <TabsContent value="tests" className="mt-4 flex-1 min-h-0">
+          <AgentTestsTab />
         </TabsContent>
 
         <TabsContent value="tasks" className="mt-4 flex-1 min-h-0">

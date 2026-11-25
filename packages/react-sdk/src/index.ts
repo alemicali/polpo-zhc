@@ -41,6 +41,8 @@ export { useSkillVersions } from "./hooks/use-skill-versions.js";
 export type { UseSkillVersionsReturn } from "./hooks/use-skill-versions.js";
 export { useAgentVersions, useAgentDeploys } from "./hooks/use-agent-versions.js";
 export type { UseAgentVersionsReturn, UseAgentDeploysReturn } from "./hooks/use-agent-versions.js";
+export { useAgentTests } from "./hooks/use-agent-tests.js";
+export type { UseAgentTestsReturn } from "./hooks/use-agent-tests.js";
 export { useMcpServers, useMcpServer } from "./hooks/use-mcp-servers.js";
 export type { UseMcpServersReturn, UseMcpServerReturn } from "./hooks/use-mcp-servers.js";
 export { useSkillBundleUpload } from "./hooks/use-skill-bundle-upload.js";
@@ -258,6 +260,7 @@ export type {
   AgentVersionList,
   AgentVersionDiff,
   AgentDeployEntry,
+  AgentTestCheckId, AgentTestStatus, AgentTestFixAction, AgentTestItem, AgentTestCheckResult, AgentTestRun, AgentTestRunRequest,
   AgentPublishResult,
   McpSecretRef, McpServerAuth, McpServerTool, McpServerSpec, McpServerSummary, McpHostedServer, McpServerTemplateInfo, McpServerTestCase,
   McpServerVersionInfo, McpServerDeploy, McpServerDiff, McpToolTestResult, McpServerCallLog, McpPendingCall, McpServerGenerateRequest, McpServerGenerateResult,

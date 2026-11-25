@@ -7,7 +7,7 @@ import { z } from "zod";
 import { agentEffectiveModel, agentEngineIdOf, modelWithEngineText } from "@polpo-ai/core/engine-label";
 import { MAX_LOGO_BYTES, fetchPublicImage, sniffImage } from "./config.js";
 import {
-  DESTRUCTIVE, READ, UPDATE, WRITE, apiError, apiGet, apiSend, confirmParam, enc, fail, looseObject, ok, qs, short,
+  DESTRUCTIVE, READ, UPDATE, WRITE, apiError, apiGet, apiSend, confirmParam, dashboardLink, enc, fail, hasScope, looseObject, ok, qs, short,
   type McpDeps, type Register,
 } from "./kit.js";
 
@@ -422,6 +422,63 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
     const list = r.data as Array<Parameters<typeof deployLine>[0]>;
     return ok(list.length ? [`${name}: ${list.length} deploy(s), newest first`, ...list.map(deployLine)].join("\n") : `${name} has no deploys yet.`,
       { deploys: list as unknown as Array<Record<string, unknown>> });
+  });
+
+  type TestItem = { label: string; status: string; detail?: string; fix?: { label: string; href?: string; action?: { type: string; connector?: string } } };
+  type TestRun = { id: string; agent: string; target: string; version?: string; status: string; startedAt: string; checks: Array<{ id: string; title: string; status: string; summary: string; items: TestItem[] }> };
+  const MARK: Record<string, string> = { pass: "✓", warn: "⚠", fail: "✗", skip: "–" };
+  const isAdmin = () => !deps.principal || hasScope(deps.principal, "polpo:admin");
+  const runText = (r: TestRun) => [
+    `${MARK[r.status] ?? r.status} ${r.agent}${r.target === "production" ? (r.version ? `@${r.version} (production)` : "") : `@${r.target}`} · ${r.startedAt.slice(0, 16).replace("T", " ")} [${r.id}]`,
+    ...r.checks.flatMap((ch) => [
+      `${MARK[ch.status] ?? ch.status} ${ch.title}: ${ch.summary}`,
+      ...ch.items.filter((i) => i.status === "fail" || i.status === "warn").map((i) => `   ${MARK[i.status]} ${i.label}${i.detail ? `: ${short(i.detail, 300)}` : ""}`
+        + `${i.fix?.action?.type === "grant-connector-access" ? ` → fix: polpo_agent_test with fix_connector "${i.fix.action.connector}"` : i.fix?.href ? ` → ${dashboardLink(deps, i.fix.href)}` : ""}`),
+    ]),
+  ].join("\n");
+
+  tool("team", "polpo_agent_test", {
+    title: "Test an agent",
+    description: "Check everything an agent has at its disposal and say what works: engine and model (a minimal real request, a few tokens), tools "
+      + "(allowedTools resolve to real tools), connectors (connected, signed in, tools listed; a connector named in allowedTools whose access leaves the agent out), "
+      + "vault references (names only), skills (load, pinned versions), computer and sandbox (a stopped machine is not started unless start_computer), "
+      + "channels routed to it, versioning (stale draft). Each check: ✓ / ⚠ / ✗ with details and a fix. "
+      + "checks: some of engine, tools, connectors, vault, skills, computer, channels, versioning, smoke (default: all but smoke). "
+      + "smoke runs a tiny real chat turn that calls one harmless tool (costs tokens; needs the admin scope). target: production (default), draft or a version (1.2.0). "
+      + "history: true lists past runs instead. fix_connector: grant that connector's access to the agent (the one-click fix; needs the admin scope).",
+    inputSchema: {
+      name: z.string().min(1).describe("The agent's name (polpo_agents_list)"),
+      checks: z.array(z.enum(["engine", "tools", "connectors", "vault", "skills", "computer", "channels", "versioning", "smoke"])).optional().describe("Which checks (default all but smoke)"),
+      target: z.string().optional().describe("production (default), draft, or a published version like 1.2.0"),
+      start_computer: z.boolean().optional().describe("Start a stopped remote computer to test it (it may cost: only when the person asked)"),
+      smoke_prompt: z.string().max(4000).optional().describe("The smoke run's message (default: call register_outcome once)"),
+      history: z.boolean().optional().describe("List the agent's past test runs instead of running"),
+      fix_connector: z.string().optional().describe("Apply the fix: grant this connector's access to the agent"),
+    },
+    outputSchema: { run: looseObject.optional(), runs: z.array(looseObject).optional(), fixed: z.string().optional() },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, async ({ name, checks, target, start_computer, smoke_prompt, history, fix_connector }) => {
+    if (fix_connector) {
+      if (!isAdmin()) return fail("Granting a connector's access changes the instance: it needs the admin scope (polpo:admin). The person can click the fix in the agent's Tests tab.");
+      const r = await apiSend(deps, "POST", `/agents/${enc(name)}/tests/fix`, { type: "grant-connector-access", connector: fix_connector });
+      if (!r.ok) return r.status === 404 ? fail(r.error ?? `There is no agent "${name}" or connector "${fix_connector}".`) : apiError(r, `Granting ${fix_connector} to ${name}`);
+      const m = (r.data as { message: string }).message;
+      return ok(`${m}. Run polpo_agent_test again to check.`, { fixed: m });
+    }
+    if (history) {
+      const r = await apiGet(deps, `/agents/${enc(name)}/tests${qs({ limit: "20" })}`);
+      if (!r.ok) return r.status === 404 ? notFoundAgent(name) : apiError(r, `Reading ${name}'s tests`);
+      const runs = r.data as TestRun[];
+      return ok(runs.length ? runs.map((x) => `${MARK[x.status] ?? x.status} ${x.startedAt.slice(0, 16).replace("T", " ")} · ${x.target}${x.version ? ` (${x.version})` : ""} · ${x.checks.map((c) => `${c.id} ${MARK[c.status] ?? c.status}`).join(", ")} [${x.id}]`).join("\n") : `${name} has not been tested yet.`,
+        { runs: runs as unknown as Array<Record<string, unknown>> });
+    }
+    if (checks?.includes("smoke") && !isAdmin()) return fail("The smoke run is a real chat turn with the agent (it costs tokens): it needs the admin scope (polpo:admin). Run the other checks without it.");
+    const r = await apiSend(deps, "POST", `/agents/${enc(name)}/tests`, {
+      ...(checks?.length ? { checks } : {}), ...(target ? { target } : {}), ...(start_computer ? { startComputer: true } : {}), ...(smoke_prompt ? { smokePrompt: smoke_prompt } : {}),
+    });
+    if (!r.ok) return r.status === 404 ? fail(r.error ?? `There is no agent "${name}" (or no such version).`) : apiError(r, `Testing ${name}`);
+    const run = r.data as TestRun;
+    return ok(runText(run), { run: run as unknown as Record<string, unknown> });
   });
 
   tool("team", "polpo_agent_delete", {
