@@ -5,13 +5,14 @@
  * answered each call), then approvals, the finish reason and the runner's notes.
  */
 import { useState } from "react";
-import { AlertOctagon, Ban, CheckCircle2, ChevronDown, ChevronRight, CircleSlash, Loader2, MinusCircle, XCircle } from "lucide-react";
-import { useAgentSuiteRun, type SuiteCaseResult, type SuiteCaseStatus, type SuiteRunStatus } from "@polpo-ai/react";
+import { toast } from "sonner";
+import { AlertOctagon, ArrowDownRight, ArrowUpRight, Ban, CheckCircle2, ChevronDown, ChevronRight, CircleSlash, Loader2, MinusCircle, Sparkles, Star, XCircle } from "lucide-react";
+import { useAgentSuiteRun, type SuiteCaseDelta, type SuiteCaseResult, type SuiteCaseStatus, type SuiteRun, type SuiteRunStatus, type SuiteScoreResult } from "@polpo-ai/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Message } from "@/components/ai-elements/message";
+import { Message, MessageResponse } from "@/components/ai-elements/message";
 import { AssistantSegments, ChatAssistantAvatar, ChatUserBubble } from "@/components/chat/chat-message-parts";
-import { formatMs, formatUsd, runIsLive, runTargetLabel, suiteModeLabel, traceAsChat } from "@/lib/agent-suites";
+import { formatDelta, formatMs, formatPointsDelta, formatScore, formatUsd, runIsLive, runTargetLabel, suiteModeLabel, traceAsChat } from "@/lib/agent-suites";
 import { cn } from "@/lib/utils";
 
 const STATUS: Record<SuiteRunStatus | SuiteCaseStatus, { icon: typeof CheckCircle2; className: string; label: string }> = {
@@ -64,20 +65,121 @@ function CaseTrace({ result, agentName }: { result: SuiteCaseResult; agentName: 
   );
 }
 
-function CaseRow({ result, agentName }: { result: SuiteCaseResult; agentName: string }) {
+/** A regression (▼) or an improvement (▲) versus the baseline. */
+function ChangeBadge({ change }: { change?: string }) {
+  if (change === "regressed") return <Badge variant="outline" className="gap-0.5 border-destructive/40 text-micro text-destructive" data-change="regressed"><ArrowDownRight className="h-3 w-3" />Regressed</Badge>;
+  if (change === "improved") return <Badge variant="outline" className="gap-0.5 border-success/40 text-micro text-success" data-change="improved"><ArrowUpRight className="h-3 w-3" />Improved</Badge>;
+  if (change === "new") return <Badge variant="outline" className="text-micro" data-change="new">New</Badge>;
+  return null;
+}
+
+function DeltaText({ value, points }: { value?: number; points?: boolean }) {
+  if (value === undefined) return null;
+  return (
+    <span className={cn("font-mono text-micro", value > 0 ? "text-success" : value < 0 ? "text-destructive" : "text-muted-foreground")}>
+      {points ? formatPointsDelta(value) : formatDelta(value)}
+    </span>
+  );
+}
+
+/** A case's scores: score vs threshold, why, and the LLM judge's criteria with its reasoning. */
+function CaseScores({ scores }: { scores: SuiteScoreResult[] }) {
+  return (
+    <ul className="space-y-1" aria-label="Scores">
+      {scores.map((x) => (
+        <li key={x.id} className="text-xs" data-testid="suite-score" data-passed={x.passed} data-scorer={x.id}>
+          <span className="flex min-w-0 items-start gap-2">
+            {x.passed ? <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" /> : <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />}
+            <span className="min-w-0 break-words">
+              <span className="font-mono">{formatScore(x.score)}</span>
+              <span className="text-muted-foreground"> / {x.threshold} · </span>
+              <span className="font-medium">{x.description}</span>
+              {(x.error ?? x.reason) && <span className="text-muted-foreground"> — {x.error ?? x.reason}</span>}
+            </span>
+          </span>
+          {x.judge?.criteria.length ? (
+            <ul className="mt-1 space-y-0.5 pl-6 text-caption text-muted-foreground" data-testid="suite-judge">
+              {x.judge.criteria.map((c) => <li key={c.name}><span className="font-medium text-foreground">{c.name} {c.score}/5</span>{c.weight !== 1 ? ` (×${c.weight})` : ""}: {c.reasoning}</li>)}
+              {x.judge.model && <li className="text-micro">judge {x.judge.model}{x.judge.costUsd !== undefined ? ` · ${formatUsd(x.judge.costUsd)}` : ""}</li>}
+            </ul>
+          ) : null}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** The run's evals: scores per scorer with deltas, the baseline comparison, flaky cases. */
+function EvalSummary({ run }: { run: SuiteRun }) {
+  const a = run.aggregates;
+  const b = run.baseline;
+  if (!a?.scorers.length && !b && !(a && a.repetitions > 1)) return null;
+  const deltas = new Map((b?.scorers ?? []).map((x) => [x.id, x]));
+  return (
+    <div className="space-y-2 border-b border-border/40 px-4 py-3" data-testid="suite-eval-summary">
+      {b && (
+        <div className={cn("flex flex-wrap items-center gap-x-3 gap-y-1 rounded-control px-3 py-2 text-caption", b.regressions ? "bg-destructive/10" : "bg-muted/40")} data-testid="suite-baseline-compare">
+          <span className="text-muted-foreground">vs baseline <span className="font-mono">{b.runId}</span> ({b.source}{b.baselineVersion ? `, v${b.baselineVersion}` : b.baselineTarget ? `, ${b.baselineTarget}` : ""})</span>
+          <span>pass rate <DeltaText value={b.passRateDelta} points /></span>
+          {b.scoreDelta !== undefined && <span>score <DeltaText value={b.scoreDelta} /></span>}
+          <span>cost <span className={cn("font-mono text-micro", b.costDelta > 0 ? "text-warning" : "text-muted-foreground")}>{b.costDelta >= 0 ? "+" : "−"}{formatUsd(Math.abs(b.costDelta))}</span></span>
+          {b.regressions > 0 && <Badge variant="outline" className="border-destructive/40 text-micro text-destructive">{b.regressions} regression(s)</Badge>}
+          {b.improvements > 0 && <Badge variant="outline" className="border-success/40 text-micro text-success">{b.improvements} improvement(s)</Badge>}
+          {!b.regressions && !b.improvements && <span className="text-muted-foreground">no change beyond ±{b.tolerance}</span>}
+        </div>
+      )}
+      {a && a.scorers.length > 0 && (
+        <table className="w-full text-caption" data-testid="suite-scorer-table">
+          <thead>
+            <tr className="text-left text-muted-foreground">
+              <th className="py-1 font-medium">Scorer</th>
+              <th className="py-1 font-medium">Mean</th>
+              <th className="hidden py-1 font-medium sm:table-cell">Median</th>
+              <th className="hidden py-1 font-medium sm:table-cell">p10</th>
+              <th className="py-1 font-medium">Pass</th>
+              <th className="py-1 font-medium">vs baseline</th>
+            </tr>
+          </thead>
+          <tbody>
+            {a.scorers.map((x) => (
+              <tr key={x.id} className="border-t border-border/30" data-scorer={x.id}>
+                <td className="py-1"><span className="font-mono">{x.id}</span> <span className="text-muted-foreground">{x.label}</span></td>
+                <td className="py-1 font-mono">{formatScore(x.mean)}</td>
+                <td className="hidden py-1 font-mono sm:table-cell">{formatScore(x.median)}</td>
+                <td className="hidden py-1 font-mono sm:table-cell">{formatScore(x.p10)}</td>
+                <td className="py-1">{Math.round(x.passRate * 100)}%</td>
+                <td className="py-1"><DeltaText value={deltas.get(x.id)?.delta} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {a && a.repetitions > 1 && (
+        <p className="text-caption text-muted-foreground" data-testid="suite-flaky">
+          {a.repetitions} attempts per case · {a.flaky.length ? <span className="text-warning">flaky: {a.flaky.join(", ")}</span> : "no flaky case"}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function CaseRow({ result, agentName, delta }: { result: SuiteCaseResult; agentName: string; delta?: SuiteCaseDelta }) {
   const [open, setOpen] = useState(result.status === "failed" || result.status === "errored");
-  const failed = result.assertions.filter((a) => !a.passed);
+  const failed = [...result.assertions.filter((a) => !a.passed).map((a) => a.description), ...(result.scores ?? []).filter((x) => !x.passed).map((x) => `${x.id} ${formatScore(x.score)} < ${x.threshold}`)];
   return (
     <li className="border-b border-border/40 last:border-b-0" data-testid="suite-case-result" data-status={result.status}>
       <button type="button" className="flex w-full min-w-0 items-center gap-3 px-4 py-2 text-left hover:bg-accent/40" onClick={() => setOpen(!open)} aria-expanded={open}>
         {open ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
         <SuiteStatusIcon status={result.status} />
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-xs font-medium">{result.caseName}{result.row ? <span className="text-muted-foreground"> · row {result.row.index + 1}</span> : null}</span>
+          <span className="block truncate text-xs font-medium">{result.caseName}{result.row ? <span className="text-muted-foreground"> · row {result.row.index + 1}</span> : null}{result.attempt ? <span className="text-muted-foreground"> · attempt {result.attempt}</span> : null}</span>
           <span className="block truncate text-caption text-muted-foreground">
-            {result.error ?? (failed.length ? failed.map((a) => a.description).join(" · ") : `${result.assertions.length} assertion(s) passed`)}
+            {result.error ?? (failed.length ? failed.join(" · ") : `${result.assertions.length} assertion(s)${result.scores?.length ? `, ${result.scores.length} scorer(s)` : ""} passed`)}
+            {delta && delta.change !== "unchanged" && delta.reasons.length ? ` · ${delta.reasons.join("; ")}` : ""}
           </span>
         </span>
+        <ChangeBadge change={delta?.change} />
+        {result.score !== undefined && <span className="shrink-0 font-mono text-caption" data-testid="suite-case-score">{formatScore(result.score)}</span>}
         <Badge variant="outline" className="hidden text-micro sm:inline-flex">{suiteModeLabel(result.mode)}</Badge>
         <span className="shrink-0 text-caption text-muted-foreground">{formatMs(result.durationMs)} · {formatUsd(result.costUsd)}</span>
       </button>
@@ -103,6 +205,7 @@ function CaseRow({ result, agentName }: { result: SuiteCaseResult; agentName: st
               ))}
             </ul>
           )}
+          {result.scores && result.scores.length > 0 && <CaseScores scores={result.scores} />}
           <CaseTrace result={result} agentName={agentName} />
         </div>
       )}
@@ -110,24 +213,57 @@ function CaseRow({ result, agentName }: { result: SuiteCaseResult; agentName: st
   );
 }
 
-export function AgentSuiteRunReport({ agentName, runId, onCancel, onClose }: { agentName: string; runId: string; onCancel: (runId: string) => void; onClose: () => void }) {
-  const { run, isLoading, error } = useAgentSuiteRun(agentName, runId);
+export function AgentSuiteRunReport({ agentName, runId, onCancel, onClose, onSetBaseline, onReview }: {
+  agentName: string;
+  runId: string;
+  onCancel: (runId: string) => void;
+  onClose: () => void;
+  /** Mark (runId) or clear (null) the suite's baseline. */
+  onSetBaseline?: (suiteId: string, runId: string | null) => Promise<void>;
+  /** "Explain this run": an AI review stored on the run. */
+  onReview?: (runId: string) => Promise<unknown>;
+}) {
+  const { run, isLoading, error, refetch } = useAgentSuiteRun(agentName, runId);
+  const [busy, setBusy] = useState<"baseline" | "review" | null>(null);
   if (isLoading) return <div className="flex justify-center py-6"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>;
   if (error || !run) return <p className="px-4 py-3 text-caption text-destructive">{error?.message ?? "Run not found"}</p>;
   const s = run.stats;
   const pending = run.planned.length - run.results.length;
+  const finished = !runIsLive(run) && run.status !== "cancelled";
+  const deltas = new Map((run.baseline?.cases ?? []).map((c) => [c.key, c]));
+  const act = async (kind: "baseline" | "review", fn: () => Promise<unknown>) => {
+    setBusy(kind);
+    try { await fn(); await refetch(); } catch (e) { toast.error((e as Error).message); } finally { setBusy(null); }
+  };
   return (
     <section aria-label="Run report" className="rounded-lg border border-border/40 bg-card/80" data-testid="suite-run-report" data-status={run.status}>
       <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border/40 px-4 py-3">
         <SuiteStatusIcon status={run.status} />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-xs font-medium">{run.suiteName} · {runTargetLabel(run)}{run.variant.label ? ` · ${run.variant.label}` : ""}</p>
+          <p className="flex min-w-0 items-center gap-1.5 truncate text-xs font-medium">
+            {run.suiteName} · {runTargetLabel(run)}{run.variant.label ? ` · ${run.variant.label}` : ""}
+            {run.isBaseline && <Badge variant="outline" className="gap-0.5 text-micro" data-testid="suite-run-is-baseline"><Star className="h-3 w-3" />Baseline</Badge>}
+          </p>
           <p className="text-caption text-muted-foreground">
             {s.passed}/{s.total - s.skipped} passed{s.failed ? ` · ${s.failed} failed` : ""}{s.errored ? ` · ${s.errored} errored` : ""}{s.skipped ? ` · ${s.skipped} skipped` : ""}
+            {run.aggregates?.score !== undefined ? ` · score ${formatScore(run.aggregates.score)}` : ""}
             {" · "}{formatUsd(s.costUsd)} · {formatMs(s.durationMs)} · {s.inputTokens + s.outputTokens} tokens{pending > 0 && runIsLive(run) ? ` · ${pending} to go` : ""}
           </p>
         </div>
         {runIsLive(run) && <Button variant="outline" size="sm" onClick={() => onCancel(run.id)} data-testid="suite-run-cancel">Cancel</Button>}
+        {finished && onSetBaseline && (
+          <Button variant={run.isBaseline ? "secondary" : "outline"} size="sm" disabled={busy !== null} aria-pressed={!!run.isBaseline} data-testid="suite-run-baseline"
+            onClick={() => void act("baseline", () => onSetBaseline(run.suiteId, run.isBaseline ? null : run.id))}>
+            {busy === "baseline" ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Star className="mr-1 h-3.5 w-3.5" />}
+            {run.isBaseline ? "Baseline" : "Mark as baseline"}
+          </Button>
+        )}
+        {finished && onReview && (
+          <Button variant="outline" size="sm" disabled={busy !== null} data-testid="suite-run-review" onClick={() => void act("review", () => onReview(run.id))}>
+            {busy === "review" ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Sparkles className="mr-1 h-3.5 w-3.5" />}
+            {run.review ? "Explain again" : "Explain this run"}
+          </Button>
+        )}
         <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
       </header>
       {(run.notes.length > 0 || run.error) && (
@@ -136,8 +272,17 @@ export function AgentSuiteRunReport({ agentName, runId, onCancel, onClose }: { a
           {run.notes.map((n, i) => <li key={i}>{n}</li>)}
         </ul>
       )}
+      <EvalSummary run={run} />
+      {run.review && (
+        <div className="space-y-1 border-b border-border/40 px-4 py-3" data-testid="suite-run-review-text">
+          <p className="flex items-center gap-1.5 text-micro font-medium uppercase tracking-label text-muted-foreground">
+            <Sparkles className="h-3 w-3" /> AI review{run.review.model ? ` · ${run.review.model}` : ""}
+          </p>
+          <div className="text-xs"><MessageResponse>{run.review.text}</MessageResponse></div>
+        </div>
+      )}
       <ul>
-        {run.results.map((r) => <CaseRow key={r.key} result={r} agentName={agentName} />)}
+        {run.results.map((r) => <CaseRow key={r.key} result={r} agentName={agentName} delta={deltas.get(r.key.replace(/~\d+$/, ""))} />)}
       </ul>
     </section>
   );

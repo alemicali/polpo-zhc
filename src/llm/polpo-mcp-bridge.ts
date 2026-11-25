@@ -184,6 +184,10 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_agent_suite_delete", name: "agent_suite_delete", group: "agent-versions" },
   { mcp: "polpo_agent_suite_run", name: "agent_suite_run", group: "agent-versions" },
   { mcp: "polpo_agent_suite_run_get", name: "agent_suite_run_get", group: "agent-versions" },
+  // evals: trends, baselines, "explain this run"
+  { mcp: "polpo_agent_suite_trend", name: "agent_suite_trend", group: "agent-versions" },
+  { mcp: "polpo_agent_suite_baseline", name: "agent_suite_baseline", group: "agent-versions" },
+  { mcp: "polpo_agent_suite_review", name: "agent_suite_review", group: "agent-versions" },
   // Large artifact contents: upload from a public URL, a file of the instance or base64 parts, then create or replace
   { mcp: "polpo_artifact_upload_prepare", name: "artifact_upload_prepare", group: "artifact-uploads" },
   { mcp: "polpo_artifact_upload_finalize", name: "artifact_upload_finalize", group: "artifact-uploads" },
@@ -214,6 +218,8 @@ export const MCP_EQUIVALENTS: Record<string, string> = {
   polpo_mission_get: "get_mission",
   // the mission card (an MCP App): get_mission has the same (cost against the budget, tasks)
   polpo_mission_show: "get_mission",
+  // the agent suite card (an MCP App): agent_suite_list, agent_suite_run_get and agent_suite_trend have the same
+  polpo_agent_suite_show: "agent_suite_run_get",
   polpo_mission_create: "create_mission",
   polpo_mission_update: "update_mission",
   polpo_mission_run: "execute_mission",

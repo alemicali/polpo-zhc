@@ -23,6 +23,7 @@
  * surface shares these shapes (REST, MCP, Polpo's chat, the SDK, the dashboard).
  */
 import { unifiedLineDiff } from "./agent-versions.js";
+import type { SuiteBaselineComparison, SuiteRunAggregates, SuiteRunReview } from "./agent-suite-evals.js";
 
 // ── Modes ────────────────────────────────────────────────────────────
 
@@ -199,21 +200,85 @@ export const SUITE_ASSERTION_TYPES: readonly SuiteAssertionType[] = [
   "approval_requested", "text_contains", "text_not_contains", "text_regex", "max_turns", "max_cost", "max_duration",
 ];
 
-/** Phase 2 (reserved): a score 0..1 with a threshold. An eval is a case with scorers. */
-export type SuiteScorer = {
+/**
+ * What a scorer reads: the final reply (default), the reply parsed as JSON, a tool call's arguments
+ * or result, or the arguments of a registered outcome — optionally narrowed by a `path`
+ * (`recipient.country_code`, `items[0].quantity`, `$.rate`).
+ */
+export type ScorerSource = "reply" | "reply_json" | "tool_args" | "tool_result" | "outcome";
+export const SCORER_SOURCES: readonly ScorerSource[] = ["reply", "reply_json", "tool_args", "tool_result", "outcome"];
+
+/** One criterion of an LLM judge (G-Eval style): scored 1–5 by the judge, weighted. */
+export interface JudgeCriterion {
+  name: string;
+  description: string;
+  /** Relative weight (default 1). */
+  weight?: number;
+}
+
+interface ScorerBase {
+  /** Stable id: aggregates, baselines and (phase 3) gate thresholds refer to it. Made from the type when missing. */
   id?: string;
   label?: string;
-  /** Pass when the score is at least this (0..1). */
+  /** Pass when the score is at least this (0..1; default: 1 for the deterministic scorers, 0.8 similarity, 0.6 llm_judge). */
   threshold?: number;
+  /** Weight in the case's overall score (default 1). */
   weight?: number;
-} & (
-  | { type: "exact"; expected: string; caseSensitive?: boolean }
-  | { type: "numeric"; expected: number | string; tolerance?: number; extract?: string }
-  | { type: "similarity"; expected: string }
-  | { type: "llm_judge"; rubric: string; model?: string }
-  | { type: "custom"; code: string }
+  /** What the scorer reads (default reply); exact, numeric, contains_*, regex, similarity, json_schema. */
+  from?: ScorerSource;
+  /** tool_args / tool_result: the tool (name or glob). */
+  tool?: string;
+  /** tool_args / tool_result / outcome: which call (default last). */
+  which?: "first" | "last";
+  /** A path into the value read (dots and [n]; a leading $. is allowed). */
+  path?: string;
+}
+
+/**
+ * Phase 2 — a scorer: a score 0..1, pass / fail against a threshold, an explanation. A case with
+ * scorers is an eval; `expected` values may come from the dataset (`{{row.expected}}`).
+ */
+export type SuiteScorer = ScorerBase & (
+  /** The value equals `expected` (text trimmed, case-insensitive unless caseSensitive; objects deeply). */
+  | { type: "exact"; expected: unknown; caseSensitive?: boolean }
+  /** A number (the value, or the first number in the text, or `extract`'s first group) within `tolerance` of `expected` (absolute, or a fraction with relative). */
+  | { type: "numeric"; expected: number | string; tolerance?: number; relative?: boolean; extract?: string }
+  /** contains_all: the share of `values` found; contains_any: 1 when any is found. */
+  | { type: "contains_all"; values: string[]; caseSensitive?: boolean }
+  | { type: "contains_any"; values: string[]; caseSensitive?: boolean }
+  | { type: "regex"; pattern: string; flags?: string }
+  /** Normalized string similarity (lowercase, punctuation and spaces folded): levenshtein (default) or tokens (Dice of words). */
+  | { type: "similarity"; expected: string; method?: "levenshtein" | "tokens" }
+  /** The value (reply_json by default) is valid against a JSON Schema. */
+  | { type: "json_schema"; schema: Record<string, unknown> }
+  /** The tools called match `expected` (names or globs), with partial credit: exact sequence, in order (extra calls allowed), or any order. */
+  | { type: "tool_trajectory"; expected: string[]; order?: "exact" | "in_order" | "any" }
+  /** 1 within the target, then target / actual. */
+  | { type: "cost"; maxUsd: number }
+  | { type: "latency"; maxMs: number }
+  /** An LLM judge (G-Eval): the rubric and weighted criteria scored 1–5 with reasoning; `expected` is an optional reference answer. */
+  | { type: "llm_judge"; rubric: string; criteria?: JudgeCriterion[]; expected?: string; model?: string }
+  /** A JS function body run in the sandboxed code worker: receives { reply, toolCalls, trace, row, input, expected } and returns a number 0..1, a boolean, or { score, reason }. */
+  | { type: "custom"; code: string; expected?: unknown; timeoutMs?: number }
 );
-export const SUITE_SCORER_TYPES = ["exact", "numeric", "similarity", "llm_judge", "custom"] as const;
+export type SuiteScorerType = SuiteScorer["type"];
+export const SUITE_SCORER_TYPES: readonly SuiteScorerType[] = [
+  "exact", "numeric", "contains_all", "contains_any", "regex", "similarity", "json_schema", "tool_trajectory", "cost", "latency", "llm_judge", "custom",
+];
+
+/** Eval settings of a suite (phase 2). */
+export interface SuiteEvalSettings {
+  /** The LLM judge's model (default: the orchestrator's effective model). */
+  judgeModel?: string;
+  /** Run every case this many times (1–10): mean, stddev and a flakiness flag per case. */
+  repetitions?: number;
+  /** A score or pass-rate change within this (0..1, default 0.05) is not a regression or an improvement. */
+  regressionTolerance?: number;
+  /** A case whose attempts' scores vary more than this (stddev, default 0.1) — or that both passed and failed — is flaky. */
+  flakyStddev?: number;
+  /** The baseline when none is marked: the previous finished run (default), the latest run on production, or none. */
+  baseline?: "previous" | "production" | "none";
+}
 
 export interface CaseBudgets {
   /** Model turns (LLM calls) before the case is stopped. */
@@ -234,7 +299,7 @@ export interface SuiteCase {
   /** Merged over the suite's mocks (the case's tool mocks are tried first; its model mock wins). */
   mocks?: SuiteMocks;
   assertions: SuiteAssertion[];
-  /** Phase 2 (reserved). */
+  /** Scorers (evals): with the suite's default scorers (a case scorer with the same id replaces it). */
   scorers?: SuiteScorer[];
   /** A dataset id: the case runs once per row, with {{row.column}} templated. */
   dataset?: string;
@@ -289,6 +354,10 @@ export interface AgentSuite {
   budgets?: CaseBudgets;
   /** Cases run at once (1–4, default 1). */
   concurrency?: number;
+  /** Scorers every case gets (a case scorer with the same id replaces one). */
+  scorers?: SuiteScorer[];
+  /** Eval settings: judge model, repetitions, regression tolerance, baseline policy. */
+  evals?: SuiteEvalSettings;
   /** Phase 3 (reserved). */
   gate?: SuiteGate;
   tags?: string[];
@@ -306,6 +375,8 @@ export const SUITE_LIMITS = {
   toolMocks: 200,
   scriptedTurns: 50,
   assertions: 50,
+  scorers: 20,
+  maxRepetitions: 10,
   maxConcurrency: 4,
   defaultMaxTurns: 20,
   defaultMaxDurationMs: 300_000,
@@ -358,6 +429,12 @@ export interface SuiteRunRequest {
   trigger?: SuiteRunTrigger;
   /** Wait for the run to finish (default: return it running). */
   wait?: boolean;
+  /** Run every case this many times (1–10; default the suite's evals.repetitions, 1). */
+  repetitions?: number;
+  /** Compare with this run instead of the suite's baseline. */
+  baselineRunId?: string;
+  /** Overrides the suite's evals.regressionTolerance for this run's comparison. */
+  regressionTolerance?: number;
 }
 
 export type SuiteRunStatus = "queued" | "running" | "passed" | "failed" | "errored" | "cancelled";
@@ -377,12 +454,25 @@ export interface SuiteAssertionResult {
   diff?: string;
 }
 
-/** Phase 2 (reserved). */
+/** A scorer's result on one case: the score 0..1, pass / fail against the threshold, why. */
 export interface SuiteScoreResult {
   scorer: SuiteScorer;
+  /** The scorer's id (given, or made from its type: exact, numeric-2…). */
+  id: string;
+  /** What was scored, in words. */
+  description: string;
   score: number;
+  threshold: number;
+  weight: number;
   passed: boolean;
+  /** Why: what was compared, the judge's summary… */
   reason?: string;
+  expected?: unknown;
+  actual?: unknown;
+  /** The scorer could not run (no judge model, the sandbox is missing, bad code): the case errors. */
+  error?: string;
+  /** LLM judge: per-criterion scores (1–5) with reasoning, the model, the judge's cost. */
+  judge?: { model?: string; criteria: Array<{ name: string; weight: number; score: number; reasoning: string }>; summary?: string; costUsd?: number };
 }
 
 export interface SuiteTraceTurn {
@@ -442,8 +532,12 @@ export interface SuiteCaseResult {
   mode: SuiteMockMode;
   engine: SuiteEngine;
   assertions: SuiteAssertionResult[];
-  /** Phase 2 (reserved). */
+  /** The scorers' results (evals). */
   scores?: SuiteScoreResult[];
+  /** The case's overall score: the weighted mean of its scores (0..1). */
+  score?: number;
+  /** With repetitions: which attempt (1-based); the key ends with ~attempt. */
+  attempt?: number;
   trace: SuiteTrace;
   error?: string;
   startedAt: string;
@@ -492,8 +586,16 @@ export interface SuiteRun {
   planned: string[];
   results: SuiteCaseResult[];
   stats: SuiteRunStats;
-  /** Phase 2 (reserved): the run compared with. */
-  baseline?: { runId: string; passRateDelta?: number; costDelta?: number };
+  /** Scores per scorer, the overall score, repetitions and flaky cases (evals). */
+  aggregates?: SuiteRunAggregates;
+  /** Attempts per case (repetitions). */
+  repetitions?: number;
+  /** The comparison with the baseline run: deltas per case and per scorer, regressions and improvements. */
+  baseline?: SuiteBaselineComparison;
+  /** This run is the suite's marked baseline (kept when older runs are dropped). */
+  isBaseline?: boolean;
+  /** An AI review of the run ("explain this run"): what failed or regressed and what to change. */
+  review?: SuiteRunReview;
   /** Phase 3 (reserved): the gate decision. */
   gate?: { decision: "pass" | "fail" | "override"; reason?: string; by?: string };
   notes: string[];
@@ -506,7 +608,12 @@ export type SuiteRunSummary = Omit<SuiteRun, "results"> & { results: Array<Omit<
 export function summarizeSuiteRun(run: SuiteRun): SuiteRunSummary {
   return {
     ...run,
-    results: run.results.map(({ trace: _t, assertions, ...r }) => ({ ...r, failed: assertions.filter((a) => !a.passed).map((a) => a.description) })),
+    results: run.results.map(({ trace: _t, assertions, scores, ...r }) => ({
+      ...r,
+      // the judge's per-criterion reasoning stays in the full run
+      ...(scores ? { scores: scores.map(({ judge: _j, ...x }) => x) } : {}),
+      failed: [...assertions.filter((a) => !a.passed).map((a) => a.description), ...(scores ?? []).filter((x) => !x.passed).map((x) => `${x.description}: ${x.score.toFixed(2)} < ${x.threshold}`)],
+    })),
   };
 }
 
@@ -575,7 +682,8 @@ export class InMemoryAgentSuiteStore implements AgentSuiteStore {
     const list = (this.runs.get(run.agent) ?? []).filter((r) => r.id !== run.id);
     const i = list.findIndex((r) => r.startedAt < run.startedAt);
     if (i < 0) list.push(clone(run)); else list.splice(i, 0, clone(run));
-    this.runs.set(run.agent, list.slice(0, SUITE_LIMITS.runsKept));
+    // the newest runs, and every marked baseline
+    this.runs.set(run.agent, list.filter((r, n) => n < SUITE_LIMITS.runsKept || r.isBaseline));
   }
   async deleteAgent(agent: string) { this.suites.delete(agent); this.runs.delete(agent); }
 }
@@ -772,11 +880,108 @@ function parseAssertion(v: unknown, where: string): SuiteAssertion {
 
 function fail(message: string): never { throw new AgentSuiteError(message); }
 
-function parseScorer(v: unknown, where: string): SuiteScorer {
+function parseScorer(v: unknown, where: string, ids: Set<string>): SuiteScorer {
   if (!isObj(v)) throw new AgentSuiteError(`${where} must be an object`);
-  if (!(SUITE_SCORER_TYPES as readonly unknown[]).includes(v.type)) throw new AgentSuiteError(`${where}.type must be one of ${SUITE_SCORER_TYPES.join(", ")}`);
-  num(v.threshold, `${where}.threshold`, { min: 0, max: 1 });
-  return v as unknown as SuiteScorer;
+  const type = v.type as SuiteScorerType;
+  if (!(SUITE_SCORER_TYPES as readonly unknown[]).includes(type)) throw new AgentSuiteError(`${where}.type must be one of ${SUITE_SCORER_TYPES.join(", ")}`);
+  let id = str(v.id, `${where}.id`, { optional: true, max: 64 });
+  if (id !== undefined && !ID_RE.test(id)) throw new AgentSuiteError(`${where}.id "${id}" must be lowercase letters, digits, - or _`);
+  if (id !== undefined && ids.has(id)) throw new AgentSuiteError(`${where}.id "${id}" is used by another scorer`);
+  if (id === undefined) { id = type.replace(/_/g, "-"); let n = 2; while (ids.has(id)) id = `${type.replace(/_/g, "-")}-${n++}`; }
+  ids.add(id);
+  const from = v.from;
+  if (from !== undefined && !(SCORER_SOURCES as readonly unknown[]).includes(from)) throw new AgentSuiteError(`${where}.from must be one of ${SCORER_SOURCES.join(", ")}`);
+  const which = v.which;
+  if (which !== undefined && which !== "first" && which !== "last") throw new AgentSuiteError(`${where}.which must be first or last`);
+  const tool = str(v.tool, `${where}.tool`, { optional: true, max: 200 });
+  if ((from === "tool_args" || from === "tool_result") && !tool) throw new AgentSuiteError(`${where}.tool is required with from: ${from}`);
+  const base = compact({
+    id,
+    label: str(v.label, `${where}.label`, { optional: true, max: 300 }),
+    threshold: num(v.threshold, `${where}.threshold`, { min: 0, max: 1 }),
+    weight: num(v.weight, `${where}.weight`, { min: 0, max: 100 }),
+    from: from as ScorerSource | undefined,
+    tool,
+    which: which as "first" | "last" | undefined,
+    path: str(v.path, `${where}.path`, { optional: true, max: 300 }),
+  });
+  const values = (key: string) => {
+    const list = typeof v[key] === "string" ? [v[key] as string] : strList(v[key], `${where}.${key}`);
+    if (!list?.length) throw new AgentSuiteError(`${where}.${key} needs at least one value`);
+    return list;
+  };
+  switch (type) {
+    case "exact":
+      if (v.expected === undefined) throw new AgentSuiteError(`${where}.expected is required`);
+      return compact({ ...base, type, expected: v.expected, caseSensitive: v.caseSensitive === true ? true : undefined });
+    case "numeric": {
+      if (typeof v.expected !== "number" && typeof v.expected !== "string") throw new AgentSuiteError(`${where}.expected must be a number (or a {{row.x}} placeholder)`);
+      const extract = str(v.extract, `${where}.extract`, { optional: true, max: 300 });
+      if (extract) { try { new RegExp(extract); } catch { throw new AgentSuiteError(`${where}.extract is not a valid regular expression`); } }
+      return compact({ ...base, type, expected: v.expected, tolerance: num(v.tolerance, `${where}.tolerance`, { min: 0 }), relative: v.relative === true ? true : undefined, extract });
+    }
+    case "contains_all":
+    case "contains_any":
+      return compact({ ...base, type, values: values("values"), caseSensitive: v.caseSensitive === true ? true : undefined });
+    case "regex": {
+      const pattern = str(v.pattern, `${where}.pattern`, { max: 1000 })!;
+      const flags = str(v.flags, `${where}.flags`, { optional: true, max: 6 });
+      try { new RegExp(pattern, flags); } catch { throw new AgentSuiteError(`${where}.pattern is not a valid regular expression`); }
+      return compact({ ...base, type, pattern, flags });
+    }
+    case "similarity": {
+      const method = v.method;
+      if (method !== undefined && method !== "levenshtein" && method !== "tokens") throw new AgentSuiteError(`${where}.method must be levenshtein or tokens`);
+      if (typeof v.expected !== "string") throw new AgentSuiteError(`${where}.expected is required (text)`);
+      return compact({ ...base, type, expected: v.expected, method: method as "levenshtein" | "tokens" | undefined });
+    }
+    case "json_schema":
+      if (!isObj(v.schema)) throw new AgentSuiteError(`${where}.schema must be a JSON Schema object`);
+      return { ...base, type, schema: v.schema };
+    case "tool_trajectory": {
+      const order = v.order;
+      if (order !== undefined && !["exact", "in_order", "any"].includes(order as string)) throw new AgentSuiteError(`${where}.order must be exact, in_order or any`);
+      return compact({ ...base, type, expected: values("expected"), order: order as "exact" | undefined });
+    }
+    case "cost": return { ...base, type, maxUsd: num(v.maxUsd, `${where}.maxUsd`, { min: 0 }) ?? fail(`${where}.maxUsd is required`) };
+    case "latency": return { ...base, type, maxMs: num(v.maxMs, `${where}.maxMs`, { min: 1 }) ?? fail(`${where}.maxMs is required`) };
+    case "llm_judge": {
+      let criteria: JudgeCriterion[] | undefined;
+      if (v.criteria !== undefined) {
+        if (!Array.isArray(v.criteria) || !v.criteria.length || v.criteria.length > 10) throw new AgentSuiteError(`${where}.criteria must be a list of 1–10 criteria`);
+        criteria = v.criteria.map((c, i) => {
+          const w = `${where}.criteria[${i}]`;
+          if (!isObj(c)) throw new AgentSuiteError(`${w} must be an object`);
+          return compact({ name: str(c.name, `${w}.name`, { max: 80 })!, description: str(c.description, `${w}.description`, { max: 2000 })!, weight: num(c.weight, `${w}.weight`, { min: 0, max: 100 }) });
+        });
+      }
+      return compact({ ...base, type, rubric: str(v.rubric, `${where}.rubric`, { max: 10_000 })!, criteria, expected: str(v.expected, `${where}.expected`, { optional: true, max: 50_000 }), model: str(v.model, `${where}.model`, { optional: true, max: 200 }) });
+    }
+    case "custom":
+      return compact({ ...base, type, code: str(v.code, `${where}.code`, { max: 20_000 })!, expected: v.expected, timeoutMs: num(v.timeoutMs, `${where}.timeoutMs`, { min: 100, max: 30_000, int: true }) });
+  }
+}
+
+function parseScorers(v: unknown, where: string): SuiteScorer[] | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (!Array.isArray(v)) throw new AgentSuiteError(`${where} must be a list`);
+  if (v.length > SUITE_LIMITS.scorers) throw new AgentSuiteError(`${where}: at most ${SUITE_LIMITS.scorers} scorers`);
+  const ids = new Set<string>();
+  return v.map((s, i) => parseScorer(s, `${where}[${i}]`, ids));
+}
+
+function parseEvals(v: unknown, where: string): SuiteEvalSettings | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (!isObj(v)) throw new AgentSuiteError(`${where} must be an object`);
+  const baseline = v.baseline;
+  if (baseline !== undefined && !["previous", "production", "none"].includes(baseline as string)) throw new AgentSuiteError(`${where}.baseline must be previous, production or none`);
+  return compact({
+    judgeModel: str(v.judgeModel, `${where}.judgeModel`, { optional: true, max: 200 }),
+    repetitions: num(v.repetitions, `${where}.repetitions`, { min: 1, max: SUITE_LIMITS.maxRepetitions, int: true }),
+    regressionTolerance: num(v.regressionTolerance, `${where}.regressionTolerance`, { min: 0, max: 1 }),
+    flakyStddev: num(v.flakyStddev, `${where}.flakyStddev`, { min: 0, max: 1 }),
+    baseline: baseline as SuiteEvalSettings["baseline"],
+  });
 }
 
 function parseInput(v: unknown, where: string): CaseInput {
@@ -821,7 +1026,6 @@ function parseCase(v: unknown, where: string, ids: Set<string>): SuiteCase {
   if (v.assertions !== undefined && !Array.isArray(v.assertions)) throw new AgentSuiteError(`${where}.assertions must be a list`);
   const assertions = ((v.assertions as unknown[] | undefined) ?? []).map((a, i) => parseAssertion(a, `${where}.assertions[${i}]`));
   if (assertions.length > SUITE_LIMITS.assertions) throw new AgentSuiteError(`${where}: at most ${SUITE_LIMITS.assertions} assertions`);
-  if (v.scorers !== undefined && !Array.isArray(v.scorers)) throw new AgentSuiteError(`${where}.scorers must be a list`);
   return compact({
     id, name,
     description: str(v.description, `${where}.description`, { optional: true, max: 2000 }),
@@ -829,7 +1033,7 @@ function parseCase(v: unknown, where: string, ids: Set<string>): SuiteCase {
     mode: mode(v.mode, `${where}.mode`),
     mocks: parseMocks(v.mocks, `${where}.mocks`),
     assertions,
-    scorers: (v.scorers as unknown[] | undefined)?.map((s, i) => parseScorer(s, `${where}.scorers[${i}]`)),
+    scorers: parseScorers(v.scorers, `${where}.scorers`),
     dataset: str(v.dataset, `${where}.dataset`, { optional: true, max: 64 }),
     budgets: parseBudgets(v.budgets, `${where}.budgets`),
     tags: strList(v.tags, `${where}.tags`),
@@ -908,6 +1112,8 @@ export function parseAgentSuite(input: unknown, agent: string, existing?: AgentS
     datasets,
     budgets: parseBudgets(input.budgets, "budgets"),
     concurrency: num(input.concurrency, "concurrency", { min: 1, max: SUITE_LIMITS.maxConcurrency, int: true }),
+    scorers: parseScorers(input.scorers, "scorers"),
+    evals: parseEvals(input.evals, "evals"),
     gate,
     tags: strList(input.tags, "tags"),
     revision: (existing?.revision ?? 0) + 1,
@@ -951,7 +1157,12 @@ export function renderSuiteTemplate<T>(value: T, vars: Record<string, unknown>):
 
 /** One case to execute: the case (templated with its dataset row) and the row. */
 export interface PlannedCase {
+  /** caseId, caseId#row, and ~attempt with repetitions. */
   key: string;
+  /** The key without the attempt (the case, or its dataset row): attempts are aggregated by it. */
+  baseKey: string;
+  /** With repetitions: 1-based. */
+  attempt?: number;
   case: SuiteCase;
   row?: { index: number; values: Record<string, unknown> };
   mode: SuiteMockMode;
@@ -970,15 +1181,24 @@ export function mergeSuiteMocks(suite: SuiteMocks | undefined, own: SuiteMocks |
   });
 }
 
-/** The cases a run executes, in order: each case once, or once per row of its dataset. */
-export function planSuiteCases(suite: AgentSuite, opts: { caseIds?: string[]; mode?: SuiteMockMode } = {}): PlannedCase[] {
+/** The scorers a case runs: the suite's defaults, then its own (one with the same id replaces the default). */
+export function mergeSuiteScorers(suite: SuiteScorer[] | undefined, own: SuiteScorer[] | undefined): SuiteScorer[] {
+  const ownIds = new Set((own ?? []).map((s) => s.id).filter(Boolean));
+  return [...(suite ?? []).filter((s) => !s.id || !ownIds.has(s.id)), ...(own ?? [])];
+}
+
+/** The cases a run executes, in order: each case once (or `repetitions` times), or once per row of its dataset. */
+export function planSuiteCases(suite: AgentSuite, opts: { caseIds?: string[]; mode?: SuiteMockMode; repetitions?: number } = {}): PlannedCase[] {
   if (opts.caseIds?.length) {
     const unknown = opts.caseIds.filter((id) => !suite.cases.some((c) => c.id === id));
     if (unknown.length) throw new AgentSuiteError(`${suite.name} has no case ${unknown.map((u) => `"${u}"`).join(", ")}`, "NOT_FOUND");
   }
-  const out: PlannedCase[] = [];
-  for (const c of suite.cases) {
-    if (opts.caseIds?.length && !opts.caseIds.includes(c.id)) continue;
+  const reps = Math.max(1, Math.min(SUITE_LIMITS.maxRepetitions, Math.floor(opts.repetitions ?? suite.evals?.repetitions ?? 1)));
+  const base: Array<Omit<PlannedCase, "key" | "attempt"> > = [];
+  for (const raw of suite.cases) {
+    if (opts.caseIds?.length && !opts.caseIds.includes(raw.id)) continue;
+    const scorers = mergeSuiteScorers(suite.scorers, raw.scorers);
+    const c: SuiteCase = scorers.length ? { ...raw, scorers } : raw;
     const m = opts.mode ?? c.mode ?? suite.defaultMode;
     const budgets = {
       maxTurns: c.budgets?.maxTurns ?? suite.budgets?.maxTurns ?? SUITE_LIMITS.defaultMaxTurns,
@@ -987,11 +1207,11 @@ export function planSuiteCases(suite: AgentSuite, opts: { caseIds?: string[]; mo
     };
     const mocks = mergeSuiteMocks(suite.mocks, c.mocks);
     const ds = c.dataset ? suite.datasets.find((d) => d.id === c.dataset) : undefined;
-    if (!ds) { out.push({ key: c.id, case: c, mode: m, mocks, budgets }); continue; }
+    if (!ds) { base.push({ baseKey: c.id, case: c, mode: m, mocks, budgets }); continue; }
     ds.rows.forEach((values, index) => {
       const vars = { row: values };
-      out.push({
-        key: `${c.id}#${index + 1}`,
+      base.push({
+        baseKey: `${c.id}#${index + 1}`,
         case: { ...c, input: renderSuiteTemplate(c.input, vars), assertions: renderSuiteTemplate(c.assertions, vars), ...(c.scorers ? { scorers: renderSuiteTemplate(c.scorers, vars) } : {}) },
         row: { index, values },
         mode: m,
@@ -1000,7 +1220,8 @@ export function planSuiteCases(suite: AgentSuite, opts: { caseIds?: string[]; mo
       });
     });
   }
-  return out;
+  if (reps === 1) return base.map((p) => ({ ...p, key: p.baseKey }));
+  return base.flatMap((p) => Array.from({ length: reps }, (_, i) => ({ ...p, key: `${p.baseKey}~${i + 1}`, attempt: i + 1 })));
 }
 
 /** Does running these cases touch real tools (a side effect is possible)? Such runs need the admin scope. */
@@ -1389,3 +1610,5 @@ export function caseFromTrace(trace: Pick<SuiteTrace, "input" | "toolCalls" | "t
     source: compact({ kind: "recorded" as const, sessionId: opts.sessionId, at: new Date().toISOString() }),
   });
 }
+
+export * from "./agent-suite-evals.js";

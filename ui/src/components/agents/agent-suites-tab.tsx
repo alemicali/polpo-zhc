@@ -6,17 +6,18 @@
  */
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { FlaskRound, History, Loader2, Pencil, Play, Plus, Trash2 } from "lucide-react";
+import { FlaskRound, History, Loader2, Pencil, Play, Plus, Star, Trash2, TrendingUp } from "lucide-react";
 import { useAgentSuites, useAgentVersions, type AgentSuite, type SuiteMockMode } from "@polpo-ai/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
-import { SUITE_MODES, blankSuite, editableSuite, formatMs, formatUsd, runTargetLabel, suiteModeLabel, suiteRunUsesRealTools } from "@/lib/agent-suites";
+import { SUITE_MODES, blankSuite, editableSuite, formatMs, formatScore, formatUsd, runTargetLabel, suiteModeLabel, suiteRunUsesRealTools } from "@/lib/agent-suites";
 import { cn } from "@/lib/utils";
 import { useAgentDetail } from "./agent-detail-context";
 import { AgentSuiteEditor } from "./agent-suite-editor";
 import { AgentSuiteRunReport, SuiteStatusIcon } from "./agent-suite-run-report";
+import { AgentSuiteTrend } from "./agent-suite-trend";
 
 function when(iso: string): string {
   const d = new Date(iso);
@@ -31,6 +32,7 @@ export function AgentSuitesTab() {
   const [mode, setMode] = useState<SuiteMockMode | "own">("own");
   const [editing, setEditing] = useState<{ suite?: AgentSuite; key: number } | null>(null);
   const [viewing, setViewing] = useState<string | null>(null);
+  const [trendOf, setTrendOf] = useState<AgentSuite | null>(null);
   const [confirm, setConfirm] = useState<{ kind: "real"; suite: AgentSuite } | { kind: "delete"; suite: AgentSuite } | null>(null);
   const [starting, setStarting] = useState<string | null>(null);
 
@@ -97,9 +99,11 @@ export function AgentSuitesTab() {
                     <p className="truncate text-xs font-medium">{s.name}</p>
                     <p className="truncate text-caption text-muted-foreground">
                       {s.cases.length} case(s){s.datasets.length ? ` · ${s.datasets.length} dataset(s)` : ""} · {suiteModeLabel(s.defaultMode)}
-                      {last ? ` · last ${last.status} ${last.stats.passed}/${last.stats.total - last.stats.skipped} (${runTargetLabel(last)})` : " · never run"}
+                      {last ? ` · last ${last.status} ${last.stats.passed}/${last.stats.total - last.stats.skipped}${last.aggregates?.score !== undefined ? ` · score ${formatScore(last.aggregates.score)}` : ""} (${runTargetLabel(last)})` : " · never run"}
+                      {last?.baseline?.regressions ? <span className="text-destructive"> · {last.baseline.regressions} regression(s)</span> : null}
                     </p>
                   </button>
+                  <Button variant="ghost" size="sm" className="h-7" onClick={() => setTrendOf(trendOf?.id === s.id ? null : s)} aria-label={`Trend of ${s.name}`} aria-pressed={trendOf?.id === s.id} data-testid="suite-trend-open"><TrendingUp className="h-3.5 w-3.5" /></Button>
                   <Button variant="ghost" size="sm" className="h-7" onClick={() => setEditing({ suite: s, key: Date.now() })} aria-label={`Edit ${s.name}`}><Pencil className="h-3.5 w-3.5" /></Button>
                   <Button variant="ghost" size="sm" className="h-7" onClick={() => setConfirm({ kind: "delete", suite: s })} aria-label={`Delete ${s.name}`}><Trash2 className="h-3.5 w-3.5" /></Button>
                   <Button variant="outline" size="sm" className="h-7" disabled={starting === s.id} onClick={() => runSuite(s)} data-testid="suite-run">
@@ -123,9 +127,15 @@ export function AgentSuitesTab() {
         />
       )}
 
+      {trendOf && (
+        <AgentSuiteTrend key={trendOf.id} agentName={agentName} suiteId={trendOf.id} suiteName={trendOf.name} onClose={() => setTrendOf(null)} onOpenRun={setViewing} />
+      )}
+
       {viewing && (
         <AgentSuiteRunReport agentName={agentName} runId={viewing} onClose={() => setViewing(null)}
-          onCancel={(id) => void suites.cancel(id).catch((e) => toast.error((e as Error).message))} />
+          onCancel={(id) => void suites.cancel(id).catch((e) => toast.error((e as Error).message))}
+          onSetBaseline={(suiteId, runId) => suites.setBaseline(suiteId, runId)}
+          onReview={(runId) => suites.review(runId)} />
       )}
 
       <section aria-label="Runs" className="rounded-lg border border-border/40 bg-card/80" data-testid="suite-runs">
@@ -144,8 +154,12 @@ export function AgentSuitesTab() {
                   <SuiteStatusIcon status={r.status} />
                   <span className="hidden text-xs sm:inline">{when(r.startedAt)}</span>
                   <Badge variant="outline" className="font-mono text-micro">{runTargetLabel(r)}</Badge>
+                  {r.isBaseline && <Star className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-label="Baseline" data-testid="suite-run-row-baseline" />}
                   <span className="min-w-0 flex-1 truncate text-caption text-muted-foreground">
-                    {r.suiteName}{r.variant.label ? ` · ${r.variant.label}` : ""} · {r.stats.passed}/{r.stats.total - r.stats.skipped} passed · {formatUsd(r.stats.costUsd)} · {formatMs(r.stats.durationMs)}
+                    {r.suiteName}{r.variant.label ? ` · ${r.variant.label}` : ""} · {r.stats.passed}/{r.stats.total - r.stats.skipped} passed
+                    {r.aggregates?.score !== undefined ? ` · score ${formatScore(r.aggregates.score)}` : ""} · {formatUsd(r.stats.costUsd)} · {formatMs(r.stats.durationMs)}
+                    {r.baseline?.regressions ? <span className="text-destructive"> · ▼ {r.baseline.regressions}</span> : null}
+                    {r.baseline?.improvements ? <span className="text-success"> · ▲ {r.baseline.improvements}</span> : null}
                   </span>
                 </button>
               </li>

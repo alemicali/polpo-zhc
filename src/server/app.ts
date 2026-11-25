@@ -1492,6 +1492,12 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       listRuns: (name, opts) => agentSuites().listRuns(name, opts),
       getRun: (name, runId) => agentSuites().getRun(name, runId),
       cancelRun: (name, runId) => agentSuites().cancelRun(name, runId),
+      // evals: baselines, comparisons, trends, "explain this run"
+      setBaseline: (name, id, runId) => agentSuites().setBaseline(name, id, runId),
+      getBaseline: (name, id) => agentSuites().getBaseline(name, id),
+      compareRuns: (name, runId, opts) => agentSuites().compareRuns(name, runId, opts),
+      trend: (name, id, opts) => agentSuites().trend(name, id, opts),
+      reviewRun: (name, runId, opts) => agentSuites().reviewRun(name, runId, opts),
       toYaml: (value) => stringifyYaml(value, { lineWidth: 0 }),
       fromYaml: (text) => parseYaml(text),
       actor: (c) => requestAuthor(c),

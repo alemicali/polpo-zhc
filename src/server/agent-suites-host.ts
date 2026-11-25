@@ -8,6 +8,7 @@ import type { AgentConfig } from "@polpo-ai/core";
 import type { Orchestrator } from "../core/orchestrator.js";
 import { AgentSuiteRunner, runAsSuiteCase, type AgentSuiteDeps, type SessionToolCall, type SuiteTurnResult } from "./agent-suites.js";
 import { FileAgentSuiteStore } from "../stores/file-agent-suite-store.js";
+import { sandboxedCustomScorer, suiteJudge, suiteReviewer } from "./agent-suite-scorers.js";
 
 export interface AgentSuiteHostOptions {
   orchestrator: Orchestrator;
@@ -29,8 +30,13 @@ export function agentSuiteRunnerFor(opts: AgentSuiteHostOptions): AgentSuiteRunn
 
 export function agentSuiteDeps(opts: AgentSuiteHostOptions): AgentSuiteDeps {
   const o = opts.orchestrator;
+  const orchestratorModel = () => o.getConfig()?.settings?.orchestratorModel;
   return {
     store: new FileAgentSuiteStore(o.getPolpoDir()),
+    // evals: the LLM judge, "explain this run", custom scorers in the sandbox
+    judge: suiteJudge(orchestratorModel),
+    review: suiteReviewer(orchestratorModel),
+    customScorer: sandboxedCustomScorer(),
     agents: () => o.getAgents(),
     resolveAgent: async (name, ref) => {
       const live = (await o.getAgents()).find((a) => a.name === name);

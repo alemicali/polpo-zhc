@@ -2,7 +2,7 @@ import { createRoute, z, type OpenAPIHono } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import {
   SUITE_MOCK_MODES, summarizeSuiteRun,
-  type AgentSuite, type SuiteMockMode, type SuiteRun, type SuiteRunListOptions, type SuiteRunRequest,
+  type AgentSuite, type SuiteBaselineComparison, type SuiteMockMode, type SuiteRun, type SuiteRunListOptions, type SuiteRunRequest, type SuiteTrend,
 } from "@polpo-ai/core/agent-suites";
 
 /** What the agent suite routes need from the host (src/server/agent-suites.ts). */
@@ -17,6 +17,14 @@ export interface AgentSuiteRouteDeps {
   listRuns: (agent: string, opts: SuiteRunListOptions) => Promise<SuiteRun[]>;
   getRun: (agent: string, runId: string) => Promise<SuiteRun>;
   cancelRun: (agent: string, runId: string) => Promise<SuiteRun>;
+  /** Evals: mark (runId) or clear (undefined) a suite's baseline run. */
+  setBaseline: (agent: string, suiteId: string, runId: string | undefined) => Promise<SuiteRun | undefined>;
+  getBaseline: (agent: string, suiteId: string) => Promise<SuiteRun | undefined>;
+  /** Compare a run with another, or with its suite's baseline now. */
+  compareRuns: (agent: string, runId: string, opts: { baselineRunId?: string; tolerance?: number }) => Promise<SuiteBaselineComparison | undefined>;
+  trend: (agent: string, suiteId: string, opts: { limit?: number }) => Promise<SuiteTrend>;
+  /** "Explain this run": an AI review stored on the run. */
+  reviewRun: (agent: string, runId: string, opts: { actor: string; language?: string }) => Promise<SuiteRun>;
   /** YAML ⇄ objects (the suite's YAML view). */
   toYaml: (value: unknown) => string;
   fromYaml: (text: string) => unknown;
@@ -48,6 +56,9 @@ const runBody = z.object({
   repetition: z.number().int().min(0).optional(),
   trigger: z.enum(["manual", "publish", "schedule", "ci", "benchmark"]).optional(),
   wait: z.boolean().optional().describe("Wait for the run to finish (default false: the run is returned running)"),
+  repetitions: z.number().int().min(1).max(10).optional().describe("Run every case this many times (mean, stddev and flakiness per case; default the suite's evals.repetitions, 1)"),
+  baselineRunId: z.string().optional().describe("Compare with this run instead of the suite's baseline"),
+  regressionTolerance: z.number().min(0).max(1).optional().describe("A score or pass-rate change within this is not a regression (default the suite's, 0.05)"),
   allowRealTools: z.boolean().optional().describe("Confirm a run that uses real tools (modes none / model, or unmocked tools run for real): side effects are possible; approvals are never given"),
 }).strict();
 
@@ -222,6 +233,53 @@ export function registerAgentSuiteRoutes(app: OpenAPIHono, getDeps: () => { suit
     } catch (err) { return errorResponse(c, err); }
   });
 
+  // GET /agents/{name}/suites/{id}/trend
+  app.openapi(createRoute({
+    method: "get", path: "/{name}/suites/{id}/trend", tags, summary: "A suite's trend",
+    description: "The suite's finished runs over time, oldest first: pass rate, overall score, mean per scorer, cost, latency, regressions versus the baseline; and the same by version (production's version, a published one, or draft).",
+    request: { params: suiteParam, query: z.object({ limit: z.string().optional() }) },
+    responses: { 200: r[200], 404: r[404] },
+  }), async (c) => {
+    const { name, id } = c.req.valid("param");
+    if (!(await exists(name))) return notFound(c, name);
+    const limit = Number(c.req.valid("query").limit);
+    try { return c.json({ ok: true, data: await s().trend(name, id, Number.isFinite(limit) && limit > 0 ? { limit } : {}) }, 200); } catch (err) { return errorResponse(c, err); }
+  });
+
+  // GET /agents/{name}/suites/{id}/baseline
+  app.openapi(createRoute({
+    method: "get", path: "/{name}/suites/{id}/baseline", tags, summary: "A suite's baseline run",
+    description: "The run marked as the suite's baseline (summary, without traces), or null. Without a marked baseline, a new run is compared with the suite's policy (evals.baseline: previous — default —, production or none).",
+    request: { params: suiteParam }, responses: { 200: r[200], 404: r[404] },
+  }), async (c) => {
+    const { name, id } = c.req.valid("param");
+    if (!(await exists(name))) return notFound(c, name);
+    try { const b = await s().getBaseline(name, id); return c.json({ ok: true, data: b ? summarizeSuiteRun(b) : null }, 200); } catch (err) { return errorResponse(c, err); }
+  });
+
+  // PUT /agents/{name}/suites/{id}/baseline
+  app.openapi(createRoute({
+    method: "put", path: "/{name}/suites/{id}/baseline", tags, summary: "Mark a run as the baseline",
+    description: "Marks a finished run of the suite as its baseline: every new run is compared with it (deltas per case and per scorer, regressions and improvements). The previous mark is removed; a marked run is never dropped from the history.",
+    request: { params: suiteParam, body: { content: { "application/json": { schema: z.object({ runId: z.string().min(1) }).strict() } } } },
+    responses: { 200: r[200], 400: r[400], 404: r[404] },
+  }), async (c) => {
+    const { name, id } = c.req.valid("param");
+    if (!(await exists(name))) return notFound(c, name);
+    try { const run = await s().setBaseline(name, id, c.req.valid("json").runId); return c.json({ ok: true, data: run ? summarizeSuiteRun(run) : null }, 200); } catch (err) { return errorResponse(c, err); }
+  });
+
+  // DELETE /agents/{name}/suites/{id}/baseline
+  app.openapi(createRoute({
+    method: "delete", path: "/{name}/suites/{id}/baseline", tags, summary: "Clear the baseline",
+    description: "Removes the suite's baseline mark: new runs are compared by the suite's policy (the previous run by default).",
+    request: { params: suiteParam }, responses: { 200: r[200], 404: r[404] },
+  }), async (c) => {
+    const { name, id } = c.req.valid("param");
+    if (!(await exists(name))) return notFound(c, name);
+    try { await s().setBaseline(name, id, undefined); return c.json({ ok: true, data: null }, 200); } catch (err) { return errorResponse(c, err); }
+  });
+
   // GET /agents/{name}/suite-runs
   app.openapi(createRoute({
     method: "get", path: "/{name}/suite-runs", tags, summary: "An agent's suite runs",
@@ -247,6 +305,38 @@ export function registerAgentSuiteRoutes(app: OpenAPIHono, getDeps: () => { suit
     const { name, runId } = c.req.valid("param");
     if (!(await exists(name))) return notFound(c, name);
     try { return c.json({ ok: true, data: await s().getRun(name, runId) }, 200); } catch (err) { return errorResponse(c, err); }
+  });
+
+  // GET /agents/{name}/suite-runs/{runId}/compare
+  app.openapi(createRoute({
+    method: "get", path: "/{name}/suite-runs/{runId}/compare", tags, summary: "Compare a run with a baseline",
+    description: "The run compared with ?baseline=<runId>, or with its suite's baseline now (the marked run, else the suite's policy): pass rate, score, cost and duration deltas; per case and per scorer the change (regressed, improved, unchanged, new, removed) beyond ?tolerance= (default the suite's, 0.05). null when there is nothing to compare with.",
+    request: { params: runParam, query: z.object({ baseline: z.string().optional(), tolerance: z.string().optional() }) },
+    responses: { 200: r[200], 404: r[404] },
+  }), async (c) => {
+    const { name, runId } = c.req.valid("param");
+    if (!(await exists(name))) return notFound(c, name);
+    const q = c.req.valid("query");
+    const tolerance = q.tolerance !== undefined ? Number(q.tolerance) : undefined;
+    try {
+      return c.json({ ok: true, data: (await s().compareRuns(name, runId, { ...(q.baseline ? { baselineRunId: q.baseline } : {}), ...(tolerance !== undefined && Number.isFinite(tolerance) ? { tolerance } : {}) })) ?? null }, 200);
+    } catch (err) { return errorResponse(c, err); }
+  });
+
+  // POST /agents/{name}/suite-runs/{runId}/review
+  app.openapi(createRoute({
+    method: "post", path: "/{name}/suite-runs/{runId}/review", tags, summary: "Explain a run (AI review)",
+    description: "Asks Polpo's model (the orchestrator's effective model) to explain a finished run: a summary, what failed or regressed and why, and suggested fixes (instruction and tool changes, or the test itself). Stored on the run as `review` (Markdown); costs tokens.",
+    request: { params: runParam, body: { content: { "application/json": { schema: z.object({ language: z.string().max(40).optional() }).strict() } }, required: false } },
+    responses: { 200: r[200], 400: r[400], 404: r[404], 409: { content: { "application/json": { schema: errorSchema } }, description: "No model, or the review failed" } },
+  }), async (c) => {
+    const { name, runId } = c.req.valid("param");
+    if (!(await exists(name))) return notFound(c, name);
+    const body = (await c.req.json().catch(() => ({}))) as { language?: unknown };
+    try {
+      const deps = s();
+      return c.json({ ok: true, data: await deps.reviewRun(name, runId, { actor: deps.actor(c), ...(typeof body?.language === "string" && body.language ? { language: body.language.slice(0, 40) } : {}) }) }, 200);
+    } catch (err) { return errorResponse(c, err); }
   });
 
   // POST /agents/{name}/suite-runs/{runId}/cancel

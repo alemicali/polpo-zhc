@@ -17,10 +17,12 @@
 import { randomUUID } from "node:crypto";
 import {
   AgentSuiteError, SUITE_LIMITS, SUITE_STUBBED_TOOLS,
-  agentCliEngine, agentHarness, caseMessages, evaluateAssertion, findToolMock, modeMocksModel, modeMocksTools,
-  parseAgentSuite, parseCsvDataset, parseJsonDataset, planSuiteCases, planUsesRealTools, suiteRunStats, suiteRunStatus, suiteSlug, toolMockResult,
-  type AgentConfig, type AgentSuite, type AgentSuiteStore, type PlannedCase, type ScriptedTurn, type SuiteCaseResult, type SuiteEngine,
-  type SuiteRun, type SuiteRunListOptions, type SuiteRunRequest, type SuiteTrace, type SuiteTraceToolCall, type SuiteTraceTurn, type SuiteVariant,
+  agentCliEngine, agentHarness, caseMessages, caseOverallScore, compareSuiteRuns, evaluateAssertion, findToolMock, modeMocksModel, modeMocksTools,
+  parseAgentSuite, parseCsvDataset, parseJsonDataset, pickSuiteBaseline, planSuiteCases, planUsesRealTools, scoreSuiteCase,
+  suiteRunAggregates, suiteRunReviewPrompt, suiteRunStats, suiteRunStatus, suiteSlug, suiteTrend, toolMockResult,
+  type AgentConfig, type AgentSuite, type AgentSuiteStore, type PlannedCase, type ScorerDeps, type ScriptedTurn, type SuiteBaselineComparison,
+  type SuiteCaseResult, type SuiteEngine, type SuiteRun, type SuiteRunListOptions, type SuiteRunRequest, type SuiteTrace, type SuiteTraceToolCall,
+  type SuiteTraceTurn, type SuiteTrend, type SuiteVariant,
 } from "@polpo-ai/core";
 import { applySuiteOverrides, runAsSuiteCase, type SuiteCaseHooks } from "../core/agent-suite-context.js";
 
@@ -56,6 +58,15 @@ export interface AgentSuiteDeps {
   turn: (agentRef: string, messages: Array<{ role: string; content: string }>, hooks: SuiteCaseHooks) => Promise<SuiteTurnResult>;
   /** Runs at once on this instance (default 2). */
   maxRunningRuns?: number;
+  /**
+   * The LLM judge of llm_judge scorers: one completion at temperature 0 (`model`: the scorer's or
+   * the suite's judge model; undefined: the orchestrator's effective model). Absent: judges error.
+   */
+  judge?: ScorerDeps["judge"];
+  /** Runs a custom scorer's code in the sandboxed code worker. Absent: custom scorers error. */
+  customScorer?: ScorerDeps["custom"];
+  /** "Explain this run": one completion with the orchestrator's effective model. */
+  review?: (prompt: string) => Promise<{ text: string; model?: string; costUsd?: number }>;
 }
 
 export interface RunOptions {
@@ -282,7 +293,11 @@ export class AgentSuiteRunner {
     let config: AgentConfig | undefined;
     try { config = await this.deps.resolveAgent(agent, ref); } catch (err) { throw new AgentSuiteError(errorText(err), "NOT_FOUND"); }
     if (!config) throw new AgentSuiteError(`Agent "${agent}" not found`, "NOT_FOUND");
-    const planned = planSuiteCases(suite, { ...(req.caseIds ? { caseIds: req.caseIds } : {}), ...(req.mode ? { mode: req.mode } : {}) });
+    if (req.repetitions !== undefined && (!Number.isInteger(req.repetitions) || req.repetitions < 1 || req.repetitions > SUITE_LIMITS.maxRepetitions)) {
+      throw new AgentSuiteError(`repetitions must be a whole number from 1 to ${SUITE_LIMITS.maxRepetitions}`);
+    }
+    if (req.baselineRunId) await this.getRun(agent, req.baselineRunId);
+    const planned = planSuiteCases(suite, { ...(req.caseIds ? { caseIds: req.caseIds } : {}), ...(req.mode ? { mode: req.mode } : {}), ...(req.repetitions ? { repetitions: req.repetitions } : {}) });
     if (!planned.length) throw new AgentSuiteError(`${suite.name} has no cases to run`);
     const effective = applySuiteOverrides(config, req.overrides);
     const engine = engineOf(effective);
@@ -313,11 +328,12 @@ export class AgentSuiteRunner {
       planned: planned.map((p) => p.key),
       results: [],
       stats: suiteRunStats([]),
+      ...(planned.some((p) => p.attempt) ? { repetitions: Math.max(...planned.map((p) => p.attempt ?? 1)) } : {}),
       notes: [],
     };
     if (engine === "harness") run.notes.push("This agent runs its tasks on a harness; its chats (and these cases) run on Polpo's engine with its model.");
     if (engine === "cli") run.notes.push("CLI engine: the official program's model cannot be scripted; Polpo's tools it calls are mocked, its own tools (Bash, Read, Edit…) run for real.");
-    if (planned.some((p) => p.case.scorers?.length)) run.notes.push("Scorers are kept but evaluated from phase 2: only assertions decide pass / fail now.");
+    if (planned.some((p) => p.case.scorers?.some((x) => x.type === "llm_judge")) && !this.deps.judge) run.notes.push("No LLM judge on this server: llm_judge scorers error.");
     await this.deps.store.saveRun(run);
 
     let cancelled: string | undefined;
@@ -334,21 +350,27 @@ export class AgentSuiteRunner {
         await pool(planned, concurrency, async (p) => {
           const result = cancelled
             ? this.skipped(p, engine, variant.id, `Not run: the run was ${cancelled}`)
-            : await this.runCase(p, agentRef, engine, variant, (r) => { recorders.add(r); if (cancelled) r.cancelled = cancelled; }, (r) => recorders.delete(r));
+            : await this.runCase(p, agentRef, engine, variant, suite, (r) => { recorders.add(r); if (cancelled) r.cancelled = cancelled; }, (r) => recorders.delete(r));
           run.results.push(result);
           run.results.sort((a, b) => run.planned.indexOf(a.key) - run.planned.indexOf(b.key));
           run.stats = suiteRunStats(run.results);
+          run.aggregates = suiteRunAggregates(run.results, { flakyStddev: suite.evals?.flakyStddev });
           saving = saving.then(() => this.deps.store.saveRun(run)).catch(() => undefined);
           return result;
         });
         await saving;
         run.status = cancelled ? "cancelled" : suiteRunStatus(run.results);
+        if (!cancelled) {
+          const cmp = await this.baselineFor(run, suite, req).catch((err) => { run.notes.push(`The comparison with the baseline failed: ${errorText(err)}`); return undefined; });
+          if (cmp) run.baseline = cmp;
+        }
       } catch (err) {
         run.status = "errored";
         run.error = errorText(err);
       } finally {
         run.finishedAt = new Date().toISOString();
         run.stats = suiteRunStats(run.results);
+        run.aggregates = suiteRunAggregates(run.results, { flakyStddev: suite.evals?.flakyStddev });
         await this.deps.store.saveRun(run).catch(() => undefined);
         this.running.delete(run.id);
         this.release();
@@ -381,14 +403,14 @@ export class AgentSuiteRunner {
 
   private skipped(p: PlannedCase, engine: SuiteEngine, variantId: string, why: string): SuiteCaseResult {
     return {
-      key: p.key, caseId: p.case.id, caseName: p.case.name, ...(p.row ? { row: p.row } : {}),
+      key: p.key, caseId: p.case.id, caseName: p.case.name, ...(p.row ? { row: p.row } : {}), ...(p.attempt ? { attempt: p.attempt } : {}),
       status: "skipped", mode: p.mode, engine, assertions: [],
       trace: { input: [], turns: [], toolCalls: [], text: "", approvals: [], usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 }, durationMs: 0, notes: [why] },
       startedAt: new Date().toISOString(), durationMs: 0, costUsd: 0, variantId,
     };
   }
 
-  private async runCase(p: PlannedCase, agentRef: string, engine: SuiteEngine, variant: SuiteVariant, onStart: (r: CaseRecorder) => void, onEnd: (r: CaseRecorder) => void): Promise<SuiteCaseResult> {
+  private async runCase(p: PlannedCase, agentRef: string, engine: SuiteEngine, variant: SuiteVariant, suite: AgentSuite, onStart: (r: CaseRecorder) => void, onEnd: (r: CaseRecorder) => void): Promise<SuiteCaseResult> {
     if (p.case.skip) return this.skipped(p, engine, variant.id, "Skipped (skip: true)");
     if (engine === "cli" && modeMocksModel(p.mode)) {
       const r = this.skipped(p, engine, variant.id, "");
@@ -440,19 +462,118 @@ export class AgentSuiteRunner {
       notes: recorder.notes,
     };
     const assertions = error ? [] : p.case.assertions.map((a) => evaluateAssertion(a, trace));
-    if (!error && !assertions.length) trace.notes.push("This case has no assertions: it passes when it runs without errors");
+    // the scorers (evals) run after the turn, outside the case's hooks: a judge calls its real model
+    const scores = error || !p.case.scorers?.length ? undefined : await scoreSuiteCase(p.case.scorers, { trace, input: p.case.input, ...(p.row ? { row: p.row.values } : {}) }, {
+      ...(this.deps.judge ? { judge: this.deps.judge } : {}), ...(this.deps.customScorer ? { custom: this.deps.customScorer } : {}),
+      ...(suite.evals?.judgeModel ? { judgeModel: suite.evals.judgeModel } : {}),
+    });
+    const scorerError = scores?.find((x) => x.error);
+    if (scorerError && !error) error = `Scorer ${scorerError.id}: ${scorerError.error}`;
+    if (!error && !assertions.length && !scores?.length) trace.notes.push("This case has no assertions: it passes when it runs without errors");
+    const score = caseOverallScore(scores);
     return {
-      key: p.key, caseId: p.case.id, caseName: p.case.name, ...(p.row ? { row: p.row } : {}),
-      status: error ? "errored" : assertions.every((a) => a.passed) ? "passed" : "failed",
-      mode: p.mode, engine, assertions, trace,
+      key: p.key, caseId: p.case.id, caseName: p.case.name, ...(p.row ? { row: p.row } : {}), ...(p.attempt ? { attempt: p.attempt } : {}),
+      status: error ? "errored" : assertions.every((a) => a.passed) && (scores ?? []).every((x) => x.passed) ? "passed" : "failed",
+      mode: p.mode, engine, assertions, ...(scores ? { scores } : {}), ...(score !== undefined ? { score } : {}), trace,
       ...(error ? { error } : {}),
       startedAt, durationMs: trace.durationMs, costUsd: trace.usage.costUsd, variantId: variant.id,
     };
   }
 
+  // ── evals: baselines, comparisons, trends, reviews ──
+
+  private compareOpts(suite: AgentSuite | undefined, tolerance?: number): { tolerance?: number; flakyStddev?: number } {
+    const tol = tolerance ?? suite?.evals?.regressionTolerance;
+    const flaky = suite?.evals?.flakyStddev;
+    return { ...(tol !== undefined ? { tolerance: tol } : {}), ...(flaky !== undefined ? { flakyStddev: flaky } : {}) };
+  }
+
+  /** The comparison of a finished run with its baseline (the given one, the marked one, or by the suite's policy). */
+  private async baselineFor(run: SuiteRun, suite: AgentSuite, req: SuiteRunRequest): Promise<SuiteBaselineComparison | undefined> {
+    const opts = this.compareOpts(suite, req.regressionTolerance);
+    if (req.baselineRunId) {
+      const b = await this.deps.store.getRun(run.agent, req.baselineRunId);
+      return b ? compareSuiteRuns(run, b, { source: "request", ...opts }) : undefined;
+    }
+    const picked = pickSuiteBaseline(await this.deps.store.listRuns(run.agent, { suiteId: run.suiteId }), run, suite.evals?.baseline ?? "previous");
+    if (!picked) return undefined;
+    const full = await this.deps.store.getRun(run.agent, picked.run.id) ?? picked.run;
+    return compareSuiteRuns(run, full, { source: picked.source, ...opts });
+  }
+
+  /** Mark a run as its suite's baseline (the previous mark is removed); `runId` undefined clears it. */
+  async setBaseline(agent: string, suiteId: string, runId: string | undefined): Promise<SuiteRun | undefined> {
+    await this.getSuite(agent, suiteId);
+    let target: SuiteRun | undefined;
+    if (runId) {
+      target = await this.getRun(agent, runId);
+      if (target.suiteId !== suiteId) throw new AgentSuiteError(`Run ${runId} is a run of ${target.suiteName}, not of ${suiteId}`);
+      if (target.status === "running" || target.status === "queued") throw new AgentSuiteError("A run still going cannot be the baseline: wait for it to finish");
+      if (target.status === "cancelled") throw new AgentSuiteError("A cancelled run cannot be the baseline");
+    }
+    for (const r of await this.deps.store.listRuns(agent, { suiteId })) {
+      if (!r.isBaseline || r.id === runId) continue;
+      const full = await this.deps.store.getRun(agent, r.id);
+      if (full) { delete full.isBaseline; await this.deps.store.saveRun(full); }
+    }
+    if (target && !target.isBaseline) { target.isBaseline = true; await this.deps.store.saveRun(target); }
+    return target;
+  }
+
+  /** The suite's marked baseline run, if any. */
+  async getBaseline(agent: string, suiteId: string): Promise<SuiteRun | undefined> {
+    await this.getSuite(agent, suiteId);
+    const marked = (await this.deps.store.listRuns(agent, { suiteId })).find((r) => r.isBaseline);
+    return marked ? this.deps.store.getRun(agent, marked.id) : undefined;
+  }
+
+  /** Compare a run with another (`baselineRunId`) or with its suite's baseline now. */
+  async compareRuns(agent: string, runId: string, opts: { baselineRunId?: string; tolerance?: number } = {}): Promise<SuiteBaselineComparison | undefined> {
+    const run = await this.getRun(agent, runId);
+    const suite = await this.deps.store.getSuite(agent, run.suiteId);
+    const extra = this.compareOpts(suite, opts.tolerance);
+    if (opts.baselineRunId) return compareSuiteRuns(run, await this.getRun(agent, opts.baselineRunId), { source: "request", ...extra });
+    const picked = pickSuiteBaseline(await this.deps.store.listRuns(agent, { suiteId: run.suiteId }), run, suite?.evals?.baseline ?? "previous");
+    if (!picked) return undefined;
+    return compareSuiteRuns(run, await this.deps.store.getRun(agent, picked.run.id) ?? picked.run, { source: picked.source, ...extra });
+  }
+
+  /** A suite's runs over time: score, pass rate, cost and latency per run and per version. */
+  async trend(agent: string, suiteId: string, opts: { limit?: number } = {}): Promise<SuiteTrend> {
+    await this.getSuite(agent, suiteId);
+    const runs = await this.deps.store.listRuns(agent, { suiteId, limit: Math.max(1, Math.min(SUITE_LIMITS.runsKept, opts.limit ?? 50)) });
+    return suiteTrend(suiteId, runs);
+  }
+
+  /** "Explain this run": an AI review of the failures and regressions with suggested fixes, stored on the run. */
+  async reviewRun(agent: string, runId: string, opts: { actor?: string; language?: string } = {}): Promise<SuiteRun> {
+    if (!this.deps.review) throw new AgentSuiteError("AI reviews are not available on this server", "CONFLICT");
+    const run = await this.getRun(agent, runId);
+    if (run.status === "running" || run.status === "queued") throw new AgentSuiteError("The run is still going: review it when it has finished");
+    const config = await this.deps.resolveAgent(agent, run.target === "production" ? undefined : run.target).catch(() => undefined)
+      ?? (await this.deps.agents()).find((a) => a.name === agent);
+    const info = config ? applySuiteOverrides(config, run.variant.overrides) : undefined;
+    const prompt = suiteRunReviewPrompt(run, {
+      name: agent,
+      ...(info?.systemPrompt ? { instructions: info.systemPrompt } : {}),
+      ...(info?.allowedTools?.length ? { tools: info.allowedTools } : {}),
+      ...(typeof info?.model === "string" ? { model: info.model } : {}),
+    }, opts.language ? { language: opts.language } : {});
+    let res: { text: string; model?: string; costUsd?: number };
+    try { res = await this.deps.review(prompt); } catch (err) { throw new AgentSuiteError(`The review failed: ${errorText(err)}`, "CONFLICT"); }
+    const latest = await this.getRun(agent, runId);
+    latest.review = {
+      text: res.text.trim(), at: new Date().toISOString(),
+      ...(res.model ? { model: res.model } : {}), ...(opts.actor ? { by: opts.actor } : {}), ...(res.costUsd !== undefined ? { costUsd: res.costUsd } : {}),
+    };
+    await this.deps.store.saveRun(latest);
+    return latest;
+  }
+
   /** The agent was removed: drop its suites and runs. */
   forget(agent: string): Promise<void> { return this.deps.store.deleteAgent(agent); }
 }
+
 
 /** Run a turn under a case's hooks (the host's `turn` wraps the completions call with this). */
 export { runAsSuiteCase };

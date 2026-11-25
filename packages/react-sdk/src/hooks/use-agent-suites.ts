@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
-import type { AgentSuite, AgentSuiteInput, SuiteDatasetImport, SuiteRun, SuiteRunRequest } from "@polpo-ai/sdk";
+import type { AgentSuite, AgentSuiteInput, SuiteDatasetImport, SuiteRun, SuiteRunRequest, SuiteTrend } from "@polpo-ai/sdk";
 
 export interface UseAgentSuitesReturn {
   /** The agent's suites (undefined while loading). */
@@ -18,6 +18,10 @@ export interface UseAgentSuitesReturn {
   run: (id: string, req?: SuiteRunRequest) => Promise<SuiteRun>;
   cancel: (runId: string) => Promise<SuiteRun>;
   yaml: (id: string) => Promise<{ yaml: string; revision: number }>;
+  /** Mark a finished run as its suite's baseline (null clears the mark); the runs list refreshes. */
+  setBaseline: (suiteId: string, runId: string | null) => Promise<void>;
+  /** "Explain this run": an AI review stored on the run. */
+  review: (runId: string, opts?: { language?: string }) => Promise<SuiteRun>;
 }
 
 /** An agent's suites and runs: save, delete, import datasets, run, cancel. */
@@ -70,6 +74,15 @@ export function useAgentSuites(name: string | undefined, opts: { runsLimit?: num
     return r;
   }, [client, name, fetch_]);
   const yaml = useCallback((id: string) => client.getAgentSuiteYaml(name ?? "", id), [client, name]);
+  const setBaseline = useCallback(async (suiteId: string, runId: string | null) => {
+    await client.setAgentSuiteBaseline(name ?? "", suiteId, runId);
+    await fetch_();
+  }, [client, name, fetch_]);
+  const review = useCallback(async (runId: string, o: { language?: string } = {}) => {
+    const r = await client.reviewAgentSuiteRun(name ?? "", runId, o);
+    await fetch_();
+    return r;
+  }, [client, name, fetch_]);
 
   return {
     suites: current?.suites,
@@ -77,7 +90,7 @@ export function useAgentSuites(name: string | undefined, opts: { runsLimit?: num
     isLoading: !!name && !current,
     error: current?.error ?? null,
     refetch: fetch_,
-    save, remove, importDataset, run, cancel, yaml,
+    save, remove, importDataset, run, cancel, yaml, setBaseline, review,
   };
 }
 
@@ -118,4 +131,34 @@ export function useAgentSuiteRun(name: string | undefined, runId: string | null 
   }, [live, fetch_, opts.pollMs]);
 
   return { run: current?.run, isLoading: !!name && !!runId && !current, error: current?.error ?? null, refetch: fetch_ };
+}
+
+export interface UseAgentSuiteTrendReturn {
+  /** The suite's finished runs over time and by version (undefined while loading). */
+  trend: SuiteTrend | undefined;
+  isLoading: boolean;
+  error: Error | null;
+  refetch: () => Promise<void>;
+}
+
+/** A suite's trend: pass rate, score, cost and latency per run and per version. */
+export function useAgentSuiteTrend(name: string | undefined, suiteId: string | null | undefined, opts: { limit?: number } = {}): UseAgentSuiteTrendReturn {
+  const { client } = usePolpoContext();
+  const [state, setState] = useState<{ key: string; trend?: SuiteTrend; error: Error | null } | null>(null);
+  const key = `${name ?? ""}/${suiteId ?? ""}/${opts.limit ?? ""}`;
+  const keyRef = useRef(key);
+  keyRef.current = key;
+  const fetch_ = useCallback(async () => {
+    if (!name || !suiteId) return;
+    const k = `${name}/${suiteId}/${opts.limit ?? ""}`;
+    try {
+      const trend = await client.getAgentSuiteTrend(name, suiteId, opts.limit ? { limit: opts.limit } : {});
+      if (keyRef.current === k) setState({ key: k, trend, error: null });
+    } catch (err) {
+      if (keyRef.current === k) setState({ key: k, error: err as Error });
+    }
+  }, [client, name, suiteId, opts.limit]);
+  useEffect(() => { void fetch_(); }, [fetch_]);
+  const current = state?.key === key ? state : null;
+  return { trend: current?.trend, isLoading: !!name && !!suiteId && !current, error: current?.error ?? null, refetch: fetch_ };
 }

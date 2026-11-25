@@ -12,16 +12,35 @@ import {
 } from "./kit.js";
 
 type Assertion = { description: string; passed: boolean; message: string; diff?: string };
+type Score = { id: string; description: string; score: number; threshold: number; passed: boolean; reason?: string; error?: string; judge?: { model?: string; summary?: string; criteria: Array<{ name: string; score: number; reasoning: string }> } };
+type Delta = { id: string; label?: string; baseline?: number; current?: number; delta?: number; change: string };
+type Comparison = {
+  runId: string; source: string; baselineTarget?: string; baselineVersion?: string; tolerance: number; passRateDelta: number; costDelta: number; durationDelta: number; scoreDelta?: number;
+  regressions: number; improvements: number; scorers: Delta[];
+  cases: Array<{ key: string; caseName: string; change: string; reasons: string[]; score?: { baseline?: number; current?: number; delta?: number } }>;
+};
+type Aggregates = {
+  score?: number; passRate: number; judgeCostUsd: number; latencyP50Ms?: number; latencyP90Ms?: number; repetitions: number; flaky: string[];
+  scorers: Array<{ id: string; label: string; mean: number; median: number; p10: number; passRate: number; count: number }>;
+  cases: Array<{ key: string; caseName: string; attempts: number; passRate: number; score?: number; scoreStddev?: number; flaky: boolean }>;
+};
 type ToolCall = { name: string; args: Record<string, unknown>; result: string; isError: boolean; mocked: string | false; mockId?: string; approval?: string };
 type Result = {
   key: string; caseName: string; status: string; mode: string; engine: string; error?: string; durationMs: number; costUsd: number;
-  assertions?: Assertion[]; failed?: string[];
+  assertions?: Assertion[]; failed?: string[]; scores?: Score[]; score?: number; attempt?: number;
   trace?: { turns: Array<{ text: string; mocked: boolean; toolCalls: Array<{ name: string }> }>; toolCalls: ToolCall[]; text: string; finishReason?: string; approvals: Array<{ tool: string; kind: string }>; notes: string[] };
 };
 type Run = {
   id: string; agent: string; suiteId: string; suiteName: string; target: string; version?: string; status: string; startedAt: string; finishedAt?: string;
   variant: { id: string; label?: string }; benchmarkRunId?: string; planned: string[]; results: Result[]; notes: string[]; error?: string;
   stats: { total: number; passed: number; failed: number; errored: number; skipped: number; passRate: number; costUsd: number; durationMs: number };
+  aggregates?: Aggregates; baseline?: Comparison; isBaseline?: boolean; repetitions?: number;
+  review?: { text: string; model?: string; at: string };
+};
+type Trend = {
+  suiteId: string;
+  points: Array<{ runId: string; startedAt: string; target: string; version?: string; status: string; passRate: number; score?: number; costUsd: number; durationMs: number; regressions?: number; isBaseline?: boolean }>;
+  byVersion: Array<{ version: string; runs: number; passRate: number; score?: number; costUsd: number; durationMs: number }>;
 };
 type Suite = { id: string; name: string; description?: string; defaultMode: string; revision: number; cases: Array<{ id: string; name: string; mode?: string; dataset?: string; assertions: unknown[] }>; datasets: Array<{ id: string; name: string; rows: unknown[] }>; updatedAt: string };
 
@@ -29,10 +48,35 @@ const MARK: Record<string, string> = { passed: "✓", failed: "✗", errored: "�
 const usd = (n: number) => `$${n.toFixed(4)}`;
 const secs = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 
+const signed = (n: number, digits = 2) => `${n > 0 ? "+" : n < 0 ? "−" : "±"}${Math.abs(n).toFixed(digits)}`;
+const pct = (n: number) => `${Math.round(n * 100)}%`;
+
 function runHeader(r: Run): string {
   const target = r.target === "production" ? `production${r.version ? ` (v${r.version})` : ""}` : r.target === "draft" ? "draft" : `v${r.target}`;
   return `${MARK[r.status] ?? r.status} ${r.agent} · ${r.suiteName} @ ${target}${r.variant.label ? ` · ${r.variant.label}` : ""} · ${r.status} · `
-    + `${r.stats.passed}/${r.stats.total - r.stats.skipped} passed · ${usd(r.stats.costUsd)} · ${secs(r.stats.durationMs)} [${r.id}]`;
+    + `${r.stats.passed}/${r.stats.total - r.stats.skipped} passed${r.aggregates?.score !== undefined ? ` · score ${r.aggregates.score.toFixed(2)}` : ""} · ${usd(r.stats.costUsd)} · ${secs(r.stats.durationMs)}`
+    + `${r.baseline ? ` · vs baseline: ${r.baseline.regressions} regression(s), ${r.baseline.improvements} improvement(s)` : ""}${r.isBaseline ? " · ★ baseline" : ""} [${r.id}]`;
+}
+
+/** The scores per scorer, flaky cases and the baseline comparison of a run. */
+function evalLines(r: Run): string[] {
+  const lines: string[] = [];
+  const a = r.aggregates;
+  if (a?.scorers.length) {
+    lines.push(`scores${a.score !== undefined ? ` (overall ${a.score.toFixed(2)})` : ""}: ${a.scorers.map((x) => `${x.id} mean ${x.mean.toFixed(2)} · median ${x.median.toFixed(2)} · p10 ${x.p10.toFixed(2)} · pass ${pct(x.passRate)}`).join(" | ")}`);
+  }
+  if (a && a.repetitions > 1) {
+    lines.push(`repetitions: ${a.repetitions} per case${a.flaky.length ? ` · flaky: ${a.flaky.join(", ")}` : " · none flaky"}`);
+    for (const c of a.cases.filter((x) => x.flaky).slice(0, 10)) lines.push(`   ≈ ${c.key} — ${c.caseName}: pass ${pct(c.passRate)} of ${c.attempts}${c.score !== undefined ? `, score ${c.score.toFixed(2)} ± ${(c.scoreStddev ?? 0).toFixed(2)}` : ""}`);
+  }
+  const b = r.baseline;
+  if (b) {
+    lines.push(`baseline ${b.runId} (${b.source}${b.baselineVersion ? `, v${b.baselineVersion}` : b.baselineTarget ? `, ${b.baselineTarget}` : ""}): pass rate ${signed(b.passRateDelta * 100, 0)} pts`
+      + `${b.scoreDelta !== undefined ? ` · score ${signed(b.scoreDelta)}` : ""} · cost ${b.costDelta >= 0 ? "+" : "−"}${usd(Math.abs(b.costDelta))} · tolerance ${b.tolerance}`);
+    for (const c of b.cases.filter((x) => x.change === "regressed" || x.change === "improved").slice(0, 20)) lines.push(`   ${c.change === "regressed" ? "▼" : "▲"} ${c.key} — ${c.caseName}: ${c.reasons.join("; ")}`);
+    for (const x of b.scorers.filter((y) => y.change === "regressed" || y.change === "improved")) lines.push(`   ${x.change === "regressed" ? "▼" : "▲"} scorer ${x.id}: ${x.baseline?.toFixed(2)} → ${x.current?.toFixed(2)}`);
+  }
+  return lines;
 }
 
 /** The report of a run: one line per case, the failed assertions with their messages and diffs. */
@@ -40,16 +84,20 @@ function runReport(r: Run, opts: { diffs?: boolean } = {}): string {
   const lines = [runHeader(r)];
   if (r.error) lines.push(`Error: ${r.error}`);
   for (const n of r.notes) lines.push(`note: ${n}`);
+  lines.push(...evalLines(r));
   for (const c of r.results) {
     const tools = c.trace ? ` · tools: ${c.trace.toolCalls.map((t) => `${t.name}${t.mocked ? `(${t.mocked})` : ""}`).join(", ") || "none"}` : "";
-    lines.push(`${MARK[c.status] ?? c.status} ${c.key} — ${c.caseName} [${c.mode}, ${c.engine}] ${secs(c.durationMs)} ${usd(c.costUsd)}${tools}`);
+    lines.push(`${MARK[c.status] ?? c.status} ${c.key} — ${c.caseName} [${c.mode}, ${c.engine}] ${secs(c.durationMs)} ${usd(c.costUsd)}${c.score !== undefined ? ` score ${c.score.toFixed(2)}` : ""}${tools}`);
     if (c.error) lines.push(`   error: ${short(c.error, 400)}`);
     for (const a of c.assertions?.filter((x) => !x.passed) ?? []) {
       lines.push(`   ✗ ${a.description}: ${short(a.message, 400)}`);
       if (opts.diffs && a.diff) lines.push(...a.diff.split("\n").slice(0, 30).map((l) => `      ${l}`));
     }
+    // full runs list the failed scorers here (summaries already have them in `failed`)
+    if (c.assertions) for (const x of c.scores?.filter((y) => !y.passed) ?? []) lines.push(`   ✗ ${x.id}: ${x.score.toFixed(2)} < ${x.threshold}${x.error ? ` (error: ${short(x.error, 200)})` : ""}${x.reason ? ` — ${short(x.reason, 300)}` : ""}`);
     for (const f of c.failed ?? []) lines.push(`   ✗ ${f}`);
   }
+  if (r.review) lines.push(`AI review (${r.review.model ?? "model"}, ${r.review.at.slice(0, 16).replace("T", " ")}):`, short(r.review.text, 3000));
   const pending = r.planned.filter((k) => !r.results.some((x) => x.key === k));
   if (pending.length) lines.push(`… ${pending.length} case(s) not finished yet: ${pending.slice(0, 10).join(", ")}`);
   return lines.join("\n");
@@ -73,6 +121,10 @@ function caseTrace(c: Result): string {
   for (const a of c.assertions ?? []) {
     lines.push(`${a.passed ? "✓" : "✗"} ${a.description}: ${short(a.message, 300)}`);
     if (!a.passed && a.diff) lines.push(...a.diff.split("\n").slice(0, 40).map((l) => `   ${l}`));
+  }
+  for (const x of c.scores ?? []) {
+    lines.push(`${x.passed ? "✓" : "✗"} score ${x.id} ${x.score.toFixed(2)} (threshold ${x.threshold}) — ${x.description}${x.error ? `: error ${short(x.error, 300)}` : x.reason ? `: ${short(x.reason, 400)}` : ""}`);
+    for (const k of x.judge?.criteria ?? []) lines.push(`   ${k.name} ${k.score}/5: ${short(k.reasoning, 400)}`);
   }
   return lines.join("\n");
 }
@@ -131,7 +183,10 @@ export function registerAgentSuiteTools(tool: Register, deps: McpDeps): void {
       + "datasets?: [{ name, rows: [{...}] }], cases: [{ name, input: { kind: chat | task, message, history?, context?: { system, memory, files, attachments } }, mode?, dataset?: dataset id (one run per row, {{row.col}} templated), "
       + "mocks?: { tools?: [{ tool: name or glob like mcp__printful__*, when?: { args, match: partial | exact | regex | schema, call }, response | error, delayMs?, times? }], "
       + "model?: { turns: [{ text?, toolCalls?: [{ name, args }] }] }, unmockedTools?: block | real }, "
-      + "assertions: [{ type: tool_called | tool_not_called | tool_order | tool_args | no_tool_errors | outcome_registered | artifact_created | approval_requested | text_contains | text_not_contains | text_regex | max_turns | max_cost | max_duration, ... }] }] }. "
+      + "assertions: [{ type: tool_called | tool_not_called | tool_order | tool_args | no_tool_errors | outcome_registered | artifact_created | approval_requested | text_contains | text_not_contains | text_regex | max_turns | max_cost | max_duration, ... }], "
+      + "scorers?: [{ type: exact | numeric | contains_all | contains_any | regex | similarity | json_schema | tool_trajectory | cost | latency | llm_judge | custom, id?, threshold? (0..1), weight?, "
+      + "from?: reply | reply_json | tool_args | tool_result | outcome, tool?, path?, expected / values / pattern / schema / maxUsd / maxMs / rubric + criteria [{ name, description, weight }] / code }] (evals: a score 0..1 each; "
+      + "expected may be {{row.expected}} from a dataset) }], scorers?: defaults for every case, evals?: { judgeModel, repetitions, regressionTolerance, baseline: previous | production | none } }. "
       + "Or yaml: the same as YAML (polpo_agent_suite_get format yaml). revision: the one you edited (refused if changed meanwhile). "
       + "import_dataset: { format: csv | json, text, name?, id?, mode?: replace | append } imports rows into the suite `suite` instead.",
     inputSchema: {
@@ -190,7 +245,8 @@ export function registerAgentSuiteTools(tool: Register, deps: McpDeps): void {
     description: "Run an agent's suite (or some cases) against a version: target production (default), draft or 1.2.0. Each case is a real chat turn through the agent's own path with its mocks. "
       + "mode overrides every case's mode: all (offline: scripted model, mocked tools — no cost, no side effects), tools (mocked tools, the real model: costs tokens), "
       + "model / none (real tools: side effects possible, needs the admin scope; approvals are never given). overrides change the agent for this run only (model, reasoning, instructions, instructionsAppend, allowedTools, maxTurns): "
-      + "compare variants by running the same suite with different overrides and labels. Waits up to wait_seconds (default 50) and returns the report; "
+      + "compare variants by running the same suite with different overrides and labels. repetitions runs each case N times (flaky cases flagged). The report has each case's assertions and scores, "
+      + "the mean / median / p10 per scorer and the comparison with the baseline (regressions, improvements). Waits up to wait_seconds (default 50) and returns the report; "
       + "a run still going is returned running: read it later with polpo_agent_suite_run_get. cancel: a run id to stop instead (cases not started are skipped).",
     inputSchema: {
       agent: z.string().min(1).describe("The agent's name (polpo_agents_list)"),
@@ -204,13 +260,16 @@ export function registerAgentSuiteTools(tool: Register, deps: McpDeps): void {
       }).optional().describe("Per-run changes to the agent (this run only; nothing is saved)"),
       label: z.string().optional().describe("A label for this run's variant (comparisons)"),
       concurrency: z.number().int().min(1).max(4).optional().describe("Cases at once (default the suite's, 1)"),
+      repetitions: z.number().int().min(1).max(10).optional().describe("Run every case this many times: mean, stddev and a flakiness flag per case (default the suite's, 1)"),
+      baseline: z.string().optional().describe("Compare with this run id instead of the suite's baseline"),
+      tolerance: z.number().min(0).max(1).optional().describe("A change within this is not a regression (default the suite's, 0.05)"),
       wait_seconds: z.number().int().min(0).max(MAX_WAIT_SECONDS).optional().describe("How long to wait for the run (default 50 s)"),
       cancel: z.string().optional().describe("Stop this running run (its id) instead of starting one"),
     },
     outputSchema: { run: looseObject },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     scope: "polpo:work",
-  }, async ({ agent, suite, target, cases, mode, overrides, label, concurrency, wait_seconds, cancel }, extra) => {
+  }, async ({ agent, suite, target, cases, mode, overrides, label, concurrency, repetitions, baseline, tolerance, wait_seconds, cancel }, extra) => {
     if (cancel) {
       const c = await apiSend(deps, "POST", `/agents/${enc(agent)}/suite-runs/${enc(cancel)}/cancel`);
       if (!c.ok) return c.status === 404 ? notFound(c, `There is no run "${cancel}".`) : apiError(c, "Cancelling the run");
@@ -220,6 +279,7 @@ export function registerAgentSuiteTools(tool: Register, deps: McpDeps): void {
     const r = await apiSend(deps, "POST", `/agents/${enc(agent)}/suites/${enc(suite)}/runs`, {
       ...(target ? { target } : {}), ...(cases?.length ? { caseIds: cases } : {}), ...(mode ? { mode } : {}), ...(overrides ? { overrides } : {}),
       ...(label ? { variant: { label } } : {}), ...(concurrency ? { concurrency } : {}),
+      ...(repetitions ? { repetitions } : {}), ...(baseline ? { baselineRunId: baseline } : {}), ...(tolerance !== undefined ? { regressionTolerance: tolerance } : {}),
       ...(admin ? { allowRealTools: true } : {}),
     });
     if (!r.ok) {
@@ -269,5 +329,98 @@ export function registerAgentSuiteTools(tool: Register, deps: McpDeps): void {
       return ok(caseTrace(c), { result: c as unknown as Record<string, unknown> });
     }
     return ok(runReport(full, { diffs: true }), { run: full as unknown as Record<string, unknown> });
+  });
+
+  tool("team", "polpo_agent_suite_trend", {
+    title: "A suite's trend",
+    description: "A suite's finished runs over time (oldest first): pass rate, overall score, cost, duration and regressions versus the baseline per run, and the same averaged by version "
+      + "(production's version, a published one, draft). Use it to see whether a change to the agent made it better or worse. polpo_agent_suite_show view trend draws it as a chart.",
+    inputSchema: {
+      agent: z.string().min(1).describe("The agent's name (polpo_agents_list)"),
+      suite: z.string().min(1).describe("The suite's id (polpo_agent_suite_list)"),
+      limit: z.number().int().min(1).max(100).optional().describe("How many recent runs (default 50)"),
+    },
+    outputSchema: { trend: looseObject },
+    annotations: READ,
+  }, async ({ agent, suite, limit }) => {
+    const r = await apiGet(deps, `/agents/${enc(agent)}/suites/${enc(suite)}/trend${qs({ limit: limit ? String(limit) : undefined })}`);
+    if (!r.ok) return r.status === 404 ? notFound(r, `There is no suite "${suite}" for ${agent}.`) : apiError(r, `Reading ${suite}'s trend`);
+    const t = r.data as Trend;
+    if (!t.points.length) return ok(`${suite} has no finished runs yet: run it with polpo_agent_suite_run.`, { trend: t as unknown as Record<string, unknown> });
+    const lines = [
+      `${suite}: ${t.points.length} run(s)`,
+      ...t.points.map((p) => `${p.startedAt.slice(0, 16).replace("T", " ")} ${MARK[p.status] ?? ""} ${p.version ? `v${p.version}` : p.target} · pass ${pct(p.passRate)}`
+        + `${p.score !== undefined ? ` · score ${p.score.toFixed(2)}` : ""} · ${usd(p.costUsd)} · ${secs(p.durationMs)}${p.regressions ? ` · ${p.regressions} regression(s)` : ""}${p.isBaseline ? " · ★ baseline" : ""} [${p.runId}]`),
+      "by version:",
+      ...t.byVersion.map((v) => `   ${v.version}: ${v.runs} run(s) · pass ${pct(v.passRate)}${v.score !== undefined ? ` · score ${v.score.toFixed(2)}` : ""} · ${usd(v.costUsd)} · ${secs(v.durationMs)}`),
+    ];
+    return ok(lines.join("\n"), { trend: t as unknown as Record<string, unknown> });
+  });
+
+  tool("team", "polpo_agent_suite_baseline", {
+    title: "A suite's baseline",
+    description: "The run a suite's new runs are compared with (deltas per case and per scorer; regressions and improvements beyond the tolerance). "
+      + "run: mark that finished run as the baseline (e.g. the last good run on production); clear: true removes the mark (new runs are then compared with the previous run, or as evals.baseline says); "
+      + "neither: show the current baseline. compare: a run id to compare with the baseline now (or with run).",
+    inputSchema: {
+      agent: z.string().min(1).describe("The agent's name (polpo_agents_list)"),
+      suite: z.string().min(1).describe("The suite's id (polpo_agent_suite_list)"),
+      run: z.string().optional().describe("Mark this run (sr-…) as the baseline; with compare: the run to compare with"),
+      clear: z.boolean().optional().describe("Remove the baseline mark"),
+      compare: z.string().optional().describe("A run id to compare with the baseline (or with run)"),
+    },
+    outputSchema: { baseline: looseObject.nullable().optional(), comparison: looseObject.nullable().optional() },
+    annotations: WRITE,
+    scope: "polpo:work",
+  }, async ({ agent, suite, run, clear, compare }) => {
+    if (compare) {
+      const r = await apiGet(deps, `/agents/${enc(agent)}/suite-runs/${enc(compare)}/compare${qs({ baseline: run })}`);
+      if (!r.ok) return r.status === 404 ? notFound(r, `There is no run "${compare}" for ${agent}.`) : apiError(r, "Comparing the runs");
+      const cmp = r.data as Comparison | null;
+      if (!cmp) return ok(`There is nothing to compare ${compare} with: mark a baseline (run) first.`, { comparison: null });
+      const fake = { baseline: cmp } as unknown as Run;
+      return ok([`${compare} vs ${cmp.runId}: ${cmp.regressions} regression(s), ${cmp.improvements} improvement(s)`, ...evalLines(fake)].join("\n"), { comparison: cmp as unknown as Record<string, unknown> });
+    }
+    if (clear) {
+      const r = await apiSend(deps, "DELETE", `/agents/${enc(agent)}/suites/${enc(suite)}/baseline`);
+      if (!r.ok) return r.status === 404 ? notFound(r, `There is no suite "${suite}" for ${agent}.`) : apiError(r, "Clearing the baseline");
+      return ok(`${suite} has no marked baseline now: new runs are compared as its evals.baseline says (the previous run by default).`, { baseline: null });
+    }
+    if (run) {
+      const r = await apiSend(deps, "PUT", `/agents/${enc(agent)}/suites/${enc(suite)}/baseline`, { runId: run });
+      if (!r.ok) return r.status === 404 ? notFound(r, `There is no suite "${suite}" or run "${run}" for ${agent}.`) : apiError(r, "Marking the baseline");
+      return ok(`Marked ${run} as ${suite}'s baseline: ${runHeader(r.data as Run)}. New runs are compared with it.`, { baseline: r.data as Record<string, unknown> });
+    }
+    const r = await apiGet(deps, `/agents/${enc(agent)}/suites/${enc(suite)}/baseline`);
+    if (!r.ok) return r.status === 404 ? notFound(r, `There is no suite "${suite}" for ${agent}.`) : apiError(r, "Reading the baseline");
+    return r.data
+      ? ok(`Baseline of ${suite}: ${runHeader(r.data as Run)}`, { baseline: r.data as Record<string, unknown> })
+      : ok(`${suite} has no marked baseline: new runs are compared with the previous run (or as its evals.baseline says). Mark one with run.`, { baseline: null });
+  });
+
+  tool("team", "polpo_agent_suite_review", {
+    title: "Explain a suite run",
+    description: "An AI review of a finished run by Polpo's model: a summary, what failed or regressed and why, and suggested fixes (instruction edits, tool changes, or the test itself). "
+      + "Stored on the run (the dashboard shows it); costs tokens. With refresh: false (default), an existing review is returned as is.",
+    inputSchema: {
+      agent: z.string().min(1).describe("The agent's name (polpo_agents_list)"),
+      run: z.string().min(1).describe("The run id (sr-…)"),
+      language: z.string().max(40).optional().describe("The review's language (default English)"),
+      refresh: z.boolean().optional().describe("Write a new review even when the run has one"),
+    },
+    outputSchema: { review: looseObject, run: looseObject.optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    scope: "polpo:work",
+  }, async ({ agent, run, language, refresh }) => {
+    if (!refresh) {
+      const g = await apiGet(deps, `/agents/${enc(agent)}/suite-runs/${enc(run)}`);
+      if (!g.ok) return g.status === 404 ? notFound(g, `There is no run "${run}" for ${agent}.`) : apiError(g, "Reading the run");
+      const existing = (g.data as Run).review;
+      if (existing) return ok(existing.text, { review: existing as unknown as Record<string, unknown> });
+    }
+    const r = await apiSend(deps, "POST", `/agents/${enc(agent)}/suite-runs/${enc(run)}/review`, language ? { language } : {});
+    if (!r.ok) return r.status === 404 ? notFound(r, `There is no run "${run}" for ${agent}.`) : apiError(r, "Reviewing the run");
+    const done = r.data as Run;
+    return ok(`${done.review?.text ?? ""}\n\n${runHeader(done)}`, { review: (done.review ?? {}) as unknown as Record<string, unknown>, run: { id: done.id, status: done.status } });
   });
 }

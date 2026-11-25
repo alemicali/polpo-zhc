@@ -1,0 +1,27 @@
+/* The agent suite card: on top of the cards' common look (agent-card/style.css); tokens only. */
+.danger-text { color: var(--w-danger); }
+.fail-line { overflow-wrap: anywhere; }
+.chips { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.chips .chip-sm, .row .chip-sm { margin-inline-start: 0; }
+.row-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.nums { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-variant-numeric: tabular-nums; font-size: var(--t-xs); }
+.delta { font-size: var(--t-xs); font-weight: var(--w-medium); margin-inline-start: 6px; font-variant-numeric: tabular-nums; color: var(--fg3); }
+.delta-up { color: var(--w-success); }
+.delta-down { color: var(--w-danger); }
+.baseline-box { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 12px; border-radius: var(--r-sm); background: var(--fill); }
+.baseline-box.has-regressions { background: var(--w-danger-bg); }
+.trend { display: flex; flex-direction: column; gap: 6px; }
+.chart { width: 100%; height: 120px; display: block; overflow: visible; }
+.chart .grid { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.chart .line { stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
+.chart .line-pass { stroke: var(--w-info); }
+.chart .line-score { stroke: var(--w-accent); stroke-dasharray: 4 3; }
+.chart .dot-pass { fill: var(--w-info); }
+.chart .dot-bad { fill: var(--w-danger); }
+.chart .dot-score { fill: var(--w-accent); }
+.chart .baseline-mark { stroke: var(--line2); stroke-width: 1; stroke-dasharray: 2 2; vector-effect: non-scaling-stroke; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; color: var(--fg2); }
+.key { display: inline-flex; align-items: center; gap: 6px; }
+.key::before { content: ""; width: 14px; height: 2px; border-radius: var(--r-full); }
+.key-pass::before { background: var(--w-info); }
+.key-score::before { background: var(--w-accent); }
