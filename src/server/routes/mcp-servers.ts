@@ -36,6 +36,7 @@ import { generateServer, type GenerateInput, type LlmQuery } from "../../mcp-ser
 import { serverTemplate } from "../../mcp-servers/templates/index.js";
 import { PUBLIC_MCP_SERVERS_PATH } from "../../mcp-servers/public.js";
 import type { UrlPolicy } from "../../mcp/net.js";
+import { NoOrchestratorModelError } from "../../llm/orchestrator-model.js";
 
 export interface McpServerRouteDeps {
   service: () => McpServerService;
@@ -65,6 +66,7 @@ function fail(c: Context, err: unknown): Response {
     return c.json({ ok: false, error: err.message, code: err.code, ...(err.details ? { details: err.details } : {}) }, status);
   }
   if (err instanceof McpServerInputError || err instanceof CodeBuildError) return c.json({ ok: false, error: err.message, code: "INVALID" }, 400);
+  if (err instanceof NoOrchestratorModelError) return c.json({ ok: false, error: err.message, code: err.code }, 409);
   const message = err instanceof Error ? err.message : String(err);
   return c.json({ ok: false, error: message, code: "ERROR" }, 500);
 }

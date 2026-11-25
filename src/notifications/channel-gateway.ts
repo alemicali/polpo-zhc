@@ -29,6 +29,7 @@
  *           └── Chat completions (for free-text conversation)
  */
 
+import { requireOrchestratorModel } from "../llm/orchestrator-model.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { nanoid } from "nanoid";
@@ -1537,7 +1538,7 @@ export class ChannelGateway {
 
       // Resolve model
       const settings = this.orchestrator.getConfig()?.settings;
-      const modelSpec = resolveModelSpec(settings?.orchestratorModel);
+      const modelSpec = resolveModelSpec(requireOrchestratorModel(settings?.orchestratorModel));
       const m = resolveModel(modelSpec);
       const streamOpts = buildStreamOpts(undefined, settings?.reasoning, m.maxTokens);
 
