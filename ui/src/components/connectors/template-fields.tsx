@@ -76,12 +76,16 @@ export function SecretHelp({ info }: { info: McpServerTemplateSecret }) {
  * A write-only secret: type or paste, then save — the value goes to the vault and the field empties.
  * `onSave` absent: the value is only handed to `onChange` (the install dialog sends it with the install).
  */
-export function SecretInput({ name, label, isSet, onSave, onChange, focus, disabled }: {
+export function SecretInput({ name, label, isSet, onSave, onChange, value: controlled, focus, disabled }: {
   name: string; label: string; isSet?: boolean; focus?: boolean; disabled?: boolean;
   onSave?: (value: string) => Promise<void>;
   onChange?: (value: string) => void;
+  /** Controlled by the parent (which empties it once the value is sent). */
+  value?: string;
 }) {
-  const [value, setValue] = useState("");
+  const [inner, setInner] = useState("");
+  const value = controlled ?? inner;
+  const setValue = (v: string) => { setInner(v); };
   const [saving, setSaving] = useState(false);
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => { if (focus) ref.current?.focus(); }, [focus]);

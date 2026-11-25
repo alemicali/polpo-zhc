@@ -181,7 +181,7 @@ export function InstallTemplateDialog({ template: t, agents, open, onOpenChange,
             <h3 className="text-sm font-medium">{t.settings.length ? "2" : "1"} · Credentials <span className="font-normal text-muted-foreground">(saved in the vault; never shown again)</span></h3>
             {t.secrets.map((s) => (
               <div key={s.name} className="space-y-1.5">
-                <SecretInput name={s.name} label={s.label} disabled={busy} onChange={(v) => setSecrets((x) => ({ ...x, [s.name]: v }))} />
+                <SecretInput name={s.name} label={s.label} disabled={busy} value={secrets[s.name] ?? ""} onChange={(v) => setSecrets((x) => ({ ...x, [s.name]: v }))} />
                 <SecretHelp info={s} />
                 <p className="text-micro text-muted-foreground">Vault entry {s.vault.owner} / {s.vault.service}, field {s.vault.key}{updating ? " — leave it empty to keep the saved one" : ""}.</p>
               </div>
