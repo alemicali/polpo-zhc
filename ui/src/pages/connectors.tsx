@@ -24,6 +24,7 @@ import { CustomConnectorDialog } from "@/components/connectors/custom-connector-
 import { OAuthAppsDialog } from "@/components/connectors/oauth-apps-dialog";
 import { CreateServerDialog, HostedServersList } from "@/components/connectors/hosted-servers";
 import { HostedServerSheet } from "@/components/connectors/hosted-server-sheet";
+import { ReadyMadeConnectors } from "@/components/connectors/ready-made-connectors";
 import { hostedLabel } from "@/lib/mcp-servers";
 import { useConnectFlow } from "@/components/connectors/use-connect-flow";
 import { useConnectors } from "@/hooks/use-connectors";
@@ -251,11 +252,17 @@ export function ConnectorsPage() {
           <TabsTrigger value="servers"><Server className="h-3.5 w-3.5" /> Hosted servers</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="servers" className="space-y-3">
-          <p className="text-sm text-muted-foreground">
-            MCP servers {product} builds and hosts — from an API's docs, a description or a template. Each becomes a connector when published.
-          </p>
-          <HostedServersList onOpen={setServerId} onCreate={() => setCreateServerOpen(true)} />
+        <TabsContent value="servers" className="space-y-6">
+          <ReadyMadeConnectors agents={agentOptions} onOpenServer={setServerId} />
+          <section className="space-y-3" aria-labelledby="hosted-servers-title">
+            <div>
+              <h2 id="hosted-servers-title" className="text-sm font-medium">Your hosted servers</h2>
+              <p className="text-sm text-muted-foreground">
+                MCP servers {product} builds and hosts — from an API's docs, a description or a template. Each becomes a connector when published.
+              </p>
+            </div>
+            <HostedServersList onOpen={setServerId} onCreate={() => setCreateServerOpen(true)} />
+          </section>
         </TabsContent>
 
         <TabsContent value="connected" className="space-y-2">

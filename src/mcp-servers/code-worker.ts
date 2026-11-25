@@ -84,7 +84,7 @@ rl.on("line", async (line) => {
   if (msg.type !== "call") return;
   try {
     const handler = await load(msg.tool);
-    const ctx = Object.freeze({ secrets: Object.freeze(Object.assign({}, msg.secrets || {})), fetch: hostFetch, log });
+    const ctx = Object.freeze({ secrets: Object.freeze(Object.assign({}, msg.secrets || {})), settings: Object.freeze(Object.assign({}, msg.settings || {})), fetch: hostFetch, log });
     const result = await handler(msg.input || {}, ctx);
     out({ type: "result", id: msg.id, ok: true, result: result === undefined ? null : result });
   } catch (err) {
@@ -284,7 +284,7 @@ export class BwrapCodeRunner implements CodeRunner {
       }, req.limits.timeoutMs);
       w.inflight.set(id, { resolve, started, timer, maxBytes: req.limits.maxResponseBytes, mask, logs: [] });
       req.signal?.addEventListener("abort", () => this.kill(w, "Cancelled"), { once: true });
-      w.child.stdin!.write(`${JSON.stringify({ type: "call", id, tool: req.tool.name, input: req.input, secrets: req.secrets })}\n`);
+      w.child.stdin!.write(`${JSON.stringify({ type: "call", id, tool: req.tool.name, input: req.input, secrets: req.secrets, settings: req.settings ?? {} })}\n`);
     });
   }
 

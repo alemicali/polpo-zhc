@@ -3,9 +3,10 @@
  */
 import { isReservedVaultOwner } from "@polpo-ai/core/vault-store";
 import { placeholdersOf, parsePath, TemplateError } from "./template.js";
+import { normalizeSettingsSchema } from "./settings.js";
 import {
   MCP_TOOL_NAME_PATTERN, SECRET_NAME_PATTERN,
-  type McpServerAuth, type McpServerSpec, type McpServerTool,
+  type HttpResponseAggregate, type HttpResponseFilter, type HttpResponseMapping, type McpServerAuth, type McpServerScope, type McpServerSpec, type McpServerTool,
 } from "./types.js";
 
 export class McpServerInputError extends Error {}
@@ -61,6 +62,44 @@ function auth(v: unknown): McpServerAuth {
   }
 }
 
+const MATCHES = new Set(["equals", "contains", "in", "gte", "lte"]);
+const AGG_OPS = new Set(["count", "unique", "min", "max", "sum", "value"]);
+
+function responseMapping(r: Record<string, unknown>, name: string): HttpResponseMapping {
+  const filters = Array.isArray(r.filters) ? r.filters.map((f, i) => {
+    if (!obj(f) || !str(f.path)) throw new McpServerInputError(`${name}: response.filters[${i}].path is required`);
+    if (f.input === undefined && f.value === undefined) throw new McpServerInputError(`${name}: response.filters[${i}] needs an input or a value`);
+    if (f.match !== undefined && !MATCHES.has(String(f.match))) throw new McpServerInputError(`${name}: response.filters[${i}].match must be equals, contains, in, gte or lte`);
+    return {
+      path: f.path.trim(),
+      ...(str(f.input) ? { input: f.input.trim() } : {}),
+      ...(typeof f.value === "string" || typeof f.value === "number" || typeof f.value === "boolean" ? { value: f.value } : {}),
+      ...(f.match !== undefined ? { match: f.match as HttpResponseFilter["match"] } : {}),
+    };
+  }) : [];
+  const p = obj(r.page) ? r.page : undefined;
+  const int = (v: unknown, max: number) => (typeof v === "number" && v >= 1 ? Math.min(max, Math.floor(v)) : undefined);
+  const page = p ? {
+    ...(str(p.offsetInput) ? { offsetInput: p.offsetInput } : {}), ...(str(p.limitInput) ? { limitInput: p.limitInput } : {}),
+    ...(int(p.defaultLimit, 1000) ? { defaultLimit: int(p.defaultLimit, 1000) } : {}), ...(int(p.maxLimit, 1000) ? { maxLimit: int(p.maxLimit, 1000) } : {}),
+  } : undefined;
+  const aggregates: Record<string, HttpResponseAggregate> = {};
+  if (obj(r.aggregates)) {
+    for (const [k, a] of Object.entries(r.aggregates)) {
+      if (!obj(a) || !str(a.path) || !AGG_OPS.has(String(a.op))) throw new McpServerInputError(`${name}: response.aggregates.${k} needs a path and op (count, unique, min, max, sum, value)`);
+      aggregates[k] = { path: a.path.trim(), op: a.op as HttpResponseAggregate["op"] };
+    }
+  }
+  return {
+    ...(str(r.pick) ? { pick: r.pick } : {}),
+    ...(Array.isArray(r.fields) ? { fields: r.fields.filter(str) } : {}),
+    ...(typeof r.maxChars === "number" && r.maxChars > 0 ? { maxChars: Math.min(200_000, Math.floor(r.maxChars)) } : {}),
+    ...(filters.length ? { filters } : {}),
+    ...(page ? { page } : {}),
+    ...(Object.keys(aggregates).length ? { aggregates } : {}),
+  };
+}
+
 function tool(v: unknown, i: number): McpServerTool {
   if (!obj(v)) throw new McpServerInputError(`tools[${i}] must be an object`);
   const name = typeof v.name === "string" ? v.name.trim() : "";
@@ -79,6 +118,7 @@ function tool(v: unknown, i: number): McpServerTool {
     ...(v.requiresApproval === true ? { requiresApproval: true } : {}),
     ...(v.publicCallable === true ? { publicCallable: true } : {}),
     ...(str(v.uiResource) ? { uiResource: v.uiResource } : {}),
+    ...(Array.isArray(v.scopes) && v.scopes.some(str) ? { scopes: [...new Set(v.scopes.filter(str).map((s) => s.trim()))] } : {}),
   };
   if (obj(v.annotations)) {
     const a: Record<string, boolean> = {};
@@ -98,11 +138,7 @@ function tool(v: unknown, i: number): McpServerTool {
       ...(stringRecord(h.query, `${name}.http.query`) ? { query: stringRecord(h.query, `${name}.http.query`) } : {}),
       ...(h.body !== undefined && h.body !== null ? { body: h.body } : {}),
       ...(h.bodyType === "form" ? { bodyType: "form" as const } : {}),
-      ...(obj(h.response) ? { response: {
-        ...(str(h.response.pick) ? { pick: h.response.pick } : {}),
-        ...(Array.isArray(h.response.fields) ? { fields: h.response.fields.filter(str) } : {}),
-        ...(typeof h.response.maxChars === "number" && h.response.maxChars > 0 ? { maxChars: Math.min(200_000, Math.floor(h.response.maxChars)) } : {}),
-      } } : {}),
+      ...(obj(h.response) ? { response: responseMapping(h.response, name) } : {}),
       ...(obj(h.pagination) && ["offset", "cursor", "page"].includes(String(h.pagination.style)) ? { pagination: h.pagination as never } : {}),
       ...(Array.isArray(h.errors) ? { errors: h.errors.filter((e): e is Record<string, unknown> => obj(e) && str(e.message)).map((e) => ({
         message: e.message as string,
@@ -155,6 +191,20 @@ export function normalizeSpec(input: unknown): McpServerSpec {
     if (!str(r.uri) || !str(r.name) || typeof r.text !== "string") throw new McpServerInputError(`resources[${i}] needs uri, name and text`);
     return { uri: r.uri, name: r.name, mimeType: str(r.mimeType) ? r.mimeType : "text/plain", text: r.text, ...(str(r.description) ? { description: r.description } : {}) };
   }) : [];
+  const scopes: Record<string, McpServerScope> = {};
+  if (input.scopes !== undefined && input.scopes !== null) {
+    if (!obj(input.scopes)) throw new McpServerInputError("scopes must be an object: name → { headers?, query?, description? }");
+    for (const [name, sc] of Object.entries(input.scopes)) {
+      if (!SECRET_NAME_PATTERN.test(name)) throw new McpServerInputError(`Scope name "${name}" must be letters, digits and _`);
+      if (!obj(sc)) throw new McpServerInputError(`scopes.${name} must be an object`);
+      const h = stringRecord(sc.headers, `scopes.${name}.headers`);
+      const q = stringRecord(sc.query, `scopes.${name}.query`);
+      scopes[name] = { ...(str(sc.description) ? { description: sc.description.trim() } : {}), ...(h && Object.keys(h).length ? { headers: h } : {}), ...(q && Object.keys(q).length ? { query: q } : {}) };
+    }
+  }
+  let settingsSchema;
+  try { settingsSchema = normalizeSettingsSchema(input.settingsSchema); } catch (err) { throw new McpServerInputError((err as Error).message); }
+  const query = stringRecord(input.query, "query");
   return {
     name: input.name.trim().slice(0, 100),
     ...(str(input.description) ? { description: input.description.trim().slice(0, 2000) } : {}),
@@ -164,6 +214,9 @@ export function normalizeSpec(input: unknown): McpServerSpec {
     secrets,
     auth: auth(input.auth),
     ...(stringRecord(input.headers, "headers") && Object.keys(stringRecord(input.headers, "headers")!).length ? { headers: stringRecord(input.headers, "headers") } : {}),
+    ...(query && Object.keys(query).length ? { query } : {}),
+    ...(Object.keys(scopes).length ? { scopes } : {}),
+    ...(settingsSchema.length ? { settingsSchema } : {}),
     ...(Object.keys(limits).length ? { limits } : {}),
     ...(Object.keys(deps).length ? { dependencies: deps } : {}),
     tools,
@@ -198,6 +251,19 @@ export function specProblems(spec: McpServerSpec): string[] {
   if ((hasHttp || hasCode) && spec.allowedDomains.length === 0 && (hasHttp || authSecrets.length)) problems.push("List the domains the server may call (allowedDomains)");
   if (spec.dependencies && !hasCode) problems.push("dependencies are only for code tools");
   const resourceUris = new Set((spec.resources ?? []).map((r) => r.uri));
+  const settingKeys = new Set((spec.settingsSchema ?? []).map((f) => f.key));
+  // server-level defaults (every tool, or the tools of a scope): settings and secrets must be declared
+  const serverLevel = [spec.headers ?? {}, spec.query ?? {}, ...Object.values(spec.scopes ?? {}).flatMap((s) => [s.headers ?? {}, s.query ?? {}])];
+  for (const p of placeholdersOf(serverLevel)) {
+    try {
+      const [root, first] = parsePath(p);
+      if (root === "secrets" && typeof first === "string" && !secretNames.has(first)) problems.push(`server defaults: {{${p}}} is not a declared secret`);
+      else if (root === "settings" && typeof first === "string" && !settingKeys.has(first)) problems.push(`server defaults: {{${p}}} is not a declared setting (settingsSchema)`);
+      else if (root !== "input" && root !== "secrets" && root !== "settings") problems.push(`server defaults: unknown template variable {{${p}}}`);
+    } catch (err) {
+      problems.push(`server defaults: ${err instanceof TemplateError ? err.message : String(err)}`);
+    }
+  }
   for (const t of spec.tools) {
     if (names.has(t.name)) problems.push(`Two tools are named "${t.name}"`);
     names.add(t.name);
@@ -211,11 +277,14 @@ export function specProblems(spec: McpServerSpec): string[] {
           const [root, first] = parsePath(p);
           if (root === "input" && typeof first === "string" && !props.includes(first)) problems.push(`${t.name}: {{${p}}} is not an input property`);
           if (root === "secrets" && typeof first === "string" && !secretNames.has(first)) problems.push(`${t.name}: {{${p}}} is not a declared secret`);
-          if (root !== "input" && root !== "secrets") problems.push(`${t.name}: unknown template variable {{${p}}}`);
+          if (root === "settings" && typeof first === "string" && !settingKeys.has(first)) problems.push(`${t.name}: {{${p}}} is not a declared setting (settingsSchema)`);
+          if (root !== "input" && root !== "secrets" && root !== "settings") problems.push(`${t.name}: unknown template variable {{${p}}}`);
         } catch (err) {
           problems.push(`${t.name}: ${err instanceof TemplateError ? err.message : String(err)}`);
         }
       }
+      for (const s of t.scopes ?? []) if (!spec.scopes?.[s]) problems.push(`${t.name}: scope "${s}" is not declared (scopes)`);
+      for (const f of t.http.response?.filters ?? []) if (f.input && !props.includes(f.input)) problems.push(`${t.name}: response filter input "${f.input}" is not an input property`);
       for (const p of placeholdersOf([t.http.url, t.http.body ?? null])) if (p.startsWith("secrets.")) problems.push(`${t.name}: secrets may only appear in headers and query parameters`);
       if (!/^https?:\/\//i.test(t.http.url) && !spec.baseUrl) problems.push(`${t.name}: relative URL but the server has no baseUrl`);
       if (t.http.response?.pick) { try { parsePath(t.http.response.pick); } catch (err) { problems.push(`${t.name}: response.pick: ${(err as Error).message}`); } }

@@ -4,14 +4,17 @@
  * a server names vault entries (owner / service / key) and responses only say whether they are set.
  *
  *   GET    /mcp-servers                         list
- *   GET    /mcp-servers/templates               ready-made servers (Printful…)
+ *   GET    /mcp-servers/templates               ready-made connectors (Printful, Gelato, Printify…) with install status
+ *   GET    /mcp-servers/templates/{t}           one template
+ *   POST   /mcp-servers/templates/{t}/install   settings → secrets → agents → read-only tests → publish + deploy (or upgrade → draft + diff)
  *   POST   /mcp-servers                         create { id?, spec } or { template } (a draft)
  *   POST   /mcp-servers/generate                draft a spec with the orchestrator model (from an API / a description)
  *   GET    /mcp-servers/{id}                    meta, draft (+ problems), production spec, secrets set, tests
- *   PATCH  /mcp-servers/{id}                    visibility, disabled (kill switch), onTestFailure, rateLimits
+ *   PATCH  /mcp-servers/{id}                    visibility, disabled (kill switch), onTestFailure, rateLimits, settings (non-secret values)
  *   DELETE /mcp-servers/{id}                    the server, its bound connector and files
  *   PUT    /mcp-servers/{id}/draft              { spec }: save the draft (problems listed, not refused)
  *   DELETE /mcp-servers/{id}/draft              back to the production spec
+ *   PUT    /mcp-servers/{id}/secrets/{name}     { value } to the vault (write-only, never echoed)
  *   PUT    /mcp-servers/{id}/tests              saved test cases
  *   POST   /mcp-servers/{id}/test               run one tool { tool, input, ref?, confirm?, dryRun? }
  *   POST   /mcp-servers/{id}/tests/run          run the saved tests { ref? }
@@ -30,7 +33,7 @@ import { McpServerError, type McpServerService } from "../../mcp-servers/service
 import { McpServerInputError } from "../../mcp-servers/validate.js";
 import { CodeBuildError } from "../../mcp-servers/code-build.js";
 import { generateServer, type GenerateInput, type LlmQuery } from "../../mcp-servers/generate.js";
-import { MCP_SERVER_TEMPLATES, serverTemplate } from "../../mcp-servers/templates.js";
+import { serverTemplate } from "../../mcp-servers/templates/index.js";
 import { PUBLIC_MCP_SERVERS_PATH } from "../../mcp-servers/public.js";
 import type { UrlPolicy } from "../../mcp/net.js";
 
@@ -81,8 +84,40 @@ export function mcpServerRoutes(deps: McpServerRouteDeps): OpenAPIHono {
   app.openapi(createRoute({ method: "get", path: "/", tags, summary: "List hosted MCP servers", description: "Custom MCP servers Polpo hosts: name, tools, production version, draft state, visibility, pending approvals.", responses: responses("The servers") }),
     async (c) => { try { return c.json({ ok: true, data: { servers: svc().list().map((s) => withUrl(c, s)) } }, 200); } catch (err) { return fail(c, err) as never; } });
 
-  app.openapi(createRoute({ method: "get", path: "/templates", tags, summary: "Server templates", description: "Ready-made servers to create in one click (e.g. Printful). No secret is included: each names the vault entry to add.", responses: responses("The templates") }),
-    async (c) => c.json({ ok: true, data: { templates: MCP_SERVER_TEMPLATES.map(({ spec, tests, ...t }) => ({ ...t, toolCount: spec.tools.length, tools: spec.tools.map((x) => ({ name: x.name, title: x.title, description: x.description, readOnly: !!x.annotations?.readOnlyHint, requiresApproval: !!x.requiresApproval })), testCount: tests.length })) } }, 200));
+  app.openapi(createRoute({ method: "get", path: "/templates", tags, summary: "Ready-made connectors (templates)",
+    description: "The curated catalog of hosted connectors Polpo can install (Printful, Gelato, Printify…): vendor, category, revision, maturity (tested with the live API or not), "
+      + "the settings and secrets each needs (with the vendor's instructions; never values), read-only and approval tools, and where each stands here: "
+      + "available, draft, installed (server and version) or update_available.",
+    responses: responses("The templates") }),
+    async (c) => { try { return c.json({ ok: true, data: { templates: svc().templates() } }, 200); } catch (err) { return fail(c, err) as never; } });
+
+  app.openapi(createRoute({ method: "get", path: "/templates/{template}", tags, summary: "One ready-made connector", description: "A template with its tools, settings, secrets' instructions, changelog and install status.", request: { params: z.object({ template: z.string() }) }, responses: responses("The template") }),
+    async (c) => {
+      try {
+        const t = serverTemplate(c.req.valid("param").template);
+        if (!t) throw new McpServerError(`No template "${c.req.valid("param").template}"`, "NOT_FOUND");
+        return c.json({ ok: true, data: svc().templateInfo(t) }, 200);
+      } catch (err) { return fail(c, err) as never; }
+    });
+
+  app.openapi(createRoute({ method: "post", path: "/templates/{template}/install", tags, summary: "Install a ready-made connector",
+    description: "settings (validated), secrets (values saved straight to the vault, never returned; the dashboard sends them, MCP never does), agents (who the connector grants: "
+      + "a list or \"*\"; default none — Polpo only), then the template's read-only tests, then publish 1.0.0 + deploy. status: installed | needs_secrets (nothing published: "
+      + "missingSecrets) | tests_failed | draft (publish: false) | upgrade_draft (an older revision is installed: the new one is the draft, with the diff) | up_to_date.",
+    request: { params: z.object({ template: z.string() }), ...anyBody("{ id?, settings?, secrets?, agents?, publish?, force? }") }, responses: responses("The install") }),
+    async (c) => {
+      try {
+        const b = await body(c);
+        const result = await svc().install(c.req.valid("param").template, {
+          ...(typeof b.id === "string" ? { id: b.id } : {}),
+          ...(b.settings && typeof b.settings === "object" ? { settings: b.settings } : {}),
+          ...(b.secrets && typeof b.secrets === "object" ? { secrets: b.secrets } : {}),
+          ...(b.agents !== undefined ? { agents: b.agents } : {}),
+          ...(b.publish === false ? { publish: false } : {}), ...(b.force === true ? { force: true } : {}),
+        }, deps.actor(c));
+        return c.json({ ok: true, data: result }, 200);
+      } catch (err) { return fail(c, err) as never; }
+    });
 
   app.openapi(createRoute({ method: "post", path: "/", tags, summary: "Create a hosted MCP server", description: "Create a server as a draft from a spec ({ id?, spec, visibility? }) or a template ({ template: \"printful\" }). Publish it to make a version and its connector.", request: anyBody("{ id?, spec } or { template, id? }"), responses: responses("Created") }),
     async (c) => {
@@ -91,7 +126,7 @@ export function mcpServerRoutes(deps: McpServerRouteDeps): OpenAPIHono {
         if (typeof b.template === "string") {
           const t = serverTemplate(b.template);
           if (!t) throw new McpServerError(`No template "${b.template}"`, "NOT_FOUND");
-          const created = svc().create({ ...(typeof b.id === "string" ? { id: b.id } : {}), spec: t.spec, template: t.id }, deps.actor(c));
+          const created = svc().create({ ...(typeof b.id === "string" ? { id: b.id } : {}), spec: t.spec, template: t.id, templateRevision: t.revision }, deps.actor(c));
           svc().saveTests(created.id, t.tests);
           return c.json({ ok: true, data: { ...created, setup: t.setup } }, 200);
         }
@@ -121,8 +156,8 @@ export function mcpServerRoutes(deps: McpServerRouteDeps): OpenAPIHono {
     async (c) => { try { const s = await svc().get(c.req.valid("param").id); return c.json({ ok: true, data: withUrl(c, s) }, 200); } catch (err) { return fail(c, err) as never; } });
 
   app.openapi(createRoute({ method: "patch", path: "/{id}", tags, summary: "Change a server's settings",
-    description: "visibility (\"private\": this instance only; \"public\": anyone with the URL, with the instance's credentials), disabled (kill switch), onTestFailure (\"warn\" | \"block\"), rateLimits { perIpPerMinute, globalPerMinute }.",
-    request: { params: idParam, ...anyBody("{ visibility?, disabled?, onTestFailure?, rateLimits? }") }, responses: responses("Saved") }),
+    description: "visibility (\"private\": this instance only; \"public\": anyone with the URL, with the instance's credentials), disabled (kill switch), onTestFailure (\"warn\" | \"block\"), rateLimits { perIpPerMinute, globalPerMinute }, settings (values of the settingsSchema, e.g. { store_id }: validated; null clears a key; no new version needed).",
+    request: { params: idParam, ...anyBody("{ visibility?, disabled?, onTestFailure?, rateLimits?, settings? }") }, responses: responses("Saved") }),
     async (c) => { try { const s = svc().updateSettings(c.req.valid("param").id, await body(c)); return c.json({ ok: true, data: withUrl(c, s) }, 200); } catch (err) { return fail(c, err) as never; } });
 
   app.openapi(createRoute({ method: "delete", path: "/{id}", tags, summary: "Delete a hosted MCP server", description: "Removes the server, its versions, logs and the connector bound to it.", request: { params: idParam }, responses: responses("Deleted") }),
@@ -133,6 +168,12 @@ export function mcpServerRoutes(deps: McpServerRouteDeps): OpenAPIHono {
 
   app.openapi(createRoute({ method: "delete", path: "/{id}/draft", tags, summary: "Discard the draft", description: "Back to the production spec.", request: { params: idParam }, responses: responses("Discarded") }),
     async (c) => { try { svc().discardDraft(c.req.valid("param").id); return c.json({ ok: true, data: { discarded: true } }, 200); } catch (err) { return fail(c, err) as never; } });
+
+  app.openapi(createRoute({ method: "put", path: "/{id}/secrets/{name}", tags, summary: "Save a secret to the vault",
+    description: "{ value }: written to the vault entry the server names for this secret (other fields of the entry are kept). Write-only: the value is never returned or logged; "
+      + "the server's GET says only whether it is set.",
+    request: { params: z.object({ id: z.string(), name: z.string() }), ...anyBody("{ value }") }, responses: responses("Saved (set: true)") }),
+    async (c) => { try { const p = c.req.valid("param"); const b = await body(c); return c.json({ ok: true, data: await svc().saveSecret(p.id, p.name, b.value) }, 200); } catch (err) { return fail(c, err) as never; } });
 
   app.openapi(createRoute({ method: "put", path: "/{id}/tests", tags, summary: "Save the test cases", description: "A list of { name?, tool, input, expect? (\"ok\" | \"error\"), contains? }. They run on publish (destructive / approval tools are always skipped).", request: { params: idParam, ...anyBody("{ tests: [...] }") }, responses: responses("Saved") }),
     async (c) => { try { const b = await body(c); return c.json({ ok: true, data: { tests: svc().saveTests(c.req.valid("param").id, b.tests) } }, 200); } catch (err) { return fail(c, err) as never; } });

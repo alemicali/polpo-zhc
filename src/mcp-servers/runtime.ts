@@ -22,9 +22,10 @@ import { executeHttpTool, type FetchLike } from "./http-executor.js";
 import type { Resolver } from "../sandbox/net-proxy.js";
 import { McpServerStore } from "./store.js";
 import { truncateText } from "./template.js";
+import { effectiveSettings } from "./settings.js";
 import {
   isSensitiveTool, limitsOf,
-  type McpCallSource, type McpServerSpec, type McpServerTool, type McpToolCallResult, type PendingCall,
+  type McpCallSource, type McpServerSettingValues, type McpServerSpec, type McpServerTool, type McpToolCallResult, type PendingCall,
 } from "./types.js";
 
 export const HOSTED_SERVER_VERSION = "1.0.0";
@@ -39,6 +40,8 @@ export interface CodeRunRequest {
   tool: McpServerTool;
   input: Record<string, unknown>;
   secrets: Record<string, string>;
+  /** The server's settings (non-secret): ctx.settings. */
+  settings?: McpServerSettingValues;
   allowedDomains: string[];
   limits: ReturnType<typeof limitsOf>;
   signal?: AbortSignal;
@@ -93,6 +96,8 @@ export interface RunToolOptions {
   approved?: boolean;
   approvalId?: string;
   requestedBy?: string;
+  /** Settings values to use instead of the server's stored ones (install checks before saving). */
+  settings?: McpServerSettingValues;
 }
 
 /** Run one tool and log it. Expected failures come back as ok: false. */
@@ -135,9 +140,10 @@ export async function runTool(opts: RunToolOptions, deps: HostedRuntimeDeps): Pr
   if (validation) return fail(validation);
   const limits = limitsOf(opts.spec);
 
+  const settings = effectiveSettings(opts.spec.settingsSchema, opts.settings ?? meta?.settings);
   if (tool.kind === "http") {
     const result = await executeHttpTool(opts.spec, tool, opts.input, {
-      secret: (name) => readSecret(deps.vault, opts.spec, name),
+      secret: (name) => readSecret(deps.vault, opts.spec, name), settings,
       ...(deps.fetch ? { fetch: deps.fetch } : {}), ...(deps.resolve ? { resolve: deps.resolve } : {}), ...(deps.sleep ? { sleep: deps.sleep } : {}),
       ...(opts.signal ? { signal: opts.signal } : {}), ...(opts.dryRun ? { dryRun: true } : {}),
     });
@@ -154,7 +160,7 @@ export async function runTool(opts: RunToolOptions, deps: HostedRuntimeDeps): Pr
   }
   const result = await deps.codeRunner.run({
     serverId: opts.serverId, buildDir: store.buildDir(opts.serverId, versionKey), workerKey: `${opts.serverId}@${versionKey}`,
-    tool, input: opts.input, secrets, allowedDomains: opts.spec.allowedDomains, limits, ...(opts.signal ? { signal: opts.signal } : {}),
+    tool, input: opts.input, secrets, settings, allowedDomains: opts.spec.allowedDomains, limits, ...(opts.signal ? { signal: opts.signal } : {}),
   });
   return done({ ...result, text: truncateText(result.text, limits.maxResultChars) });
 }

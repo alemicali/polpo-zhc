@@ -4,6 +4,7 @@ import { useEvents } from "./use-events.js";
 import type {
   McpHostedServer, McpServerCallLog, McpServerDeploy, McpServerDiff, McpServerSpec, McpServerSummary, McpServerTemplateInfo,
   McpServerVersionInfo, McpToolTestResult, McpPendingCall, McpServerGenerateRequest, McpServerGenerateResult,
+  McpServerInstallRequest, McpServerInstallResult,
 } from "@polpo-ai/sdk";
 
 /** Refetch on `mcp-server:changed` (for `id`, or any server when undefined). */
@@ -29,6 +30,8 @@ export interface UseMcpServersReturn {
   create: (req: { id?: string; spec?: McpServerSpec; template?: string }) => Promise<{ id: string; problems: string[]; setup?: string }>;
   /** Draft a spec with Polpo's model (from an API or a description). */
   generate: (req: McpServerGenerateRequest) => Promise<McpServerGenerateResult>;
+  /** Install a ready-made connector (settings, secrets to the vault, agents, read-only tests, publish); refetches. */
+  install: (template: string, req: McpServerInstallRequest) => Promise<McpServerInstallResult>;
 }
 
 /** The custom MCP servers Polpo hosts, and the templates (Printful…). Live through `mcp-server:changed`. */
@@ -62,8 +65,11 @@ export function useMcpServers(): UseMcpServersReturn {
     return r;
   }, [client, fetch_]);
   const generate = useCallback((req: McpServerGenerateRequest) => client.generateMcpServer(req), [client]);
+  const install = useCallback(async (template: string, req: McpServerInstallRequest) => {
+    try { return await client.installMcpServerTemplate(template, req); } finally { await fetch_(); }
+  }, [client, fetch_]);
 
-  return { servers, templates, isLoading, error, refetch: fetch_, create, generate };
+  return { servers, templates, isLoading, error, refetch: fetch_, create, generate, install };
 }
 
 export interface UseMcpServerReturn {
@@ -78,6 +84,8 @@ export interface UseMcpServerReturn {
   updateSettings: (req: Parameters<ReturnType<typeof usePolpoContext>["client"]["updateMcpServerSettings"]>[1]) => Promise<void>;
   test: (req: { tool: string; input?: Record<string, unknown>; ref?: string; confirm?: boolean; dryRun?: boolean }) => Promise<McpToolTestResult>;
   runTests: (ref?: string) => Promise<{ results: McpToolTestResult[]; passed: number; failed: number; skipped: number }>;
+  /** Save a secret's value to the vault entry the server names (write-only: never read back). */
+  saveSecret: (name: string, value: string) => Promise<void>;
   saveTests: (tests: Parameters<ReturnType<typeof usePolpoContext>["client"]["saveMcpServerTests"]>[1]) => Promise<void>;
   publish: (req?: { bump?: "major" | "minor" | "patch"; version?: string; note?: string; deploy?: boolean; force?: boolean }) => Promise<{ version: string }>;
   deploy: (version: string, note?: string) => Promise<McpServerDeploy>;
@@ -116,6 +124,7 @@ export function useMcpServer(id: string | undefined): UseMcpServerReturn {
     test: (req) => client.testMcpServerTool(key, req),
     runTests: (ref) => client.runMcpServerTests(key, ref),
     saveTests: (tests) => after(client.saveMcpServerTests(key, tests)).then(() => undefined),
+    saveSecret: (name, value) => after(client.saveMcpServerSecret(key, name, value)).then(() => undefined),
     publish: (req) => after(client.publishMcpServer(key, req ?? {})),
     deploy: (version, note) => after(client.deployMcpServer(key, version, note)),
     rollback: (opts) => after(client.rollbackMcpServer(key, opts ?? {})),

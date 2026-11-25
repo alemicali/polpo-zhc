@@ -2908,12 +2908,26 @@ export interface McpServerTool {
   kind: "http" | "code";
   http?: {
     method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; url: string; headers?: Record<string, string>; query?: Record<string, string>; body?: unknown;
-    bodyType?: "json" | "form"; response?: { pick?: string; fields?: string[]; maxChars?: number };
+    bodyType?: "json" | "form";
+    response?: {
+      pick?: string; fields?: string[]; maxChars?: number;
+      filters?: Array<{ path: string; input?: string; value?: string | number | boolean; match?: "equals" | "contains" | "in" | "gte" | "lte" }>;
+      page?: { offsetInput?: string; limitInput?: string; defaultLimit?: number; maxLimit?: number };
+      aggregates?: Record<string, { path: string; op: "count" | "unique" | "min" | "max" | "sum" | "value" }>;
+    };
     pagination?: { style: "offset" | "cursor" | "page"; param?: string; sizeParam?: string; nextPath?: string; totalPath?: string };
     errors?: Array<{ status?: number | "4xx" | "5xx"; match?: string; message: string }>; retries?: number;
   };
   code?: { source: string };
   uiResource?: string;
+  /** The server's scoped defaults this tool gets (spec.scopes). */
+  scopes?: string[];
+}
+
+/** A non-secret setting a hosted server declares (`{{settings.key}}` in its tools). */
+export interface McpServerSettingField {
+  key: string; label: string; type: "string" | "number" | "enum" | "boolean";
+  help?: string; required?: boolean; default?: string | number | boolean; options?: string[]; pattern?: string; min?: number; max?: number;
 }
 
 export interface McpServerSpec {
@@ -2925,6 +2939,9 @@ export interface McpServerSpec {
   secrets: Record<string, McpSecretRef>;
   auth: McpServerAuth;
   headers?: Record<string, string>;
+  query?: Record<string, string>;
+  scopes?: Record<string, { description?: string; headers?: Record<string, string>; query?: Record<string, string> }>;
+  settingsSchema?: McpServerSettingField[];
   limits?: Partial<Record<"timeoutMs" | "maxResponseBytes" | "maxResultChars" | "retries" | "memoryMb" | "concurrency" | "idleMs" | "depsMaxMb", number>>;
   dependencies?: Record<string, string>;
   tools: McpServerTool[];
@@ -2942,6 +2959,10 @@ export interface McpServerSummary {
   rateLimits?: { perIpPerMinute: number; globalPerMinute: number };
   connectorId?: string;
   template?: string;
+  /** The template revision production was published from. */
+  templateRevision?: number;
+  /** Values of the spec's settingsSchema. */
+  settings?: Record<string, string | number | boolean>;
   createdAt: string;
   updatedAt: string;
   createdBy: string;
@@ -2964,11 +2985,53 @@ export interface McpHostedServer extends McpServerSummary {
   secrets: Record<string, boolean>;
   tests: McpServerTestCase[];
   rateLimits: { perIpPerMinute: number; globalPerMinute: number };
+  /** The settings the deployed (else draft) spec declares and what tools see (defaults applied). */
+  settingsSchema: McpServerSettingField[];
+  effectiveSettings: Record<string, string | number | boolean>;
+  /** Made from a ready-made template: its revisions and the vendor's instructions per secret. */
+  templateInfo?: {
+    id: string; name: string; latestRevision: number; installedRevision?: number; docs: string;
+    secrets: Record<string, McpServerTemplateSecret>; maturity: { testedWithLiveApi: boolean; note?: string };
+  };
 }
 
+/** A credential a template needs, with the vendor's instructions (never a value). */
+export interface McpServerTemplateSecret { label: string; howTo: string; url?: string; scopes?: string[]; recommendation?: string }
+
+export type McpServerTemplateStatus = "available" | "draft" | "installed" | "update_available";
+
+/** A ready-made hosted connector and where it stands on this instance. */
 export interface McpServerTemplateInfo {
-  id: string; name: string; description: string; setup: string; docs?: string; toolCount: number; testCount: number;
-  tools: Array<{ name: string; title?: string; description: string; readOnly: boolean; requiresApproval: boolean }>;
+  id: string; name: string; vendor: string; category: string; description: string; icon?: string; docs: string; setup: string;
+  revision: number; changelog: Array<{ revision: number; note: string }>; maturity: { testedWithLiveApi: boolean; note?: string };
+  secrets: Array<McpServerTemplateSecret & { name: string; vault: McpSecretRef }>;
+  settings: McpServerSettingField[];
+  toolCount: number; testCount: number;
+  tools: Array<{ name: string; title?: string; description: string; readOnly: boolean; requiresApproval: boolean; destructive: boolean }>;
+  readOnlyTools: string[]; approvalTools: string[];
+  status: McpServerTemplateStatus;
+  installs: Array<{ serverId: string; production?: string; revision?: number; status: McpServerTemplateStatus; connectorId?: string }>;
+}
+
+export interface McpServerInstallRequest {
+  id?: string;
+  settings?: Record<string, string | number | boolean | null>;
+  /** Secret values, saved straight to the vault (never returned). */
+  secrets?: Record<string, string>;
+  /** Who the connector grants ("*": all agents). Default none. */
+  agents?: string[] | "*";
+  publish?: boolean;
+  force?: boolean;
+}
+
+export interface McpServerInstallResult {
+  id: string; template: string; revision: number;
+  status: "installed" | "needs_secrets" | "tests_failed" | "draft" | "upgrade_draft" | "up_to_date";
+  missingSecrets?: string[];
+  tests?: { passed: number; failed: number; skipped: number; results: McpToolTestResult[] };
+  version?: string; deployed?: McpServerDeploy; diff?: McpServerDiff; connectorId?: string;
+  access?: { agents: string[] | "*"; polpo: boolean };
+  settings: Record<string, string | number | boolean>;
 }
 
 export interface McpServerVersionInfo {
