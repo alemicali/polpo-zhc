@@ -7,7 +7,9 @@ import { randomUUID } from "node:crypto";
 import type { ConnectorConfig, VaultStore } from "@polpo-ai/core";
 import { CONNECTOR_ID_PATTERN } from "@polpo-ai/core";
 import type { ConnectorManager } from "../mcp/manager.js";
+import type { HostedServerSuiteSettings } from "@polpo-ai/core/agent-suites";
 import { runTool, secretStatus, type HostedRuntimeDeps } from "./runtime.js";
+import type { FetchLike } from "./http-executor.js";
 import { McpServerStore } from "./store.js";
 import { McpServerInputError, normalizeSpec, specProblems } from "./validate.js";
 import { compareSemver, nextVersion, specChanges, specsEqual, suggestBump, unifiedSpecDiff } from "./versioning.js";
@@ -60,9 +62,21 @@ export interface InstallResult {
 }
 
 export class McpServerError extends Error {
-  constructor(message: string, readonly code: "NOT_FOUND" | "INVALID" | "CONFLICT" | "TESTS_FAILED" = "INVALID", readonly details?: unknown) {
+  constructor(message: string, readonly code: "NOT_FOUND" | "INVALID" | "CONFLICT" | "TESTS_FAILED" | "GATE_BLOCKED" | "FORBIDDEN" = "INVALID", readonly details?: unknown) {
     super(message);
   }
+}
+
+/**
+ * The deploy gate of a hosted server: its suite (the saved tests with gate.required) run against
+ * the version; the deploy happens only when it passes (docs/agent-suites.md).
+ */
+export type HostedSuiteGate = (id: string, version: string, opts: { actor: string }) => Promise<{ passed: boolean; runId?: string; failures: string[] }>;
+
+/** A vault that answers every secret with a placeholder: suite calls whose HTTP is mocked never read a real secret. */
+function placeholderVault(): VaultStore {
+  const entry = { type: "api_key", label: "test", credentials: new Proxy({} as Record<string, string>, { get: (_t, k) => (typeof k === "string" ? `polpo-test-${k}` : undefined) }) };
+  return { get: async () => entry } as unknown as VaultStore;
 }
 
 /** Builds code tools (installs npm deps) for a version; see code-build.ts. */
@@ -78,6 +92,8 @@ export interface McpServerServiceDeps {
   build?: CodeBuilder;
   /** Announce a change (SSE: mcp-server:changed). */
   changed?: (id: string, what: string) => void;
+  /** The deploy gate: the server's required suite run against a version before it reaches production. */
+  suiteGate?: () => HostedSuiteGate | undefined;
 }
 
 export interface TestRunResult extends McpToolCallResult {
@@ -320,16 +336,84 @@ export class McpServerService {
       const x = t as Record<string, unknown>;
       if (!x || typeof x.tool !== "string" || !x.tool) throw new McpServerError(`tests[${i}].tool is required`);
       const input = x.input && typeof x.input === "object" && !Array.isArray(x.input) ? x.input as Record<string, unknown> : {};
+      // the suite's fields (checks, HTTP mocks, mode…) are kept as they are: the suite validates them
+      const list = (k: string) => (Array.isArray(x[k]) ? { [k]: x[k] } : {});
       return {
         id: typeof x.id === "string" && /^[\w-]{1,64}$/.test(x.id) ? x.id : randomUUID().slice(0, 8), tool: x.tool, input,
         ...(typeof x.name === "string" && x.name.trim() ? { name: x.name.trim().slice(0, 120) } : {}),
         ...(x.expect === "error" ? { expect: "error" as const } : {}),
         ...(typeof x.contains === "string" && x.contains ? { contains: x.contains } : {}),
-      };
+        ...list("assertions"), ...list("scorers"), ...list("http"),
+        ...(typeof x.mode === "string" ? { mode: x.mode } : {}),
+        ...(typeof x.dataset === "string" ? { dataset: x.dataset } : {}),
+        ...(typeof x.description === "string" ? { description: x.description } : {}),
+        ...(x.skip === true ? { skip: true } : {}),
+      } as McpServerTestCase;
     });
     this.store.saveTests(id, out);
     this.deps.changed?.(id, "tests");
     return out;
+  }
+
+  // ── the saved tests as a suite (docs/agent-suites.md, "Hosted MCP servers") ──
+
+  /** The server's saved tests and its suite settings. */
+  suiteStorage(id: string): { name: string; createdAt: string; tests: McpServerTestCase[]; settings: HostedServerSuiteSettings } {
+    const meta = this.need(id);
+    const spec = this.specAt(id, "production") ?? this.store.draft(id)?.spec;
+    return { name: spec?.name ?? id, createdAt: meta.createdAt, tests: this.store.tests(id), settings: meta.suite ?? {} };
+  }
+
+  /** Save the suite's tests (tests.json) and settings (server.json). */
+  saveSuiteStorage(id: string, tests: McpServerTestCase[], settings: HostedServerSuiteSettings): void {
+    const meta = this.need(id);
+    this.store.saveTests(id, tests);
+    this.touch(meta, { suite: settings });
+    this.deps.changed?.(id, "tests");
+  }
+
+  /** Each tool's kind at a ref (http, code), and whether it is destructive / needs approval. */
+  toolKinds(id: string, ref: string): Record<string, { kind: "http" | "code"; sensitive: boolean }> | undefined {
+    this.need(id);
+    const spec = this.specAt(id, ref);
+    if (!spec) return undefined;
+    return Object.fromEntries(spec.tools.map((t) => [t.name, { kind: t.kind === "code" ? "code" as const : "http" as const, sensitive: isSensitiveTool(t) }]));
+  }
+
+  /**
+   * One tool call for a suite case. With `mockedHttp` the upstream API is the given `fetch` (the
+   * case's HTTP mocks): secrets are placeholders (a real one never reaches a test), DNS is not asked,
+   * approval tools run (nothing leaves Polpo). Without it the call is real (read-only tools only).
+   */
+  async suiteCall(id: string, opts: { ref: string; tool: string; input: Record<string, unknown>; fetch?: FetchLike; mockedHttp: boolean; actor?: string; signal?: AbortSignal }): Promise<TestRunResult> {
+    this.need(id);
+    const spec = this.specAt(id, opts.ref);
+    if (!spec) throw new McpServerError(`Nothing at "${opts.ref}"`, "NOT_FOUND");
+    const tool = spec.tools.find((t) => t.name === opts.tool);
+    if (!tool) return { ok: false, text: `No tool "${opts.tool}" in ${opts.ref}`, error: `No tool "${opts.tool}" in ${opts.ref}`, ms: 0, tool: opts.tool };
+    const version = opts.ref === "draft" ? undefined : opts.ref === "production" ? this.store.production(id) : opts.ref;
+    if (!opts.mockedHttp && isSensitiveTool(tool)) {
+      return { ok: true, text: "", ms: 0, tool: tool.name, skipped: "destructive / approval tools never run against the real API in a test: mock its HTTP (mode all)" };
+    }
+    if (tool.kind === "code" && opts.mockedHttp) {
+      return { ok: true, text: "", ms: 0, tool: tool.name, skipped: "code tools run in the sandboxed worker with its own network: HTTP mocks do not reach them (run the case in mode none, real HTTP)" };
+    }
+    if (tool.kind === "code") await this.ensureBuild(id, version ?? "draft", spec);
+    const base = this.runtimeDeps();
+    const runtime: HostedRuntimeDeps = opts.mockedHttp
+      ? {
+        ...base,
+        vault: placeholderVault(),
+        resolve: async () => ["93.184.216.34"],
+        sleep: async () => undefined,
+        ...(opts.fetch ? { fetch: opts.fetch } : {}),
+      }
+      : { ...base, ...(opts.fetch ? { fetch: opts.fetch } : {}) };
+    const result = await runTool({
+      serverId: id, spec, ...(version ? { version } : {}), toolName: tool.name, input: opts.input, source: "test",
+      approved: opts.mockedHttp, ...(opts.actor ? { requestedBy: opts.actor } : {}), ...(opts.signal ? { signal: opts.signal } : {}),
+    }, runtime);
+    return { ...result, tool: tool.name };
   }
 
   // ── testing ──
@@ -390,7 +474,7 @@ export class McpServerService {
 
   // ── publish / deploy ──
 
-  async publish(id: string, opts: { bump?: McpServerBump; version?: string; note?: string; deploy?: boolean; force?: boolean; testsRun?: { passed: number; failed: number; skipped: number } }, actor: string) {
+  async publish(id: string, opts: { bump?: McpServerBump; version?: string; note?: string; deploy?: boolean; force?: boolean; testsRun?: { passed: number; failed: number; skipped: number }; override?: { reason: string }; admin?: boolean }, actor: string) {
     const meta = this.need(id);
     const draft = this.store.draft(id);
     if (!draft) throw new McpServerError("There is no draft to publish", "CONFLICT");
@@ -429,18 +513,49 @@ export class McpServerService {
     // the first version goes live at once (the connector needs something to serve)
     const first = !this.store.production(id);
     let deploy: McpServerDeploy | undefined;
-    if (first || opts.deploy) deploy = await this.deploy(id, version, { actor, ...(opts.note ? { note: opts.note } : {}), action: first ? "initial" : "deploy" });
-    return { version: record.version, changes: record.changes, ...(deploy ? { deployed: deploy } : {}), ...(tests ? { tests } : {}) };
+    let deployBlocked: { reason: string; runId?: string; failures: string[] } | undefined;
+    if (first || opts.deploy) {
+      try {
+        deploy = await this.deploy(id, version, { actor, ...(opts.note ? { note: opts.note } : {}), action: first ? "initial" : "deploy", ...(opts.override ? { override: opts.override } : {}), ...(opts.admin ? { admin: true } : {}) });
+      } catch (err) {
+        // the required suite failed: the version stays published, not deployed
+        if (!(err instanceof McpServerError) || err.code !== "GATE_BLOCKED") throw err;
+        const d = err.details as { runId?: string; failures?: string[] } | undefined;
+        deployBlocked = { reason: err.message, ...(d?.runId ? { runId: d.runId } : {}), failures: d?.failures ?? [] };
+      }
+    }
+    return { version: record.version, changes: record.changes, ...(deploy ? { deployed: deploy } : {}), ...(deployBlocked ? { deployBlocked } : {}), ...(tests ? { tests } : {}) };
   }
 
-  async deploy(id: string, version: string, opts: { actor: string; note?: string; action?: McpServerDeploy["action"] }): Promise<McpServerDeploy> {
-    this.need(id);
+  /**
+   * Move production to a version. With a required suite (meta.suite.gate.required) the suite runs
+   * against the version first and a failure blocks the deploy (GATE_BLOCKED), unless an admin
+   * overrides it with a reason (recorded on the deploy). Rollbacks are never gated.
+   */
+  async deploy(id: string, version: string, opts: { actor: string; note?: string; action?: McpServerDeploy["action"]; override?: { reason: string }; admin?: boolean }): Promise<McpServerDeploy> {
+    const meta = this.need(id);
     if (!this.store.version(id, version)) throw new McpServerError(`No version ${version}`, "NOT_FOUND");
     const from = this.store.production(id);
     if (from === version) throw new McpServerError(`${version} is already in production`, "CONFLICT");
+    let gate: McpServerDeploy["gate"];
+    const gateFn = this.deps.suiteGate?.();
+    if (opts.action !== "rollback" && meta.suite?.gate?.required && gateFn) {
+      if (opts.override) {
+        if (!opts.admin) throw new McpServerError("Only an admin can deploy past the suite gate", "FORBIDDEN");
+        const reason = String(opts.override.reason ?? "").trim();
+        if (!reason) throw new McpServerError("An override needs a reason");
+        gate = { decision: "override", reason: reason.slice(0, 1000), by: opts.actor };
+      } else {
+        const verdict = await gateFn(id, version, { actor: opts.actor });
+        if (!verdict.passed) {
+          throw new McpServerError(`Blocked by the suite: ${verdict.failures.join("; ") || "it did not pass"}`, "GATE_BLOCKED", { ...(verdict.runId ? { runId: verdict.runId } : {}), failures: verdict.failures });
+        }
+        gate = { decision: "pass", ...(verdict.runId ? { runId: verdict.runId } : {}) };
+      }
+    }
     const entry: McpServerDeploy = {
       id: randomUUID(), ...(from ? { from } : {}), to: version, action: opts.action ?? "deploy", actor: opts.actor,
-      ...(opts.note ? { note: opts.note.slice(0, 1000) } : {}), at: new Date().toISOString(),
+      ...(opts.note ? { note: opts.note.slice(0, 1000) } : {}), at: new Date().toISOString(), ...(gate ? { gate } : {}),
     };
     this.store.addDeploy(id, entry);
     this.touch(this.need(id));

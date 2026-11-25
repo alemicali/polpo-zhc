@@ -19,7 +19,11 @@
  *
  * Secrets are never stored here: a server names vault entries (owner / service / key) and the value
  * is read for one call only.
+ *
+ * The saved tests are also the server's suite (docs/agent-suites.md, "Hosted MCP servers"): its
+ * settings (shared HTTP mocks, datasets, the deploy gate) live in server.json's `suite`.
  */
+import type { HostedServerSuiteSettings, HostedServerTest } from "@polpo-ai/core/agent-suites";
 
 /** Where a secret lives in the vault: an entry (owner + service) and one credential field. */
 export interface McpSecretRef {
@@ -280,6 +284,8 @@ export interface McpServerMeta {
   settings?: McpServerSettingValues;
   /** Agents the connector grants when it is created (install flow); afterwards the connector's own access rules. */
   installAccess?: { agents: string[] | "*" };
+  /** The saved tests as a suite: shared HTTP mocks, datasets, the deploy gate (required before production). */
+  suite?: HostedServerSuiteSettings;
 }
 
 export type McpServerBump = "major" | "minor" | "patch";
@@ -323,19 +329,18 @@ export interface McpServerDeploy {
   actor: string;
   note?: string;
   at: string;
+  /**
+   * The deploy gate (the server's suite with gate.required): pass, or an admin's override with a
+   * reason; `runId` is the suite run (owner mcp-server:<id>).
+   */
+  gate?: { decision: "pass" | "override"; runId?: string; reason?: string; by?: string; failures?: string[] };
 }
 
-/** A saved test case: one tool with sample input. */
-export interface McpServerTestCase {
-  id: string;
-  name?: string;
-  tool: string;
-  input: Record<string, unknown>;
-  /** "ok" (default): the call must succeed; "error": it must fail. */
-  expect?: "ok" | "error";
-  /** The result text must contain this. */
-  contains?: string;
-}
+/**
+ * A saved test case: one tool with sample input (and, as a suite case, more checks, HTTP mocks and
+ * a mode: see HostedServerTest).
+ */
+export type McpServerTestCase = HostedServerTest;
 
 /** Where a call came from (logs, rate limits, approval). */
 export type McpCallSource = "private" | "public" | "test" | "approval";

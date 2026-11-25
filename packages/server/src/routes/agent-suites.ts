@@ -1,8 +1,9 @@
 import { createRoute, z, type OpenAPIHono } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import {
-  SUITE_MOCK_MODES, summarizeSuiteRun,
-  type AgentSuite, type SuiteBaselineComparison, type SuiteMockMode, type SuiteRun, type SuiteRunListOptions, type SuiteRunRequest, type SuiteTrend,
+  SUITE_MOCK_MODES, summarizeCassette, summarizeSuiteRun,
+  type AgentSuite, type CaseGenerationRequest, type CassetteCallEdit, type GeneratedCaseProposal, type SuiteBaselineComparison, type SuiteCase,
+  type SuiteCassetteRecord, type SuiteMockMode, type SuiteRun, type SuiteRunListOptions, type SuiteRunRequest, type SuiteTrend,
 } from "@polpo-ai/core/agent-suites";
 
 /** What the agent suite routes need from the host (src/server/agent-suites.ts). */
@@ -31,6 +32,34 @@ export interface AgentSuiteRouteDeps {
   actor: (c: Context) => string;
   /** An admin (may turn on gate.allowRealTools: deploy gates that run real tools). */
   isAdmin?: (c: Context) => boolean;
+  // ── phase 4: cassettes, recordings, generation ──
+  listCassettes?: (agent: string) => Promise<SuiteCassetteRecord[]>;
+  getCassette?: (agent: string, id: string) => Promise<SuiteCassetteRecord>;
+  caseCassette?: (agent: string, suiteId: string, caseId: string) => Promise<SuiteCassetteRecord | null>;
+  editCassette?: (agent: string, id: string, edits: CassetteCallEdit[], opts: { actor: string; revision?: number }) => Promise<SuiteCassetteRecord>;
+  deleteCassette?: (agent: string, id: string) => Promise<void>;
+  /** Record (or re-record) one case live: its exchange becomes its cassette. */
+  recordCase?: (agent: string, suiteId: string, caseId: string, req: { target?: string }, opts: { actor: string; allowRealTools: boolean }) => Promise<{ run: SuiteRun; done: Promise<SuiteRun> }>;
+  /** A case (and its cassette) from a real chat session or a task run, added to the suite. */
+  caseFromRecording?: (agent: string, suiteId: string, req: { sessionId?: string; taskId?: string; messageIndex?: number; name?: string }, opts: { actor: string }) => Promise<{ suite: AgentSuite; case: SuiteCase; cassette: SuiteCassetteRecord }>;
+  /** Proposed cases (validated, not saved). */
+  generateCases?: (agent: string, req: CaseGenerationRequest & { suiteId?: string; sessionIds?: string[] }) => Promise<{ proposals: GeneratedCaseProposal[]; model?: string; costUsd?: number }>;
+  /** Add the cases a person accepted. */
+  acceptCases?: (agent: string, suiteId: string, req: { cases: unknown[]; datasets?: unknown[]; revision?: number }, opts: { actor: string }) => Promise<AgentSuite>;
+  /** Proposed dataset rows for a case (not saved). */
+  generateDatasetRows?: (agent: string, suiteId: string, req: { caseId: string; count?: number; brief?: string }) => Promise<{ datasetId?: string; columns: string[]; rows: Array<Record<string, unknown>>; model?: string; costUsd?: number }>;
+}
+
+/** Suites of a target other than an agent (a hosted MCP server, a mission): the same routes under that target's path. */
+export interface SuiteRouteTarget {
+  /** The owner key of `{name}` (`mcp-server:<id>`, `mission:<id>`). */
+  owner: (name: string) => string;
+  /** Does the target exist? (404 otherwise) */
+  exists: (name: string) => Promise<boolean>;
+  /** OpenAPI tag. */
+  tag: string;
+  /** What `{name}` is, in words ("hosted server", "mission"). */
+  noun: string;
 }
 
 const errorSchema = z.object({ ok: z.boolean(), error: z.string(), code: z.string() });
@@ -62,6 +91,27 @@ const runBody = z.object({
   baselineRunId: z.string().optional().describe("Compare with this run instead of the suite's baseline"),
   regressionTolerance: z.number().min(0).max(1).optional().describe("A score or pass-rate change within this is not a regression (default the suite's, 0.05)"),
   allowRealTools: z.boolean().optional().describe("Confirm a run that uses real tools (modes none / model, or unmocked tools run for real): side effects are possible; approvals are never given"),
+  record: z.boolean().optional().describe("Record: run the cases live (real model and tools; needs allowRealTools and an admin) and save each one's exchange as its cassette (secrets redacted); the cases replay it from then on"),
+}).strict();
+
+const editCassetteBody = z.object({
+  edits: z.array(z.object({
+    callId: z.string().min(1),
+    response: z.string().max(200_000).optional(),
+    isError: z.boolean().optional(),
+    delete: z.boolean().optional(),
+    markAsMock: z.boolean().optional().describe("Turn the call into a tool mock of its case (a re-recording keeps it pinned)"),
+  }).strict()).min(1).max(500),
+  revision: z.number().int().optional(),
+}).strict();
+
+const generateBody = z.object({
+  suiteId: z.string().optional().describe("The suite the cases are for (ids kept unique)"),
+  count: z.number().int().min(1).max(20).optional(),
+  brief: z.string().max(4000).optional().describe("What to focus on"),
+  sessionIds: z.array(z.string()).max(5).optional().describe("Real chats with the agent to draw from"),
+  include: z.array(z.enum(["happy", "edge", "adversarial"])).optional(),
+  style: z.enum(["contract", "tools"]).optional().describe("contract (default): scripted model turns and tool mocks (offline); tools: the real model with mocked tools"),
 }).strict();
 
 const importBody = z.object({
@@ -100,18 +150,20 @@ function suiteFromBody(deps: AgentSuiteRouteDeps, body: unknown): { input: unkno
  * Agent suites under /agents/{name}/suites and /agents/{name}/suite-runs: suites (cases, datasets,
  * mocks), dataset imports, runs against a version with per-case traces. Registered before /agents/{name}.
  */
-export function registerAgentSuiteRoutes(app: OpenAPIHono, getDeps: () => { suites?: AgentSuiteRouteDeps; getAgents: () => Promise<any[]> }): void {
+export function registerAgentSuiteRoutes(app: OpenAPIHono, getDeps: () => { suites?: AgentSuiteRouteDeps; getAgents: () => Promise<any[]> }, target?: SuiteRouteTarget): void {
   const s = () => {
     const deps = getDeps().suites;
     if (!deps) throw Object.assign(new Error("Agent suites are not available on this server"), { name: "AgentSuiteError", code: "CONFLICT" });
     return deps;
   };
-  const exists = async (name: string) => (await getDeps().getAgents()).some((a) => a.name === name);
-  const notFound = (c: Context, name: string): never => c.json({ ok: false, error: `Agent "${name}" not found`, code: "NOT_FOUND" }, 404) as never;
+  // an agent's suites are kept under its name; a target's under its owner key (mcp-server:<id>, mission:<id>)
+  const own = (name: string) => (target ? target.owner(name) : name);
+  const exists = async (name: string) => (target ? target.exists(name) : (await getDeps().getAgents()).some((a) => a.name === name));
+  const notFound = (c: Context, name: string): never => c.json({ ok: false, error: `${target ? `The ${target.noun}` : "Agent"} "${name}" not found`, code: "NOT_FOUND" }, 404) as never;
   const nameParam = z.object({ name: z.string() });
   const suiteParam = z.object({ name: z.string(), id: z.string() });
   const runParam = z.object({ name: z.string(), runId: z.string() });
-  const tags = ["Agent suites"];
+  const tags = [target?.tag ?? "Agent suites"];
   const r = {
     200: { content: { "application/json": { schema: okAny } }, description: "OK" },
     400: { content: { "application/json": { schema: errorSchema } }, description: "Invalid request" },
@@ -128,7 +180,7 @@ export function registerAgentSuiteRoutes(app: OpenAPIHono, getDeps: () => { suit
   }), async (c) => {
     const { name } = c.req.valid("param");
     if (!(await exists(name))) return notFound(c, name);
-    try { return c.json({ ok: true, data: await s().list(name) }, 200); } catch (err) { return errorResponse(c, err); }
+    try { return c.json({ ok: true, data: await s().list(own(name)) }, 200); } catch (err) { return errorResponse(c, err); }
   });
 
   // POST /agents/{name}/suites
@@ -145,7 +197,7 @@ export function registerAgentSuiteRoutes(app: OpenAPIHono, getDeps: () => { suit
     try {
       const deps = s();
       const { input } = suiteFromBody(deps, await c.req.json().catch(() => ({})));
-      return c.json({ ok: true, data: await deps.save(name, input, { actor: deps.actor(c), create: true, admin: deps.isAdmin?.(c) ?? false }) }, 200);
+      return c.json({ ok: true, data: await deps.save(own(name), input, { actor: deps.actor(c), create: true, admin: deps.isAdmin?.(c) ?? false }) }, 200);
     } catch (err) { return errorResponse(c, err); }
   });
 
@@ -160,7 +212,7 @@ export function registerAgentSuiteRoutes(app: OpenAPIHono, getDeps: () => { suit
     if (!(await exists(name))) return notFound(c, name);
     try {
       const deps = s();
-      const suite = await deps.get(name, id);
+      const suite = await deps.get(own(name), id);
       if (c.req.valid("query").format === "yaml") {
         const { agent: _a, createdAt: _c, updatedAt: _u, updatedBy: _b, revision, ...rest } = suite;
         return c.json({ ok: true, data: { yaml: deps.toYaml(rest), revision } }, 200);
@@ -182,7 +234,7 @@ export function registerAgentSuiteRoutes(app: OpenAPIHono, getDeps: () => { suit
       const deps = s();
       const { input, revision } = suiteFromBody(deps, await c.req.json().catch(() => ({})));
       const body = input && typeof input === "object" ? { ...(input as Record<string, unknown>), id } : input;
-      return c.json({ ok: true, data: await deps.save(name, body, { actor: deps.actor(c), admin: deps.isAdmin?.(c) ?? false, ...(revision !== undefined ? { revision } : {}) }) }, 200);
+      return c.json({ ok: true, data: await deps.save(own(name), body, { actor: deps.actor(c), admin: deps.isAdmin?.(c) ?? false, ...(revision !== undefined ? { revision } : {}) }) }, 200);
     } catch (err) { return errorResponse(c, err); }
   });
 
@@ -194,7 +246,7 @@ export function registerAgentSuiteRoutes(app: OpenAPIHono, getDeps: () => { suit
   }), async (c) => {
     const { name, id } = c.req.valid("param");
     if (!(await exists(name))) return notFound(c, name);
-    try { await s().remove(name, id); return c.json({ ok: true, data: { deleted: id } }, 200); } catch (err) { return errorResponse(c, err); }
+    try { await s().remove(own(name), id); return c.json({ ok: true, data: { deleted: id } }, 200); } catch (err) { return errorResponse(c, err); }
   });
 
   // POST /agents/{name}/suites/{id}/datasets/import
@@ -209,7 +261,7 @@ export function registerAgentSuiteRoutes(app: OpenAPIHono, getDeps: () => { suit
     if (!(await exists(name))) return notFound(c, name);
     try {
       const deps = s();
-      return c.json({ ok: true, data: await deps.importDataset(name, id, c.req.valid("json"), { actor: deps.actor(c) }) }, 200);
+      return c.json({ ok: true, data: await deps.importDataset(own(name), id, c.req.valid("json"), { actor: deps.actor(c) }) }, 200);
     } catch (err) { return errorResponse(c, err); }
   });
 
@@ -230,7 +282,7 @@ export function registerAgentSuiteRoutes(app: OpenAPIHono, getDeps: () => { suit
     const { wait, allowRealTools, ...req } = parsed.data;
     try {
       const deps = s();
-      const started = await deps.startRun(name, id, req, { actor: deps.actor(c), allowRealTools: allowRealTools === true });
+      const started = await deps.startRun(own(name), id, req, { actor: deps.actor(c), allowRealTools: allowRealTools === true });
       return c.json({ ok: true, data: wait ? await started.done : started.run }, 200);
     } catch (err) { return errorResponse(c, err); }
   });
@@ -245,7 +297,7 @@ export function registerAgentSuiteRoutes(app: OpenAPIHono, getDeps: () => { suit
     const { name, id } = c.req.valid("param");
     if (!(await exists(name))) return notFound(c, name);
     const limit = Number(c.req.valid("query").limit);
-    try { return c.json({ ok: true, data: await s().trend(name, id, Number.isFinite(limit) && limit > 0 ? { limit } : {}) }, 200); } catch (err) { return errorResponse(c, err); }
+    try { return c.json({ ok: true, data: await s().trend(own(name), id, Number.isFinite(limit) && limit > 0 ? { limit } : {}) }, 200); } catch (err) { return errorResponse(c, err); }
   });
 
   // GET /agents/{name}/suites/{id}/baseline
@@ -256,7 +308,7 @@ export function registerAgentSuiteRoutes(app: OpenAPIHono, getDeps: () => { suit
   }), async (c) => {
     const { name, id } = c.req.valid("param");
     if (!(await exists(name))) return notFound(c, name);
-    try { const b = await s().getBaseline(name, id); return c.json({ ok: true, data: b ? summarizeSuiteRun(b) : null }, 200); } catch (err) { return errorResponse(c, err); }
+    try { const b = await s().getBaseline(own(name), id); return c.json({ ok: true, data: b ? summarizeSuiteRun(b) : null }, 200); } catch (err) { return errorResponse(c, err); }
   });
 
   // PUT /agents/{name}/suites/{id}/baseline
@@ -268,7 +320,7 @@ export function registerAgentSuiteRoutes(app: OpenAPIHono, getDeps: () => { suit
   }), async (c) => {
     const { name, id } = c.req.valid("param");
     if (!(await exists(name))) return notFound(c, name);
-    try { const run = await s().setBaseline(name, id, c.req.valid("json").runId); return c.json({ ok: true, data: run ? summarizeSuiteRun(run) : null }, 200); } catch (err) { return errorResponse(c, err); }
+    try { const run = await s().setBaseline(own(name), id, c.req.valid("json").runId); return c.json({ ok: true, data: run ? summarizeSuiteRun(run) : null }, 200); } catch (err) { return errorResponse(c, err); }
   });
 
   // DELETE /agents/{name}/suites/{id}/baseline
@@ -279,7 +331,7 @@ export function registerAgentSuiteRoutes(app: OpenAPIHono, getDeps: () => { suit
   }), async (c) => {
     const { name, id } = c.req.valid("param");
     if (!(await exists(name))) return notFound(c, name);
-    try { await s().setBaseline(name, id, undefined); return c.json({ ok: true, data: null }, 200); } catch (err) { return errorResponse(c, err); }
+    try { await s().setBaseline(own(name), id, undefined); return c.json({ ok: true, data: null }, 200); } catch (err) { return errorResponse(c, err); }
   });
 
   // GET /agents/{name}/suite-runs
@@ -293,7 +345,7 @@ export function registerAgentSuiteRoutes(app: OpenAPIHono, getDeps: () => { suit
     if (!(await exists(name))) return notFound(c, name);
     const q = c.req.valid("query");
     try {
-      const runs = await s().listRuns(name, { ...(q.suite ? { suiteId: q.suite } : {}), ...(q.benchmark ? { benchmarkRunId: q.benchmark } : {}), ...(Number(q.limit) ? { limit: Number(q.limit) } : {}) });
+      const runs = await s().listRuns(own(name), { ...(q.suite ? { suiteId: q.suite } : {}), ...(q.benchmark ? { benchmarkRunId: q.benchmark } : {}), ...(Number(q.limit) ? { limit: Number(q.limit) } : {}) });
       return c.json({ ok: true, data: q.full === "true" ? runs : runs.map(summarizeSuiteRun) }, 200);
     } catch (err) { return errorResponse(c, err); }
   });
@@ -306,7 +358,7 @@ export function registerAgentSuiteRoutes(app: OpenAPIHono, getDeps: () => { suit
   }), async (c) => {
     const { name, runId } = c.req.valid("param");
     if (!(await exists(name))) return notFound(c, name);
-    try { return c.json({ ok: true, data: await s().getRun(name, runId) }, 200); } catch (err) { return errorResponse(c, err); }
+    try { return c.json({ ok: true, data: await s().getRun(own(name), runId) }, 200); } catch (err) { return errorResponse(c, err); }
   });
 
   // GET /agents/{name}/suite-runs/{runId}/compare
@@ -321,7 +373,7 @@ export function registerAgentSuiteRoutes(app: OpenAPIHono, getDeps: () => { suit
     const q = c.req.valid("query");
     const tolerance = q.tolerance !== undefined ? Number(q.tolerance) : undefined;
     try {
-      return c.json({ ok: true, data: (await s().compareRuns(name, runId, { ...(q.baseline ? { baselineRunId: q.baseline } : {}), ...(tolerance !== undefined && Number.isFinite(tolerance) ? { tolerance } : {}) })) ?? null }, 200);
+      return c.json({ ok: true, data: (await s().compareRuns(own(name), runId, { ...(q.baseline ? { baselineRunId: q.baseline } : {}), ...(tolerance !== undefined && Number.isFinite(tolerance) ? { tolerance } : {}) })) ?? null }, 200);
     } catch (err) { return errorResponse(c, err); }
   });
 
@@ -337,7 +389,7 @@ export function registerAgentSuiteRoutes(app: OpenAPIHono, getDeps: () => { suit
     const body = (await c.req.json().catch(() => ({}))) as { language?: unknown };
     try {
       const deps = s();
-      return c.json({ ok: true, data: await deps.reviewRun(name, runId, { actor: deps.actor(c), ...(typeof body?.language === "string" && body.language ? { language: body.language.slice(0, 40) } : {}) }) }, 200);
+      return c.json({ ok: true, data: await deps.reviewRun(own(name), runId, { actor: deps.actor(c), ...(typeof body?.language === "string" && body.language ? { language: body.language.slice(0, 40) } : {}) }) }, 200);
     } catch (err) { return errorResponse(c, err); }
   });
 
@@ -349,6 +401,146 @@ export function registerAgentSuiteRoutes(app: OpenAPIHono, getDeps: () => { suit
   }), async (c) => {
     const { name, runId } = c.req.valid("param");
     if (!(await exists(name))) return notFound(c, name);
-    try { return c.json({ ok: true, data: await s().cancelRun(name, runId) }, 200); } catch (err) { return errorResponse(c, err); }
+    try { return c.json({ ok: true, data: await s().cancelRun(own(name), runId) }, 200); } catch (err) { return errorResponse(c, err); }
+  });
+
+  const caseParam = z.object({ name: z.string(), id: z.string(), caseId: z.string() });
+  const unavailable = (what: string) => Object.assign(new Error(`${what} is not available on this server`), { name: "AgentSuiteError", code: "CONFLICT" });
+  const need = <K extends keyof AgentSuiteRouteDeps>(k: K, what: string): NonNullable<AgentSuiteRouteDeps[K]> => {
+    const fn = s()[k];
+    if (!fn) throw unavailable(what);
+    return fn as NonNullable<AgentSuiteRouteDeps[K]>;
+  };
+
+  // POST /{name}/suites/{id}/cases — add cases (the generated ones a person accepted)
+  app.openapi(createRoute({
+    method: "post", path: "/{name}/suites/{id}/cases", tags, summary: "Add cases to a suite",
+    description: "Appends cases (validated like a saved suite's; an id already used gets a new one) and the datasets they use: e.g. the generated cases a person accepted. `revision` refuses the save when the suite changed meanwhile (409).",
+    request: { params: suiteParam, body: { content: { "application/json": { schema: z.object({ cases: z.array(z.any()).min(1).max(200), datasets: z.array(z.any()).optional(), revision: z.number().int().optional() }).strict() } } } },
+    responses: { 200: r[200], 400: r[400], 404: r[404] },
+  }), async (c) => {
+    const { name, id } = c.req.valid("param");
+    if (!(await exists(name))) return notFound(c, name);
+    try { return c.json({ ok: true, data: await need("acceptCases", "Adding cases")(own(name), id, c.req.valid("json"), { actor: s().actor(c) }) }, 200); } catch (err) { return errorResponse(c, err); }
+  });
+
+  // POST /{name}/suites/{id}/datasets/generate — proposed rows (not saved)
+  app.openapi(createRoute({
+    method: "post", path: "/{name}/suites/{id}/datasets/generate", tags, summary: "Generate dataset rows",
+    description: "Polpo's model proposes rows for a case's dataset (its columns kept; edge and adversarial values included), or a first dataset for a case that uses {{row.x}}. Nothing is saved: add the rows you keep (datasets/import or a save). Costs tokens.",
+    request: { params: suiteParam, body: { content: { "application/json": { schema: z.object({ caseId: z.string().min(1), count: z.number().int().min(1).max(50).optional(), brief: z.string().max(2000).optional() }).strict() } } } },
+    responses: { 200: r[200], 400: r[400], 404: r[404], 409: { content: { "application/json": { schema: errorSchema } }, description: "No model" } },
+  }), async (c) => {
+    const { name, id } = c.req.valid("param");
+    if (!(await exists(name))) return notFound(c, name);
+    try { return c.json({ ok: true, data: await need("generateDatasetRows", "Generation")(own(name), id, c.req.valid("json")) }, 200); } catch (err) { return errorResponse(c, err); }
+  });
+
+  // the rest is for agents: cassettes (record / replay) and case generation
+  if (target) return;
+
+  // POST /agents/{name}/suites/generate-cases — proposed cases (not saved)
+  app.openapi(createRoute({
+    method: "post", path: "/{name}/suites/generate-cases", tags, summary: "Generate cases (AI)",
+    description: "Polpo's model proposes cases from the agent's instructions, tools, skills and connectors (and a brief, sample chats): input, mocks, assertions, scorers and dataset rows, "
+      + "including edge cases and adversarial / prompt-injection ones. Each proposal is validated and returned with its rationale; nothing is saved — accept the ones you keep with POST …/suites/{id}/cases. Costs tokens.",
+    request: { params: nameParam, body: { content: { "application/json": { schema: generateBody } }, required: false } },
+    responses: { 200: r[200], 400: r[400], 404: r[404], 409: { content: { "application/json": { schema: errorSchema } }, description: "No model, or the generation failed" } },
+  }), async (c) => {
+    const { name } = c.req.valid("param");
+    if (!(await exists(name))) return notFound(c, name);
+    const parsed = generateBody.safeParse((await c.req.json().catch(() => ({}))) ?? {});
+    if (!parsed.success) return invalid(c, parsed.error.issues);
+    try { return c.json({ ok: true, data: await need("generateCases", "Case generation")(name, parsed.data) }, 200); } catch (err) { return errorResponse(c, err); }
+  });
+
+  // POST /agents/{name}/suites/{id}/cases/from-recording — a case from a real chat or task run
+  app.openapi(createRoute({
+    method: "post", path: "/{name}/suites/{id}/cases/from-recording", tags, summary: "A case from a real chat or task",
+    description: "Turns a chat session with the agent (`sessionId`, the user message at `messageIndex`, default the last one) or a task run (`taskId`, its activity) into a case and its cassette: "
+      + "the exchange is replayed offline (mode all) and the same tool calls are checked in order. Secrets are redacted from the cassette. The case is added to the suite.",
+    request: { params: suiteParam, body: { content: { "application/json": { schema: z.object({ sessionId: z.string().optional(), taskId: z.string().optional(), messageIndex: z.number().int().min(0).optional(), name: z.string().max(200).optional() }).strict() } } } },
+    responses: { 200: r[200], 400: r[400], 404: r[404] },
+  }), async (c) => {
+    const { name, id } = c.req.valid("param");
+    if (!(await exists(name))) return notFound(c, name);
+    try { return c.json({ ok: true, data: await need("caseFromRecording", "Recording from chats")(name, id, c.req.valid("json"), { actor: s().actor(c) }) }, 200); } catch (err) { return errorResponse(c, err); }
+  });
+
+  // GET /agents/{name}/suites/{id}/cases/{caseId}/cassette
+  app.openapi(createRoute({
+    method: "get", path: "/{name}/suites/{id}/cases/{caseId}/cassette", tags, summary: "A case's cassette",
+    description: "The recording a case replays (every model turn and tool call with its arguments and result, secrets redacted), or null when it was never recorded.",
+    request: { params: caseParam }, responses: { 200: r[200], 404: r[404] },
+  }), async (c) => {
+    const { name, id, caseId } = c.req.valid("param");
+    if (!(await exists(name))) return notFound(c, name);
+    try { return c.json({ ok: true, data: await need("caseCassette", "Cassettes")(name, id, caseId) }, 200); } catch (err) { return errorResponse(c, err); }
+  });
+
+  // POST /agents/{name}/suites/{id}/cases/{caseId}/record
+  app.openapi(createRoute({
+    method: "post", path: "/{name}/suites/{id}/cases/{caseId}/record", tags, summary: "Record (or re-record) a case",
+    description: "Runs the case live — the agent's real model and real tools: side effects are possible, so it needs `allowRealTools: true` and an admin (403 otherwise) — and saves its exchange as the case's cassette (secrets redacted: vault values, auth headers, tokens). "
+      + "The case then replays it offline. Calls turned into mocks stay pinned. Returns the recording run (finished with `wait: true`).",
+    request: { params: caseParam, body: { content: { "application/json": { schema: z.object({ target: z.string().optional(), allowRealTools: z.boolean().optional(), wait: z.boolean().optional() }).strict() } }, required: false } },
+    responses: { 200: r[200], 400: r[400], 403: { content: { "application/json": { schema: errorSchema } }, description: "Not confirmed, or not an admin" }, 404: r[404] },
+  }), async (c) => {
+    const { name, id, caseId } = c.req.valid("param");
+    if (!(await exists(name))) return notFound(c, name);
+    const b = (await c.req.json().catch(() => ({}))) as { target?: string; allowRealTools?: boolean; wait?: boolean };
+    try {
+      const deps = s();
+      const allowed = b?.allowRealTools === true && (deps.isAdmin?.(c) ?? true);
+      const started = await need("recordCase", "Recording")(name, id, caseId, { ...(typeof b?.target === "string" ? { target: b.target } : {}) }, { actor: deps.actor(c), allowRealTools: allowed });
+      return c.json({ ok: true, data: b?.wait ? await started.done : started.run }, 200);
+    } catch (err) { return errorResponse(c, err); }
+  });
+
+  // GET /agents/{name}/cassettes
+  app.openapi(createRoute({
+    method: "get", path: "/{name}/cassettes", tags, summary: "An agent's cassettes",
+    description: "The recordings its cases replay, newest first, without their calls (tools, how many calls and turns, redactions, where they were recorded).",
+    request: { params: nameParam }, responses: { 200: r[200], 404: r[404] },
+  }), async (c) => {
+    const { name } = c.req.valid("param");
+    if (!(await exists(name))) return notFound(c, name);
+    try { return c.json({ ok: true, data: (await need("listCassettes", "Cassettes")(name)).map(summarizeCassette) }, 200); } catch (err) { return errorResponse(c, err); }
+  });
+
+  // GET /agents/{name}/cassettes/{cassetteId}
+  const cassetteParam = z.object({ name: z.string(), cassetteId: z.string() });
+  app.openapi(createRoute({
+    method: "get", path: "/{name}/cassettes/{cassetteId}", tags, summary: "One cassette",
+    description: "A recording with every model turn and tool call (arguments, result, error, edited, turned into a mock).",
+    request: { params: cassetteParam }, responses: { 200: r[200], 404: r[404] },
+  }), async (c) => {
+    const { name, cassetteId } = c.req.valid("param");
+    if (!(await exists(name))) return notFound(c, name);
+    try { return c.json({ ok: true, data: await need("getCassette", "Cassettes")(name, cassetteId) }, 200); } catch (err) { return errorResponse(c, err); }
+  });
+
+  // PATCH /agents/{name}/cassettes/{cassetteId}
+  app.openapi(createRoute({
+    method: "patch", path: "/{name}/cassettes/{cassetteId}", tags, summary: "Edit a cassette",
+    description: "Per recorded call: a new `response` (and `isError`), `delete`, or `markAsMock` (the call becomes a tool mock of its case, kept on re-recording). `revision` refuses an edit over a newer one (409).",
+    request: { params: cassetteParam, body: { content: { "application/json": { schema: editCassetteBody } } } },
+    responses: { 200: r[200], 400: r[400], 404: r[404], 409: { content: { "application/json": { schema: errorSchema } }, description: "Changed meanwhile" } },
+  }), async (c) => {
+    const { name, cassetteId } = c.req.valid("param");
+    if (!(await exists(name))) return notFound(c, name);
+    const b = c.req.valid("json");
+    try { return c.json({ ok: true, data: await need("editCassette", "Cassettes")(name, cassetteId, b.edits, { actor: s().actor(c), ...(b.revision !== undefined ? { revision: b.revision } : {}) }) }, 200); } catch (err) { return errorResponse(c, err); }
+  });
+
+  // DELETE /agents/{name}/cassettes/{cassetteId}
+  app.openapi(createRoute({
+    method: "delete", path: "/{name}/cassettes/{cassetteId}", tags, summary: "Delete a cassette",
+    description: "Deletes the recording: the cases pointing at it block their tool calls until they are recorded again.",
+    request: { params: cassetteParam }, responses: { 200: r[200], 404: r[404] },
+  }), async (c) => {
+    const { name, cassetteId } = c.req.valid("param");
+    if (!(await exists(name))) return notFound(c, name);
+    try { await need("deleteCassette", "Cassettes")(name, cassetteId); return c.json({ ok: true, data: { deleted: cassetteId } }, 200); } catch (err) { return errorResponse(c, err); }
   });
 }
