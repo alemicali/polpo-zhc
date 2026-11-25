@@ -11,11 +11,52 @@ import { runTool, secretStatus, type HostedRuntimeDeps } from "./runtime.js";
 import { McpServerStore } from "./store.js";
 import { McpServerInputError, normalizeSpec, specProblems } from "./validate.js";
 import { compareSemver, nextVersion, specChanges, specsEqual, suggestBump, unifiedSpecDiff } from "./versioning.js";
+import { effectiveSettings, validateSettings } from "./settings.js";
+import { MCP_SERVER_TEMPLATES, serverTemplate, type McpServerTemplate } from "./templates/index.js";
 import {
   DEFAULT_RATE_LIMITS, isSensitiveTool, MCP_SERVER_ID_PATTERN,
-  type McpServerBump, type McpServerDeploy, type McpServerMeta, type McpServerSpec, type McpServerTestCase, type McpServerVersion,
+  type McpSecretRef, type McpServerBump, type McpServerDeploy, type McpServerMeta, type McpServerSpec, type McpServerTestCase, type McpServerVersion,
   type McpServerVisibility, type McpToolCallResult, type PendingCall, type PublicRateLimits,
 } from "./types.js";
+
+/** Where a template stands on this instance. */
+export type TemplateStatus = "available" | "draft" | "installed" | "update_available";
+
+export interface InstallOptions {
+  /** The server id (default: the template's id, or the server already made from it). */
+  id?: string;
+  /** Settings values (validated against the template's settingsSchema). */
+  settings?: Record<string, unknown>;
+  /** Secret values to save in the vault first (dashboard only: never echoed back). */
+  secrets?: Record<string, unknown>;
+  /** Agents the connector grants ("*": all). Default: none (Polpo only). */
+  agents?: string[] | "*";
+  /** false: stop after the checks (a draft). Default true: publish v1.0.0 and deploy. */
+  publish?: boolean;
+  /** Publish even when a saved test fails. */
+  force?: boolean;
+}
+
+export interface InstallResult {
+  id: string;
+  template: string;
+  revision: number;
+  /**
+   * installed: published and deployed; needs_secrets: a secret is not in the vault yet (nothing
+   * published); tests_failed: a read-only test failed (nothing published); draft: checks passed,
+   * not published (publish: false); upgrade_draft: a newer template revision became the draft (diff);
+   * up_to_date: already on this revision.
+   */
+  status: "installed" | "needs_secrets" | "tests_failed" | "draft" | "upgrade_draft" | "up_to_date";
+  missingSecrets?: string[];
+  tests?: { passed: number; failed: number; skipped: number; results: TestRunResult[] };
+  version?: string;
+  deployed?: McpServerDeploy;
+  diff?: ReturnType<McpServerService["diff"]>;
+  connectorId?: string;
+  access?: { agents: string[] | "*"; polpo: boolean };
+  settings: Record<string, string | number | boolean>;
+}
 
 export class McpServerError extends Error {
   constructor(message: string, readonly code: "NOT_FOUND" | "INVALID" | "CONFLICT" | "TESTS_FAILED" = "INVALID", readonly details?: unknown) {
@@ -103,9 +144,21 @@ export class McpServerService {
     const production = this.store.production(id);
     const prod = production ? this.store.version(id, production) : undefined;
     const spec = draft?.spec ?? prod?.spec;
+    const settingsSpec = prod?.spec ?? draft?.spec;
+    const template = meta.template ? serverTemplate(meta.template) : undefined;
     return {
       ...this.summary(id),
       meta,
+      // the settings the deployed (else the draft's) spec declares, and the values templates see
+      settingsSchema: settingsSpec?.settingsSchema ?? [],
+      settings: meta.settings ?? {},
+      effectiveSettings: effectiveSettings(settingsSpec?.settingsSchema, meta.settings),
+      ...(template ? {
+        templateInfo: {
+          id: template.id, name: template.name, latestRevision: template.revision, installedRevision: meta.templateRevision ?? (production ? 1 : undefined),
+          secrets: template.secrets, docs: template.docs, maturity: template.maturity,
+        },
+      } : {}),
       draft: draft ? { ...draft, problems: specProblems(draft.spec), ...(draft.baseVersion && production && draft.baseVersion !== production ? { stale: true } : {}) } : null,
       ...(prod ? { productionSpec: prod.spec } : {}),
       secrets: spec ? await secretStatus(this.deps.vault(), spec) : {},
@@ -168,7 +221,7 @@ export class McpServerService {
 
   // ── writing ──
 
-  create(input: { id?: string; spec: unknown; visibility?: McpServerVisibility; template?: string }, actor: string) {
+  create(input: { id?: string; spec: unknown; visibility?: McpServerVisibility; template?: string; templateRevision?: number }, actor: string) {
     const spec = normalizeSpec(input.spec);
     let id = input.id?.trim() || SLUG(spec.name);
     if (!MCP_SERVER_ID_PATTERN.test(id)) throw new McpServerError("id must be lowercase letters, digits and dashes (at most 40)");
@@ -184,7 +237,7 @@ export class McpServerService {
       ...(input.template ? { template: input.template } : {}),
     };
     this.store.saveMeta(meta);
-    this.store.saveDraft(id, { spec, updatedAt: now, updatedBy: actor });
+    this.store.saveDraft(id, { spec, updatedAt: now, updatedBy: actor, ...(input.templateRevision ? { templateRevision: input.templateRevision } : {}) });
     this.deps.changed?.(id, "created");
     return { id, problems: specProblems(spec) };
   }
@@ -197,6 +250,7 @@ export class McpServerService {
     this.store.saveDraft(id, {
       spec, updatedAt: new Date().toISOString(), updatedBy: actor,
       ...(current?.baseVersion ?? production ? { baseVersion: current?.baseVersion ?? production } : {}),
+      ...(current?.templateRevision ? { templateRevision: current.templateRevision } : {}),
     });
     this.touch(this.need(id));
     this.deps.changed?.(id, "draft");
@@ -213,9 +267,18 @@ export class McpServerService {
     this.deps.changed?.(id, "draft");
   }
 
-  updateSettings(id: string, patch: { visibility?: unknown; disabled?: unknown; onTestFailure?: unknown; rateLimits?: unknown }) {
+  updateSettings(id: string, patch: { visibility?: unknown; disabled?: unknown; onTestFailure?: unknown; rateLimits?: unknown; settings?: unknown }) {
     const meta = this.need(id);
     const next: Partial<McpServerMeta> = {};
+    if (patch.settings !== undefined) {
+      // a patch of the values: keys set to null or "" are cleared
+      const spec = this.specAt(id, "production") ?? this.store.draft(id)?.spec;
+      const merged: Record<string, unknown> = { ...(meta.settings ?? {}) };
+      for (const [k, v] of Object.entries((patch.settings ?? {}) as Record<string, unknown>)) { if (v === null || v === "") delete merged[k]; else merged[k] = v; }
+      const { values, problems } = validateSettings(spec?.settingsSchema, merged);
+      if (problems.length) throw new McpServerError(`Settings: ${problems.join("; ")}`, "INVALID", { problems });
+      next.settings = values;
+    }
     if (patch.visibility !== undefined) {
       if (patch.visibility !== "private" && patch.visibility !== "public") throw new McpServerError('visibility must be "private" or "public"');
       next.visibility = patch.visibility;
@@ -326,7 +389,7 @@ export class McpServerService {
 
   // ── publish / deploy ──
 
-  async publish(id: string, opts: { bump?: McpServerBump; version?: string; note?: string; deploy?: boolean; force?: boolean }, actor: string) {
+  async publish(id: string, opts: { bump?: McpServerBump; version?: string; note?: string; deploy?: boolean; force?: boolean; testsRun?: { passed: number; failed: number; skipped: number } }, actor: string) {
     const meta = this.need(id);
     const draft = this.store.draft(id);
     if (!draft) throw new McpServerError("There is no draft to publish", "CONFLICT");
@@ -345,7 +408,8 @@ export class McpServerService {
       version = nextVersion(existing.map((v) => v.version), opts.bump ?? suggestBump(latestSpec, draft.spec) ?? "patch");
     }
     // saved tests on the draft (destructive / approval tools are skipped)
-    const tests = this.store.tests(id).length ? await this.runSavedTests(id, "draft") : undefined;
+    // (the install flow ran them just before: not again)
+    const tests = opts.testsRun ?? (this.store.tests(id).length ? await this.runSavedTests(id, "draft") : undefined);
     if (tests?.failed && (meta.onTestFailure ?? "warn") === "block" && !opts.force) {
       throw new McpServerError(`${tests.failed} saved test(s) failed: publishing is blocked (settings: onTestFailure "block")`, "TESTS_FAILED", { tests });
     }
@@ -359,6 +423,7 @@ export class McpServerService {
     };
     this.store.saveVersion(id, record);
     this.store.saveDraft(id, { ...draft, baseVersion: version });
+    if (draft.templateRevision) this.touch(this.need(id), { templateRevision: draft.templateRevision });
     this.deps.changed?.(id, "published");
     // the first version goes live at once (the connector needs something to serve)
     const first = !this.store.production(id);
@@ -398,6 +463,168 @@ export class McpServerService {
     return this.deploy(id, target, { actor: opts.actor, ...(opts.note ? { note: opts.note } : {}), action: "rollback" });
   }
 
+  // ── secrets (write-only) ──
+
+  /** Save one declared secret's value in the vault entry it references. The value is never returned. */
+  async saveSecret(id: string, name: string, value: unknown): Promise<{ name: string; set: true; vault: McpSecretRef }> {
+    this.need(id);
+    const spec = this.store.draft(id)?.spec ?? this.specAt(id, "production");
+    const ref = spec?.secrets[name];
+    if (!ref) throw new McpServerError(`"${name}" is not a secret of ${id}`, "NOT_FOUND");
+    await this.writeSecret(ref, value);
+    this.deps.changed?.(id, "secrets");
+    return { name, set: true, vault: ref };
+  }
+
+  private async writeSecret(ref: McpSecretRef, value: unknown): Promise<void> {
+    const vault = this.deps.vault();
+    if (!vault) throw new McpServerError("The vault is not available on this instance (POLPO_VAULT_KEY)", "CONFLICT");
+    if (typeof value !== "string" || !value.trim()) throw new McpServerError("The secret value is empty");
+    if (value.length > 20_000) throw new McpServerError("The secret value is too long");
+    const existing = await vault.get(ref.owner, ref.service).catch(() => undefined);
+    // the other fields of the entry stay as they are
+    await vault.set(ref.owner, ref.service, {
+      ...(existing ?? { type: "api_key" as const }),
+      credentials: { ...(existing?.credentials ?? {}), [ref.key]: value.trim() },
+    });
+  }
+
+  // ── ready-made connectors (templates) ──
+
+  /** Servers made from a template, newest first. */
+  private installsOf(templateId: string): McpServerMeta[] {
+    return this.store.ids().map((id) => this.store.meta(id)).filter((m): m is McpServerMeta => m?.template === templateId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  /** The catalog: every template with what it needs and where it stands here (available, installed vX, update available). */
+  templates() {
+    return MCP_SERVER_TEMPLATES.map((t) => this.templateInfo(t));
+  }
+
+  templateInfo(t: McpServerTemplate) {
+    const installs = this.installsOf(t.id).map((m) => {
+      const production = this.store.production(m.id);
+      const revision = m.templateRevision ?? (production ? 1 : undefined);
+      const status: TemplateStatus = !production ? "draft" : (revision ?? 1) < t.revision ? "update_available" : "installed";
+      return { serverId: m.id, ...(production ? { production } : {}), ...(revision ? { revision } : {}), status, ...(m.connectorId ? { connectorId: m.connectorId } : {}) };
+    });
+    const order: TemplateStatus[] = ["update_available", "installed", "draft"];
+    const status: TemplateStatus = installs.length ? order.find((s) => installs.some((i) => i.status === s))! : "available";
+    const tools = t.spec.tools.map((x) => ({
+      name: x.name, ...(x.title ? { title: x.title } : {}), description: x.description,
+      readOnly: !!x.annotations?.readOnlyHint, requiresApproval: !!x.requiresApproval, destructive: !!x.annotations?.destructiveHint,
+    }));
+    return {
+      id: t.id, name: t.name, vendor: t.vendor, category: t.category, description: t.description, ...(t.icon ? { icon: t.icon } : {}),
+      docs: t.docs, setup: t.setup, revision: t.revision, changelog: t.changelog, maturity: t.maturity,
+      secrets: Object.entries(t.spec.secrets).map(([name, ref]) => ({ name, vault: ref, ...(t.secrets[name] ?? { label: name, howTo: "" }) })),
+      settings: t.spec.settingsSchema ?? [],
+      toolCount: tools.length, tools,
+      readOnlyTools: tools.filter((x) => x.readOnly).map((x) => x.name),
+      approvalTools: tools.filter((x) => x.requiresApproval).map((x) => x.name),
+      testCount: t.tests.length,
+      status, installs,
+    };
+  }
+
+  /**
+   * Install a template: settings → secrets (saved to the vault when given) → who may use it → the
+   * template's read-only tests → publish v1.0.0 and deploy (the connector is created with the chosen
+   * agents). Stops early (nothing published) when a secret is missing or a test fails. Installing a
+   * template already installed at an older revision makes the new revision the draft, with the diff,
+   * for a person to publish; at the same revision it only updates settings and access.
+   */
+  async install(templateId: string, opts: InstallOptions, actor: string): Promise<InstallResult> {
+    const t = serverTemplate(templateId);
+    if (!t) throw new McpServerError(`No template "${templateId}"`, "NOT_FOUND");
+    const id = opts.id?.trim() || this.installsOf(t.id)[0]?.id || t.id;
+    let meta = this.store.meta(id);
+    if (meta && meta.template !== t.id) throw new McpServerError(`A server "${id}" already exists and was not made from the ${t.name} template: pass another id`, "CONFLICT");
+    if (opts.agents !== undefined && opts.agents !== "*" && (!Array.isArray(opts.agents) || opts.agents.some((a) => typeof a !== "string" || !a.trim()))) {
+      throw new McpServerError('agents must be a list of agent names, or "*"');
+    }
+    const secretValues = opts.secrets ?? {};
+    for (const name of Object.keys(secretValues)) if (!t.spec.secrets[name]) throw new McpServerError(`"${name}" is not a secret of the ${t.name} template`);
+
+    // settings: the stored values, then the given ones; checked before anything is written
+    const merged: Record<string, unknown> = { ...(meta?.settings ?? {}) };
+    for (const [k, v] of Object.entries(opts.settings ?? {})) { if (v === null || v === "") delete merged[k]; else merged[k] = v; }
+    const { values: settings, problems } = validateSettings(t.spec.settingsSchema, merged);
+    if (problems.length) throw new McpServerError(`Settings: ${problems.join("; ")}`, "INVALID", { problems });
+
+    const production = meta ? this.store.production(id) : undefined;
+    const installedRevision = meta ? meta.templateRevision ?? (production ? 1 : undefined) : undefined;
+    if (!meta) {
+      this.create({ id, spec: t.spec, template: t.id, templateRevision: t.revision }, actor);
+      this.store.saveTests(id, t.tests.map((x) => ({ ...x })));
+      meta = this.need(id);
+    } else if (production && (installedRevision ?? 1) < t.revision) {
+      // upgrade: the new revision becomes the draft; the person reviews the diff and publishes
+      const draft = this.store.draft(id);
+      this.store.saveDraft(id, { spec: t.spec, baseVersion: draft?.baseVersion ?? production, templateRevision: t.revision, updatedAt: new Date().toISOString(), updatedBy: actor });
+      const own = this.store.tests(id).filter((x) => !t.tests.some((tt) => tt.id === x.id));
+      this.store.saveTests(id, [...t.tests.map((x) => ({ ...x })), ...own]);
+      for (const [name, v] of Object.entries(secretValues)) await this.writeSecret(t.spec.secrets[name]!, v);
+      const access = await this.applyAccess(id, opts.agents, settings);
+      this.deps.changed?.(id, "draft");
+      return { id, template: t.id, revision: t.revision, status: "upgrade_draft", diff: this.diff(id, "production", "draft"), settings, ...access };
+    } else if (!production) {
+      // an install that stopped before publishing: carry on from the template's current revision
+      const draft = this.store.draft(id);
+      if ((draft?.templateRevision ?? 0) < t.revision) {
+        this.store.saveDraft(id, { spec: t.spec, templateRevision: t.revision, updatedAt: new Date().toISOString(), updatedBy: actor });
+        const own = this.store.tests(id).filter((x) => !t.tests.some((tt) => tt.id === x.id));
+        this.store.saveTests(id, [...t.tests.map((x) => ({ ...x })), ...own]);
+      }
+    }
+
+    for (const [name, v] of Object.entries(secretValues)) await this.writeSecret(t.spec.secrets[name]!, v);
+    const access = await this.applyAccess(id, opts.agents, settings);
+    if (production) {
+      this.deps.changed?.(id, "settings");
+      return { id, template: t.id, revision: t.revision, status: "up_to_date", version: production, settings, ...access };
+    }
+
+    const spec = this.store.draft(id)!.spec;
+    const status = await secretStatus(this.deps.vault(), spec);
+    const missingSecrets = Object.entries(status).filter(([, set]) => !set).map(([name]) => name);
+    if (missingSecrets.length) return { id, template: t.id, revision: t.revision, status: "needs_secrets", missingSecrets, settings, ...access };
+
+    const tests = await this.runSavedTests(id, "draft");
+    const testsOut = { passed: tests.passed, failed: tests.failed, skipped: tests.skipped, results: tests.results };
+    if (tests.failed && !opts.force) return { id, template: t.id, revision: t.revision, status: "tests_failed", tests: testsOut, settings, ...access };
+    if (opts.publish === false) return { id, template: t.id, revision: t.revision, status: "draft", tests: testsOut, settings, ...access };
+
+    const published = await this.publish(id, {
+      note: `Installed from the ${t.name} template (revision ${t.revision})`, force: true,
+      testsRun: { passed: tests.passed, failed: tests.failed, skipped: tests.skipped },
+    }, actor);
+    const after = await this.applyAccess(id, opts.agents, settings);
+    return {
+      id, template: t.id, revision: t.revision, status: "installed", version: published.version,
+      ...(published.deployed ? { deployed: published.deployed } : {}), tests: testsOut, settings, ...after,
+    };
+  }
+
+  /** Save the settings and the agents the connector grants (on the connector when it exists). */
+  private async applyAccess(id: string, agents: string[] | "*" | undefined, settings: Record<string, string | number | boolean>): Promise<Pick<InstallResult, "connectorId" | "access">> {
+    const meta = this.need(id);
+    const normalized = agents === undefined ? undefined : agents === "*" ? "*" as const : [...new Set(agents.map((a) => a.trim()))];
+    this.touch(meta, { settings, ...(normalized !== undefined ? { installAccess: { agents: normalized } } : {}) });
+    const manager = this.deps.connectors?.();
+    const connector = meta.connectorId ? manager?.store.get(meta.connectorId) : undefined;
+    if (!manager || !connector || connector.transport.type !== "hosted" || connector.transport.serverId !== id) {
+      return normalized !== undefined ? { access: { agents: normalized, polpo: true } } : {};
+    }
+    if (normalized !== undefined) {
+      manager.store.update(connector.id, { access: { ...connector.access, agents: normalized } });
+      manager.announce(connector.id, "updated");
+    }
+    const now = manager.store.get(connector.id)!;
+    return { connectorId: connector.id, access: { agents: now.access.agents, polpo: !!now.access.polpo } };
+  }
+
   // ── the connector ──
 
   /**
@@ -430,7 +657,7 @@ export class McpServerService {
       id: connectorId, name: spec.name, kind: "mcp", ...(spec.description ? { description: spec.description } : {}),
       transport: { type: "hosted", serverId: id }, auth: { type: "none" },
       // like any connector: Polpo may use it, agents are granted explicitly in Connectors
-      access: { agents: [], polpo: true }, enabled: true,
+      access: { agents: meta.installAccess?.agents ?? [], polpo: true }, enabled: true,
       ...(icon ? { icon } : {}), hostedVersion: production, createdAt: new Date().toISOString(), status: "disconnected",
     };
     manager.store.create(connector);

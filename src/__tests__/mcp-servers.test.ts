@@ -19,7 +19,7 @@ import { McpServerService, McpServerError } from "../mcp-servers/service.js";
 import { runTool } from "../mcp-servers/runtime.js";
 import { handlePublicMcpRequest, RateLimiter } from "../mcp-servers/public.js";
 import { generateServer, outlineOpenApi, parseOpenApi } from "../mcp-servers/generate.js";
-import { PRINTFUL_TEMPLATE } from "../mcp-servers/templates.js";
+import { PRINTFUL_TEMPLATE } from "../mcp-servers/templates/index.js";
 import { setHostedApprovalHook, setHostedDefaults } from "../mcp-servers/host.js";
 import { suggestBump } from "../mcp-servers/versioning.js";
 import { ConnectorManager } from "../mcp/manager.js";

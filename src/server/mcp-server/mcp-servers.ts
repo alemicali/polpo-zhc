@@ -10,6 +10,7 @@ import {
   DESTRUCTIVE, READ, UPDATE, WRITE, apiError, apiGet, apiSend, confirmParam, dashboardLink, enc, fail, ok, short,
   type McpDeps, type Register,
 } from "./kit.js";
+import { setupHandoffs } from "./setup.js";
 
 type Summary = {
   id: string; name: string; description?: string; visibility: string; disabled?: boolean; toolCount: number; production?: string; latest?: string;
@@ -19,6 +20,8 @@ type Tool = { name: string; title?: string; description: string; kind: string; r
 type Detail = Summary & {
   draft: { spec: { tools: Tool[]; allowedDomains: string[]; auth: { type: string }; secrets: Record<string, { owner: string; service: string; key: string }> }; problems: string[]; stale?: boolean } | null;
   secrets: Record<string, boolean>; tests: unknown[]; rateLimits: { perIpPerMinute: number; globalPerMinute: number };
+  settingsSchema?: Array<{ key: string; label: string; required?: boolean }>; effectiveSettings?: Record<string, unknown>;
+  templateInfo?: { id: string; latestRevision: number; installedRevision?: number };
 };
 
 const serverItem = z.object({
@@ -33,6 +36,30 @@ const item = (s: Summary) => ({
 });
 const line = (s: ReturnType<typeof item>) => `- ${s.id} "${s.name}" [${s.visibility}${s.disabled ? ", switched off" : ""}] ${s.production ? `v${s.production} in production` : "not deployed"}`
   + `${s.draft_changed ? " · draft has changes" : ""} · ${s.tool_count} tools${s.connector_id ? ` · connector ${s.connector_id}` : ""}${s.pending_approvals ? ` · ${s.pending_approvals} waiting for approval` : ""}`;
+
+type TemplateInfo = {
+  id: string; name: string; category: string; description: string; revision: number; status: string;
+  maturity: { testedWithLiveApi: boolean; note?: string };
+  installs: Array<{ serverId: string; production?: string; revision?: number; status: string }>;
+  readOnlyTools: string[]; approvalTools: string[];
+  settings: Array<{ key: string; label: string; required?: boolean; default?: unknown }>;
+  secrets: Array<{ name: string; label: string; howTo: string }>;
+  tools: Array<{ name: string; description: string; readOnly: boolean; requiresApproval: boolean }>;
+  changelog: Array<{ revision: number; note: string }>;
+};
+type InstallData = {
+  id: string; status: string; revision: number; version?: string; missingSecrets?: string[]; connectorId?: string;
+  access?: { agents: string[] | "*"; polpo: boolean };
+  tests?: { passed: number; failed: number; skipped: number; results: Array<{ tool: string; passed?: boolean; error?: string; text: string }> };
+  diff?: { changes: Array<{ field: string; kind: string }>; suggestedBump?: string };
+};
+const statusLine = (t: TemplateInfo) => {
+  const i = t.installs[0];
+  if (t.status === "available") return "available";
+  if (t.status === "update_available") return `installed as ${i?.serverId} v${i?.production} (revision ${i?.revision ?? 1}): update available`;
+  if (t.status === "draft") return `being installed as ${i?.serverId} (not published)`;
+  return `installed as ${i?.serverId} v${i?.production}`;
+};
 
 const notFound = (id: string) => fail(`There is no hosted server "${id}". List them with polpo_mcp_servers_list.`);
 const ADMIN = "polpo:admin" as const;
@@ -75,7 +102,11 @@ export function registerMcpServerTools(tool: Register, deps: McpDeps): void {
     if (s.publicUrl) lines.push(`public URL: ${s.publicUrl} (rate limits: ${s.rateLimits.perIpPerMinute}/min per IP, ${s.rateLimits.globalPerMinute}/min in all)`);
     if (spec) {
       lines.push(`domains: ${spec.allowedDomains.join(", ") || "(none)"} · auth: ${spec.auth.type}`);
-      for (const [name, ref] of Object.entries(spec.secrets)) lines.push(`secret ${name}: vault ${ref.owner}/${ref.service} field ${ref.key} — ${s.secrets[name] ? "set" : "NOT SET (the person adds it in the vault)"}`);
+      for (const [name, ref] of Object.entries(spec.secrets)) {
+        lines.push(`secret ${name}: vault ${ref.owner}/${ref.service} field ${ref.key} — ${s.secrets[name] ? "set" : `NOT SET: ${setupHandoffs(deps, [{ target: { kind: "mcp-server", item: id, field: name }, what: name }]).next_step ?? "the person adds it in the vault"}`}`);
+      }
+      for (const f of s.settingsSchema ?? []) lines.push(`setting ${f.key} (${f.label}): ${s.effectiveSettings?.[f.key] !== undefined ? String(s.effectiveSettings[f.key]) : f.required ? "NOT SET (required)" : "not set"}`);
+      if (s.templateInfo) lines.push(`template ${s.templateInfo.id}: revision ${s.templateInfo.installedRevision ?? "—"} installed, latest ${s.templateInfo.latestRevision}${(s.templateInfo.installedRevision ?? 0) < s.templateInfo.latestRevision && s.templateInfo.installedRevision ? " (update: polpo_mcp_server_install)" : ""}`);
       lines.push("draft tools:", ...spec.tools.map((t) => `- ${t.name} (${t.kind}${t.http ? ` ${t.http.method} ${t.http.url}` : ""})${t.requiresApproval ? " [needs approval]" : t.annotations?.readOnlyHint ? " [read-only]" : ""}: ${short(t.description, 120)}`));
       if (s.draft?.problems.length) lines.push(`before publishing, fix: ${s.draft.problems.join("; ")}`);
     }
@@ -106,7 +137,7 @@ export function registerMcpServerTools(tool: Register, deps: McpDeps): void {
     description: "Create a hosted server as a draft: from a template (template: \"printful\") or a full spec (name, baseUrl, allowedDomains, secrets as vault references "
       + "{ owner, service, key }, auth, tools). Never put a secret value in it: the person adds the vault entry. Then test, publish (it becomes a connector).",
     inputSchema: {
-      template: z.string().optional().describe("A template id: printful"),
+      template: z.string().optional().describe("A template id (polpo_mcp_server_templates); to install it in one step use polpo_mcp_server_install"),
       id: z.string().optional().describe("The server's id (default: from the name)"),
       spec: z.record(z.string(), z.any()).optional().describe("The full spec (see polpo_mcp_server_get for its shape)"),
     },
@@ -120,6 +151,91 @@ export function registerMcpServerTools(tool: Register, deps: McpDeps): void {
     const d = r.data as { id: string; problems: string[]; setup?: string };
     return ok(`Created the draft ${d.id}.${d.setup ? ` Setup: ${d.setup}` : ""}${d.problems.length ? ` Fix before publishing: ${d.problems.join("; ")}.` : ""} `
       + `Test it with polpo_mcp_server_test, then polpo_mcp_server_publish. Dashboard: ${link(d.id)}`, d);
+  });
+
+  tool("connectors", "polpo_mcp_server_templates", {
+    title: "Ready-made connectors",
+    description: "The curated hosted connectors Polpo can install in one step (Printful, Gelato, Printify…): vendor, category, maturity (tested with the live API or not), "
+      + "the settings and secrets each needs (with where to create the token), read-only and approval tools, and their status here: available, draft, installed (version) "
+      + "or update_available. Install with polpo_mcp_server_install.",
+    inputSchema: { id: z.string().optional().describe("One template (e.g. printful): also its tools, settings and changelog") },
+    outputSchema: { templates: z.array(z.object({ id: z.string(), name: z.string(), status: z.string(), revision: z.number() }).passthrough()) },
+    annotations: READ,
+  }, async ({ id }) => {
+    const r = await apiGet(deps, id ? `/mcp-servers/templates/${enc(id)}` : "/mcp-servers/templates");
+    if (!r.ok) return r.status === 404 ? fail(`There is no template "${id}". List them with polpo_mcp_server_templates.`) : apiError(r, "Reading the templates");
+    const list = (id ? [r.data] : (r.data as { templates: unknown[] }).templates) as TemplateInfo[];
+    const lines = list.map((t) => [
+      `- ${t.id} "${t.name}" (${t.category}, revision ${t.revision}) — ${statusLine(t)}${t.maturity.testedWithLiveApi ? "" : " · not yet tested with the live API"}`,
+      `  ${short(t.description, 200)}`,
+      `  read-only: ${t.readOnlyTools.join(", ") || "none"} · needs approval: ${t.approvalTools.join(", ") || "none"}`,
+      ...(t.settings.length ? [`  settings: ${t.settings.map((s) => `${s.key}${s.required ? " (required)" : ""}${s.default !== undefined ? ` = ${s.default}` : ""}`).join(", ")}`] : []),
+      `  secrets: ${t.secrets.map((s) => `${s.name} (${s.label}: ${short(s.howTo, 160)})`).join("; ")}`,
+      ...(id ? t.tools.map((x) => `  - ${x.name}${x.requiresApproval ? " [needs approval]" : x.readOnly ? " [read-only]" : ""}: ${short(x.description, 140)}`) : []),
+      ...(id ? t.changelog.map((c) => `  rev ${c.revision}: ${c.note}`) : []),
+    ].join("\n"));
+    return ok(`${lines.join("\n")}\nDashboard: ${link()}`, { templates: list });
+  });
+
+  tool("connectors", "polpo_mcp_server_install", {
+    title: "Install a ready-made connector",
+    description: "Install a template (e.g. \"install the Printful connector\"): settings (e.g. store_id), which agents may use it (agents: names or \"*\"; default none — "
+      + "ask the person, an agent sees no tools until granted), then the template's read-only tests, then publish 1.0.0 + deploy (it becomes a connector). Secrets never pass "
+      + "through here: when one is missing the result has setup_url / setup_ids — show the link, call polpo_setup_wait, then call this again. On a server already installed "
+      + "at an older revision it makes the new revision a draft and shows the diff (publish it with polpo_mcp_server_publish after the person agrees).",
+    inputSchema: {
+      template: z.string().describe("The template id (polpo_mcp_server_templates)"),
+      id: z.string().optional().describe("The server id (default: the template's id)"),
+      settings: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional().describe("Setting values, e.g. { store_id: \"123\" } (null clears one)"),
+      agents: z.union([z.array(z.string()), z.literal("*")]).optional().describe("Agents the connector grants (\"*\": all); omitted: unchanged (none on a new install)"),
+      publish: z.boolean().optional().describe("false: only run the checks and keep a draft"),
+    },
+    outputSchema: {
+      id: z.string(), status: z.string(), revision: z.number(), version: z.string().optional(), missing_secrets: z.array(z.string()).optional(),
+      setup_url: z.string().optional(), setup_id: z.string().optional(), setup_ids: z.array(z.string()).optional(), next_step: z.string().optional(),
+      tests: z.object({ passed: z.number(), failed: z.number(), skipped: z.number() }).passthrough().optional(),
+      access: z.object({ agents: z.union([z.array(z.string()), z.literal("*")]), polpo: z.boolean() }).optional(),
+      changes: z.array(z.object({ field: z.string(), kind: z.string() })).optional(),
+    },
+    annotations: WRITE,
+    scope: ADMIN,
+  }, async ({ template, id, settings, agents, publish }) => {
+    const r = await apiSend(deps, "POST", `/mcp-servers/templates/${enc(template)}/install`, {
+      ...(id ? { id } : {}), ...(settings ? { settings } : {}), ...(agents !== undefined ? { agents } : {}), ...(publish === false ? { publish: false } : {}),
+    });
+    if (!r.ok) return r.status === 404 ? fail(`${r.error}. List the templates with polpo_mcp_server_templates.`) : apiError(r, `Installing ${template}`);
+    const d = r.data as InstallData;
+    const base = {
+      id: d.id, status: d.status, revision: d.revision, ...(d.version ? { version: d.version } : {}), ...(d.access ? { access: d.access } : {}),
+      ...(d.tests ? { tests: { passed: d.tests.passed, failed: d.tests.failed, skipped: d.tests.skipped } } : {}),
+    };
+    const who = d.access ? (d.access.agents === "*" ? "all agents and Polpo" : d.access.agents.length ? `${d.access.agents.join(", ")} and Polpo` : "Polpo only (no agent yet: grant agents with agents: [...])") : undefined;
+    switch (d.status) {
+      case "needs_secrets": {
+        const info = await apiGet(deps, `/mcp-servers/templates/${enc(template)}`);
+        const secrets = info.ok ? (info.data as TemplateInfo).secrets : [];
+        const handoff = setupHandoffs(deps, (d.missingSecrets ?? []).map((name) => {
+          const s = secrets.find((x) => x.name === name);
+          return { target: { kind: "mcp-server" as const, item: d.id, field: name }, what: `${s?.label ?? name}${s?.howTo ? ` (${s.howTo})` : ""}` };
+        }));
+        return ok(`${d.id}: almost there — the ${(d.missingSecrets ?? []).join(", ")} secret is not in the vault yet, so nothing was published. ${"next_step" in handoff ? handoff.next_step : ""} Then call polpo_mcp_server_install again.`,
+          { ...base, missing_secrets: d.missingSecrets ?? [], ...handoff });
+      }
+      case "tests_failed":
+        return ok([`${d.id}: a read-only test failed, so nothing was published:`, ...(d.tests?.results ?? []).filter((x) => x.passed === false).map((x) => `- ${x.tool}: ${short(x.error ?? x.text, 200)}`),
+          "Check the secret and the settings (polpo_mcp_server_get), then install again."].join("\n"), base);
+      case "upgrade_draft":
+        return ok(`${d.id}: revision ${d.revision} of the template is now the draft. Changes: ${(d.diff?.changes ?? []).map((c) => `${c.kind} ${c.field}`).join(", ") || "none"}`
+          + `${d.diff?.suggestedBump ? ` (suggested bump: ${d.diff.suggestedBump})` : ""}. Show them to the person, then polpo_mcp_server_publish { id: "${d.id}", deploy: true }. Dashboard: ${link(d.id)}`,
+        { ...base, changes: d.diff?.changes ?? [] });
+      case "up_to_date":
+        return ok(`${d.id} is already on revision ${d.revision} (v${d.version} in production); settings and access saved${who ? ` — used by ${who}` : ""}.`, base);
+      case "draft":
+        return ok(`${d.id}: checks passed (${d.tests?.passed ?? 0} tests), kept as a draft. Publish with polpo_mcp_server_publish. Dashboard: ${link(d.id)}`, base);
+      default:
+        return ok(`Installed ${d.id} v${d.version} (template revision ${d.revision}); read-only tests: ${d.tests?.passed ?? 0} passed, ${d.tests?.skipped ?? 0} skipped. `
+          + `It is the connector ${d.connectorId ?? d.id}${who ? `, used by ${who}` : ""}. Dashboard: ${link(d.id)}`, base);
+    }
   });
 
   tool("connectors", "polpo_mcp_server_generate", {
@@ -154,7 +270,7 @@ export function registerMcpServerTools(tool: Register, deps: McpDeps): void {
 
   tool("connectors", "polpo_mcp_server_update", {
     title: "Change a hosted server",
-    description: "Save the draft (spec: the whole spec) and/or settings: visibility (private | public — public means ANYONE with the URL can call it with the instance's credentials: "
+    description: "Save the draft (spec: the whole spec) and/or settings: settings (the server's declared values, e.g. a store id), visibility (private | public — public means ANYONE with the URL can call it with the instance's credentials: "
       + "ask the person and pass confirm: true), disabled (kill switch), on_test_failure (warn | block), rate_limits. Changes to the draft go live only after publish + deploy.",
     inputSchema: {
       id: z.string().describe("The hosted server's id (polpo_mcp_servers_list)"),
@@ -163,13 +279,15 @@ export function registerMcpServerTools(tool: Register, deps: McpDeps): void {
       disabled: z.boolean().optional().describe("Kill switch: true refuses every call"),
       on_test_failure: z.enum(["warn", "block"]).optional().describe("What publish does when a saved test fails"),
       rate_limits: z.object({ per_ip_per_minute: z.number().int().min(1).describe("Requests per minute from one address"), global_per_minute: z.number().int().min(1).describe("Requests per minute in all") }).optional().describe("The public endpoint's limits"),
+      settings: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional()
+        .describe("Setting values the server declares (e.g. { store_id: \"123\" }; null clears one): used at once, no new version"),
       discard_draft: z.boolean().optional().describe("Throw the draft away (back to production)"),
       confirm: confirmParam("make a server public"),
     },
     outputSchema: { changed: z.array(z.string()) },
     annotations: UPDATE,
     scope: ADMIN,
-  }, async ({ id, spec, visibility, disabled, on_test_failure, rate_limits, discard_draft, confirm }) => {
+  }, async ({ id, spec, visibility, disabled, on_test_failure, rate_limits, settings, discard_draft, confirm }) => {
     if (visibility === "public" && confirm !== true) {
       return fail("Making it public lets anyone with the URL call its tools with this instance's credentials (destructive and approval tools stay off). Ask the person, then call again with confirm: true.");
     }
@@ -185,14 +303,16 @@ export function registerMcpServerTools(tool: Register, deps: McpDeps): void {
       const problems = (r.data as { problems: string[] }).problems;
       done.push(`draft saved${problems.length ? ` (to fix before publishing: ${problems.join("; ")})` : ""}`);
     }
-    if (visibility || disabled !== undefined || on_test_failure || rate_limits) {
+    if (visibility || disabled !== undefined || on_test_failure || rate_limits || settings) {
       const r = await apiSend(deps, "PATCH", `/mcp-servers/${enc(id)}`, {
         ...(visibility ? { visibility } : {}), ...(disabled !== undefined ? { disabled } : {}), ...(on_test_failure ? { onTestFailure: on_test_failure } : {}),
         ...(rate_limits ? { rateLimits: { perIpPerMinute: rate_limits.per_ip_per_minute, globalPerMinute: rate_limits.global_per_minute } } : {}),
+        ...(settings ? { settings } : {}),
       });
       if (!r.ok) return r.status === 404 ? notFound(id) : apiError(r, "Saving the settings");
-      const s = r.data as { visibility: string; disabled?: boolean; publicUrl?: string };
-      done.push(`settings saved: ${s.visibility}${s.disabled ? ", switched off" : ""}${s.publicUrl ? ` — public URL ${s.publicUrl}` : ""}`);
+      const s = r.data as { visibility: string; disabled?: boolean; publicUrl?: string; settings?: Record<string, unknown> };
+      done.push(`settings saved: ${s.visibility}${s.disabled ? ", switched off" : ""}${s.publicUrl ? ` — public URL ${s.publicUrl}` : ""}`
+        + `${settings ? ` — values: ${Object.entries(s.settings ?? {}).map(([k, v]) => `${k}=${String(v)}`).join(", ") || "none"}` : ""}`);
     }
     return done.length ? ok(`${id}: ${done.join("; ")}.`, { changed: done }) : fail("Nothing to change.");
   });

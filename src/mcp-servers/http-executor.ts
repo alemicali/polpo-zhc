@@ -10,14 +10,16 @@
  * - the request is returned masked (secret values replaced) for the Test section and the logs.
  */
 import { authorizeDestination, type Resolver } from "../sandbox/net-proxy.js";
-import { mapResponse, renderBody, renderString, renderUrl, truncateText, TemplateError, placeholdersOf } from "./template.js";
-import { limitsOf, type MaskedRequest, type McpServerSpec, type McpServerTool, type McpToolCallResult } from "./types.js";
+import { fitText, truncateText, renderBody, renderString, renderUrl, shapeResponse, TemplateError, placeholdersOf } from "./template.js";
+import { limitsOf, type MaskedRequest, type McpServerSettingValues, type McpServerSpec, type McpServerTool, type McpToolCallResult } from "./types.js";
 
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 
 export interface HttpExecOptions {
   /** A secret's value by the server's secret name (undefined: not set). */
   secret: (name: string) => Promise<string | undefined>;
+  /** The server's settings values (`{{settings.x}}`). */
+  settings?: McpServerSettingValues;
   fetch?: FetchLike;
   resolve?: Resolver;
   signal?: AbortSignal;
@@ -33,14 +35,31 @@ const IDEMPOTENT = new Set(["GET", "HEAD", "PUT", "DELETE", "OPTIONS"]);
 const MAX_RETRY_AFTER_MS = 10_000;
 const MASK = "••••";
 
-/** Secret names a tool needs: auth plus `{{secrets.X}}` in the server's and tool's headers and query. */
+/**
+ * The headers and query templates a tool's request uses, in order of precedence (later wins): the
+ * server's defaults, the scoped defaults of the scopes the tool lists, the tool's own.
+ */
+export function requestTemplates(spec: McpServerSpec, tool: McpServerTool): { headers: Record<string, string>; query: Record<string, string> } {
+  const headers: Record<string, string> = { ...(spec.headers ?? {}) };
+  const query: Record<string, string> = { ...(spec.query ?? {}) };
+  for (const scope of tool.scopes ?? []) {
+    Object.assign(headers, spec.scopes?.[scope]?.headers ?? {});
+    Object.assign(query, spec.scopes?.[scope]?.query ?? {});
+  }
+  Object.assign(headers, tool.http?.headers ?? {});
+  Object.assign(query, tool.http?.query ?? {});
+  return { headers, query };
+}
+
+/** Secret names a tool needs: auth plus `{{secrets.X}}` in the headers and query it sends. */
 export function secretsNeeded(spec: McpServerSpec, tool: McpServerTool): string[] {
   const names = new Set<string>();
   const auth = spec.auth;
   if (auth.type === "bearer" || auth.type === "header" || auth.type === "query") names.add(auth.secret);
   if (auth.type === "basic") { names.add(auth.usernameSecret); names.add(auth.passwordSecret); }
   if (auth.type === "oauth2_client_credentials") { names.add(auth.clientIdSecret); names.add(auth.clientSecretSecret); }
-  for (const p of placeholdersOf([spec.headers ?? {}, tool.http?.headers ?? {}, tool.http?.query ?? {}])) {
+  const t = requestTemplates(spec, tool);
+  for (const p of placeholdersOf([t.headers, t.query])) {
     if (p.startsWith("secrets.")) names.add(p.slice("secrets.".length));
   }
   return [...names];
@@ -168,10 +187,11 @@ export async function executeHttpTool(spec: McpServerSpec, tool: McpServerTool, 
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const fail = (error: string, extra: Partial<McpToolCallResult> = {}): McpToolCallResult => ({ ok: false, text: error, error, ms: Date.now() - started, ...extra });
   if (!http) return fail(`${tool.name} is not an HTTP tool`);
+  const settings = opts.settings ?? {};
 
   let url: URL;
   try {
-    url = new URL(joinUrl(spec.baseUrl, renderUrl(http.url, { input })));
+    url = new URL(joinUrl(spec.baseUrl, renderUrl(http.url, { input, settings })));
     await checkDestination(url, spec.allowedDomains, opts.resolve);
   } catch (err) {
     return fail(err instanceof Error ? err.message : String(err));
@@ -192,12 +212,13 @@ export async function executeHttpTool(spec: McpServerSpec, tool: McpServerTool, 
   const headers: Record<string, string> = { accept: "application/json" };
   let body: string | undefined;
   try {
-    for (const [name, template] of Object.entries({ ...(spec.headers ?? {}), ...(http.headers ?? {}) })) {
-      const v = renderString(template, { input, secrets: secretValues });
+    const templates = requestTemplates(spec, tool);
+    for (const [name, template] of Object.entries(templates.headers)) {
+      const v = renderString(template, { input, settings, secrets: secretValues });
       if (v !== undefined && v !== "") headers[name.toLowerCase()] = v;
     }
-    for (const [name, template] of Object.entries(http.query ?? {})) {
-      const v = renderString(template, { input, secrets: secretValues });
+    for (const [name, template] of Object.entries(templates.query)) {
+      const v = renderString(template, { input, settings, secrets: secretValues });
       if (v !== undefined && v !== "") url.searchParams.set(name, v);
     }
     const auth = spec.auth;
@@ -211,7 +232,7 @@ export async function executeHttpTool(spec: McpServerSpec, tool: McpServerTool, 
       headers.authorization = `Bearer ${token}`;
     }
     if (http.body !== undefined && http.method !== "GET") {
-      const rendered = renderBody(http.body, { input });
+      const rendered = renderBody(http.body, { input, settings });
       if (http.bodyType === "form") {
         const form = new URLSearchParams();
         for (const [k, v] of Object.entries((rendered ?? {}) as Record<string, unknown>)) form.set(k, typeof v === "object" ? JSON.stringify(v) : String(v));
@@ -270,12 +291,13 @@ export async function executeHttpTool(spec: McpServerSpec, tool: McpServerTool, 
     if (!truncated) { try { parsed = JSON.parse(responseText); } catch { /* text */ } }
     let mapped: unknown;
     try {
-      mapped = typeof parsed === "string" ? parsed : mapResponse(parsed, http.response);
+      mapped = typeof parsed === "string" ? parsed : shapeResponse(parsed, http.response, input);
     } catch (err) {
       return fail(`The response mapping failed: ${(err as Error).message}`, { status: res.status, request, response: responseText.slice(0, 4000) });
     }
     const max = http.response?.maxChars ?? limits.maxResultChars;
-    const text = truncateText(typeof mapped === "string" ? mapped : JSON.stringify(mapped ?? null, null, 2), max)
+    // lists keep whole items (and say how many were left out) instead of a cut in the middle of the JSON
+    const text = (typeof mapped === "string" ? truncateText(mapped, max) : fitText(mapped, max))
       + (truncated ? `\n\n[the response was larger than ${limits.maxResponseBytes} bytes and was cut]` : "");
     const structured = mapped !== null && typeof mapped === "object" && !Array.isArray(mapped) ? mapped : mapped === undefined ? undefined : { result: mapped };
     return {

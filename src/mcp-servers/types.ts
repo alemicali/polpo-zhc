@@ -47,6 +47,45 @@ export interface HttpResponseMapping {
   fields?: string[];
   /** Cut the text the model sees at this many characters (default: the server's maxResultChars). */
   maxChars?: number;
+  /**
+   * Keep only the items of the picked list that match (all rules): `path` in each item against the
+   * tool input `input` (skipped when that input is not given) or a fixed `value`. Applied before `fields`.
+   */
+  filters?: HttpResponseFilter[];
+  /** Page the picked list locally (APIs that return everything): { items, total, offset, limit, next_offset }. */
+  page?: HttpResponsePage;
+  /**
+   * Summaries computed on the whole response (before pick), added to the result: e.g.
+   * `{ colors: { path: "result.variants[*].color", op: "unique" } }` instead of dumping every variant.
+   */
+  aggregates?: Record<string, HttpResponseAggregate>;
+}
+
+export interface HttpResponseFilter {
+  /** Path in each item (`color`, `options.size`). */
+  path: string;
+  /** The input property whose value it is compared with (the rule is skipped when it is not given). */
+  input?: string;
+  /** A fixed value (when no input). */
+  value?: string | number | boolean;
+  /** equals (default; case-insensitive for text), contains (case-insensitive), in (the input is a list), gte / lte (numbers). */
+  match?: "equals" | "contains" | "in" | "gte" | "lte";
+}
+
+export interface HttpResponsePage {
+  /** Input properties carrying the position and the size (default offset / limit). */
+  offsetInput?: string;
+  limitInput?: string;
+  /** Default 20. */
+  defaultLimit?: number;
+  /** Default 100. */
+  maxLimit?: number;
+}
+
+export interface HttpResponseAggregate {
+  path: string;
+  /** value: the value at the path as is (e.g. a total or the last page next to a picked list). */
+  op: "count" | "unique" | "min" | "max" | "sum" | "value";
 }
 
 /** Pagination hints (said to the model in the tool description; the executor does not loop). */
@@ -122,6 +161,37 @@ export interface McpServerTool {
   code?: CodeToolSpec;
   /** An MCP Apps widget (`ui://…`) shown with the result: one of the server's resources. */
   uiResource?: string;
+  /** The server's scoped defaults this tool gets (spec.scopes), e.g. ["store"] for store-scoped endpoints. */
+  scopes?: string[];
+}
+
+/**
+ * A non-secret setting of a server (a store id, a default currency): declared by the spec, the value
+ * set at install and editable later (server settings, not versioned). Templates use `{{settings.key}}`.
+ */
+export interface McpServerSettingField {
+  key: string;
+  label: string;
+  type: "string" | "number" | "enum" | "boolean";
+  help?: string;
+  required?: boolean;
+  default?: string | number | boolean;
+  /** enum: the allowed values. */
+  options?: string[];
+  /** string: a regular expression the whole value must match. */
+  pattern?: string;
+  /** number: bounds. */
+  min?: number;
+  max?: number;
+}
+
+export type McpServerSettingValues = Record<string, string | number | boolean>;
+
+/** Defaults a group of tools gets (the tools list the scope in `scopes`). */
+export interface McpServerScope {
+  description?: string;
+  headers?: Record<string, string>;
+  query?: Record<string, string>;
 }
 
 /** A static resource (text or an MCP Apps widget, `ui://<server>/<name>`). */
@@ -167,6 +237,12 @@ export interface McpServerSpec {
   auth: McpServerAuth;
   /** Headers sent with every http call (templates). */
   headers?: Record<string, string>;
+  /** Query parameters sent with every http call (templates; empty values are left out). */
+  query?: Record<string, string>;
+  /** Scoped defaults: headers / query added to the tools that list the scope (e.g. "store": X-PF-Store-Id). */
+  scopes?: Record<string, McpServerScope>;
+  /** Non-secret settings (their values live in the server's meta: McpServerMeta.settings). */
+  settingsSchema?: McpServerSettingField[];
   limits?: McpServerLimits;
   /** Code tools' npm dependencies (name → version range), installed at publish with --ignore-scripts. */
   dependencies?: Record<string, string>;
@@ -198,6 +274,12 @@ export interface McpServerMeta {
   connectorId?: string;
   /** Created from a template (e.g. "printful"). */
   template?: string;
+  /** The template revision production was published from. */
+  templateRevision?: number;
+  /** Values of the spec's settingsSchema (non-secret; set at install, editable later). */
+  settings?: McpServerSettingValues;
+  /** Agents the connector grants when it is created (install flow); afterwards the connector's own access rules. */
+  installAccess?: { agents: string[] | "*" };
 }
 
 export type McpServerBump = "major" | "minor" | "patch";
@@ -225,6 +307,8 @@ export interface McpServerDraft {
   spec: McpServerSpec;
   /** The version the draft started from (undefined: never published). */
   baseVersion?: string;
+  /** The template revision the draft was made from (install / upgrade). */
+  templateRevision?: number;
   updatedAt: string;
   updatedBy: string;
 }

@@ -59,6 +59,8 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_mcp_servers_list", name: "mcp_servers_list", group: "hosted-servers" },
   { mcp: "polpo_mcp_server_get", name: "mcp_server_get", group: "hosted-servers" },
   { mcp: "polpo_mcp_server_create", name: "mcp_server_create", group: "hosted-servers" },
+  { mcp: "polpo_mcp_server_templates", name: "mcp_server_templates", group: "hosted-servers" },
+  { mcp: "polpo_mcp_server_install", name: "mcp_server_install", group: "hosted-servers" },
   { mcp: "polpo_mcp_server_generate", name: "mcp_server_generate", group: "hosted-servers" },
   { mcp: "polpo_mcp_server_update", name: "mcp_server_update", group: "hosted-servers" },
   { mcp: "polpo_mcp_server_test", name: "mcp_server_test", group: "hosted-servers" },
