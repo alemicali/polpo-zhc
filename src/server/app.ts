@@ -171,6 +171,9 @@ export interface AppOptions {
  * from Hono context.  This lets the cloud data-plane wire stores directly
  * without needing the full Orchestrator class.
  */
+/** Orchestrators whose deleted missions / hosted servers already drop their suites (createApp may run more than once). */
+const suiteCleanupWired = new WeakSet<Orchestrator>();
+
 export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts?: AppOptions): OpenAPIHono {
   const app = new OpenAPIHono();
   const activeWorkDir = () => orchestrator.isInitialized ? orchestrator.getWorkDir() : opts?.workDir;
@@ -1592,6 +1595,12 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   });
   // a hosted server's deploys go through its required suite (the saved tests' gate)
   setHostedSuiteGate(o, (id, version, opts) => agentSuites().hostedGate(id, version, opts), (id, ref, opts) => agentSuites().hostedCheck(id, ref, opts));
+  // a deleted mission or hosted server takes its suite runs and cassettes along (a server's saved tests go with it)
+  if (!suiteCleanupWired.has(o)) {
+    suiteCleanupWired.add(o);
+    o.on("mission:deleted", ({ missionId }) => { void agentSuites().forget(`mission:${missionId}`).catch(() => undefined); });
+    o.on("mcp-server:changed", ({ id, what }) => { if (what === "deleted") void agentSuites().forget(`mcp-server:${id}`).catch(() => undefined); });
+  }
   const deployGates = () => agentDeployGatesFor({ orchestrator: o, completions: (req) => completionApp.request(req) });
   // every deploy (dashboard, REST, MCP, Polpo's chat, API updates that auto-deploy) goes through the required suites
   o.setAgentDeployGate({

@@ -7,6 +7,7 @@
  */
 import { describe, test, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Orchestrator } from "../core/orchestrator.js";
@@ -263,6 +264,11 @@ describe("other targets over REST", () => {
     expect(providerCalls).toBe(0);
     const targets = await mcp(["polpo:read"]).call("polpo_target_suites", { kind: "mission", id });
     expect(targets.content[0].text).toMatch(/Blog \[blog\] · 1 case\(s\).*last ✓ passed 1\/1/);
+    // deleting the mission drops its suites and runs
+    const dir = join(tmpDir, ".polpo", "agent-suites", encodeURIComponent(`mission:${id}`));
+    expect(existsSync(dir)).toBe(true);
+    expect((await api(`/missions/${id}`, { method: "DELETE" })).status).toBeLessThan(300);
+    await vi.waitFor(() => expect(existsSync(dir)).toBe(false));
   });
 });
 
