@@ -15,32 +15,31 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ConnectorIcon } from "./connector-icon";
-import { blankSpec } from "@/lib/mcp-servers";
+import { blankSpec, hostedLabel, serverPill } from "@/lib/mcp-servers";
+import { hostedServerIcon, hostedServerIconFor } from "@/lib/hosted-server-icons";
+import { ConnectorListRow } from "./connector-card";
+import { HostedStatusPill } from "./connector-bits";
 import { productName, useInstanceBranding } from "@/lib/branding";
 
+/** A hosted server, as a connector row (the same row as Connected): its mark, "Hosted by …", the status pill, the gear. */
 function ServerRow({ server, onOpen }: { server: McpServerSummary; onOpen: () => void }) {
+  const product = productName(useInstanceBranding());
   return (
-    <button
-      type="button" onClick={onOpen} data-testid={`hosted-server-${server.id}`}
-      className="flex w-full items-center gap-3 rounded-card border bg-card px-3 py-3 text-left transition-colors hover:border-foreground/20 sm:px-4"
-    >
-      <ConnectorIcon catalogId={server.icon && /^[a-z0-9]+$/.test(server.icon) ? server.icon : undefined} name={server.name} />
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-2">
-          <span className="truncate font-medium">{server.name}</span>
-          {server.visibility === "public"
-            ? <Badge variant="outline" className="gap-1 text-micro font-normal"><Globe className="h-3 w-3" /> Public</Badge>
-            : <Badge variant="secondary" className="gap-1 text-micro font-normal"><Lock className="h-3 w-3" /> Private</Badge>}
-          {server.disabled && <Badge variant="destructive" className="text-micro font-normal">Switched off</Badge>}
-        </span>
-        <span className="block truncate text-xs text-muted-foreground">
-          {server.production ? `v${server.production} in production` : "Draft, not published"}
-          {server.draftChanged && server.production ? " · draft has changes" : ""}
-          {` · ${server.toolCount} tools`}
-          {server.pendingApprovals ? ` · ${server.pendingApprovals} waiting for approval` : ""}
-        </span>
-      </span>
-    </button>
+    <ConnectorListRow
+      testId={`hosted-server-${server.id}`}
+      icon={<ConnectorIcon name={server.name} {...hostedServerIconFor(server)} />}
+      title={server.name}
+      badges={<>
+        <Badge variant="secondary" className="text-micro font-normal" data-testid={`hosted-server-badge-${server.id}`}>{hostedLabel(product)}</Badge>
+        {server.visibility === "public"
+          ? <Badge variant="outline" className="gap-1 text-micro font-normal"><Globe className="h-3 w-3" /> Public</Badge>
+          : <Badge variant="outline" className="gap-1 text-micro font-normal text-muted-foreground"><Lock className="h-3 w-3" /> Private</Badge>}
+      </>}
+      summary={`${server.production ? `v${server.production} in production` : "Draft, not published"}${server.draftChanged && server.production ? " · draft has changes" : ""} · ${server.toolCount} tools${server.pendingApprovals ? ` · ${server.pendingApprovals} waiting for approval` : ""}`}
+      status={<HostedStatusPill pill={serverPill(server)} />}
+      onOpen={onOpen}
+      manageLabel={`Manage ${server.name}`}
+    />
   );
 }
 
@@ -116,7 +115,7 @@ export function CreateServerDialog({ open, onOpenChange, onCreated }: { open: bo
             <div className="space-y-2">
               {templates.map((t) => (
                 <div key={t.id} className="flex items-start gap-3 rounded-card border p-3" data-testid={`template-${t.id}`}>
-                  <ConnectorIcon catalogId={t.id} name={t.name} />
+                  <ConnectorIcon name={t.name} {...hostedServerIcon(t.icon ?? t.id)} />
                   <div className="min-w-0 flex-1 space-y-1">
                     <p className="font-medium">{t.name}</p>
                     <p className="text-sm text-muted-foreground">{t.description}</p>

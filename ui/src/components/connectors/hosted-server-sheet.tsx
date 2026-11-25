@@ -6,7 +6,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, FlaskConical, Globe, History, Loader2, Play, Plus, Rocket, RotateCcw, Save, ScrollText, Settings2, Trash2, Wrench } from "lucide-react";
+import { AlertTriangle, FlaskConical, Globe, History, Loader2, Play, Plus, Rocket, RotateCcw, Save, ScrollText, Settings2, Trash2, Users, Wrench } from "lucide-react";
 import {
   useMcpServer,
   type McpHostedServer, type McpServerAuth, type McpServerCallLog, type McpServerDiff, type McpServerSpec, type McpServerTool, type McpPendingCall, type McpToolTestResult,
@@ -20,8 +20,10 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { AgentVersionDiffView } from "@/components/agents/agent-versions-tab";
-import { Switch } from "./connector-bits";
-import { blankTool, hostedLabel, isSensitive, parseJson, pretty, sampleInput, schemaParams, settingsPayload } from "@/lib/mcp-servers";
+import { HostedStatusPill, Switch } from "./connector-bits";
+import { ConnectorIcon } from "./connector-icon";
+import { hostedServerIconFor } from "@/lib/hosted-server-icons";
+import { blankTool, hostedLabel, isSensitive, parseJson, pretty, sampleInput, schemaParams, serverPill, settingsPayload } from "@/lib/mcp-servers";
 import { productName, useInstanceBranding } from "@/lib/branding";
 import { SecretHelp, SecretInput, SettingInput, type SettingValue } from "./template-fields";
 import { cn } from "@/lib/utils";
@@ -316,7 +318,11 @@ function TestTab({ spec, test, runTests, saveTest }: {
   );
 }
 
-export function HostedServerSheet({ id, open, onOpenChange }: { id: string | null; open: boolean; onOpenChange: (open: boolean) => void }) {
+export function HostedServerSheet({ id, open, onOpenChange, onOpenConnector }: {
+  id: string | null; open: boolean; onOpenChange: (open: boolean) => void;
+  /** Open the connector it became (who can use it, per-tool policy): the connector sheet. */
+  onOpenConnector?: (connectorId: string) => void;
+}) {
   const s = useMcpServer(id ?? undefined);
   const product = productName(useInstanceBranding());
   // ?focus=secret:<name> (a setup link from MCP / Polpo's chat): open on the secret's input
@@ -356,17 +362,34 @@ export function HostedServerSheet({ id, open, onOpenChange }: { id: string | nul
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full gap-0 overflow-y-auto sm:max-w-3xl">
+        {/* the connector sheet's header: icon, name, what it is, then the status pill and its actions */}
         <SheetHeader className="border-b">
-          <SheetTitle>{server?.name ?? "Server"}</SheetTitle>
-          <SheetDescription>
-            {server ? (
-              <>
-                {server.production ? hostedLabel(product, server.production) : "Draft, not published yet"}
-                {server.connectorId ? ` · connector ${server.connectorId}` : ""}
-                {server.publicUrl ? <> · <span className="font-mono">{server.publicUrl}</span></> : ""}
-              </>
-            ) : "Loading…"}
-          </SheetDescription>
+          <div className="flex items-center gap-3 pr-6">
+            <ConnectorIcon name={server?.name ?? "Server"} {...(server ? hostedServerIconFor(server) : {})} size="lg" />
+            <div className="min-w-0 flex-1">
+              <SheetTitle className="truncate">{server?.name ?? "Server"}</SheetTitle>
+              <SheetDescription className="line-clamp-2">
+                {server ? (
+                  <>
+                    {server.production ? hostedLabel(product, server.production) : "Draft, not published yet"}
+                    {server.connectorId ? ` · connector ${server.connectorId}` : ""}
+                    {server.publicUrl ? <> · <span className="font-mono">{server.publicUrl}</span></> : ""}
+                  </>
+                ) : "Loading…"}
+              </SheetDescription>
+            </div>
+          </div>
+          {server && (
+            <div className="mt-2 flex flex-wrap items-center gap-2" data-testid="hosted-server-status">
+              <HostedStatusPill pill={serverPill(server)} />
+              <span className="text-xs text-muted-foreground">{server.toolCount} tools</span>
+              {server.connectorId && onOpenConnector && (
+                <Button size="sm" variant="ghost" className="ml-auto h-7 gap-1 px-2 text-xs" onClick={() => onOpenConnector(server.connectorId!)}>
+                  <Users className="h-3.5 w-3.5" /> Who can use it
+                </Button>
+              )}
+            </div>
+          )}
         </SheetHeader>
         {!server || !spec ? (
           <p className="flex items-center gap-2 p-6 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</p>

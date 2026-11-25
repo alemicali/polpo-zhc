@@ -643,7 +643,7 @@ export class McpServerService {
     const bound = existing?.transport.type === "hosted" && existing.transport.serverId === id ? existing : undefined;
     // the spec's icon key (a bundled official mark), else its template's (servers made before the template had one)
     const iconKey = spec.icon && /^[a-z0-9]+$/.test(spec.icon) ? spec.icon
-      : meta.template && HOSTED_SERVER_ICON_FILES[meta.template] ? meta.template : undefined;
+      : meta.template && Object.hasOwn(HOSTED_SERVER_ICON_FILES, meta.template) ? meta.template : undefined;
     const icon = iconKey ? { simpleIcons: iconKey } : undefined;
     if (bound) {
       manager.store.update(bound.id, {

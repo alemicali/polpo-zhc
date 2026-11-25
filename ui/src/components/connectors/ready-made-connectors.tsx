@@ -10,34 +10,48 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AlertTriangle, ArrowUpCircle, CheckCircle2, Download, ExternalLink, FlaskConical, Loader2, ShieldCheck, ShieldAlert } from "lucide-react";
 import { useMcpServers, type McpServerInstallResult, type McpServerTemplateInfo } from "@polpo-ai/react";
-import { installOutcome, settingsPayload, templateStatusLabel } from "@/lib/mcp-servers";
+import { hostedLabel, installOutcome, settingsPayload, templatePill } from "@/lib/mcp-servers";
+import { hostedServerIcon } from "@/lib/hosted-server-icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ConnectorIcon } from "./connector-icon";
+import { ConnectorCard } from "./connector-card";
+import { HostedStatusPill } from "./connector-bits";
 import type { AgentOption } from "./connector-detail-sheet";
 import { SecretHelp, SecretInput, SettingInput, type SettingValue } from "./template-fields";
 import { productName, useInstanceBranding } from "@/lib/branding";
 
-const iconSlug = (icon?: string) => (icon && /^[a-z0-9]+$/.test(icon) ? icon : undefined);
-
-
+/** A ready-made connector, as a catalog card (the same card as Browse): pill, tools that are safe or need approval, maturity. */
 function TemplateCard({ t, onInstall, onOpen }: { t: McpServerTemplateInfo; onInstall: () => void; onOpen: (id: string) => void }) {
-  const install = t.installs[0];
+  const product = productName(useInstanceBranding());
+  const install = t.installs.find((x) => x.status === t.status) ?? t.installs[0];
+  const pill = templatePill(t);
+  const action = t.status === "available" ? "Install" : t.status === "draft" ? "Finish install" : t.status === "update_available" ? "Update" : null;
   return (
-    <div className="flex flex-col gap-3 rounded-card border bg-card p-4" data-testid={`ready-made-${t.id}`}>
-      <div className="flex items-start gap-3">
-        {t.icon && !iconSlug(t.icon) ? <span className="text-2xl" aria-hidden>{t.icon}</span> : <ConnectorIcon catalogId={iconSlug(t.icon)} name={t.name} />}
-        <div className="min-w-0 flex-1">
-          <p className="font-medium">{t.name}</p>
-          <p className="text-xs text-muted-foreground">{t.vendor} · {t.category}</p>
-        </div>
-        <Badge variant={t.status === "available" ? "outline" : t.status === "update_available" ? "default" : "secondary"} className="text-micro font-normal">
-          {templateStatusLabel(t)}
-        </Badge>
-      </div>
-      <p className="text-sm text-muted-foreground">{t.description}</p>
+    <ConnectorCard
+      testId={`ready-made-${t.id}`}
+      icon={<ConnectorIcon name={t.name} {...hostedServerIcon(t.icon)} />}
+      title={t.name}
+      subtitle={`${t.vendor} · ${t.category}${t.status === "update_available" && install?.production ? ` · v${install.production} → revision ${t.revision}` : ""}`}
+      status={<HostedStatusPill pill={pill} />}
+      description={t.description}
+      footer={<>
+        <Badge variant="outline" className="text-micro font-normal text-muted-foreground" data-testid={`ready-made-hosted-${t.id}`}>{hostedLabel(product)}</Badge>
+        <Button size="sm" variant="ghost" className="ml-auto h-7 gap-1 px-2 text-xs" asChild>
+          <a href={t.docs} target="_blank" rel="noreferrer" aria-label={`${t.name} API docs`}>Docs <ExternalLink className="h-3 w-3" /></a>
+        </Button>
+        {install && (
+          <Button size="sm" variant={action ? "ghost" : "outline"} className="h-7 px-3 text-xs" onClick={() => onOpen(install.serverId)} aria-label={`Open ${t.name}`}>Open</Button>
+        )}
+        {action && (
+          <Button size="sm" className="h-7 gap-1 px-3 text-xs" onClick={onInstall}>
+            {t.status === "update_available" ? <ArrowUpCircle className="h-3.5 w-3.5" /> : <Download className="h-3.5 w-3.5" />} {action}
+          </Button>
+        )}
+      </>}
+    >
       <div className="space-y-1 text-xs text-muted-foreground">
         <p className="flex items-start gap-1.5"><ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" /> <span><span className="font-medium text-foreground">{t.readOnlyTools.length} read-only</span>: {t.readOnlyTools.join(", ")}</span></p>
         {t.approvalTools.length > 0 && (
@@ -48,16 +62,7 @@ function TemplateCard({ t, onInstall, onOpen }: { t: McpServerTemplateInfo; onIn
           {t.maturity.testedWithLiveApi ? "Tested with the live API" : "Not yet tested with the live API"} · revision {t.revision}
         </p>
       </div>
-      <div className="mt-auto flex flex-wrap gap-2">
-        {t.status === "available" || t.status === "draft" ? (
-          <Button size="sm" onClick={onInstall}><Download className="h-3.5 w-3.5" /> {t.status === "draft" ? "Finish install" : "Install"}</Button>
-        ) : t.status === "update_available" ? (
-          <Button size="sm" onClick={onInstall}><ArrowUpCircle className="h-3.5 w-3.5" /> Update</Button>
-        ) : null}
-        {install && <Button size="sm" variant="outline" onClick={() => onOpen(install.serverId)}>Open</Button>}
-        <Button size="sm" variant="ghost" asChild><a href={t.docs} target="_blank" rel="noreferrer">API docs <ExternalLink className="h-3 w-3" /></a></Button>
-      </div>
-    </div>
+    </ConnectorCard>
   );
 }
 
@@ -74,7 +79,7 @@ export function ReadyMadeConnectors({ agents, onOpenServer }: { agents: AgentOpt
         <h2 id="ready-made-title" className="text-sm font-medium">Ready-made (hosted by {product})</h2>
         <p className="text-sm text-muted-foreground">Curated connectors {product} hosts for you: fill in the settings, paste the vendor's token, choose the agents — tested and published in one step.</p>
       </div>
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {templates.map((t) => <TemplateCard key={t.id} t={t} onInstall={() => setInstalling(t.id)} onOpen={onOpenServer} />)}
       </div>
       {current && (
@@ -128,12 +133,17 @@ export function InstallTemplateDialog({ template: t, agents, open, onOpenChange,
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl" data-testid="install-template-dialog">
         <DialogHeader>
-          <DialogTitle>{updating ? `Update ${t.name}` : `Install ${t.name}`}</DialogTitle>
-          <DialogDescription>
-            {updating
-              ? `Revision ${t.revision} becomes a draft with its changes; you publish it when it looks right.`
-              : `${product} checks it with the read-only tests, then publishes v1.0.0 and adds it to your connectors.`}
-          </DialogDescription>
+          <div className="flex items-center gap-3">
+            <ConnectorIcon name={t.name} {...hostedServerIcon(t.icon)} size="lg" />
+            <div className="min-w-0">
+              <DialogTitle className="leading-tight">{updating ? `Update ${t.name}` : `Install ${t.name}`}</DialogTitle>
+              <DialogDescription className="line-clamp-2">
+                {updating
+                  ? `Revision ${t.revision} becomes a draft with its changes; you publish it when it looks right.`
+                  : `${product} checks it with the read-only tests, then publishes v1.0.0 and adds it to your connectors.`}
+              </DialogDescription>
+            </div>
+          </div>
         </DialogHeader>
         <DialogBody className="space-y-5">
           {!t.maturity.testedWithLiveApi && (

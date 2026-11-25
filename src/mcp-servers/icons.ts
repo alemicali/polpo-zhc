@@ -11,7 +11,7 @@ export const HOSTED_SERVER_ICON_FILES: Record<string, { light: string; dark?: st
 
 /** The dashboard paths of a bundled hosted-server icon (`icon` key), if there is one. */
 export function hostedServerIconUrls(key: string | null | undefined): { iconUrl?: string; iconDarkUrl?: string } {
-  const entry = key ? HOSTED_SERVER_ICON_FILES[key] : undefined;
+  const entry = key && Object.hasOwn(HOSTED_SERVER_ICON_FILES, key) ? HOSTED_SERVER_ICON_FILES[key] : undefined;
   if (!entry) return {};
   return { iconUrl: `/hosted-server-icons/${entry.light}`, ...(entry.dark ? { iconDarkUrl: `/hosted-server-icons/${entry.dark}` } : {}) };
 }

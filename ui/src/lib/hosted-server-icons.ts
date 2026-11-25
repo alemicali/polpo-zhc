@@ -20,9 +20,15 @@ const path = (file: string) => `${import.meta.env.BASE_URL ?? "/"}hosted-server-
 
 /** The bundled icon of a hosted server / template (its `icon` key); empty when it has none (letter tile). */
 export function hostedServerIcon(key: string | undefined): { iconUrl?: string; iconDarkUrl?: string } {
-  const entry = key ? HOSTED_SERVER_ICONS[key] : undefined;
+  const entry = key && Object.hasOwn(HOSTED_SERVER_ICONS, key) ? HOSTED_SERVER_ICONS[key] : undefined;
   if (!entry) return {};
   return { iconUrl: path(entry.light), ...(entry.dark ? { iconDarkUrl: path(entry.dark) } : {}) };
+}
+
+/** A hosted server's bundled icon: its own `icon`, else its template's (servers made before the template had one). */
+export function hostedServerIconFor(server: { icon?: string; template?: string }): { iconUrl?: string; iconDarkUrl?: string } {
+  const own = hostedServerIcon(server.icon);
+  return own.iconUrl ? own : hostedServerIcon(server.template);
 }
 
 /** A bundled hosted-server icon URL (the server's /hosted-server-icons/<file>, or one from above) under the base path. */
