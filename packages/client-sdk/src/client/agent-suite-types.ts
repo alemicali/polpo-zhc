@@ -68,14 +68,39 @@ export type SuiteAssertion = { id?: string; label?: string } & (
 );
 export type SuiteAssertionType = SuiteAssertion["type"];
 
-/** later (phase 2): scores 0..1 with thresholds. */
-export type SuiteScorer = { id?: string; label?: string; threshold?: number; weight?: number } & (
-  | { type: "exact"; expected: string; caseSensitive?: boolean }
-  | { type: "numeric"; expected: number | string; tolerance?: number; extract?: string }
-  | { type: "similarity"; expected: string }
-  | { type: "llm_judge"; rubric: string; model?: string }
-  | { type: "custom"; code: string }
+/** What a scorer reads: the reply (default), the reply's JSON, a tool call's arguments or result, a registered outcome. */
+export type ScorerSource = "reply" | "reply_json" | "tool_args" | "tool_result" | "outcome";
+
+export interface JudgeCriterion { name: string; description: string; weight?: number }
+
+/** Evals: a score 0..1 with a threshold (default 1; similarity 0.8; llm_judge 0.6) and a weight. */
+export type SuiteScorer = {
+  id?: string; label?: string; threshold?: number; weight?: number;
+  from?: ScorerSource; tool?: string; which?: "first" | "last"; path?: string;
+} & (
+  | { type: "exact"; expected: unknown; caseSensitive?: boolean }
+  | { type: "numeric"; expected: number | string; tolerance?: number; relative?: boolean; extract?: string }
+  | { type: "contains_all"; values: string[]; caseSensitive?: boolean }
+  | { type: "contains_any"; values: string[]; caseSensitive?: boolean }
+  | { type: "regex"; pattern: string; flags?: string }
+  | { type: "similarity"; expected: string; method?: "levenshtein" | "tokens" }
+  | { type: "json_schema"; schema: Record<string, unknown> }
+  | { type: "tool_trajectory"; expected: string[]; order?: "exact" | "in_order" | "any" }
+  | { type: "cost"; maxUsd: number }
+  | { type: "latency"; maxMs: number }
+  | { type: "llm_judge"; rubric: string; criteria?: JudgeCriterion[]; expected?: string; model?: string }
+  | { type: "custom"; code: string; expected?: unknown; timeoutMs?: number }
 );
+export type SuiteScorerType = SuiteScorer["type"];
+
+/** A suite's eval settings. */
+export interface SuiteEvalSettings {
+  judgeModel?: string;
+  repetitions?: number;
+  regressionTolerance?: number;
+  flakyStddev?: number;
+  baseline?: "previous" | "production" | "none";
+}
 
 export interface SuiteBudgets { maxTurns?: number; maxCostUsd?: number; maxDurationMs?: number }
 
@@ -87,7 +112,7 @@ export interface SuiteCase {
   mode?: SuiteMockMode;
   mocks?: SuiteMocks;
   assertions: SuiteAssertion[];
-  /** later (phase 2) */
+  /** Evals (with the suite's default scorers). */
   scorers?: SuiteScorer[];
   dataset?: string;
   budgets?: SuiteBudgets;
@@ -117,6 +142,9 @@ export interface AgentSuite {
   datasets: SuiteDataset[];
   budgets?: SuiteBudgets;
   concurrency?: number;
+  /** Scorers every case gets. */
+  scorers?: SuiteScorer[];
+  evals?: SuiteEvalSettings;
   /** later (phase 3) */
   gate?: { required?: boolean; minPassRate?: number; maxRegression?: number; scoreThresholds?: Record<string, number> };
   tags?: string[];
@@ -157,6 +185,11 @@ export interface SuiteRunRequest {
   wait?: boolean;
   /** Confirm a run that uses real tools (side effects possible; approvals never given). */
   allowRealTools?: boolean;
+  /** Run every case this many times (1–10). */
+  repetitions?: number;
+  /** Compare with this run instead of the suite's baseline. */
+  baselineRunId?: string;
+  regressionTolerance?: number;
 }
 
 export type SuiteRunStatus = "queued" | "running" | "passed" | "failed" | "errored" | "cancelled";
@@ -219,8 +252,11 @@ export interface SuiteCaseResult {
   mode: SuiteMockMode;
   engine: "native" | "harness" | "cli";
   assertions: SuiteAssertionResult[];
-  /** later (phase 2) */
-  scores?: Array<{ scorer: SuiteScorer; score: number; passed: boolean; reason?: string }>;
+  scores?: SuiteScoreResult[];
+  /** The weighted mean of its scores. */
+  score?: number;
+  /** With repetitions: the attempt (1-based). */
+  attempt?: number;
   trace: SuiteTrace;
   error?: string;
   startedAt: string;
@@ -265,8 +301,14 @@ export interface SuiteRun {
   /** In lists, results come without trace and assertions (with `failed`: the failed assertions' descriptions). */
   results: Array<SuiteCaseResult & { failed?: string[] }>;
   stats: SuiteRunStats;
-  /** later (phase 2) */
-  baseline?: { runId: string; passRateDelta?: number; costDelta?: number };
+  aggregates?: SuiteRunAggregates;
+  repetitions?: number;
+  /** The comparison with the baseline run. */
+  baseline?: SuiteBaselineComparison;
+  /** This run is its suite's marked baseline. */
+  isBaseline?: boolean;
+  /** "Explain this run" (Markdown). */
+  review?: SuiteRunReview;
   /** later (phase 3) */
   gate?: { decision: "pass" | "fail" | "override"; reason?: string; by?: string };
   notes: string[];
@@ -280,4 +322,63 @@ export interface SuiteDatasetImport {
   name?: string;
   mode?: "replace" | "append";
   coerce?: boolean;
+}
+
+export interface SuiteScoreResult {
+  scorer: SuiteScorer;
+  id: string;
+  description: string;
+  score: number;
+  threshold: number;
+  weight: number;
+  passed: boolean;
+  reason?: string;
+  expected?: unknown;
+  actual?: unknown;
+  error?: string;
+  judge?: { model?: string; criteria: Array<{ name: string; weight: number; score: number; reasoning: string }>; summary?: string; costUsd?: number };
+}
+
+export interface SuiteScorerAggregate {
+  id: string; label: string; type: SuiteScorerType; count: number;
+  mean: number; median: number; p10: number; min: number; max: number; stddev: number; passRate: number; weight: number;
+}
+
+export interface SuiteCaseAggregate {
+  key: string; caseId: string; caseName: string; row?: { index: number; values: Record<string, unknown> };
+  attempts: number; passed: number; passRate: number; score?: number; scoreStddev?: number; flaky: boolean;
+  scores: Record<string, number>; costUsd: number; durationMs: number; status: SuiteCaseStatus;
+}
+
+export interface SuiteRunAggregates {
+  score?: number; passRate: number; costUsd: number; durationMs: number; latencyP50Ms?: number; latencyP90Ms?: number; judgeCostUsd: number;
+  scorers: SuiteScorerAggregate[]; cases: SuiteCaseAggregate[]; flaky: string[]; repetitions: number;
+}
+
+export type SuiteChange = "regressed" | "improved" | "unchanged" | "new" | "removed";
+export interface SuiteScorerDelta { id: string; label?: string; baseline?: number; current?: number; delta?: number; change: SuiteChange }
+export interface SuiteCaseDelta {
+  key: string; caseName: string; change: SuiteChange; baselineStatus?: SuiteCaseStatus; status?: SuiteCaseStatus;
+  passRate: { baseline?: number; current?: number; delta?: number };
+  score?: { baseline?: number; current?: number; delta?: number };
+  scorers: SuiteScorerDelta[]; reasons: string[]; costDelta?: number; durationDelta?: number;
+}
+export interface SuiteBaselineComparison {
+  runId: string; source: "marked" | "request" | "previous" | "production";
+  baselineTarget?: string; baselineVersion?: string; baselineStartedAt?: string; tolerance: number;
+  passRateDelta: number; costDelta: number; durationDelta: number; scoreDelta?: number;
+  regressions: number; improvements: number; cases: SuiteCaseDelta[]; scorers: SuiteScorerDelta[];
+}
+
+export interface SuiteRunReview { text: string; model?: string; at: string; by?: string; costUsd?: number }
+
+export interface SuiteTrendPoint {
+  runId: string; startedAt: string; target: string; version?: string; label?: string; status: SuiteRunStatus;
+  passRate: number; score?: number; costUsd: number; durationMs: number; scorers: Record<string, number>; regressions?: number; isBaseline?: boolean;
+}
+export interface SuiteTrend {
+  suiteId: string;
+  points: SuiteTrendPoint[];
+  byVersion: Array<{ version: string; runs: number; passRate: number; score?: number; costUsd: number; durationMs: number; lastRunAt: string }>;
+  scorers: Array<{ id: string; label: string }>;
 }

@@ -5,7 +5,7 @@ import { SUITE_LIMITS, type AgentSuite, type AgentSuiteStore, type SuiteRun, typ
 /**
  * File-based AgentSuiteStore, per agent under `.polpo/agent-suites/<agent>/`:
  *   suites/<id>.json   one suite (cases, datasets, mocks)
- *   runs/<id>.json     one run (results with their traces); the newest {@link SUITE_LIMITS.runsKept} kept
+ *   runs/<id>.json     one run (results with their traces); the newest {@link SUITE_LIMITS.runsKept} kept, and marked baselines
  */
 export class FileAgentSuiteStore implements AgentSuiteStore {
   private readonly dir: string;
@@ -78,10 +78,10 @@ export class FileAgentSuiteStore implements AgentSuiteStore {
     const isNew = !existsSync(join(dir, `${encodeURIComponent(run.id)}.json`));
     FileAgentSuiteStore.writeJson(dir, `${encodeURIComponent(run.id)}.json`, run);
     if (!isNew) return;
-    // keep the newest runs only (finished ones are dropped first; a running one is never dropped)
+    // keep the newest runs only (a running one and a suite's marked baseline are never dropped)
     const runs = this.allRuns(run.agent);
     for (const old of runs.slice(SUITE_LIMITS.runsKept)) {
-      if (old.status === "running" || old.status === "queued") continue;
+      if (old.status === "running" || old.status === "queued" || old.isBaseline) continue;
       rmSync(join(dir, `${encodeURIComponent(old.id)}.json`), { force: true });
     }
   }

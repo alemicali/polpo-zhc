@@ -44,6 +44,9 @@ jobs:
       - name: Build Vite UI
         run: POLPO_ELECTRON=1 VITE_POLPO_API_URL=http://localhost:3890 pnpm exec vite build
         working-directory: ui
+        # the dashboard bundle is past Node's default ~2 GB heap when Rollup renders the chunks
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
 
       # Upload for desktop jobs
       - name: Upload build artifacts

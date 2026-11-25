@@ -129,6 +129,7 @@ describe("Polpo MCP server", () => {
       "polpo_agent_versions", "polpo_agent_version_get", "polpo_agent_version_diff", "polpo_agent_draft", "polpo_agent_publish", "polpo_agent_deploy", "polpo_agent_rollback", "polpo_agent_deploys", "polpo_agent_test",
       "polpo_agent_delete", "polpo_agent_avatar_set", "polpo_teams_list", "polpo_team_save", "polpo_team_delete",
       "polpo_agent_suite_list", "polpo_agent_suite_get", "polpo_agent_suite_save", "polpo_agent_suite_delete", "polpo_agent_suite_run", "polpo_agent_suite_run_get",
+      "polpo_agent_suite_trend", "polpo_agent_suite_baseline", "polpo_agent_suite_review", "polpo_agent_suite_show",
       "polpo_config_get", "polpo_config_update", "polpo_branding_get", "polpo_branding_update", "polpo_providers_list", "polpo_models_list",
       "polpo_sandbox_get", "polpo_sandbox_update", "polpo_sandbox_provider_test", "polpo_policies_get", "polpo_policies_update",
       "polpo_approval_gate_save", "polpo_approval_gate_delete", "polpo_members_list", "polpo_members_invite", "polpo_members_remove",

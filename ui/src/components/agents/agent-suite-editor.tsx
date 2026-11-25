@@ -6,16 +6,16 @@
  */
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Code2, Database, FileText, ListChecks, Loader2, Plus, Save, Trash2, Upload } from "lucide-react";
-import type { AgentSuite, AgentSuiteInput, SuiteAssertion, SuiteAssertionType, SuiteCase, SuiteMockMode, ToolMock, ScriptedTurn, UseAgentSuitesReturn } from "@polpo-ai/react";
+import { Code2, Database, FileText, Gauge, ListChecks, Loader2, Plus, Save, Trash2, Upload } from "lucide-react";
+import type { AgentSuite, AgentSuiteInput, SuiteAssertion, SuiteAssertionType, SuiteCase, SuiteEvalSettings, SuiteMockMode, SuiteScorer, SuiteScorerType, ToolMock, ScriptedTurn, UseAgentSuitesReturn } from "@polpo-ai/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ASSERTION_LABELS, ASSERTION_TEMPLATES, SUITE_MODES, blankCase } from "@/lib/agent-suites";
+import { ASSERTION_LABELS, ASSERTION_TEMPLATES, SCORER_LABELS, SCORER_TEMPLATES, SUITE_MODES, blankCase } from "@/lib/agent-suites";
 import { cn } from "@/lib/utils";
 
-type View = "form" | "datasets" | "json" | "yaml";
+type View = "form" | "evals" | "datasets" | "json" | "yaml";
 type Draft = AgentSuiteInput & { id?: string };
 
 /** A JSON value edited as text: applied when it parses, the error shown when it does not. */
@@ -59,6 +59,92 @@ function RowHeader({ title, onRemove }: { title: string; onRemove?: () => void }
     <div className="flex items-center gap-2">
       <span className="min-w-0 flex-1 truncate text-micro font-medium uppercase tracking-label text-muted-foreground">{title}</span>
       {onRemove && <Button variant="ghost" size="sm" className="h-6 px-1.5" onClick={onRemove} aria-label={`Remove ${title}`}><Trash2 className="h-3 w-3" /></Button>}
+    </div>
+  );
+}
+
+/** Scorers (evals): each a type and its parameters (JSON), with a threshold and a weight. */
+function ScorerList({ value, onChange, title, hint }: { value: SuiteScorer[]; onChange: (s: SuiteScorer[]) => void; title: string; hint?: string }) {
+  const [newType, setNewType] = useState<SuiteScorerType>("exact");
+  const set = (i: number, sc: SuiteScorer) => onChange(value.map((x, j) => (j === i ? sc : x)));
+  return (
+    <div className="space-y-2" data-testid="suite-scorers">
+      <RowHeader title={title} />
+      {hint && <p className="text-micro text-muted-foreground">{hint}</p>}
+      {value.map((sc, i) => {
+        const { type, threshold, weight, ...params } = sc;
+        return (
+          <div key={`${i}-${type}`} className="flex flex-wrap items-start gap-2" data-testid="suite-scorer-form">
+            <span className="mt-2 w-36 shrink-0 text-caption font-medium">{SCORER_LABELS[type]}</span>
+            <div className="min-w-0 flex-1 basis-64">
+              <JsonField label={`${type} parameters`} value={params} onChange={(v) => set(i, { ...(v as object ?? {}), type, ...(threshold !== undefined ? { threshold } : {}), ...(weight !== undefined ? { weight } : {}) } as SuiteScorer)} />
+            </div>
+            <label className="w-20 shrink-0">
+              <span className="text-micro text-muted-foreground">Threshold</span>
+              <Input type="number" min={0} max={1} step={0.05} value={threshold ?? ""} placeholder={type === "similarity" ? "0.8" : type === "llm_judge" ? "0.6" : "1"} aria-label={`Scorer ${i + 1} threshold`} className="h-8 text-caption"
+                onChange={(e) => set(i, { ...sc, threshold: e.target.value === "" ? undefined : Number(e.target.value) } as SuiteScorer)} />
+            </label>
+            <label className="w-16 shrink-0">
+              <span className="text-micro text-muted-foreground">Weight</span>
+              <Input type="number" min={0} step={0.5} value={weight ?? ""} placeholder="1" aria-label={`Scorer ${i + 1} weight`} className="h-8 text-caption"
+                onChange={(e) => set(i, { ...sc, weight: e.target.value === "" ? undefined : Number(e.target.value) } as SuiteScorer)} />
+            </label>
+            <Button variant="ghost" size="sm" className="mt-4 h-7 px-1.5" aria-label={`Remove scorer ${i + 1}`} onClick={() => onChange(value.filter((_, j) => j !== i))}><Trash2 className="h-3 w-3" /></Button>
+          </div>
+        );
+      })}
+      <div className="flex items-center gap-2">
+        <Select value={newType} onValueChange={(v) => setNewType(v as SuiteScorerType)}>
+          <SelectTrigger size="sm" className="w-48" aria-label="Scorer type"><SelectValue /></SelectTrigger>
+          <SelectContent>{(Object.keys(SCORER_LABELS) as SuiteScorerType[]).map((t) => <SelectItem key={t} value={t}>{SCORER_LABELS[t]}</SelectItem>)}</SelectContent>
+        </Select>
+        <Button variant="outline" size="sm" className="h-7" data-testid="suite-add-scorer"
+          onClick={() => onChange([...value, { type: newType, ...SCORER_TEMPLATES[newType] } as SuiteScorer])}>
+          <Plus className="mr-1 h-3 w-3" /> Scorer
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** The suite's eval settings and default scorers. */
+function EvalsView({ draft, setDraft }: { draft: Draft; setDraft: (d: Draft) => void }) {
+  const evals: SuiteEvalSettings = draft.evals ?? {};
+  const setEvals = (e: Partial<SuiteEvalSettings>) => {
+    const next = { ...evals, ...e };
+    for (const k of Object.keys(next) as Array<keyof SuiteEvalSettings>) if (next[k] === undefined) delete next[k];
+    setDraft({ ...draft, evals: Object.keys(next).length ? next : undefined });
+  };
+  const num = (v: string) => (v === "" ? undefined : Number(v));
+  return (
+    <div className="space-y-4 px-4 py-3" data-testid="suite-evals">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block min-w-0">
+          <span className="text-micro text-muted-foreground">Judge model (LLM judge scorers; default: Polpo's model)</span>
+          <Input value={evals.judgeModel ?? ""} placeholder="anthropic:claude-sonnet-5-5" aria-label="Judge model" className="h-8 font-mono text-caption" onChange={(e) => setEvals({ judgeModel: e.target.value || undefined })} />
+        </label>
+        <label className="block min-w-0">
+          <span className="text-micro text-muted-foreground">Repetitions (runs per case: mean, stddev, flakiness)</span>
+          <Input type="number" min={1} max={10} value={evals.repetitions ?? ""} placeholder="1" aria-label="Repetitions" className="h-8 text-caption" onChange={(e) => setEvals({ repetitions: num(e.target.value) })} />
+        </label>
+        <label className="block min-w-0">
+          <span className="text-micro text-muted-foreground">Regression tolerance (score or pass-rate change ignored)</span>
+          <Input type="number" min={0} max={1} step={0.01} value={evals.regressionTolerance ?? ""} placeholder="0.05" aria-label="Regression tolerance" className="h-8 text-caption" onChange={(e) => setEvals({ regressionTolerance: num(e.target.value) })} />
+        </label>
+        <label className="block min-w-0">
+          <span className="text-micro text-muted-foreground">Baseline when none is marked</span>
+          <Select value={evals.baseline ?? "previous"} onValueChange={(v) => setEvals({ baseline: v === "previous" ? undefined : v as SuiteEvalSettings["baseline"] })}>
+            <SelectTrigger size="sm" className="w-full" aria-label="Baseline policy"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="previous">The previous run</SelectItem>
+              <SelectItem value="production">The latest run on production</SelectItem>
+              <SelectItem value="none">No comparison</SelectItem>
+            </SelectContent>
+          </Select>
+        </label>
+      </div>
+      <ScorerList value={draft.scorers ?? []} onChange={(sc) => setDraft({ ...draft, scorers: sc.length ? sc : undefined })} title="Default scorers (every case)"
+        hint="A case's own scorer with the same id replaces a default. Expected values can come from a dataset: {{row.expected}}." />
     </div>
   );
 }
@@ -132,6 +218,8 @@ function CaseForm({ value, onChange, onRemove, defaultMode, datasets }: { value:
           <Button variant="outline" size="sm" className="h-7" onClick={() => setMocks({ tools: [...tools, { tool: "", response: "" }] })}><Plus className="mr-1 h-3 w-3" /> Tool mock</Button>
         </div>
       )}
+
+      <ScorerList value={value.scorers ?? []} onChange={(sc) => onChange({ ...value, scorers: sc.length ? sc : undefined })} title="Scorers (evals)" />
 
       <div className="space-y-2">
         <RowHeader title="Assertions" />
@@ -261,6 +349,7 @@ export function AgentSuiteEditor({ saved, initial, suites, onSaved, onClose }: {
   const cases = (draft.cases ?? []) as SuiteCase[];
   const views: Array<{ id: View; label: string; icon: typeof ListChecks; disabled?: boolean }> = [
     { id: "form", label: "Cases", icon: ListChecks },
+    { id: "evals", label: "Evals", icon: Gauge },
     { id: "datasets", label: "Datasets", icon: Database },
     { id: "json", label: "JSON", icon: Code2 },
     { id: "yaml", label: "YAML", icon: FileText, disabled: !saved },
@@ -301,6 +390,7 @@ export function AgentSuiteEditor({ saved, initial, suites, onSaved, onClose }: {
           </div>
         </>
       )}
+      {view === "evals" && <EvalsView draft={draft} setDraft={setDraft} />}
       {view === "datasets" && <DatasetsView draft={draft} setDraft={setDraft} saved={saved} suites={suites} />}
       {view === "json" && (
         <div className="px-4 py-3">

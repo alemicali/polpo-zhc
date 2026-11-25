@@ -32,6 +32,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-25-agent-suite-evals",
+    date: "2026-11-25",
+    kind: "new",
+    title: "Eval degli agenti: punteggi, baseline, andamento e \"Spiega questo run\"",
+    summary: "Nelle Suite ogni caso può avere dei punteggi (valore esatto, numero con tolleranza, somiglianza, giudice AI…): vedi se una nuova versione peggiora rispetto alla baseline, l'andamento nel tempo e fatti spiegare cosa sistemare.",
+    body: [
+      "- **Punteggi** da 0 a 1 con una soglia: valore esatto, numero con tolleranza, contiene, regex, somiglianza del testo, JSON Schema, sequenza di strumenti, costo e tempo, un **giudice AI** con criteri pesati (che spiega ogni voto) e codice personalizzato in un ambiente isolato. I valori attesi possono venire da un dataset (`{{row.expected}}`).",
+      "- **Ripetizioni**: lo stesso caso più volte, con media, deviazione e i casi **instabili** evidenziati.",
+      "- **Baseline**: segna un run come riferimento; ogni nuovo run mostra cosa è **peggiorato** o **migliorato**, caso per caso e punteggio per punteggio.",
+      "- **Andamento**: il grafico dei run nel tempo (superati e punteggio) e le medie per versione.",
+      "- **Spiega questo run**: il modello di Polpo riassume cosa è fallito o peggiorato e propone le modifiche alle istruzioni, agli strumenti o al test.",
+      "- Anche via API, MCP (con la scheda della suite in Claude e ChatGPT) e nella chat con Polpo.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri un agente", to: "/agents" },
+  },
+  {
     id: "2026-11-25-agent-suites",
     date: "2026-11-25",
     kind: "new",

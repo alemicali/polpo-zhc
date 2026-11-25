@@ -1,5 +1,5 @@
 import { PolpoApiError } from "./errors.js";
-import type { AgentSuite, AgentSuiteInput, SuiteRun, SuiteRunRequest, SuiteDatasetImport } from "./agent-suite-types.js";
+import type { AgentSuite, AgentSuiteInput, SuiteBaselineComparison, SuiteRun, SuiteRunRequest, SuiteDatasetImport, SuiteTrend } from "./agent-suite-types.js";
 import type {
   Connector,
   ConnectorTool,
@@ -1054,6 +1054,36 @@ export class PolpoClient {
 
   cancelAgentSuiteRun(name: string, runId: string): Promise<SuiteRun> {
     return this.post<SuiteRun>(`/agents/${encodeURIComponent(name)}/suite-runs/${encodeURIComponent(runId)}/cancel`);
+  }
+
+  /** A suite's finished runs over time (pass rate, score, cost, latency) and by version. */
+  getAgentSuiteTrend(name: string, id: string, opts: { limit?: number } = {}): Promise<SuiteTrend> {
+    return this.get<SuiteTrend>(`/agents/${encodeURIComponent(name)}/suites/${encodeURIComponent(id)}/trend${opts.limit ? `?limit=${opts.limit}` : ""}`);
+  }
+
+  /** The suite's marked baseline run (without traces), or null. */
+  getAgentSuiteBaseline(name: string, id: string): Promise<SuiteRun | null> {
+    return this.get<SuiteRun | null>(`/agents/${encodeURIComponent(name)}/suites/${encodeURIComponent(id)}/baseline`);
+  }
+
+  /** Mark a finished run as the suite's baseline (`runId` null clears the mark). */
+  setAgentSuiteBaseline(name: string, id: string, runId: string | null): Promise<SuiteRun | null> {
+    const path = `/agents/${encodeURIComponent(name)}/suites/${encodeURIComponent(id)}/baseline`;
+    return runId ? this.put<SuiteRun | null>(path, { runId }) : this.del<SuiteRun | null>(path);
+  }
+
+  /** Compare a run with another (`baseline`) or with its suite's baseline now; null when there is nothing to compare with. */
+  compareAgentSuiteRun(name: string, runId: string, opts: { baseline?: string; tolerance?: number } = {}): Promise<SuiteBaselineComparison | null> {
+    const q = new URLSearchParams();
+    if (opts.baseline) q.set("baseline", opts.baseline);
+    if (opts.tolerance !== undefined) q.set("tolerance", String(opts.tolerance));
+    const s = q.toString();
+    return this.get<SuiteBaselineComparison | null>(`/agents/${encodeURIComponent(name)}/suite-runs/${encodeURIComponent(runId)}/compare${s ? `?${s}` : ""}`);
+  }
+
+  /** "Explain this run": an AI review (Polpo's model) stored on the run. */
+  reviewAgentSuiteRun(name: string, runId: string, opts: { language?: string } = {}): Promise<SuiteRun> {
+    return this.post<SuiteRun>(`/agents/${encodeURIComponent(name)}/suite-runs/${encodeURIComponent(runId)}/review`, opts);
   }
 
   // ── Hosted MCP servers ──

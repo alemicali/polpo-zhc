@@ -25,6 +25,7 @@ import { registerAdminTools } from "./mcp-server/admin.js";
 import { registerConfigTools } from "./mcp-server/config.js";
 import { registerTeamTools } from "./mcp-server/team.js";
 import { registerAgentSuiteTools } from "./mcp-server/agent-suites.js";
+import { registerSuiteCards } from "./mcp-server/suite-cards.js";
 import { registerRoomTools } from "./mcp-server/rooms.js";
 import { registerChatTools } from "./mcp-server/chat.js";
 import { registerBrainTools, registerLearningTools, registerMemoryTools } from "./mcp-server/knowledge.js";
@@ -79,6 +80,7 @@ export function createPolpoMcpServer(deps: McpDeps, catalog?: ToolScope[]): McpS
   registerFileTools(tool, deps);
   registerTeamTools(tool, deps);
   registerAgentSuiteTools(tool, deps);
+  registerSuiteCards(server, deps, enabled, principal, catalog);
   registerConfigTools(tool, deps);
   registerSettingsTools(tool, deps);
   registerChannelSetupTools(tool, deps);

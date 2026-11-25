@@ -3,7 +3,7 @@
  * labels, blank suites and cases, assertion templates, and a case trace as chat messages (the
  * same parts the chat page and Tasks → Execution → Chat draw).
  */
-import type { AgentSuiteInput, SuiteAssertionType, SuiteCase, SuiteMockMode, SuiteRun, SuiteTrace } from "@polpo-ai/react";
+import type { AgentSuiteInput, SuiteAssertionType, SuiteCase, SuiteMockMode, SuiteRun, SuiteScorerType, SuiteTrace } from "@polpo-ai/react";
 import type { MessageSegment, ToolCallInfo } from "@/hooks/use-polpo";
 
 export const SUITE_MODES: Array<{ id: SuiteMockMode; label: string; hint: string; realTools: boolean; realModel: boolean }> = [
@@ -97,6 +97,55 @@ export function runTargetLabel(run: Pick<SuiteRun, "target" | "version">): strin
 
 export function runIsLive(run: Pick<SuiteRun, "status">): boolean {
   return run.status === "running" || run.status === "queued";
+}
+
+// ── Evals: scorers, scores, deltas ──
+
+/** A template for each scorer type (the form adds one, then its fields are edited). */
+export const SCORER_TEMPLATES: Record<SuiteScorerType, Record<string, unknown>> = {
+  exact: { expected: "{{row.expected}}" },
+  numeric: { expected: "{{row.expected}}", tolerance: 0.01 },
+  contains_all: { values: [""] },
+  contains_any: { values: [""] },
+  regex: { pattern: "" },
+  similarity: { expected: "", threshold: 0.8 },
+  json_schema: { schema: { type: "object", required: [] } },
+  tool_trajectory: { expected: ["", ""], order: "in_order" },
+  cost: { maxUsd: 0.05 },
+  latency: { maxMs: 30000 },
+  llm_judge: { rubric: "", criteria: [{ name: "correctness", description: "", weight: 1 }], threshold: 0.6 },
+  custom: { code: "return reply.includes(String(expected)) ? 1 : 0", expected: "{{row.expected}}" },
+};
+
+export const SCORER_LABELS: Record<SuiteScorerType, string> = {
+  exact: "Exact match",
+  numeric: "Number (tolerance)",
+  contains_all: "Contains all",
+  contains_any: "Contains any",
+  regex: "Regex",
+  similarity: "Similarity",
+  json_schema: "JSON Schema",
+  tool_trajectory: "Tool trajectory",
+  cost: "Cost target",
+  latency: "Latency target",
+  llm_judge: "LLM judge",
+  custom: "Custom (sandboxed JS)",
+};
+
+export function formatScore(n: number | undefined): string {
+  return n === undefined ? "—" : n.toFixed(2);
+}
+
+/** +0.12 / −0.05 / ±0.00 */
+export function formatDelta(n: number | undefined, digits = 2): string {
+  if (n === undefined) return "";
+  return `${n > 0 ? "+" : n < 0 ? "−" : "±"}${Math.abs(n).toFixed(digits)}`;
+}
+
+/** A pass-rate delta in points: +20 pts */
+export function formatPointsDelta(n: number): string {
+  const p = Math.round(n * 100);
+  return `${p > 0 ? "+" : p < 0 ? "−" : "±"}${Math.abs(p)} pts`;
 }
 
 /** The case's trace as a chat: the user's message, then one assistant message with text and tool calls in order. */
