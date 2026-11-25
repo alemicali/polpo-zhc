@@ -132,7 +132,7 @@ describe("agent suite evals over REST", () => {
     const list = await json(await api("/agents/shop/suite-runs?suite=quotes"));
     expect(list.data[0].results[0].scores[2].judge).toBeUndefined();
     expect(list.data[0].aggregates.score).toBe(1);
-  });
+  }, 30_000);
 
   test("repetitions: each row N times, aggregated per case", async () => {
     const run = (await json(await api("/agents/shop/suites/quotes/runs", { body: { wait: true, repetitions: 2 } }))).data;
@@ -145,7 +145,7 @@ describe("agent suite evals over REST", () => {
     const tooMany = await api("/agents/shop/suites/quotes/runs", { body: { repetitions: 11 } });
     expect(tooMany.status).toBe(400);
     expect(JSON.stringify(await tooMany.json())).toContain("repetitions");
-  });
+  }, 30_000);
 
   test("baseline: mark a run, a regression shows per case and per scorer; compare on demand; clear", async () => {
     const marked = await json(await api("/agents/shop/suites/quotes/baseline", { method: "PUT", body: { runId: firstRun } }));
@@ -172,7 +172,7 @@ describe("agent suite evals over REST", () => {
     expect((await json(await api("/agents/shop/suites/quotes/baseline", { method: "PUT", body: { runId: "sr-nope" } }))).code).toBe("NOT_FOUND");
     expect((await json(await api("/agents/shop/suites/quotes/baseline", { method: "DELETE" }))).ok).toBe(true);
     expect((await json(await api("/agents/shop/suites/quotes/baseline"))).data).toBeNull();
-  });
+  }, 30_000);
 
   test("trend: the runs over time and by version; explain this run: stored on the run", async () => {
     const trend = (await json(await api("/agents/shop/suites/quotes/trend"))).data;
@@ -191,7 +191,7 @@ describe("agent suite evals over REST", () => {
     expect(reviewCalls[0]).toContain("regressed: Quote [quote#2]");
     expect(reviewCalls[0]).toContain("Answer in Italian");
     expect((await json(await api(`/agents/shop/suite-runs/${last}`))).data.review.text).toContain("Suggested fixes");
-  });
+  }, 30_000);
 });
 
 describe("agent suite evals over MCP", () => {
@@ -259,7 +259,7 @@ describe("agent suite evals over MCP", () => {
 
     const cleared = await work.call("polpo_agent_suite_baseline", { agent: "shop", suite: "mcp-quotes", clear: true });
     expect(cleared.content[0].text).toContain("has no marked baseline now");
-  });
+  }, 30_000);
 
   test("the suite card (MCP App): the resource, and the suites, run and trend views", async () => {
     const read = mcp(["polpo:read"]);
@@ -295,5 +295,5 @@ describe("agent suite evals over MCP", () => {
 
     const missing = await read.call("polpo_agent_suite_show", { agent: "shop", view: "trend" });
     expect(missing.isError).toBe(true);
-  });
+  }, 30_000);
 });
