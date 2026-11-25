@@ -32,6 +32,20 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-25-agent-page-scroll",
+    date: "2026-11-25",
+    kind: "fixed",
+    title: "La pagina dell'agente scorre fino in fondo, in ogni scheda",
+    summary: "Con molti contenuti, alcune schede della pagina dell'agente (per esempio Test) restavano tagliate e non si arrivava in fondo. Ora la colonna di destra scorre tutta insieme e la barra delle schede resta in alto.",
+    body: [
+      "- **Un solo scorrimento** a destra: la mappa delle attività scorre via, la **barra delle schede resta in alto** e ogni scheda (Test, Versioni, Istruzioni, Task…) si legge fino all'ultima riga, senza barre di scorrimento doppie.",
+      "- Cambiando scheda dopo essere scesi, la nuova scheda parte dall'inizio; i link diretti a una scheda (`?tab=`) funzionano come prima.",
+      "- **Colonna di sinistra**: scorre solo in verticale e si arriva sempre all'ultimo riquadro; gli URL lunghi dei social (e e-mail, titolo, azienda) sono accorciati, con il valore intero al passaggio del mouse.",
+      "- Su telefono resta un unico scorrimento di pagina.",
+    ].join("\n"),
+    highlight: false,
+  },
+  {
     id: "2026-11-25-ready-made-connectors",
     date: "2026-11-25",
     kind: "new",

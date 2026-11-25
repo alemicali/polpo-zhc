@@ -18,7 +18,6 @@ import { Loader2, Monitor, Plus, RefreshCw, Save, Server, Star, X } from "lucide
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { ComputerCard } from "@/components/computers/computer-card";
 import { ComputerConfirmDialog } from "@/components/computers/computer-confirm-dialog";
 import { ComputerDialog } from "@/components/computers/computer-dialog";
@@ -115,7 +114,7 @@ export function AgentComputerTab() {
   );
 
   return (
-    <ScrollArea className="h-full">
+    <div>
       <div className="space-y-4 pb-bottom-nav pr-4 lg:pb-4">
         {/* Where it works now */}
         <Card className="gap-0 py-0" data-testid="agent-computer-header">
@@ -263,6 +262,6 @@ export function AgentComputerTab() {
       )}
 
       <ComputerConfirmDialog pending={pending} onCancel={() => setPending(null)} onConfirm={() => void confirm()} />
-    </ScrollArea>
+    </div>
   );
 }

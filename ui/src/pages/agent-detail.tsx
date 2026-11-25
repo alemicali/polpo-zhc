@@ -11,6 +11,7 @@
  * - Explicit variant components for each tab
  */
 
+import { useEffect, useRef } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -76,7 +77,12 @@ function AgentBreadcrumb() {
 
 function AgentDetailSidebar() {
   return (
-    <div className="w-80 shrink-0 hidden lg:flex flex-col gap-4 overflow-auto pb-bottom-nav lg:pb-0 pr-1">
+    // Scrolls on its own, vertically only (long values are truncated, never scrolled sideways), and
+    // keeps room at the bottom so the last card is reachable on short viewports.
+    <div
+      className="w-80 shrink-0 hidden lg:flex min-h-0 flex-col gap-4 overflow-y-auto overflow-x-hidden pb-4 pr-1"
+      data-testid="agent-detail-sidebar"
+    >
       <AgentHeroCard />
       <AgentSocialsCard />
       <AgentHierarchyCard />
@@ -137,8 +143,29 @@ function AgentDetailContent() {
     return next;
   }, { replace: true });
 
+  // The right column is ONE scroll container: the activity strip scrolls away, the tab bar sticks
+  // to its top and every tab panel is plain flow content (no nested scrollers, no clipping
+  // overflow-hidden ancestor). On a tab change, if the reader had scrolled past the tab bar, the
+  // new tab starts at its top (just under the sticky bar).
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const tabsRef = useRef<HTMLDivElement>(null);
+  const lastTab = useRef(tab);
+  useEffect(() => {
+    if (lastTab.current === tab) return;
+    lastTab.current = tab;
+    const scroller = scrollRef.current;
+    const tabs = tabsRef.current;
+    if (!scroller || !tabs) return;
+    const offset = tabs.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+    if (offset < 0) scroller.scrollTop += offset;
+  }, [tab]);
+
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+    <div
+      ref={scrollRef}
+      className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden"
+      data-testid="agent-detail-scroll"
+    >
       <MobileIdentitySummary />
 
       {/* Live activity */}
@@ -146,14 +173,20 @@ function AgentDetailContent() {
 
       {/* Activity heatmap */}
       {sortedTasks.length > 0 && (
-        <Card className="py-0 gap-0 mb-3">
+        <Card className="py-0 gap-0 mb-3 shrink-0">
           <CardContent className="pt-3 pb-3 overflow-x-auto">
             <ActivityHeatmap tasks={sortedTasks} />
           </CardContent>
         </Card>
       )}
 
-      <Tabs value={tab} onValueChange={selectTab} className="mt-2 flex min-h-0 min-w-0 flex-1 flex-col">
+      <Tabs ref={tabsRef} value={tab} onValueChange={selectTab} className="mt-2 flex min-w-0 flex-col gap-0">
+        {/* Sticky tab bar: page background so the content passes under it; it scrolls sideways on
+            its own when the tabs don't fit the column. */}
+        <div
+          className="sticky top-0 z-10 shrink-0 overflow-x-auto bg-background pb-2"
+          data-testid="agent-detail-tabbar"
+        >
         <TabsList className="shrink-0">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="instructions">Instructions</TabsTrigger>
@@ -198,55 +231,56 @@ function AgentDetailContent() {
             )}
           </TabsTrigger>
         </TabsList>
+        </div>
 
-        <TabsContent value="overview" className="mt-4 flex-1 min-h-0">
+        <TabsContent value="overview" className="mt-2 min-w-0 flex-none">
           <AgentOverviewTab />
         </TabsContent>
 
-        <TabsContent value="instructions" className="mt-4 flex-1 min-h-0">
+        <TabsContent value="instructions" className="mt-2 min-w-0 flex-none">
           <AgentInstructionsTab />
         </TabsContent>
 
-        <TabsContent value="tools" className="mt-4 flex-1 min-h-0">
+        <TabsContent value="tools" className="mt-2 min-w-0 flex-none">
           <AgentToolsTab />
         </TabsContent>
 
-        <TabsContent value="credentials" className="mt-4 flex-1 min-h-0">
+        <TabsContent value="credentials" className="mt-2 min-w-0 flex-none">
           <AgentCredentialsTab />
         </TabsContent>
 
-        <TabsContent value="memory" className="mt-4 flex-1 min-h-0">
+        <TabsContent value="memory" className="mt-2 min-w-0 flex-none">
           <AgentMemoryTab />
         </TabsContent>
 
-        <TabsContent value="learning" className="mt-4 flex-1 min-h-0">
+        <TabsContent value="learning" className="mt-2 min-w-0 flex-none">
           <AgentLearningTab />
         </TabsContent>
 
-        <TabsContent value="goals" className="mt-4 flex-1 min-h-0">
+        <TabsContent value="goals" className="mt-2 min-w-0 flex-none">
           <AgentDriveTab />
         </TabsContent>
 
-        <TabsContent value="computer" className="mt-4 flex-1 min-h-0">
+        <TabsContent value="computer" className="mt-2 min-w-0 flex-none">
           <AgentComputerTab />
         </TabsContent>
 
-        <TabsContent value="sandbox" className="mt-4 flex-1 min-h-0">
+        <TabsContent value="sandbox" className="mt-2 min-w-0 flex-none">
           <AgentSandboxTab />
         </TabsContent>
 
-        <TabsContent value="versions" className="mt-4 flex-1 min-h-0">
+        <TabsContent value="versions" className="mt-2 min-w-0 flex-none">
           <AgentVersionsTab />
         </TabsContent>
-        <TabsContent value="config" className="mt-4 flex-1 min-h-0">
+        <TabsContent value="config" className="mt-2 min-w-0 flex-none">
           <AgentConfigTab />
         </TabsContent>
 
-        <TabsContent value="tests" className="mt-4 flex-1 min-h-0">
+        <TabsContent value="tests" className="mt-2 min-w-0 flex-none">
           <AgentTestsTab />
         </TabsContent>
 
-        <TabsContent value="tasks" className="mt-4 flex-1 min-h-0">
+        <TabsContent value="tasks" className="mt-2 min-w-0 flex-none">
           <AgentTasksTab />
         </TabsContent>
       </Tabs>

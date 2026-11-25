@@ -10,7 +10,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Copy } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { useAgentDetail } from "./agent-detail-context";
@@ -19,7 +18,7 @@ export function AgentConfigTab() {
   const { state: { agent } } = useAgentDetail();
 
   return (
-    <ScrollArea className="h-full">
+    <div>
       <div className="pr-4 pb-bottom-nav lg:pb-4">
         <Card className="py-0 gap-0 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30">
@@ -41,6 +40,6 @@ export function AgentConfigTab() {
           </div>
         </Card>
       </div>
-    </ScrollArea>
+    </div>
   );
 }

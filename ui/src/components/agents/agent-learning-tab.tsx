@@ -11,7 +11,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { learningApi, type LearningChange, type LearningSettings } from "@/lib/learning-api";
 import { useAgentDetail } from "./agent-detail-context";
 
@@ -123,7 +122,7 @@ export function AgentLearningTab() {
   const number = (value: string, min: number) => (value === "" ? undefined : Math.max(min, Math.round(Number(value))));
 
   return (
-    <ScrollArea className="h-full">
+    <div>
       <div className="pr-4 pb-bottom-nav lg:pb-4 space-y-4">
         <Card>
           <CardHeader className="pb-2">
@@ -194,6 +193,6 @@ export function AgentLearningTab() {
           </CardContent>
         </Card>
       </div>
-    </ScrollArea>
+    </div>
   );
 }
