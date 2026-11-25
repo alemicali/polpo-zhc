@@ -1425,7 +1425,11 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   authed.route("/agents", agentRoutes(() => ({
     getAgents: () => o.getAgents(),
     addAgent: (agent: any, teamName?: string) => o.addAgent(agent, teamName),
-    removeAgent: (name: string) => o.removeAgent(name),
+    removeAgent: async (name: string) => {
+      const removed = await o.removeAgent(name);
+      if (removed) await agentTester().forget(name).catch(() => undefined);
+      return removed;
+    },
     updateAgent: (name: string, updates: any) => o.updateAgent(name, updates),
     getTeams: () => o.getTeams(),
     getTeam: (name?: string) => o.getTeam(name),

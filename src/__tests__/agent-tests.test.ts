@@ -400,6 +400,8 @@ describe("runs and history", () => {
     expect(history[1]).toMatchObject({ agent: "writer", target: "production", version: "1.0.0", actor: "person:ada@example.com", status: "pass" });
     expect(Date.parse(history[1]!.finishedAt)).toBeGreaterThanOrEqual(Date.parse(history[1]!.startedAt));
     expect(await tester.get("writer", a.id)).toEqual(a);
+    await tester.forget("writer");
+    expect(await tester.history("writer")).toEqual([]);
   });
 
   it("a check that throws fails on its own without breaking the run", async () => {

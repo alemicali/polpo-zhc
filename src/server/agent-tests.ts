@@ -639,6 +639,8 @@ export class AgentTester {
   /** The agent's runs, newest first. */
   history(name: string, limit?: number): Promise<AgentTestRun[]> { return this.deps.store.list(name, limit); }
   get(name: string, id: string): Promise<AgentTestRun | undefined> { return this.deps.store.get(name, id); }
+  /** The agent was removed: drop its history. */
+  forget(name: string): Promise<void> { return this.deps.store.deleteAgent(name); }
 
   // ── fixes ──
 
