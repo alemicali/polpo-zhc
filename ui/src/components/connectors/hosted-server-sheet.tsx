@@ -292,7 +292,7 @@ function TestTab({ spec, test, runTests, saveTest }: {
         <Button variant="outline" disabled={busy} onClick={async () => {
           setBusy(true);
           try { setSuite(await runTests()); } catch (reason) { toast.error(errorText(reason)); } finally { setBusy(false); }
-        }}><FlaskConical className="h-4 w-4" /> Run saved tests</Button>
+        }} title="Runs the saved tests against the real API (read-only tools only); the Suite tab runs them offline with their HTTP mocks"><FlaskConical className="h-4 w-4" /> Run saved tests live</Button>
       </div>
       {result && (
         <div className="space-y-2 text-sm" data-testid="test-result">
