@@ -417,6 +417,13 @@ Both are one `ui://polpo/work-card.html` resource: one HTML document that loads 
 
 One `ui://polpo/suite-card.html` resource; the card calls `polpo_agent_suite_show` again to refresh or switch view.
 
+`polpo_benchmark_show` uses the same resource for **benchmarks** (docs/agent-suites.md → Benchmarks). Ask, for example, "which model is best for the shop agent?" or "why does the draft answer differently on the Italy case?".
+
+- **Benchmark:** progress and spend against the budget cap; the **leaderboard** (variants ranked by the weighted quality, cost and latency, quality ± stddev over repetitions, cost per repetition, p50 / p95, flakiness, the **Pareto front** ◆) and the notes on differences within the noise; the **case × variant matrix** (cases where the variants disagree first). A case opens side by side.
+- **Side by side:** one case for 2–4 variants in columns — tool calls compared with the first column (= same, ~ other arguments, + extra, − missing) and the answer's words added and removed. **Leaderboard** goes back.
+
+Benchmarks and the Playground over MCP: `polpo_benchmark_get`, `polpo_benchmark_leaderboard` (weights), `polpo_benchmark_compare` (`polpo:read`); `polpo_benchmark_save`, `polpo_benchmark_delete`, `polpo_benchmark_run` (a real model returns the **cost estimate** first and runs only with `confirm: true`; `budget_usd`; `cancel`; real tools need `polpo:admin`) and `polpo_playground_send` (one message to 1–4 variants headless; `save_case` saves an exchange as a test case) (`polpo:work`); `polpo_playground_promote` writes a variant's overrides into the agent's draft (`polpo:admin`; never deploys).
+
 The widgets' source is in `widgets/` (`agent-card/`, `work-card/`, `suite-card/`, `shared/` for the brand marks); after changing it, run `pnpm run build:widgets`.
 
 ## Setup

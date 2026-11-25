@@ -20,7 +20,7 @@ The official WhatsApp Business channel (Meta Cloud API: setup, the 24-hour windo
 
 Agent versions — drafts, semver versions, deploying to production, rollback, the deploy history with diffs, pinning a task or chat to a version (`writer@1.2.0`) and the API compatibility setting — are documented in [agent-versions.md](agent-versions.md).
 
-Agent suites — tests and evals of an agent with tool mocks and scripted models, datasets, assertions, runs against a version with a trace per case, and the per-engine mock support — are documented in [agent-suites.md](agent-suites.md).
+Agent suites — tests and evals of an agent with tool mocks and scripted models, datasets, assertions, runs against a version with a trace per case, and the per-engine mock support — — and benchmarks (suites × variants × repetitions: leaderboard, Pareto front, case × variant matrix, side by side) and the Playground (chat with several variants at once) are documented in [agent-suites.md](agent-suites.md).
 
 Agent harnesses (Claude Code and Codex as an agent's engine, inside its computer) are documented in [harnesses.md](harnesses.md).
 
