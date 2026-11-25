@@ -32,6 +32,22 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-25-agent-suites",
+    date: "2026-11-25",
+    kind: "new",
+    title: "Suite di test per gli agenti: casi, mock e controlli, su una versione",
+    summary: "Nella pagina dell'agente, la scheda Suite: scrivi casi (un messaggio o un task), simula gli strumenti e il modello, controlla cosa fa l'agente e lancia tutto sulla bozza o su una versione prima del deploy.",
+    body: [
+      "- **Casi**: un messaggio in chat o la descrizione di un task, con turni precedenti e contesto; cosa deve succedere: strumenti chiamati (o mai chiamati) con quali argomenti e in che ordine, risultato registrato, artefatto creato, approvazione richiesta, cosa contiene la risposta, massimo di turni, costo e durata. Ogni controllo fallito spiega perché, con le differenze.",
+      "- **Mock**: rispondi al posto degli strumenti (anche quelli dei connettori, come `mcp__printful__*`, e dei server ospitati) prima che partano, e scrivi i turni del modello. In modalità **Contratto** gira tutto offline: nessun costo, nessun effetto.",
+      "- **Dataset**: righe di valori (anche da CSV o JSON) che riempiono il caso con `{{row.colonna}}`: un caso, tanti paesi.",
+      "- **Su una versione**: produzione, bozza o una versione pubblicata; il report mostra ogni caso come una chat, con il mock che ha risposto a ogni strumento.",
+      "- Gli strumenti reali partono solo dopo una conferma e **nessuna approvazione viene mai data da un test**. Anche via API, MCP (`polpo_agent_suite_*`) e nella chat con Polpo.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri un agente", to: "/agents" },
+  },
+  {
     id: "2026-11-25-hosted-servers-like-connectors",
     date: "2026-11-25",
     kind: "improved",

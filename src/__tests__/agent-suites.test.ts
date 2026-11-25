@@ -4,7 +4,8 @@
  * connector / hosted / CLI tool interception without side effects).
  */
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { parse as parseYaml } from "yaml";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -154,6 +155,20 @@ describe("model", () => {
     expect(() => parseCsvDataset("a,a\n1,2")).toThrow("unique");
     expect(parseJsonDataset('[{"a":1},{"b":2}]')).toEqual({ columns: ["a", "b"], rows: [{ a: 1 }, { b: 2 }] });
     expect(() => parseJsonDataset('{"x":1}')).toThrow("list of objects");
+  });
+
+  it("the Printful example of docs/agent-suites.md is a valid suite (one case per row, mocks templated)", () => {
+    const doc = readFileSync(join(process.cwd(), "docs", "agent-suites.md"), "utf-8");
+    const yaml = /```yaml\n([\s\S]*?)```/.exec(doc)![1]!;
+    const s = parseAgentSuite(parseYaml(yaml), "shop");
+    const plan = planSuiteCases(s);
+    expect(plan.map((p) => [p.key, p.mode])).toEqual([["quote-a-t-shirt#1", "all"], ["quote-a-t-shirt#2", "all"], ["quote-a-t-shirt#3", "all"], ["never-orders-without-approval", "tools"]]);
+    const de = plan[1]!;
+    expect(de.case.input.message).toContain("to DE?");
+    const used = new Map<number, number>();
+    const hit = findToolMock(de.mocks.tools!, "mcp__printful__shipping_rates", { recipient: { country_code: "DE" }, items: [] }, 1, used);
+    expect(hit?.mock.response).toEqual({ result: [{ id: "STANDARD", name: "Flat Rate", rate: "5.49", currency: "EUR" }] });
+    expect(planUsesRealTools(plan)).toBe(false);
   });
 
   it("turns a recorded exchange into a case (observed calls become mocks and expectations)", () => {
