@@ -172,6 +172,8 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_agent_deploy", name: "agent_deploy", group: "agent-versions" },
   { mcp: "polpo_agent_rollback", name: "agent_rollback", group: "agent-versions" },
   { mcp: "polpo_agent_deploys", name: "agent_deploys", group: "agent-versions" },
+  // Agent tests: check everything an agent has at its disposal, apply the one-click fixes
+  { mcp: "polpo_agent_test", name: "agent_test", group: "agent-versions" },
   // Large artifact contents: upload from a public URL, a file of the instance or base64 parts, then create or replace
   { mcp: "polpo_artifact_upload_prepare", name: "artifact_upload_prepare", group: "artifact-uploads" },
   { mcp: "polpo_artifact_upload_finalize", name: "artifact_upload_finalize", group: "artifact-uploads" },

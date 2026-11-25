@@ -32,6 +32,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-25-agent-tests",
+    date: "2026-11-25",
+    kind: "new",
+    title: "Test degli agenti: verifica tutto quello che un agente ha a disposizione",
+    summary: "Nuova scheda Tests nella pagina dell'agente: motore e modello, strumenti, connettori, vault, skill, computer, canali e versioni, uno per volta o tutti insieme, con ✓ / ⚠ / ✗ e come sistemare.",
+    body: [
+      "- **Motore e modello**: una richiesta minima e reale con il motore dell'agente (Polpo, Claude Code, Codex, OpenCode o la CLI) e la sua autenticazione; mostra modello e latenza. Per la CLI controlla l'accesso dell'account e se la regola del proprietario ti permette di usarlo.",
+      "- **Strumenti**: ogni voce di allowedTools (anche con `*`) corrisponde a uno strumento vero; i nomi sconosciuti vengono segnalati.",
+      "- **Connettori**: collegato, accesso valido, strumenti elencati. Se un agente ha `mcp__printful__*` ma il connettore non gli dà accesso, il test lo dice e lo sistemi con un clic (**Grant access**).",
+      "- **Vault** (solo i nomi, mai i valori), **skill** (si caricano, le versioni fissate esistono), **computer e sandbox** (un computer spento si accende solo se clicchi **Start and test**), **canali** instradati all'agente e **versioni** (bozza non aggiornata).",
+      "- **Prova dal vivo** (solo su richiesta, costa pochi token): un breve turno di chat in cui l'agente chiama uno strumento innocuo, anche sulla bozza o su una versione prima del deploy.",
+      "- Ogni esecuzione resta nello **storico** con data e versione provata. Anche da API, MCP (`polpo_agent_test`), chat con Polpo e SDK (`useAgentTests`).",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri gli agenti", to: "/agents" },
+  },
+  {
     id: "2026-11-24-custom-mcp-servers",
     date: "2026-11-24",
     kind: "new",

@@ -1615,6 +1615,56 @@ export interface AgentPublishResult {
   deploy?: AgentDeployEntry;
 }
 
+// ── Agent tests ──
+
+export type AgentTestCheckId = "engine" | "tools" | "connectors" | "vault" | "skills" | "computer" | "channels" | "versioning" | "smoke";
+/** pass ✓, warn ⚠, fail ✗; skip: nothing to check. */
+export type AgentTestStatus = "pass" | "warn" | "fail" | "skip";
+/** A one-click fix (POST /agents/{name}/tests/fix). */
+export type AgentTestFixAction = { type: "grant-connector-access"; connector: string };
+
+export interface AgentTestItem {
+  label: string;
+  status: AgentTestStatus;
+  detail?: string;
+  /** A link to the setting (href, a dashboard path) or a one-click action. */
+  fix?: { label: string; href?: string; action?: AgentTestFixAction };
+}
+
+export interface AgentTestCheckResult {
+  id: AgentTestCheckId;
+  title: string;
+  status: AgentTestStatus;
+  summary: string;
+  items: AgentTestItem[];
+  durationMs: number;
+  /** engine: model, latencyMs, engine; computer: status, canStart; smoke: ref, tools, latencyMs. */
+  data?: Record<string, unknown>;
+}
+
+export interface AgentTestRun {
+  id: string;
+  agent: string;
+  /** production, draft or a published version. */
+  target: string;
+  version?: string;
+  startedAt: string;
+  finishedAt: string;
+  status: AgentTestStatus;
+  checks: AgentTestCheckResult[];
+  actor?: string;
+}
+
+export interface AgentTestRunRequest {
+  /** Default: every check but smoke. */
+  checks?: AgentTestCheckId[];
+  /** production (default), draft, or a version like 1.2.0. */
+  target?: string;
+  /** Start a stopped remote computer to test it (it may cost). */
+  startComputer?: boolean;
+  smokePrompt?: string;
+}
+
 export interface UpdateSettingsRequest {
   /** Sandbox settings (see GET /sandbox); null removes them. */
   sandbox?: Record<string, unknown> | null;
