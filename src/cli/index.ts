@@ -72,7 +72,8 @@ import { registerAgentOnboardCommands } from "./commands/agent-onboard.js";
 import { registerUpdateCommand } from "./commands/update.js";
 import { registerWhatsAppCommands } from "./commands/whatsapp.js";
 import { registerInkCommands } from "./commands/ink.js";
-import { registerTestCommand } from "./commands/test.js";
+import { connectApi, registerTestCommand } from "./commands/test.js";
+import { registerBenchCommand } from "./commands/bench.js";
 // Cloud commands (unified CLI)
 import { registerLoginCommand } from "./commands/cloud/login.js";
 import { registerLogoutCommand } from "./commands/cloud/logout.js";
@@ -637,6 +638,7 @@ registerUpdateCommand(program);
 registerWhatsAppCommands(program);
 registerInkCommands(program);
 registerTestCommand(program);
+registerBenchCommand(program, connectApi);
 
 // Cloud commands
 registerLoginCommand(program);

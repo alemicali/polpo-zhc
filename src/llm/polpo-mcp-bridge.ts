@@ -34,6 +34,7 @@ import { registerSearchTools } from "../server/mcp-server/search.js";
 import { registerSkillTools } from "../server/mcp-server/skills.js";
 import { registerTeamTools } from "../server/mcp-server/team.js";
 import { registerAgentSuiteTools } from "../server/mcp-server/agent-suites.js";
+import { registerBenchmarkTools } from "../server/mcp-server/benchmarks.js";
 import { registerArtifactTools } from "../server/mcp-server/core-tools.js";
 import { knownPublicOrigin } from "../mcp/runtime.js";
 
@@ -199,6 +200,15 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_target_suites", name: "target_suites", group: "agent-versions" },
   { mcp: "polpo_target_suite_save", name: "target_suite_save", group: "agent-versions" },
   { mcp: "polpo_target_suite_run", name: "target_suite_run", group: "agent-versions" },
+  // phase 5: benchmarks (suites × variants × repetitions: leaderboard, matrix, side by side) and the Playground
+  { mcp: "polpo_benchmark_save", name: "benchmark_save", group: "agent-versions" },
+  { mcp: "polpo_benchmark_delete", name: "benchmark_delete", group: "agent-versions" },
+  { mcp: "polpo_benchmark_run", name: "benchmark_run", group: "agent-versions" },
+  { mcp: "polpo_benchmark_get", name: "benchmark_get", group: "agent-versions" },
+  { mcp: "polpo_benchmark_leaderboard", name: "benchmark_leaderboard", group: "agent-versions" },
+  { mcp: "polpo_benchmark_compare", name: "benchmark_compare", group: "agent-versions" },
+  { mcp: "polpo_playground_send", name: "playground_send", group: "agent-versions" },
+  { mcp: "polpo_playground_promote", name: "playground_promote", group: "agent-versions" },
   // Large artifact contents: upload from a public URL, a file of the instance or base64 parts, then create or replace
   { mcp: "polpo_artifact_upload_prepare", name: "artifact_upload_prepare", group: "artifact-uploads" },
   { mcp: "polpo_artifact_upload_finalize", name: "artifact_upload_finalize", group: "artifact-uploads" },
@@ -231,6 +241,8 @@ export const MCP_EQUIVALENTS: Record<string, string> = {
   polpo_mission_show: "get_mission",
   // the agent suite card (an MCP App): agent_suite_list, agent_suite_run_get and agent_suite_trend have the same
   polpo_agent_suite_show: "agent_suite_run_get",
+  // the benchmark card (an MCP App): benchmark_get and benchmark_compare have the same (leaderboard, matrix, side by side)
+  polpo_benchmark_show: "benchmark_get",
   polpo_mission_create: "create_mission",
   polpo_mission_update: "update_mission",
   polpo_mission_run: "execute_mission",
@@ -376,7 +388,7 @@ function capture(): Map<string, Captured> {
     if (wanted.has(name)) out.set(name, { spec: spec as unknown as ToolSpec<z.ZodRawShape>, handler: handler as unknown as Captured["handler"] });
   };
   for (const register of [
-    registerSetupTools, registerTeamTools, registerAgentSuiteTools, registerConnectorTools, registerMcpServerTools, registerHarnessTools, registerComputerTools, registerConfigTools,
+    registerSetupTools, registerTeamTools, registerAgentSuiteTools, registerBenchmarkTools, registerConnectorTools, registerMcpServerTools, registerHarnessTools, registerComputerTools, registerConfigTools,
     registerSettingsTools, registerChannelTools, registerChannelSetupTools, registerRoomTools, registerChatTools, registerAutomationTools,
     registerMissionTools, registerDataTools, registerBrainTools, registerSkillTools, registerWaBusinessTools, registerSearchTools,
     registerArtifactTools,

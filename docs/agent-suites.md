@@ -19,8 +19,10 @@ user** over several turns ([Simulated users](#simulated-users-multi-turn-cases))
 The same suites test a **hosted MCP server** (its saved tests, the upstream API mocked) and a
 **mission** (its tasks run in test mode, every agent mocked) — see [Suites for hosted servers and
 missions](#suites-for-hosted-servers-and-missions) — and run from a terminal or CI with **`polpo
-test`** and the **GitHub Action** ([polpo test and CI](#polpo-test-and-ci)). The same engine will run
-**benchmarks** later; the data model already has their fields (see [Later phases](#later-phases)).
+test`** and the **GitHub Action** ([polpo test and CI](#polpo-test-and-ci)). **Benchmarks** run suites
+against several **variants** (agents, versions, models, instructions) and compare them — a leaderboard,
+a case × variant matrix, a case side by side ([Benchmarks](#benchmarks)) — and the **Playground** chats
+with up to four variants at once ([Playground](#playground)).
 
 Suites live in `.polpo/agent-suites/<agent>/suites/<id>.json`, runs in
 `.polpo/agent-suites/<agent>/runs/<run>.json` (the newest 100 per agent), deploy gates in
@@ -28,7 +30,9 @@ Suites live in `.polpo/agent-suites/<agent>/suites/<id>.json`, runs in
 `.polpo/agent-suites/<agent>/cassettes/<id>.json`. Removing an agent removes its suites, runs,
 gates and cassettes. A mission's suites and runs are kept the same way under the owner
 `mission:<id>`, a hosted server's runs under `mcp-server:<id>` (its suite is its saved tests);
-deleting the mission or the server removes them.
+deleting the mission or the server removes them. Benchmarks live in `.polpo/benchmarks/definitions/<id>.json`
+and their runs in `.polpo/benchmarks/runs/<id>.json` (the newest 50); a benchmark's suite runs stay with
+their suite (tagged with the benchmark, the newest 300 per agent kept apart from the suite's own 100).
 
 ## Concepts
 
@@ -676,6 +680,105 @@ the best fit for every pull request. This repository's own CI does not run it.
 | SDK | `getAgentCassettes`, `getAgentCassette`, `getAgentSuiteCaseCassette`, `editAgentCassette`, `deleteAgentCassette`, `recordAgentSuiteCase`, `agentSuiteCaseFromRecording`, `generateAgentSuiteCases`, `acceptAgentSuiteCases`, `generateAgentSuiteDatasetRows`, `getTargetSuites`, `saveTargetSuite`, `deleteTargetSuite`, `runTargetSuite`, `getTargetSuiteRuns`, `getTargetSuiteRun`; `publishMcpServer` (`override`, `deployBlocked`), `deployMcpServer(id, version, note?, { override })`. React: `useAgentSuites(name)` adds `record`, `fromRecording`, `generate`, `accept`, `generateRows`; `useSuiteCassette(name, suiteId, caseId)` → `{ cassette, edit, remove, refetch }`; `useTargetSuites(kind, id)` → `{ suites, runs, save, remove, run }`; `useTargetSuiteRun(kind, id, runId)`; `useMcpServer(id).publish` / `.deploy(version, note, { override })` |
 | CLI | `polpo test` (above) |
 
+## Benchmarks
+
+A **benchmark** runs one or more suites (or only the cases of one **dataset**) against **N variants**,
+**R times** each (repetitions), and compares them. A **variant** is an agent — any agent: a suite's
+cases can run against another agent — at a version (production, the draft, `1.2.0`) with per-run
+**overrides**: `model`, `reasoning`, `engine`, `instructions` (replace) or `instructionsAppend`,
+`allowedTools`, `maxTurns`. Nothing is saved to the agents.
+
+```yaml
+name: Shop models
+suites:
+  - { agent: shop, suite: quotes }
+  - { agent: shop, suite: quotes, dataset: countries }   # only the cases using that dataset
+variants:
+  - { agent: shop, label: Production }
+  - { agent: shop, version: draft, label: Draft }
+  - { agent: shop, label: Cheaper model, overrides: { model: "openai:gpt-5-mini", instructionsAppend: "Answer in one line." } }
+  - { agent: helper, label: Helper agent }
+repetitions: 3
+mode: tools            # every case in this mode (default: each case's own; all = offline and free)
+budgetUsd: 2           # stop once spent
+weights: { quality: 0.7, cost: 0.2, latency: 0.1 }
+```
+
+- **Runs.** Every suite × variant × repetition is an ordinary suite run (`trigger: "benchmark"`,
+  `benchmarkRunId`, `repetition`, `variant` with its agent), started on the same runner: at most **two
+  runs at a time** on the instance (the others wait, `queued`), each with its case concurrency. The
+  runs are interleaved so every variant moves forward together. They are **not** the suite's history:
+  baselines, trends, deploy gates and a suite's "last run" leave them out.
+- **Cost estimate and confirmation.** Before it starts, the benchmark is estimated per suite and
+  variant: the cases, those on a real model and the LLM judges, priced from the suite's **past runs**
+  of that variant's agent and model, else **heuristically** (the prompt size, a few turns, the model's
+  price per million tokens), with a cautious upper bound. A benchmark that calls a real model starts
+  only with **`confirm: true`** (else `409 CONFIRM_COST` with the estimate); one whose estimate is above
+  its budget cap is refused (`409 OVER_BUDGET`). Mode `all` (scripted model, mocked tools) is free and
+  needs no confirmation. Real tools need an admin and `allowRealTools: true`, as for suites.
+- **Budget cap.** `budgetUsd` (the benchmark's, or the run's) stops the benchmark once it has spent that
+  much: its runs not finished are cancelled (`stopReason: "budget"`).
+- **Progress** is saved and sent live as the `benchmark:progress` event (SSE): runs and cases done,
+  spend. **Cancel** stops every run not finished (cases not started are skipped).
+
+### Comparison: stats, leaderboard, matrix
+
+`GET /benchmark-runs/{id}` returns `{ run, stats, leaderboard, matrix }`:
+
+- **Per variant** (`stats`): pass rate and overall score as **mean ± stddev over the repetitions**, the
+  mean of each scorer (± stddev), cost per repetition (and per case), latency **p50 / p95**, tokens,
+  and **flakiness** (the share of cases whose outcome changed between repetitions, or whose scores
+  spread more than 0.1).
+- **Leaderboard**: a composite of **quality** (the score, else the pass rate), **cost** and **latency**
+  (both normalized across the variants, lower is better) weighted by `weights` (default 0.7 / 0.2 /
+  0.1; `?quality=&cost=&latency=` re-ranks without running again); the **Pareto front** (no other
+  variant is at least as good on all three and better on one); and **statistical notes**: two variants
+  whose quality differs by less than about two standard errors (from the spread over repetitions, or
+  from the number of cases with one repetition) are "within the noise", and a single repetition is
+  flagged.
+- **Matrix**: one row per case (dataset rows apart) and one cell per variant — attempts, passed, pass
+  rate, mean score, cost, latency, and its results (run and key) to open the traces; `spread` marks the
+  rows where the variants disagree.
+- **Side by side** (`GET …/compare?case=&variants=a,b`): one case for 2–4 variants, each with its full
+  result and trace; the tool calls aligned with the first column's (longest common subsequence of the
+  names: same, other arguments with the changed paths, extra, missing) and the final answers diffed
+  word by word.
+
+## Playground
+
+The **Playground** opens 2–4 **chat panes** side by side, each bound to a variant (an agent at a version
+with overrides) and its own toggles:
+
+| Toggle | |
+|---|---|
+| **Tool mocks** (default on) | tool calls are answered by the pane's mocks: a suite's (its shared mocks, and a case's) and quick inline ones (`[{ tool, response }]`), inline first |
+| **Model mock** | the model plays scripted turns (`mocks.model`, or the suite case's): offline, free |
+| **Real tools** | a call no mock answers runs for real — an admin and a confirmation (`allowRealTools: true`), like a suite. Off: such calls are **blocked** |
+
+Type once and **send to every pane** (or to one); the replies **stream** (text, model turns, tool calls)
+and each exchange shows its **cost, latency and tokens**. Each pane continues its own conversation. Every
+exchange is a test chat turn through the agent's real path inside a case's hooks, its chat **deleted
+afterwards** like a suite case's; sessions live in memory and end after two idle hours (or a restart).
+
+- **Save as test case**: an exchange becomes a case through `caseFromTrace` — its tool calls become
+  mocks answering with their observed results and checks (same tools, same arguments, in order);
+  optionally the model turns become a script (an offline contract case). It is proposed for review
+  (edit it), then added to a suite you choose.
+- **Promote variant**: a pane's overrides, applied to the agent at the pane's version, are written into
+  the agent's **draft** (an admin). Nothing is deployed: publish and deploy the draft as usual, through
+  its required suites.
+
+### Benchmark and Playground surfaces
+
+| Surface | How |
+|---|---|
+| Dashboard | **Benchmarks** (agents area of the navigation): saved benchmarks (New, Edit, Delete, Run), the editor (suites — an agent's suite, every case or one dataset —, variants — any agent, a version, model, reasoning, max turns, instructions to append —, repetitions, mode, cases at once, budget cap), the run dialog (the estimate per suite and variant, the budget cap, "I accept the cost" for real models, a separate confirmation for real tools), runs, and a run's view: progress and **Cancel**, the **leaderboard** with weight sliders and the Pareto front ◆, a quality × cost chart, the noise notes, each variant's details, the **case × variant matrix**; pick 2–4 variants and a case to see it **side by side** (the traces drawn like the suite report, tool calls and answers diffed). An agent's **Suites** tab: **Benchmark** on a suite (production vs draft prefilled) and **Playground** (with the suite's mocks); benchmark runs are marked in its runs list. **Playground** (agents area): panes, their settings, Send to all / Send here, streaming, Save as test case (review, choose the suite), Promote variant |
+| REST | `GET/POST /api/v1/benchmarks`, `GET/PUT/DELETE …/benchmarks/{id}`, `POST …/benchmarks/estimate`, `POST …/benchmarks/runs { benchmarkId \| benchmark, confirm?, allowRealTools?, budgetUsd?, wait?, source? }`, `GET …/benchmark-runs[?benchmark=]`, `GET …/benchmark-runs/{id}[?quality=&cost=&latency=]`, `…/leaderboard`, `…/matrix`, `…/compare?case=&variants=&repetition=`, `POST …/cancel`; `GET/POST /api/v1/playground/sessions`, `GET/PUT/DELETE …/sessions/{id}`, `POST …/sessions/{id}/send { message, paneIds?, allowRealTools?, stream? }` (text/event-stream with `start`, `text`, `turn`, `tool`, `done` per pane, then `end`), `POST …/sessions/{id}/reset`, `POST …/sessions/{id}/case { paneId, exchange?, name?, mockModel?, save? }`, `POST /api/v1/playground/send` (headless), `POST /api/v1/playground/promote` (admins); event `benchmark:progress` (OpenAPI tags "Benchmarks", "Playground") |
+| MCP | `polpo_benchmark_get` (definitions and runs; one run's report), `polpo_benchmark_leaderboard` (weights), `polpo_benchmark_compare` (a case side by side) need `polpo:read`; `polpo_benchmark_save`, `polpo_benchmark_delete`, `polpo_benchmark_run` (`estimate_only`; a real model returns the estimate and starts only with `confirm: true`; `budget_usd`; `cancel`; real tools need `polpo:admin`) and `polpo_playground_send` (1–4 panes, one message, headless; `save_case`) need `polpo:work`; `polpo_playground_promote` needs `polpo:admin`. **Benchmark card** (an MCP App, the suite card's resource): `polpo_benchmark_show` — the leaderboard, the matrix and a case side by side |
+| Polpo's chat | `benchmark_save`, `benchmark_delete`, `benchmark_run`, `benchmark_get`, `benchmark_leaderboard`, `benchmark_compare`, `playground_send`, `playground_promote` (group "agent-versions": "compare the shop agent on gpt-5-mini and the current model", "is the draft better than production?", "why do they answer differently on the Italy case?", "try this message on both versions and save it as a test") |
+| SDK | `getBenchmarks`, `getBenchmark`, `saveBenchmark`, `deleteBenchmark`, `estimateBenchmark`, `runBenchmark`, `getBenchmarkRuns`, `getBenchmarkRun(id, weights?)`, `getBenchmarkLeaderboard`, `getBenchmarkMatrix`, `compareBenchmarkCase`, `cancelBenchmarkRun`; `getPlaygroundSessions`, `createPlaygroundSession`, `getPlaygroundSession`, `updatePlaygroundSession`, `deletePlaygroundSession`, `resetPlaygroundSession`, `sendPlayground(id, req, { onEvent })` (streams), `playgroundCompare`, `playgroundCaseFromExchange`, `promotePlaygroundVariant`. React: `useBenchmarks()` → `{ benchmarks, runs, save, remove, estimate, run, cancel }` (live on `benchmark:progress`), `useBenchmarkRun(runId, weights?)` → `{ report, cancel, compare }`, `usePlayground()` → `{ session, live, sending, open, setPanes, send, reset, close, saveCase, promote }` |
+| CLI | `polpo bench <file\|id>` (and `polpo test --bench <file\|id>`): a benchmark from a JSON / YAML file (inline) or a saved id; prints the estimate, runs (a real model only with `--yes`), prints the leaderboard and the matrix; `--budget`, `--weights quality=1,cost=0.5,latency=0`, `--allow-real-tools`, `--json [file]`, `--remote` / `--token`, `--timeout`. Exit **0** completed, **1** cancelled (budget cap, timeout) or errored, **2** could not run |
+
 ## Later phases
 
 Reserved in the model now, built later (no migration needed):
@@ -688,7 +791,9 @@ Reserved in the model now, built later (no migration needed):
   (no checkpoints, delays, quality gates, assessments or retries: see [Missions](#missions));
   cassettes for hosted servers and missions (their upstream is mocked with HTTP / per-agent mocks
   instead); code tools of a hosted server with HTTP mocks (their sandbox has its own network).
-- **Phase 5 — benchmarks and playground**: `run.variant` (`id`, `label`, `agent`, `version`,
-  `overrides`), `run.benchmarkRunId`, `run.repetition` and `result.variantId` make the comparison
-  matrix (case × variant); `caseFromTrace` (core) turns a recorded exchange into a case (observed
-  tool calls become mocks and expectations, optionally the model turns a script).
+- **Phase 5 — benchmarks and the Playground**: built (see [Benchmarks](#benchmarks) and
+  [Playground](#playground)). Not in phase 5: benchmarks of hosted servers' and missions' suites
+  (agent suites only: a variant is an agent); Playground sessions are kept in memory (not across a
+  restart) and panes run one message at a time per session; the cost estimate is a heuristic until a
+  suite has past runs on that model; the statistical note is a two-standard-error check, not a test
+  of significance.

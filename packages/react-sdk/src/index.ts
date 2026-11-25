@@ -45,6 +45,8 @@ export { useAgentTests } from "./hooks/use-agent-tests.js";
 export type { UseAgentTestsReturn } from "./hooks/use-agent-tests.js";
 export { useAgentSuites, useAgentSuiteRun, useAgentSuiteTrend, useSuiteCassette, useTargetSuites, useTargetSuiteRun } from "./hooks/use-agent-suites.js";
 export type { UseAgentSuitesReturn, UseAgentSuiteRunReturn, UseAgentSuiteTrendReturn, UseSuiteCassetteReturn, UseTargetSuitesReturn } from "./hooks/use-agent-suites.js";
+export { useBenchmarks, useBenchmarkRun, usePlayground } from "./hooks/use-benchmarks.js";
+export type { UseBenchmarksReturn, UseBenchmarkRunReturn, UsePlaygroundReturn, PlaygroundLivePane } from "./hooks/use-benchmarks.js";
 export { useMcpServers, useMcpServer } from "./hooks/use-mcp-servers.js";
 export type { UseMcpServersReturn, UseMcpServerReturn } from "./hooks/use-mcp-servers.js";
 export { useSkillBundleUpload } from "./hooks/use-skill-bundle-upload.js";
@@ -269,6 +271,9 @@ export type {
   SuiteChange, SuiteScorerDelta, SuiteCaseDelta, SuiteBaselineComparison, SuiteRunReview, SuiteTrendPoint, SuiteTrend,
   SuiteGate, DeployGateTrigger, DeployGateStatus, DeployGateSuiteStatus, DeployGateSuite, AgentDeployGate, AgentDeployGateRef, AgentVersionGateStatus,
   CassetteMatch, SuiteCassetteRef, SimulatedUser, HttpMock, SuiteCassette, SuiteCassetteCall, SuiteCassetteSummary, SuiteCassetteEdit, CaseGenerationRequest, GeneratedCaseProposal, SuiteTargetKind,
+  BenchmarkVariantSpec, BenchmarkSuiteRef, BenchmarkWeights, BenchmarkDefinition, BenchmarkInput, BenchmarkEstimateCell, BenchmarkEstimate, BenchmarkRunStatus, BenchmarkRunEntry, BenchmarkRun,
+  MeanSd, BenchmarkVariantStats, BenchmarkLeaderboardEntry, BenchmarkLeaderboard, BenchmarkCellStatus, BenchmarkMatrixCell, BenchmarkMatrixRow, BenchmarkMatrix, BenchmarkReport,
+  DiffSegment, BenchmarkCompareColumn, BenchmarkCaseComparison, BenchmarkProgressEvent, PlaygroundMocks, PlaygroundPane, PlaygroundPaneInput, PlaygroundExchange, PlaygroundSession, PlaygroundStreamEvent,
   AgentPublishResult,
   McpSecretRef, McpServerAuth, McpServerTool, McpServerSpec, McpServerSummary, McpHostedServer, McpServerTemplateInfo, McpServerTemplateSecret, McpServerTemplateStatus, McpServerSettingField, McpServerInstallRequest, McpServerInstallResult, McpServerTestCase,
   McpServerVersionInfo, McpServerDeploy, McpServerDeployBlocked, McpServerDiff, McpToolTestResult, McpServerCallLog, McpPendingCall, McpServerGenerateRequest, McpServerGenerateResult,

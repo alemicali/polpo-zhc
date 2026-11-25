@@ -521,7 +521,8 @@ export interface SuiteRunRequest {
   concurrency?: number;
   /** Per-run overrides (the variant): applied to this run only. */
   overrides?: SuiteVariantOverrides;
-  variant?: { id?: string; label?: string };
+  /** The variant's id and label; `agent`: run the suite's cases against another agent (benchmarks compare agents). */
+  variant?: { id?: string; label?: string; agent?: string };
   /** Phase 5: the benchmark this run belongs to. */
   benchmarkRunId?: string;
   repetition?: number;
@@ -808,7 +809,30 @@ export function suiteRunStatus(results: SuiteCaseResult[]): SuiteRunStatus {
 export interface SuiteRunListOptions {
   suiteId?: string;
   benchmarkRunId?: string;
+  /** Leave out the runs of benchmarks (a suite's own history: baselines, trends, its last run). */
+  excludeBenchmarks?: boolean;
   limit?: number;
+}
+
+/** Does a run match the list options? */
+export function suiteRunMatches(r: Pick<SuiteRun, "suiteId" | "benchmarkRunId">, opts: SuiteRunListOptions): boolean {
+  return (!opts.suiteId || r.suiteId === opts.suiteId) && (!opts.benchmarkRunId || r.benchmarkRunId === opts.benchmarkRunId) && (!opts.excludeBenchmarks || !r.benchmarkRunId);
+}
+
+/**
+ * The runs a store keeps: the newest {@link SUITE_LIMITS.runsKept} of the suite's own, the newest
+ * benchmark runs apart (so a benchmark does not push the history out), marked baselines and runs
+ * still going. Newest first in, the ids to drop out.
+ */
+export function suiteRunsToDrop(runs: Array<Pick<SuiteRun, "id" | "status" | "isBaseline" | "benchmarkRunId">>, keptBenchmarkRuns = 300): string[] {
+  let own = 0, bench = 0;
+  const drop: string[] = [];
+  for (const r of runs) {
+    const n = r.benchmarkRunId ? ++bench : ++own;
+    const limit = r.benchmarkRunId ? keptBenchmarkRuns : SUITE_LIMITS.runsKept;
+    if (n > limit && r.status !== "running" && r.status !== "queued" && !r.isBaseline) drop.push(r.id);
+  }
+  return drop;
 }
 
 /** Where suites and their runs are kept (files under .polpo/agent-suites/<agent>/, a database…). */
@@ -854,7 +878,7 @@ export class InMemoryAgentSuiteStore implements AgentSuiteStore {
   async deleteSuite(agent: string, id: string) { return this.suites.get(agent)?.delete(id) ?? false; }
   async listRuns(agent: string, opts: SuiteRunListOptions = {}) {
     return (this.runs.get(agent) ?? [])
-      .filter((r) => (!opts.suiteId || r.suiteId === opts.suiteId) && (!opts.benchmarkRunId || r.benchmarkRunId === opts.benchmarkRunId))
+      .filter((r) => suiteRunMatches(r, opts))
       .slice(0, opts.limit ?? SUITE_LIMITS.runsKept).map(clone);
   }
   async getRun(agent: string, id: string) { const r = this.runs.get(agent)?.find((x) => x.id === id); return r ? clone(r) : undefined; }
@@ -862,8 +886,9 @@ export class InMemoryAgentSuiteStore implements AgentSuiteStore {
     const list = (this.runs.get(run.agent) ?? []).filter((r) => r.id !== run.id);
     const i = list.findIndex((r) => r.startedAt < run.startedAt);
     if (i < 0) list.push(clone(run)); else list.splice(i, 0, clone(run));
-    // the newest runs, and every marked baseline
-    this.runs.set(run.agent, list.filter((r, n) => n < SUITE_LIMITS.runsKept || r.isBaseline));
+    // the newest runs (benchmark runs counted apart), and every marked baseline
+    const drop = new Set(suiteRunsToDrop(list));
+    this.runs.set(run.agent, list.filter((r) => !drop.has(r.id)));
   }
   async listGates(agent: string, opts: { version?: string; limit?: number } = {}) {
     return (this.gates.get(agent) ?? []).filter((g) => !opts.version || g.version === opts.version).slice(0, opts.limit ?? DEPLOY_GATE_LIMITS.kept).map(clone);
@@ -1985,3 +2010,4 @@ export * from "./agent-suite-replay.js";
 export * from "./agent-suite-generate.js";
 export * from "./agent-suite-report.js";
 export * from "./agent-suite-targets.js";
+export * from "./agent-suite-bench.js";

@@ -32,6 +32,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-25-agent-benchmarks-playground",
+    date: "2026-11-25",
+    kind: "new",
+    title: "Benchmark e Playground: confronta varianti di un agente",
+    summary: "Fai girare le suite su più varianti (agenti, versioni, modelli, istruzioni) e confrontale in una classifica per qualità, costo e latenza, caso per caso e una accanto all'altra. Nel Playground chatti con fino a quattro varianti insieme.",
+    body: [
+      "- **Benchmark**: una o più suite (o i casi di un dataset) × più **varianti** — qualunque agente, una versione, e modifiche solo per il test: modello, ragionamento, istruzioni, strumenti, turni massimi — × più ripetizioni. Girano rispettando i limiti dell'istanza, puoi annullarli e vedi l'avanzamento in tempo reale.",
+      "- **Prima di partire vedi la stima del costo**: con un modello vero devi confermarla, e un **tetto di spesa** ferma il benchmark quando lo raggiunge. In modalità offline (modello e strumenti simulati) è gratis.",
+      "- **Classifica**: per ogni variante percentuale di casi superati, punteggio (± deviazione tra le ripetizioni), costo, latenza p50 / p95, token e instabilità; scegli quanto pesano qualità, costo e latenza, vedi il **fronte di Pareto** e un avviso quando la differenza è solo rumore.",
+      "- **Caso × variante**: la matrice di tutti i casi; apri un caso e vedi 2–4 varianti **affiancate**, con le chiamate agli strumenti e le risposte e le differenze evidenziate.",
+      "- **Playground**: fino a quattro chat affiancate, ognuna con la sua variante e i suoi mock (di una suite o scritti al volo, modello simulato o strumenti veri, questi ultimi solo per gli amministratori dopo una conferma). Scrivi una volta e invii a tutte; per ciascuna vedi costo, tempo e token. **Salva come caso di test** da una risposta (lo rivedi prima di salvarlo in una suite) e **Promuovi la variante** nella bozza dell'agente, senza deploy.",
+      "- Dalla scheda **Suite** di un agente (Benchmark, Playground), dalle nuove pagine nell'area agenti, da terminale (`polpo bench`), via API, MCP (con la scheda della classifica) e nella chat con Polpo.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i benchmark", to: "/benchmarks" },
+  },
+  {
     id: "2026-11-25-agent-suites-phase4",
     date: "2026-11-25",
     kind: "new",

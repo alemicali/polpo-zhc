@@ -293,7 +293,8 @@ export interface SuiteRunRequest {
   mode?: SuiteMockMode;
   concurrency?: number;
   overrides?: SuiteVariantOverrides;
-  variant?: { id?: string; label?: string };
+  /** The variant's id and label; `agent`: run the suite's cases against another agent. */
+  variant?: { id?: string; label?: string; agent?: string };
   benchmarkRunId?: string;
   repetition?: number;
   trigger?: "manual" | "publish" | "deploy" | "schedule" | "ci" | "benchmark" | "record";
@@ -421,7 +422,7 @@ export interface SuiteRun {
   target: string;
   version?: string;
   variant: { id: string; label?: string; agent: string; version: string; overrides?: SuiteVariantOverrides };
-  /** later (phase 5) */
+  /** The benchmark run this run belongs to (phase 5). */
   benchmarkRunId?: string;
   repetition?: number;
   trigger: "manual" | "publish" | "deploy" | "schedule" | "ci" | "benchmark" | "record";
@@ -602,3 +603,206 @@ export interface AgentVersionGateStatus {
 
 /** A suite target other than an agent. */
 export type SuiteTargetKind = "mcp-server" | "mission";
+
+// ── Phase 5: benchmarks and the Playground (docs/agent-suites.md) ──
+
+/** A variant: an agent (any agent) at a version, with per-run overrides. */
+export interface BenchmarkVariantSpec {
+  id: string;
+  label?: string;
+  agent: string;
+  /** production (default), draft or a published version. */
+  version: string;
+  overrides?: SuiteVariantOverrides;
+}
+
+/** A suite of a benchmark (its agent and id), optionally some cases or the cases of one dataset. */
+export interface BenchmarkSuiteRef { agent: string; suite: string; caseIds?: string[]; dataset?: string }
+
+export interface BenchmarkWeights { quality: number; cost: number; latency: number }
+
+export interface BenchmarkDefinition {
+  id: string;
+  name: string;
+  description?: string;
+  suites: BenchmarkSuiteRef[];
+  variants: BenchmarkVariantSpec[];
+  repetitions: number;
+  mode?: SuiteMockMode;
+  concurrency?: number;
+  budgetUsd?: number;
+  weights?: BenchmarkWeights;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+  updatedBy?: string;
+}
+
+/** What you send to create or run a benchmark (variants' ids and versions are filled in). */
+export type BenchmarkInput = Omit<Partial<BenchmarkDefinition>, "variants" | "suites" | "createdAt" | "updatedAt" | "updatedBy"> & {
+  name: string;
+  suites: BenchmarkSuiteRef[];
+  variants: Array<Partial<BenchmarkVariantSpec> & { agent: string }>;
+};
+
+export interface BenchmarkEstimateCell {
+  suite: string; owner: string; variantId: string; cases: number; realModelCases: number; judgeCalls: number; costUsd: number;
+  basis: "offline" | "history" | "heuristic" | "unknown"; model?: string; realTools: boolean;
+}
+
+export interface BenchmarkEstimate {
+  runs: number; cases: number; realModelCases: number;
+  costUsd: number; maxCostUsd: number;
+  /** Nothing calls a real model: free, no confirmation needed. */
+  offline: boolean;
+  unknownPrice: boolean;
+  realTools: boolean;
+  cells: BenchmarkEstimateCell[];
+  notes: string[];
+}
+
+export type BenchmarkRunStatus = "queued" | "running" | "completed" | "cancelled" | "errored";
+
+export interface BenchmarkRunEntry {
+  runId: string; owner: string; suiteId: string; suiteName: string; variantId: string; repetition: number;
+  status: SuiteRunStatus; costUsd: number; passed: number; total: number; done: number; planned: number; score?: number; error?: string;
+}
+
+export interface BenchmarkRun {
+  id: string;
+  benchmarkId?: string;
+  name: string;
+  spec: Omit<BenchmarkDefinition, "id" | "revision" | "createdAt" | "updatedAt" | "updatedBy"> & { id?: string };
+  status: BenchmarkRunStatus;
+  stopReason?: "budget" | "cancelled" | "error";
+  startedAt: string;
+  finishedAt?: string;
+  actor?: string;
+  estimate: BenchmarkEstimate;
+  budgetUsd?: number;
+  spentUsd: number;
+  runs: BenchmarkRunEntry[];
+  progress: { runsDone: number; runsTotal: number; casesDone: number; casesTotal: number };
+  source?: string;
+  leaderboard?: BenchmarkLeaderboard;
+  notes: string[];
+  error?: string;
+}
+
+export interface MeanSd { mean: number; stddev: number }
+
+export interface BenchmarkVariantStats {
+  variantId: string; label: string; agent: string; version: string; overrides?: SuiteVariantOverrides;
+  runs: number; repetitions: number; cases: number;
+  passRate: MeanSd; score?: MeanSd;
+  scorers: Array<{ id: string; label: string; mean: number; stddev: number }>;
+  costUsd: MeanSd & { total: number; perCase: number };
+  latency: { p50Ms: number; p95Ms: number; meanMs: number };
+  tokens: { input: number; output: number; perCase: number };
+  flakiness: number; flakyCases: string[]; errored: number; complete: boolean;
+}
+
+export interface BenchmarkLeaderboardEntry {
+  rank: number; variantId: string; label: string;
+  quality: number; qualityStddev: number; qualityError: number; passRate: number; score?: number;
+  costUsd: number; latencyP50Ms: number; latencyP95Ms: number;
+  composite: number; pareto: boolean; dominatedBy: string[]; flakiness: number;
+}
+
+export interface BenchmarkLeaderboard {
+  weights: BenchmarkWeights;
+  qualityMetric: "score" | "passRate";
+  entries: BenchmarkLeaderboardEntry[];
+  paretoFront: string[];
+  notes: string[];
+}
+
+export type BenchmarkCellStatus = "passed" | "failed" | "mixed" | "errored" | "skipped" | "missing";
+
+export interface BenchmarkMatrixCell {
+  variantId: string; attempts: number; passed: number; passRate: number; score?: number; costUsd: number; durationMs: number; status: BenchmarkCellStatus;
+  results: Array<{ runId: string; owner: string; key: string; repetition: number; status: string }>;
+}
+
+export interface BenchmarkMatrixRow {
+  key: string; owner: string; suiteId: string; suiteName: string; caseId: string; caseName: string; caseKey: string; row?: number;
+  cells: Record<string, BenchmarkMatrixCell>;
+  spread: boolean;
+}
+
+export interface BenchmarkMatrix { variants: Array<{ id: string; label: string }>; rows: BenchmarkMatrixRow[] }
+
+/** GET /benchmark-runs/{id}: the run, per-variant stats, the leaderboard, the matrix. */
+export interface BenchmarkReport { run: BenchmarkRun; stats: BenchmarkVariantStats[]; leaderboard: BenchmarkLeaderboard; matrix: BenchmarkMatrix }
+
+export interface DiffSegment { op: "same" | "add" | "del"; text: string }
+
+export interface BenchmarkCompareColumn {
+  variantId: string; label: string; runId: string; owner: string; repetition: number; key: string;
+  status: string; score?: number; costUsd: number; durationMs: number; tokens: { input: number; output: number };
+  finalText: string;
+  toolCalls: Array<{ name: string; args: Record<string, unknown>; result: string; isError: boolean; mocked: string | false; diff: "same" | "changed" | "added"; argChanges?: string[] }>;
+  missingCalls: string[];
+  textDiff?: DiffSegment[];
+  sameAsReference: { tools: boolean; text: boolean };
+  result: SuiteCaseResult;
+}
+
+export interface BenchmarkCaseComparison { key: string; caseName: string; reference: string; columns: BenchmarkCompareColumn[] }
+
+/** benchmark:progress (SSE). */
+export interface BenchmarkProgressEvent {
+  benchmarkRunId: string; benchmarkId?: string; name: string; status: BenchmarkRunStatus; stopReason?: "budget" | "cancelled" | "error";
+  progress: BenchmarkRun["progress"]; spentUsd: number; budgetUsd?: number; timestamp: string;
+}
+
+export interface PlaygroundMocks {
+  suite?: { agent: string; suite: string; caseId?: string };
+  tools?: ToolMock[];
+  model?: { turns: ScriptedTurn[]; onExhausted?: "stop" | "error" };
+}
+
+export interface PlaygroundPane {
+  id: string;
+  label?: string;
+  variant: { agent: string; version: string; overrides?: SuiteVariantOverrides };
+  /** Answer tool calls with the mocks (default true). */
+  mockTools: boolean;
+  /** Script the model from mocks.model (offline). */
+  mockModel: boolean;
+  /** Calls no mock answers run for real (admins, after a confirmation); off: blocked. */
+  realTools: boolean;
+  mocks?: PlaygroundMocks;
+}
+
+export type PlaygroundPaneInput = Partial<Omit<PlaygroundPane, "variant">> & { variant: { agent: string; version?: string; overrides?: SuiteVariantOverrides } };
+
+export interface PlaygroundExchange {
+  index: number;
+  message: string;
+  at: string;
+  trace: SuiteTrace;
+  mode: SuiteMockMode;
+  status: "done" | "error" | "stopped";
+  error?: string;
+  costUsd: number;
+  durationMs: number;
+  tokens: { input: number; output: number };
+}
+
+export interface PlaygroundSession {
+  id: string;
+  panes: PlaygroundPane[];
+  exchanges: Record<string, PlaygroundExchange[]>;
+  createdAt: string;
+  updatedAt: string;
+  actor?: string;
+}
+
+/** What a pane streams while it answers (POST …/send with stream). */
+export type PlaygroundStreamEvent =
+  | { type: "start"; paneId: string; mode: string }
+  | { type: "text"; paneId: string; delta: string }
+  | { type: "turn"; paneId: string; turn: SuiteTraceTurn }
+  | { type: "tool"; paneId: string; call: SuiteTraceToolCall }
+  | { type: "done"; paneId: string; exchange: PlaygroundExchange };

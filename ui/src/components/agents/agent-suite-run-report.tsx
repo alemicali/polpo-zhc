@@ -94,7 +94,7 @@ function TraceExtras({ trace }: { trace: SuiteCaseResult["trace"] }) {
   );
 }
 
-function CaseTrace({ result, agentName }: { result: SuiteCaseResult; agentName: string }) {
+export function CaseTrace({ result, agentName }: { result: SuiteCaseResult; agentName: string }) {
   const { user, segments } = traceAsChat(result.trace);
   const t = result.trace;
   if (t.transcript?.length) {

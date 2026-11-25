@@ -42,6 +42,7 @@ import {
   trustedApiCallHeaders,
   registerAgentSuiteRoutes,
   type AgentSuiteRouteDeps,
+  benchmarkRoutes,
   isTrustedApiCall,
   TRUSTED_API_CALL_HEADER,
   CHAT_ORIGIN_HEADER,
@@ -110,7 +111,7 @@ import { isMcpToolName, toolResultText } from "../mcp/tools.js";
 import { connectorLabel } from "../mcp/view.js";
 import { AgentTalk } from "./agent-talk.js";
 import { agentTesterFor } from "./agent-tests-host.js";
-import { agentDeployGatesFor, agentSuiteRunnerFor } from "./agent-suites-host.js";
+import { agentBenchmarksFor, agentDeployGatesFor, agentSuiteRunnerFor } from "./agent-suites-host.js";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
   SUITE_PLACEHOLDER_MODEL, applySuiteOverrides, currentSuiteCase, suiteCompleteLLM, suiteStreamLLM, suiteToolExecutor,
@@ -1593,6 +1594,26 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     orchestrator: o, completions: (req) => completionApp.request(req),
     api: (path) => app.request(`/api/v1${path}`, { headers: trustedApiCallHeaders() }),
   });
+  // phase 5 (docs/agent-suites.md): benchmarks (suites × variants × repetitions, compared) and the Playground
+  const benchmarks = () => agentBenchmarksFor({
+    orchestrator: o, completions: (req) => completionApp.request(req),
+    api: (path) => app.request(`/api/v1${path}`, { headers: trustedApiCallHeaders() }),
+  });
+  authed.route("/", benchmarkRoutes(() => {
+    const b = benchmarks();
+    return {
+      list: () => b.list(), get: (id) => b.get(id), save: (input, opts) => b.save(input, opts), remove: (id) => b.remove(id),
+      estimate: async (req) => b.estimate((await b.specOf(req)).spec),
+      start: (req, opts) => b.start(req, opts),
+      listRuns: (opts) => b.listRuns(opts), report: (id, w) => b.report(id, w), cancel: (id) => b.cancel(id),
+      compare: (id, key, opts) => b.compareCase(id, key, opts),
+      sessions: (actor) => b.listSessions(actor), createSession: (panes, opts) => b.createSession(panes, opts), getSession: (id) => b.getSession(id),
+      updateSession: (id, panes) => b.updateSession(id, panes), deleteSession: (id) => b.deleteSession(id), resetSession: (id, paneId) => b.resetSession(id, paneId),
+      send: (id, req, onEvent, signal) => b.send(id, req, onEvent, signal), sendOnce: (panes, req, opts) => b.sendOnce(panes, req, opts),
+      caseFromExchange: (id, req, opts) => b.caseFromExchange(id, req, opts), promote: (req, opts) => b.promote(req, opts),
+      actor: (c) => requestAuthor(c), isAdmin: (c) => requestIsAdmin(c),
+    };
+  }));
   // a hosted server's deploys go through its required suite (the saved tests' gate)
   setHostedSuiteGate(o, (id, version, opts) => agentSuites().hostedGate(id, version, opts), (id, ref, opts) => agentSuites().hostedCheck(id, ref, opts));
   // a deleted mission or hosted server takes its suite runs and cassettes along (a server's saved tests go with it)

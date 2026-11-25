@@ -170,7 +170,8 @@ export function registerAgentSuiteTools(tool: Register, deps: McpDeps): void {
     const suites = r.data as Suite[];
     const runs = await apiGet(deps, `/agents/${enc(agent)}/suite-runs${qs({ limit: "50" })}`);
     const latest = new Map<string, Run>();
-    for (const run of (runs.ok ? runs.data as Run[] : [])) if (!latest.has(run.suiteId)) latest.set(run.suiteId, run);
+    // a suite's own last run (benchmark runs compare variants)
+    for (const run of (runs.ok ? runs.data as Run[] : [])) if (!run.benchmarkRunId && !latest.has(run.suiteId)) latest.set(run.suiteId, run);
     if (!suites.length) return ok(`${agent} has no suites yet. Create one with polpo_agent_suite_save (${suitesLink(agent)}).`, { suites: [] });
     return ok(suites.map((s) => {
       const last = latest.get(s.id);

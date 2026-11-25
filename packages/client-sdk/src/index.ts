@@ -276,4 +276,7 @@ export type {
   SuiteChange, SuiteScorerDelta, SuiteCaseDelta, SuiteBaselineComparison, SuiteRunReview, SuiteTrendPoint, SuiteTrend,
   SuiteGate, DeployGateTrigger, DeployGateStatus, DeployGateSuiteStatus, DeployGateSuite, AgentDeployGate, AgentDeployGateRef, AgentVersionGateStatus,
   CassetteMatch, SuiteCassetteRef, SimulatedUser, HttpMock, SuiteCassette, SuiteCassetteCall, SuiteCassetteSummary, SuiteCassetteEdit, CaseGenerationRequest, GeneratedCaseProposal, SuiteTargetKind,
+  BenchmarkVariantSpec, BenchmarkSuiteRef, BenchmarkWeights, BenchmarkDefinition, BenchmarkInput, BenchmarkEstimateCell, BenchmarkEstimate, BenchmarkRunStatus, BenchmarkRunEntry, BenchmarkRun,
+  MeanSd, BenchmarkVariantStats, BenchmarkLeaderboardEntry, BenchmarkLeaderboard, BenchmarkCellStatus, BenchmarkMatrixCell, BenchmarkMatrixRow, BenchmarkMatrix, BenchmarkReport,
+  DiffSegment, BenchmarkCompareColumn, BenchmarkCaseComparison, BenchmarkProgressEvent, PlaygroundMocks, PlaygroundPane, PlaygroundPaneInput, PlaygroundExchange, PlaygroundSession, PlaygroundStreamEvent,
 } from "./client/agent-suite-types.js";

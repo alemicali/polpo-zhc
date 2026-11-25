@@ -13,6 +13,8 @@ import {
 import type { Orchestrator } from "../core/orchestrator.js";
 import { AgentSuiteRunner, runAsSuiteCase, type AgentSuiteDeps, type SessionToolCall, type SuiteCompletion, type SuiteTurnResult } from "./agent-suites.js";
 import { FileAgentSuiteStore } from "../stores/file-agent-suite-store.js";
+import { FileBenchmarkStore } from "../stores/file-benchmark-store.js";
+import { AgentBenchmarks } from "./agent-benchmarks.js";
 import { sandboxedCustomScorer, suiteJudge, suiteReviewer } from "./agent-suite-scorers.js";
 import { AgentDeployGates } from "./agent-deploy-gates.js";
 import { deployGateSummary } from "@polpo-ai/core";
@@ -39,6 +41,42 @@ export function agentSuiteRunnerFor(opts: AgentSuiteHostOptions): AgentSuiteRunn
   const runner = new AgentSuiteRunner(agentSuiteDeps(opts));
   runners.set(o, { polpoDir: o.getPolpoDir(), runner });
   return runner;
+}
+
+const benchmarkManagers = new WeakMap<Orchestrator, { polpoDir: string; benchmarks: AgentBenchmarks }>();
+
+/** The instance's benchmarks and Playground (phase 5): suite runs per variant, compared; chat panes per variant. */
+export function agentBenchmarksFor(opts: AgentSuiteHostOptions): AgentBenchmarks {
+  const o = opts.orchestrator;
+  const cached = benchmarkManagers.get(o);
+  if (cached && cached.polpoDir === o.getPolpoDir()) return cached.benchmarks;
+  const deps = agentSuiteDeps(opts);
+  const priceOf = async (spec: string | undefined) => {
+    try {
+      const { resolveModel } = await import("../llm/pi-client.js");
+      const m = resolveModel(spec);
+      return { model: `${m.provider}:${m.id}`, price: { input: Number(m.cost?.input) || 0, output: Number(m.cost?.output) || 0 } };
+    } catch { return undefined; }
+  };
+  const benchmarks = new AgentBenchmarks({
+    runner: () => agentSuiteRunnerFor(opts),
+    store: new FileBenchmarkStore(o.getPolpoDir()),
+    agents: () => o.getAgents(),
+    resolveAgent: deps.resolveAgent,
+    price: priceOf,
+    judgePrice: async () => {
+      const m = o.getConfig()?.settings?.orchestratorModel;
+      const spec = typeof m === "string" ? m : (m as { primary?: string } | undefined)?.primary;
+      return (await priceOf(spec))?.price;
+    },
+    emit: (e) => o.emit("benchmark:progress", e),
+    writeDraft: async (agent, fields, w) => {
+      const r = await o.updateAgentVersioned(agent, fields as never, { actor: w.actor ?? "person:dashboard", mode: "draft", ...(w.note ? { note: w.note } : {}) });
+      return { draftChanged: r.draftChanged };
+    },
+  });
+  benchmarkManagers.set(o, { polpoDir: o.getPolpoDir(), benchmarks });
+  return benchmarks;
 }
 
 const gateManagers = new WeakMap<Orchestrator, { polpoDir: string; gates: AgentDeployGates }>();
@@ -187,13 +225,15 @@ export function agentSuiteDeps(opts: AgentSuiteHostOptions): AgentSuiteDeps {
       return (await o.getAgentVersioning().resolve(name, ref))?.agent;
     },
     productionVersion: async (name) => (await o.getAgentVersioning().state(name)).production ?? undefined,
-    turn: (agentRef, messages, hooks) => runAsSuiteCase(hooks, async (): Promise<SuiteTurnResult> => {
+    turn: (agentRef, messages, hooks, turnOpts) => runAsSuiteCase(hooks, async (): Promise<SuiteTurnResult> => {
+      const stream = !!turnOpts?.onText;
       const res = await opts.completions(new Request("http://localhost/", {
         method: "POST",
         headers: { "content-type": "application/json", "x-session-id": "new", ...trustedApiCallHeaders() },
-        body: JSON.stringify({ agent: agentRef, stream: false, messages }),
+        body: JSON.stringify({ agent: agentRef, stream, messages }),
       }));
-      const body = await res.json().catch(() => ({})) as {
+      // the Playground streams the reply: OpenAI chunks (data: {...}) ending with [DONE]
+      const body = stream && res.ok && res.body ? await readCompletionStream(res.body, turnOpts!.onText!) : await res.json().catch(() => ({})) as {
         choices?: Array<{ message?: { content?: string }; finish_reason?: string }>;
         error?: { message?: string };
       };
@@ -215,4 +255,35 @@ export function agentSuiteDeps(opts: AgentSuiteHostOptions): AgentSuiteDeps {
       return { text: choice?.message?.content ?? "", ...(choice?.finish_reason ? { finishReason: choice.finish_reason } : {}), toolCalls };
     }),
   };
+}
+
+/** Read a streamed completion (SSE chunks): every text delta to `onText`, then the whole reply as a non-streamed body. */
+async function readCompletionStream(body: ReadableStream<Uint8Array>, onText: (delta: string) => void): Promise<{ choices: Array<{ message: { content: string }; finish_reason?: string }>; error?: { message?: string } }> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let text = "";
+  let finish: string | undefined;
+  let error: string | undefined;
+  const handle = (line: string) => {
+    if (!line.startsWith("data:")) return;
+    const data = line.slice(5).trim();
+    if (!data || data === "[DONE]") return;
+    try {
+      const chunk = JSON.parse(data) as { choices?: Array<{ delta?: { content?: string }; finish_reason?: string | null }>; error?: { message?: string } };
+      if (chunk.error?.message) error = chunk.error.message;
+      const c = chunk.choices?.[0];
+      if (c?.delta?.content) { text += c.delta.content; try { onText(c.delta.content); } catch { /* a listener's problem */ } }
+      if (c?.finish_reason) finish = c.finish_reason;
+    } catch { /* not JSON: skip */ }
+  };
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buf.indexOf("\n")) >= 0) { handle(buf.slice(0, nl).trim()); buf = buf.slice(nl + 1); }
+  }
+  if (buf.trim()) handle(buf.trim());
+  return { choices: [{ message: { content: text }, ...(finish ? { finish_reason: finish } : {}) }], ...(error ? { error: { message: error } } : {}) };
 }

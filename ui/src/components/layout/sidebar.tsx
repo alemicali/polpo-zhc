@@ -26,6 +26,8 @@ import {
   BrainCircuit,
   Radio,
   MessagesSquare,
+  Gauge,
+  Columns3,
 } from "lucide-react";
 import { usePolpo } from "@polpo-ai/react";
 import { useProjectInfo } from "@/hooks/use-polpo";
@@ -70,6 +72,8 @@ const nav: NavSection[] = [
     section: "Knowledge",
     items: [
       { to: "/agents", icon: Bot, label: "Agents" },
+      { to: "/benchmarks", icon: Gauge, label: "Benchmarks" },
+      { to: "/playground", icon: Columns3, label: "Playground" },
       { to: "/connectors", icon: Plug, label: "Connectors" },
       { to: "/computers", icon: Monitor, label: "Computers" },
       { to: "/agent-talk", icon: MessagesSquare, label: "Agent conversations" },

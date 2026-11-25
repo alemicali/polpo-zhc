@@ -4,6 +4,7 @@
  *   polpo test [agent] [--suite id] [--version production|draft|1.2.0] [--mode all|tools|model|none]
  *              [--mcp-server id | --mission id] [--json [file]] [--junit file] [--summary file]
  *              [--fail-on-regression] [--allow-real-tools] [--remote URL --token TOKEN] [--timeout s]
+ *   polpo test --bench <file|id> [--yes] [--budget usd] [--weights quality=1,cost=0.5]   a benchmark (polpo bench)
  *
  * Locally it runs against the project in the working directory (the server in process, nothing
  * listens); with --remote it runs on an instance through its REST API (a token: an API key). It
@@ -13,6 +14,7 @@
 import { Command } from "commander";
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { benchAction } from "./bench.js";
 import { suiteReportExitCode, suiteRunsJunit, suiteRunsMarkdown, suiteRunsText, type ReportRun } from "@polpo-ai/core/agent-suites";
 
 export interface PolpoTestOptions {
@@ -31,6 +33,11 @@ export interface PolpoTestOptions {
   token?: string;
   timeout?: string | number;
   dir?: string;
+  /** Run a benchmark instead (a file or a saved id): see polpo bench. */
+  bench?: string;
+  yes?: boolean;
+  budget?: string;
+  weights?: string;
 }
 
 /** One REST call: `{ ok, data }` or `{ ok: false, error, status }`. */
@@ -138,6 +145,14 @@ export function remoteApi(url: string, token: string | undefined, fetchImpl: typ
   };
 }
 
+/** The API to run against: a remote instance (--remote / POLPO_URL) or the project in `dir`, in process. */
+export async function connectApi(opts: { remote?: string; token?: string; dir?: string }): Promise<{ api: TestApi; close?: () => Promise<void>; dashboard?: string }> {
+  const remote = opts.remote ?? process.env.POLPO_URL;
+  const token = opts.token ?? process.env.POLPO_TOKEN;
+  if (remote) return { api: remoteApi(remote, token), dashboard: remote.replace(/\/+$/, "") };
+  return localApi(opts.dir ?? ".");
+}
+
 /** The project in `dir`, in process: its server app without listening. */
 async function localApi(dir: string): Promise<{ api: TestApi; close: () => Promise<void> }> {
   const { Orchestrator } = await import("../../core/orchestrator.js");
@@ -179,7 +194,18 @@ export function registerTestCommand(program: Command): void {
     .option("--token <token>", "The instance's API key (env POLPO_TOKEN)")
     .option("--timeout <seconds>", "How long to wait for the runs", "1800")
     .option("-d, --dir <path>", "Working directory (local runs)", ".")
+    .option("--bench <benchmark>", "Run a benchmark instead: a file (JSON or YAML) or a saved benchmark's id (see polpo bench)")
+    .option("--yes", "With --bench: accept the cost estimate (needed when a real model is called)")
+    .option("--budget <usd>", "With --bench: stop once it has spent this much")
+    .option("--weights <list>", "With --bench: the leaderboard's weights, e.g. quality=1,cost=0.5,latency=0")
     .action(async (agent: string | undefined, opts: PolpoTestOptions) => {
+      if (opts.bench) {
+        process.exit(await benchAction({
+          bench: opts.bench, ...(opts.yes ? { yes: true } : {}), ...(opts.budget ? { budget: opts.budget } : {}), ...(opts.allowRealTools ? { allowRealTools: true } : {}),
+          ...(opts.weights ? { weights: opts.weights } : {}), ...(opts.json !== undefined ? { json: opts.json } : {}), ...(opts.timeout ? { timeout: opts.timeout } : {}),
+          ...(opts.remote ? { remote: opts.remote } : {}), ...(opts.token ? { token: opts.token } : {}), ...(opts.dir ? { dir: opts.dir } : {}),
+        }, connectApi));
+      }
       const remote = opts.remote ?? process.env.POLPO_URL;
       const token = opts.token ?? process.env.POLPO_TOKEN;
       let close: (() => Promise<void>) | undefined;
