@@ -392,6 +392,7 @@ describe("hosted MCP server suites", () => {
     const service = new McpServerService({
       polpoDir: dir, vault: () => undefined, runtime: () => ({ fetch: async (u: string) => { realFetches.push(u); return new Response("{}"); } }),
       suiteGate: () => (id, version, opts) => runner.hostedGate(id, version, opts),
+      suiteCheck: () => (id, ref, opts) => runner.hostedCheck(id, ref, opts),
     });
     runner = new AgentSuiteRunner(deps({
       targets: { mcpServer: {
@@ -446,7 +447,7 @@ describe("hosted MCP server suites", () => {
   });
 
   it("a required suite gates the server's deploys: blocked, an admin's override with a reason, rollbacks never gated", async () => {
-    const { dir, service, runner } = setup();
+    const { dir, service, runner, realFetches } = setup();
     try {
       const s = (await runner.listSuites("mcp-server:shop"))[0];
       await runner.saveSuite("mcp-server:shop", { ...s, gate: { required: true }, cases: [
@@ -456,12 +457,17 @@ describe("hosted MCP server suites", () => {
       expect(first.deployed?.gate).toMatchObject({ decision: "pass", runId: expect.stringMatching(/^sr-/) });
       const gateRun = await runner.getRun("mcp-server:shop", first.deployed!.gate!.runId!);
       expect(gateRun).toMatchObject({ trigger: "deploy", target: "1.0.0", gate: { decision: "pass" } });
+      // publish's check is the suite too (on the draft, HTTP mocked): nothing reached the network
+      expect(first.tests).toEqual({ passed: 1, failed: 0, skipped: 0, runId: expect.stringMatching(/^sr-/) });
+      expect((await runner.listRuns("mcp-server:shop")).map((r) => r.trigger).sort()).toEqual(["deploy", "publish"]);
+      expect(realFetches).toEqual([]);
 
       // a draft whose test fails: published, not deployed
       service.updateDraft("shop", { ...spec, tools: spec.tools.map((t) => (t.name === "get_item" ? { ...t, http: { ...t.http!, response: { pick: "data", fields: ["id"] } } } : t)) }, "tester");
       const second = await service.publish("shop", { deploy: true }, "tester");
       expect(second.deployed).toBeUndefined();
       expect(second.deployBlocked?.reason).toContain("Blocked by the suite");
+      expect(second.tests).toMatchObject({ passed: 0, failed: 1 });
       expect(service.store.production("shop")).toBe("1.0.0");
       await expect(service.deploy("shop", second.version, { actor: "member", override: { reason: "hotfix" } })).rejects.toMatchObject({ code: "FORBIDDEN" });
       const forced = await service.deploy("shop", second.version, { actor: "admin", override: { reason: "hotfix" }, admin: true });

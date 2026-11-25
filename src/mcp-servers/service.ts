@@ -73,6 +73,13 @@ export class McpServerError extends Error {
  */
 export type HostedSuiteGate = (id: string, version: string, opts: { actor: string }) => Promise<{ passed: boolean; runId?: string; failures: string[] }>;
 
+/**
+ * The saved tests run as the server's suite (HTTP mocked per case) on a ref: publish's check. Returns
+ * undefined when the suite cannot run that way (no cases, or cases that need real HTTP): the
+ * legacy live run of the saved tests is used then.
+ */
+export type HostedSuiteCheck = (id: string, ref: string, opts: { actor: string }) => Promise<{ passed: number; failed: number; skipped: number; runId?: string } | undefined>;
+
 /** A vault that answers every secret with a placeholder: suite calls whose HTTP is mocked never read a real secret. */
 function placeholderVault(): VaultStore {
   const entry = { type: "api_key", label: "test", credentials: new Proxy({} as Record<string, string>, { get: (_t, k) => (typeof k === "string" ? `polpo-test-${k}` : undefined) }) };
@@ -94,6 +101,8 @@ export interface McpServerServiceDeps {
   changed?: (id: string, what: string) => void;
   /** The deploy gate: the server's required suite run against a version before it reaches production. */
   suiteGate?: () => HostedSuiteGate | undefined;
+  /** Publish's check: the saved tests run as the suite (HTTP mocked), else the legacy live run. */
+  suiteCheck?: () => HostedSuiteCheck | undefined;
 }
 
 export interface TestRunResult extends McpToolCallResult {
@@ -494,7 +503,12 @@ export class McpServerService {
     }
     // saved tests on the draft (destructive / approval tools are skipped)
     // (the install flow ran them just before: not again)
-    const tests = opts.testsRun ?? (this.store.tests(id).length ? await this.runSavedTests(id, "draft") : undefined);
+    // the saved tests are the server's suite: run as such (HTTP mocked per case, offline) when the
+    // suite runner is wired, else (or when cases need real HTTP) the legacy live run
+    const suiteCheck = this.deps.suiteCheck?.();
+    const tests = opts.testsRun ?? (this.store.tests(id).length
+      ? (suiteCheck ? await suiteCheck(id, "draft", { actor }) : undefined) ?? await this.runSavedTests(id, "draft")
+      : undefined);
     if (tests?.failed && (meta.onTestFailure ?? "warn") === "block" && !opts.force) {
       throw new McpServerError(`${tests.failed} saved test(s) failed: publishing is blocked (settings: onTestFailure "block")`, "TESTS_FAILED", { tests });
     }

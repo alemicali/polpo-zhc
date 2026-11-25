@@ -1591,7 +1591,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     api: (path) => app.request(`/api/v1${path}`, { headers: trustedApiCallHeaders() }),
   });
   // a hosted server's deploys go through its required suite (the saved tests' gate)
-  setHostedSuiteGate(o, (id, version, opts) => agentSuites().hostedGate(id, version, opts));
+  setHostedSuiteGate(o, (id, version, opts) => agentSuites().hostedGate(id, version, opts), (id, ref, opts) => agentSuites().hostedCheck(id, ref, opts));
   const deployGates = () => agentDeployGatesFor({ orchestrator: o, completions: (req) => completionApp.request(req) });
   // every deploy (dashboard, REST, MCP, Polpo's chat, API updates that auto-deploy) goes through the required suites
   o.setAgentDeployGate({

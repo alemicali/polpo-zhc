@@ -1249,6 +1249,25 @@ export class AgentSuiteRunner {
     return latest;
   }
 
+  /**
+   * A hosted server's publish check: its saved tests run as the suite on `ref` (the draft), HTTP
+   * mocked, nothing real. Undefined when there is nothing to run or a case would need real HTTP
+   * (the service falls back to the legacy live run of the saved tests then).
+   */
+  async hostedCheck(serverId: string, ref: string, opts: { actor?: string } = {}): Promise<{ passed: number; failed: number; skipped: number; runId: string } | undefined> {
+    const owner = `mcp-server:${serverId}`;
+    const suite = await this.getSuite(owner, (await this.listSuites(owner))[0]!.id);
+    if (!suite.cases.length) return undefined;
+    let run: SuiteRun;
+    try {
+      run = await this.run(owner, suite.id, { target: ref, trigger: "publish" }, opts.actor ? { actor: opts.actor } : {});
+    } catch (err) {
+      if (err instanceof AgentSuiteError && err.code === "FORBIDDEN") return undefined;
+      throw err;
+    }
+    return { passed: run.stats.passed, failed: run.stats.failed + run.stats.errored, skipped: run.stats.skipped, runId: run.id };
+  }
+
   /** The agent was removed: drop its suites and runs. */
   forget(agent: string): Promise<void> { return this.deps.store.deleteAgent(agent); }
 
@@ -1260,7 +1279,16 @@ export class AgentSuiteRunner {
     const owner = `mcp-server:${serverId}`;
     const suite = await this.getSuite(owner, (await this.listSuites(owner))[0]!.id);
     if (!suite.cases.length) return { passed: true, failures: [] };
-    const run = await this.run(owner, suite.id, { target: version, trigger: "deploy" }, { ...(opts.actor ? { actor: opts.actor } : {}), allowRealTools: suite.gate?.allowRealTools === true });
+    let run: SuiteRun;
+    try {
+      run = await this.run(owner, suite.id, { target: version, trigger: "deploy" }, { ...(opts.actor ? { actor: opts.actor } : {}), allowRealTools: suite.gate?.allowRealTools === true });
+    } catch (err) {
+      // a suite that needs real HTTP (mode none, unmocked requests run for real) without gate.allowRealTools
+      if (err instanceof AgentSuiteError && err.code === "FORBIDDEN") {
+        return { passed: false, failures: ["The suite needs real HTTP (a case in mode none, or unmocked requests run for real): mock it, or let the gate run it for real (gate.allowRealTools, admins)"] };
+      }
+      throw err;
+    }
     const failures: string[] = [];
     const minPassRate = suite.gate?.minPassRate ?? 1;
     if (run.status === "errored" && run.error) failures.push(run.error);

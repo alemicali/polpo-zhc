@@ -200,6 +200,50 @@ describe("other targets over REST", () => {
     expect((await api("/mcp-servers/nope/suites")).status).toBe(404);
   });
 
+  test("a hosted server's required suite gates its deploys (REST and MCP): publish checks offline, a failure blocks, an admin overrides", async () => {
+    const fetches: string[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (u: string | URL | Request) => { fetches.push(String(u)); throw new Error("no network in tests"); }) as typeof fetch;
+    try {
+      const spec = {
+        name: "Stock API", baseUrl: "https://api.stock.test", allowedDomains: ["api.stock.test"], secrets: { token: { owner: "infra", service: "stock", key: "token" } }, auth: { type: "bearer", secret: "token" },
+        tools: [{ name: "get_stock", description: "Stock of an item", kind: "http", annotations: { readOnlyHint: true }, inputSchema: { type: "object", properties: { sku: { type: "string" } }, required: ["sku"] },
+          http: { method: "GET", url: "/stock/{{input.sku}}", response: { pick: "data", fields: ["sku", "qty"] } } }],
+      };
+      expect((await json(await api("/mcp-servers", { body: { id: "stock-api", spec } }))).ok).toBe(true);
+      const saved = await json(await api("/mcp-servers/stock-api/suites/saved-tests", { method: "PUT", body: {
+        name: "Stock tests", gate: { required: true },
+        cases: [{ name: "Lamp stock", input: { kind: "tool", tool: "get_stock", args: { sku: "lamp" } }, mocks: { http: [{ url: "/stock/lamp", body: { data: { sku: "lamp", qty: 4 } } }] }, assertions: [{ type: "text_contains", value: "\"qty\"" }] }],
+      } }));
+      expect(saved.ok, saved.error).toBe(true);
+      const first = await json(await api("/mcp-servers/stock-api/publish", { body: {} }));
+      expect(first.ok, first.error).toBe(true);
+      expect(first.data).toMatchObject({ version: "1.0.0", tests: { passed: 1, failed: 0 }, deployed: { action: "initial", gate: { decision: "pass" } } });
+      // a draft that drops qty: published, not deployed
+      const broken = { ...spec, tools: [{ ...spec.tools[0], http: { ...spec.tools[0].http, response: { pick: "data", fields: ["sku"] } } }] };
+      expect((await json(await api("/mcp-servers/stock-api/draft", { method: "PUT", body: { spec: broken } }))).ok).toBe(true);
+      const second = await json(await api("/mcp-servers/stock-api/publish", { body: { deploy: true } }));
+      expect(second.data).toMatchObject({ version: expect.any(String), tests: { failed: 1 }, deployBlocked: { reason: expect.stringContaining("Blocked by the suite") } });
+      expect(second.data.deployed).toBeUndefined();
+      const deploy = await json(await api("/mcp-servers/stock-api/deploy", { body: { version: second.data.version } }));
+      expect(deploy).toMatchObject({ ok: false, code: "GATE_BLOCKED" });
+      // over MCP: blocked without a reason, deployed with one (admin), recorded
+      const admin = mcp(["polpo:admin", "polpo:read"]);
+      const blocked = await admin.call("polpo_mcp_server_deploy", { id: "stock-api", version: second.data.version });
+      expect(blocked.isError).toBe(true);
+      expect(blocked.content[0].text).toContain("NOT deployed");
+      const forced = await admin.call("polpo_mcp_server_deploy", { id: "stock-api", version: second.data.version, override_reason: "upstream renamed qty" });
+      expect(forced.isError, forced.content[0].text).toBeFalsy();
+      expect(forced.content[0].text).toContain("suite gate: override — upstream renamed qty");
+      const deploys = await json(await api("/mcp-servers/stock-api/deploys"));
+      expect(deploys.data.deploys[0]).toMatchObject({ to: second.data.version, gate: { decision: "override", reason: "upstream renamed qty" } });
+      // the gate and publish runs are the suite's runs
+      const runs = await json(await api("/mcp-servers/stock-api/suite-runs"));
+      expect(new Set(runs.data.map((r: any) => r.trigger))).toEqual(new Set(["publish", "deploy"]));
+      expect(fetches).toEqual([]);
+    } finally { globalThis.fetch = realFetch; }
+  });
+
   test("a mission runs in test mode, each agent with its own mocks", async () => {
     const m = await json(await api("/missions", { body: { name: "blog-post", data: JSON.stringify({ tasks: [
       { title: "Draft", description: "Write a draft", assignTo: "writer" },
