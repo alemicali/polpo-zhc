@@ -2,6 +2,8 @@ import { PolpoApiError } from "./errors.js";
 import type {
   AgentDeployGate, AgentSuite, AgentSuiteInput, CaseGenerationRequest, GeneratedCaseProposal, SuiteBaselineComparison, SuiteCase, SuiteCassette, SuiteCassetteEdit,
   SuiteCassetteSummary, SuiteDataset, SuiteRun, SuiteRunRequest, SuiteDatasetImport, SuiteTargetKind, SuiteTrend,
+  BenchmarkCaseComparison, BenchmarkDefinition, BenchmarkEstimate, BenchmarkInput, BenchmarkLeaderboard, BenchmarkMatrix, BenchmarkReport, BenchmarkRun,
+  BenchmarkVariantStats, BenchmarkWeights, PlaygroundExchange, PlaygroundPane, PlaygroundPaneInput, PlaygroundSession, PlaygroundStreamEvent, SuiteVariantOverrides,
 } from "./agent-suite-types.js";
 import type {
   Connector,
@@ -1206,6 +1208,172 @@ export class PolpoClient {
 
   getTargetSuiteRun(kind: SuiteTargetKind, id: string, runId: string): Promise<SuiteRun> {
     return this.get<SuiteRun>(`${this.targetBase(kind, id)}/suite-runs/${encodeURIComponent(runId)}`);
+  }
+
+  // ── Benchmarks (agent suites phase 5): suites × variants × repetitions, compared ──
+
+  /** The saved benchmarks. */
+  getBenchmarks(): Promise<BenchmarkDefinition[]> {
+    return this.get<BenchmarkDefinition[]>("/benchmarks");
+  }
+
+  getBenchmark(id: string): Promise<BenchmarkDefinition> {
+    return this.get<BenchmarkDefinition>(`/benchmarks/${encodeURIComponent(id)}`);
+  }
+
+  /** Create (no id) or replace a benchmark; `revision` refuses a save over someone else's change. */
+  saveBenchmark(benchmark: BenchmarkInput, opts: { id?: string; revision?: number } = {}): Promise<BenchmarkDefinition> {
+    const id = opts.id ?? benchmark.id;
+    const body = { ...benchmark, ...(opts.revision !== undefined ? { revision: opts.revision } : {}) };
+    return id ? this.put<BenchmarkDefinition>(`/benchmarks/${encodeURIComponent(id)}`, body) : this.post<BenchmarkDefinition>("/benchmarks", body);
+  }
+
+  deleteBenchmark(id: string): Promise<{ deleted: string }> {
+    return this.del<{ deleted: string }>(`/benchmarks/${encodeURIComponent(id)}`);
+  }
+
+  /** What a benchmark would cost (a saved one, or inline), and whether it is offline (free). */
+  estimateBenchmark(ref: { benchmarkId?: string; benchmark?: BenchmarkInput }): Promise<BenchmarkEstimate> {
+    return this.post<BenchmarkEstimate>("/benchmarks/estimate", ref);
+  }
+
+  /**
+   * Start a benchmark. One that calls a real model needs `confirm: true` (else PolpoApiError code
+   * CONFIRM_COST, the estimate in `details`); one whose estimate is above the budget cap is refused
+   * (OVER_BUDGET); real tools need `allowRealTools` (admins).
+   */
+  runBenchmark(ref: { benchmarkId?: string; benchmark?: BenchmarkInput }, opts: { confirm?: boolean; allowRealTools?: boolean; budgetUsd?: number; wait?: boolean; source?: string } = {}): Promise<BenchmarkRun> {
+    return this.post<BenchmarkRun>("/benchmarks/runs", { ...ref, ...opts });
+  }
+
+  getBenchmarkRuns(opts: { benchmark?: string; limit?: number } = {}): Promise<BenchmarkRun[]> {
+    const q = new URLSearchParams();
+    if (opts.benchmark) q.set("benchmark", opts.benchmark);
+    if (opts.limit) q.set("limit", String(opts.limit));
+    const s = q.toString();
+    return this.get<BenchmarkRun[]>(`/benchmark-runs${s ? `?${s}` : ""}`);
+  }
+
+  /** A benchmark run's comparison: the run, per-variant stats, the leaderboard (with these weights), the matrix. */
+  getBenchmarkRun(runId: string, weights?: Partial<BenchmarkWeights>): Promise<BenchmarkReport> {
+    const q = new URLSearchParams();
+    for (const k of ["quality", "cost", "latency"] as const) if (weights?.[k] !== undefined) q.set(k, String(weights[k]));
+    const s = q.toString();
+    return this.get<BenchmarkReport>(`/benchmark-runs/${encodeURIComponent(runId)}${s ? `?${s}` : ""}`);
+  }
+
+  getBenchmarkLeaderboard(runId: string, weights?: Partial<BenchmarkWeights>): Promise<BenchmarkLeaderboard & { stats: BenchmarkVariantStats[] }> {
+    const q = new URLSearchParams();
+    for (const k of ["quality", "cost", "latency"] as const) if (weights?.[k] !== undefined) q.set(k, String(weights[k]));
+    const s = q.toString();
+    return this.get<BenchmarkLeaderboard & { stats: BenchmarkVariantStats[] }>(`/benchmark-runs/${encodeURIComponent(runId)}/leaderboard${s ? `?${s}` : ""}`);
+  }
+
+  getBenchmarkMatrix(runId: string): Promise<BenchmarkMatrix> {
+    return this.get<BenchmarkMatrix>(`/benchmark-runs/${encodeURIComponent(runId)}/matrix`);
+  }
+
+  /** One case side by side for 2–4 variants: traces, tool calls and answers diffed against the first. */
+  compareBenchmarkCase(runId: string, caseKey: string, opts: { variants?: string[]; repetition?: number } = {}): Promise<BenchmarkCaseComparison> {
+    const q = new URLSearchParams({ case: caseKey });
+    if (opts.variants?.length) q.set("variants", opts.variants.join(","));
+    if (opts.repetition) q.set("repetition", String(opts.repetition));
+    return this.get<BenchmarkCaseComparison>(`/benchmark-runs/${encodeURIComponent(runId)}/compare?${q.toString()}`);
+  }
+
+  cancelBenchmarkRun(runId: string): Promise<BenchmarkRun> {
+    return this.post<BenchmarkRun>(`/benchmark-runs/${encodeURIComponent(runId)}/cancel`);
+  }
+
+  // ── Playground: chat panes side by side, each bound to a variant ──
+
+  getPlaygroundSessions(): Promise<PlaygroundSession[]> {
+    return this.get<PlaygroundSession[]>("/playground/sessions");
+  }
+
+  createPlaygroundSession(panes: PlaygroundPaneInput[]): Promise<PlaygroundSession> {
+    return this.post<PlaygroundSession>("/playground/sessions", { panes });
+  }
+
+  getPlaygroundSession(id: string): Promise<PlaygroundSession> {
+    return this.get<PlaygroundSession>(`/playground/sessions/${encodeURIComponent(id)}`);
+  }
+
+  /** Replace the panes (a pane whose variant and toggles are unchanged keeps its conversation). */
+  updatePlaygroundSession(id: string, panes: PlaygroundPaneInput[]): Promise<PlaygroundSession> {
+    return this.put<PlaygroundSession>(`/playground/sessions/${encodeURIComponent(id)}`, { panes });
+  }
+
+  deletePlaygroundSession(id: string): Promise<{ deleted: string }> {
+    return this.del<{ deleted: string }>(`/playground/sessions/${encodeURIComponent(id)}`);
+  }
+
+  resetPlaygroundSession(id: string, paneId?: string): Promise<PlaygroundSession> {
+    return this.post<PlaygroundSession>(`/playground/sessions/${encodeURIComponent(id)}/reset`, paneId ? { paneId } : {});
+  }
+
+  /**
+   * Send a message to the panes (or `paneIds`). With `onEvent` the answers stream (start, text,
+   * turn, tool, done per pane) and the result arrives at the end.
+   */
+  async sendPlayground(id: string, req: { message: string; paneIds?: string[]; allowRealTools?: boolean }, opts: { onEvent?: (e: PlaygroundStreamEvent) => void; signal?: AbortSignal } = {}): Promise<{ session: PlaygroundSession; exchanges: Record<string, PlaygroundExchange> }> {
+    const path = `/playground/sessions/${encodeURIComponent(id)}/send`;
+    if (!opts.onEvent) return this.post(path, req);
+    const res = await this.fetchFn(this.apiUrl(path), {
+      method: "POST",
+      headers: { ...this.headers, "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ ...req, stream: true }),
+      ...(opts.signal ? { signal: opts.signal } : {}),
+    });
+    if (!(res.headers.get("content-type") ?? "").includes("text/event-stream")) {
+      const json = (await res.json()) as ApiResult<{ session: PlaygroundSession; exchanges: Record<string, PlaygroundExchange> }>;
+      if (!json.ok) throw new PolpoApiError(json.error, json.code, res.status, json.details);
+      return json.data;
+    }
+    const reader = res.body?.getReader();
+    if (!reader) throw new PolpoApiError("No response body", "INTERNAL_ERROR", 500);
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let event = "message";
+    let result: { session: PlaygroundSession; exchanges: Record<string, PlaygroundExchange> } | undefined;
+    let failure: { error: string; code?: string } | undefined;
+    const handle = (line: string) => {
+      if (line.startsWith("event:")) { event = line.slice(6).trim(); return; }
+      if (!line.startsWith("data:")) return;
+      let data: unknown;
+      try { data = JSON.parse(line.slice(5).trim()); } catch { return; }
+      if (event === "end") result = data as typeof result;
+      else if (event === "error") failure = data as typeof failure;
+      else opts.onEvent!(data as PlaygroundStreamEvent);
+    };
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) handle(line.trim());
+    }
+    if (buffer.trim()) handle(buffer.trim());
+    if (failure) throw new PolpoApiError(failure.error, (failure.code ?? "INTERNAL_ERROR") as never, 400);
+    if (!result) throw new PolpoApiError("The answer was cut short", "INTERNAL_ERROR", 502);
+    return result;
+  }
+
+  /** One message to 1–4 panes without keeping a session (headless comparison). */
+  playgroundCompare(panes: PlaygroundPaneInput[], message: string, opts: { allowRealTools?: boolean } = {}): Promise<{ panes: PlaygroundPane[]; exchanges: Record<string, PlaygroundExchange> }> {
+    return this.post("/playground/send", { panes, message, ...opts });
+  }
+
+  /** "Save as test case": a pane's exchange as a case (returned for review, or saved with `save`). */
+  playgroundCaseFromExchange(id: string, req: { paneId: string; exchange?: number; name?: string; mockModel?: boolean; save?: { agent: string; suite: string } }): Promise<{ case: SuiteCase; suite?: AgentSuite }> {
+    return this.post(`/playground/sessions/${encodeURIComponent(id)}/case`, req);
+  }
+
+  /** "Promote variant": its overrides into the agent's draft (never deployed). Admins. */
+  promotePlaygroundVariant(req: { agent: string; version?: string; overrides: SuiteVariantOverrides; note?: string }): Promise<{ agent: string; fields: Record<string, unknown>; draftChanged: boolean }> {
+    return this.post("/playground/promote", req);
   }
 
   // ── Hosted MCP servers ──
