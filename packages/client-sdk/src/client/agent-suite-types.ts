@@ -145,8 +145,8 @@ export interface AgentSuite {
   /** Scorers every case gets. */
   scorers?: SuiteScorer[];
   evals?: SuiteEvalSettings;
-  /** later (phase 3) */
-  gate?: { required?: boolean; minPassRate?: number; maxRegression?: number; scoreThresholds?: Record<string, number> };
+  /** A deploy gate: required before a version reaches production (docs/agent-suites.md, "CI gate"). */
+  gate?: SuiteGate;
   tags?: string[];
   revision: number;
   createdAt: string;
@@ -181,7 +181,7 @@ export interface SuiteRunRequest {
   variant?: { id?: string; label?: string };
   benchmarkRunId?: string;
   repetition?: number;
-  trigger?: "manual" | "publish" | "schedule" | "ci" | "benchmark";
+  trigger?: "manual" | "publish" | "deploy" | "schedule" | "ci" | "benchmark";
   wait?: boolean;
   /** Confirm a run that uses real tools (side effects possible; approvals never given). */
   allowRealTools?: boolean;
@@ -292,7 +292,7 @@ export interface SuiteRun {
   /** later (phase 5) */
   benchmarkRunId?: string;
   repetition?: number;
-  trigger: "manual" | "publish" | "schedule" | "ci" | "benchmark";
+  trigger: "manual" | "publish" | "deploy" | "schedule" | "ci" | "benchmark";
   status: SuiteRunStatus;
   startedAt: string;
   finishedAt?: string;
@@ -310,7 +310,8 @@ export interface SuiteRun {
   /** "Explain this run" (Markdown). */
   review?: SuiteRunReview;
   /** later (phase 3) */
-  gate?: { decision: "pass" | "fail" | "override"; reason?: string; by?: string };
+  /** A gate run (trigger deploy / publish): the decision and its deploy gate. */
+  gate?: { decision: "pass" | "fail" | "override"; reason?: string; by?: string; gateId?: string };
   notes: string[];
   error?: string;
 }
@@ -381,4 +382,84 @@ export interface SuiteTrend {
   points: SuiteTrendPoint[];
   byVersion: Array<{ version: string; runs: number; passRate: number; score?: number; costUsd: number; durationMs: number; lastRunAt: string }>;
   scorers: Array<{ id: string; label: string }>;
+}
+
+// ── Deploy gates (agent suites phase 3) ──
+
+/** A suite as a deploy gate of its agent. */
+export interface SuiteGate {
+  /** Must pass before a version is deployed to production. */
+  required?: boolean;
+  /** Minimum pass rate (0..1, default 1). */
+  minPassRate?: number;
+  /** Largest pass-rate (or overall score) drop allowed versus the baseline (0..1). */
+  maxRegression?: number;
+  /** Minimum mean score per scorer id ("score": the run's overall score). */
+  scoreThresholds?: Record<string, number>;
+  /** Also run when a version is published (non-blocking). */
+  onPublish?: boolean;
+  /** The gate may run the suite's real-tools cases (admins only). */
+  allowRealTools?: boolean;
+}
+
+export type DeployGateTrigger = "deploy" | "api-update" | "publish";
+/** running = "in verifica"; blocked: a deploy stopped; failed: a publish check failed; override: deployed anyway by an admin. */
+export type DeployGateStatus = "running" | "passed" | "blocked" | "failed" | "override" | "cancelled" | "errored";
+export type DeployGateSuiteStatus = "queued" | "running" | "passed" | "failed" | "errored" | "cancelled" | "not_run";
+
+export interface DeployGateSuite {
+  suiteId: string;
+  suiteName: string;
+  suiteRevision: number;
+  runId?: string;
+  status: DeployGateSuiteStatus;
+  reasons: string[];
+  failedCases: Array<{ key: string; caseName: string; failed: string[]; error?: string }>;
+  passRate?: number;
+  score?: number;
+  baselineRunId?: string;
+  thresholds: { minPassRate: number; maxRegression?: number; scoreThresholds?: Record<string, number> };
+  progress: { done: number; total: number };
+}
+
+/** The required suites run against a version (before a deploy, or as a publish check). */
+export interface AgentDeployGate {
+  id: string;
+  agent: string;
+  version: string;
+  from?: string;
+  trigger: DeployGateTrigger;
+  status: DeployGateStatus;
+  requestedBy: string;
+  requestedAt: string;
+  finishedAt?: string;
+  note?: string;
+  suites: DeployGateSuite[];
+  progress: { done: number; total: number };
+  deployId?: string;
+  blockedEntryId?: string;
+  override?: { by: string; at: string; reason: string; failed: string[] };
+  cancelledBy?: string;
+  error?: string;
+  notes: string[];
+}
+
+/** What a deploy history entry carries about its gate. */
+export interface AgentDeployGateRef {
+  id: string;
+  status: DeployGateStatus;
+  trigger: DeployGateTrigger;
+  failed: string[];
+  suites: Array<{ suiteId: string; suiteName: string; status: DeployGateSuiteStatus; runId?: string; passRate?: number; score?: number }>;
+  override?: { by: string; at: string; reason: string; failed: string[] };
+}
+
+/** A version's latest gate (the badge in the versions list). */
+export interface AgentVersionGateStatus {
+  gateId: string;
+  status: DeployGateStatus;
+  trigger: DeployGateTrigger;
+  at: string;
+  failed: string[];
+  progress?: { done: number; total: number };
 }

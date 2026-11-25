@@ -1,11 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { SUITE_LIMITS, type AgentSuite, type AgentSuiteStore, type SuiteRun, type SuiteRunListOptions } from "@polpo-ai/core/agent-suites";
+import { DEPLOY_GATE_LIMITS, SUITE_LIMITS, type AgentDeployGate, type AgentSuite, type AgentSuiteStore, type SuiteRun, type SuiteRunListOptions } from "@polpo-ai/core/agent-suites";
 
 /**
  * File-based AgentSuiteStore, per agent under `.polpo/agent-suites/<agent>/`:
  *   suites/<id>.json   one suite (cases, datasets, mocks)
  *   runs/<id>.json     one run (results with their traces); the newest {@link SUITE_LIMITS.runsKept} kept, and marked baselines
+ *   gates/<id>.json    one deploy gate (the required suites run against a version); the newest {@link DEPLOY_GATE_LIMITS.kept} kept
  */
 export class FileAgentSuiteStore implements AgentSuiteStore {
   private readonly dir: string;
@@ -17,6 +18,7 @@ export class FileAgentSuiteStore implements AgentSuiteStore {
   private agentDir(agent: string): string { return join(this.dir, encodeURIComponent(agent)); }
   private suitesDir(agent: string): string { return join(this.agentDir(agent), "suites"); }
   private runsDir(agent: string): string { return join(this.agentDir(agent), "runs"); }
+  private gatesDir(agent: string): string { return join(this.agentDir(agent), "gates"); }
 
   private static readJson<T>(path: string): T | undefined {
     try { return JSON.parse(readFileSync(path, "utf-8")) as T; } catch { return undefined; }
@@ -82,6 +84,33 @@ export class FileAgentSuiteStore implements AgentSuiteStore {
     const runs = this.allRuns(run.agent);
     for (const old of runs.slice(SUITE_LIMITS.runsKept)) {
       if (old.status === "running" || old.status === "queued" || old.isBaseline) continue;
+      rmSync(join(dir, `${encodeURIComponent(old.id)}.json`), { force: true });
+    }
+  }
+
+  private allGates(agent: string): AgentDeployGate[] {
+    const dir = this.gatesDir(agent);
+    return FileAgentSuiteStore.jsonFiles(dir)
+      .map((f) => FileAgentSuiteStore.readJson<AgentDeployGate>(join(dir, f)))
+      .filter((g): g is AgentDeployGate => !!g)
+      .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt));
+  }
+
+  async listGates(agent: string, opts: { version?: string; limit?: number } = {}): Promise<AgentDeployGate[]> {
+    return this.allGates(agent).filter((g) => !opts.version || g.version === opts.version).slice(0, Math.max(1, opts.limit ?? DEPLOY_GATE_LIMITS.kept));
+  }
+
+  async getGate(agent: string, id: string): Promise<AgentDeployGate | undefined> {
+    return FileAgentSuiteStore.readJson<AgentDeployGate>(join(this.gatesDir(agent), `${encodeURIComponent(id)}.json`));
+  }
+
+  async saveGate(gate: AgentDeployGate): Promise<void> {
+    const dir = this.gatesDir(gate.agent);
+    const isNew = !existsSync(join(dir, `${encodeURIComponent(gate.id)}.json`));
+    FileAgentSuiteStore.writeJson(dir, `${encodeURIComponent(gate.id)}.json`, gate);
+    if (!isNew) return;
+    for (const old of this.allGates(gate.agent).slice(DEPLOY_GATE_LIMITS.kept)) {
+      if (old.status === "running") continue;
       rmSync(join(dir, `${encodeURIComponent(old.id)}.json`), { force: true });
     }
   }

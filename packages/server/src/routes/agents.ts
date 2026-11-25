@@ -5,7 +5,8 @@ import { normalizeConnectorTools, unknownComputersProblem, type FileSystem } fro
 import { AddAgentSchema, UpdateAgentSchema, RenameTeamSchema, AddTeamSchema } from "../schemas.js";
 import { redactAgentConfig, redactTeam, sanitizeTranscriptEntry } from "../security.js";
 import { buildETag, contentFingerprint, handleConditional } from "../etag.js";
-import { registerAgentVersionRoutes, versionErrorResponse, type AgentVersionDeps } from "./agent-versions.js";
+import { DEPLOY_GATE_MAX_WAIT_MS, registerAgentVersionRoutes, versionErrorResponse, type AgentVersionDeps } from "./agent-versions.js";
+import { deployGateFailures } from "@polpo-ai/core/agent-suites";
 import { registerAgentTestRoutes, type AgentTestRouteDeps } from "./agent-tests.js";
 import { registerAgentSuiteRoutes, type AgentSuiteRouteDeps } from "./agent-suites.js";
 import { AGENT_FIELD_CLASSIFICATION } from "@polpo-ai/core/agent-versions";
@@ -93,7 +94,13 @@ export function agentRoutes(getDeps: () => {
    */
   versions?: AgentVersionDeps & {
     /** Change the draft and, as asked, publish and deploy (see Orchestrator.updateAgentVersioned). */
-    update: (name: string, updates: any, opts: { actor: string; mode: "draft" | "publish" | "deploy"; bump?: "major" | "minor" | "patch"; version?: string; note?: string }) => Promise<{ agent: any; draftChanged: boolean; published?: any; deployed?: any }>;
+    update: (name: string, updates: any, opts: { actor: string; mode: "draft" | "publish" | "deploy"; bump?: "major" | "minor" | "patch"; version?: string; note?: string; gateWaitMs?: number }) => Promise<{
+      agent: any; draftChanged: boolean; published?: any; deployed?: any;
+      /** mode deploy through the deploy gate (required suites): deployed, pending or blocked. */
+      deploy?: { status: "deployed" | "pending" | "blocked"; message: string; gate?: any };
+      /** mode publish: the publish checks started (suites with gate.onPublish). */
+      check?: any;
+    }>;
     /** settings.agents.versioning.autoDeployApiUpdates (default true). */
     autoDeploy: () => boolean;
   };
@@ -600,11 +607,18 @@ export function agentRoutes(getDeps: () => {
         const result = await deps.versions.update(name, updates, {
           actor: deps.versions.actor(c), mode,
           ...(body.bump ? { bump: body.bump } : {}), ...(body.version ? { version: body.version } : {}), ...(body.note ? { note: body.note } : {}),
+          ...(body.wait ? { gateWaitMs: DEPLOY_GATE_MAX_WAIT_MS } : {}),
         });
+        const gate = result.deploy?.gate;
         versioning = {
           mode, draftChanged: result.draftChanged,
           ...(result.published ? { published: { version: result.published.version, bump: result.published.bump, changedFields: result.published.changes.map((ch: { field: string }) => ch.field) } } : {}),
           ...(result.deployed ? { deployed: result.deployed } : {}),
+          // the agent's required suites decide the deploy: pending ("in verifica") or blocked → published, not deployed
+          ...(result.deploy ? { deployStatus: result.deploy.status, deployMessage: result.deploy.message } : {}),
+          ...(gate ? { gate: { id: gate.id, status: gate.status, version: gate.version, progress: gate.progress, failed: deployGateFailures(gate), suites: gate.suites.map((s: any) => ({ suiteId: s.suiteId, suiteName: s.suiteName, status: s.status, runId: s.runId, reasons: s.reasons })) } } : {}),
+          ...(result.deploy && result.deploy.status !== "deployed" && result.published ? { warning: `Published as ${result.published.version} but not deployed: ${result.deploy.message}` } : {}),
+          ...(result.check ? { check: { id: result.check.id, status: result.check.status, version: result.check.version } } : {}),
         };
       } else {
         await deps.updateAgent(name, updates);

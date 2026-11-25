@@ -175,6 +175,8 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_agent_deploy", name: "agent_deploy", group: "agent-versions" },
   { mcp: "polpo_agent_rollback", name: "agent_rollback", group: "agent-versions" },
   { mcp: "polpo_agent_deploys", name: "agent_deploys", group: "agent-versions" },
+  // deploy gates: the required suites verifying a deploy (in verifica, passed, blocked, override)
+  { mcp: "polpo_agent_deploy_gates", name: "agent_deploy_gates", group: "agent-versions" },
   // Agent tests: check everything an agent has at its disposal, apply the one-click fixes
   { mcp: "polpo_agent_test", name: "agent_test", group: "agent-versions" },
   // Agent suites: tests and evals with mocks, run against a version, read the reports

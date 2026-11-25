@@ -35,6 +35,7 @@ vi.mock("@polpo-ai/react", () => ({
     diff: vi.fn(async () => ({ changes: [], unified: "" })), get: vi.fn(), publish: vi.fn(), discardDraft: vi.fn(), rebaseDraft: vi.fn(),
   }),
   useAgentDeploys: () => ({ data: DEPLOYS, isLoading: false, error: null, refetch: async () => undefined, deploy: vi.fn(), rollback: vi.fn(), get: vi.fn() }),
+  useAgentDeployGates: () => ({ data: [], pending: undefined, isLoading: false, error: null, refetch: async () => undefined, get: vi.fn(), cancel: vi.fn(), override: vi.fn() }),
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock("../src/components/ai-elements/message", () => ({

@@ -9,6 +9,8 @@ import type { Orchestrator } from "../core/orchestrator.js";
 import { AgentSuiteRunner, runAsSuiteCase, type AgentSuiteDeps, type SessionToolCall, type SuiteTurnResult } from "./agent-suites.js";
 import { FileAgentSuiteStore } from "../stores/file-agent-suite-store.js";
 import { sandboxedCustomScorer, suiteJudge, suiteReviewer } from "./agent-suite-scorers.js";
+import { AgentDeployGates } from "./agent-deploy-gates.js";
+import { deployGateSummary } from "@polpo-ai/core";
 
 export interface AgentSuiteHostOptions {
   orchestrator: Orchestrator;
@@ -26,6 +28,32 @@ export function agentSuiteRunnerFor(opts: AgentSuiteHostOptions): AgentSuiteRunn
   const runner = new AgentSuiteRunner(agentSuiteDeps(opts));
   runners.set(o, { polpoDir: o.getPolpoDir(), runner });
   return runner;
+}
+
+const gateManagers = new WeakMap<Orchestrator, { polpoDir: string; gates: AgentDeployGates }>();
+
+/**
+ * The instance's deploy gates (one per orchestrator): required suites run before a version reaches
+ * production; the orchestrator calls them for every deploy (Orchestrator.setAgentDeployGate).
+ */
+export function agentDeployGatesFor(opts: AgentSuiteHostOptions): AgentDeployGates {
+  const o = opts.orchestrator;
+  const cached = gateManagers.get(o);
+  if (cached && cached.polpoDir === o.getPolpoDir()) return cached.gates;
+  const gates = new AgentDeployGates({
+    runner: () => agentSuiteRunnerFor(opts),
+    versioning: () => o.getAgentVersioning(),
+    deploy: (name, version, d) => o.deployAgentVersion(name, version, d),
+    emit: (g) => {
+      o.emit("agent:gate", {
+        agentName: g.agent, gateId: g.id, version: g.version, status: g.status, trigger: g.trigger, progress: g.progress,
+        summary: deployGateSummary(g), timestamp: new Date().toISOString(),
+      });
+    },
+    changed: (name) => { void o.notifyAgentChanged(name); },
+  });
+  gateManagers.set(o, { polpoDir: o.getPolpoDir(), gates });
+  return gates;
 }
 
 export function agentSuiteDeps(opts: AgentSuiteHostOptions): AgentSuiteDeps {

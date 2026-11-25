@@ -32,6 +32,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-25-agent-suites-gate",
+    date: "2026-11-25",
+    kind: "new",
+    title: "Le suite come controllo prima del deploy",
+    summary: "Segna una suite come obbligatoria: ogni deploy dell'agente la esegue prima sulla nuova versione e la produzione cambia solo se passa. Altrimenti il deploy è bloccato e lo trovi nella cronologia, con cosa è fallito.",
+    body: [
+      "- **Suite obbligatorie**: nell'editor della suite, vista **Gate**: percentuale minima di casi superati, quanto può peggiorare rispetto alla baseline, soglie per punteggio.",
+      "- **In verifica**: il deploy resta in attesa mentre le suite girano, con l'avanzamento in tempo reale; puoi annullarlo. La produzione si sposta solo se tutte passano.",
+      "- **Bloccato**: se una suite non passa, la produzione non cambia e la cronologia dei deploy mostra quali suite e quali casi sono falliti, con il link al run.",
+      "- **Forzare il deploy**: un amministratore può fare il deploy comunque, scrivendo il motivo: resta nella cronologia chi, quando, perché e cosa era fallito.",
+      "- **Alla pubblicazione** (facoltativo): le suite girano anche quando pubblichi una versione, così vedi il risultato prima del deploy. Il rollback non viene mai bloccato.",
+      "- Anche le modifiche via API che fanno il deploy automatico passano dal controllo: se non passa, la versione resta pubblicata ma non in produzione e la risposta lo dice. Anche via API, MCP e nella chat con Polpo.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri un agente", to: "/agents" },
+  },
+  {
     id: "2026-11-25-agent-suite-evals",
     date: "2026-11-25",
     kind: "new",

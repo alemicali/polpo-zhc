@@ -159,6 +159,7 @@ const EVENT_CATALOG: { [K in PolpoEvent]: Omit<HookEventDef, "name"> } = {
   "agent:updated": { label: "Agent updated", description: "An agent's configuration changed.", category: "agent", placeholders: ["agentName"] },
   "agent:removed": { label: "Agent removed", description: "An agent was removed.", category: "agent", placeholders: ["agentName"] },
   "agent:reflected": { label: "Agent reflected", description: "An agent with a drive reflected on what happened and decided whether to act (write, plan, or nothing).", category: "agent", placeholders: ["agentName", "trigger", "summary"] },
+  "agent:gate": { label: "Agent deploy gate", description: "The suites required before a version reaches production started, progressed, passed (deployed), blocked the deploy, or were overridden or cancelled.", category: "agent", placeholders: ["agentName", "version", "status", "summary"] },
   "agent:learned": { label: "Agent learned", description: "An agent reviewed its conversations and updated its memory or its own skills.", category: "agent", placeholders: ["agentName", "messages", "summary"] },
   "team:created": { label: "Team created", description: "A team was added.", category: "agent", placeholders: ["teamName"] },
   "team:updated": { label: "Team updated", description: "A team changed (or was renamed).", category: "agent", placeholders: ["teamName", "oldName"] },

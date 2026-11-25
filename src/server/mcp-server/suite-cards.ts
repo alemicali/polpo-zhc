@@ -47,12 +47,15 @@ export async function loadSuiteCard(deps: McpDeps, args: { agent: string; suite?
     if (!t.ok) return { ok: false, error: t.status === 404 ? `There is no suite "${args.suite}" for ${agent}.` : t.error };
     card = buildSuiteTrendCard({ agent, trend: t.data as Parameters<typeof buildSuiteTrendCard>[0]["trend"], key: key(), ...(s.ok ? { suiteName: (s.data as { name: string }).name } : {}), ...(link ? { link } : {}) });
   } else {
-    const [s, runs] = await Promise.all([get(deps, `/agents/${enc(agent)}/suites`), get(deps, `/agents/${enc(agent)}/suite-runs?limit=100`)]);
+    const [s, runs, gates] = await Promise.all([
+      get(deps, `/agents/${enc(agent)}/suites`), get(deps, `/agents/${enc(agent)}/suite-runs?limit=100`), get(deps, `/agents/${enc(agent)}/deploy-gates?limit=5`),
+    ]);
     if (!s.ok) return { ok: false, error: s.status === 404 ? `There is no agent "${agent}".` : s.error };
     card = buildSuiteListCard({
       agent, key: key(), ...(link ? { link } : {}),
       suites: s.data as Parameters<typeof buildSuiteListCard>[0]["suites"],
       runs: runs.ok ? runs.data as Parameters<typeof buildSuiteListCard>[0]["runs"] : [],
+      ...(gates.ok ? { gates: gates.data as NonNullable<Parameters<typeof buildSuiteListCard>[0]["gates"]> } : {}),
     });
   }
   const appearance = await cardAppearance(deps);
@@ -64,7 +67,8 @@ const output = z.object({
   key: z.object({ createdAt: z.number(), seq: z.number() }).passthrough().optional(),
   generatedAt: z.string().optional(),
   agent: z.string().optional(),
-  suites: z.array(looseObject).optional().describe("suites view: each suite with its last run (score, regressions) and baseline"),
+  suites: z.array(looseObject).optional().describe("suites view: each suite with its last run (score, regressions), baseline and deploy gate (required)"),
+  gates: z.array(looseObject).optional().describe("suites view: the latest deploy gates (version, status — verifying, passed, blocked, override —, what failed)"),
   run: looseObject.optional().describe("run view: status, pass rate, overall score, cost"),
   scorers: z.array(looseObject).optional().describe("run view: mean / median / p10 per scorer with the delta versus the baseline; trend view: the scorer ids"),
   cases: z.array(looseObject).optional().describe("run view: each case with its status, score, failed checks and change versus the baseline"),
@@ -90,7 +94,7 @@ export function registerSuiteCards(server: McpServer, deps: McpDeps, enabled: Re
 
   registerAppTool(server, "polpo_agent_suite_show", {
     title: "Show agent suites",
-    description: "Show an agent's suites as a card: the suites with their last run (pass rate, score, regressions); with run (or view run and suite: its latest run), the run's report — "
+    description: "Show an agent's suites as a card: the suites with their last run (pass rate, score, regressions), which ones gate its deploys (required) and the latest deploy gates (in verifica, passed, blocked, override); with run (or view run and suite: its latest run), the run's report — "
       + "each case's status, failed assertions and scorers, scores per scorer (mean, median, p10), deltas and regressions versus the baseline, flaky cases, the AI review; "
       + "with view trend and suite, the suite's runs over time as a chart (score, pass rate, cost) and by version. Use it when the person asks how an agent's tests or evals are going.",
     inputSchema: {

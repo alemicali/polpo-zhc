@@ -17,6 +17,7 @@
  * outside the agent config, so it is never versioned nor restored by a rollback.
  */
 import type { AgentConfig, AgentUpdate } from "./types.js";
+import type { AgentDeployGateRef } from "./agent-suite-gates.js";
 
 // ── Field classification ────────────────────────────────────────────────
 
@@ -153,7 +154,8 @@ export interface AgentPointer {
   updatedBy: string;
 }
 
-export type AgentDeployAction = "deploy" | "rollback" | "initial";
+/** blocked: a deploy the required suites stopped (the pointer did not move). */
+export type AgentDeployAction = "deploy" | "rollback" | "initial" | "blocked";
 
 /** One move of a pointer: the deploy history (audit log). */
 export interface AgentDeployEntry {
@@ -167,6 +169,8 @@ export interface AgentDeployEntry {
   actor: string;
   note?: string;
   at: string;
+  /** The deploy gate that verified (or blocked, or was overridden for) it: attached when the history is read. */
+  gate?: AgentDeployGateRef;
 }
 
 export const PRODUCTION_POINTER = "production";
@@ -567,6 +571,8 @@ export interface DeployOptions {
   actor: string;
   note?: string;
   pointer?: string;
+  /** The history entry's id (a deploy gate's id, to link the two). */
+  id?: string;
 }
 
 /**
@@ -859,7 +865,7 @@ export class AgentVersioning {
     const at = this.now();
     await this.store.setPointer({ agent: name, pointer, version, updatedAt: at, updatedBy: opts.actor });
     const entry: AgentDeployEntry = {
-      id: this.id(), agent: name, pointer, ...(from ? { from } : {}), to: version, action: opts.action ?? "deploy",
+      id: opts.id ?? this.id(), agent: name, pointer, ...(from ? { from } : {}), to: version, action: opts.action ?? "deploy",
       actor: opts.actor, at, ...(opts.note?.trim() ? { note: opts.note.trim() } : {}),
     };
     await this.store.addDeploy(entry);
@@ -875,6 +881,25 @@ export class AgentVersioning {
   }
 
   /**
+   * Record a deploy the required suites blocked: a history entry (action "blocked") from what
+   * production runs to the version that did not pass. The pointer does not move.
+   */
+  async recordBlocked(name: string, version: string, opts: DeployOptions): Promise<AgentDeployEntry> {
+    await this.ensureInitial(name);
+    return this.serial(name, async () => {
+      const pointer = opts.pointer ?? PRODUCTION_POINTER;
+      if (!(await this.store.getVersion(name, version))) throw new AgentVersionError(`${name} has no version ${version}`, "NOT_FOUND");
+      const from = await this.pointer(name, pointer);
+      const entry: AgentDeployEntry = {
+        id: opts.id ?? this.id(), agent: name, pointer, ...(from ? { from } : {}), to: version, action: "blocked",
+        actor: opts.actor, at: this.now(), ...(opts.note?.trim() ? { note: opts.note.trim() } : {}),
+      };
+      await this.store.addDeploy(entry);
+      return entry;
+    });
+  }
+
+  /**
    * Roll production back: to `to`, or to the version production ran before the deploy that brought
    * the current one, else the published version below it.
    */
@@ -887,7 +912,7 @@ export class AgentVersioning {
         const deploys = await this.store.listDeploys(name);
         // the deploy that brought the current version (not a rollback to it): one step back in the
         // history each time, so repeated rollbacks walk back instead of toggling
-        to = deploys.find((d) => d.pointer === PRODUCTION_POINTER && d.to === current && d.action !== "rollback" && d.from && d.from !== current)?.from;
+        to = deploys.find((d) => d.pointer === PRODUCTION_POINTER && d.to === current && d.action !== "rollback" && d.action !== "blocked" && d.from && d.from !== current)?.from;
       }
       if (!to) {
         const below = (await this.store.listVersions(name))

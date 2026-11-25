@@ -5,8 +5,9 @@
  * Runs that touch real tools ask for a confirmation; the offline "contract" mode never does.
  */
 import { useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { FlaskRound, History, Loader2, Pencil, Play, Plus, Star, Trash2, TrendingUp } from "lucide-react";
+import { FlaskRound, History, Loader2, Pencil, Play, Plus, ShieldCheck, Star, Trash2, TrendingUp } from "lucide-react";
 import { useAgentSuites, useAgentVersions, type AgentSuite, type SuiteMockMode } from "@polpo-ai/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,7 +32,9 @@ export function AgentSuitesTab() {
   const [target, setTarget] = useState("production");
   const [mode, setMode] = useState<SuiteMockMode | "own">("own");
   const [editing, setEditing] = useState<{ suite?: AgentSuite; key: number } | null>(null);
-  const [viewing, setViewing] = useState<string | null>(null);
+  // ?run=<id> (a deploy gate's "Open run") opens that run's report
+  const [params] = useSearchParams();
+  const [viewing, setViewing] = useState<string | null>(params.get("run"));
   const [trendOf, setTrendOf] = useState<AgentSuite | null>(null);
   const [confirm, setConfirm] = useState<{ kind: "real"; suite: AgentSuite } | { kind: "delete"; suite: AgentSuite } | null>(null);
   const [starting, setStarting] = useState<string | null>(null);
@@ -96,7 +99,15 @@ export function AgentSuitesTab() {
                 <li key={s.id} className="flex min-w-0 items-center gap-3 border-b border-border/40 px-4 py-2 last:border-b-0" data-testid="suite-row" data-suite={s.id}>
                   {last ? <SuiteStatusIcon status={last.status} /> : <span className="h-4 w-4 shrink-0" />}
                   <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setEditing({ suite: s, key: Date.now() })}>
-                    <p className="truncate text-xs font-medium">{s.name}</p>
+                    <p className="flex min-w-0 items-center gap-1.5 truncate text-xs font-medium">
+                      <span className="truncate">{s.name}</span>
+                      {s.gate?.required && (
+                        <Badge variant="outline" className="shrink-0 text-micro text-warning border-warning/30 bg-warning/10" data-testid="suite-required"
+                          title={`Required to deploy: pass rate ≥ ${Math.round((s.gate.minPassRate ?? 1) * 100)}%${s.gate.maxRegression !== undefined ? `, max regression ${s.gate.maxRegression}` : ""}${s.gate.onPublish ? ", also on publish" : ""}`}>
+                          <ShieldCheck className="mr-0.5 h-3 w-3" /> Required
+                        </Badge>
+                      )}
+                    </p>
                     <p className="truncate text-caption text-muted-foreground">
                       {s.cases.length} case(s){s.datasets.length ? ` · ${s.datasets.length} dataset(s)` : ""} · {suiteModeLabel(s.defaultMode)}
                       {last ? ` · last ${last.status} ${last.stats.passed}/${last.stats.total - last.stats.skipped}${last.aggregates?.score !== undefined ? ` · score ${formatScore(last.aggregates.score)}` : ""} (${runTargetLabel(last)})` : " · never run"}
@@ -154,6 +165,11 @@ export function AgentSuitesTab() {
                   <SuiteStatusIcon status={r.status} />
                   <span className="hidden text-xs sm:inline">{when(r.startedAt)}</span>
                   <Badge variant="outline" className="font-mono text-micro">{runTargetLabel(r)}</Badge>
+                  {(r.trigger === "deploy" || r.trigger === "publish") && (
+                    <Badge variant="secondary" className="text-micro" data-testid="suite-run-row-gate" title={r.gate ? `Gate: ${r.gate.decision}${r.gate.reason ? ` · ${r.gate.reason}` : ""}` : undefined}>
+                      {r.trigger === "deploy" ? "Deploy gate" : "Publish check"}{r.gate ? ` · ${r.gate.decision}` : ""}
+                    </Badge>
+                  )}
                   {r.isBaseline && <Star className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-label="Baseline" data-testid="suite-run-row-baseline" />}
                   <span className="min-w-0 flex-1 truncate text-caption text-muted-foreground">
                     {r.suiteName}{r.variant.label ? ` · ${r.variant.label}` : ""} · {r.stats.passed}/{r.stats.total - r.stats.skipped} passed

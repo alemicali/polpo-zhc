@@ -1247,6 +1247,8 @@ export type ErrorCode =
   | "AUTH_REQUIRED"
   | "FORBIDDEN"
   | "CONFLICT"
+  /** A deploy the agent's required suites blocked (details: { status, gate, entry }). */
+  | "GATE_BLOCKED"
   | "INTERNAL_ERROR";
 
 export interface ApiResponse<T> {
@@ -1543,6 +1545,8 @@ export interface AgentVersion {
   changedFields?: string[];
   /** Skill versions pinned at publish time (skill → version number). */
   skillVersions?: Record<string, number>;
+  /** Lists: the version's latest deploy gate (✓ passed, ✗ blocked / failed, in verifica, override). */
+  gate?: import("./agent-suite-types.js").AgentVersionGateStatus;
 }
 
 export interface AgentVersionState {
@@ -1565,6 +1569,8 @@ export interface AgentVersionState {
     suggestedBump?: AgentVersionBump;
     nextVersion?: string;
   };
+  /** Deploy gates: the suites that gate deploys, the deploy being verified now. */
+  gate?: { requiredSuites: Array<{ id: string; name: string; onPublish: boolean; allowRealTools: boolean }>; pending?: import("./agent-suite-types.js").AgentDeployGate };
 }
 
 /** The versioning summary returned with an agent (GET/PATCH /agents/{name}). */
@@ -1579,6 +1585,14 @@ export interface AgentVersioningSummary {
   draftChanged?: boolean;
   published?: { version: string; bump: string; changedFields: string[] };
   deployed?: AgentDeployEntry;
+  /** A deploy through the required suites: deployed, pending ("in verifica") or blocked (published, not deployed). */
+  deployStatus?: "deployed" | "pending" | "blocked";
+  deployMessage?: string;
+  gate?: { id: string; status: string; version: string; progress: { done: number; total: number }; failed: string[]; suites: Array<{ suiteId: string; suiteName: string; status: string; runId?: string; reasons: string[] }> };
+  /** Set when the deploy was not made: "Published as 1.3.0 but not deployed: …". */
+  warning?: string;
+  /** mode publish: the publish checks started. */
+  check?: { id: string; status: string; version: string };
 }
 
 export interface AgentVersionList {
@@ -1603,16 +1617,34 @@ export interface AgentDeployEntry {
   pointer: string;
   from?: string;
   to: string;
-  action: "deploy" | "rollback" | "initial";
+  /** blocked: the required suites stopped the deploy (production did not move). */
+  action: "deploy" | "rollback" | "initial" | "blocked";
   actor: string;
   note?: string;
   at: string;
   diff?: AgentVersionDiff;
+  /** The deploy gate that verified it (or blocked it, or was overridden). */
+  gate?: import("./agent-suite-types.js").AgentDeployGateRef;
 }
+
+/**
+ * A deploy request's outcome: deployed (the history entry, with its gate), or pending (the required
+ * suites are running: production moves when they pass). A blocked deploy throws a PolpoApiError
+ * with code GATE_BLOCKED (details: { status, gate, entry }).
+ */
+export type AgentDeployOutcome =
+  | (AgentDeployEntry & { status: "deployed"; gate?: import("./agent-suite-types.js").AgentDeployGate | import("./agent-suite-types.js").AgentDeployGateRef; message?: string })
+  | { status: "pending"; gate: import("./agent-suite-types.js").AgentDeployGate; message?: string };
 
 export interface AgentPublishResult {
   version: AgentVersion;
   deploy?: AgentDeployEntry;
+  /** deploy: true through the required suites. */
+  deployStatus?: "deployed" | "pending" | "blocked";
+  message?: string;
+  gate?: import("./agent-suite-types.js").AgentDeployGate;
+  /** Without deploy: the publish checks started (suites with gate.onPublish). */
+  check?: import("./agent-suite-types.js").AgentDeployGate;
 }
 
 // ── Agent tests ──

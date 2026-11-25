@@ -197,8 +197,25 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
     if (egress) return fail(egress);
     const r = await apiSend(deps, "PATCH", `/agents/${enc(name)}`, { ...body, ...flags });
     if (!r.ok) return apiError(r, `Updating agent ${name}`);
-    const result = r.data as Record<string, unknown> & { versioning?: { mode?: string; draftChanged?: boolean; production?: string; published?: { version: string; bump: string }; deployed?: { from?: string; to: string }; draft?: { hasChanges: boolean; nextVersion?: string } } };
+    const result = r.data as Record<string, unknown> & { versioning?: {
+      mode?: string; draftChanged?: boolean; production?: string; published?: { version: string; bump: string }; deployed?: { from?: string; to: string }; draft?: { hasChanges: boolean; nextVersion?: string };
+      deployStatus?: string; deployMessage?: string; gate?: { id: string; status: string; failed: string[] };
+    } };
     const v = result?.versioning;
+    if (v && !v.deployed && v.published && v.deployStatus && v.deployStatus !== "deployed") {
+      // the agent's required suites decide the deploy
+      const g = v.gate?.status === "running" ? await awaitGate(name, v.gate.id) : undefined;
+      if (g && g.status === "passed" && g.deployId) {
+        return ok(`${name}: ${Object.keys(body).join(", ")} published as ${v.published.version} and deployed to production: every required suite passed.\n${gateText(g)}`,
+          { agent: result, changed: Object.keys(body), versioning: { ...v, deployStatus: "deployed", gate: g } as Record<string, unknown> });
+      }
+      const status = g ? (g.status === "running" ? "pending" : "blocked") : v.deployStatus;
+      const text = status === "pending"
+        ? `${name}: ${Object.keys(body).join(", ")} published as ${v.published.version}; its deploy is being verified by the required suites (production moves when they pass: polpo_agent_deploy_gates id "${v.gate?.id}").`
+        : `${name}: ${Object.keys(body).join(", ")} published as ${v.published.version} but NOT deployed: the required suites blocked it (production stays on ${v.production ?? "its version"}).`;
+      return ok(`${text}${g ? `\n${gateText(g)}` : v.gate?.failed.length ? `\n${v.gate.failed.join("\n")}` : ""}`,
+        { agent: result, changed: Object.keys(body), versioning: { ...v, deployStatus: status, ...(g ? { gate: g } : {}) } as Record<string, unknown> });
+    }
     if (v && !v.deployed) {
       // the draft (or a published version not deployed): report what changed there
       const changedInDraft = v.draftChanged ? Object.keys(body) : [];
@@ -226,8 +243,45 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
   type FieldChange = { field: string; kind: string; textDiff?: string };
   type VersionDiff = { from?: string; to: string; changes: FieldChange[]; unified: string; suggestedBump?: string };
   const changesLine = (changes: FieldChange[]) => changes.length ? changes.map((c) => `${c.field} (${c.kind})`).join(", ") : "no changes";
-  const deployLine = (d: { at: string; actor: string; from?: string; to: string; action: string; note?: string; id: string }) =>
-    `${d.at.slice(0, 16).replace("T", " ")} · ${d.action === "rollback" ? "ROLLBACK " : d.action === "initial" ? "initial " : ""}${d.from ? `${d.from} → ` : ""}${d.to} · ${d.actor}${d.note ? ` · "${short(d.note, 120)}"` : ""} [${d.id}]`;
+  const deployLine = (d: { at: string; actor: string; from?: string; to: string; action: string; note?: string; id: string; gate?: { status: string; failed: string[]; override?: { reason: string } } }) =>
+    `${d.at.slice(0, 16).replace("T", " ")} · ${d.action === "rollback" ? "ROLLBACK " : d.action === "initial" ? "initial " : d.action === "blocked" ? "BLOCKED by suites " : ""}${d.from ? `${d.from} → ` : ""}${d.to} · ${d.actor}`
+    + `${d.gate ? ` · ${d.gate.status === "override" ? `OVERRIDE ("${short(d.gate.override?.reason ?? "", 120)}")` : d.gate.status === "passed" ? "suites ✓" : `suites ${d.gate.status}`}` : ""}`
+    + `${d.note && d.action !== "blocked" ? ` · "${short(d.note, 120)}"` : ""}${d.action === "blocked" && d.gate?.failed.length ? ` · ${short(d.gate.failed.join(" · "), 300)}` : ""} [${d.id}]`;
+
+  type GateSuite = { suiteId: string; suiteName: string; status: string; runId?: string; passRate?: number; score?: number; reasons: string[]; failedCases?: Array<{ caseName: string; failed: string[]; error?: string }>; progress?: { done: number; total: number } };
+  type Gate = {
+    id: string; agent: string; version: string; from?: string; trigger: string; status: string; requestedBy: string; requestedAt: string; finishedAt?: string;
+    progress: { done: number; total: number }; suites: GateSuite[]; deployId?: string; override?: { by: string; at: string; reason: string; failed: string[] }; error?: string;
+  };
+  const GATE_MARK: Record<string, string> = { running: "⏳ verifying", passed: "✓ passed", blocked: "✗ blocked", failed: "✗ failed", override: "⚠ override", cancelled: "– cancelled", errored: "✗ errored" };
+  /** A gate as text: status, progress, each suite's verdict with its failed cases and the run to open. */
+  const gateText = (g: Gate) => [
+    `${GATE_MARK[g.status] ?? g.status} · ${g.agent}@${g.version} (${g.trigger === "publish" ? "publish check" : g.trigger === "api-update" ? "API update" : "deploy"}${g.from ? `, production ${g.from}` : ""}) · ${g.progress.done}/${g.progress.total} cases · by ${g.requestedBy} [${g.id}]`,
+    ...g.suites.flatMap((s) => [
+      `  ${s.status === "passed" ? "✓" : s.status === "running" || s.status === "queued" ? "…" : "✗"} ${s.suiteName} [${s.suiteId}]: ${s.status}${s.passRate !== undefined ? ` · pass rate ${Math.round(s.passRate * 100)}%` : ""}${s.score !== undefined ? ` · score ${s.score.toFixed(2)}` : ""}${s.runId ? ` · run ${s.runId} (polpo_agent_suite_run_get)` : ""}`,
+      ...s.reasons.map((r) => `      ${r}`),
+      ...(s.failedCases ?? []).slice(0, 5).map((c) => `      ✗ ${c.caseName}: ${short(c.error ?? c.failed.join("; "), 200)}`),
+    ]),
+    ...(g.override ? [`  override by ${g.override.by}: "${g.override.reason}"`] : []),
+    ...(g.error ? [`  ${g.error}`] : []),
+  ].join("\n");
+  /** Wait (polling, up to ~50 s) for a gate to leave "running". */
+  const awaitGate = async (name: string, id: string): Promise<Gate | undefined> => {
+    let last: Gate | undefined;
+    for (let i = 0; i < 2; i++) {
+      const r = await apiGet(deps, `/agents/${enc(name)}/deploy-gates/${enc(id)}${qs({ wait: 25 })}`);
+      if (!r.ok) return last;
+      last = r.data as Gate;
+      if (last.status !== "running") return last;
+    }
+    return last;
+  };
+  /** The version's latest deploy gate (after a 409 GATE_BLOCKED). */
+  const latestGate = async (name: string, version: string): Promise<Gate | undefined> => {
+    const r = await apiGet(deps, `/agents/${enc(name)}/deploy-gates${qs({ version, limit: 1 })}`);
+    return r.ok ? (r.data as Gate[])[0] : undefined;
+  };
+  const suitesLink = (name: string) => dashboardLink(deps, `/agents/${enc(name)}?tab=versions`);
 
   tool("team", "polpo_agent_versions", {
     title: "List an agent's versions",
@@ -239,16 +293,22 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
   }, async ({ name }) => {
     const r = await apiGet(deps, `/agents/${enc(name)}/versions`);
     if (!r.ok) return r.status === 404 ? notFoundAgent(name) : apiError(r, `Reading ${name}'s versions`);
-    const data = r.data as { state: { production?: string; latest?: string; draft: { hasChanges: boolean; stale?: boolean; warning?: string; changes: FieldChange[]; nextVersion?: string; suggestedBump?: string } }; versions: Array<{ version: string; author: string; createdAt: string; note?: string; changedFields: string[] }> };
+    const data = r.data as {
+      state: { production?: string; latest?: string; draft: { hasChanges: boolean; stale?: boolean; warning?: string; changes: FieldChange[]; nextVersion?: string; suggestedBump?: string }; gate?: { requiredSuites: Array<{ id: string; name: string }>; pending?: Gate } };
+      versions: Array<{ version: string; author: string; createdAt: string; note?: string; changedFields: string[]; gate?: { status: string; failed: string[] } }>;
+    };
     const s = data.state;
+    const gateBadge = (g?: { status: string; failed: string[] }) => g ? ` · suites ${GATE_MARK[g.status] ?? g.status}${g.failed.length && g.status !== "override" ? ` (${short(g.failed.join(" · "), 160)})` : ""}` : "";
     const text = [
       `${name}: production ${s.production ?? "none"} · latest ${s.latest ?? "none"}`,
       s.draft.hasChanges
         ? `Draft: ${changesLine(s.draft.changes)} → would publish ${s.draft.nextVersion} (${s.draft.suggestedBump})`
         : "Draft: no unpublished changes",
       ...(s.draft.stale ? [`⚠ ${s.draft.warning} (polpo_agent_draft action rebase or discard)`] : []),
+      ...(s.gate?.requiredSuites.length ? [`Deploys are gated by: ${s.gate.requiredSuites.map((x) => x.name).join(", ")}`] : []),
+      ...(s.gate?.pending ? [`In verifica: ${s.gate.pending.version} (${s.gate.pending.progress.done}/${s.gate.pending.progress.total} cases) [${s.gate.pending.id}]`] : []),
       "",
-      ...data.versions.map((v) => `${v.version}${v.version === s.production ? " (production)" : ""} · ${v.createdAt.slice(0, 16).replace("T", " ")} · ${v.author}${v.note ? ` · "${short(v.note, 120)}"` : ""} · ${v.changedFields.join(", ") || "—"}`),
+      ...data.versions.map((v) => `${v.version}${v.version === s.production ? " (production)" : ""} · ${v.createdAt.slice(0, 16).replace("T", " ")} · ${v.author}${v.note ? ` · "${short(v.note, 120)}"` : ""} · ${v.changedFields.join(", ") || "—"}${gateBadge(v.gate)}`),
     ].join("\n");
     return ok(text, { state: s as Record<string, unknown>, versions: data.versions as Array<Record<string, unknown>> });
   });
@@ -325,7 +385,8 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
     title: "Publish an agent's draft",
     description: "Publish the agent's draft (its unpublished changes) as a new immutable version. The number follows the suggested bump "
       + "(patch: text, instructions, identity; minor: added tools, skills, connectors or settings; major: engine or model change, removed tools, skills or connectors) "
-      + "unless bump or version say otherwise. It does not change what runs: deploy it with polpo_agent_deploy (or deploy: true here, after the person agreed).",
+      + "unless bump or version say otherwise. It does not change what runs: deploy it with polpo_agent_deploy (or deploy: true here, after the person agreed; through the agent's required suites, if any). "
+      + "Suites with gate.onPublish run on publish (a non-blocking check: polpo_agent_deploy_gates).",
     inputSchema: {
       name: z.string().min(1).describe("The agent's name"),
       bump: z.enum(["major", "minor", "patch"]).optional().describe("Override the suggested bump"),
@@ -333,7 +394,7 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
       note: z.string().max(2000).optional().describe("Release note: what changed and why"),
       deploy: z.boolean().optional().describe("Also deploy it to production now (ask the person first)"),
     },
-    outputSchema: { version: looseObject, deploy: looseObject.optional() },
+    outputSchema: { version: looseObject, deploy: looseObject.optional(), gate: looseObject.optional(), check: looseObject.optional() },
     annotations: WRITE,
   }, async ({ name, bump, version, note, deploy }) => {
     const r = await apiSend(deps, "POST", `/agents/${enc(name)}/publish`, { bump, version, note, deploy });
@@ -342,33 +403,103 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
       if (r.status === 409) return fail(/rebase/.test(r.error ?? "") ? `${r.error} (polpo_agent_draft).` : `${r.error}. Change it first (polpo_agent_update with publish: false writes the draft), or see polpo_agent_versions.`);
       return apiError(r, `Publishing ${name}`);
     }
-    const data = r.data as { version: { version: string; changes: FieldChange[] }; deploy?: { from?: string; to: string } };
-    return ok(`Published ${name}@${data.version.version}: ${changesLine(data.version.changes)}.${data.deploy ? ` Deployed to production (${data.deploy.from ?? "none"} → ${data.deploy.to}).` : ` Production is unchanged: deploy it with polpo_agent_deploy.`}`,
-      { version: data.version as unknown as Record<string, unknown>, ...(data.deploy ? { deploy: data.deploy as unknown as Record<string, unknown> } : {}) });
+    const data = r.data as { version: { version: string; changes: FieldChange[] }; deploy?: { from?: string; to: string }; deployStatus?: string; message?: string; gate?: Gate; check?: Gate };
+    let gate = data.gate;
+    if (gate?.status === "running") gate = await awaitGate(name, gate.id) ?? gate;
+    const deployed = data.deploy || (gate && (gate.status === "passed" || gate.status === "override") && gate.deployId);
+    const what = deployed ? ` Deployed to production${data.deploy ? ` (${data.deploy.from ?? "none"} → ${data.deploy.to})` : ""}.`
+      : deploy && gate ? (gate.status === "running" ? ` Its deploy is being verified by the required suites: production moves when they pass (polpo_agent_deploy_gates id "${gate.id}").` : ` NOT deployed: the required suites blocked it. Production is unchanged.`)
+      : ` Production is unchanged: deploy it with polpo_agent_deploy.`;
+    return ok(`Published ${name}@${data.version.version}: ${changesLine(data.version.changes)}.${what}${gate ? `\n${gateText(gate)}` : ""}${data.check ? `\nPublish check started [${data.check.id}]: polpo_agent_deploy_gates.` : ""}`,
+      { version: data.version as unknown as Record<string, unknown>, ...(data.deploy ? { deploy: data.deploy as unknown as Record<string, unknown> } : {}), ...(gate ? { gate: gate as unknown as Record<string, unknown> } : {}), ...(data.check ? { check: data.check as unknown as Record<string, unknown> } : {}) });
   });
 
   tool("team", "polpo_agent_deploy", {
     title: "Deploy an agent version",
     description: "Deploy a published version to production: every chat, task, mission, schedule, channel and delegation that does not pin a version uses it from its next run "
-      + "(runs in flight keep theirs). Recorded in the deploy history. Needs confirm: true after the person agreed (show them polpo_agent_version_diff first).",
+      + "(runs in flight keep theirs). Recorded in the deploy history. Needs confirm: true after the person agreed (show them polpo_agent_version_diff first). "
+      + "When the agent has required suites (deploy gate) they run against the version first: production moves only if every one passes (this waits up to ~50 s, then the deploy stays pending: "
+      + "polpo_agent_deploy_gates); otherwise the deploy is blocked and recorded. override_reason (admins only) deploys anyway, recording which gates failed. cancel_gate: stop a verification.",
     inputSchema: {
       name: z.string().min(1).describe("The agent's name"),
-      version: semver.describe("The published version to deploy (polpo_agent_versions)"),
+      version: semver.optional().describe("The published version to deploy (polpo_agent_versions); not needed with cancel_gate"),
       note: z.string().max(2000).optional().describe("Why (kept in the deploy history)"),
+      override_reason: z.string().min(3).max(2000).optional().describe("Admins only: deploy even though the required suites failed (or without running them); the reason is recorded in the deploy history"),
+      cancel_gate: z.string().optional().describe("A deploy gate's id (polpo_agent_deploy_gates): stop that verification, nothing is deployed"),
       confirm: confirmParam("deploy this version to production"),
     },
-    outputSchema: { deploy: looseObject },
+    outputSchema: { deploy: looseObject.optional(), gate: looseObject.optional(), status: z.string().optional() },
     annotations: DESTRUCTIVE,
-  }, async ({ name, version, note, confirm }) => {
+  }, async ({ name, version, note, override_reason, cancel_gate, confirm }) => {
+    if (cancel_gate) {
+      const r = await apiSend(deps, "POST", `/agents/${enc(name)}/deploy-gates/${enc(cancel_gate)}/cancel`, {});
+      if (!r.ok) return r.status === 404 ? fail(`${name} has no deploy gate ${cancel_gate}: see polpo_agent_deploy_gates.`) : apiError(r, `Cancelling ${cancel_gate}`);
+      return ok(`Cancelled: nothing was deployed.\n${gateText(r.data as Gate)}`, { gate: r.data as Record<string, unknown>, status: "cancelled" });
+    }
+    if (!version) return fail("Give version (the published version to deploy), or cancel_gate.");
+    if (override_reason && !isAdmin()) return fail("Only an admin (scope polpo:admin) can deploy past the required suites.");
     if (confirm !== true) {
       const d = await apiGet(deps, `/agents/${enc(name)}/diff${qs({ to: version, from: "production" })}`);
       const summary = d.ok ? changesLine((d.data as VersionDiff).changes) : "see polpo_agent_version_diff";
-      return fail(`Deploying ${name}@${version} to production changes: ${summary}. Ask the person, then call again with confirm: true.`);
+      return fail(`Deploying ${name}@${version} to production changes: ${summary}.${override_reason ? ` With an override: the required suites are skipped or their failures ignored ("${override_reason}").` : ""} Ask the person, then call again with confirm: true.`);
     }
-    const r = await apiSend(deps, "POST", `/agents/${enc(name)}/deploy`, { version, note });
-    if (!r.ok) return r.status === 404 ? fail(`${name} has no version ${version}: see polpo_agent_versions.`) : apiError(r, `Deploying ${name}@${version}`);
-    const e = r.data as { from?: string; to: string };
-    return ok(`Deployed ${name}@${e.to} to production${e.from ? ` (was ${e.from})` : ""}.`, { deploy: e as unknown as Record<string, unknown> });
+    const r = await apiSend(deps, "POST", `/agents/${enc(name)}/deploy`, { version, note, ...(override_reason ? { override: { reason: override_reason } } : {}) });
+    if (!r.ok) {
+      if (r.status === 404) return fail(`${name} has no version ${version}: see polpo_agent_versions.`);
+      if (r.code === "GATE_BLOCKED") {
+        const g = await latestGate(name, version);
+        return fail(`${r.error}${g ? `\n${gateText(g)}` : ""}\nFix the agent (or the test), publish and deploy again; an admin may deploy anyway with override_reason. ${suitesLink(name)}`);
+      }
+      return apiError(r, `Deploying ${name}@${version}`);
+    }
+    const data = r.data as { status?: string; gate?: Gate; from?: string; to?: string; message?: string };
+    if (data.status === "pending" && data.gate) {
+      const g = await awaitGate(name, data.gate.id) ?? data.gate;
+      if (g.status === "running") {
+        return ok(`${name}@${version} is being verified by its required suites (${g.progress.done}/${g.progress.total} cases): production moves when they pass. Check it with polpo_agent_deploy_gates id "${g.id}"; stop it with cancel_gate.\n${gateText(g)}`,
+          { gate: g as unknown as Record<string, unknown>, status: "pending" });
+      }
+      if (g.status === "passed" && g.deployId) return ok(`Deployed ${name}@${version} to production: every required suite passed.\n${gateText(g)}`, { gate: g as unknown as Record<string, unknown>, status: "deployed" });
+      const failed = g.suites.filter((s) => s.status !== "passed").map((s) => `${s.suiteName}: ${s.reasons.join("; ") || s.status}`);
+      return fail(`${g.status === "blocked" ? `Blocked by suites: ${failed.join(" · ")}` : `The verification ${g.status}`}. ${name}@${version} was NOT deployed: production is unchanged.\n${gateText(g)}\nAn admin may deploy anyway with override_reason. ${suitesLink(name)}`);
+    }
+    const gateNote = data.gate ? `\n${gateText(data.gate)}` : "";
+    return ok(`Deployed ${name}@${data.to ?? version} to production${data.from ? ` (was ${data.from})` : ""}${data.gate?.status === "override" ? " with an override" : ""}.${gateNote}`,
+      { deploy: data as unknown as Record<string, unknown>, ...(data.gate ? { gate: data.gate as unknown as Record<string, unknown> } : {}), status: "deployed" });
+  });
+
+  tool("team", "polpo_agent_deploy_gates", {
+    title: "An agent's deploy gates",
+    description: "The deploy gates of an agent: its required suites (gate.required) run against a version before it reaches production, or when it is published (gate.onPublish). "
+      + "Each gate: in verifica (running, with progress), passed (deployed), blocked (not deployed: which suites failed, why, the failed cases and the runs to open with polpo_agent_suite_run_get), "
+      + "override (deployed anyway by an admin: who, when, why), cancelled. id: one gate (wait: up to 50 s for it to finish). version: that version's gates.",
+    inputSchema: {
+      name: z.string().min(1).describe("The agent's name"),
+      id: z.string().optional().describe("One gate's id"),
+      version: semver.optional().describe("Only this version's gates"),
+      wait: z.boolean().optional().describe("With id: wait (up to ~50 s) for a running gate to finish"),
+      limit: z.number().int().min(1).max(50).optional().describe("How many (default 10)"),
+    },
+    outputSchema: { gate: looseObject.optional(), gates: z.array(looseObject).optional(), required: z.array(looseObject).optional() },
+    annotations: READ,
+  }, async ({ name, id, version, wait, limit }) => {
+    if (id) {
+      const g = wait ? await awaitGate(name, id) : await apiGet(deps, `/agents/${enc(name)}/deploy-gates/${enc(id)}`).then((r) => r.ok ? r.data as Gate : undefined);
+      if (!g) return fail(`${name} has no deploy gate ${id}: list them with polpo_agent_deploy_gates.`);
+      return ok(gateText(g), { gate: g as unknown as Record<string, unknown> });
+    }
+    const [r, v] = await Promise.all([
+      apiGet(deps, `/agents/${enc(name)}/deploy-gates${qs({ version, limit: limit ?? 10 })}`),
+      apiGet(deps, `/agents/${enc(name)}/versions`),
+    ]);
+    if (!r.ok) return r.status === 404 ? notFoundAgent(name) : apiError(r, `Reading ${name}'s deploy gates`);
+    const gates = r.data as Gate[];
+    const required = v.ok ? ((v.data as { state: { gate?: { requiredSuites: Array<{ id: string; name: string; onPublish: boolean }> } } }).state.gate?.requiredSuites ?? []) : [];
+    const head = required.length
+      ? `${name}'s deploys are gated by: ${required.map((s) => `${s.name} [${s.id}]${s.onPublish ? " (also on publish)" : ""}`).join(", ")}`
+      : `${name} has no required suites: deploys are immediate (mark a suite gate.required with polpo_agent_suite_save).`;
+    return ok([head, "", ...(gates.length ? gates.map(gateText) : ["No deploy gates yet."]), suitesLink(name)].filter(Boolean).join("\n"),
+      { gates: gates as unknown as Array<Record<string, unknown>>, required: required as unknown as Array<Record<string, unknown>> });
   });
 
   tool("team", "polpo_agent_rollback", {

@@ -73,6 +73,8 @@ export interface RunOptions {
   actor?: string;
   /** May the run touch real tools (modes none / model, or unmocked tools run for real)? Admins only. */
   allowRealTools?: boolean;
+  /** Called after each case (the run so far): deploy gates report their progress. */
+  onProgress?: (run: SuiteRun) => void;
 }
 
 const INTERACTIVE_REASONS = new Set(["ask_user", "email_preview", "whatsapp_preview", "vault_preview", "mission_preview"]);
@@ -195,6 +197,9 @@ export class AgentSuiteRunner {
 
   constructor(private readonly deps: AgentSuiteDeps) {}
 
+  /** Where suites, runs and deploy gates are kept. */
+  get store(): AgentSuiteStore { return this.deps.store; }
+
   // ── suites ──
 
   private async agentExists(agent: string): Promise<void> {
@@ -215,7 +220,7 @@ export class AgentSuiteRunner {
    * Create or replace a suite (validated; ids made from names). `revision`: the revision the edit
    * started from (a newer saved revision refuses the save: someone else changed it).
    */
-  async saveSuite(agent: string, input: unknown, opts: { actor?: string; revision?: number; create?: boolean } = {}): Promise<AgentSuite> {
+  async saveSuite(agent: string, input: unknown, opts: { actor?: string; revision?: number; create?: boolean; admin?: boolean } = {}): Promise<AgentSuite> {
     await this.agentExists(agent);
     const raw = input && typeof input === "object" ? input as Record<string, unknown> : {};
     const id = typeof raw.id === "string" && raw.id ? raw.id : typeof raw.name === "string" ? suiteSlug(raw.name) : undefined;
@@ -225,6 +230,10 @@ export class AgentSuiteRunner {
       throw new AgentSuiteError(`The suite changed since you opened it (revision ${existing.revision}, yours ${opts.revision}): reload it and apply your edit again`, "CONFLICT");
     }
     const suite = parseAgentSuite(input, agent, existing);
+    // a deploy gate that may run real tools (side effects at every deploy): an admin decides
+    if (suite.gate?.allowRealTools && !existing?.gate?.allowRealTools && opts.admin !== true) {
+      throw new AgentSuiteError("gate.allowRealTools lets every deploy run this suite's real tools (side effects possible): only an admin can turn it on", "FORBIDDEN");
+    }
     if (opts.actor) suite.updatedBy = opts.actor;
     await this.deps.store.saveSuite(suite);
     return suite;
@@ -251,7 +260,7 @@ export class AgentSuiteRunner {
     } else {
       datasets.push({ id, name, columns: parsed.columns, rows: parsed.rows, source });
     }
-    return this.saveSuite(agent, { ...suite, datasets }, { actor: opts.actor, revision: suite.revision });
+    return this.saveSuite(agent, { ...suite, datasets }, { actor: opts.actor, revision: suite.revision, admin: true });
   }
 
   // ── runs ──
@@ -356,6 +365,7 @@ export class AgentSuiteRunner {
           run.stats = suiteRunStats(run.results);
           run.aggregates = suiteRunAggregates(run.results, { flakyStddev: suite.evals?.flakyStddev });
           saving = saving.then(() => this.deps.store.saveRun(run)).catch(() => undefined);
+          try { opts.onProgress?.(run); } catch { /* a listener's problem is not the run's */ }
           return result;
         });
         await saving;

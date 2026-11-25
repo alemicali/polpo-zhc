@@ -6,16 +6,17 @@
  */
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Code2, Database, FileText, Gauge, ListChecks, Loader2, Plus, Save, Trash2, Upload } from "lucide-react";
-import type { AgentSuite, AgentSuiteInput, SuiteAssertion, SuiteAssertionType, SuiteCase, SuiteEvalSettings, SuiteMockMode, SuiteScorer, SuiteScorerType, ToolMock, ScriptedTurn, UseAgentSuitesReturn } from "@polpo-ai/react";
+import { Code2, Database, FileText, Gauge, ListChecks, Loader2, Plus, Save, ShieldCheck, Trash2, Upload } from "lucide-react";
+import type { AgentSuite, AgentSuiteInput, SuiteAssertion, SuiteAssertionType, SuiteCase, SuiteEvalSettings, SuiteGate, SuiteMockMode, SuiteScorer, SuiteScorerType, ToolMock, ScriptedTurn, UseAgentSuitesReturn } from "@polpo-ai/react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ASSERTION_LABELS, ASSERTION_TEMPLATES, SCORER_LABELS, SCORER_TEMPLATES, SUITE_MODES, blankCase } from "@/lib/agent-suites";
 import { cn } from "@/lib/utils";
 
-type View = "form" | "evals" | "datasets" | "json" | "yaml";
+type View = "form" | "evals" | "gate" | "datasets" | "json" | "yaml";
 type Draft = AgentSuiteInput & { id?: string };
 
 /** A JSON value edited as text: applied when it parses, the error shown when it does not. */
@@ -145,6 +146,54 @@ function EvalsView({ draft, setDraft }: { draft: Draft; setDraft: (d: Draft) => 
       </div>
       <ScorerList value={draft.scorers ?? []} onChange={(sc) => setDraft({ ...draft, scorers: sc.length ? sc : undefined })} title="Default scorers (every case)"
         hint="A case's own scorer with the same id replaces a default. Expected values can come from a dataset: {{row.expected}}." />
+    </div>
+  );
+}
+
+/** The suite as a deploy gate: required before production, its thresholds, run on publish, real tools. */
+function GateView({ draft, setDraft }: { draft: Draft; setDraft: (d: Draft) => void }) {
+  const gate: SuiteGate = draft.gate ?? {};
+  const setGate = (g: Partial<SuiteGate>) => {
+    const next: SuiteGate = { ...gate, ...g };
+    for (const k of Object.keys(next) as Array<keyof SuiteGate>) if (next[k] === undefined || next[k] === false) delete next[k];
+    setDraft({ ...draft, gate: Object.keys(next).length ? next : undefined });
+  };
+  const num = (v: string) => (v === "" ? undefined : Number(v));
+  return (
+    <div className="space-y-4 px-4 py-3" data-testid="suite-gate">
+      <label className="flex items-start gap-2">
+        <Checkbox checked={!!gate.required} onCheckedChange={(v) => setGate({ required: v === true || undefined })} aria-label="Required to deploy" data-testid="suite-gate-required" />
+        <span className="min-w-0">
+          <span className="block text-xs font-medium">Required to deploy</span>
+          <span className="block text-caption text-muted-foreground">Every deploy of this agent to production runs this suite against the version first: production moves only if it passes. Rollbacks are never gated; an admin can deploy anyway with a reason.</span>
+        </span>
+      </label>
+      <div className={cn("grid gap-3 sm:grid-cols-2", !gate.required && "opacity-60")}>
+        <label className="block min-w-0">
+          <span className="text-micro text-muted-foreground">Minimum pass rate (0–1)</span>
+          <Input type="number" min={0} max={1} step={0.05} value={gate.minPassRate ?? ""} placeholder="1" aria-label="Minimum pass rate" className="h-8 text-caption" onChange={(e) => setGate({ minPassRate: num(e.target.value) })} />
+        </label>
+        <label className="block min-w-0">
+          <span className="text-micro text-muted-foreground">Largest drop versus the baseline (pass rate or score)</span>
+          <Input type="number" min={0} max={1} step={0.01} value={gate.maxRegression ?? ""} placeholder="no check" aria-label="Maximum regression" className="h-8 text-caption" onChange={(e) => setGate({ maxRegression: num(e.target.value) })} />
+        </label>
+      </div>
+      <JsonField label="Score thresholds: minimum mean per scorer id (score: the overall score)" value={gate.scoreThresholds ?? {}} placeholder='{ "judge": 0.7, "score": 0.8 }'
+        onChange={(v) => setGate({ scoreThresholds: v && typeof v === "object" && Object.keys(v as object).length ? v as Record<string, number> : undefined })} />
+      <label className="flex items-start gap-2">
+        <Checkbox checked={!!gate.onPublish} onCheckedChange={(v) => setGate({ onPublish: v === true || undefined })} aria-label="Also run on publish" data-testid="suite-gate-on-publish" />
+        <span className="min-w-0">
+          <span className="block text-xs font-medium">Also run on publish</span>
+          <span className="block text-caption text-muted-foreground">A non-blocking check when a version is published: the Versions tab shows the result before anyone deploys it.</span>
+        </span>
+      </label>
+      <label className="flex items-start gap-2">
+        <Checkbox checked={!!gate.allowRealTools} onCheckedChange={(v) => setGate({ allowRealTools: v === true || undefined })} aria-label="Let the gate run real tools" data-testid="suite-gate-real-tools" />
+        <span className="min-w-0">
+          <span className="block text-xs font-medium">Let the gate run real tools</span>
+          <span className="block text-caption text-muted-foreground">Cases in mode model or live (or unmocked tools run for real) may send, write or spend at every deploy. Off: such a suite blocks the deploy without running. Admins only.</span>
+        </span>
+      </label>
     </div>
   );
 }
@@ -350,6 +399,7 @@ export function AgentSuiteEditor({ saved, initial, suites, onSaved, onClose }: {
   const views: Array<{ id: View; label: string; icon: typeof ListChecks; disabled?: boolean }> = [
     { id: "form", label: "Cases", icon: ListChecks },
     { id: "evals", label: "Evals", icon: Gauge },
+    { id: "gate", label: "Gate", icon: ShieldCheck },
     { id: "datasets", label: "Datasets", icon: Database },
     { id: "json", label: "JSON", icon: Code2 },
     { id: "yaml", label: "YAML", icon: FileText, disabled: !saved },
@@ -391,6 +441,7 @@ export function AgentSuiteEditor({ saved, initial, suites, onSaved, onClose }: {
         </>
       )}
       {view === "evals" && <EvalsView draft={draft} setDraft={setDraft} />}
+      {view === "gate" && <GateView draft={draft} setDraft={setDraft} />}
       {view === "datasets" && <DatasetsView draft={draft} setDraft={setDraft} saved={saved} suites={suites} />}
       {view === "json" && (
         <div className="px-4 py-3">

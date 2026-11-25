@@ -156,7 +156,7 @@ export const POLPO_TOOL_GROUPS: ToolGroupRule[] = [
   },
   {
     id: "agent-versions", label: "Agent versions, tests and suites: list and read versions, diff two, rebase or discard the draft, publish it, deploy to production, roll back, deploy history; test an agent (engine, tools, connectors, vault, skills, computer, channels, smoke run) and fix what fails; agent suites (test and eval cases with tool and model mocks, datasets, assertions, scorers — exact, numeric, similarity, LLM judge…): list, read, save, delete, run against a version (with repetitions), read run reports, scores and traces, mark a baseline and see regressions, trends over versions, explain a run (AI review)",
-    names: ["agent_versions", "agent_version_get", "agent_version_diff", "agent_draft", "agent_publish", "agent_deploy", "agent_rollback", "agent_deploys", "agent_test",
+    names: ["agent_versions", "agent_version_get", "agent_version_diff", "agent_draft", "agent_publish", "agent_deploy", "agent_deploy_gates", "agent_rollback", "agent_deploys", "agent_test",
       "agent_suite_list", "agent_suite_get", "agent_suite_save", "agent_suite_delete", "agent_suite_run", "agent_suite_run_get",
       "agent_suite_trend", "agent_suite_baseline", "agent_suite_review"],
   },

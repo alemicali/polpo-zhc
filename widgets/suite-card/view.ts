@@ -2,7 +2,8 @@
  * The agent suite card's view: DOM from a card (src/server/mcp-suite-card.ts) with no host wiring,
  * so it can be tested in a DOM (ui/tests/mcp-widgets.test.ts). main.ts connects it to the MCP host.
  *
- *   suites   each suite with its last run (pass rate, score, regressions) and baseline
+ *   suites   each suite with its last run (pass rate, score, regressions), baseline and whether it
+ *            gates deploys (required); the latest deploy gates (verifying, passed, blocked, override)
  *   run      the report: pass rate, score, cost; scores per scorer with the delta versus the
  *            baseline; each case with its failed checks, its change (▼ regressed, ▲ improved), flaky
  *            cases; the AI review
@@ -23,6 +24,8 @@ export const STRINGS = {
     change: { regressed: "Regressed", improved: "Improved", new: "New", removed: "Removed", unchanged: "" } as Record<string, string>,
     status: { passed: "Passed", failed: "Failed", errored: "Errored", skipped: "Skipped", running: "Running", queued: "Queued", cancelled: "Cancelled" } as Record<string, string>,
     legendPass: "Pass rate", legendScore: "Score", error: "Could not load the card", superseded: "There is a newer card for this below",
+    required: "Required to deploy", gatesTitle: "Deploy gates", onPublish: "also on publish",
+    gateStatus: { running: "Verifying", passed: "Passed", blocked: "Blocked", failed: "Failed", override: "Override", cancelled: "Cancelled", errored: "Errored" } as Record<string, string>,
   },
   it: {
     open: "Apri", refresh: "Aggiorna", ask: "Spiega questo run", askSuites: "Chiedi", trend: "Andamento", report: "Ultimo run", suitesTitle: "Suite",
@@ -36,6 +39,8 @@ export const STRINGS = {
     change: { regressed: "Peggiorato", improved: "Migliorato", new: "Nuovo", removed: "Rimosso", unchanged: "" } as Record<string, string>,
     status: { passed: "Superato", failed: "Fallito", errored: "Errore", skipped: "Saltato", running: "In corso", queued: "In coda", cancelled: "Annullato" } as Record<string, string>,
     legendPass: "Superati", legendScore: "Punteggio", error: "Non riesco a caricare la scheda", superseded: "C'è una scheda più recente più sotto",
+    required: "Obbligatoria per il deploy", gatesTitle: "Verifiche di deploy", onPublish: "anche alla pubblicazione",
+    gateStatus: { running: "In verifica", passed: "Superata", blocked: "Bloccato", failed: "Fallita", override: "Forzato", cancelled: "Annullata", errored: "Errore" } as Record<string, string>,
   },
 };
 export type Strings = typeof STRINGS.en;
@@ -112,7 +117,8 @@ export function suitesView(c: SuiteListCard, str: Strings): HTMLElement {
     header(`${c.agent} · ${str.suitesTitle}`, str.cases(c.suites.reduce((a, x) => a + x.cases, 0))),
     c.suites.length ? h("div", { class: "suites" }, ...c.suites.map((x) => h("div", { class: "row", "data-suite": x.id },
       h("div", { class: "row-main" },
-        h("div", {}, x.name, x.baselineRunId ? h("span", { class: "chip chip-sm chip-info" }, `★ ${str.isBaseline}`) : null),
+        h("div", {}, x.name, x.baselineRunId ? h("span", { class: "chip chip-sm chip-info" }, `★ ${str.isBaseline}`) : null,
+          x.gate?.required ? h("span", { class: "chip chip-sm chip-warning", "data-gate": "required", title: `≥ ${pct(x.gate.minPassRate)}${x.gate.onPublish ? ` · ${str.onPublish}` : ""}` }, str.required) : null),
         h("div", { class: "muted small" }, [str.cases(x.cases), x.scorers ? str.scorers(x.scorers) : "", x.lastRun
           ? `${x.lastRun.passed}/${x.lastRun.total}${x.lastRun.score !== undefined ? ` · ${str.score.toLowerCase()} ${x.lastRun.score.toFixed(2)}` : ""} · ${target(x.lastRun.target, x.lastRun.version)}`
           : str.neverRun].filter(Boolean).join(" · ")),
@@ -121,7 +127,23 @@ export function suitesView(c: SuiteListCard, str: Strings): HTMLElement {
         x.lastRun ? h("button", { class: "btn btn-sm", disabled: env.superseded || env.busy, onclick: () => env.onShow?.({ run: x.lastRun!.id, suite: x.id, view: "run" }) }, str.report) : null,
         x.lastRun ? h("button", { class: "btn btn-sm", disabled: env.superseded || env.busy, onclick: () => env.onShow?.({ suite: x.id, view: "trend" }) }, str.trend) : null,
         x.lastRun ? chip(str, x.lastRun.status) : null)))) : h("p", { class: "muted empty" }, str.noSuites),
+    c.gates?.length ? gatesList(c, str) : null,
     actions(str));
+}
+
+const GATE_TONE: Record<string, string> = { running: "info", passed: "success", blocked: "danger", failed: "danger", override: "warning", errored: "warning", cancelled: "neutral" };
+
+/** The latest deploy gates: version, status (verifying with progress), what failed, the override. */
+function gatesList(c: SuiteListCard, str: Strings): HTMLElement {
+  return h("div", { class: "gates" },
+    h("div", { class: "section-title" }, str.gatesTitle),
+    ...(c.gates ?? []).map((g) => h("div", { class: "row", "data-gate-id": g.id, "data-gate-status": g.status },
+      h("div", { class: "row-main" },
+        h("div", {}, `v${g.version}`),
+        g.status === "running" ? h("div", { class: "muted small" }, `${g.progress.done}/${g.progress.total}`) : null,
+        g.override ? h("div", { class: "muted small fail-line" }, `${g.override.by}: “${g.override.reason}”`) : null,
+        ...(g.status === "blocked" || g.status === "failed" ? g.failed.slice(0, 3).map((f) => h("div", { class: "small danger-text fail-line" }, f)) : [])),
+      h("span", { class: `chip chip-sm chip-${GATE_TONE[g.status] ?? "neutral"}` }, str.gateStatus[g.status] ?? g.status))));
 }
 
 // ── Run ──

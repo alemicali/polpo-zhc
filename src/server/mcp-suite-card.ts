@@ -4,7 +4,7 @@
  * Built from the REST shapes; the widget (widgets/suite-card) draws it, the text is for clients
  * without MCP Apps.
  */
-import type { SuiteBaselineComparison, SuiteRun, SuiteRunAggregates, SuiteTrend } from "@polpo-ai/core/agent-suites";
+import { deployGateFailures, type AgentDeployGate, type SuiteBaselineComparison, type SuiteRun, type SuiteRunAggregates, type SuiteTrend } from "@polpo-ai/core/agent-suites";
 
 export interface SuiteCardKey { createdAt: number; seq: number }
 
@@ -19,9 +19,21 @@ export interface SuiteListCard {
     id: string; name: string; cases: number; datasets: number; scorers: number; defaultMode: string;
     lastRun?: { id: string; status: string; passed: number; total: number; score?: number; startedAt: string; target: string; version?: string; regressions?: number };
     baselineRunId?: string;
+    /** A deploy gate: required before production (minimum pass rate, also run on publish). */
+    gate?: { required: boolean; minPassRate: number; onPublish?: boolean };
   }>;
+  /** The latest deploy gates (newest first): the required suites verifying versions. */
+  gates?: SuiteCardGate[];
   link?: string;
   appearance?: Appearance;
+}
+
+export interface SuiteCardGate {
+  id: string; version: string; status: string; trigger: string; at: string;
+  progress: { done: number; total: number };
+  /** "Suite: reason" for what did not pass. */
+  failed: string[];
+  override?: { by: string; reason: string };
 }
 
 export interface SuiteRunCard {
@@ -79,8 +91,9 @@ type RunIn = Pick<SuiteRun, "id" | "agent" | "suiteId" | "suiteName" | "status" 
 
 export function buildSuiteListCard(input: {
   agent: string;
-  suites: Array<{ id: string; name: string; cases: Array<{ scorers?: unknown[] }>; datasets: unknown[]; defaultMode: string; scorers?: unknown[] }>;
+  suites: Array<{ id: string; name: string; cases: Array<{ scorers?: unknown[] }>; datasets: unknown[]; defaultMode: string; scorers?: unknown[]; gate?: { required?: boolean; minPassRate?: number; onPublish?: boolean } }>;
   runs: Array<Pick<SuiteRun, "id" | "suiteId" | "status" | "stats" | "startedAt" | "target" | "version" | "isBaseline"> & { aggregates?: { score?: number }; baseline?: { regressions: number } }>;
+  gates?: Array<Pick<AgentDeployGate, "id" | "version" | "status" | "trigger" | "requestedAt" | "finishedAt" | "progress" | "suites" | "override">>;
   key: SuiteCardKey; link?: string;
 }): SuiteListCard {
   return {
@@ -97,8 +110,13 @@ export function buildSuiteListCard(input: {
           ...(last.baseline ? { regressions: last.baseline.regressions } : {}),
         } } : {}),
         ...(base ? { baselineRunId: base.id } : {}),
+        ...(s.gate?.required ? { gate: { required: true, minPassRate: s.gate.minPassRate ?? 1, ...(s.gate.onPublish ? { onPublish: true } : {}) } } : {}),
       };
     }),
+    ...(input.gates?.length ? { gates: input.gates.slice(0, 5).map((g) => ({
+      id: g.id, version: g.version, status: g.status, trigger: g.trigger, at: g.finishedAt ?? g.requestedAt, progress: g.progress,
+      failed: deployGateFailures(g), ...(g.override ? { override: { by: g.override.by, reason: g.override.reason } } : {}),
+    })) } : {}),
     ...(input.link ? { link: input.link } : {}),
   };
 }
@@ -189,7 +207,10 @@ export function suiteCardText(card: SuiteCard): string {
     if (!card.suites.length) return `${card.agent} has no suites yet.`;
     return [`${card.agent}'s suites:`, ...card.suites.map((s) => `- ${s.name} [${s.id}] · ${s.cases} case(s) · ${s.scorers} scorer(s) · mode ${s.defaultMode}`
       + (s.lastRun ? ` · last ${s.lastRun.status} ${s.lastRun.passed}/${s.lastRun.total}${s.lastRun.score !== undefined ? ` score ${s.lastRun.score.toFixed(2)}` : ""}${s.lastRun.regressions ? ` · ${s.lastRun.regressions} regression(s)` : ""} (${s.lastRun.id})` : " · never run")
-      + (s.baselineRunId ? ` · baseline ${s.baselineRunId}` : ""))].join("\n");
+      + (s.baselineRunId ? ` · baseline ${s.baselineRunId}` : "")
+      + (s.gate?.required ? ` · REQUIRED to deploy (pass rate ≥ ${pct(s.gate.minPassRate)}${s.gate.onPublish ? ", also on publish" : ""})` : "")),
+    ...(card.gates?.length ? ["Deploy gates:", ...card.gates.map((g) => `- ${g.version} · ${g.status === "running" ? `verifying ${g.progress.done}/${g.progress.total}` : g.status}`
+      + `${g.override ? ` by ${g.override.by}: "${g.override.reason}"` : ""}${g.failed.length && g.status !== "passed" ? ` · ${g.failed.join(" · ").slice(0, 300)}` : ""} [${g.id}]`)] : [])].join("\n");
   }
   if (card.kind === "trend") {
     if (!card.points.length) return `${card.suiteName ?? card.suiteId} has no finished runs yet.`;

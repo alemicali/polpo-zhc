@@ -42,7 +42,19 @@ type Trend = {
   points: Array<{ runId: string; startedAt: string; target: string; version?: string; status: string; passRate: number; score?: number; costUsd: number; durationMs: number; regressions?: number; isBaseline?: boolean }>;
   byVersion: Array<{ version: string; runs: number; passRate: number; score?: number; costUsd: number; durationMs: number }>;
 };
-type Suite = { id: string; name: string; description?: string; defaultMode: string; revision: number; cases: Array<{ id: string; name: string; mode?: string; dataset?: string; assertions: unknown[] }>; datasets: Array<{ id: string; name: string; rows: unknown[] }>; updatedAt: string };
+type Suite = { id: string; name: string; description?: string; defaultMode: string; revision: number; cases: Array<{ id: string; name: string; mode?: string; dataset?: string; assertions: unknown[] }>; datasets: Array<{ id: string; name: string; rows: unknown[] }>; updatedAt: string;
+  gate?: { required?: boolean; minPassRate?: number; maxRegression?: number; scoreThresholds?: Record<string, number>; onPublish?: boolean; allowRealTools?: boolean } };
+
+/** A suite's deploy gate in words ("required: pass rate ≥ 100%, max regression 0.05, on publish"). */
+function gateLine(g: Suite["gate"]): string {
+  if (!g?.required) return "";
+  const parts = [`pass rate ≥ ${Math.round((g.minPassRate ?? 1) * 100)}%`];
+  if (g.maxRegression !== undefined) parts.push(`max regression ${g.maxRegression}`);
+  for (const [k, v] of Object.entries(g.scoreThresholds ?? {})) parts.push(`${k} ≥ ${v}`);
+  if (g.onPublish) parts.push("also on publish");
+  if (g.allowRealTools) parts.push("may run real tools");
+  return ` · REQUIRED to deploy (${parts.join(", ")})`;
+}
 
 const MARK: Record<string, string> = { passed: "✓", failed: "✗", errored: "‼", skipped: "–", running: "…", queued: "…", cancelled: "⊘" };
 const usd = (n: number) => `$${n.toFixed(4)}`;
@@ -151,7 +163,7 @@ export function registerAgentSuiteTools(tool: Register, deps: McpDeps): void {
     if (!suites.length) return ok(`${agent} has no suites yet. Create one with polpo_agent_suite_save (${suitesLink(agent)}).`, { suites: [] });
     return ok(suites.map((s) => {
       const last = latest.get(s.id);
-      return `${s.name} [${s.id}] · ${s.cases.length} case(s), ${s.datasets.length} dataset(s), mode ${s.defaultMode} · rev ${s.revision}`
+      return `${s.name} [${s.id}] · ${s.cases.length} case(s), ${s.datasets.length} dataset(s), mode ${s.defaultMode} · rev ${s.revision}${gateLine(s.gate)}`
         + (last ? ` · last run ${MARK[last.status] ?? ""} ${last.status} ${last.stats.passed}/${last.stats.total - last.stats.skipped} (${last.startedAt.slice(0, 16).replace("T", " ")}, ${last.id})` : " · never run");
     }).join("\n"), { suites: suites.map((s) => ({ ...s, lastRun: latest.get(s.id) ?? null })) as unknown as Array<Record<string, unknown>> });
   });
@@ -186,7 +198,9 @@ export function registerAgentSuiteTools(tool: Register, deps: McpDeps): void {
       + "assertions: [{ type: tool_called | tool_not_called | tool_order | tool_args | no_tool_errors | outcome_registered | artifact_created | approval_requested | text_contains | text_not_contains | text_regex | max_turns | max_cost | max_duration, ... }], "
       + "scorers?: [{ type: exact | numeric | contains_all | contains_any | regex | similarity | json_schema | tool_trajectory | cost | latency | llm_judge | custom, id?, threshold? (0..1), weight?, "
       + "from?: reply | reply_json | tool_args | tool_result | outcome, tool?, path?, expected / values / pattern / schema / maxUsd / maxMs / rubric + criteria [{ name, description, weight }] / code }] (evals: a score 0..1 each; "
-      + "expected may be {{row.expected}} from a dataset) }], scorers?: defaults for every case, evals?: { judgeModel, repetitions, regressionTolerance, baseline: previous | production | none } }. "
+      + "expected may be {{row.expected}} from a dataset) }], scorers?: defaults for every case, evals?: { judgeModel, repetitions, regressionTolerance, baseline: previous | production | none }, "
+      + "gate?: { required: true (a deploy gate: the suite must pass before any version of the agent reaches production), minPassRate? (0..1, default 1), maxRegression? (largest pass-rate or score drop versus the baseline), "
+      + "scoreThresholds?: { scorerId | score: minimum mean }, onPublish? (also run when a version is published, non-blocking), allowRealTools? (the gate may run its real-tools cases: admin only) } }. "
       + "Or yaml: the same as YAML (polpo_agent_suite_get format yaml). revision: the one you edited (refused if changed meanwhile). "
       + "import_dataset: { format: csv | json, text, name?, id?, mode?: replace | append } imports rows into the suite `suite` instead.",
     inputSchema: {

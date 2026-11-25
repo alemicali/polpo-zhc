@@ -660,6 +660,8 @@ export const UpdateAgentSchema = z.object({
   version: z.string().regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/, "a version: major.minor.patch").optional(),
   /** Release note of the published version (and the deploy). */
   note: z.string().max(2000).optional(),
+  /** A deploy through the agent's required suites (deploy gate): wait for them (default: the response says the deploy is pending). */
+  wait: z.boolean().optional(),
 });
 
 export const RenameTeamSchema = z.object({

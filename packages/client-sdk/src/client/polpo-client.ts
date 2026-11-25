@@ -1,5 +1,5 @@
 import { PolpoApiError } from "./errors.js";
-import type { AgentSuite, AgentSuiteInput, SuiteBaselineComparison, SuiteRun, SuiteRunRequest, SuiteDatasetImport, SuiteTrend } from "./agent-suite-types.js";
+import type { AgentDeployGate, AgentSuite, AgentSuiteInput, SuiteBaselineComparison, SuiteRun, SuiteRunRequest, SuiteDatasetImport, SuiteTrend } from "./agent-suite-types.js";
 import type {
   Connector,
   ConnectorTool,
@@ -108,6 +108,7 @@ import type {
   AgentVersionDiff,
   AgentVersionList,
   AgentDeployEntry,
+  AgentDeployOutcome,
   AgentPublishResult,
   SkillRestoreResult,
   NotificationChannelConfig,
@@ -952,9 +953,37 @@ export class PolpoClient {
     return this.del<{ discarded: boolean }>(`/agents/${encodeURIComponent(name)}/draft`);
   }
 
-  /** Deploy a published version to production. */
-  deployAgentVersion(name: string, version: string, note?: string): Promise<AgentDeployEntry> {
-    return this.post<AgentDeployEntry>(`/agents/${encodeURIComponent(name)}/deploy`, { version, ...(note ? { note } : {}) });
+  /**
+   * Deploy a published version to production. With required suites (deploy gate) the outcome may be
+   * `pending` (they are running; production moves when they pass); a blocked deploy throws a
+   * PolpoApiError with code GATE_BLOCKED. `override` (admins only): deploy anyway, with a reason.
+   */
+  deployAgentVersion(name: string, version: string, note?: string, opts: { override?: { reason: string }; wait?: boolean } = {}): Promise<AgentDeployOutcome> {
+    return this.post<AgentDeployOutcome>(`/agents/${encodeURIComponent(name)}/deploy`, { version, ...(note ? { note } : {}), ...(opts.override ? { override: opts.override } : {}), ...(opts.wait ? { wait: true } : {}) });
+  }
+
+  /** An agent's deploy gates, newest first (version: only that version's). */
+  getAgentDeployGates(name: string, opts: { version?: string; limit?: number } = {}): Promise<AgentDeployGate[]> {
+    const q = new URLSearchParams();
+    if (opts.version) q.set("version", opts.version);
+    if (opts.limit) q.set("limit", String(opts.limit));
+    const qs = q.toString();
+    return this.get<AgentDeployGate[]>(`/agents/${encodeURIComponent(name)}/deploy-gates${qs ? `?${qs}` : ""}`);
+  }
+
+  /** One deploy gate (waitSeconds: wait up to that long, max 55, for it to finish). */
+  getAgentDeployGate(name: string, id: string, opts: { waitSeconds?: number } = {}): Promise<AgentDeployGate> {
+    return this.get<AgentDeployGate>(`/agents/${encodeURIComponent(name)}/deploy-gates/${encodeURIComponent(id)}${opts.waitSeconds ? `?wait=${opts.waitSeconds}` : ""}`);
+  }
+
+  /** Stop a verification: nothing is deployed. */
+  cancelAgentDeployGate(name: string, id: string): Promise<AgentDeployGate> {
+    return this.post<AgentDeployGate>(`/agents/${encodeURIComponent(name)}/deploy-gates/${encodeURIComponent(id)}/cancel`);
+  }
+
+  /** Deploy a gate's version anyway (admins only; the reason is recorded in the deploy history). */
+  overrideAgentDeployGate(name: string, id: string, reason: string, note?: string): Promise<AgentDeployOutcome> {
+    return this.post<AgentDeployOutcome>(`/agents/${encodeURIComponent(name)}/deploy-gates/${encodeURIComponent(id)}/override`, { reason, ...(note ? { note } : {}) });
   }
 
   /** Roll production back to the previous deploy (or to a version). */

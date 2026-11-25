@@ -4531,6 +4531,8 @@ async function execUpdateAgent(polpo: Orchestrator, args: Record<string, unknown
   }
   const changes = Object.keys(args).filter(k => k !== "name" && k !== "publish" && k !== "deploy" && k !== "note").join(", ");
   const where = result.deployed ? ` (version ${result.deployed.to} deployed to production)`
+    : result.published && result.deploy?.status === "pending" ? ` (published as ${result.published.version}; not deployed yet: ${result.deploy.message} Status: agent_deploy_gates)`
+    : result.published && result.deploy?.status === "blocked" ? ` (published as ${result.published.version} but NOT deployed: ${result.deploy.message})`
     : result.published ? ` (published as ${result.published.version}, not deployed: agent_deploy)`
     : result.draftChanged ? " (saved in the draft, production unchanged: agent_publish)" : "";
   return `Agent "${name}" updated: ${changes}${where}${sandboxNote}`;
