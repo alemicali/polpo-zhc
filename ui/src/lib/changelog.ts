@@ -32,6 +32,24 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-25-agent-suites-phase4",
+    date: "2026-11-25",
+    kind: "new",
+    title: "Suite: registra e riproduci, utenti simulati, casi generati con l'AI e test in CI",
+    summary: "Registra una conversazione vera e riproducila offline, fai parlare l'agente con un utente simulato, fatti proporre casi (anche di prompt injection) da approvare uno per uno, e lancia le suite da terminale o da GitHub. Anche per i server MCP ospitati e le missioni.",
+    body: [
+      "- **Registra e riproduci**: un caso gira una volta dal vivo (solo amministratori, dopo una conferma) e la conversazione viene salvata come **cassetta**, con i segreti oscurati; da lì in poi si riproduce offline, sempre uguale. Nella cassetta puoi cambiare una risposta, eliminare una chiamata o trasformarla in un mock. Anche una chat o un task veri diventano un caso.",
+      "- **Utenti simulati**: un modello interpreta un cliente (chi è, cosa vuole, le sue regole) per più turni, finché raggiunge l'obiettivo; oppure turni scritti da te. Il report mostra tutta la conversazione e i controlli valgono su tutta.",
+      "- **Genera casi**: Polpo legge istruzioni, strumenti, skill e connettori dell'agente (più una tua indicazione e chat di esempio) e propone casi normali, limite e **avversari** (prompt injection). Non viene salvato niente finché non spunti quelli da tenere. Anche righe di dataset.",
+      "- **`polpo test` e GitHub Action**: lancia le suite da terminale o in CI contro la tua istanza, con report JUnit e riepilogo nel job; fallisce se un test fallisce o peggiora.",
+      "- **Server MCP ospitati**: i test salvati sono la suite del server, con le risposte dell'API simulate (niente rete, strumenti distruttivi al sicuro). Segnala come **obbligatoria** e ogni deploy la esegue prima; se fallisce la versione resta pubblicata, un amministratore può forzare con un motivo.",
+      "- **Missioni**: suite che eseguono i task in ordine, ogni agente con i suoi mock, e controllano esito, ordine, chi ha fatto cosa e gli artefatti.",
+      "- Anche via API, MCP, nella chat con Polpo e nell'SDK.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri un agente", to: "/agents" },
+  },
+  {
     id: "2026-11-25-agent-suites-gate",
     date: "2026-11-25",
     kind: "new",
