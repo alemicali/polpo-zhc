@@ -1,5 +1,8 @@
 import { PolpoApiError } from "./errors.js";
-import type { AgentDeployGate, AgentSuite, AgentSuiteInput, SuiteBaselineComparison, SuiteRun, SuiteRunRequest, SuiteDatasetImport, SuiteTrend } from "./agent-suite-types.js";
+import type {
+  AgentDeployGate, AgentSuite, AgentSuiteInput, CaseGenerationRequest, GeneratedCaseProposal, SuiteBaselineComparison, SuiteCase, SuiteCassette, SuiteCassetteEdit,
+  SuiteCassetteSummary, SuiteDataset, SuiteRun, SuiteRunRequest, SuiteDatasetImport, SuiteTargetKind, SuiteTrend,
+} from "./agent-suite-types.js";
 import type {
   Connector,
   ConnectorTool,
@@ -1113,6 +1116,96 @@ export class PolpoClient {
   /** "Explain this run": an AI review (Polpo's model) stored on the run. */
   reviewAgentSuiteRun(name: string, runId: string, opts: { language?: string } = {}): Promise<SuiteRun> {
     return this.post<SuiteRun>(`/agents/${encodeURIComponent(name)}/suite-runs/${encodeURIComponent(runId)}/review`, opts);
+  }
+
+  // ── Agent suites, phase 4: cassettes (record / replay), recordings, generation ──
+
+  /** The agent's cassettes (recorded exchanges its cases replay), without their calls. */
+  getAgentCassettes(name: string): Promise<SuiteCassetteSummary[]> {
+    return this.get<SuiteCassetteSummary[]>(`/agents/${encodeURIComponent(name)}/cassettes`);
+  }
+
+  /** One cassette with every recorded model turn and tool call (secrets redacted). */
+  getAgentCassette(name: string, id: string): Promise<SuiteCassette> {
+    return this.get<SuiteCassette>(`/agents/${encodeURIComponent(name)}/cassettes/${encodeURIComponent(id)}`);
+  }
+
+  /** The cassette a case replays, or null when it was never recorded. */
+  getAgentSuiteCaseCassette(name: string, suiteId: string, caseId: string): Promise<SuiteCassette | null> {
+    return this.get<SuiteCassette | null>(`/agents/${encodeURIComponent(name)}/suites/${encodeURIComponent(suiteId)}/cases/${encodeURIComponent(caseId)}/cassette`);
+  }
+
+  /** Edit recorded calls (response, delete, turn into a case mock); `revision` refuses an edit over a newer one. */
+  editAgentCassette(name: string, id: string, edits: SuiteCassetteEdit[], revision?: number): Promise<SuiteCassette> {
+    return this.patch<SuiteCassette>(`/agents/${encodeURIComponent(name)}/cassettes/${encodeURIComponent(id)}`, { edits, ...(revision !== undefined ? { revision } : {}) });
+  }
+
+  deleteAgentCassette(name: string, id: string): Promise<{ deleted: string }> {
+    return this.del<{ deleted: string }>(`/agents/${encodeURIComponent(name)}/cassettes/${encodeURIComponent(id)}`);
+  }
+
+  /** Record (or re-record) a case live — real model and tools: admins, `allowRealTools: true` — into its cassette. */
+  recordAgentSuiteCase(name: string, suiteId: string, caseId: string, req: { target?: string; allowRealTools: boolean; wait?: boolean }): Promise<SuiteRun> {
+    return this.post<SuiteRun>(`/agents/${encodeURIComponent(name)}/suites/${encodeURIComponent(suiteId)}/cases/${encodeURIComponent(caseId)}/record`, req);
+  }
+
+  /** A case and its cassette from a real chat (`sessionId`) or task run (`taskId`), added to the suite. */
+  agentSuiteCaseFromRecording(name: string, suiteId: string, req: { sessionId?: string; taskId?: string; messageIndex?: number; name?: string }): Promise<{ suite: AgentSuite; case: SuiteCase; cassette: SuiteCassette }> {
+    return this.post(`/agents/${encodeURIComponent(name)}/suites/${encodeURIComponent(suiteId)}/cases/from-recording`, req);
+  }
+
+  /** AI-proposed cases (validated, NOT saved): accept the ones you keep with acceptAgentSuiteCases. */
+  generateAgentSuiteCases(name: string, req: CaseGenerationRequest = {}): Promise<{ proposals: GeneratedCaseProposal[]; model?: string; costUsd?: number }> {
+    return this.post(`/agents/${encodeURIComponent(name)}/suites/generate-cases`, req);
+  }
+
+  /** Add cases (e.g. accepted proposals) and their datasets to a suite. */
+  acceptAgentSuiteCases(name: string, suiteId: string, req: { cases: Array<Partial<SuiteCase>>; datasets?: Array<Partial<SuiteDataset>>; revision?: number }): Promise<AgentSuite> {
+    return this.post<AgentSuite>(`/agents/${encodeURIComponent(name)}/suites/${encodeURIComponent(suiteId)}/cases`, req);
+  }
+
+  /** AI-proposed dataset rows for a case (not saved). */
+  generateAgentSuiteDatasetRows(name: string, suiteId: string, req: { caseId: string; count?: number; brief?: string }): Promise<{ datasetId?: string; columns: string[]; rows: Array<Record<string, unknown>>; model?: string; costUsd?: number }> {
+    return this.post(`/agents/${encodeURIComponent(name)}/suites/${encodeURIComponent(suiteId)}/datasets/generate`, req);
+  }
+
+  // ── Suites of other targets: a hosted MCP server (its saved tests), a mission ──
+
+  private targetBase(kind: SuiteTargetKind, id: string): string {
+    return `${kind === "mcp-server" ? "/mcp-servers" : "/missions"}/${encodeURIComponent(id)}`;
+  }
+
+  /** A hosted server's suite (one: its saved tests) or a mission's suites. */
+  getTargetSuites(kind: SuiteTargetKind, id: string): Promise<AgentSuite[]> {
+    return this.get<AgentSuite[]>(`${this.targetBase(kind, id)}/suites`);
+  }
+
+  /** Save a target's suite (a hosted server: id "saved-tests"); without an id, create one (missions). */
+  saveTargetSuite(kind: SuiteTargetKind, id: string, suite: AgentSuiteInput, revision?: number): Promise<AgentSuite> {
+    const body = { ...suite, ...(revision !== undefined ? { revision } : {}) };
+    const sid = suite.id ?? (kind === "mcp-server" ? "saved-tests" : undefined);
+    return sid ? this.put<AgentSuite>(`${this.targetBase(kind, id)}/suites/${encodeURIComponent(sid)}`, body) : this.post<AgentSuite>(`${this.targetBase(kind, id)}/suites`, body);
+  }
+
+  deleteTargetSuite(kind: SuiteTargetKind, id: string, suiteId: string): Promise<{ deleted: string }> {
+    return this.del<{ deleted: string }>(`${this.targetBase(kind, id)}/suites/${encodeURIComponent(suiteId)}`);
+  }
+
+  /** Run a target's suite (a hosted server: draft by default). */
+  runTargetSuite(kind: SuiteTargetKind, id: string, suiteId: string, req: SuiteRunRequest = {}): Promise<SuiteRun> {
+    return this.post<SuiteRun>(`${this.targetBase(kind, id)}/suites/${encodeURIComponent(suiteId)}/runs`, req);
+  }
+
+  getTargetSuiteRuns(kind: SuiteTargetKind, id: string, opts: { suite?: string; limit?: number } = {}): Promise<SuiteRun[]> {
+    const q = new URLSearchParams();
+    if (opts.suite) q.set("suite", opts.suite);
+    if (opts.limit) q.set("limit", String(opts.limit));
+    const s = q.toString();
+    return this.get<SuiteRun[]>(`${this.targetBase(kind, id)}/suite-runs${s ? `?${s}` : ""}`);
+  }
+
+  getTargetSuiteRun(kind: SuiteTargetKind, id: string, runId: string): Promise<SuiteRun> {
+    return this.get<SuiteRun>(`${this.targetBase(kind, id)}/suite-runs/${encodeURIComponent(runId)}`);
   }
 
   // ── Hosted MCP servers ──

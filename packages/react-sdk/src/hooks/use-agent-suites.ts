@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
-import type { AgentSuite, AgentSuiteInput, SuiteDatasetImport, SuiteRun, SuiteRunRequest, SuiteTrend } from "@polpo-ai/sdk";
+import type {
+  AgentSuite, AgentSuiteInput, CaseGenerationRequest, GeneratedCaseProposal, SuiteCase, SuiteCassette, SuiteCassetteEdit, SuiteDataset, SuiteDatasetImport,
+  SuiteRun, SuiteRunRequest, SuiteTargetKind, SuiteTrend,
+} from "@polpo-ai/sdk";
 
 export interface UseAgentSuitesReturn {
   /** The agent's suites (undefined while loading). */
@@ -22,6 +25,16 @@ export interface UseAgentSuitesReturn {
   setBaseline: (suiteId: string, runId: string | null) => Promise<void>;
   /** "Explain this run": an AI review stored on the run. */
   review: (runId: string, opts?: { language?: string }) => Promise<SuiteRun>;
+  /** Record (or re-record) a case live into its cassette (admins; real model and tools). */
+  record: (suiteId: string, caseId: string, opts?: { target?: string }) => Promise<SuiteRun>;
+  /** A case and its cassette from a real chat (sessionId) or task run (taskId), added to the suite. */
+  fromRecording: (suiteId: string, req: { sessionId?: string; taskId?: string; messageIndex?: number; name?: string }) => Promise<{ suite: AgentSuite; case: SuiteCase; cassette: SuiteCassette }>;
+  /** AI-proposed cases (NOT saved): review them, then accept. */
+  generate: (req?: CaseGenerationRequest) => Promise<{ proposals: GeneratedCaseProposal[]; model?: string; costUsd?: number }>;
+  /** Add the accepted cases (and their datasets) to a suite. */
+  accept: (suiteId: string, cases: Array<Partial<SuiteCase>>, datasets?: Array<Partial<SuiteDataset>>) => Promise<AgentSuite>;
+  /** AI-proposed dataset rows for a case (not saved). */
+  generateRows: (suiteId: string, req: { caseId: string; count?: number; brief?: string }) => Promise<{ datasetId?: string; columns: string[]; rows: Array<Record<string, unknown>> }>;
 }
 
 /** An agent's suites and runs: save, delete, import datasets, run, cancel. */
@@ -84,6 +97,24 @@ export function useAgentSuites(name: string | undefined, opts: { runsLimit?: num
     return r;
   }, [client, name, fetch_]);
 
+  const record = useCallback(async (suiteId: string, caseId: string, o: { target?: string } = {}) => {
+    const r = await client.recordAgentSuiteCase(name ?? "", suiteId, caseId, { ...(o.target ? { target: o.target } : {}), allowRealTools: true });
+    await fetch_();
+    return r;
+  }, [client, name, fetch_]);
+  const fromRecording = useCallback(async (suiteId: string, req: { sessionId?: string; taskId?: string; messageIndex?: number; name?: string }) => {
+    const r = await client.agentSuiteCaseFromRecording(name ?? "", suiteId, req);
+    await fetch_();
+    return r;
+  }, [client, name, fetch_]);
+  const generate = useCallback((req: CaseGenerationRequest = {}) => client.generateAgentSuiteCases(name ?? "", req), [client, name]);
+  const accept = useCallback(async (suiteId: string, cases: Array<Partial<SuiteCase>>, datasets?: Array<Partial<SuiteDataset>>) => {
+    const s = await client.acceptAgentSuiteCases(name ?? "", suiteId, { cases, ...(datasets?.length ? { datasets } : {}) });
+    await fetch_();
+    return s;
+  }, [client, name, fetch_]);
+  const generateRows = useCallback((suiteId: string, req: { caseId: string; count?: number; brief?: string }) => client.generateAgentSuiteDatasetRows(name ?? "", suiteId, req), [client, name]);
+
   return {
     suites: current?.suites,
     runs: current?.runs,
@@ -91,7 +122,106 @@ export function useAgentSuites(name: string | undefined, opts: { runsLimit?: num
     error: current?.error ?? null,
     refetch: fetch_,
     save, remove, importDataset, run, cancel, yaml, setBaseline, review,
+    record, fromRecording, generate, accept, generateRows,
   };
+}
+
+export interface UseSuiteCassetteReturn {
+  /** The case's cassette (null: never recorded; undefined while loading). */
+  cassette: SuiteCassette | null | undefined;
+  isLoading: boolean;
+  error: Error | null;
+  refetch: () => Promise<void>;
+  /** Edit recorded calls (response, delete, turn into a case mock). */
+  edit: (edits: SuiteCassetteEdit[]) => Promise<SuiteCassette>;
+  /** Delete the cassette (the case blocks its tool calls until recorded again). */
+  remove: () => Promise<void>;
+}
+
+/** The cassette a case replays: read, edit (per call), delete. */
+export function useSuiteCassette(name: string | undefined, suiteId: string | null | undefined, caseId: string | null | undefined): UseSuiteCassetteReturn {
+  const { client } = usePolpoContext();
+  const [state, setState] = useState<{ key: string; cassette?: SuiteCassette | null; error: Error | null } | null>(null);
+  const key = `${name ?? ""}/${suiteId ?? ""}/${caseId ?? ""}`;
+  const keyRef = useRef(key);
+  keyRef.current = key;
+  const fetch_ = useCallback(async () => {
+    if (!name || !suiteId || !caseId) return;
+    const k = `${name}/${suiteId}/${caseId}`;
+    try {
+      const cassette = await client.getAgentSuiteCaseCassette(name, suiteId, caseId);
+      if (keyRef.current === k) setState({ key: k, cassette, error: null });
+    } catch (err) {
+      if (keyRef.current === k) setState({ key: k, error: err as Error });
+    }
+  }, [client, name, suiteId, caseId]);
+  useEffect(() => { void fetch_(); }, [fetch_]);
+  const current = state?.key === key ? state : null;
+  const edit = useCallback(async (edits: SuiteCassetteEdit[]) => {
+    const c = current?.cassette;
+    if (!name || !c) throw new Error("There is no cassette to edit");
+    const next = await client.editAgentCassette(name, c.id, edits, c.revision);
+    setState({ key, cassette: next, error: null });
+    return next;
+  }, [client, name, current?.cassette, key]);
+  const remove = useCallback(async () => {
+    const c = current?.cassette;
+    if (!name || !c) return;
+    await client.deleteAgentCassette(name, c.id);
+    setState({ key, cassette: null, error: null });
+  }, [client, name, current?.cassette, key]);
+  return { cassette: current?.cassette, isLoading: !!name && !!suiteId && !!caseId && !current, error: current?.error ?? null, refetch: fetch_, edit, remove };
+}
+
+export interface UseTargetSuitesReturn {
+  suites: AgentSuite[] | undefined;
+  runs: SuiteRun[] | undefined;
+  isLoading: boolean;
+  error: Error | null;
+  refetch: () => Promise<void>;
+  /** Save a suite (a hosted server: its saved tests, id "saved-tests"). */
+  save: (suite: AgentSuiteInput, revision?: number) => Promise<AgentSuite>;
+  remove: (suiteId: string) => Promise<void>;
+  /** Start a run (returned running); the runs refresh while it runs. */
+  run: (suiteId: string, req?: SuiteRunRequest) => Promise<SuiteRun>;
+}
+
+/** The suites of a hosted MCP server (its saved tests) or a mission, and their runs. */
+export function useTargetSuites(kind: SuiteTargetKind, id: string | undefined, opts: { runsLimit?: number } = {}): UseTargetSuitesReturn {
+  const { client } = usePolpoContext();
+  const [state, setState] = useState<{ key: string; suites?: AgentSuite[]; runs?: SuiteRun[]; error: Error | null } | null>(null);
+  const key = `${kind}/${id ?? ""}`;
+  const limit = opts.runsLimit ?? 20;
+  const fetch_ = useCallback(async () => {
+    if (!id) return;
+    const k = `${kind}/${id}`;
+    try {
+      const [suites, runs] = await Promise.all([client.getTargetSuites(kind, id), client.getTargetSuiteRuns(kind, id, { limit })]);
+      setState({ key: k, suites, runs, error: null });
+    } catch (err) {
+      setState((s) => ({ key: k, ...(s?.key === k ? { suites: s.suites, runs: s.runs } : {}), error: err as Error }));
+    }
+  }, [client, kind, id, limit]);
+  useEffect(() => { void fetch_(); }, [fetch_]);
+  const current = state?.key === key ? state : null;
+  const anyRunning = !!current?.runs?.some((r) => r.status === "running" || r.status === "queued");
+  useEffect(() => {
+    if (!anyRunning) return;
+    const t = setInterval(() => { void fetch_(); }, 3000);
+    return () => clearInterval(t);
+  }, [anyRunning, fetch_]);
+  const save = useCallback(async (suite: AgentSuiteInput, revision?: number) => {
+    const s = await client.saveTargetSuite(kind, id ?? "", suite, revision);
+    await fetch_();
+    return s;
+  }, [client, kind, id, fetch_]);
+  const remove = useCallback(async (suiteId: string) => { await client.deleteTargetSuite(kind, id ?? "", suiteId); await fetch_(); }, [client, kind, id, fetch_]);
+  const run = useCallback(async (suiteId: string, req: SuiteRunRequest = {}) => {
+    const r = await client.runTargetSuite(kind, id ?? "", suiteId, req);
+    await fetch_();
+    return r;
+  }, [client, kind, id, fetch_]);
+  return { suites: current?.suites, runs: current?.runs, isLoading: !!id && !current, error: current?.error ?? null, refetch: fetch_, save, remove, run };
 }
 
 export interface UseAgentSuiteRunReturn {

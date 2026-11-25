@@ -275,4 +275,5 @@ export type {
   ScorerSource, JudgeCriterion, SuiteScorerType, SuiteEvalSettings, SuiteScoreResult, SuiteScorerAggregate, SuiteCaseAggregate, SuiteRunAggregates,
   SuiteChange, SuiteScorerDelta, SuiteCaseDelta, SuiteBaselineComparison, SuiteRunReview, SuiteTrendPoint, SuiteTrend,
   SuiteGate, DeployGateTrigger, DeployGateStatus, DeployGateSuiteStatus, DeployGateSuite, AgentDeployGate, AgentDeployGateRef, AgentVersionGateStatus,
+  CassetteMatch, SuiteCassetteRef, SimulatedUser, HttpMock, SuiteCassette, SuiteCassetteCall, SuiteCassetteSummary, SuiteCassetteEdit, CaseGenerationRequest, GeneratedCaseProposal, SuiteTargetKind,
 } from "./client/agent-suite-types.js";
