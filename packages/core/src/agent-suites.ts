@@ -25,6 +25,7 @@
 import { unifiedLineDiff } from "./agent-versions.js";
 import type { SuiteBaselineComparison, SuiteRunAggregates, SuiteRunReview } from "./agent-suite-evals.js";
 import { DEPLOY_GATE_LIMITS, type AgentDeployGate } from "./agent-suite-gates.js";
+import type { SuiteCassetteRecord } from "./agent-suite-replay.js";
 
 // ── Modes ────────────────────────────────────────────────────────────
 
@@ -100,18 +101,74 @@ export interface ModelMock {
   onExhausted?: "stop" | "error";
 }
 
-/** Phase 4 (reserved): a recorded exchange replayed instead of the model and tools. */
+/** How a replayed tool call is matched with a recorded one (see `matchCassetteCall`). */
+export type CassetteMatch = "exact" | "partial" | "tool" | "sequence";
+export const CASSETTE_MATCHES: readonly CassetteMatch[] = ["exact", "partial", "tool", "sequence"];
+
+/**
+ * Phase 4 — a cassette: a recorded exchange (every model turn and tool call of a real run, secrets
+ * redacted) replayed instead of the model and the tools. The recording itself is kept apart
+ * (`.polpo/agent-suites/<agent>/cassettes/<id>.json`); a case points at it.
+ */
 export interface SuiteCassette {
   id: string;
-  mode: "record" | "replay";
+  /** replay (default). A recording is made with a run's `record: true` (or the Record button). */
+  mode?: "record" | "replay";
+  /**
+   * How a tool call finds its recorded answer: exact arguments (default), partial (the recorded
+   * arguments are a subset of the call's), tool (the next unused recording of that tool) or
+   * sequence (the n-th call of the case must be the n-th recorded one).
+   */
+  match?: CassetteMatch;
+  /** A call no recording answers: blocked (an error result, default) or the case fails. */
+  onUnmatched?: "block" | "fail";
+  /** Replay the recorded model turns when the mode scripts the model (default true). */
+  model?: boolean;
 }
 
-/** Phase 4 (reserved): a model that plays the user for multi-turn cases. */
+/** When a simulated conversation stops (besides maxTurns): the simulator says the goal is reached, a scorer passes, or only at maxTurns. */
+export type SimulatedUserStop = "goal" | "scorer" | "max_turns";
+
+/**
+ * Phase 4 — a simulated user: a model plays the user of a multi-turn case from a persona, a goal and
+ * constraints (or a scripted list of user turns). The case's message is the first user turn.
+ */
 export interface SimulatedUser {
-  persona: string;
+  /** Who the user is (tone, knowledge, situation). */
+  persona?: string;
+  /** What the user wants to get done. */
   goal?: string;
+  /** Rules the user follows ("never gives the order number", "answers in Italian"). */
+  constraints?: string[];
+  /** User turns after the first (1–20, default 5). */
   maxTurns?: number;
+  /** goal (default): stop when the simulator says the goal is reached; scorer: when `stopScorer` passes; max_turns: run every turn. */
+  stop?: SimulatedUserStop;
+  /** stop: scorer — the id of one of the case's scorers (checked after each agent reply). */
+  stopScorer?: string;
+  /** The simulator's model (default the suite's simulatorModel, else Polpo's model). */
   model?: string;
+  /** Scripted user: these turns, in order, after the case's message (no simulator call). */
+  script?: string[];
+}
+
+/**
+ * Phase 4 — an HTTP mock for hosted MCP server suites: answers an upstream request a server's tool
+ * makes (matched by method and URL: a glob, or a substring) instead of the network.
+ */
+export interface HttpMock {
+  id?: string;
+  /** GET, POST… (default any). */
+  method?: string;
+  /** A glob (`https://api.example.com/v1/orders*`) or a substring of the request URL. */
+  url: string;
+  /** Default 200. */
+  status?: number;
+  /** The response body: a string as is, anything else as JSON. Templated ({{row.x}}). */
+  body?: unknown;
+  headers?: Record<string, string>;
+  /** Answer at most this many requests. */
+  times?: number;
 }
 
 /** What a tool call no mock matches does in a tool-mocking mode: blocked (an error result, default) or run for real (`tools` mode only). */
@@ -121,10 +178,16 @@ export interface SuiteMocks {
   tools?: ToolMock[];
   model?: ModelMock;
   unmockedTools?: UnmockedToolPolicy;
-  /** Phase 4 (reserved). */
+  /** A recorded exchange replayed (phase 4). */
   cassette?: SuiteCassette;
-  /** Phase 4 (reserved). */
+  /** A simulated (or scripted) user for a multi-turn case (phase 4). */
   simulatedUser?: SimulatedUser;
+  /** Missions: mocks per agent (by name), merged over the shared ones for that agent's tasks. */
+  agents?: Record<string, SuiteMocks>;
+  /** Hosted MCP servers: the upstream API's answers. */
+  http?: HttpMock[];
+  /** Hosted MCP servers: a request no HTTP mock matches is blocked (default) or sent for real (admins). */
+  unmockedHttp?: UnmockedToolPolicy;
 }
 
 /**
@@ -142,11 +205,21 @@ export const SUITE_STUBBED_TOOLS: Record<string, string> = {
 export interface CaseContextFile { path: string; content: string }
 export interface CaseAttachment { name: string; content: string; mimeType?: string }
 
+export type CaseInputKind = "chat" | "task" | "tool" | "mission";
+
 export interface CaseInput {
-  /** chat: a message to the agent; task: a task description (run as an agent turn with the task framing). */
-  kind: "chat" | "task";
-  /** The message or the task description. Templated ({{row.x}}). */
+  /**
+   * chat: a message to the agent; task: a task description (run as an agent turn with the task
+   * framing); tool: a hosted MCP server's tool called with `args`; mission: the target mission run
+   * in test mode (the message, when given, is added to every task as context).
+   */
+  kind: CaseInputKind;
+  /** The message or the task description (tool: unused). Templated ({{row.x}}). */
   message: string;
+  /** tool: the hosted server's tool to call. */
+  tool?: string;
+  /** tool: its arguments (templated). */
+  args?: Record<string, unknown>;
   /** Earlier turns of the conversation (a recorded exchange). */
   history?: Array<{ role: "user" | "assistant"; content: string }>;
   context?: {
@@ -170,14 +243,24 @@ interface AssertionBase {
 }
 
 export type SuiteAssertion = AssertionBase & (
-  /** Called (at least once, or exactly `times`, or between `min` and `max`), optionally with these arguments. */
-  | { type: "tool_called"; tool: string; times?: number; min?: number; max?: number; args?: unknown; match?: ArgsMatchMode }
-  /** Never called (with these arguments, when given). */
-  | { type: "tool_not_called"; tool: string; args?: unknown; match?: ArgsMatchMode }
+  /** Called (at least once, or exactly `times`, or between `min` and `max`), optionally with these arguments (missions: by `agent`). */
+  | { type: "tool_called"; tool: string; times?: number; min?: number; max?: number; args?: unknown; match?: ArgsMatchMode; agent?: string }
+  /** Never called (with these arguments, when given; missions: by `agent`). */
+  | { type: "tool_not_called"; tool: string; args?: unknown; match?: ArgsMatchMode; agent?: string }
   /** These tools were called in this order (a subsequence; strict: one right after the other). */
   | { type: "tool_order"; tools: string[]; strict?: boolean }
-  /** The arguments of the tool's calls (which: any (default), all, first, last). */
-  | { type: "tool_args"; tool: string; value: unknown; match?: ArgsMatchMode; which?: "any" | "all" | "first" | "last" }
+  /** The arguments of the tool's calls (which: any (default), all, first, last; missions: by `agent`). */
+  | { type: "tool_args"; tool: string; value: unknown; match?: ArgsMatchMode; which?: "any" | "all" | "first" | "last"; agent?: string }
+  /** A call (of this tool, when given) failed: hosted server cases that expect an error. */
+  | { type: "tool_failed"; tool?: string; contains?: string }
+  /** Hosted MCP servers: the tool sent an upstream request (method, URL glob or substring), `times` when given. */
+  | { type: "http_called"; url: string; method?: string; times?: number }
+  /** Missions: the task (by title) ended with this status (done, failed, skipped). */
+  | { type: "task_status"; task: string; status: "done" | "failed" | "skipped" }
+  /** Missions: these tasks ran in this order (titles). */
+  | { type: "task_order"; tasks: string[] }
+  /** Missions: the task was done by this agent. */
+  | { type: "task_agent"; task: string; agent: string }
   /** No tool call failed. */
   | { type: "no_tool_errors" }
   /** register_outcome was called (with this label / type, a value containing this text). */
@@ -199,6 +282,7 @@ export type SuiteAssertionType = SuiteAssertion["type"];
 export const SUITE_ASSERTION_TYPES: readonly SuiteAssertionType[] = [
   "tool_called", "tool_not_called", "tool_order", "tool_args", "no_tool_errors", "outcome_registered", "artifact_created",
   "approval_requested", "text_contains", "text_not_contains", "text_regex", "max_turns", "max_cost", "max_duration",
+  "tool_failed", "http_called", "task_status", "task_order", "task_agent",
 ];
 
 /**
@@ -308,7 +392,12 @@ export interface SuiteCase {
   tags?: string[];
   skip?: boolean;
   /** Where the case came from (a recorded chat exchange, the playground, an import, AI generation). */
-  source?: { kind: "manual" | "recorded" | "imported" | "generated"; sessionId?: string; runId?: string; at?: string };
+  source?: {
+    kind: "manual" | "recorded" | "imported" | "generated";
+    sessionId?: string; runId?: string; taskId?: string; at?: string;
+    /** generated: why the model proposed it, and what it covers (happy path, edge case, adversarial…). */
+    rationale?: string; category?: string; model?: string;
+  };
 }
 
 export interface SuiteDataset {
@@ -317,11 +406,14 @@ export interface SuiteDataset {
   description?: string;
   columns: string[];
   rows: Array<Record<string, unknown>>;
-  /** manual, csv / json import, (phase 4) generated. */
-  source?: { kind: "manual" | "csv" | "json" | "generated"; file?: string; at?: string };
+  /** manual, csv / json import, generated (AI, reviewed before it was saved). */
+  source?: { kind: "manual" | "csv" | "json" | "generated"; file?: string; at?: string; model?: string };
 }
 
-/** What a suite tests. Phase 1: an agent; hosted MCP servers, missions and teams later. */
+/**
+ * What a suite tests: an agent (its suites live with it), a hosted MCP server (its saved tests are
+ * its suite) or a mission (run in test mode with every agent mocked). Teams: reserved.
+ */
 export type SuiteTarget =
   | { kind: "agent" }
   | { kind: "mcp-server"; server: string }
@@ -365,6 +457,8 @@ export interface AgentSuite {
   evals?: SuiteEvalSettings;
   /** A deploy gate: required before production, thresholds, run on publish. */
   gate?: SuiteGate;
+  /** The simulated users' model (default Polpo's model, Settings → Orchestrator). */
+  simulatorModel?: string;
   tags?: string[];
   /** Bumped on every save (a save with an older revision is refused). */
   revision: number;
@@ -415,7 +509,7 @@ export interface SuiteVariant {
   overrides?: SuiteVariantOverrides;
 }
 
-export type SuiteRunTrigger = "manual" | "publish" | "deploy" | "schedule" | "ci" | "benchmark";
+export type SuiteRunTrigger = "manual" | "publish" | "deploy" | "schedule" | "ci" | "benchmark" | "record";
 
 export interface SuiteRunRequest {
   /** production (default), draft, or a published version (1.2.0). */
@@ -440,6 +534,11 @@ export interface SuiteRunRequest {
   baselineRunId?: string;
   /** Overrides the suite's evals.regressionTolerance for this run's comparison. */
   regressionTolerance?: number;
+  /**
+   * Record: run the cases live (real model, real tools: admins, after a confirmation) and save each
+   * one's exchange as its cassette (secrets redacted); the case then replays it.
+   */
+  record?: boolean;
 }
 
 export type SuiteRunStatus = "queued" | "running" | "passed" | "failed" | "errored" | "cancelled";
@@ -485,16 +584,18 @@ export interface SuiteTraceTurn {
   text: string;
   thinking?: string;
   toolCalls: Array<{ id: string; name: string; args: Record<string, unknown> }>;
-  /** A scripted turn (model mock). */
+  /** A scripted turn (model mock, or a cassette's recorded turn). */
   mocked: boolean;
   model?: string;
   usage?: { inputTokens: number; outputTokens: number; costUsd: number };
   durationMs: number;
   error?: string;
+  /** Missions: the agent whose turn it was. */
+  agent?: string;
 }
 
-/** mock: a tool mock answered; stub: a harmless stub (register_outcome…); blocked: no mock, not run; false: ran for real. */
-export type SuiteToolCallMocked = "mock" | "stub" | "blocked" | false;
+/** mock: a tool mock answered; cassette: a recorded answer; stub: a harmless stub (register_outcome…); blocked: no mock, not run; false: ran for real. */
+export type SuiteToolCallMocked = "mock" | "cassette" | "stub" | "blocked" | false;
 
 export interface SuiteTraceToolCall {
   id: string;
@@ -509,6 +610,44 @@ export interface SuiteTraceToolCall {
   durationMs: number;
   /** interactive: the chat stopped for a person (a gated send, ask_user); queued: a hosted tool waits in Approvals. */
   approval?: "interactive" | "queued";
+  /** Missions: the agent that called it. */
+  agent?: string;
+}
+
+/** One message of a multi-turn case (simulated or scripted user). */
+export interface SuiteTranscriptMessage {
+  role: "user" | "assistant";
+  content: string;
+  /** user: written by the simulator (false: the case's first message or a scripted turn). */
+  simulated?: boolean;
+  /** The simulator's reasoning for this turn, or why it stopped. */
+  note?: string;
+}
+
+/** Missions: one task of the mission run in test mode. */
+export interface SuiteTraceTask {
+  title: string;
+  agent: string;
+  status: "done" | "failed" | "skipped";
+  /** The agent's final reply for the task. */
+  text: string;
+  toolCalls: number;
+  turns: number;
+  costUsd: number;
+  durationMs: number;
+  error?: string;
+}
+
+/** Hosted MCP servers: one upstream request a tool made. */
+export interface SuiteTraceHttp {
+  method: string;
+  url: string;
+  status: number;
+  /** mock: an HTTP mock answered (its id); blocked: no mock, not sent; false: sent for real. */
+  mocked: "mock" | "blocked" | false;
+  mockId?: string;
+  /** The request body (secrets redacted), shortened. */
+  body?: string;
 }
 
 export interface SuiteTrace {
@@ -525,6 +664,20 @@ export interface SuiteTrace {
   durationMs: number;
   /** What the runner noticed (engine limits, budget stops, unmocked calls blocked…). */
   notes: string[];
+  /** Multi-turn cases (simulated or scripted user): the whole conversation. `text` then holds every agent reply. */
+  transcript?: SuiteTranscriptMessage[];
+  /** The reply of the last turn (multi-turn cases). */
+  finalText?: string;
+  /** The simulated user's model calls (not counted in the agent's cost), and why the conversation stopped. */
+  simulator?: { model?: string; calls: number; costUsd: number; stoppedBy: "goal" | "scorer" | "max_turns" | "script" | "agent" | "budget" | "error"; goalReached?: boolean };
+  /** Missions: each task, in the order it ran. */
+  tasks?: SuiteTraceTask[];
+  /** Hosted MCP servers: the upstream requests. */
+  http?: SuiteTraceHttp[];
+  /** A replayed cassette: what it answered and what it could not. */
+  cassette?: { id: string; replayedCalls: number; replayedTurns: number; unmatched: string[] };
+  /** A recorded run: the cassette saved from this case. */
+  recorded?: { cassetteId: string; calls: number; turns: number; redactions: number };
 }
 
 export interface SuiteCaseResult {
@@ -603,6 +756,10 @@ export interface SuiteRun {
   review?: SuiteRunReview;
   /** A gate run (trigger deploy / publish): the gate's decision and the deploy gate it belongs to. */
   gate?: { decision: "pass" | "fail" | "override"; reason?: string; by?: string; gateId?: string };
+  /** What the suite tests (default agent); `agent` then holds the owner key (`mcp-server:<id>`, `mission:<id>`). */
+  targetKind?: SuiteTarget["kind"];
+  /** A recording run: each case's exchange was saved as its cassette. */
+  record?: boolean;
   notes: string[];
   error?: string;
 }
@@ -668,6 +825,11 @@ export interface AgentSuiteStore {
   listGates(agent: string, opts?: { version?: string; limit?: number }): Promise<AgentDeployGate[]>;
   getGate(agent: string, id: string): Promise<AgentDeployGate | undefined>;
   saveGate(gate: AgentDeployGate): Promise<void>;
+  /** Cassettes (recorded exchanges replayed by cases), by id. */
+  listCassettes(agent: string): Promise<SuiteCassetteRecord[]>;
+  getCassette(agent: string, id: string): Promise<SuiteCassetteRecord | undefined>;
+  saveCassette(cassette: SuiteCassetteRecord): Promise<void>;
+  deleteCassette(agent: string, id: string): Promise<boolean>;
   deleteAgent(agent: string): Promise<void>;
 }
 
@@ -675,6 +837,14 @@ export class InMemoryAgentSuiteStore implements AgentSuiteStore {
   private suites = new Map<string, Map<string, AgentSuite>>();
   private runs = new Map<string, SuiteRun[]>();
   private gates = new Map<string, AgentDeployGate[]>();
+  private cassettes = new Map<string, Map<string, SuiteCassetteRecord>>();
+  async listCassettes(agent: string) { return [...(this.cassettes.get(agent)?.values() ?? [])].map(clone); }
+  async getCassette(agent: string, id: string) { const c = this.cassettes.get(agent)?.get(id); return c ? clone(c) : undefined; }
+  async saveCassette(c: SuiteCassetteRecord) {
+    if (!this.cassettes.has(c.agent)) this.cassettes.set(c.agent, new Map());
+    this.cassettes.get(c.agent)!.set(c.id, clone(c));
+  }
+  async deleteCassette(agent: string, id: string) { return this.cassettes.get(agent)?.delete(id) ?? false; }
   async listSuites(agent: string) { return [...(this.suites.get(agent)?.values() ?? [])].map(clone); }
   async getSuite(agent: string, id: string) { const s = this.suites.get(agent)?.get(id); return s ? clone(s) : undefined; }
   async saveSuite(suite: AgentSuite) {
@@ -705,7 +875,7 @@ export class InMemoryAgentSuiteStore implements AgentSuiteStore {
     list.sort((a, b) => b.requestedAt.localeCompare(a.requestedAt));
     this.gates.set(gate.agent, list.slice(0, DEPLOY_GATE_LIMITS.kept));
   }
-  async deleteAgent(agent: string) { this.suites.delete(agent); this.runs.delete(agent); this.gates.delete(agent); }
+  async deleteAgent(agent: string) { this.suites.delete(agent); this.runs.delete(agent); this.gates.delete(agent); this.cassettes.delete(agent); }
 }
 
 function clone<T>(v: T): T { return JSON.parse(JSON.stringify(v)) as T; }
@@ -847,10 +1017,87 @@ function parseMocks(v: unknown, where: string): SuiteMocks | undefined {
   }
   const unmocked = v.unmockedTools;
   if (unmocked !== undefined && unmocked !== "block" && unmocked !== "real") throw new AgentSuiteError(`${where}.unmockedTools must be block or real`);
+  const unmockedHttp = v.unmockedHttp;
+  if (unmockedHttp !== undefined && unmockedHttp !== "block" && unmockedHttp !== "real") throw new AgentSuiteError(`${where}.unmockedHttp must be block or real`);
+  let agents: Record<string, SuiteMocks> | undefined;
+  if (v.agents !== undefined && v.agents !== null) {
+    if (!isObj(v.agents)) throw new AgentSuiteError(`${where}.agents must be an object: { agentName: mocks }`);
+    agents = {};
+    for (const [name, m] of Object.entries(v.agents)) {
+      const parsed = parseMocks(m, `${where}.agents.${name}`);
+      if (parsed?.agents) throw new AgentSuiteError(`${where}.agents.${name}: mocks per agent cannot nest`);
+      if (parsed) agents[name] = parsed;
+    }
+  }
+  let http: HttpMock[] | undefined;
+  if (v.http !== undefined && v.http !== null) {
+    if (!Array.isArray(v.http)) throw new AgentSuiteError(`${where}.http must be a list`);
+    if (v.http.length > SUITE_LIMITS.toolMocks) throw new AgentSuiteError(`${where}.http: at most ${SUITE_LIMITS.toolMocks} mocks`);
+    http = v.http.map((h, i) => parseHttpMock(h, `${where}.http[${i}]`));
+  }
   return compact({
     tools, model, unmockedTools: unmocked as UnmockedToolPolicy | undefined,
-    cassette: isObj(v.cassette) ? v.cassette as unknown as SuiteCassette : undefined,
-    simulatedUser: isObj(v.simulatedUser) ? v.simulatedUser as unknown as SimulatedUser : undefined,
+    cassette: parseCassetteRef(v.cassette, `${where}.cassette`),
+    simulatedUser: parseSimulatedUser(v.simulatedUser, `${where}.simulatedUser`),
+    agents, http, unmockedHttp: unmockedHttp as UnmockedToolPolicy | undefined,
+  });
+}
+
+function parseCassetteRef(v: unknown, where: string): SuiteCassette | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (!isObj(v)) throw new AgentSuiteError(`${where} must be an object: { id, match?, onUnmatched? }`);
+  const id = str(v.id, `${where}.id`, { max: 64 })!;
+  if (!ID_RE.test(id)) throw new AgentSuiteError(`${where}.id "${id}" must be lowercase letters, digits, - or _`);
+  const m = v.match;
+  if (m !== undefined && !(CASSETTE_MATCHES as readonly unknown[]).includes(m)) throw new AgentSuiteError(`${where}.match must be one of ${CASSETTE_MATCHES.join(", ")}`);
+  const onUnmatched = v.onUnmatched;
+  if (onUnmatched !== undefined && onUnmatched !== "block" && onUnmatched !== "fail") throw new AgentSuiteError(`${where}.onUnmatched must be block or fail`);
+  const mode = v.mode;
+  if (mode !== undefined && mode !== "record" && mode !== "replay") throw new AgentSuiteError(`${where}.mode must be replay or record`);
+  return compact({
+    id, mode: mode as SuiteCassette["mode"], match: m as CassetteMatch | undefined, onUnmatched: onUnmatched as SuiteCassette["onUnmatched"],
+    model: v.model === false ? false : undefined,
+  });
+}
+
+function parseSimulatedUser(v: unknown, where: string): SimulatedUser | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (!isObj(v)) throw new AgentSuiteError(`${where} must be an object: { persona, goal, constraints?, maxTurns?, stop?, script? }`);
+  const script = strList(v.script, `${where}.script`);
+  if (script && script.length > 20) throw new AgentSuiteError(`${where}.script: at most 20 turns`);
+  const persona = str(v.persona, `${where}.persona`, { optional: true, max: 4000 });
+  const goal = str(v.goal, `${where}.goal`, { optional: true, max: 4000 });
+  if (!script?.length && !persona && !goal) throw new AgentSuiteError(`${where} needs a persona or a goal (a simulated user), or a script (scripted turns)`);
+  const stop = v.stop;
+  if (stop !== undefined && stop !== "goal" && stop !== "scorer" && stop !== "max_turns") throw new AgentSuiteError(`${where}.stop must be goal, scorer or max_turns`);
+  const stopScorer = str(v.stopScorer, `${where}.stopScorer`, { optional: true, max: 64 });
+  if (stop === "scorer" && !stopScorer) throw new AgentSuiteError(`${where}.stopScorer is required with stop: scorer`);
+  const constraints = strList(v.constraints, `${where}.constraints`);
+  return compact({
+    persona, goal, constraints: constraints?.length ? constraints : undefined,
+    maxTurns: num(v.maxTurns, `${where}.maxTurns`, { min: 1, max: 20, int: true }),
+    stop: stop as SimulatedUserStop | undefined, stopScorer,
+    model: str(v.model, `${where}.model`, { optional: true, max: 200 }),
+    script: script?.length ? script : undefined,
+  });
+}
+
+function parseHttpMock(v: unknown, where: string): HttpMock {
+  if (!isObj(v)) throw new AgentSuiteError(`${where} must be an object: { method?, url, status?, body? }`);
+  const method = str(v.method, `${where}.method`, { optional: true, max: 10 });
+  let headers: Record<string, string> | undefined;
+  if (v.headers !== undefined) {
+    if (!isObj(v.headers) || Object.values(v.headers).some((x) => typeof x !== "string")) throw new AgentSuiteError(`${where}.headers must be an object of strings`);
+    headers = v.headers as Record<string, string>;
+  }
+  return compact({
+    id: str(v.id, `${where}.id`, { optional: true, max: 64 }),
+    method: method?.toUpperCase(),
+    url: str(v.url, `${where}.url`, { max: 2000 })!,
+    status: num(v.status, `${where}.status`, { min: 100, max: 599, int: true }),
+    body: v.body,
+    headers,
+    times: num(v.times, `${where}.times`, { min: 1, int: true }),
   });
 }
 
@@ -868,11 +1115,28 @@ function parseAssertion(v: unknown, where: string): SuiteAssertion {
   const base = compact({ id: str(v.id, `${where}.id`, { optional: true, max: 64 }), label: str(v.label, `${where}.label`, { optional: true, max: 300 }) });
   const m = matchMode(v.match, `${where}.match`);
   if (m === "regex") checkRegexes(v.args ?? v.value, `${where}.${v.args !== undefined ? "args" : "value"}`);
+  const agent = str(v.agent, `${where}.agent`, { optional: true, max: 200 });
   switch (type) {
     case "tool_called":
-      return compact({ ...base, type, tool: str(v.tool, `${where}.tool`)!, times: num(v.times, `${where}.times`, { min: 0, int: true }), min: num(v.min, `${where}.min`, { min: 0, int: true }), max: num(v.max, `${where}.max`, { min: 0, int: true }), args: v.args, match: m });
+      return compact({ ...base, type, tool: str(v.tool, `${where}.tool`)!, times: num(v.times, `${where}.times`, { min: 0, int: true }), min: num(v.min, `${where}.min`, { min: 0, int: true }), max: num(v.max, `${where}.max`, { min: 0, int: true }), args: v.args, match: m, agent });
     case "tool_not_called":
-      return compact({ ...base, type, tool: str(v.tool, `${where}.tool`)!, args: v.args, match: m });
+      return compact({ ...base, type, tool: str(v.tool, `${where}.tool`)!, args: v.args, match: m, agent });
+    case "tool_failed":
+      return compact({ ...base, type, tool: str(v.tool, `${where}.tool`, { optional: true, max: 200 }), contains: str(v.contains, `${where}.contains`, { optional: true, max: 2000 }) });
+    case "http_called":
+      return compact({ ...base, type, url: str(v.url, `${where}.url`, { max: 2000 })!, method: str(v.method, `${where}.method`, { optional: true, max: 10 })?.toUpperCase(), times: num(v.times, `${where}.times`, { min: 0, int: true }) });
+    case "task_status": {
+      const status = v.status;
+      if (status !== "done" && status !== "failed" && status !== "skipped") throw new AgentSuiteError(`${where}.status must be done, failed or skipped`);
+      return { ...base, type, task: str(v.task, `${where}.task`, { max: 300 })!, status };
+    }
+    case "task_order": {
+      const tasks = strList(v.tasks, `${where}.tasks`);
+      if (!tasks || tasks.length < 2) throw new AgentSuiteError(`${where}.tasks needs at least two task titles`);
+      return { ...base, type, tasks };
+    }
+    case "task_agent":
+      return { ...base, type, task: str(v.task, `${where}.task`, { max: 300 })!, agent: str(v.agent, `${where}.agent`, { max: 200 })! };
     case "tool_order": {
       const tools = strList(v.tools, `${where}.tools`);
       if (!tools || tools.length < 2) throw new AgentSuiteError(`${where}.tools needs at least two tools`);
@@ -882,7 +1146,7 @@ function parseAssertion(v: unknown, where: string): SuiteAssertion {
       if (v.value === undefined) throw new AgentSuiteError(`${where}.value is required`);
       const which = v.which;
       if (which !== undefined && !["any", "all", "first", "last"].includes(which as string)) throw new AgentSuiteError(`${where}.which must be any, all, first or last`);
-      return compact({ ...base, type, tool: str(v.tool, `${where}.tool`)!, value: v.value, match: m, which: which as "any" | undefined });
+      return compact({ ...base, type, tool: str(v.tool, `${where}.tool`)!, value: v.value, match: m, which: which as "any" | undefined, agent });
     }
     case "no_tool_errors": return { ...base, type };
     case "outcome_registered":
@@ -1018,7 +1282,11 @@ function parseEvals(v: unknown, where: string): SuiteEvalSettings | undefined {
 function parseInput(v: unknown, where: string): CaseInput {
   if (!isObj(v)) throw new AgentSuiteError(`${where} must be an object`);
   const kind = v.kind ?? "chat";
-  if (kind !== "chat" && kind !== "task") throw new AgentSuiteError(`${where}.kind must be chat or task`);
+  if (kind !== "chat" && kind !== "task" && kind !== "tool" && kind !== "mission") throw new AgentSuiteError(`${where}.kind must be chat, task, tool or mission`);
+  if (kind === "tool") {
+    if (v.args !== undefined && !isObj(v.args)) throw new AgentSuiteError(`${where}.args must be an object`);
+    return compact({ kind, message: str(v.message, `${where}.message`, { optional: true, max: 100_000 }) ?? "", tool: str(v.tool, `${where}.tool`, { max: 200 })!, args: (v.args as Record<string, unknown> | undefined) ?? {} });
+  }
   let history: CaseInput["history"];
   if (v.history !== undefined) {
     if (!Array.isArray(v.history)) throw new AgentSuiteError(`${where}.history must be a list`);
@@ -1043,7 +1311,13 @@ function parseInput(v: unknown, where: string): CaseInput {
       attachments: list(c.attachments, `${where}.context.attachments`, (o, w) => compact({ name: str(o.name, `${w}.name`, { max: 200 })!, content: str(o.content, `${w}.content`, { max: 200_000, optional: true }) ?? "", mimeType: str(o.mimeType, `${w}.mimeType`, { optional: true }) })),
     });
   }
-  return compact({ kind, message: str(v.message, `${where}.message`, { max: 100_000 })!, history, context });
+  const message = kind === "mission" ? str(v.message, `${where}.message`, { optional: true, max: 100_000 }) ?? "" : str(v.message, `${where}.message`, { max: 100_000 })!;
+  return compact({ kind, message, history, context });
+}
+
+/** Validate one case (the generated cases a person accepts, the cases appended to a suite). */
+export function parseSuiteCase(input: unknown, where = "case", takenIds: Iterable<string> = []): SuiteCase {
+  return parseCase(input, where, new Set(takenIds));
 }
 
 function parseCase(v: unknown, where: string, ids: Set<string>): SuiteCase {
@@ -1149,6 +1423,7 @@ export function parseAgentSuite(input: unknown, agent: string, existing?: AgentS
     scorers: parseScorers(input.scorers, "scorers"),
     evals: parseEvals(input.evals, "evals"),
     gate,
+    simulatorModel: str(input.simulatorModel, "simulatorModel", { optional: true, max: 200 }),
     tags: strList(input.tags, "tags"),
     revision: (existing?.revision ?? 0) + 1,
     createdAt: existing?.createdAt ?? now,
@@ -1206,13 +1481,31 @@ export interface PlannedCase {
 
 /** Merge the suite's and the case's mocks: the case's tool mocks first, its model mock and policy win. */
 export function mergeSuiteMocks(suite: SuiteMocks | undefined, own: SuiteMocks | undefined): SuiteMocks {
+  let agents: Record<string, SuiteMocks> | undefined;
+  if (own?.agents || suite?.agents) {
+    agents = {};
+    for (const name of new Set([...Object.keys(own?.agents ?? {}), ...Object.keys(suite?.agents ?? {})])) {
+      agents[name] = mergeSuiteMocks(suite?.agents?.[name], own?.agents?.[name]);
+    }
+  }
+  const http = [...(own?.http ?? []), ...(suite?.http ?? [])];
   return compact({
     tools: [...(own?.tools ?? []), ...(suite?.tools ?? [])],
     model: own?.model ?? suite?.model,
     unmockedTools: own?.unmockedTools ?? suite?.unmockedTools,
     cassette: own?.cassette ?? suite?.cassette,
     simulatedUser: own?.simulatedUser ?? suite?.simulatedUser,
+    agents,
+    http: http.length ? http : undefined,
+    unmockedHttp: own?.unmockedHttp ?? suite?.unmockedHttp,
   });
+}
+
+/** A mission task's mocks: the agent's own (by name), over the case's shared ones (tool mocks first, model mock and policies win). */
+export function agentMocksFor(mocks: SuiteMocks, agent: string): SuiteMocks {
+  const { agents, ...shared } = mocks;
+  const own = agents?.[agent];
+  return own ? mergeSuiteMocks(shared, own) : shared;
 }
 
 /** The scorers a case runs: the suite's defaults, then its own (one with the same id replaces the default). */
@@ -1260,12 +1553,14 @@ export function planSuiteCases(suite: AgentSuite, opts: { caseIds?: string[]; mo
 
 /** Does running these cases touch real tools (a side effect is possible)? Such runs need the admin scope. */
 export function planUsesRealTools(planned: PlannedCase[]): boolean {
-  return planned.some((p) => !modeMocksTools(p.mode) || (p.mode === "tools" && p.mocks.unmockedTools === "real"));
+  return planned.some((p) => !modeMocksTools(p.mode) || (p.mode === "tools" && p.mocks.unmockedTools === "real")
+    || (p.case.input.kind === "tool" && p.mocks.unmockedHttp === "real")
+    || (p.case.input.kind === "mission" && Object.values(p.mocks.agents ?? {}).some((m) => p.mode === "tools" && m.unmockedTools === "real")));
 }
 
 /** Does running these cases call a real model (it costs tokens)? */
 export function planUsesRealModel(planned: PlannedCase[]): boolean {
-  return planned.some((p) => !modeMocksModel(p.mode));
+  return planned.some((p) => p.case.input.kind !== "tool" && !modeMocksModel(p.mode));
 }
 
 /** The message sent to the agent for a case: the task framing, context files and attachments inlined. */
@@ -1432,11 +1727,17 @@ function argsDiff(expected: unknown, actual: unknown): string {
 export function describeAssertion(a: SuiteAssertion): string {
   if (a.label) return a.label;
   const args = (x: unknown, m?: ArgsMatchMode) => x === undefined ? "" : ` with ${m ?? "partial"} args ${JSON.stringify(x)}`;
+  const by = "agent" in a && a.agent ? ` by ${a.agent}` : "";
   switch (a.type) {
-    case "tool_called": return `${a.tool} called${a.times !== undefined ? ` exactly ${a.times}×` : a.min !== undefined || a.max !== undefined ? ` ${a.min ?? 0}–${a.max ?? "∞"}×` : ""}${args(a.args, a.match)}`;
-    case "tool_not_called": return `${a.tool} not called${args(a.args, a.match)}`;
+    case "tool_called": return `${a.tool} called${by}${a.times !== undefined ? ` exactly ${a.times}×` : a.min !== undefined || a.max !== undefined ? ` ${a.min ?? 0}–${a.max ?? "∞"}×` : ""}${args(a.args, a.match)}`;
+    case "tool_not_called": return `${a.tool} not called${by}${args(a.args, a.match)}`;
+    case "tool_failed": return `${a.tool ?? "a tool call"} fails${a.contains ? ` with "${a.contains}"` : ""}`;
+    case "http_called": return `${a.method ?? "a"} request to ${a.url}${a.times !== undefined ? ` exactly ${a.times}×` : ""}`;
+    case "task_status": return `task "${a.task}" ${a.status}`;
+    case "task_order": return `tasks in order: ${a.tasks.join(" → ")}`;
+    case "task_agent": return `task "${a.task}" done by ${a.agent}`;
     case "tool_order": return `tools in order${a.strict ? " (consecutive)" : ""}: ${a.tools.join(" → ")}`;
-    case "tool_args": return `${a.which ?? "any"} ${a.tool} call has ${a.match ?? "partial"} args ${JSON.stringify(a.value)}`;
+    case "tool_args": return `${a.which ?? "any"} ${a.tool} call${by} has ${a.match ?? "partial"} args ${JSON.stringify(a.value)}`;
     case "no_tool_errors": return "no tool call failed";
     case "outcome_registered": return `outcome registered${a.label ? ` "${a.label}"` : ""}${a.outcomeType ? ` (${a.outcomeType})` : ""}${a.valueContains ? ` containing "${a.valueContains}"` : ""}`;
     case "artifact_created": return `artifact created${a.kind ? ` (${a.kind})` : ""}${a.titleContains ? ` titled "…${a.titleContains}…"` : ""}`;
@@ -1454,7 +1755,9 @@ export function describeAssertion(a: SuiteAssertion): string {
 export function evaluateAssertion(a: SuiteAssertion, trace: SuiteTrace): SuiteAssertionResult {
   const description = describeAssertion(a);
   const res = (passed: boolean, message: string, extra: Partial<SuiteAssertionResult> = {}): SuiteAssertionResult => ({ assertion: a, description, passed, message, ...extra });
-  const callsOf = (pattern: string) => trace.toolCalls.filter((c) => suiteToolMatches(pattern, c.name));
+  const byAgent = "agent" in a && typeof a.agent === "string" ? a.agent : undefined;
+  const callsOf = (pattern: string) => trace.toolCalls.filter((c) => suiteToolMatches(pattern, c.name) && (!byAgent || c.agent === byAgent));
+  const taskOf = (title: string) => trace.tasks?.find((t) => t.title === title);
   const names = trace.toolCalls.map((c) => c.name);
   const calledText = names.length ? `called: ${names.join(", ")}` : "no tool was called";
   switch (a.type) {
@@ -1550,6 +1853,37 @@ export function evaluateAssertion(a: SuiteAssertion, trace: SuiteTrace): SuiteAs
     case "max_turns": return trace.turns.length <= a.value ? res(true, `${trace.turns.length} turn(s)`) : res(false, `${trace.turns.length} model turns (max ${a.value})`, { expected: a.value, actual: trace.turns.length });
     case "max_cost": return trace.usage.costUsd <= a.usd ? res(true, `$${trace.usage.costUsd.toFixed(4)}`) : res(false, `cost $${trace.usage.costUsd.toFixed(4)} (max $${a.usd})`, { expected: a.usd, actual: trace.usage.costUsd });
     case "max_duration": return trace.durationMs <= a.ms ? res(true, `${trace.durationMs} ms`) : res(false, `took ${trace.durationMs} ms (max ${a.ms} ms)`, { expected: a.ms, actual: trace.durationMs });
+    case "tool_failed": {
+      const calls = (a.tool ? callsOf(a.tool) : trace.toolCalls).filter((c) => c.isError);
+      const ok = calls.filter((c) => !a.contains || c.result.toLowerCase().includes(a.contains.toLowerCase()));
+      if (ok.length) return res(true, `${ok[0].name} failed: ${short(ok[0].result, 200)}`);
+      return res(false, calls.length ? `the failure does not mention "${a.contains}": ${short(calls[0].result, 300)}` : `no call${a.tool ? ` of ${a.tool}` : ""} failed (${calledText})`, { actual: trace.toolCalls.map((c) => ({ name: c.name, isError: c.isError })) });
+    }
+    case "http_called": {
+      const reqs = (trace.http ?? []).filter((h) => (!a.method || h.method.toUpperCase() === a.method) && (suiteToolMatches(a.url, h.url) || (!/[*?]/.test(a.url) && h.url.includes(a.url))));
+      const n = reqs.length;
+      const ok = a.times === undefined ? n > 0 : n === a.times;
+      const seen = (trace.http ?? []).map((h) => `${h.method} ${h.url}`);
+      return ok ? res(true, `${n} matching request(s)`, { actual: n })
+        : res(false, `${a.method ?? "any method"} ${a.url}: expected ${a.times ?? "≥1"} request(s), got ${n}${seen.length ? ` (sent: ${seen.slice(0, 5).join(", ")})` : " (no request was sent)"}`, { expected: a.times ?? ">=1", actual: n });
+    }
+    case "task_status": {
+      const t = taskOf(a.task);
+      if (!t) return res(false, `there is no task "${a.task}" (tasks: ${(trace.tasks ?? []).map((x) => x.title).join(", ") || "none"})`);
+      return t.status === a.status ? res(true, `${a.task}: ${t.status}`) : res(false, `${a.task} is ${t.status}${t.error ? ` (${short(t.error, 200)})` : ""}, expected ${a.status}`, { expected: a.status, actual: t.status });
+    }
+    case "task_order": {
+      const ran = (trace.tasks ?? []).filter((t) => t.status !== "skipped").map((t) => t.title);
+      let j = 0;
+      for (const t of ran) if (j < a.tasks.length && t === a.tasks[j]) j++;
+      return j === a.tasks.length ? res(true, "in order")
+        : res(false, `expected ${a.tasks.join(" → ")}; ran ${ran.join(" → ") || "nothing"}`, { expected: a.tasks, actual: ran, diff: unifiedLineDiff(a.tasks.join("\n"), ran.join("\n"), "expected", "actual") });
+    }
+    case "task_agent": {
+      const t = taskOf(a.task);
+      if (!t) return res(false, `there is no task "${a.task}"`);
+      return t.agent === a.agent ? res(true, `${a.task}: ${t.agent}`) : res(false, `${a.task} was done by ${t.agent}, expected ${a.agent}`, { expected: a.agent, actual: t.agent });
+    }
   }
 }
 
@@ -1647,3 +1981,7 @@ export function caseFromTrace(trace: Pick<SuiteTrace, "input" | "toolCalls" | "t
 
 export * from "./agent-suite-evals.js";
 export * from "./agent-suite-gates.js";
+export * from "./agent-suite-replay.js";
+export * from "./agent-suite-generate.js";
+export * from "./agent-suite-report.js";
+export * from "./agent-suite-targets.js";

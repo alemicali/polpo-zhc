@@ -40,6 +40,8 @@ import {
   sessionLeases,
   internalCallHeaders,
   trustedApiCallHeaders,
+  registerAgentSuiteRoutes,
+  type AgentSuiteRouteDeps,
   isTrustedApiCall,
   TRUSTED_API_CALL_HEADER,
   CHAT_ORIGIN_HEADER,
@@ -95,7 +97,7 @@ import { browserDashboardRoutes } from "./routes/browser-dashboard.js";
 import { browserProfileRoutes } from "./routes/browser-profiles.js";
 import { connectorRoutes, connectorOAuthCallback } from "./routes/connectors.js";
 import { mcpServerRoutes } from "./routes/mcp-servers.js";
-import { mcpServerServiceFor } from "./mcp-servers-runtime.js";
+import { mcpServerServiceFor, setHostedSuiteGate } from "./mcp-servers-runtime.js";
 import { handlePublicMcpRequest, RateLimiter, PUBLIC_MCP_SERVERS_PATH } from "../mcp-servers/public.js";
 import { hostedDeps } from "../mcp-servers/host.js";
 import { queryOrchestratorText } from "../llm/query.js";
@@ -169,6 +171,9 @@ export interface AppOptions {
  * from Hono context.  This lets the cloud data-plane wire stores directly
  * without needing the full Orchestrator class.
  */
+/** Orchestrators whose deleted missions / hosted servers already drop their suites (createApp may run more than once). */
+const suiteCleanupWired = new WeakSet<Orchestrator>();
+
 export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts?: AppOptions): OpenAPIHono {
   const app = new OpenAPIHono();
   const activeWorkDir = () => orchestrator.isInitialized ? orchestrator.getWorkDir() : opts?.workDir;
@@ -1534,9 +1539,68 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       fromYaml: (text) => parseYaml(text),
       actor: (c) => requestAuthor(c),
       isAdmin: (c) => requestIsAdmin(c),
+      ...suitePhase4Deps(),
     },
   })));
-  const agentSuites = () => agentSuiteRunnerFor({ orchestrator: o, completions: (req) => completionApp.request(req) });
+  // phase 4 (docs/agent-suites.md): cassettes (record / replay), recordings from chats and tasks, generation
+  function suitePhase4Deps(): Partial<AgentSuiteRouteDeps> {
+    return {
+      listCassettes: (name) => agentSuites().listCassettes(name),
+      getCassette: (name, id) => agentSuites().getCassette(name, id),
+      caseCassette: (name, suiteId, caseId) => agentSuites().caseCassette(name, suiteId, caseId),
+      editCassette: (name, id, edits, opts) => agentSuites().editCassette(name, id, edits, opts),
+      deleteCassette: (name, id) => agentSuites().deleteCassette(name, id),
+      recordCase: (name, suiteId, caseId, req, opts) => agentSuites().recordCase(name, suiteId, caseId, req, opts),
+      caseFromRecording: (name, suiteId, req, opts) => agentSuites().caseFromRecording(name, suiteId, req, opts),
+      generateCases: (name, req) => agentSuites().generateCases(name, req),
+      acceptCases: (name, suiteId, req, opts) => agentSuites().acceptCases(name, suiteId, req, opts),
+      generateDatasetRows: (name, suiteId, req) => agentSuites().generateDatasetRows(name, suiteId, req),
+    };
+  }
+  const suiteRouteDeps = (): AgentSuiteRouteDeps => ({
+    list: (name) => agentSuites().listSuites(name),
+    get: (name, id) => agentSuites().getSuite(name, id),
+    save: (name, input, opts) => agentSuites().saveSuite(name, input, opts),
+    remove: (name, id) => agentSuites().deleteSuite(name, id),
+    importDataset: (name, id, req, opts) => agentSuites().importDataset(name, id, req, opts),
+    startRun: (name, id, req, opts) => agentSuites().startRun(name, id, req, opts),
+    listRuns: (name, opts) => agentSuites().listRuns(name, opts),
+    getRun: (name, runId) => agentSuites().getRun(name, runId),
+    cancelRun: (name, runId) => agentSuites().cancelRun(name, runId),
+    setBaseline: (name, id, runId) => agentSuites().setBaseline(name, id, runId),
+    getBaseline: (name, id) => agentSuites().getBaseline(name, id),
+    compareRuns: (name, runId, opts) => agentSuites().compareRuns(name, runId, opts),
+    trend: (name, id, opts) => agentSuites().trend(name, id, opts),
+    reviewRun: (name, runId, opts) => agentSuites().reviewRun(name, runId, opts),
+    toYaml: (value) => stringifyYaml(value, { lineWidth: 0 }),
+    fromYaml: (text) => parseYaml(text),
+    actor: (c) => requestAuthor(c),
+    isAdmin: (c) => requestIsAdmin(c),
+    ...suitePhase4Deps(),
+  });
+  // suites of other targets: a hosted MCP server's saved tests, a mission run in test mode
+  const hostedSuiteApp = new OpenAPIHono();
+  registerAgentSuiteRoutes(hostedSuiteApp, () => ({ suites: suiteRouteDeps(), getAgents: () => o.getAgents() }), {
+    owner: (id) => `mcp-server:${id}`, exists: async (id) => mcpServerServiceFor(o).store.exists(id), tag: "MCP server suites", noun: "hosted server",
+  });
+  authed.route("/mcp-servers", hostedSuiteApp);
+  const missionSuiteApp = new OpenAPIHono();
+  registerAgentSuiteRoutes(missionSuiteApp, () => ({ suites: suiteRouteDeps(), getAgents: () => o.getAgents() }), {
+    owner: (id) => `mission:${id}`, exists: async (id) => !!(await o.getMission(id).catch(() => undefined)), tag: "Mission suites", noun: "mission",
+  });
+  authed.route("/missions", missionSuiteApp);
+  const agentSuites = () => agentSuiteRunnerFor({
+    orchestrator: o, completions: (req) => completionApp.request(req),
+    api: (path) => app.request(`/api/v1${path}`, { headers: trustedApiCallHeaders() }),
+  });
+  // a hosted server's deploys go through its required suite (the saved tests' gate)
+  setHostedSuiteGate(o, (id, version, opts) => agentSuites().hostedGate(id, version, opts), (id, ref, opts) => agentSuites().hostedCheck(id, ref, opts));
+  // a deleted mission or hosted server takes its suite runs and cassettes along (a server's saved tests go with it)
+  if (!suiteCleanupWired.has(o)) {
+    suiteCleanupWired.add(o);
+    o.on("mission:deleted", ({ missionId }) => { void agentSuites().forget(`mission:${missionId}`).catch(() => undefined); });
+    o.on("mcp-server:changed", ({ id, what }) => { if (what === "deleted") void agentSuites().forget(`mcp-server:${id}`).catch(() => undefined); });
+  }
   const deployGates = () => agentDeployGatesFor({ orchestrator: o, completions: (req) => completionApp.request(req) });
   // every deploy (dashboard, REST, MCP, Polpo's chat, API updates that auto-deploy) goes through the required suites
   o.setAgentDeployGate({
@@ -1790,6 +1854,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     actor: (c) => requestAuthor(c),
     publicBase: (c) => connectorPublicBase(publicOrigin(c)),
     urlPolicy: () => ({ allowPrivateNetwork: false }),
+    isAdmin: (c) => requestIsAdmin(c),
   }));
   const computerDeps: ComputerRouteDeps = {
     computers: () => o.getConfig()?.settings?.computers ?? [],

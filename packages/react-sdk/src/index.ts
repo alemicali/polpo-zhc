@@ -43,8 +43,8 @@ export { useAgentVersions, useAgentDeploys, useAgentDeployGates } from "./hooks/
 export type { UseAgentVersionsReturn, UseAgentDeploysReturn, UseAgentDeployGatesReturn } from "./hooks/use-agent-versions.js";
 export { useAgentTests } from "./hooks/use-agent-tests.js";
 export type { UseAgentTestsReturn } from "./hooks/use-agent-tests.js";
-export { useAgentSuites, useAgentSuiteRun, useAgentSuiteTrend } from "./hooks/use-agent-suites.js";
-export type { UseAgentSuitesReturn, UseAgentSuiteRunReturn, UseAgentSuiteTrendReturn } from "./hooks/use-agent-suites.js";
+export { useAgentSuites, useAgentSuiteRun, useAgentSuiteTrend, useSuiteCassette, useTargetSuites, useTargetSuiteRun } from "./hooks/use-agent-suites.js";
+export type { UseAgentSuitesReturn, UseAgentSuiteRunReturn, UseAgentSuiteTrendReturn, UseSuiteCassetteReturn, UseTargetSuitesReturn } from "./hooks/use-agent-suites.js";
 export { useMcpServers, useMcpServer } from "./hooks/use-mcp-servers.js";
 export type { UseMcpServersReturn, UseMcpServerReturn } from "./hooks/use-mcp-servers.js";
 export { useSkillBundleUpload } from "./hooks/use-skill-bundle-upload.js";
@@ -268,9 +268,10 @@ export type {
   ScorerSource, JudgeCriterion, SuiteScorerType, SuiteEvalSettings, SuiteScoreResult, SuiteScorerAggregate, SuiteCaseAggregate, SuiteRunAggregates,
   SuiteChange, SuiteScorerDelta, SuiteCaseDelta, SuiteBaselineComparison, SuiteRunReview, SuiteTrendPoint, SuiteTrend,
   SuiteGate, DeployGateTrigger, DeployGateStatus, DeployGateSuiteStatus, DeployGateSuite, AgentDeployGate, AgentDeployGateRef, AgentVersionGateStatus,
+  CassetteMatch, SuiteCassetteRef, SimulatedUser, HttpMock, SuiteCassette, SuiteCassetteCall, SuiteCassetteSummary, SuiteCassetteEdit, CaseGenerationRequest, GeneratedCaseProposal, SuiteTargetKind,
   AgentPublishResult,
   McpSecretRef, McpServerAuth, McpServerTool, McpServerSpec, McpServerSummary, McpHostedServer, McpServerTemplateInfo, McpServerTemplateSecret, McpServerTemplateStatus, McpServerSettingField, McpServerInstallRequest, McpServerInstallResult, McpServerTestCase,
-  McpServerVersionInfo, McpServerDeploy, McpServerDiff, McpToolTestResult, McpServerCallLog, McpPendingCall, McpServerGenerateRequest, McpServerGenerateResult,
+  McpServerVersionInfo, McpServerDeploy, McpServerDeployBlocked, McpServerDiff, McpToolTestResult, McpServerCallLog, McpPendingCall, McpServerGenerateRequest, McpServerGenerateResult,
   SkillRestoreResult,
   NotificationChannelType,
   NotificationChannelConfig,

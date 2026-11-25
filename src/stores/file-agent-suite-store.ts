@@ -1,11 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEPLOY_GATE_LIMITS, SUITE_LIMITS, type AgentDeployGate, type AgentSuite, type AgentSuiteStore, type SuiteRun, type SuiteRunListOptions } from "@polpo-ai/core/agent-suites";
+import { DEPLOY_GATE_LIMITS, SUITE_LIMITS, type AgentDeployGate, type AgentSuite, type AgentSuiteStore, type SuiteCassetteRecord, type SuiteRun, type SuiteRunListOptions } from "@polpo-ai/core/agent-suites";
 
 /**
  * File-based AgentSuiteStore, per agent under `.polpo/agent-suites/<agent>/`:
  *   suites/<id>.json   one suite (cases, datasets, mocks)
  *   runs/<id>.json     one run (results with their traces); the newest {@link SUITE_LIMITS.runsKept} kept, and marked baselines
+ *   cassettes/<id>.json a recorded exchange (secrets redacted) replayed by a case
  *   gates/<id>.json    one deploy gate (the required suites run against a version); the newest {@link DEPLOY_GATE_LIMITS.kept} kept
  */
 export class FileAgentSuiteStore implements AgentSuiteStore {
@@ -113,6 +114,28 @@ export class FileAgentSuiteStore implements AgentSuiteStore {
       if (old.status === "running") continue;
       rmSync(join(dir, `${encodeURIComponent(old.id)}.json`), { force: true });
     }
+  }
+
+  private cassettesDir(agent: string): string { return join(this.agentDir(agent), "cassettes"); }
+
+  async listCassettes(agent: string): Promise<SuiteCassetteRecord[]> {
+    const dir = this.cassettesDir(agent);
+    return FileAgentSuiteStore.jsonFiles(dir).map((f) => FileAgentSuiteStore.readJson<SuiteCassetteRecord>(join(dir, f))).filter((c): c is SuiteCassetteRecord => !!c);
+  }
+
+  async getCassette(agent: string, id: string): Promise<SuiteCassetteRecord | undefined> {
+    return FileAgentSuiteStore.readJson<SuiteCassetteRecord>(join(this.cassettesDir(agent), `${encodeURIComponent(id)}.json`));
+  }
+
+  async saveCassette(cassette: SuiteCassetteRecord): Promise<void> {
+    FileAgentSuiteStore.writeJson(this.cassettesDir(cassette.agent), `${encodeURIComponent(cassette.id)}.json`, cassette);
+  }
+
+  async deleteCassette(agent: string, id: string): Promise<boolean> {
+    const path = join(this.cassettesDir(agent), `${encodeURIComponent(id)}.json`);
+    if (!existsSync(path)) return false;
+    rmSync(path, { force: true });
+    return true;
   }
 
   async deleteAgent(agent: string): Promise<void> {

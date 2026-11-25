@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
 import { useEvents } from "./use-events.js";
 import type {
-  McpHostedServer, McpServerCallLog, McpServerDeploy, McpServerDiff, McpServerSpec, McpServerSummary, McpServerTemplateInfo,
+  McpHostedServer, McpServerCallLog, McpServerDeploy, McpServerDeployBlocked, McpServerDiff, McpServerSpec, McpServerSummary, McpServerTemplateInfo,
   McpServerVersionInfo, McpToolTestResult, McpPendingCall, McpServerGenerateRequest, McpServerGenerateResult,
   McpServerInstallRequest, McpServerInstallResult,
 } from "@polpo-ai/sdk";
@@ -87,8 +87,10 @@ export interface UseMcpServerReturn {
   /** Save a secret's value to the vault entry the server names (write-only: never read back). */
   saveSecret: (name: string, value: string) => Promise<void>;
   saveTests: (tests: Parameters<ReturnType<typeof usePolpoContext>["client"]["saveMcpServerTests"]>[1]) => Promise<void>;
-  publish: (req?: { bump?: "major" | "minor" | "patch"; version?: string; note?: string; deploy?: boolean; force?: boolean }) => Promise<{ version: string }>;
-  deploy: (version: string, note?: string) => Promise<McpServerDeploy>;
+  /** Publish the draft; with `deploy`, a failing required suite leaves it published (`deployBlocked`). */
+  publish: (req?: { bump?: "major" | "minor" | "patch"; version?: string; note?: string; deploy?: boolean; force?: boolean; override?: { reason: string } }) => Promise<{ version: string; deployed?: McpServerDeploy; deployBlocked?: McpServerDeployBlocked; tests?: { passed: number; failed: number; skipped: number } }>;
+  /** Deploy a version (a failing required suite throws GATE_BLOCKED; `override` deploys anyway, admins). */
+  deploy: (version: string, note?: string, opts?: { override?: { reason: string } }) => Promise<McpServerDeploy>;
   rollback: (opts?: { to?: string; note?: string }) => Promise<McpServerDeploy>;
   diff: (opts?: { from?: string; to?: string }) => Promise<McpServerDiff>;
   logs: (limit?: number) => Promise<McpServerCallLog[]>;
@@ -126,7 +128,7 @@ export function useMcpServer(id: string | undefined): UseMcpServerReturn {
     saveTests: (tests) => after(client.saveMcpServerTests(key, tests)).then(() => undefined),
     saveSecret: (name, value) => after(client.saveMcpServerSecret(key, name, value)).then(() => undefined),
     publish: (req) => after(client.publishMcpServer(key, req ?? {})),
-    deploy: (version, note) => after(client.deployMcpServer(key, version, note)),
+    deploy: (version, note, opts) => after(client.deployMcpServer(key, version, note, opts ?? {})),
     rollback: (opts) => after(client.rollbackMcpServer(key, opts ?? {})),
     diff: (opts) => client.diffMcpServer(key, opts ?? {}),
     logs: (limit) => client.getMcpServerLogs(key, limit),

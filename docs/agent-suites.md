@@ -10,21 +10,33 @@ Schema, tool trajectory, cost, latency, an LLM judge, custom code), runs aggrega
 with a **baseline** run (regressions and improvements) and draw a **trend** over versions; an AI
 review explains a run (see [Evals](#evals-scorers-baselines-trends)). Suites marked **required**
 are the agent's **CI gate**: they run against a version before it reaches production, and the
-deploy happens only if they pass (see [CI gate](#ci-gate-required-suites-before-production)). The
-same engine will run **benchmarks** later; the data model already has their fields (see
-[Later phases](#later-phases)).
+deploy happens only if they pass (see [CI gate](#ci-gate-required-suites-before-production)).
+
+A case can **replay a recorded exchange** (a cassette: record a case live once, or turn a real chat
+or task into a case; see [Record and replay](#record-and-replay-cassettes)), talk with a **simulated
+user** over several turns ([Simulated users](#simulated-users-multi-turn-cases)), and cases can be
+**proposed by AI** and reviewed before they are saved ([Generate cases](#generate-cases-with-ai)).
+The same suites test a **hosted MCP server** (its saved tests, the upstream API mocked) and a
+**mission** (its tasks run in test mode, every agent mocked) — see [Suites for hosted servers and
+missions](#suites-for-hosted-servers-and-missions) — and run from a terminal or CI with **`polpo
+test`** and the **GitHub Action** ([polpo test and CI](#polpo-test-and-ci)). The same engine will run
+**benchmarks** later; the data model already has their fields (see [Later phases](#later-phases)).
 
 Suites live in `.polpo/agent-suites/<agent>/suites/<id>.json`, runs in
 `.polpo/agent-suites/<agent>/runs/<run>.json` (the newest 100 per agent), deploy gates in
-`.polpo/agent-suites/<agent>/gates/<id>.json` (the newest 200). Removing an agent removes its
-suites, runs and gates.
+`.polpo/agent-suites/<agent>/gates/<id>.json` (the newest 200), cassettes in
+`.polpo/agent-suites/<agent>/cassettes/<id>.json`. Removing an agent removes its suites, runs,
+gates and cassettes. A mission's suites and runs are kept the same way under the owner
+`mission:<id>`, a hosted server's runs under `mcp-server:<id>` (its suite is its saved tests);
+deleting the mission or the server removes them.
 
 ## Concepts
 
 | | |
 |---|---|
 | **Suite** | A named set of cases for one agent: default mock mode, shared mocks, datasets, default budgets, concurrency (1–4). Saved with a `revision`: a save that started from an older revision is refused (someone changed it meanwhile). |
-| **Case** | `input` (`kind: chat` — a message —, or `task` — a task description, sent with the task framing), optional `history` (earlier turns) and `context` (`system` instructions, `memory`, `files`, `attachments`, given as context: the agent's real memory and workspace are untouched), a `mode`, `mocks`, `assertions`, `budgets`, an optional `dataset`. |
+| **Case** | `input` (`kind: chat` — a message —, or `task` — a task description, sent with the task framing; `tool` — a hosted server's tool with `args` —, or `mission` — the mission run in test mode), optional `history` (earlier turns) and `context` (`system` instructions, `memory`, `files`, `attachments`, given as context: the agent's real memory and workspace are untouched), a `mode`, `mocks` (tools, model, `cassette`, `simulatedUser`, `http`, `agents`), `assertions`, `budgets`, an optional `dataset`. |
+| **Cassette** | A recorded exchange (every model turn and tool call with its arguments and result, secrets redacted) a case replays offline. |
 | **Dataset** | Rows (`[{ "country": "IT", "rate": "4.99" }]`); a case with `dataset: "<id>"` runs once per row, with `{{row.column}}` filled in its input, mocks and assertions. Manual, or imported from CSV / JSON. |
 | **Run** | The suite (or some cases) executed against a version, as a **variant** (`agent`, `version`, optional per-run `overrides`). Each case: status, assertions with messages and diffs, scores, trace, cost, duration; the run: aggregates, the comparison with its baseline, an optional AI review. |
 | **Scorer** | A score 0..1 for a case with a threshold and a reason (evals); suite defaults and per case. |
@@ -103,6 +115,15 @@ arguments and tool order, a unified **diff**.
 | `text_contains` / `text_not_contains` | `value` (string or list), `caseSensitive?` | the final reply contains every value / none |
 | `text_regex` | `pattern`, `flags?` | the reply matches |
 | `max_turns` / `max_cost` / `max_duration` | `value` / `usd` / `ms` | within the limit |
+| `tool_failed` | `tool?`, `contains?` | a tool call failed (with that text): a hosted server's tool expected to fail |
+| `http_called` | `url` (glob or substring), `method?`, `times?` | the hosted server's tool sent that upstream request (mocked or not) |
+| `task_status` | `task` (title), `status` (`done`, `failed`, `skipped`) | missions: the task ended so |
+| `task_order` | `tasks: [...]` | missions: the tasks finished in this order |
+| `task_agent` | `task`, `agent` | missions: the task was done by that agent |
+
+`tool_called`, `tool_not_called` and `tool_args` take `agent` in mission suites (only that agent's
+calls). In a multi-turn case the reply checks read **every** agent reply of the conversation and
+the tool checks every call of it.
 
 A case without assertions passes when it runs without errors. Matching: `partial` compares the
 listed keys (deeply; `"5"` equals `5`), `regex` treats string values as patterns, `schema` checks a
@@ -401,15 +422,272 @@ Each gate run is a normal suite run (`trigger: "deploy"` or `"publish"`, target 
 | Polpo's chat | `agent_deploy` (with `override_reason`, `cancel_gate`), `agent_deploy_gates`, `agent_suite_save` with `gate`, `update_agent` (says when the deploy is pending or blocked) |
 | SDK | `deployAgentVersion(name, version, note?, { override?, wait? })` → `AgentDeployOutcome` (a blocked deploy throws `PolpoApiError` with code `GATE_BLOCKED`), `getAgentDeployGates`, `getAgentDeployGate(name, id, { waitSeconds })`, `cancelAgentDeployGate`, `overrideAgentDeployGate`; React `useAgentDeployGates(name)` → `{ data, pending, cancel, override }` (live on `agent:gate`), `useAgentDeploys().deploy(version, note, { override })` |
 
+## Record and replay (cassettes)
+
+A **cassette** is a real exchange saved once and replayed offline: every model turn (text,
+thinking, tool calls, usage) and every tool call with its arguments and result. A case points at
+it with `mocks.cassette`:
+
+```json
+{ "id": "rates-it", "name": "Rates to Italy", "input": { "message": "How much is shipping to Italy?" }, "mode": "all",
+  "mocks": { "cassette": { "id": "rates-it-rec", "match": "exact", "onUnmatched": "block", "model": true } },
+  "assertions": [{ "type": "tool_called", "tool": "mcp__printful__shipping_rates", "args": { "country": "IT" } }] }
+```
+
+- **Record** (`POST …/suites/{id}/cases/{caseId}/record { allowRealTools: true, target? }`, the
+  cassette viewer's **Record**, MCP `polpo_agent_suite_record`, or a run with `record: true`): the
+  case runs **live** once — the agent's real model and real tools, side effects possible — so it
+  needs an **admin** and an explicit confirmation (`allowRealTools: true`; the dashboard asks; MCP
+  needs `polpo:admin`). Approvals are never given by a recording. The exchange is saved as the
+  case's cassette (`<case>-rec`, one per dataset row: `<case>-rec--r<n>`) and the case is pointed
+  at it; it replays from then on. **Re-record** the same way: calls marked as mocks stay pinned.
+- **Secrets are redacted** before anything is written: the vault's values wherever they appear,
+  values under secret-looking keys (`authorization`, `api_key`, `token`, `password`, `cookie`,
+  `client_secret`…), and credential shapes in text (bearer / basic tokens, `sk-…`, GitHub, Slack,
+  AWS, Google keys, JWTs, `Authorization: …` headers dumped in a result). The cassette says how many
+  values were redacted. A redacted argument matches anything when replayed.
+- **Replay**: in a mode that mocks tools (`all`, `tools`) a tool call is answered by the case's own
+  mocks first, then by the cassette; in a mode that scripts the model (`all`, `model`) the recorded
+  model turns are played (`model: false` keeps the real model). Matching (`match`): `exact`
+  arguments (default), `partial` (the recorded arguments are a subset of the call's), `tool` (the
+  next unused recording of that tool, any arguments) or `sequence` (the n-th call of the case must
+  be the n-th recorded one). A call no recording answers is **blocked** (an error result,
+  `onUnmatched: "block"`, default) or **fails** the case (`"fail"`). The trace says which cassette
+  answered, how many calls and turns it replayed and which calls it could not.
+- **Edit** (the cassette viewer, `PATCH …/cassettes/{id} { edits, revision? }`, MCP
+  `polpo_agent_suite_cassette_edit`): per recorded call, change the `response` (and `isError`),
+  `delete` it, or `markAsMock` — the call becomes a tool mock of its case (kept on re-recording).
+  `revision` refuses an edit over a newer one. Deleting the cassette makes the case block its
+  calls until it is recorded again.
+- **From a real chat or task** (`POST …/suites/{id}/cases/from-recording { sessionId | taskId,
+  messageIndex?, name? }`, **Add cases → From a chat or task**, MCP `polpo_agent_suite_record` with
+  `from_session` / `from_task`): no live run. A chat with the agent (its last user message, or
+  `messageIndex`; the earlier turns become the case's history) or a task run's activity (the task
+  description is the message, `kind: task`) becomes a case and its cassette, secrets redacted; the
+  case replays it offline (mode `all`) and checks the same tool calls with the same arguments, in
+  order (the core's `caseFromTrace`, extended with the cassette).
+
+## Simulated users (multi-turn cases)
+
+`mocks.simulatedUser` turns a case into a **conversation**: the case's message is the first user
+turn, then after each agent reply a **simulated user** — a model playing a persona — writes the
+next one, until it stops.
+
+```json
+{ "name": "Refund, annoyed customer", "input": { "message": "My order never arrived. I want my money back." }, "mode": "tools",
+  "mocks": {
+    "simulatedUser": { "persona": "An annoyed customer, short answers", "goal": "Get a refund for order 1234",
+      "constraints": ["Gives the order number only when asked", "Writes in Italian"], "maxTurns": 5, "stop": "goal" },
+    "tools": [{ "tool": "refund_order", "response": { "ok": true } }] },
+  "assertions": [{ "type": "tool_called", "tool": "refund_order", "args": { "order": "1234" } }, { "type": "text_not_contains", "value": "I cannot help" }],
+  "scorers": [{ "id": "polite", "type": "llm_judge", "rubric": "Polite and empathetic throughout", "threshold": 0.7 }] }
+```
+
+- `persona`, `goal`, `constraints`: who plays the user and what they want (at least a persona or
+  a goal). `maxTurns`: user turns after the first (1–20, default 5).
+- **Stop condition** (`stop`): `goal` (default — the simulator says the goal is reached, or that it
+  cannot be), `scorer` (when the case's scorer `stopScorer` passes, checked after each reply), or
+  `max_turns` (every turn runs; the simulator keeps talking). A conversation also stops when the
+  agent waits for a person (an approval, `ask_user`) or a budget is spent.
+- **Model**: `simulatedUser.model`, else the suite's `simulatorModel` (editor → Evals), else
+  Polpo's effective orchestrator model (`settings.orchestratorModel`, else a connected provider's).
+  The simulator's calls are counted apart (not in the agent's cost).
+- **Scripted user**: `script: ["and to Germany?", "thanks"]` plays these user turns in order, no
+  simulator model: fully offline with a scripted model and tool mocks.
+- The **transcript** is in the trace (`trace.transcript`: each message, simulated or scripted, the
+  simulator's note when it stopped; `trace.simulator`: model, calls, cost, why it stopped, goal
+  reached) and drawn as a conversation in the report and the suite card. **Assertions and scorers
+  read the whole conversation**: `text` holds every agent reply, the tool checks every call;
+  `trace.finalText` is the last reply.
+
+## Generate cases with AI
+
+**Add cases → Generate cases** (REST `POST /agents/{name}/suites/generate-cases`, MCP
+`polpo_agent_suite_generate`, Polpo's `agent_suite_generate`): Polpo's model reads the agent's
+instructions, tools, skills and connectors, an optional **brief** ("refunds over 100 EUR") and up to
+five **sample chats** (`sessionIds`, secrets redacted) and proposes `count` cases (1–20, default
+6): **happy paths**, **edge cases** and **adversarial** ones (prompt injection, off-scope requests,
+unsafe actions) — `include` picks the kinds. `style: "contract"` (default) writes offline cases
+(scripted model, every tool it calls mocked); `"tools"` uses the real model with mocked tools.
+Each proposal comes back **validated** with its category and rationale (an invalid one says why);
+**nothing is saved**: a person ticks the ones to keep and adds them (`POST …/suites/{id}/cases {
+cases, datasets?, revision? }`, MCP `accept`). Generated cases are marked `source.kind:
+"generated"`.
+
+**Dataset rows** (`POST …/suites/{id}/datasets/generate { caseId, count?, brief? }`, the dialog's
+**Dataset rows**, MCP `rows_for_case`): rows proposed for a case's dataset (its columns kept, edge
+and adversarial values included), shown for review and added only when accepted.
+
+Generation costs tokens of Polpo's model; without a model it answers `409`.
+
+## Suites for hosted servers and missions
+
+The same suites test two more targets. Their REST routes mirror an agent's under
+`/api/v1/mcp-servers/{id}/…` and `/api/v1/missions/{id}/…` (`suites`, `suites/{suiteId}`,
+`…/runs`, `suite-runs`, `suite-runs/{runId}`, `…/cancel`, baselines, trends; OpenAPI tags "MCP
+server suites" and "Mission suites").
+
+### Hosted MCP servers
+
+A hosted server's **saved tests are its suite** (one suite, id `saved-tests`; docs/custom-mcp-servers.md):
+the same tests, stored once in the server's `tests.json`, its settings (shared HTTP mocks, datasets,
+the gate) in `server.json`. Each test is a case that calls one of the server's tools
+(`input: { kind: "tool", tool, args }`) on the draft (default), production or a version; the legacy
+`expect` / `contains` are assertions (`tool_failed` / `no_tool_errors`, `text_contains`).
+
+```json
+{ "name": "Item 404", "input": { "kind": "tool", "tool": "get_item", "args": { "id": "9" } },
+  "mocks": { "http": [{ "method": "GET", "url": "*/items/9", "status": 404, "body": { "error": "nope" } }] },
+  "assertions": [{ "type": "tool_failed", "contains": "No such item" }, { "type": "http_called", "method": "GET", "url": "*/items/9", "times": 1 }] }
+```
+
+- **The upstream API is mocked**: `mocks.http` (case first, then the suite's) answers each request
+  by method and URL (a glob or a substring) with `status`, `body`, `headers`, `times`. In modes
+  `all` / `tools` a request no mock matches is **blocked** (`unmockedHttp: "block"`, default) and
+  nothing reaches the network; secrets are placeholders (a real one never reaches a test), so
+  destructive and approval tools run safely. Real HTTP (mode `none`, or `unmockedHttp: "real"`)
+  needs an admin and runs read-only tools only. Code tools run in their sandboxed worker with its
+  own network, so HTTP mocks do not reach them: their cases are skipped in mocked modes (run them
+  in mode `none`).
+- The trace lists each HTTP request (method, URL, status, which mock answered, or blocked).
+- **Publish and deploy**: publishing runs the saved tests as this suite on the draft (offline; the
+  legacy live run only when a case needs real HTTP), with the server's `onTestFailure` (warn or
+  block). Mark the suite **Required to deploy** (`gate.required`, the hosted server's **Suite** tab)
+  and every deploy — dashboard, REST, MCP, Polpo — runs it on the version first, exactly like an
+  agent's [CI gate](#ci-gate-required-suites-before-production) (`minPassRate`, `allowRealTools`):
+  when it fails, the deploy is **blocked** (`409 GATE_BLOCKED` with `{ runId, failures }`; a publish
+  with `deploy: true` stays published, not deployed, with `deployBlocked`), and an **admin** may
+  deploy anyway with `override: { reason }` (recorded on the deploy: who, why). Rollbacks are never
+  gated. The deploy history shows each deploy's gate (suite passed, override and its reason).
+
+### Missions
+
+A mission's suites (`input: { kind: "mission", message? }`) run the mission **in test mode**: its
+tasks in dependency order, each a chat turn of its assigned agent (production version) with the
+task framing and what the tasks before produced, every agent with **its own mocks**:
+
+```json
+{ "name": "Blog post, happy path", "input": { "kind": "mission", "message": "Topic: octopuses" },
+  "mocks": { "agents": {
+    "writer": { "model": { "turns": [{ "toolCalls": [{ "name": "web_search", "args": { "q": "octopus" } }] }, { "text": "3 facts" }, { "text": "post written" }] },
+                "tools": [{ "tool": "web_search", "response": "facts" }] },
+    "checker": { "model": { "turns": [{ "text": "looks good" }] } } } },
+  "assertions": [
+    { "type": "task_order", "tasks": ["Research", "Write", "Check"] },
+    { "type": "task_status", "task": "Check", "status": "done" },
+    { "type": "task_agent", "task": "Check", "agent": "checker" },
+    { "type": "tool_called", "tool": "web_search", "agent": "writer", "times": 1 },
+    { "type": "artifact_created", "titleContains": "octopus" }] }
+```
+
+- `mocks.agents.<name>` is merged over the case's shared mocks for that agent's tasks; an agent's
+  scripted turns continue across its tasks.
+- A task whose dependency did not finish is **skipped**; a failed task (an error, a spent budget)
+  is `failed`. With no assertions or scorers, a case passes when every task is done.
+- The trace has one entry per task (agent, status, reply, calls, turns, cost, time, error), every
+  tool call with its agent, and notes for what test mode does not run.
+
+**What a mission suite does not do (deferred)**: it does not go through the mission engine. The
+tasks run **one after another** (no parallelism), with no task assessment / review loop, no
+retries, and the mission's **checkpoints, delays and quality gates are not run** (the run notes
+them; check the tasks with assertions instead). Each task is an agent chat turn with the task
+framing, not the task runner process (as for `kind: task` cases). Agents run their production
+version; there is no `target`. Recording cassettes is for agent suites only.
+
+## polpo test and CI
+
+`polpo test` runs suites and reports, locally or on a remote instance:
+
+```bash
+polpo test shop --version draft --junit suites.xml          # one agent's suites, on its draft
+polpo test --suite quotes --mode all                         # every agent, offline
+polpo test --mcp-server stock-api                            # a hosted server's saved tests (draft)
+polpo test --mission blog-post --json report.json
+POLPO_URL=https://polpo.example.com POLPO_TOKEN=… polpo test shop --fail-on-regression --summary summary.md
+```
+
+| Option | |
+|---|---|
+| `[agent]` | The agent whose suites run (default: every agent's) |
+| `--mcp-server <id>` / `--mission <id>` | A hosted server's saved tests / a mission's suites instead |
+| `--suite <id>` | Only this suite |
+| `--version <v>` | `production` (default; hosted servers: `draft`), `draft` or a published version |
+| `--mode <mode>` | Every case in this mode (`all` offline, `tools`, `model`, `none`) |
+| `--fail-on-regression` | Also fail when a run regressed versus its baseline |
+| `--allow-real-tools` | Confirm runs that use real tools (remotely: an admin key) |
+| `--json [file]` / `--junit <file>` / `--summary <file>` | JSON report (stdout or a file), JUnit XML (one test suite per run, failures with their messages), a Markdown summary (a table of runs with links to the dashboard, the failed cases) |
+| `--remote <url>` / `--token <key>` | Run on an instance through its REST API (env `POLPO_URL`, `POLPO_TOKEN`: an API key). Without it the project in the working directory (`-d`) runs in process: nothing listens |
+| `--timeout <s>` | How long to wait for the runs (default 1800) |
+
+It prints a report (each run, its failed cases and why) and exits **0** when every run passed,
+**1** when a run failed or errored (or regressed, with `--fail-on-regression`), **2** when it could
+not run (bad options, an unknown agent or suite, the instance unreachable).
+
+### GitHub Action
+
+A reusable composite action, `.github/actions/polpo-test` (in this repository: use it as
+`alemicali/polpo-zhc/.github/actions/polpo-test@<ref>`, or copy it), runs `polpo test --remote`
+against your instance with a token from a secret, writes JUnit XML, posts the Markdown summary to
+the job summary and **fails the step** when a run fails or regresses (`fail-on-regression:
+"false"` only reports regressions). Inputs: `url`, `token` (required), `agent`, `suite`, `version`,
+`mode`, `mcp-server`, `mission`, `fail-on-regression`, `allow-real-tools`, `junit`, `timeout`,
+`polpo-version`, `node-version`; outputs `exit-code` and `junit`.
+
+```yaml
+# .github/workflows/polpo-suites.yml
+name: Polpo suites
+on:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  suites:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Agent suites on the draft
+        uses: alemicali/polpo-zhc/.github/actions/polpo-test@main
+        with:
+          url: ${{ vars.POLPO_URL }}
+          token: ${{ secrets.POLPO_TOKEN }}
+          agent: shop
+          version: draft
+      - name: The hosted server's saved tests
+        if: always()
+        uses: alemicali/polpo-zhc/.github/actions/polpo-test@main
+        with:
+          url: ${{ vars.POLPO_URL }}
+          token: ${{ secrets.POLPO_TOKEN }}
+          mcp-server: stock-api
+          junit: stock-api.xml
+```
+
+Keep the key in a secret; runs that use real tools need an admin key and `allow-real-tools:
+"true"`. Offline suites (mode `all`, cassettes, scripted users) cost nothing and are deterministic:
+the best fit for every pull request. This repository's own CI does not run it.
+
+## Phase 4 surfaces
+
+| Surface | How |
+|---|---|
+| Dashboard | Agent page → **Suites**: rows count the cases replaying a cassette and the multi-turn ones; **Add cases** (Generate cases — brief, sample chats, how many, happy / edge / adversarial, offline or real model — with a review list where each proposal is ticked before **Add**; Dataset rows for a case; From a chat or task); the case editor's **Multi-turn** block (persona, goal, constraints, script, max turns, stop condition, simulator model) and the cassette's matching and unmatched policy; **Evals** view: the suite's simulated user model. The run report draws a multi-turn case as a **conversation** (simulated / scripted turns, why it stopped), a mission's **tasks**, a hosted server's **HTTP requests**, the cassette replayed or recorded, and opens the **cassette viewer** (Record / Re-record after a confirmation, each call's arguments with secrets redacted, edit its response, delete it, Mark as mock, delete the cassette). Hosted server → **Suite** tab (the saved tests as the suite: run, report, edit as JSON, **Required to deploy**); its Versions: a blocked deploy with what failed, **Deploy anyway…** (reason), the gate in the deploy history. Mission page → **Suites** tab |
+| REST | Cassettes: `GET …/agents/{name}/cassettes`, `GET/PATCH/DELETE …/cassettes/{id}`, `GET …/suites/{id}/cases/{caseId}/cassette`, `POST …/suites/{id}/cases/{caseId}/record`, runs with `record: true`; `POST …/suites/{id}/cases/from-recording`; generation: `POST …/agents/{name}/suites/generate-cases`, `POST …/suites/{id}/cases` (accept), `POST …/suites/{id}/datasets/generate`; other targets: `/mcp-servers/{id}/suites…`, `/missions/{id}/suites…`, `…/suite-runs…`; hosted publish / deploy: `override`, `deployBlocked`, `409 GATE_BLOCKED` |
+| MCP | `polpo_agent_suite_cassette` (list, or one cassette's calls) and `polpo_target_suites` (a hosted server's or a mission's suites and runs) need `polpo:read`; `polpo_agent_suite_record` (live: `polpo:admin`; `from_session` / `from_task`: `polpo:work`), `polpo_agent_suite_replay`, `polpo_agent_suite_cassette_edit`, `polpo_agent_suite_generate` (propose, `accept`, `rows_for_case`), `polpo_target_suite_save` and `polpo_target_suite_run` need `polpo:work` (real tools or HTTP: `polpo:admin`). The **suite card** (`polpo_agent_suite_show`) draws transcripts, the replayed cassette and a mission's tasks. `polpo_mcp_server_publish` / `polpo_mcp_server_deploy` take `override_reason` and say when the suite blocked a deploy |
+| Polpo's chat | `agent_suite_record`, `agent_suite_replay`, `agent_suite_cassette`, `agent_suite_cassette_edit`, `agent_suite_generate`, `target_suites`, `target_suite_save`, `target_suite_run` (group "agent-versions": "record the rates case", "turn my last chat with shop into a test", "propose adversarial cases for the shop agent", "test the stock-api server's tools", "run the blog mission's suite") |
+| SDK | `getAgentCassettes`, `getAgentCassette`, `getAgentSuiteCaseCassette`, `editAgentCassette`, `deleteAgentCassette`, `recordAgentSuiteCase`, `agentSuiteCaseFromRecording`, `generateAgentSuiteCases`, `acceptAgentSuiteCases`, `generateAgentSuiteDatasetRows`, `getTargetSuites`, `saveTargetSuite`, `deleteTargetSuite`, `runTargetSuite`, `getTargetSuiteRuns`, `getTargetSuiteRun`; `publishMcpServer` (`override`, `deployBlocked`), `deployMcpServer(id, version, note?, { override })`. React: `useAgentSuites(name)` adds `record`, `fromRecording`, `generate`, `accept`, `generateRows`; `useSuiteCassette(name, suiteId, caseId)` → `{ cassette, edit, remove, refetch }`; `useTargetSuites(kind, id)` → `{ suites, runs, save, remove, run }`; `useTargetSuiteRun(kind, id, runId)`; `useMcpServer(id).publish` / `.deploy(version, note, { override })` |
+| CLI | `polpo test` (above) |
+
 ## Later phases
 
 Reserved in the model now, built later (no migration needed):
 
 - **Phase 2 — evals**: built (see [Evals](#evals-scorers-baselines-trends)).
 - **Phase 3 — gates**: built (see [CI gate](#ci-gate-required-suites-before-production)).
-- **Phase 4**: `mocks.cassette` (record / replay), `mocks.simulatedUser`, generated datasets
-  (`dataset.source.kind: "generated"`), `suite.target` other than an agent (hosted MCP server,
-  mission, team).
+- **Phase 4 — record / replay, simulated users, generated cases, `polpo test` and CI, hosted server
+  and mission suites**: built (see the sections above). Not in phase 4: `suite.target` of kind
+  `team` (reserved, refused); mission suites run the tasks in sequence outside the mission engine
+  (no checkpoints, delays, quality gates, assessments or retries: see [Missions](#missions));
+  cassettes for hosted servers and missions (their upstream is mocked with HTTP / per-agent mocks
+  instead); code tools of a hosted server with HTTP mocks (their sandbox has its own network).
 - **Phase 5 — benchmarks and playground**: `run.variant` (`id`, `label`, `agent`, `version`,
   `overrides`), `run.benchmarkRunId`, `run.repetition` and `result.variantId` make the comparison
   matrix (case × variant); `caseFromTrace` (core) turns a recorded exchange into a case (observed

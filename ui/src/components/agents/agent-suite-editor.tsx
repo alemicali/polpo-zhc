@@ -125,6 +125,11 @@ function EvalsView({ draft, setDraft }: { draft: Draft; setDraft: (d: Draft) => 
           <Input value={evals.judgeModel ?? ""} placeholder="anthropic:claude-sonnet-5-5" aria-label="Judge model" className="h-8 font-mono text-caption" onChange={(e) => setEvals({ judgeModel: e.target.value || undefined })} />
         </label>
         <label className="block min-w-0">
+          <span className="text-micro text-muted-foreground">Simulated user model (multi-turn cases; default: Polpo's model)</span>
+          <Input value={draft.simulatorModel ?? ""} placeholder="openai:gpt-5-mini" aria-label="Simulated user model" className="h-8 font-mono text-caption" data-testid="suite-simulator-model"
+            onChange={(e) => setDraft({ ...draft, simulatorModel: e.target.value || undefined })} />
+        </label>
+        <label className="block min-w-0">
           <span className="text-micro text-muted-foreground">Repetitions (runs per case: mean, stddev, flakiness)</span>
           <Input type="number" min={1} max={10} value={evals.repetitions ?? ""} placeholder="1" aria-label="Repetitions" className="h-8 text-caption" onChange={(e) => setEvals({ repetitions: num(e.target.value) })} />
         </label>
@@ -265,6 +270,61 @@ function CaseForm({ value, onChange, onRemove, defaultMode, datasets }: { value:
             </div>
           ))}
           <Button variant="outline" size="sm" className="h-7" onClick={() => setMocks({ tools: [...tools, { tool: "", response: "" }] })}><Plus className="mr-1 h-3 w-3" /> Tool mock</Button>
+        </div>
+      )}
+
+      <div className="space-y-2" data-testid="suite-simulated-user">
+        <RowHeader title="Multi-turn (simulated or scripted user)" onRemove={value.mocks?.simulatedUser ? () => setMocks({ simulatedUser: undefined }) : undefined} />
+        {value.mocks?.simulatedUser ? (
+          <div className="grid gap-2 border-l-2 border-border/60 pl-3 sm:grid-cols-2">
+            <Input value={value.mocks.simulatedUser.persona ?? ""} aria-label="Persona" placeholder="Persona: who the user is" className="h-8 text-caption"
+              onChange={(e) => setMocks({ simulatedUser: { ...value.mocks!.simulatedUser, persona: e.target.value || undefined } })} />
+            <Input value={value.mocks.simulatedUser.goal ?? ""} aria-label="Goal" placeholder="Goal: what the user wants done" className="h-8 text-caption"
+              onChange={(e) => setMocks({ simulatedUser: { ...value.mocks!.simulatedUser, goal: e.target.value || undefined } })} />
+            <JsonField label="Constraints" value={value.mocks.simulatedUser.constraints} placeholder='["answers in Italian"]' onChange={(v) => setMocks({ simulatedUser: { ...value.mocks!.simulatedUser, constraints: v as string[] | undefined } })} />
+            <JsonField label="Script (fixed user turns: no simulator)" value={value.mocks.simulatedUser.script} placeholder='["and to Germany?"]' onChange={(v) => setMocks({ simulatedUser: { ...value.mocks!.simulatedUser, script: v as string[] | undefined } })} />
+            <Input type="number" min={1} max={20} value={value.mocks.simulatedUser.maxTurns ?? ""} aria-label="Max user turns" placeholder="Max user turns (5)" className="h-8 text-caption"
+              onChange={(e) => setMocks({ simulatedUser: { ...value.mocks!.simulatedUser, maxTurns: e.target.value ? Number(e.target.value) : undefined } })} />
+            <Select value={value.mocks.simulatedUser.stop ?? "goal"} onValueChange={(v) => setMocks({ simulatedUser: { ...value.mocks!.simulatedUser, stop: v === "goal" ? undefined : v as "scorer" | "max_turns", ...(v === "scorer" ? {} : { stopScorer: undefined }) } })}>
+              <SelectTrigger size="sm" className="w-full" aria-label="Stop condition" data-testid="suite-simulated-stop"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="goal">Stop when the goal is reached</SelectItem>
+                <SelectItem value="scorer">Stop when a scorer passes</SelectItem>
+                <SelectItem value="max_turns">Always run every turn</SelectItem>
+              </SelectContent>
+            </Select>
+            {value.mocks.simulatedUser.stop === "scorer" && (
+              <Input value={value.mocks.simulatedUser.stopScorer ?? ""} aria-label="Stop when this scorer passes" placeholder="The scorer's id" className="h-8 font-mono text-caption"
+                onChange={(e) => setMocks({ simulatedUser: { ...value.mocks!.simulatedUser, stopScorer: e.target.value || undefined } })} />
+            )}
+            <Input value={value.mocks.simulatedUser.model ?? ""} aria-label="Simulator model" placeholder="Simulator model (default: the suite's, else Polpo's)" className="h-8 font-mono text-caption"
+              onChange={(e) => setMocks({ simulatedUser: { ...value.mocks!.simulatedUser, model: e.target.value || undefined } })} />
+          </div>
+        ) : (
+          <Button variant="outline" size="sm" className="h-7" onClick={() => setMocks({ simulatedUser: { persona: "", goal: "", maxTurns: 5 } })} data-testid="suite-add-simulated-user"><Plus className="mr-1 h-3 w-3" /> Simulated user</Button>
+        )}
+      </div>
+
+      {value.mocks?.cassette && (
+        <div className="flex flex-wrap items-center gap-2 text-caption" data-testid="suite-case-cassette-ref">
+          <span className="font-medium">Cassette</span>
+          <span className="font-mono">{value.mocks.cassette.id}</span>
+          <Select value={value.mocks.cassette.match ?? "exact"} onValueChange={(m) => setMocks({ cassette: { ...value.mocks!.cassette!, match: m as "exact" } })}>
+            <SelectTrigger size="sm" className="w-36" aria-label="Cassette matching"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="exact">Exact arguments</SelectItem>
+              <SelectItem value="partial">Partial arguments</SelectItem>
+              <SelectItem value="tool">Tool name only</SelectItem>
+              <SelectItem value="sequence">In sequence</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={value.mocks.cassette.onUnmatched ?? "block"} onValueChange={(m) => setMocks({ cassette: { ...value.mocks!.cassette!, onUnmatched: m as "block" } })}>
+            <SelectTrigger size="sm" className="w-44" aria-label="Unmatched calls"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="block">Unmatched: blocked</SelectItem>
+              <SelectItem value="fail">Unmatched: the case fails</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       )}
 

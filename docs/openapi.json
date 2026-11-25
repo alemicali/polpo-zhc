@@ -11605,6 +11605,10 @@
                   "allowRealTools": {
                     "type": "boolean",
                     "description": "Confirm a run that uses real tools (modes none / model, or unmocked tools run for real): side effects are possible; approvals are never given"
+                  },
+                  "record": {
+                    "type": "boolean",
+                    "description": "Record: run the cases live (real model and tools; needs allowRealTools and an admin) and save each one's exchange as its cassette (secrets redacted); the cases replay it from then on"
                   }
                 },
                 "additionalProperties": false
@@ -12530,6 +12534,5292 @@
           },
           "404": {
             "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agents/{name}/suites/{id}/cases": {
+      "post": {
+        "tags": [
+          "Agent suites"
+        ],
+        "summary": "Add cases to a suite",
+        "description": "Appends cases (validated like a saved suite's; an id already used gets a new one) and the datasets they use: e.g. the generated cases a person accepted. `revision` refuses the save when the suite changed meanwhile (409).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "cases": {
+                    "type": "array",
+                    "items": {
+                      "nullable": true
+                    },
+                    "minItems": 1,
+                    "maxItems": 200
+                  },
+                  "datasets": {
+                    "type": "array",
+                    "items": {
+                      "nullable": true
+                    }
+                  },
+                  "revision": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "cases"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agents/{name}/suites/{id}/datasets/generate": {
+      "post": {
+        "tags": [
+          "Agent suites"
+        ],
+        "summary": "Generate dataset rows",
+        "description": "Polpo's model proposes rows for a case's dataset (its columns kept; edge and adversarial values included), or a first dataset for a case that uses {{row.x}}. Nothing is saved: add the rows you keep (datasets/import or a save). Costs tokens.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "caseId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50
+                  },
+                  "brief": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                },
+                "required": [
+                  "caseId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No model",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agents/{name}/suites/generate-cases": {
+      "post": {
+        "tags": [
+          "Agent suites"
+        ],
+        "summary": "Generate cases (AI)",
+        "description": "Polpo's model proposes cases from the agent's instructions, tools, skills and connectors (and a brief, sample chats): input, mocks, assertions, scorers and dataset rows, including edge cases and adversarial / prompt-injection ones. Each proposal is validated and returned with its rationale; nothing is saved — accept the ones you keep with POST …/suites/{id}/cases. Costs tokens.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "suiteId": {
+                    "type": "string",
+                    "description": "The suite the cases are for (ids kept unique)"
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 20
+                  },
+                  "brief": {
+                    "type": "string",
+                    "maxLength": 4000,
+                    "description": "What to focus on"
+                  },
+                  "sessionIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 5,
+                    "description": "Real chats with the agent to draw from"
+                  },
+                  "include": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "happy",
+                        "edge",
+                        "adversarial"
+                      ]
+                    }
+                  },
+                  "style": {
+                    "type": "string",
+                    "enum": [
+                      "contract",
+                      "tools"
+                    ],
+                    "description": "contract (default): scripted model turns and tool mocks (offline); tools: the real model with mocked tools"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No model, or the generation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agents/{name}/suites/{id}/cases/from-recording": {
+      "post": {
+        "tags": [
+          "Agent suites"
+        ],
+        "summary": "A case from a real chat or task",
+        "description": "Turns a chat session with the agent (`sessionId`, the user message at `messageIndex`, default the last one) or a task run (`taskId`, its activity) into a case and its cassette: the exchange is replayed offline (mode all) and the same tool calls are checked in order. Secrets are redacted from the cassette. The case is added to the suite.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "taskId": {
+                    "type": "string"
+                  },
+                  "messageIndex": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agents/{name}/suites/{id}/cases/{caseId}/cassette": {
+      "get": {
+        "tags": [
+          "Agent suites"
+        ],
+        "summary": "A case's cassette",
+        "description": "The recording a case replays (every model turn and tool call with its arguments and result, secrets redacted), or null when it was never recorded.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "caseId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agents/{name}/suites/{id}/cases/{caseId}/record": {
+      "post": {
+        "tags": [
+          "Agent suites"
+        ],
+        "summary": "Record (or re-record) a case",
+        "description": "Runs the case live — the agent's real model and real tools: side effects are possible, so it needs `allowRealTools: true` and an admin (403 otherwise) — and saves its exchange as the case's cassette (secrets redacted: vault values, auth headers, tokens). The case then replays it offline. Calls turned into mocks stay pinned. Returns the recording run (finished with `wait: true`).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "caseId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "target": {
+                    "type": "string"
+                  },
+                  "allowRealTools": {
+                    "type": "boolean"
+                  },
+                  "wait": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not confirmed, or not an admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agents/{name}/cassettes": {
+      "get": {
+        "tags": [
+          "Agent suites"
+        ],
+        "summary": "An agent's cassettes",
+        "description": "The recordings its cases replay, newest first, without their calls (tools, how many calls and turns, redactions, where they were recorded).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agents/{name}/cassettes/{cassetteId}": {
+      "get": {
+        "tags": [
+          "Agent suites"
+        ],
+        "summary": "One cassette",
+        "description": "A recording with every model turn and tool call (arguments, result, error, edited, turned into a mock).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "cassetteId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Agent suites"
+        ],
+        "summary": "Edit a cassette",
+        "description": "Per recorded call: a new `response` (and `isError`), `delete`, or `markAsMock` (the call becomes a tool mock of its case, kept on re-recording). `revision` refuses an edit over a newer one (409).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "cassetteId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "edits": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "callId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "response": {
+                          "type": "string",
+                          "maxLength": 200000
+                        },
+                        "isError": {
+                          "type": "boolean"
+                        },
+                        "delete": {
+                          "type": "boolean"
+                        },
+                        "markAsMock": {
+                          "type": "boolean",
+                          "description": "Turn the call into a tool mock of its case (a re-recording keeps it pinned)"
+                        }
+                      },
+                      "required": [
+                        "callId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minItems": 1,
+                    "maxItems": 500
+                  },
+                  "revision": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "edits"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Changed meanwhile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Agent suites"
+        ],
+        "summary": "Delete a cassette",
+        "description": "Deletes the recording: the cases pointing at it block their tool calls until they are recorded again.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "cassetteId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers/{name}/suites": {
+      "get": {
+        "tags": [
+          "MCP server suites"
+        ],
+        "summary": "An agent's suites",
+        "description": "The agent's test and eval suites (cases, datasets, mocks), by name.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "MCP server suites"
+        ],
+        "summary": "Create a suite",
+        "description": "Creates a suite: { name, description?, defaultMode (none | tools | model | all, default all), mocks?, cases: [{ name, input: { kind: chat | task, message, history?, context? }, mode?, mocks?: { tools?: [{ tool, when?, response?, error?, delayMs?, times? }], model?: { turns: [{ text?, toolCalls? }] }, unmockedTools? }, assertions: [...], dataset?, budgets? }], datasets?: [{ name, rows }] }, or { yaml } with the same in YAML. Ids are made from names when missing.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "nullable": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A suite with this id exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers/{name}/suites/{id}": {
+      "get": {
+        "tags": [
+          "MCP server suites"
+        ],
+        "summary": "One suite",
+        "description": "The suite; ?format=yaml returns { yaml, revision } (the YAML view).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "json",
+                "yaml"
+              ]
+            },
+            "required": false,
+            "name": "format",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "MCP server suites"
+        ],
+        "summary": "Save a suite",
+        "description": "Replaces the suite (validated), or creates it. Send `revision` (the one you edited) to refuse the save when someone changed it meanwhile (409). Body: the suite, or { yaml, revision? }.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "nullable": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Changed meanwhile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "MCP server suites"
+        ],
+        "summary": "Delete a suite",
+        "description": "Deletes the suite (its past runs stay in the history).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers/{name}/suites/{id}/datasets/import": {
+      "post": {
+        "tags": [
+          "MCP server suites"
+        ],
+        "summary": "Import a dataset",
+        "description": "Imports rows from CSV (first line: the column names; quotes, comma, semicolon or tab) or JSON (a list of objects, or { rows }) into a new dataset, or replaces / appends the rows of the dataset `id`. Cases use a dataset with `dataset: <id>` and {{row.column}} in their input, mocks and assertions.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "format": {
+                    "type": "string",
+                    "enum": [
+                      "csv",
+                      "json"
+                    ]
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 5000000
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "replace",
+                      "append"
+                    ]
+                  },
+                  "coerce": {
+                    "type": "boolean",
+                    "description": "CSV: numbers and booleans from text (default true)"
+                  }
+                },
+                "required": [
+                  "format",
+                  "text"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers/{name}/suites/{id}/runs": {
+      "post": {
+        "tags": [
+          "MCP server suites"
+        ],
+        "summary": "Run a suite",
+        "description": "Runs the suite (or `caseIds`) against the agent at `target` (production, draft, 1.2.0), each case a real chat turn through the agent's own path with its mocks: mode all runs offline (scripted model, mocked tools), tools mocks the tools (real model), model scripts the model (real tools), none is live. A run that uses real tools needs `allowRealTools: true` (403 otherwise); approvals are never given. `overrides` change the agent for this run only. Returns the run (running, or finished with `wait: true`); poll GET /agents/{name}/suite-runs/{runId}.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "target": {
+                    "type": "string",
+                    "description": "production (default), draft, or a published version (1.2.0)"
+                  },
+                  "caseIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Only these cases"
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "tools",
+                      "model",
+                      "all"
+                    ],
+                    "description": "Run every case in this mode (default: each case's own): none, tools, model, all"
+                  },
+                  "concurrency": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 4
+                  },
+                  "overrides": {
+                    "type": "object",
+                    "properties": {
+                      "model": {
+                        "type": "string"
+                      },
+                      "reasoning": {
+                        "type": "string"
+                      },
+                      "engine": {
+                        "nullable": true
+                      },
+                      "instructions": {
+                        "type": "string"
+                      },
+                      "instructionsAppend": {
+                        "type": "string"
+                      },
+                      "allowedTools": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "maxTurns": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "exclusiveMinimum": true
+                      }
+                    },
+                    "additionalProperties": false,
+                    "description": "Per-run changes to the agent (model, reasoning, engine, instructions, allowedTools, maxTurns): this run only"
+                  },
+                  "variant": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "benchmarkRunId": {
+                    "type": "string"
+                  },
+                  "repetition": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "trigger": {
+                    "type": "string",
+                    "enum": [
+                      "manual",
+                      "publish",
+                      "deploy",
+                      "schedule",
+                      "ci",
+                      "benchmark"
+                    ]
+                  },
+                  "wait": {
+                    "type": "boolean",
+                    "description": "Wait for the run to finish (default false: the run is returned running)"
+                  },
+                  "repetitions": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10,
+                    "description": "Run every case this many times (mean, stddev and flakiness per case; default the suite's evals.repetitions, 1)"
+                  },
+                  "baselineRunId": {
+                    "type": "string",
+                    "description": "Compare with this run instead of the suite's baseline"
+                  },
+                  "regressionTolerance": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "A score or pass-rate change within this is not a regression (default the suite's, 0.05)"
+                  },
+                  "allowRealTools": {
+                    "type": "boolean",
+                    "description": "Confirm a run that uses real tools (modes none / model, or unmocked tools run for real): side effects are possible; approvals are never given"
+                  },
+                  "record": {
+                    "type": "boolean",
+                    "description": "Record: run the cases live (real model and tools; needs allowRealTools and an admin) and save each one's exchange as its cassette (secrets redacted); the cases replay it from then on"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Real tools not confirmed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers/{name}/suites/{id}/trend": {
+      "get": {
+        "tags": [
+          "MCP server suites"
+        ],
+        "summary": "A suite's trend",
+        "description": "The suite's finished runs over time, oldest first: pass rate, overall score, mean per scorer, cost, latency, regressions versus the baseline; and the same by version (production's version, a published one, or draft).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers/{name}/suites/{id}/baseline": {
+      "get": {
+        "tags": [
+          "MCP server suites"
+        ],
+        "summary": "A suite's baseline run",
+        "description": "The run marked as the suite's baseline (summary, without traces), or null. Without a marked baseline, a new run is compared with the suite's policy (evals.baseline: previous — default —, production or none).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "MCP server suites"
+        ],
+        "summary": "Mark a run as the baseline",
+        "description": "Marks a finished run of the suite as its baseline: every new run is compared with it (deltas per case and per scorer, regressions and improvements). The previous mark is removed; a marked run is never dropped from the history.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "runId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "runId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "MCP server suites"
+        ],
+        "summary": "Clear the baseline",
+        "description": "Removes the suite's baseline mark: new runs are compared by the suite's policy (the previous run by default).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers/{name}/suite-runs": {
+      "get": {
+        "tags": [
+          "MCP server suites"
+        ],
+        "summary": "An agent's suite runs",
+        "description": "Runs, newest first, without traces (each case's status, failed assertions, cost, duration); ?suite= one suite, ?benchmark= one benchmark, ?full=true with traces.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "suite",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "benchmark",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "full",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers/{name}/suite-runs/{runId}": {
+      "get": {
+        "tags": [
+          "MCP server suites"
+        ],
+        "summary": "One suite run",
+        "description": "The run with each case's assertions (pass / fail, message, expected, actual, diff) and trace (model turns, tool calls with arguments and results, mocks hit, approvals, usage).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers/{name}/suite-runs/{runId}/compare": {
+      "get": {
+        "tags": [
+          "MCP server suites"
+        ],
+        "summary": "Compare a run with a baseline",
+        "description": "The run compared with ?baseline=<runId>, or with its suite's baseline now (the marked run, else the suite's policy): pass rate, score, cost and duration deltas; per case and per scorer the change (regressed, improved, unchanged, new, removed) beyond ?tolerance= (default the suite's, 0.05). null when there is nothing to compare with.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "baseline",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "tolerance",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers/{name}/suite-runs/{runId}/review": {
+      "post": {
+        "tags": [
+          "MCP server suites"
+        ],
+        "summary": "Explain a run (AI review)",
+        "description": "Asks Polpo's model (the orchestrator's effective model) to explain a finished run: a summary, what failed or regressed and why, and suggested fixes (instruction and tool changes, or the test itself). Stored on the run as `review` (Markdown); costs tokens.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "language": {
+                    "type": "string",
+                    "maxLength": 40
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No model, or the review failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers/{name}/suite-runs/{runId}/cancel": {
+      "post": {
+        "tags": [
+          "MCP server suites"
+        ],
+        "summary": "Cancel a suite run",
+        "description": "Stops a running run: cases not started are skipped; running ones stop before their next model call or tool.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers/{name}/suites/{id}/cases": {
+      "post": {
+        "tags": [
+          "MCP server suites"
+        ],
+        "summary": "Add cases to a suite",
+        "description": "Appends cases (validated like a saved suite's; an id already used gets a new one) and the datasets they use: e.g. the generated cases a person accepted. `revision` refuses the save when the suite changed meanwhile (409).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "cases": {
+                    "type": "array",
+                    "items": {
+                      "nullable": true
+                    },
+                    "minItems": 1,
+                    "maxItems": 200
+                  },
+                  "datasets": {
+                    "type": "array",
+                    "items": {
+                      "nullable": true
+                    }
+                  },
+                  "revision": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "cases"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/mcp-servers/{name}/suites/{id}/datasets/generate": {
+      "post": {
+        "tags": [
+          "MCP server suites"
+        ],
+        "summary": "Generate dataset rows",
+        "description": "Polpo's model proposes rows for a case's dataset (its columns kept; edge and adversarial values included), or a first dataset for a case that uses {{row.x}}. Nothing is saved: add the rows you keep (datasets/import or a save). Costs tokens.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "caseId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50
+                  },
+                  "brief": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                },
+                "required": [
+                  "caseId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No model",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/missions/{name}/suites": {
+      "get": {
+        "tags": [
+          "Mission suites"
+        ],
+        "summary": "An agent's suites",
+        "description": "The agent's test and eval suites (cases, datasets, mocks), by name.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Mission suites"
+        ],
+        "summary": "Create a suite",
+        "description": "Creates a suite: { name, description?, defaultMode (none | tools | model | all, default all), mocks?, cases: [{ name, input: { kind: chat | task, message, history?, context? }, mode?, mocks?: { tools?: [{ tool, when?, response?, error?, delayMs?, times? }], model?: { turns: [{ text?, toolCalls? }] }, unmockedTools? }, assertions: [...], dataset?, budgets? }], datasets?: [{ name, rows }] }, or { yaml } with the same in YAML. Ids are made from names when missing.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "nullable": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A suite with this id exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/missions/{name}/suites/{id}": {
+      "get": {
+        "tags": [
+          "Mission suites"
+        ],
+        "summary": "One suite",
+        "description": "The suite; ?format=yaml returns { yaml, revision } (the YAML view).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "json",
+                "yaml"
+              ]
+            },
+            "required": false,
+            "name": "format",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Mission suites"
+        ],
+        "summary": "Save a suite",
+        "description": "Replaces the suite (validated), or creates it. Send `revision` (the one you edited) to refuse the save when someone changed it meanwhile (409). Body: the suite, or { yaml, revision? }.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "nullable": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Changed meanwhile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Mission suites"
+        ],
+        "summary": "Delete a suite",
+        "description": "Deletes the suite (its past runs stay in the history).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/missions/{name}/suites/{id}/datasets/import": {
+      "post": {
+        "tags": [
+          "Mission suites"
+        ],
+        "summary": "Import a dataset",
+        "description": "Imports rows from CSV (first line: the column names; quotes, comma, semicolon or tab) or JSON (a list of objects, or { rows }) into a new dataset, or replaces / appends the rows of the dataset `id`. Cases use a dataset with `dataset: <id>` and {{row.column}} in their input, mocks and assertions.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "format": {
+                    "type": "string",
+                    "enum": [
+                      "csv",
+                      "json"
+                    ]
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 5000000
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "replace",
+                      "append"
+                    ]
+                  },
+                  "coerce": {
+                    "type": "boolean",
+                    "description": "CSV: numbers and booleans from text (default true)"
+                  }
+                },
+                "required": [
+                  "format",
+                  "text"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/missions/{name}/suites/{id}/runs": {
+      "post": {
+        "tags": [
+          "Mission suites"
+        ],
+        "summary": "Run a suite",
+        "description": "Runs the suite (or `caseIds`) against the agent at `target` (production, draft, 1.2.0), each case a real chat turn through the agent's own path with its mocks: mode all runs offline (scripted model, mocked tools), tools mocks the tools (real model), model scripts the model (real tools), none is live. A run that uses real tools needs `allowRealTools: true` (403 otherwise); approvals are never given. `overrides` change the agent for this run only. Returns the run (running, or finished with `wait: true`); poll GET /agents/{name}/suite-runs/{runId}.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "target": {
+                    "type": "string",
+                    "description": "production (default), draft, or a published version (1.2.0)"
+                  },
+                  "caseIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Only these cases"
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "tools",
+                      "model",
+                      "all"
+                    ],
+                    "description": "Run every case in this mode (default: each case's own): none, tools, model, all"
+                  },
+                  "concurrency": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 4
+                  },
+                  "overrides": {
+                    "type": "object",
+                    "properties": {
+                      "model": {
+                        "type": "string"
+                      },
+                      "reasoning": {
+                        "type": "string"
+                      },
+                      "engine": {
+                        "nullable": true
+                      },
+                      "instructions": {
+                        "type": "string"
+                      },
+                      "instructionsAppend": {
+                        "type": "string"
+                      },
+                      "allowedTools": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "maxTurns": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "exclusiveMinimum": true
+                      }
+                    },
+                    "additionalProperties": false,
+                    "description": "Per-run changes to the agent (model, reasoning, engine, instructions, allowedTools, maxTurns): this run only"
+                  },
+                  "variant": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "benchmarkRunId": {
+                    "type": "string"
+                  },
+                  "repetition": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "trigger": {
+                    "type": "string",
+                    "enum": [
+                      "manual",
+                      "publish",
+                      "deploy",
+                      "schedule",
+                      "ci",
+                      "benchmark"
+                    ]
+                  },
+                  "wait": {
+                    "type": "boolean",
+                    "description": "Wait for the run to finish (default false: the run is returned running)"
+                  },
+                  "repetitions": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10,
+                    "description": "Run every case this many times (mean, stddev and flakiness per case; default the suite's evals.repetitions, 1)"
+                  },
+                  "baselineRunId": {
+                    "type": "string",
+                    "description": "Compare with this run instead of the suite's baseline"
+                  },
+                  "regressionTolerance": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "A score or pass-rate change within this is not a regression (default the suite's, 0.05)"
+                  },
+                  "allowRealTools": {
+                    "type": "boolean",
+                    "description": "Confirm a run that uses real tools (modes none / model, or unmocked tools run for real): side effects are possible; approvals are never given"
+                  },
+                  "record": {
+                    "type": "boolean",
+                    "description": "Record: run the cases live (real model and tools; needs allowRealTools and an admin) and save each one's exchange as its cassette (secrets redacted); the cases replay it from then on"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Real tools not confirmed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/missions/{name}/suites/{id}/trend": {
+      "get": {
+        "tags": [
+          "Mission suites"
+        ],
+        "summary": "A suite's trend",
+        "description": "The suite's finished runs over time, oldest first: pass rate, overall score, mean per scorer, cost, latency, regressions versus the baseline; and the same by version (production's version, a published one, or draft).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/missions/{name}/suites/{id}/baseline": {
+      "get": {
+        "tags": [
+          "Mission suites"
+        ],
+        "summary": "A suite's baseline run",
+        "description": "The run marked as the suite's baseline (summary, without traces), or null. Without a marked baseline, a new run is compared with the suite's policy (evals.baseline: previous — default —, production or none).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Mission suites"
+        ],
+        "summary": "Mark a run as the baseline",
+        "description": "Marks a finished run of the suite as its baseline: every new run is compared with it (deltas per case and per scorer, regressions and improvements). The previous mark is removed; a marked run is never dropped from the history.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "runId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "runId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Mission suites"
+        ],
+        "summary": "Clear the baseline",
+        "description": "Removes the suite's baseline mark: new runs are compared by the suite's policy (the previous run by default).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/missions/{name}/suite-runs": {
+      "get": {
+        "tags": [
+          "Mission suites"
+        ],
+        "summary": "An agent's suite runs",
+        "description": "Runs, newest first, without traces (each case's status, failed assertions, cost, duration); ?suite= one suite, ?benchmark= one benchmark, ?full=true with traces.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "suite",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "benchmark",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "full",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/missions/{name}/suite-runs/{runId}": {
+      "get": {
+        "tags": [
+          "Mission suites"
+        ],
+        "summary": "One suite run",
+        "description": "The run with each case's assertions (pass / fail, message, expected, actual, diff) and trace (model turns, tool calls with arguments and results, mocks hit, approvals, usage).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/missions/{name}/suite-runs/{runId}/compare": {
+      "get": {
+        "tags": [
+          "Mission suites"
+        ],
+        "summary": "Compare a run with a baseline",
+        "description": "The run compared with ?baseline=<runId>, or with its suite's baseline now (the marked run, else the suite's policy): pass rate, score, cost and duration deltas; per case and per scorer the change (regressed, improved, unchanged, new, removed) beyond ?tolerance= (default the suite's, 0.05). null when there is nothing to compare with.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "baseline",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "tolerance",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/missions/{name}/suite-runs/{runId}/review": {
+      "post": {
+        "tags": [
+          "Mission suites"
+        ],
+        "summary": "Explain a run (AI review)",
+        "description": "Asks Polpo's model (the orchestrator's effective model) to explain a finished run: a summary, what failed or regressed and why, and suggested fixes (instruction and tool changes, or the test itself). Stored on the run as `review` (Markdown); costs tokens.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "language": {
+                    "type": "string",
+                    "maxLength": 40
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No model, or the review failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/missions/{name}/suite-runs/{runId}/cancel": {
+      "post": {
+        "tags": [
+          "Mission suites"
+        ],
+        "summary": "Cancel a suite run",
+        "description": "Stops a running run: cases not started are skipped; running ones stop before their next model call or tool.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/missions/{name}/suites/{id}/cases": {
+      "post": {
+        "tags": [
+          "Mission suites"
+        ],
+        "summary": "Add cases to a suite",
+        "description": "Appends cases (validated like a saved suite's; an id already used gets a new one) and the datasets they use: e.g. the generated cases a person accepted. `revision` refuses the save when the suite changed meanwhile (409).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "cases": {
+                    "type": "array",
+                    "items": {
+                      "nullable": true
+                    },
+                    "minItems": 1,
+                    "maxItems": 200
+                  },
+                  "datasets": {
+                    "type": "array",
+                    "items": {
+                      "nullable": true
+                    }
+                  },
+                  "revision": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "cases"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/missions/{name}/suites/{id}/datasets/generate": {
+      "post": {
+        "tags": [
+          "Mission suites"
+        ],
+        "summary": "Generate dataset rows",
+        "description": "Polpo's model proposes rows for a case's dataset (its columns kept; edge and adversarial values included), or a first dataset for a case that uses {{row.x}}. Nothing is saved: add the rows you keep (datasets/import or a save). Costs tokens.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "caseId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50
+                  },
+                  "brief": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                },
+                "required": [
+                  "caseId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No model",
             "content": {
               "application/json": {
                 "schema": {
@@ -27116,7 +32406,7 @@
           "MCP servers"
         ],
         "summary": "Publish the draft",
-        "description": "Freeze the draft as a new semver version (bump: major | minor | patch, suggested from the changes; or an explicit version). Saved tests run first: failures warn, or block when onTestFailure is \"block\" (force: true overrides). The first version is deployed at once and creates the connector; later ones with deploy: true.",
+        "description": "Freeze the draft as a new semver version (bump: major | minor | patch, suggested from the changes; or an explicit version). Saved tests run first: failures warn, or block when onTestFailure is \"block\" (force: true overrides). The first version is deployed at once and creates the connector; later ones with deploy: true. With a required suite (the saved tests' gate) the deploy runs it first: when it fails the version stays published, not deployed (`deployBlocked`); `override: { reason }` (admins) deploys anyway.",
         "parameters": [
           {
             "schema": {
@@ -27135,7 +32425,7 @@
                 "additionalProperties": {
                   "nullable": true
                 },
-                "description": "{ bump?, version?, note?, deploy?, force? }"
+                "description": "{ bump?, version?, note?, deploy?, force?, override?: { reason } }"
               }
             }
           }
@@ -27255,7 +32545,7 @@
           "MCP servers"
         ],
         "summary": "Deploy a version",
-        "description": "Move production to a published version (the connector serves it from now on).",
+        "description": "Move production to a published version (the connector serves it from now on). With a required suite (the saved tests' gate, docs/agent-suites.md) the suite runs against the version first: a failure blocks the deploy (409 GATE_BLOCKED, details: { runId, failures }); `override: { reason }` deploys anyway (admins only, 403 otherwise; recorded on the deploy).",
         "parameters": [
           {
             "schema": {
@@ -27274,7 +32564,7 @@
                 "additionalProperties": {
                   "nullable": true
                 },
-                "description": "{ version, note? }"
+                "description": "{ version, note?, override?: { reason } }"
               }
             }
           }

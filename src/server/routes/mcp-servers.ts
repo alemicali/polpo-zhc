@@ -46,6 +46,8 @@ export interface McpServerRouteDeps {
   /** The public base (POLPO_PUBLIC_URL, else the request origin) for public endpoint URLs. */
   publicBase: (c: Context) => string;
   urlPolicy?: () => UrlPolicy;
+  /** An admin (may deploy past a failed suite gate, with a reason). */
+  isAdmin?: (c: Context) => boolean;
 }
 
 const tags = ["MCP servers"];
@@ -62,7 +64,7 @@ const responses = (what: string) => ({
 
 function fail(c: Context, err: unknown): Response {
   if (err instanceof McpServerError) {
-    const status = err.code === "NOT_FOUND" ? 404 : err.code === "INVALID" ? 400 : 409;
+    const status = err.code === "NOT_FOUND" ? 404 : err.code === "INVALID" ? 400 : err.code === "FORBIDDEN" ? 403 : 409;
     return c.json({ ok: false, error: err.message, code: err.code, ...(err.details ? { details: err.details } : {}) }, status);
   }
   if (err instanceof McpServerInputError || err instanceof CodeBuildError) return c.json({ ok: false, error: err.message, code: "INVALID" }, 400);
@@ -197,16 +199,28 @@ export function mcpServerRoutes(deps: McpServerRouteDeps): OpenAPIHono {
 
   app.openapi(createRoute({ method: "post", path: "/{id}/publish", tags, summary: "Publish the draft",
     description: "Freeze the draft as a new semver version (bump: major | minor | patch, suggested from the changes; or an explicit version). Saved tests run first: failures warn, "
-      + "or block when onTestFailure is \"block\" (force: true overrides). The first version is deployed at once and creates the connector; later ones with deploy: true.",
-    request: { params: idParam, ...anyBody("{ bump?, version?, note?, deploy?, force? }") }, responses: responses("Published") }),
-    async (c) => { try { return c.json({ ok: true, data: await svc().publish(c.req.valid("param").id, await body(c), deps.actor(c)) }, 200); } catch (err) { return fail(c, err) as never; } });
+      + "or block when onTestFailure is \"block\" (force: true overrides). The first version is deployed at once and creates the connector; later ones with deploy: true. "
+      + "With a required suite (the saved tests' gate) the deploy runs it first: when it fails the version stays published, not deployed (`deployBlocked`); `override: { reason }` (admins) deploys anyway.",
+    request: { params: idParam, ...anyBody("{ bump?, version?, note?, deploy?, force?, override?: { reason } }") }, responses: responses("Published") }),
+    async (c) => {
+      try {
+        const b = await body(c);
+        return c.json({ ok: true, data: await svc().publish(c.req.valid("param").id, { ...b, admin: deps.isAdmin?.(c) ?? false }, deps.actor(c)) }, 200);
+      } catch (err) { return fail(c, err) as never; }
+    });
 
-  app.openapi(createRoute({ method: "post", path: "/{id}/deploy", tags, summary: "Deploy a version", description: "Move production to a published version (the connector serves it from now on).", request: { params: idParam, ...anyBody("{ version, note? }") }, responses: responses("Deployed") }),
+  app.openapi(createRoute({ method: "post", path: "/{id}/deploy", tags, summary: "Deploy a version",
+    description: "Move production to a published version (the connector serves it from now on). With a required suite (the saved tests' gate, docs/agent-suites.md) the suite runs against the version first: "
+      + "a failure blocks the deploy (409 GATE_BLOCKED, details: { runId, failures }); `override: { reason }` deploys anyway (admins only, 403 otherwise; recorded on the deploy).",
+    request: { params: idParam, ...anyBody("{ version, note?, override?: { reason } }") }, responses: responses("Deployed") }),
     async (c) => {
       try {
         const b = await body(c);
         if (typeof b.version !== "string") throw new McpServerError("version is required");
-        return c.json({ ok: true, data: await svc().deploy(c.req.valid("param").id, b.version, { actor: deps.actor(c), ...(b.note ? { note: String(b.note) } : {}) }) }, 200);
+        const override = b.override && typeof b.override === "object" ? { reason: String((b.override as { reason?: unknown }).reason ?? "") } : undefined;
+        return c.json({ ok: true, data: await svc().deploy(c.req.valid("param").id, b.version, {
+          actor: deps.actor(c), ...(b.note ? { note: String(b.note) } : {}), ...(override ? { override } : {}), admin: deps.isAdmin?.(c) ?? false,
+        }) }, 200);
       } catch (err) { return fail(c, err) as never; }
     });
 

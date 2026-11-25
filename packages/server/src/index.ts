@@ -27,7 +27,7 @@ export { carryContextCheckpoint, checkpointText, contextCheckpointProjection, ty
 export { createSessionCompaction, type SessionCompaction, type SessionCompactorOptions } from "./session-compactor.js";
 export { agentRoutes } from "./routes/agents.js";
 export { AgentTestError, type AgentTestRouteDeps } from "./routes/agent-tests.js";
-export { type AgentSuiteRouteDeps } from "./routes/agent-suites.js";
+export { registerAgentSuiteRoutes, type AgentSuiteRouteDeps, type SuiteRouteTarget } from "./routes/agent-suites.js";
 export { eventRoutes, type EventBridge, type EventClient } from "./routes/events.js";
 export { configRoutes } from "./routes/config.js";
 export { fileRoutes, type FileRouteDeps } from "./routes/files.js";

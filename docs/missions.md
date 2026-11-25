@@ -184,3 +184,14 @@ Polpo's `resume_checkpoint`, MCP):
 Each task in `blocksTasks` must also list the `afterTasks` in its `dependsOn` (the mission is refused
 otherwise). A checkpoint is for a person's decision; it is not needed to pass results to the next
 task (see above).
+
+## Suites
+
+A mission can have **suites** (the mission page → **Suites**; docs/agent-suites.md, "Missions"):
+each case runs the mission in **test mode** — its tasks in dependency order, each a turn of its
+agent with that agent's own mocks (scripted model, tool mocks) — and checks the tasks' outcomes
+(`task_status`), their order (`task_order`), who did what (`task_agent`, `tool_called` with
+`agent`) and the artifacts. Offline, no side effects, nothing is spent. Test mode does not run the
+mission's checkpoints, delays or quality gates, and runs the tasks one after another. REST
+`/api/v1/missions/{id}/suites…`, MCP `polpo_target_suites` / `polpo_target_suite_save` /
+`polpo_target_suite_run`, CLI `polpo test --mission <id>`.

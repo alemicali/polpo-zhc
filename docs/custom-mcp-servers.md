@@ -183,8 +183,16 @@ visibility, delete) needs `polpo:admin`.
 ## Testing, versions and deploys
 
 - **Test** one tool against the draft, production or any version; save sample inputs as test cases
-  (`expect: "ok" | "error"`, `contains`). Publish runs them first: failures warn, or block with
+  (`expect: "ok" | "error" | "any"`, `contains`). Publish runs them first: failures warn, or block with
   `onTestFailure: "block"` (`force: true` overrides).
+- The saved tests are also the server's **suite** (the **Suite** tab; docs/agent-suites.md,
+  "Hosted MCP servers"): each test can carry more checks (`assertions`, `scorers`), **HTTP mocks**
+  that answer the upstream API (`http`, offline: nothing reaches the network, secrets are
+  placeholders, so destructive and approval tools are safe to test), a `mode` and a dataset. Publish
+  runs them as the suite (offline). Mark it **Required to deploy** and every deploy runs it on the
+  version first: a failure blocks the deploy (the version stays published), an admin can deploy
+  anyway with a reason; rollbacks are never gated. Also from the terminal and CI: `polpo test
+  --mcp-server <id>`.
 - **Publish** freezes the draft as the next semver version. The bump is suggested: **major** when a
   tool is removed or its input schema, kind or approval changes; **minor** for added tools or
   setting changes; **patch** for names, descriptions and icons. An explicit version must be higher

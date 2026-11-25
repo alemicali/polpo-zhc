@@ -352,8 +352,9 @@ export function registerMcpServerTools(tool: Register, deps: McpDeps): void {
 
   tool("connectors", "polpo_mcp_server_publish", {
     title: "Publish a hosted server",
-    description: "Freeze the draft as a new semver version (bump suggested from the changes, or major | minor | patch, or an explicit version). Saved tests run first. "
-      + "The first version is deployed at once and becomes a connector (Polpo may use it; grant agents in Connectors). Later ones go live with deploy: true or polpo_mcp_server_deploy.",
+    description: "Freeze the draft as a new semver version (bump suggested from the changes, or major | minor | patch, or an explicit version). Saved tests run first (as the server's suite: HTTP mocked). "
+      + "The first version is deployed at once and becomes a connector (Polpo may use it; grant agents in Connectors). Later ones go live with deploy: true or polpo_mcp_server_deploy. "
+      + "When the saved tests are required (polpo_target_suite_save gate.required) the deploy runs them on the version first: a failure leaves it published, not deployed (deployBlocked); override_reason deploys anyway.",
     inputSchema: {
       id: z.string().describe("The hosted server's id (polpo_mcp_servers_list)"),
       bump: z.enum(["major", "minor", "patch"]).optional().describe("Default: suggested from the changes"),
@@ -361,39 +362,52 @@ export function registerMcpServerTools(tool: Register, deps: McpDeps): void {
       note: z.string().optional().describe("What changed (shown in the history)"),
       deploy: z.boolean().optional().describe("Also deploy it to production"),
       force: z.boolean().optional().describe("Publish even when saved tests fail and the server blocks on failures"),
+      override_reason: z.string().min(3).max(1000).optional().describe("With deploy: deploy even though the required suite fails; the reason is recorded in the deploy history"),
     },
-    outputSchema: { version: z.string(), deployed: z.object({ to: z.string(), action: z.string() }).passthrough().optional(), tests: z.object({ passed: z.number(), failed: z.number(), skipped: z.number() }).passthrough().optional() },
+    outputSchema: {
+      version: z.string(), deployed: z.object({ to: z.string(), action: z.string() }).passthrough().optional(), tests: z.object({ passed: z.number(), failed: z.number(), skipped: z.number() }).passthrough().optional(),
+      deployBlocked: z.object({ reason: z.string(), runId: z.string().optional(), failures: z.array(z.string()) }).passthrough().optional(),
+    },
     annotations: WRITE,
     scope: ADMIN,
-  }, async ({ id, ...rest }) => {
-    const r = await apiSend(deps, "POST", `/mcp-servers/${enc(id)}/publish`, rest);
+  }, async ({ id, override_reason, ...rest }) => {
+    const r = await apiSend(deps, "POST", `/mcp-servers/${enc(id)}/publish`, { ...rest, ...(override_reason ? { override: { reason: override_reason } } : {}) });
     if (!r.ok) return r.status === 404 ? notFound(id) : apiError(r, "Publishing");
-    const d = r.data as { version: string; deployed?: { to: string; action: string }; tests?: { passed: number; failed: number; skipped: number } };
-    return ok(`Published ${id} ${d.version}${d.deployed ? ` and deployed it (${d.deployed.action})` : " (not deployed: polpo_mcp_server_deploy)"}.`
+    const d = r.data as { version: string; deployed?: { to: string; action: string; gate?: { decision: string } }; tests?: { passed: number; failed: number; skipped: number }; deployBlocked?: { reason: string; runId?: string; failures: string[] } };
+    const deployed = d.deployed ? ` and deployed it (${d.deployed.action}${d.deployed.gate ? `, suite gate: ${d.deployed.gate.decision}` : ""})`
+      : d.deployBlocked ? ` but NOT deployed — ${d.deployBlocked.reason}${d.deployBlocked.runId ? ` (run ${d.deployBlocked.runId}: polpo_target_suites kind mcp-server)` : ""}. Fix the tool (or the test) and publish again; an admin may deploy anyway with override_reason`
+        : " (not deployed: polpo_mcp_server_deploy)";
+    return ok(`Published ${id} ${d.version}${deployed}.`
       + `${d.tests ? ` Tests: ${d.tests.passed} passed, ${d.tests.failed} failed, ${d.tests.skipped} skipped.` : ""}`, d);
   });
 
   tool("connectors", "polpo_mcp_server_deploy", {
     title: "Deploy or roll back a hosted server",
     description: "Move a hosted server's production to a published version (version), or roll back (rollback: true: to the version deployed before, or to `version`). "
-      + "Its connector serves that version from now on.",
+      + "Its connector serves that version from now on. When its saved tests are required (gate.required) they run on the version first and a failure blocks the deploy; "
+      + "override_reason deploys anyway (recorded). Rollbacks are never gated.",
     inputSchema: {
       id: z.string().describe("The hosted server's id (polpo_mcp_servers_list)"),
       version: z.string().optional().describe("The version to deploy (with rollback: the version to go back to)"),
       rollback: z.boolean().optional().describe("Roll back instead"),
       note: z.string().optional().describe("What changed (shown in the history)"),
+      override_reason: z.string().min(3).max(1000).optional().describe("Deploy even though the required suite (the saved tests) fails; the reason is recorded in the deploy history"),
     },
     outputSchema: { from: z.string().optional(), to: z.string(), action: z.string() },
     annotations: UPDATE,
     scope: ADMIN,
-  }, async ({ id, version, rollback, note }) => {
+  }, async ({ id, version, rollback, note, override_reason }) => {
     if (!rollback && !version) return fail("Give the version to deploy, or rollback: true.");
     const r = rollback
       ? await apiSend(deps, "POST", `/mcp-servers/${enc(id)}/rollback`, { ...(version ? { to: version } : {}), ...(note ? { note } : {}) })
-      : await apiSend(deps, "POST", `/mcp-servers/${enc(id)}/deploy`, { version, ...(note ? { note } : {}) });
-    if (!r.ok) return r.status === 404 ? fail(r.error) : apiError(r, rollback ? "Rolling back" : "Deploying");
-    const d = r.data as { from?: string; to: string; action: string };
-    return ok(`${id}: production ${d.from ?? "∅"} → ${d.to} (${d.action}).`, d);
+      : await apiSend(deps, "POST", `/mcp-servers/${enc(id)}/deploy`, { version, ...(note ? { note } : {}), ...(override_reason ? { override: { reason: override_reason } } : {}) });
+    if (!r.ok) {
+      if (r.status === 404) return fail(r.error);
+      if (r.code === "GATE_BLOCKED") return fail(`${r.error}. ${id}@${version} was NOT deployed: production is unchanged. Fix the tool (or the test) and publish again; an admin may deploy anyway with override_reason.`);
+      return apiError(r, rollback ? "Rolling back" : "Deploying");
+    }
+    const d = r.data as { from?: string; to: string; action: string; gate?: { decision: string; reason?: string } };
+    return ok(`${id}: production ${d.from ?? "∅"} → ${d.to} (${d.action}${d.gate ? `, suite gate: ${d.gate.decision}${d.gate.reason ? ` — ${d.gate.reason}` : ""}` : ""}).`, d);
   });
 
   tool("connectors", "polpo_mcp_server_logs", {

@@ -32,15 +32,123 @@ export interface SuiteMocks {
   tools?: ToolMock[];
   model?: { turns: ScriptedTurn[]; onExhausted?: "stop" | "error" };
   unmockedTools?: "block" | "real";
-  /** later (phase 4) */
-  cassette?: { id: string; mode: "record" | "replay" };
-  /** later (phase 4) */
-  simulatedUser?: { persona: string; goal?: string; maxTurns?: number; model?: string };
+  /** A recorded exchange replayed (record it with a run's `record: true` or `recordAgentSuiteCase`). */
+  cassette?: SuiteCassetteRef;
+  /** A simulated (or scripted) user: a multi-turn case. */
+  simulatedUser?: SimulatedUser;
+  /** Missions: mocks per agent (by name). */
+  agents?: Record<string, SuiteMocks>;
+  /** Hosted MCP servers: the upstream API's answers. */
+  http?: HttpMock[];
+  unmockedHttp?: "block" | "real";
+}
+
+export type CassetteMatch = "exact" | "partial" | "tool" | "sequence";
+
+export interface SuiteCassetteRef {
+  id: string;
+  mode?: "record" | "replay";
+  /** How a tool call finds its recorded answer (default exact arguments). */
+  match?: CassetteMatch;
+  /** A call no recording answers: blocked (default) or the case fails. */
+  onUnmatched?: "block" | "fail";
+  /** Replay the recorded model turns (default true). */
+  model?: boolean;
+}
+
+export interface SimulatedUser {
+  persona?: string;
+  goal?: string;
+  constraints?: string[];
+  /** User turns after the first (1–20, default 5). */
+  maxTurns?: number;
+  stop?: "goal" | "scorer" | "max_turns";
+  stopScorer?: string;
+  model?: string;
+  /** Scripted user: these turns, in order (no simulator). */
+  script?: string[];
+}
+
+export interface HttpMock {
+  id?: string;
+  method?: string;
+  /** A glob or a substring of the request URL. */
+  url: string;
+  status?: number;
+  body?: unknown;
+  headers?: Record<string, string>;
+  times?: number;
+}
+
+/** A cassette: a recorded exchange (secrets redacted) a case replays. */
+export interface SuiteCassette {
+  id: string;
+  agent: string;
+  suiteId?: string;
+  caseId?: string;
+  name: string;
+  source: { kind: "run" | "session" | "task"; runId?: string; sessionId?: string; taskId?: string; target?: string; version?: string };
+  input: Array<{ role: string; content: string }>;
+  turns: Array<{ text: string; thinking?: string; toolCalls: Array<{ id?: string; name: string; args: Record<string, unknown> }>; usage?: { inputTokens?: number; outputTokens?: number; costUsd?: number }; model?: string }>;
+  calls: SuiteCassetteCall[];
+  text: string;
+  redactions: number;
+  revision: number;
+  recordedAt: string;
+  recordedBy?: string;
+  updatedAt: string;
+  updatedBy?: string;
+}
+
+export interface SuiteCassetteCall {
+  id: string;
+  turn: number;
+  tool: string;
+  args: Record<string, unknown>;
+  response: string;
+  isError: boolean;
+  edited?: boolean;
+  /** Turned into a case mock (kept on re-recording). */
+  mock?: boolean;
+}
+
+/** A cassette in a list (without its calls). */
+export type SuiteCassetteSummary = Omit<SuiteCassette, "turns" | "calls" | "input"> & { turnCount: number; callCount: number; tools: string[] };
+
+export interface SuiteCassetteEdit {
+  callId: string;
+  response?: string;
+  isError?: boolean;
+  delete?: boolean;
+  markAsMock?: boolean;
+}
+
+export interface CaseGenerationRequest {
+  suiteId?: string;
+  count?: number;
+  brief?: string;
+  sessionIds?: string[];
+  include?: Array<"happy" | "edge" | "adversarial">;
+  style?: "contract" | "tools";
+}
+
+/** A generated case awaiting review (never saved by itself). */
+export interface GeneratedCaseProposal {
+  index: number;
+  case?: SuiteCase;
+  dataset?: Pick<SuiteDataset, "id" | "name" | "columns" | "rows">;
+  category?: string;
+  rationale?: string;
+  error?: string;
+  raw: unknown;
 }
 
 export interface SuiteCaseInput {
-  kind: "chat" | "task";
+  /** chat, task, tool (a hosted server's tool with `args`), mission (the target mission in test mode). */
+  kind: "chat" | "task" | "tool" | "mission";
   message: string;
+  tool?: string;
+  args?: Record<string, unknown>;
   history?: Array<{ role: "user" | "assistant"; content: string }>;
   context?: {
     system?: string;
@@ -51,10 +159,15 @@ export interface SuiteCaseInput {
 }
 
 export type SuiteAssertion = { id?: string; label?: string } & (
-  | { type: "tool_called"; tool: string; times?: number; min?: number; max?: number; args?: unknown; match?: ArgsMatchMode }
-  | { type: "tool_not_called"; tool: string; args?: unknown; match?: ArgsMatchMode }
+  | { type: "tool_called"; tool: string; times?: number; min?: number; max?: number; args?: unknown; match?: ArgsMatchMode; agent?: string }
+  | { type: "tool_not_called"; tool: string; args?: unknown; match?: ArgsMatchMode; agent?: string }
   | { type: "tool_order"; tools: string[]; strict?: boolean }
-  | { type: "tool_args"; tool: string; value: unknown; match?: ArgsMatchMode; which?: "any" | "all" | "first" | "last" }
+  | { type: "tool_args"; tool: string; value: unknown; match?: ArgsMatchMode; which?: "any" | "all" | "first" | "last"; agent?: string }
+  | { type: "tool_failed"; tool?: string; contains?: string }
+  | { type: "http_called"; url: string; method?: string; times?: number }
+  | { type: "task_status"; task: string; status: "done" | "failed" | "skipped" }
+  | { type: "task_order"; tasks: string[] }
+  | { type: "task_agent"; task: string; agent: string }
   | { type: "no_tool_errors" }
   | { type: "outcome_registered"; label?: string; outcomeType?: string; valueContains?: string }
   | { type: "artifact_created"; kind?: string; titleContains?: string }
@@ -118,7 +231,7 @@ export interface SuiteCase {
   budgets?: SuiteBudgets;
   tags?: string[];
   skip?: boolean;
-  source?: { kind: "manual" | "recorded" | "imported" | "generated"; sessionId?: string; runId?: string; at?: string };
+  source?: { kind: "manual" | "recorded" | "imported" | "generated"; sessionId?: string; runId?: string; taskId?: string; at?: string; rationale?: string; category?: string; model?: string };
 }
 
 export interface SuiteDataset {
@@ -147,6 +260,8 @@ export interface AgentSuite {
   evals?: SuiteEvalSettings;
   /** A deploy gate: required before a version reaches production (docs/agent-suites.md, "CI gate"). */
   gate?: SuiteGate;
+  /** The simulated users' model (default Polpo's). */
+  simulatorModel?: string;
   tags?: string[];
   revision: number;
   createdAt: string;
@@ -181,7 +296,7 @@ export interface SuiteRunRequest {
   variant?: { id?: string; label?: string };
   benchmarkRunId?: string;
   repetition?: number;
-  trigger?: "manual" | "publish" | "deploy" | "schedule" | "ci" | "benchmark";
+  trigger?: "manual" | "publish" | "deploy" | "schedule" | "ci" | "benchmark" | "record";
   wait?: boolean;
   /** Confirm a run that uses real tools (side effects possible; approvals never given). */
   allowRealTools?: boolean;
@@ -190,6 +305,8 @@ export interface SuiteRunRequest {
   /** Compare with this run instead of the suite's baseline. */
   baselineRunId?: string;
   regressionTolerance?: number;
+  /** Record: run the cases live (admins, allowRealTools) and save each exchange as its cassette. */
+  record?: boolean;
 }
 
 export type SuiteRunStatus = "queued" | "running" | "passed" | "failed" | "errored" | "cancelled";
@@ -213,7 +330,9 @@ export interface SuiteTraceToolCall {
   result: string;
   isError: boolean;
   /** mock, stub, blocked, or false (ran for real). */
-  mocked: "mock" | "stub" | "blocked" | false;
+  mocked: "mock" | "cassette" | "stub" | "blocked" | false;
+  /** Missions: the agent that called it. */
+  agent?: string;
   mockId?: string;
   durationMs: number;
   approval?: "interactive" | "queued";
@@ -229,6 +348,7 @@ export interface SuiteTraceTurn {
   usage?: { inputTokens: number; outputTokens: number; costUsd: number };
   durationMs: number;
   error?: string;
+  agent?: string;
 }
 
 export interface SuiteTrace {
@@ -241,6 +361,18 @@ export interface SuiteTrace {
   usage: { inputTokens: number; outputTokens: number; costUsd: number };
   durationMs: number;
   notes: string[];
+  /** Multi-turn cases: the whole conversation (`text` then holds every agent reply). */
+  transcript?: Array<{ role: "user" | "assistant"; content: string; simulated?: boolean; note?: string }>;
+  finalText?: string;
+  simulator?: { model?: string; calls: number; costUsd: number; stoppedBy: "goal" | "scorer" | "max_turns" | "script" | "agent" | "budget" | "error"; goalReached?: boolean };
+  /** Missions: each task in the order it ran. */
+  tasks?: Array<{ title: string; agent: string; status: "done" | "failed" | "skipped"; text: string; toolCalls: number; turns: number; costUsd: number; durationMs: number; error?: string }>;
+  /** Hosted MCP servers: the upstream requests. */
+  http?: Array<{ method: string; url: string; status: number; mocked: "mock" | "blocked" | false; mockId?: string; body?: string }>;
+  /** A replayed cassette. */
+  cassette?: { id: string; replayedCalls: number; replayedTurns: number; unmatched: string[] };
+  /** A recording run: the cassette saved from this case. */
+  recorded?: { cassetteId: string; calls: number; turns: number; redactions: number };
 }
 
 export interface SuiteCaseResult {
@@ -292,7 +424,7 @@ export interface SuiteRun {
   /** later (phase 5) */
   benchmarkRunId?: string;
   repetition?: number;
-  trigger: "manual" | "publish" | "deploy" | "schedule" | "ci" | "benchmark";
+  trigger: "manual" | "publish" | "deploy" | "schedule" | "ci" | "benchmark" | "record";
   status: SuiteRunStatus;
   startedAt: string;
   finishedAt?: string;
@@ -312,6 +444,10 @@ export interface SuiteRun {
   /** later (phase 3) */
   /** A gate run (trigger deploy / publish): the decision and its deploy gate. */
   gate?: { decision: "pass" | "fail" | "override"; reason?: string; by?: string; gateId?: string };
+  /** What the suite tests (default agent); `agent` then holds the owner key (mcp-server:<id>, mission:<id>). */
+  targetKind?: "agent" | "mcp-server" | "mission" | "team";
+  /** A recording run: each case's exchange was saved as its cassette. */
+  record?: boolean;
   notes: string[];
   error?: string;
 }
@@ -463,3 +599,6 @@ export interface AgentVersionGateStatus {
   failed: string[];
   progress?: { done: number; total: number };
 }
+
+/** A suite target other than an agent. */
+export type SuiteTargetKind = "mcp-server" | "mission";

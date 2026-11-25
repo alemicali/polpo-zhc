@@ -190,6 +190,15 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_agent_suite_trend", name: "agent_suite_trend", group: "agent-versions" },
   { mcp: "polpo_agent_suite_baseline", name: "agent_suite_baseline", group: "agent-versions" },
   { mcp: "polpo_agent_suite_review", name: "agent_suite_review", group: "agent-versions" },
+  // phase 4: cassettes (record / replay), AI case generation, suites of hosted servers and missions
+  { mcp: "polpo_agent_suite_record", name: "agent_suite_record", group: "agent-versions" },
+  { mcp: "polpo_agent_suite_replay", name: "agent_suite_replay", group: "agent-versions" },
+  { mcp: "polpo_agent_suite_cassette", name: "agent_suite_cassette", group: "agent-versions" },
+  { mcp: "polpo_agent_suite_cassette_edit", name: "agent_suite_cassette_edit", group: "agent-versions" },
+  { mcp: "polpo_agent_suite_generate", name: "agent_suite_generate", group: "agent-versions" },
+  { mcp: "polpo_target_suites", name: "target_suites", group: "agent-versions" },
+  { mcp: "polpo_target_suite_save", name: "target_suite_save", group: "agent-versions" },
+  { mcp: "polpo_target_suite_run", name: "target_suite_run", group: "agent-versions" },
   // Large artifact contents: upload from a public URL, a file of the instance or base64 parts, then create or replace
   { mcp: "polpo_artifact_upload_prepare", name: "artifact_upload_prepare", group: "artifact-uploads" },
   { mcp: "polpo_artifact_upload_finalize", name: "artifact_upload_finalize", group: "artifact-uploads" },
