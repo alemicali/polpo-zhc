@@ -9888,6 +9888,413 @@
         }
       }
     },
+    "/api/v1/agents/{name}/tests": {
+      "post": {
+        "tags": [
+          "Agent tests"
+        ],
+        "summary": "Test an agent",
+        "description": "Runs checks of everything the agent has at its disposal: engine and model (a minimal real request, a few tokens), tools, connectors, vault references (names only), skills, computer and sandbox, channels, versioning; `smoke` (only when listed) runs a tiny real chat turn that calls one harmless tool. Each check returns pass / warn / fail with its items and a fix when there is one. The run is kept in the agent's history.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "checks": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "engine",
+                        "tools",
+                        "connectors",
+                        "vault",
+                        "skills",
+                        "computer",
+                        "channels",
+                        "versioning",
+                        "smoke"
+                      ]
+                    },
+                    "description": "Which checks (default: all but smoke, the live run that costs a real turn)"
+                  },
+                  "target": {
+                    "type": "string",
+                    "description": "production (default), draft, or a published version (1.2.0)"
+                  },
+                  "startComputer": {
+                    "type": "boolean",
+                    "description": "Start a stopped remote computer to test it (it may cost)"
+                  },
+                  "smokePrompt": {
+                    "type": "string",
+                    "maxLength": 4000,
+                    "description": "The smoke run's message (default: call one harmless tool)"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent or version not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Agent tests"
+        ],
+        "summary": "An agent's test history",
+        "description": "The agent's test runs, newest first, with each check's result, the target and version tested and when.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Runs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agents/{name}/tests/{id}": {
+      "get": {
+        "tags": [
+          "Agent tests"
+        ],
+        "summary": "One test run",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agents/{name}/tests/fix": {
+      "post": {
+        "tags": [
+          "Agent tests"
+        ],
+        "summary": "Apply a test's fix",
+        "description": "Applies a one-click fix a check offered: `grant-connector-access` adds the agent to the connector's access list (the agent names the connector's tools in allowedTools but cannot see them).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "grant-connector-access"
+                    ]
+                  },
+                  "connector": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "type",
+                  "connector"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Done",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid fix",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent or connector not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/chat/sessions": {
       "get": {
         "tags": [

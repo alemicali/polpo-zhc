@@ -101,6 +101,9 @@ import type {
   SkillVersionDiff,
   AgentVersion,
   AgentVersionBump,
+  AgentTestRun,
+  AgentTestRunRequest,
+  AgentTestFixAction,
   AgentVersionDiff,
   AgentVersionList,
   AgentDeployEntry,
@@ -970,6 +973,27 @@ export class PolpoClient {
   /** One deploy with its diff. */
   getAgentDeploy(name: string, id: string): Promise<AgentDeployEntry & { diff: AgentVersionDiff }> {
     return this.get<AgentDeployEntry & { diff: AgentVersionDiff }>(`/agents/${encodeURIComponent(name)}/deploys/${encodeURIComponent(id)}`);
+  }
+
+  // ── Agent tests ──
+
+  /** Test an agent: all checks but the smoke run by default, or `checks`; kept in its history. */
+  runAgentTests(name: string, req: AgentTestRunRequest = {}): Promise<AgentTestRun> {
+    return this.post<AgentTestRun>(`/agents/${encodeURIComponent(name)}/tests`, req);
+  }
+
+  /** The agent's test runs, newest first. */
+  getAgentTests(name: string, opts: { limit?: number } = {}): Promise<AgentTestRun[]> {
+    return this.get<AgentTestRun[]>(`/agents/${encodeURIComponent(name)}/tests${opts.limit ? `?limit=${opts.limit}` : ""}`);
+  }
+
+  getAgentTest(name: string, id: string): Promise<AgentTestRun> {
+    return this.get<AgentTestRun>(`/agents/${encodeURIComponent(name)}/tests/${encodeURIComponent(id)}`);
+  }
+
+  /** Apply a one-click fix a check offered (e.g. grant a connector's access to the agent). */
+  fixAgentTest(name: string, action: AgentTestFixAction): Promise<{ message: string }> {
+    return this.post<{ message: string }>(`/agents/${encodeURIComponent(name)}/tests/fix`, action);
   }
 
   // ── Hosted MCP servers ──
