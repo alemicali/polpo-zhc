@@ -32,6 +32,24 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-25-ready-made-connectors",
+    date: "2026-11-25",
+    kind: "new",
+    title: "Connettori pronti, ospitati da Polpo: Printful, Gelato e Printify in un passaggio",
+    summary: "In Connettori → Server ospitati trovi un catalogo di connettori pronti: scegli, inserisci le impostazioni e il token, decidi quali agenti li usano. Polpo li prova e li pubblica.",
+    body: [
+      "- **Catalogo \"Pronti (ospitati da Polpo)\"**: per ogni connettore vedi fornitore, categoria, quali strumenti sono **solo lettura** e quali chiedono **approvazione**, se è già stato provato con l'API reale, e lo stato: disponibile, installato (versione) o aggiornamento disponibile.",
+      "- **Installazione guidata**: impostazioni (per esempio l'ID del negozio Printful), il **token** del fornitore con le istruzioni su dove crearlo e quali permessi dargli — va dritto nel **vault** e non viene più mostrato —, gli **agenti** che possono usarlo (nessuno finché non lo scegli, e il dialogo lo dice), poi i test in sola lettura e la pubblicazione della 1.0.0.",
+      "- **Printful (revisione 2)**: impostazione del negozio con l'header giusto sugli endpoint del negozio, `find_variant` per trovare la variante esatta per colore e taglia (per esempio Bianco / M), riepilogo del prodotto senza l'elenco infinito delle varianti, stima dei costi dell'ordine, mockup gratuiti, ordini in **bozza** con approvazione.",
+      "- **Gelato** e **Printify**: catalogo, prezzi e spedizioni, stato degli ordini; creare un ordine chiede sempre approvazione e non lo manda mai in produzione. Non ancora provati con l'API reale.",
+      "- **Aggiornamenti**: quando esce una nuova revisione di un modello, \"Aggiorna\" la mette come bozza del server con le differenze, da pubblicare quando ti va bene.",
+      "- Per chi costruisce server: **impostazioni** tipizzate (`{{settings.x}}`), **header predefiniti** per gruppi di strumenti, **filtri, paginazione e riepiloghi** delle risposte (niente più risultati tagliati a metà).",
+      "- Anche da API, MCP (`polpo_mcp_server_templates`, `polpo_mcp_server_install`, con link per inserire il token), chat con Polpo (\"installa il connettore Printful\") e SDK.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i connettori pronti", to: "/connectors?tab=servers" },
+  },
+  {
     id: "2026-11-24-custom-mcp-servers",
     date: "2026-11-24",
     kind: "new",

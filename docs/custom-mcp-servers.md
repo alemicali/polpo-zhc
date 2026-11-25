@@ -17,9 +17,9 @@ draft ──publish──▶ 1.0.0 ──deploy──▶ production ──▶ co
 | | |
 |---|---|
 | **Server** | `.polpo/mcp-servers/<id>/`: settings (`server.json`), the draft, versions, deploy history, saved tests, call log, calls waiting for approval, code builds. |
-| **Spec** (versioned) | name, description, icon, `baseUrl`, **`allowedDomains`**, **`secrets`** (vault references), `auth`, default headers, `limits`, npm `dependencies` (code tools), `tools`, `resources`. |
+| **Spec** (versioned) | name, description, icon, `baseUrl`, **`allowedDomains`**, **`secrets`** (vault references), `auth`, default `headers` and `query`, `scopes` (defaults for a group of tools), `settingsSchema`, `limits`, npm `dependencies` (code tools), `tools`, `resources`. |
 | **Tool** | name, title, a description written for the model, `inputSchema` / `outputSchema` (JSON Schema), annotations (`readOnlyHint`, `destructiveHint`…), `requiresApproval`, `publicCallable`, and a **kind**: `http` (declarative) or `code`. |
-| **Settings** (not versioned) | visibility (`private` / `public`), kill switch (`disabled`), `onTestFailure` (`warn` / `block`), public `rateLimits`, the bound connector id. |
+| **Settings** (not versioned) | visibility (`private` / `public`), kill switch (`disabled`), `onTestFailure` (`warn` / `block`), public `rateLimits`, the bound connector id, the template and its installed revision, and the **values of the spec's settings** (`settings`, e.g. a store id). |
 
 ### HTTP tools (declarative)
 
@@ -40,16 +40,75 @@ One request per call, built from the input and run **by Polpo** (no sandbox):
 }
 ```
 
-- Templates: `{{input.path}}`, `{{input.x ?? "default"}}`; `{{secrets.NAME}}` only in headers and query
-  parameters. In the URL, values are URL-encoded and a missing one is an error; an empty query
+- Templates: `{{input.path}}`, `{{settings.key}}` (the server's settings), `{{input.x ?? "default"}}`
+  or a variable fallback `{{input.currency ?? settings.currency}}`; `{{secrets.NAME}}` only in headers
+  and query parameters. In the URL, values are URL-encoded and a missing one is an error; an empty query
   parameter is left out; in a JSON body, a value that is exactly one placeholder keeps its type
   (numbers, lists, objects) and keys whose value is missing are left out.
 - Response mapping: `pick` (JSONPath-ish: `result`, `$.data.items`, `items[0]`, `items[*].id`),
   `fields` (keep only these, also of each item of a list; dotted paths keep their shape), `maxChars`.
+  See **Output shaping** below for filters, local paging and summaries.
 - `errors`: the first rule whose `status` (`404`, `"4xx"`, `"5xx"`) and optional `match` fit turns a
   failure into that message (with the API's own detail).
 - `pagination`: hints (style, parameter names, where the total / next cursor is) the description
   can rely on; the executor does not loop.
+
+### Settings, default headers and scopes
+
+A spec can declare non-secret **settings** — typed values set when the server is installed and
+changed later without a new version (`PATCH /mcp-servers/{id} { settings }`, the Settings tab,
+`polpo_mcp_server_update { settings }`):
+
+```json
+"settingsSchema": [
+  { "key": "store_id", "label": "Store id", "type": "string", "pattern": "\\d{1,12}",
+    "help": "Needed with an account-level token" },
+  { "key": "currency", "label": "Default currency", "type": "enum", "options": ["EUR", "USD"], "default": "EUR" }
+]
+```
+
+Types: `string` (optional `pattern`), `number` (`min`, `max`), `enum` (`options`), `boolean`; `required`
+and `default`. Values are validated (unknown keys refused, numbers and booleans coerced); tools see the
+stored value or the default as `{{settings.key}}` (code tools: `ctx.settings`).
+
+**Default headers and query** apply to every HTTP tool (`headers`, `query`); **scopes** apply to the
+tools that list them, so a header is not repeated in each tool:
+
+```json
+"scopes": { "store": { "headers": { "X-PF-Store-Id": "{{settings.store_id}}" } } },
+"tools": [{ "name": "list_orders", "scopes": ["store"], … }]
+```
+
+Precedence: server defaults < scopes (in the order the tool lists them) < the tool's own. A header or
+query parameter whose value renders empty (e.g. the setting is not set) is left out.
+
+### Output shaping
+
+Large answers stay useful without cutting what the model needs:
+
+```json
+"response": {
+  "pick": "result.variants",
+  "filters": [
+    { "path": "color", "input": "color", "match": "contains" },
+    { "path": "size", "input": "size" }
+  ],
+  "page": { "defaultLimit": 50, "maxLimit": 100 },
+  "fields": ["id", "name", "size", "color", "price", "in_stock"]
+}
+```
+
+- `filters`: keep the items of the picked list whose `path` matches the tool input `input` (rules whose
+  input is not given are skipped) or a fixed `value`; `match`: `equals` (default, case-insensitive),
+  `contains`, `in` (the input is a list), `gte`, `lte`.
+- `page`: page the list locally for APIs that answer with everything — the result is
+  `{ items, total, offset, limit, next_offset }`, read from the inputs `offset` / `limit` (or
+  `offsetInput` / `limitInput`).
+- `aggregates`: computed on the whole response, added to the result — `count`, `unique`, `min`, `max`,
+  `sum`, `value` (e.g. `"colors": { "path": "result.variants[*].color", "op": "unique" }`): a summary
+  instead of a dump.
+- When the text is still over `maxChars`, a list keeps as many **whole** items as fit and says how many
+  there are (`shown`, `total`, a note to filter or page) instead of being cut in the middle of the JSON.
 
 ### Code tools
 
@@ -175,33 +234,106 @@ Set `POLPO_PUBLIC_URL` to the instance's public base (e.g. `https://host.ts.net/
 dashboard shows the right URL. Remove the path with `tailscale funnel --bg --set-path
 /<instance>/mcp/servers off` when no server is public.
 
+## Ready-made connectors
+
+Connectors → **Hosted servers** opens with **Ready-made (hosted by Polpo)**: curated templates of
+hosted connectors, each with its vendor, category, description, the read-only tools (safe to try), the
+tools that need approval, its maturity ("tested with the live API" or not) and its status here —
+**available**, **installed · vX**, **update available**, or an install not finished.
+
+| Template | Category | Read-only | Needs approval | Settings | Live API tested |
+|---|---|---|---|---|---|
+| **Printful** (revision 2) | Print on demand | stores, categories, products (filter + paging), product summary, **find_variant** (color / size), variant, shipping rates, order cost estimate, mockup result, orders | `create_order` (a **draft**, never confirmed) | `store_id` (→ `X-PF-Store-Id` on store endpoints) | revision 1 only |
+| **Gelato** (revision 1) | Print on demand | catalogs, catalog attributes, product search, product, prices, shipping methods, order quote, order, order search | `create_draft_order` (`orderType: "draft"`, fixed) | `currency`, `country` (defaults) | no |
+| **Printify** (revision 1) | Print on demand | shops, blueprints (search + paging), blueprint, print providers, **find_variant**, catalog shipping, shop products, product summary, shipping cost, orders | `create_order` (kept on hold; never sent to production) | `shop_id` (in the shop URLs) | no |
+
+`create_mockup_task` (Printful) is free of charge on Printful's side and rate-limited; it needs no
+approval by default (turn `requiresApproval` on in the draft if you want one).
+
+### Install
+
+**Install** opens one dialog:
+
+1. **Settings** — e.g. Printful's store id (only with an account-level token: `list_stores` lists them).
+2. **Credentials** — where to create the token, which scopes, a read-only recommendation; the value
+   is posted to the vault entry the template names (e.g. `polpo-infra / printful`, field `token`) and is
+   never shown again (the server only says "saved in the vault" / "not set").
+3. **Who can use it** — the agents the connector grants, or all agents; none by default, and the dialog
+   says so ("only Polpo will see its tools"), so an agent with `mcp__printful__*` in its tools is not
+   left with nothing.
+4. **Install** — the template's read-only tests run on the draft; if they pass, 1.0.0 is published and
+   deployed and the connector is created with the chosen agents. A missing secret or a failing test
+   publishes nothing and says why.
+
+Installing a template already installed at an **older revision** makes the new revision the server's
+**draft**, with the diff (e.g. `added tools.find_variant`); publish it from Versions when it looks
+right. At the same revision, install only saves settings and access.
+
+| Surface | |
+|---|---|
+| REST | `GET /mcp-servers/templates` (catalog + status), `GET /mcp-servers/templates/{t}`, `POST /mcp-servers/templates/{t}/install { id?, settings?, secrets?, agents?, publish?, force? }` → `status`: `installed`, `needs_secrets` (`missingSecrets`), `tests_failed`, `draft`, `upgrade_draft` (`diff`), `up_to_date`; `PUT /mcp-servers/{id}/secrets/{name} { value }` (write-only). |
+| MCP | `polpo_mcp_server_templates` (read), `polpo_mcp_server_install` (admin). Secrets never pass through MCP: a missing one returns `setup_url` / `setup_ids` (`mcp-server:<id>:<secret>`) that open the server's Settings with the secret's input focused; `polpo_setup_wait` waits for it, then install again. |
+| Polpo's chat | "install the Printful connector" (the same tools). |
+| SDK | `getMcpServerTemplates`, `getMcpServerTemplate`, `installMcpServerTemplate`, `saveMcpServerSecret`; React `useMcpServers().install`, `useMcpServer().saveSecret`. |
+
+### How to add a template
+
+1. Create `src/mcp-servers/templates/<id>/template.ts` exporting a `McpServerTemplate`
+   (`src/mcp-servers/templates/types.ts`) and add it to `MCP_SERVER_TEMPLATES` in
+   `src/mcp-servers/templates/index.ts`.
+2. Fill in: `id`, `name`, `vendor`, `category`, `description`, `icon`, `docs`, `revision` (start at 1),
+   `changelog`, `maturity` (`testedWithLiveApi: false` until someone runs it against the real API), a
+   one-line `setup`, `secrets` (per secret of the spec: `label`, `howTo`, `url`, `scopes`,
+   `recommendation`), the `spec` and `tests`.
+3. Curate, don't mirror the API: a few task-oriented tools with descriptions written for the model;
+   read-only first (`readOnlyHint`); anything that creates, pays or ships gets `requiresApproval` and
+   `destructiveHint`, and should create a draft / on-hold item the vendor never fulfils by itself; fix
+   such values in the body (e.g. `"orderType": "draft"`), never take them from the input.
+4. Shape the answers (filters, paging, aggregates) so the variant / item the user needs is never cut off.
+5. `tests` are **read-only** tools only (they run at install, before publishing), with stable ids.
+6. Add the vendor's endpoints to the mocked API in `src/__tests__/mcp-server-templates.test.ts`: every
+   template's tools run there against recorded-shaped responses in CI.
+7. Any change to the spec or tests: bump `revision` and add a `changelog` line — installed servers then
+   show "update available".
+
+### Template spec reference
+
+| Field | |
+|---|---|
+| `spec.settingsSchema[]` | `{ key, label, type: string \| number \| enum \| boolean, help?, required?, default?, options?, pattern?, min?, max? }` |
+| `spec.headers`, `spec.query` | templates sent with every HTTP tool |
+| `spec.scopes.<name>` | `{ description?, headers?, query? }`, applied to tools with `scopes: ["<name>"]` |
+| `tool.http.response` | `pick`, `fields`, `maxChars`, `filters[] { path, input? \| value?, match? }`, `page { offsetInput?, limitInput?, defaultLimit?, maxLimit? }`, `aggregates.<key> { path, op }` |
+| placeholders | `{{input.x}}`, `{{settings.x}}`, `{{secrets.X}}` (headers / query only), fallbacks `?? "literal"` or `?? settings.x` |
+
 ## Surfaces
 
 | | |
 |---|---|
 | Dashboard | Connectors → **Hosted servers**; **Create server** (template, from API, from description, blank); the editor: Tools, Settings (credentials, auth, domains, dependencies, limits, visibility, kill switch), Test, Versions, Logs. |
-| REST | `GET/POST /api/v1/mcp-servers`, `GET /templates`, `POST /generate`, `GET/PATCH/DELETE /{id}`, `PUT/DELETE /{id}/draft`, `PUT /{id}/tests`, `POST /{id}/test`, `POST /{id}/tests/run`, `POST /{id}/publish`, `POST /{id}/deploy`, `POST /{id}/rollback`, `GET /{id}/versions[/{version}]`, `GET /{id}/deploys`, `GET /{id}/diff`, `GET /{id}/logs`, `GET /{id}/pending` (OpenAPI: tag "MCP servers"). |
-| MCP | `polpo_mcp_servers_list`, `polpo_mcp_server_get` (versions, diff), `…_create`, `…_generate`, `…_update`, `…_test`, `…_publish`, `…_deploy` (and rollback), `…_logs`, `…_delete` (toolset `connectors`; changes need `polpo:admin`). |
+| REST | `GET/POST /api/v1/mcp-servers`, `GET /templates[/{t}]`, `POST /templates/{t}/install`, `PUT /{id}/secrets/{name}`, `POST /generate`, `GET/PATCH/DELETE /{id}`, `PUT/DELETE /{id}/draft`, `PUT /{id}/tests`, `POST /{id}/test`, `POST /{id}/tests/run`, `POST /{id}/publish`, `POST /{id}/deploy`, `POST /{id}/rollback`, `GET /{id}/versions[/{version}]`, `GET /{id}/deploys`, `GET /{id}/diff`, `GET /{id}/logs`, `GET /{id}/pending` (OpenAPI: tag "MCP servers"). |
+| MCP | `polpo_mcp_servers_list`, `polpo_mcp_server_get` (versions, diff), `…_templates`, `…_install`, `…_create`, `…_generate`, `…_update`, `…_test`, `…_publish`, `…_deploy` (and rollback), `…_logs`, `…_delete` (toolset `connectors`; changes need `polpo:admin`). |
 | Polpo's chat | The same tools ("hosted-servers" group): "create a connector for Printful". |
 | SDK | `getMcpServers`, `getMcpServerTemplates`, `createMcpServer`, `generateMcpServer`, `saveMcpServerDraft`, `testMcpServerTool`, `runMcpServerTests`, `publishMcpServer`, `deployMcpServer`, `rollbackMcpServer`, `diffMcpServer`, `getMcpServerLogs`…; React `useMcpServers`, `useMcpServer`. |
 | Events | `mcp-server:changed` `{ id, what }` (created, draft, published, deployed, settings, tests, pending, deleted). |
 
 ## Walkthrough: Printful
 
-1. Store a Printful private token (Printful → Settings → API) in the vault, under the reference the
-   template uses:
-   ```bash
-   curl -X POST "$POLPO/api/v1/vault/entries" -H "authorization: Bearer $KEY" -H "content-type: application/json" \
-     -d '{ "agent": "polpo-infra", "service": "printful", "type": "api_key", "credentials": { "token": "<token>" } }'
-   ```
-2. Connectors → **Create server** → Template → **Printful** → Use (or `polpo_mcp_server_create {
-   template: "printful" }`, or ask Polpo "create a connector for Printful").
-3. **Test**: `list_catalog_categories`, `get_product { "product_id": 71 }`, `get_shipping_rates`. Three
-   test cases are saved with the template.
-4. **Publish**: 1.0.0 is deployed and the **Printful** connector appears (Hosted by Polpo · v1.0.0).
-   Grant it to the agents that need it.
+1. Connectors → **Hosted servers** → Ready-made → **Printful** → **Install** (or
+   `polpo_mcp_server_install { template: "printful", settings: { store_id: "…" }, agents: ["designer"] }`,
+   or ask Polpo "install the Printful connector").
+2. Paste a Printful private token (developers.printful.com/tokens); with an account-level token, also the
+   store id (`list_stores`).
+3. Choose the agents. **Install**: the read-only tests run (`list_catalog_categories`,
+   `get_product { "product_id": 71 }`, `find_variant { product_id: 71, color: "White", size: "M" }`,
+   `get_shipping_rates`), then 1.0.0 is deployed and the **Printful** connector appears (Hosted by
+   Polpo · v1.0.0), granted to those agents.
+4. `get_product` gives the summary (colors, sizes, price range); `find_variant` the exact variant ids.
 5. An agent asks for `create_order`: it is queued; approve it in **Approvals** and the draft order is
    created (never confirmed for fulfillment).
+
+A Printful server installed from revision 1 shows "update available": **Update** makes revision 2 its
+draft (store setting, `find_variant`, `list_stores`, `estimate_order_costs`, …) with the diff to publish.
 
 ### Spike: what is safe to try with a real token
 
@@ -211,7 +343,10 @@ The template's tools against Printful's API (https://developers.printful.com/doc
 |---|---|---|---|
 | `list_catalog_categories` | `GET /categories` | yes | read-only |
 | `list_catalog_products` | `GET /products` | yes | read-only; the whole catalog unless `category_id` |
-| `get_product` | `GET /products/{id}` | yes | read-only (variants, prices) |
+| `list_stores` | `GET /stores` | yes | read-only |
+| `get_product` | `GET /products/{id}` | yes | read-only (a summary: colors, sizes, price range) |
+| `find_variant` | `GET /products/{id}` | yes | read-only; the variants filtered by color / size, paged |
+| `estimate_order_costs` | `POST /orders/estimate-costs` | yes | a quote: creates nothing, costs nothing |
 | `get_variant` | `GET /products/variant/{id}` | yes | read-only |
 | `get_shipping_rates` | `POST /shipping/rates` | yes | a quote: creates nothing, costs nothing |
 | `get_order`, `list_orders` | `GET /orders…` | yes | read-only |
@@ -226,4 +361,7 @@ No tool confirms, cancels or pays for an order.
 - Code tools need Linux with bubblewrap; memory is limited through V8's heap size (no cgroup).
 - Public servers have no per-client keys or OAuth: public means anyone with the URL.
 - No "run on a computer" option and no external deployment (later).
-- Pagination is described to the model, not followed automatically.
+- Pagination is described to the model, not followed automatically (local paging of a full answer is,
+  see Output shaping).
+- Gelato and Printify templates are built from the vendors' docs and tested against recorded-shaped
+  responses only: run them read-only against the real API before relying on them.
