@@ -6,14 +6,18 @@
  *      set by the person, served by GET /api/v1/connectors/:id/icon. The API needs the instance's auth
  *      (an API key header or the session cookie), so it is fetched and shown as an object URL, cached
  *      by its hashed URL; a dark variant, when the server gave one, is shown on a dark tile in dark mode;
- *   3. a preview (a data URI, e.g. while adding a connector);
- *   4. else (or when the image fails) a letter avatar in the brand color.
+ *   3. a ready-made hosted server's official mark (Printful, Gelato, Printify…), bundled under
+ *      /hosted-server-icons (lib/hosted-server-icons.ts): iconUrl / iconDarkUrl point there, the dark
+ *      variant (a dark mark) shown on a dark tile in dark mode;
+ *   4. a preview (a data URI, e.g. while adding a connector);
+ *   5. else (or when the image fails) a letter avatar in the brand color.
  *
  * Images are never hotlinked from third-party sites.
  */
 import { useEffect, useState } from "react";
 import { connectorIconSrc } from "@/lib/connectors-api";
 import { loadApiImage } from "@/lib/connector-icon-cache";
+import { bundledHostedIconSrc } from "@/lib/hosted-server-icons";
 import { cn } from "@/lib/utils";
 
 const SIZES = { sm: "h-7 w-7 rounded-md text-xs", md: "h-9 w-9 rounded-lg text-sm", lg: "h-12 w-12 rounded-xl text-lg" } as const;
@@ -58,8 +62,10 @@ export function ConnectorIcon({ catalogId, name, color, iconUrl, iconDarkUrl, pr
   const apiPath = !bundled && iconUrl?.startsWith("/api/") ? iconUrl : undefined;
   const darkPath = apiPath && iconDarkUrl?.startsWith("/api/") ? iconDarkUrl : undefined;
   const custom = useApiImage(apiPath);
-  const dark = useApiImage(darkPath);
-  const src = bundled ?? previewSrc ?? custom ?? undefined;
+  const apiDark = useApiImage(darkPath);
+  const hosted = bundled ? undefined : bundledHostedIconSrc(iconUrl);
+  const dark = hosted ? bundledHostedIconSrc(iconDarkUrl) : apiDark;
+  const src = bundled ?? hosted ?? previewSrc ?? custom ?? undefined;
   const [failed, setFailed] = useState<string | null>(null);
   const tile = cn("inline-flex shrink-0 items-center justify-center border border-border/50 p-1.5 dark:border-white/10", SIZES[size], className);
 
@@ -77,7 +83,7 @@ export function ConnectorIcon({ catalogId, name, color, iconUrl, iconDarkUrl, pr
       );
     }
     return (
-      <span className={cn(tile, "bg-white")} data-testid={bundled ? "connector-icon-bundled" : "connector-icon-custom"}>
+      <span className={cn(tile, "bg-white")} data-testid={bundled || hosted ? "connector-icon-bundled" : "connector-icon-custom"}>
         <img src={src} alt="" aria-hidden className="h-full w-full object-contain" loading="lazy" onError={() => setFailed(src)} />
       </span>
     );
