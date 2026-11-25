@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   InMemoryAgentSuiteStore, REDACTED, cassetteArgsMatch, cassetteFromTrace, editCassette, hostedServerStorage, hostedServerSuite, hostedTestToCase,
-  caseToHostedTest, matchCassetteCall, parseAgentSuite, parseGeneratedCases, parseSimulatedUserReply, redactCassetteSecrets, suiteReportExitCode,
+  caseToHostedTest, matchCassetteCall, parseAgentSuite, parseGeneratedCases, parseSimulatedUserReply, redactCassetteSecrets, simulatedUserPrompt, suiteReportExitCode,
   suiteRunsJunit, suiteRunsMarkdown, suiteRunsText, traceFromChat, traceFromTaskActivity,
   type AgentConfig, type CassetteCall, type ScriptedTurn, type SuiteRun,
 } from "@polpo-ai/core";
@@ -319,6 +319,18 @@ describe("simulated and scripted users", () => {
     expect(parseSimulatedUserReply("plain next message")).toEqual({ done: false, message: "plain next message" });
     expect(() => parseAgentSuite({ name: "x", cases: [{ name: "c", input: { message: "m" }, mocks: { simulatedUser: {} } }] }, "a")).toThrow("needs a persona or a goal");
     expect(() => parseAgentSuite({ name: "x", cases: [{ name: "c", input: { message: "m" }, mocks: { simulatedUser: { goal: "g", stop: "scorer" } } }] }, "a")).toThrow("stopScorer is required");
+  });
+
+  it("the simulator's prompt: persona, goal, constraints, the conversation; it may stop unless every turn must run", () => {
+    const transcript = [{ role: "user" as const, content: "I want a refund" }, { role: "assistant" as const, content: "Which order?" }];
+    const goal = simulatedUserPrompt({ persona: "annoyed customer", goal: "a refund for order 123", constraints: ["answers in Italian"] }, transcript, { turn: 2, maxTurns: 6 });
+    expect(goal).toContain("annoyed customer");
+    expect(goal).toContain("- answers in Italian");
+    expect(goal).toContain("ASSISTANT: Which order?");
+    expect(goal).toContain('"done": true');
+    const all = simulatedUserPrompt({ goal: "g", stop: "max_turns" }, transcript, { turn: 2, maxTurns: 6 });
+    expect(all).toContain("Keep the conversation going");
+    expect(all).not.toContain('"done": true');
   });
 });
 

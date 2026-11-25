@@ -28,9 +28,14 @@ export function simulatedUserPrompt(sim: SimulatedUser, transcript: SuiteTranscr
     sim.constraints?.length ? `## Rules you follow\n${sim.constraints.map((c) => `- ${c}`).join("\n")}` : "",
     `## The conversation so far\n${convo}`,
     `## Your next move (user turn ${opts.turn} of at most ${opts.maxTurns})`,
-    "If your goal is reached (or clearly cannot be reached in this conversation), stop. Otherwise write your next message: short, natural, in the conversation's language. "
-      + "Never mention that you are a simulation or a test.",
-    'Answer with JSON only: {"done": false, "message": "your next message"} or {"done": true, "goalReached": true | false, "reason": "why you stop"}.',
+    ...(sim.stop === "max_turns"
+      // the case runs every turn: keep talking (pursue the goal, follow up, push back)
+      ? ["Keep the conversation going: write your next message even if your goal is reached (follow up, check, push back). Short, natural, in the conversation's language. "
+          + "Never mention that you are a simulation or a test.",
+        'Answer with JSON only: {"done": false, "message": "your next message"}.']
+      : ["If your goal is reached (or clearly cannot be reached in this conversation), stop. Otherwise write your next message: short, natural, in the conversation's language. "
+          + "Never mention that you are a simulation or a test.",
+        'Answer with JSON only: {"done": false, "message": "your next message"} or {"done": true, "goalReached": true | false, "reason": "why you stop"}.']),
   ].filter(Boolean).join("\n\n");
 }
 
