@@ -902,3 +902,17 @@ export function benchmarkRunText(run: BenchmarkRun, board?: BenchmarkLeaderboard
   }
   return lines.join("\n");
 }
+
+/** The case × variant matrix as text (CLI, MCP, Polpo's chat): ✓ passed, ✗ failed, ≈ mixed, ‼ errored; ≠ marks the rows where the variants disagree. */
+export function benchmarkMatrixText(m: BenchmarkMatrix, limit = 40): string {
+  const mark: Record<string, string> = { passed: "✓", failed: "✗", mixed: "≈", errored: "‼", skipped: "–", missing: " " };
+  const lines = [`case × variant (${m.variants.map((v) => v.label).join(" | ")}):`];
+  for (const r of m.rows.slice(0, limit)) {
+    lines.push(`${r.spread ? "≠" : " "} ${r.suiteName} · ${r.caseName}${r.row ? ` #${r.row}` : ""} [${r.key}]: ${m.variants.map((v) => {
+      const c = r.cells[v.id];
+      return `${mark[c?.status ?? "missing"]}${c && c.attempts > 1 ? ` ${c.passed}/${c.attempts}` : ""}${c?.score !== undefined ? ` ${c.score.toFixed(2)}` : ""}`;
+    }).join(" | ")}`);
+  }
+  if (m.rows.length > limit) lines.push(`… ${m.rows.length - limit} more case(s)`);
+  return lines.join("\n");
+}

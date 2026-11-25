@@ -7,7 +7,7 @@
  * agent's draft (admin). The card (polpo_benchmark_show) lives in suite-cards.ts.
  */
 import { z } from "zod";
-import { benchmarkRunText, type BenchmarkCaseComparison, type BenchmarkEstimate, type BenchmarkLeaderboard, type BenchmarkMatrix, type BenchmarkRun, type BenchmarkVariantStats, type PlaygroundExchange, type PlaygroundPane } from "@polpo-ai/core/agent-suites";
+import { benchmarkMatrixText, benchmarkRunText, type BenchmarkCaseComparison, type BenchmarkEstimate, type BenchmarkLeaderboard, type BenchmarkMatrix, type BenchmarkRun, type BenchmarkVariantStats, type PlaygroundExchange, type PlaygroundPane } from "@polpo-ai/core/agent-suites";
 import {
   DESTRUCTIVE, MAX_WAIT_SECONDS, READ, UPDATE, WRITE, apiError, apiGet, apiSend, dashboardLink, enc, fail, hasScope, looseObject, ok, qs, short, sleep,
   type McpDeps, type Register,
@@ -51,18 +51,7 @@ export function estimateText(e: BenchmarkEstimate): string {
   ].join("\n");
 }
 
-export function matrixText(m: BenchmarkMatrix, limit = 40): string {
-  const mark: Record<string, string> = { passed: "✓", failed: "✗", mixed: "≈", errored: "‼", skipped: "–", missing: " " };
-  const lines = [`case × variant (${m.variants.map((v) => v.label).join(" | ")}):`];
-  for (const r of m.rows.slice(0, limit)) {
-    lines.push(`${r.spread ? "≠" : " "} ${r.suiteName} · ${r.caseName}${r.row ? ` #${r.row}` : ""} [${r.key}]: ${m.variants.map((v) => {
-      const c = r.cells[v.id];
-      return `${mark[c?.status ?? "missing"]}${c && c.attempts > 1 ? ` ${c.passed}/${c.attempts}` : ""}${c?.score !== undefined ? ` ${c.score.toFixed(2)}` : ""}`;
-    }).join(" | ")}`);
-  }
-  if (m.rows.length > limit) lines.push(`… ${m.rows.length - limit} more case(s)`);
-  return lines.join("\n");
-}
+export function matrixText(m: BenchmarkMatrix, limit = 40): string { return benchmarkMatrixText(m, limit); }
 
 export function compareText(c: BenchmarkCaseComparison): string {
   const lines = [`${c.caseName} [${c.key}] side by side (diffs against ${c.reference}):`];
