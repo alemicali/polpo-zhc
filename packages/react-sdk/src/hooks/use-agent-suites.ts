@@ -292,3 +292,31 @@ export function useAgentSuiteTrend(name: string | undefined, suiteId: string | n
   const current = state?.key === key ? state : null;
   return { trend: current?.trend, isLoading: !!name && !!suiteId && !current, error: current?.error ?? null, refetch: fetch_ };
 }
+
+/** One run of a hosted server's or a mission's suite, polled while it is running. */
+export function useTargetSuiteRun(kind: SuiteTargetKind, id: string | undefined, runId: string | null | undefined, opts: { pollMs?: number } = {}): UseAgentSuiteRunReturn {
+  const { client } = usePolpoContext();
+  const [state, setState] = useState<{ key: string; run?: SuiteRun; error: Error | null } | null>(null);
+  const key = `${kind}/${id ?? ""}/${runId ?? ""}`;
+  const keyRef = useRef(key);
+  keyRef.current = key;
+  const fetch_ = useCallback(async () => {
+    if (!id || !runId) return;
+    const k = `${kind}/${id}/${runId}`;
+    try {
+      const run = await client.getTargetSuiteRun(kind, id, runId);
+      if (keyRef.current === k) setState({ key: k, run, error: null });
+    } catch (err) {
+      if (keyRef.current === k) setState({ key: k, error: err as Error });
+    }
+  }, [client, kind, id, runId]);
+  useEffect(() => { void fetch_(); }, [fetch_]);
+  const current = state?.key === key ? state : null;
+  const live = current?.run?.status === "running" || current?.run?.status === "queued";
+  useEffect(() => {
+    if (!live) return;
+    const t = setInterval(() => { void fetch_(); }, opts.pollMs ?? 2000);
+    return () => clearInterval(t);
+  }, [live, fetch_, opts.pollMs]);
+  return { run: current?.run, isLoading: !!id && !!runId && !current, error: current?.error ?? null, refetch: fetch_ };
+}

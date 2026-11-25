@@ -218,7 +218,7 @@ export type {
   AgentDeployEntry,
   AgentDeployOutcome,
   McpSecretRef, McpServerAuth, McpServerTool, McpServerSpec, McpServerSummary, McpHostedServer, McpServerTemplateInfo, McpServerTemplateSecret, McpServerTemplateStatus, McpServerSettingField, McpServerInstallRequest, McpServerInstallResult, McpServerTestCase,
-  McpServerVersionInfo, McpServerDeploy, McpServerDiff, McpToolTestResult, McpServerCallLog, McpPendingCall, McpServerGenerateRequest, McpServerGenerateResult,
+  McpServerVersionInfo, McpServerDeploy, McpServerDeployBlocked, McpServerDiff, McpToolTestResult, McpServerCallLog, McpPendingCall, McpServerGenerateRequest, McpServerGenerateResult,
   AgentPublishResult,
   AgentTestCheckId, AgentTestStatus, AgentTestFixAction, AgentTestItem, AgentTestCheckResult, AgentTestRun, AgentTestRunRequest,
   NotificationChannelType,

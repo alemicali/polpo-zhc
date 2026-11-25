@@ -7,7 +7,7 @@ import type {
   Connector,
   ConnectorTool,
   McpServerSummary, McpServerTemplateInfo, McpServerInstallRequest, McpServerInstallResult, McpSecretRef, McpHostedServer, McpServerSpec, McpServerGenerateRequest, McpServerGenerateResult,
-  McpServerTestCase, McpToolTestResult, McpServerVersionInfo, McpServerDeploy, McpServerDiff, McpServerCallLog, McpPendingCall,
+  McpServerTestCase, McpToolTestResult, McpServerVersionInfo, McpServerDeploy, McpServerDeployBlocked, McpServerDiff, McpServerCallLog, McpPendingCall,
   AuthStatusResponse,
   MemberPreferencesPatch,
   MemberPreferencesResponse,
@@ -1280,12 +1280,21 @@ export class PolpoClient {
     return this.post<{ results: McpToolTestResult[]; passed: number; failed: number; skipped: number }>(`/mcp-servers/${encodeURIComponent(id)}/tests/run`, ref ? { ref } : {});
   }
 
-  publishMcpServer(id: string, req: { bump?: "major" | "minor" | "patch"; version?: string; note?: string; deploy?: boolean; force?: boolean } = {}): Promise<{ version: string; changes: McpServerVersionInfo["changes"]; deployed?: McpServerDeploy; tests?: { passed: number; failed: number; skipped: number } }> {
+  /**
+   * Publish the draft. With `deploy` and a required suite (the saved tests' gate) the deploy runs it
+   * first: when it fails the version stays published and `deployBlocked` says why; `override` (admins)
+   * deploys anyway with a reason.
+   */
+  publishMcpServer(id: string, req: { bump?: "major" | "minor" | "patch"; version?: string; note?: string; deploy?: boolean; force?: boolean; override?: { reason: string } } = {}): Promise<{ version: string; changes: McpServerVersionInfo["changes"]; deployed?: McpServerDeploy; deployBlocked?: McpServerDeployBlocked; tests?: { passed: number; failed: number; skipped: number; runId?: string } }> {
     return this.post(`/mcp-servers/${encodeURIComponent(id)}/publish`, req);
   }
 
-  deployMcpServer(id: string, version: string, note?: string): Promise<McpServerDeploy> {
-    return this.post<McpServerDeploy>(`/mcp-servers/${encodeURIComponent(id)}/deploy`, { version, ...(note ? { note } : {}) });
+  /**
+   * Deploy a version. A required suite that fails blocks it (`PolpoApiError` code `GATE_BLOCKED`,
+   * details `{ runId, failures }`); `opts.override` (admins) deploys anyway, recorded on the deploy.
+   */
+  deployMcpServer(id: string, version: string, note?: string, opts: { override?: { reason: string } } = {}): Promise<McpServerDeploy> {
+    return this.post<McpServerDeploy>(`/mcp-servers/${encodeURIComponent(id)}/deploy`, { version, ...(note ? { note } : {}), ...(opts.override ? { override: opts.override } : {}) });
   }
 
   rollbackMcpServer(id: string, opts: { to?: string; note?: string } = {}): Promise<McpServerDeploy> {

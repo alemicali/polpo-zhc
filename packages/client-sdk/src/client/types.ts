@@ -3072,7 +3072,14 @@ export interface McpServerVersionInfo {
   build?: { depsBytes?: number; builtAt: string }; tests?: { passed: number; failed: number; skipped: number };
 }
 
-export interface McpServerDeploy { id: string; from?: string; to: string; action: "deploy" | "rollback" | "initial"; actor: string; note?: string; at: string }
+export interface McpServerDeploy {
+  id: string; from?: string; to: string; action: "deploy" | "rollback" | "initial"; actor: string; note?: string; at: string;
+  /** The deploy gate (the server's saved tests marked required): passed (with the suite run), or an admin's override with a reason. */
+  gate?: { decision: "pass" | "override"; runId?: string; reason?: string; by?: string };
+}
+
+/** A publish whose deploy the required suite blocked: the version is published, not deployed. */
+export interface McpServerDeployBlocked { reason: string; runId?: string; failures: string[] }
 
 export interface McpServerDiff {
   server: string; from?: string; to: string; changes: Array<{ field: string; kind: "added" | "removed" | "changed" }>; unified: string; suggestedBump?: "major" | "minor" | "patch";
