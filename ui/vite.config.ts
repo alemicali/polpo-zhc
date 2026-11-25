@@ -50,6 +50,10 @@ const pwaPlugin = VitePWA({
     ],
   },
   workbox: {
+    // A new build takes over at once: a waiting worker would keep serving the previous app shell,
+    // whose lazy chunks no longer exist after a deploy ("Failed to fetch dynamically imported module").
+    skipWaiting: true,
+    clientsClaim: true,
     importScripts: ["push-handlers.js"],
     cleanupOutdatedCaches: true,
     navigateFallback: "/index.html",

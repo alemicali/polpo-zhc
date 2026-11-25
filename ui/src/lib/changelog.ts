@@ -46,6 +46,15 @@ export const CHANGELOG: ChangelogEntry[] = [
     highlight: false,
   },
   {
+    id: "2026-11-25-sw-update",
+    date: "2026-11-25",
+    kind: "fixed",
+    title: "Niente più pagine rotte dopo un aggiornamento",
+    summary: "Dopo un aggiornamento di Polpo alcune pagine (come Agenti) potevano dare errore finché non si svuotava la cache: ora la nuova versione prende il posto della vecchia da sola.",
+    body: "- La dashboard installata o aperta in una scheda passa alla nuova versione appena arriva, invece di restare su quella vecchia.\n- Se una pagina non trova i suoi file dopo un aggiornamento, l'app attiva la nuova versione e si ricarica una volta da sola.",
+    highlight: false,
+  },
+  {
     id: "2026-11-25-ready-made-connectors",
     date: "2026-11-25",
     kind: "new",
