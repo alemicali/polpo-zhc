@@ -10,6 +10,7 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Orchestrator } from "../core/orchestrator.js";
+import { handleMcpRequest, type McpDeps } from "../server/mcp.js";
 
 let streamSimpleImpl: (...args: unknown[]) => unknown;
 const providerCalls: Array<{ systemPrompt?: string }> = [];
@@ -295,5 +296,52 @@ describe("agent suites end to end", () => {
     expect((await api("/agents/shop/suites/shipping-rates", { method: "DELETE" })).status).toBe(200);
     expect((await api("/agents/shop/suites/shipping-rates")).status).toBe(404);
     expect((await api("/agents/nobody/suites")).status).toBe(404);
+  });
+});
+
+describe("agent suites over MCP (on the real instance)", () => {
+  const mcp = (scopes: string[]) => {
+    const deps: McpDeps = {
+      version: "x", toolsets: ["all"], principal: { kind: "oauth", actor: "ada@example.com via Claude", scopes },
+      api: async (method, path, body) => {
+        const res = await app.request(path, { method, headers: { "content-type": "application/json" }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
+        return { status: res.status, body: await res.json(), headers: res.headers };
+      },
+    };
+    const rpc = (method: string, params: Record<string, unknown>) => handleMcpRequest(new Request("http://localhost/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-protocol-version": "2025-06-18" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    }), deps).then(async (res) => (await res.json()).result);
+    return { call: (name: string, args: Record<string, unknown>) => rpc("tools/call", { name, arguments: args }), list: () => rpc("tools/list", {}) };
+  };
+
+  test("work scope saves and runs offline suites, reads reports and traces; real tools need admin; read scope only reads", async () => {
+    const work = mcp(["polpo:work"]);
+    const saved = await work.call("polpo_agent_suite_save", { agent: "shop", suite: { ...shippingSuite, id: "mcp-shipping", name: "MCP shipping" } });
+    expect(saved.isError).toBeFalsy();
+    expect(saved.content[0].text).toContain("Saved MCP shipping [mcp-shipping] rev 1");
+    const run = await work.call("polpo_agent_suite_run", { agent: "shop", suite: "mcp-shipping" });
+    expect(run.isError).toBeFalsy();
+    expect(run.content[0].text).toMatch(/✓ shop · MCP shipping @ production \(v1\.0\.0\) · passed · 1\/1 passed/);
+    expect(run.content[0].text).toContain("mcp__printful__shipping_rates(mock)");
+    const id = run.structuredContent.run.id;
+    const trace = await work.call("polpo_agent_suite_run_get", { agent: "shop", run: id, case: "quote-italy" });
+    expect(trace.content[0].text).toContain("tool mcp__printful__shipping_rates [mock rates]");
+    expect(trace.content[0].text).toContain("turn 1 (scripted)");
+    const list = await work.call("polpo_agent_suite_list", { agent: "shop" });
+    expect(list.content[0].text).toMatch(/MCP shipping \[mcp-shipping\] · 1 case\(s\).*last run ✓ passed 1\/1/);
+    const live = await work.call("polpo_agent_suite_run", { agent: "shop", suite: "mcp-shipping", mode: "none" });
+    expect(live.isError).toBe(true);
+    expect(live.content[0].text).toContain("admin scope");
+
+    const admin = mcp(["polpo:admin"]);
+    const modelRun = await admin.call("polpo_agent_suite_run", { agent: "shop", suite: "mcp-shipping", mode: "model", label: "real tools" });
+    expect(modelRun.isError).toBeFalsy();
+    expect(modelRun.structuredContent.run.variant.label).toBe("real tools");
+
+    const read = mcp(["polpo:read"]);
+    const names = ((await read.list()).tools as Array<{ name: string }>).map((t) => t.name).filter((n) => n.startsWith("polpo_agent_suite"));
+    expect(names.sort()).toEqual(["polpo_agent_suite_get", "polpo_agent_suite_list", "polpo_agent_suite_run_get"]);
   });
 });
