@@ -6,6 +6,8 @@ const titles: Record<string, string> = {
   "/agents": "Agents",
   "/connectors": "Connectors",
   "/agent-talk": "Agent conversations",
+  "/benchmarks": "Benchmarks",
+  "/playground": "Playground",
   "/skills": "Skills",
   "/events": "Events",
   "/chat": "Chat",

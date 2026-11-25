@@ -18,6 +18,8 @@ const ComputersPage = lazy(() => import("@/pages/computers").then(m => ({ defaul
 const ComputerDetailPage = lazy(() => import("@/pages/computer-detail").then(m => ({ default: m.ComputerDetailPage })));
 const AgentDetailPage = lazy(() => import("@/pages/agent-detail").then(m => ({ default: m.AgentDetailPage })));
 const AgentTalkPage = lazy(() => import("@/pages/agent-talk").then(m => ({ default: m.AgentTalkPage })));
+const BenchmarksPage = lazy(() => import("@/pages/benchmarks").then(m => ({ default: m.BenchmarksPage })));
+const PlaygroundPage = lazy(() => import("@/pages/playground").then(m => ({ default: m.PlaygroundPage })));
 const EventsPage = lazy(() => import("@/pages/activity").then(m => ({ default: m.EventsPage })));
 const ChatPage = lazy(() => import("@/pages/chat").then(m => ({ default: m.ChatPage })));
 const ChangelogPage = lazy(() => import("@/pages/changelog").then(m => ({ default: m.ChangelogPage })));
@@ -199,6 +201,8 @@ export function App() {
           <Route path="computers" element={<Suspense fallback={<PageLoader />}><ComputersPage /></Suspense>} />
           <Route path="computers/:id" element={<Suspense fallback={<PageLoader />}><ComputerDetailPage /></Suspense>} />
           <Route path="agent-talk" element={<Suspense fallback={<PageLoader />}><AgentTalkPage /></Suspense>} />
+          <Route path="benchmarks" element={<Suspense fallback={<PageLoader />}><BenchmarksPage /></Suspense>} />
+          <Route path="playground" element={<Suspense fallback={<PageLoader />}><PlaygroundPage /></Suspense>} />
           <Route path="skills" element={<Suspense fallback={<PageLoader />}><SkillsPage /></Suspense>} />
           <Route path="skills/:skillName" element={<Suspense fallback={<PageLoader />}><SkillDetailPage /></Suspense>} />
           <Route path="events" element={<Suspense fallback={<PageLoader />}><EventsPage /></Suspense>} />

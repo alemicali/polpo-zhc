@@ -5,9 +5,9 @@
  * Runs that touch real tools ask for a confirmation; the offline "contract" mode never does.
  */
 import { useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { Disc3, FlaskRound, History, Loader2, Pencil, Play, Plus, ShieldCheck, Sparkles, Star, Trash2, TrendingUp, UsersRound } from "lucide-react";
+import { Columns3, Disc3, FlaskRound, Gauge, History, Loader2, Pencil, Play, Plus, ShieldCheck, Sparkles, Star, Trash2, TrendingUp, UsersRound } from "lucide-react";
 import { useAgentSuites, useAgentVersions, type AgentSuite, type SuiteMockMode } from "@polpo-ai/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,6 +36,7 @@ export function AgentSuitesTab() {
   const [editing, setEditing] = useState<{ suite?: AgentSuite; key: number } | null>(null);
   // ?run=<id> (a deploy gate's "Open run") opens that run's report
   const [params] = useSearchParams();
+  const navigate = useNavigate();
   const [viewing, setViewing] = useState<string | null>(params.get("run"));
   const [trendOf, setTrendOf] = useState<AgentSuite | null>(null);
   const [confirm, setConfirm] = useState<{ kind: "real"; suite: AgentSuite } | { kind: "delete"; suite: AgentSuite } | null>(null);
@@ -46,7 +47,8 @@ export function AgentSuitesTab() {
   const runs = suites.runs;
   const lastRun = useMemo(() => {
     const m = new Map<string, NonNullable<typeof runs>[number]>();
-    for (const r of runs ?? []) if (!m.has(r.suiteId)) m.set(r.suiteId, r);
+    // a suite's own last run (benchmark runs compare variants: they are not its history)
+    for (const r of runs ?? []) if (!r.benchmarkRunId && !m.has(r.suiteId)) m.set(r.suiteId, r);
     return m;
   }, [runs]);
 
@@ -121,6 +123,8 @@ export function AgentSuitesTab() {
                       {last?.baseline?.regressions ? <span className="text-destructive"> · {last.baseline.regressions} regression(s)</span> : null}
                     </p>
                   </button>
+                  <Button variant="ghost" size="sm" className="h-7" onClick={() => navigate(`/benchmarks?new=1&agent=${encodeURIComponent(agentName)}&suite=${encodeURIComponent(s.id)}`)} aria-label={`Benchmark ${s.name}`} title="Benchmark: compare variants on this suite" data-testid="suite-benchmark"><Gauge className="h-3.5 w-3.5" /></Button>
+                  <Button variant="ghost" size="sm" className="h-7" onClick={() => navigate(`/playground?agent=${encodeURIComponent(agentName)}&suite=${encodeURIComponent(s.id)}`)} aria-label={`Playground with ${s.name}'s mocks`} title="Playground with this suite's mocks" data-testid="suite-playground"><Columns3 className="h-3.5 w-3.5" /></Button>
                   <Button variant="ghost" size="sm" className="h-7" onClick={() => setTrendOf(trendOf?.id === s.id ? null : s)} aria-label={`Trend of ${s.name}`} aria-pressed={trendOf?.id === s.id} data-testid="suite-trend-open"><TrendingUp className="h-3.5 w-3.5" /></Button>
                   <Button variant="ghost" size="sm" className="h-7" onClick={() => setEditing({ suite: s, key: Date.now() })} aria-label={`Edit ${s.name}`}><Pencil className="h-3.5 w-3.5" /></Button>
                   <Button variant="ghost" size="sm" className="h-7" onClick={() => setConfirm({ kind: "delete", suite: s })} aria-label={`Delete ${s.name}`}><Trash2 className="h-3.5 w-3.5" /></Button>
@@ -185,6 +189,11 @@ export function AgentSuitesTab() {
                   {(r.trigger === "deploy" || r.trigger === "publish") && (
                     <Badge variant="secondary" className="text-micro" data-testid="suite-run-row-gate" title={r.gate ? `Gate: ${r.gate.decision}${r.gate.reason ? ` · ${r.gate.reason}` : ""}` : undefined}>
                       {r.trigger === "deploy" ? "Deploy gate" : "Publish check"}{r.gate ? ` · ${r.gate.decision}` : ""}
+                    </Badge>
+                  )}
+                  {r.benchmarkRunId && (
+                    <Badge variant="secondary" className="text-micro" data-testid="suite-run-row-benchmark" title={`Benchmark ${r.benchmarkRunId}${r.repetition ? ` · repetition ${r.repetition}` : ""}`}>
+                      Benchmark{r.variant.label ? ` · ${r.variant.label}` : ""}
                     </Badge>
                   )}
                   {r.isBaseline && <Star className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-label="Baseline" data-testid="suite-run-row-baseline" />}

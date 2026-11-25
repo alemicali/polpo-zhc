@@ -210,14 +210,14 @@ type RunIn = Pick<SuiteRun, "id" | "agent" | "suiteId" | "suiteName" | "status" 
 export function buildSuiteListCard(input: {
   agent: string;
   suites: Array<{ id: string; name: string; cases: Array<{ scorers?: unknown[]; mocks?: { cassette?: unknown; simulatedUser?: unknown } }>; datasets: unknown[]; defaultMode: string; scorers?: unknown[]; gate?: { required?: boolean; minPassRate?: number; onPublish?: boolean } }>;
-  runs: Array<Pick<SuiteRun, "id" | "suiteId" | "status" | "stats" | "startedAt" | "target" | "version" | "isBaseline"> & { aggregates?: { score?: number }; baseline?: { regressions: number } }>;
+  runs: Array<Pick<SuiteRun, "id" | "suiteId" | "status" | "stats" | "startedAt" | "target" | "version" | "isBaseline" | "benchmarkRunId"> & { aggregates?: { score?: number }; baseline?: { regressions: number } }>;
   gates?: Array<Pick<AgentDeployGate, "id" | "version" | "status" | "trigger" | "requestedAt" | "finishedAt" | "progress" | "suites" | "override">>;
   key: SuiteCardKey; link?: string;
 }): SuiteListCard {
   return {
     kind: "suites", key: input.key, generatedAt: new Date().toISOString(), agent: input.agent,
     suites: input.suites.map((s) => {
-      const last = input.runs.find((r) => r.suiteId === s.id);
+      const last = input.runs.find((r) => r.suiteId === s.id && !r.benchmarkRunId);
       const base = input.runs.find((r) => r.suiteId === s.id && r.isBaseline);
       return {
         id: s.id, name: s.name, cases: s.cases.length, datasets: s.datasets.length, defaultMode: s.defaultMode,

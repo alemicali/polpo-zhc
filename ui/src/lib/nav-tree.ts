@@ -25,6 +25,8 @@ import {
   CalendarClock,
   Cloud,
   Code2,
+  Columns3,
+  Gauge,
   Database,
   FolderOpen,
   Hash,
@@ -122,6 +124,8 @@ export const DRILL_IN_NAV: NavNode[] = [
   {
     kind: "group", id: "team", label: "Team", icon: UsersRound, children: [
       link("agents", "Agents", Bot, "/agents"),
+      link("benchmarks", "Benchmarks", Gauge, "/benchmarks"),
+      link("playground", "Playground", Columns3, "/playground"),
       link("agent-talk", "Agent conversations", MessagesSquare, "/agent-talk"),
       link("skills", "Skills", Sparkles, "/skills"),
       link("memory", "Memory", Brain, "/memory"),
