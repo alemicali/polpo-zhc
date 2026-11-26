@@ -1054,6 +1054,647 @@
           "questions"
         ]
       },
+      "MediaResult": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "generate",
+              "edit"
+            ]
+          },
+          "model": {
+            "type": "string"
+          },
+          "usedFallback": {
+            "type": "boolean"
+          },
+          "costUsd": {
+            "type": "number"
+          },
+          "latencyMs": {
+            "type": "number"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "index": {
+                  "type": "number"
+                },
+                "path": {
+                  "type": "string",
+                  "description": "Relative to the .polpo folder"
+                },
+                "mimeType": {
+                  "type": "string"
+                },
+                "bytes": {
+                  "type": "number"
+                },
+                "width": {
+                  "type": "number"
+                },
+                "height": {
+                  "type": "number"
+                },
+                "sha256": {
+                  "type": "string"
+                },
+                "revisedPrompt": {
+                  "type": "string"
+                },
+                "thumbPath": {
+                  "type": "string"
+                },
+                "file": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string",
+                  "description": "GET it (authenticated)"
+                }
+              },
+              "required": [
+                "index",
+                "path",
+                "mimeType",
+                "bytes",
+                "sha256",
+                "file",
+                "url"
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "model",
+          "usedFallback",
+          "costUsd",
+          "latencyMs",
+          "warnings",
+          "images"
+        ]
+      },
+      "GenerateImageRequest": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "example": "A lighthouse at dawn, watercolor"
+          },
+          "size": {
+            "type": "string",
+            "description": "WIDTHxHEIGHT (e.g. 1024x1024) or auto",
+            "example": "1024x1024"
+          },
+          "n": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "description": "How many variants (default 1; at most settings.media.maxImages)"
+          },
+          "model": {
+            "type": "string",
+            "description": "Another model than settings.imageModel: gateway:provider/model",
+            "example": "vercel-ai-gateway:bfl/flux-2-pro"
+          },
+          "providerOptions": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            },
+            "description": "Passed to the gateway as is (e.g. { blackForestLabs: { outputFormat: \"jpeg\" } })"
+          },
+          "referenceImages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImageInput"
+            },
+            "description": "Images the result should follow (up to 16): the request goes to the gateway's edits endpoint"
+          },
+          "seed": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "prompt"
+        ]
+      },
+      "ImageInput": {
+        "anyOf": [
+          {
+            "type": "string",
+            "description": "An https URL, a data: URL, a media image (img_…#index) or a file path of the project / .polpo"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "base64": {
+                "type": "string"
+              },
+              "mimeType": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "base64"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "url"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "mediaId": {
+                "type": "string"
+              },
+              "index": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "mediaId"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ]
+          }
+        ]
+      },
+      "EditImageRequest": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "example": "A lighthouse at dawn, watercolor"
+          },
+          "size": {
+            "type": "string",
+            "description": "WIDTHxHEIGHT (e.g. 1024x1024) or auto",
+            "example": "1024x1024"
+          },
+          "n": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "description": "How many variants (default 1; at most settings.media.maxImages)"
+          },
+          "model": {
+            "type": "string",
+            "description": "Another model than settings.imageModel: gateway:provider/model",
+            "example": "vercel-ai-gateway:bfl/flux-2-pro"
+          },
+          "providerOptions": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            },
+            "description": "Passed to the gateway as is (e.g. { blackForestLabs: { outputFormat: \"jpeg\" } })"
+          },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string",
+                "description": "An https URL, a data: URL, a media image (img_…#index) or a file path of the project / .polpo"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "base64": {
+                    "type": "string"
+                  },
+                  "mimeType": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "base64"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "url"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "mediaId": {
+                    "type": "string"
+                  },
+                  "index": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "mediaId"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ]
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ImageInput"
+                }
+              }
+            ],
+            "description": "The image to change, or several to compose"
+          },
+          "mask": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImageInput"
+              },
+              {
+                "description": "Transparent areas mark the region to replace (same size as the image)"
+              }
+            ]
+          }
+        },
+        "required": [
+          "prompt",
+          "image"
+        ]
+      },
+      "MediaLogEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "generate",
+              "edit"
+            ]
+          },
+          "caller": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "api",
+                  "mcp",
+                  "chat",
+                  "agent",
+                  "mission",
+                  "playground"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "by": {
+                "type": "string"
+              },
+              "taskId": {
+                "type": "string"
+              },
+              "missionId": {
+                "type": "string"
+              },
+              "sessionId": {
+                "type": "string"
+              },
+              "triggerId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "error"
+            ]
+          },
+          "error": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "gateway": {
+            "type": "string"
+          },
+          "usedFallback": {
+            "type": "boolean"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "promptTruncated": {
+            "type": "boolean"
+          },
+          "size": {
+            "type": "string"
+          },
+          "n": {
+            "type": "number"
+          },
+          "seed": {
+            "type": "number"
+          },
+          "inputs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "latencyMs": {
+            "type": "number"
+          },
+          "costUsd": {
+            "type": "number"
+          },
+          "usage": {
+            "type": "object",
+            "properties": {
+              "inputTokens": {
+                "type": "number"
+              },
+              "outputTokens": {
+                "type": "number"
+              },
+              "images": {
+                "type": "number"
+              }
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "assets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaAsset"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "at",
+          "kind",
+          "caller",
+          "status",
+          "model",
+          "prompt",
+          "n",
+          "latencyMs",
+          "costUsd",
+          "usage",
+          "assets"
+        ]
+      },
+      "MediaAsset": {
+        "type": "object",
+        "properties": {
+          "index": {
+            "type": "number"
+          },
+          "path": {
+            "type": "string",
+            "description": "Relative to the .polpo folder"
+          },
+          "mimeType": {
+            "type": "string"
+          },
+          "bytes": {
+            "type": "number"
+          },
+          "width": {
+            "type": "number"
+          },
+          "height": {
+            "type": "number"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "revisedPrompt": {
+            "type": "string"
+          },
+          "thumbPath": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "path",
+          "mimeType",
+          "bytes",
+          "sha256"
+        ]
+      },
+      "MediaStatus": {
+        "type": "object",
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "model": {
+            "type": "string"
+          },
+          "gateway": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "label"
+            ]
+          },
+          "fallbackModel": {
+            "type": "string"
+          },
+          "key": {
+            "type": "object",
+            "properties": {
+              "ok": {
+                "type": "boolean"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "vault",
+                  "env"
+                ]
+              },
+              "detail": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "ok",
+              "detail"
+            ]
+          },
+          "error": {
+            "type": "string"
+          },
+          "maxImages": {
+            "type": "number"
+          },
+          "retention": {
+            "type": "number"
+          },
+          "retentionDays": {
+            "type": "number"
+          },
+          "analysis": {
+            "type": "string",
+            "enum": [
+              "chat"
+            ]
+          },
+          "gateways": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "envVar": {
+                  "type": "string"
+                },
+                "docsUrl": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "envVar"
+              ]
+            }
+          }
+        },
+        "required": [
+          "configured",
+          "maxImages",
+          "retention",
+          "retentionDays",
+          "analysis",
+          "gateways"
+        ]
+      },
+      "ImageNodeState": {
+        "type": "object",
+        "properties": {
+          "group": {
+            "type": "string"
+          },
+          "missionId": {
+            "type": "string"
+          },
+          "node": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "generating",
+              "done",
+              "failed"
+            ]
+          },
+          "mediaId": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "error": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "group",
+          "node",
+          "status",
+          "startedAt"
+        ]
+      },
       "SearchAskResult": {
         "type": "object",
         "properties": {
@@ -1991,6 +2632,10 @@
                 "type": "integer",
                 "description": "Retries after a failure with backoff (default 2; 0 for agent). What was created is never created again"
               },
+              "continueOnError": {
+                "type": "boolean",
+                "description": "When this action fails, still run the later ones (default false: they are skipped)"
+              },
               "kind": {
                 "type": "string",
                 "enum": [
@@ -2034,6 +2679,10 @@
               "retries": {
                 "type": "integer",
                 "description": "Retries after a failure with backoff (default 2; 0 for agent). What was created is never created again"
+              },
+              "continueOnError": {
+                "type": "boolean",
+                "description": "When this action fails, still run the later ones (default false: they are skipped)"
               },
               "kind": {
                 "type": "string",
@@ -2080,6 +2729,10 @@
                 "type": "integer",
                 "description": "Retries after a failure with backoff (default 2; 0 for agent). What was created is never created again"
               },
+              "continueOnError": {
+                "type": "boolean",
+                "description": "When this action fails, still run the later ones (default false: they are skipped)"
+              },
               "kind": {
                 "type": "string",
                 "enum": [
@@ -2124,6 +2777,10 @@
               "retries": {
                 "type": "integer",
                 "description": "Retries after a failure with backoff (default 2; 0 for agent). What was created is never created again"
+              },
+              "continueOnError": {
+                "type": "boolean",
+                "description": "When this action fails, still run the later ones (default false: they are skipped)"
               },
               "kind": {
                 "type": "string",
@@ -2202,6 +2859,10 @@
               "retries": {
                 "type": "integer",
                 "description": "Retries after a failure with backoff (default 2; 0 for agent). What was created is never created again"
+              },
+              "continueOnError": {
+                "type": "boolean",
+                "description": "When this action fails, still run the later ones (default false: they are skipped)"
               },
               "kind": {
                 "type": "string",
@@ -20901,6 +21562,866 @@
         }
       }
     },
+    "/api/v1/media/images": {
+      "post": {
+        "tags": [
+          "Media"
+        ],
+        "summary": "Generate images",
+        "description": "Generate images from a prompt with the image model (settings.imageModel, e.g. vercel-ai-gateway:openai/gpt-image-2) through the shared gateway resolver: Vercel AI Gateway's OpenAI-compatible Images API. With referenceImages the request goes to its edits endpoint. The fallback model (settings.media.fallbackModel) is tried once when the model fails. Every image is saved as an asset with its provenance in the media log; the cost is recorded as model usage (source image). Without an image model: 409 with a link to Settings → Media.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateImageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The images",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/MediaResult"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No image model (or its key) is configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The gateway is rate limiting",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The image model failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The image model was too slow",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Media"
+        ],
+        "summary": "The media log",
+        "description": "Every image request (who asked and from where, the prompt, the model, the size, the seed, the cost, its images), newest first.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "api",
+                "mcp",
+                "chat",
+                "agent",
+                "mission",
+                "playground"
+              ]
+            },
+            "required": false,
+            "name": "caller",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "callerId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ok",
+                "error"
+              ]
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "generate",
+                "edit"
+              ]
+            },
+            "required": false,
+            "name": "kind",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of the log",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "entries": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/MediaLogEntry"
+                          }
+                        },
+                        "nextCursor": {
+                          "type": "string"
+                        },
+                        "total": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "entries",
+                        "total"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/media/images/edits": {
+      "post": {
+        "tags": [
+          "Media"
+        ],
+        "summary": "Edit an image",
+        "description": "Change an image (or compose several) with a prompt, optionally inside a mask: the gateway's edits endpoint (models that take image inputs, e.g. openai/gpt-image-2, bfl/flux-kontext-pro).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditImageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The images",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/MediaResult"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No image model (or its key) is configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The gateway is rate limiting",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The image model failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The image model was too slow",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/media/status": {
+      "get": {
+        "tags": [
+          "Media"
+        ],
+        "summary": "Media status",
+        "description": "The image model, its gateway, the fallback, where the gateway's key comes from (a vault entry or the env var; never the key) and whether it resolves, the limits and the log's retention.",
+        "responses": {
+          "200": {
+            "description": "Status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/MediaStatus"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/media/nodes": {
+      "get": {
+        "tags": [
+          "Media"
+        ],
+        "summary": "Mission image nodes",
+        "description": "Missions' image nodes of the runs in progress: generating, done (the media entry and files) or failed.",
+        "responses": {
+          "200": {
+            "description": "Nodes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ImageNodeState"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/media/images/{id}": {
+      "get": {
+        "tags": [
+          "Media"
+        ],
+        "summary": "One image request",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/MediaLogEntry"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such request (or no longer kept)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/media/images/{id}/{index}": {
+      "get": {
+        "tags": [
+          "Media"
+        ],
+        "summary": "An image's bytes",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "index",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "1: the preview (webp, 512 px), when there is one"
+            },
+            "required": false,
+            "description": "1: the preview (webp, 512 px), when there is one",
+            "name": "thumb",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "download",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The image",
+            "content": {
+              "image/png": {
+                "schema": {
+                  "nullable": true
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such image",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/benchmarks": {
       "get": {
         "tags": [
@@ -29925,6 +31446,50 @@
                   "imageModel": {
                     "type": "string",
                     "nullable": true
+                  },
+                  "media": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "fallbackModel": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "credentialRef": {
+                        "type": "object",
+                        "properties": {
+                          "owner": {
+                            "type": "string"
+                          },
+                          "service": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "owner",
+                          "service"
+                        ]
+                      },
+                      "credentialField": {
+                        "type": "string"
+                      },
+                      "maxImages": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10
+                      },
+                      "retention": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 20000
+                      },
+                      "retentionDays": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 3650
+                      }
+                    },
+                    "additionalProperties": false
                   },
                   "decisionModel": {
                     "anyOf": [

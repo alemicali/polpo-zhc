@@ -15,6 +15,7 @@ import { AGENT_BROWSER_CHECK_COMMAND } from "../tools/browser-tools.js";
 import { createExcelTools } from "../tools/excel-tools.js";
 import { createDocxTools } from "../tools/docx-tools.js";
 import { createImageTools } from "../tools/image-tools.js";
+import { MediaService, registerMediaService } from "../media/service.js";
 import { createAudioTools } from "../tools/audio-tools.js";
 import { createHttpTools } from "../tools/http-tools.js";
 import { createOutcomeTools } from "../tools/outcome-tools.js";
@@ -145,15 +146,18 @@ describe("file tools through the given FileSystem", () => {
     expect([...fs.files.get("/vm/work/dl/f.bin")!]).toEqual([1, 2, 3, 4]);
   });
 
-  test("image_analyze reads the image from the FileSystem", async () => {
+  test("image_analyze reads the image from the FileSystem (and looks at it through the chat, no provider call)", async () => {
     const fs = new MemoryFs();
     await fs.mkdir(CWD);
-    await fs.writeFileBuffer("/vm/work/pic.png", new Uint8Array([137, 80, 78, 71]));
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: "a tiny png" } }] })));
-    const tools = createImageTools(CWD, undefined, ["image_analyze"], vault, fs);
+    await fs.writeFileBuffer("/vm/work/pic.png", new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]));
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const visionTurn = vi.fn(async () => ({ text: "a tiny png" }));
+    const polpoDir = "/tmp/polpo-sandbox-fs-media";
+    registerMediaService(polpoDir, new MediaService({ polpoDir: () => polpoDir, settings: () => undefined, vault: () => undefined, visionTurn }));
+    const tools = createImageTools(CWD, undefined, ["image_analyze"], vault, fs, { polpoDir, agent: "a" });
     expect(text(await tool(tools, "image_analyze").execute("1", { path: "pic.png" }))).toContain("a tiny png");
-    const body = JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body));
-    expect(JSON.stringify(body)).toContain(Buffer.from([137, 80, 78, 71]).toString("base64"));
+    expect(visionTurn).toHaveBeenCalledWith(expect.objectContaining({ image: { data: Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).toString("base64"), mimeType: "image/png" } }));
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   test("audio: transcribe reads from the FileSystem, speak writes there", async () => {

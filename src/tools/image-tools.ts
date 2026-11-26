@@ -1,394 +1,196 @@
 /**
- * Image & video tools for generation and vision/analysis.
+ * The agents' image tools: thin wrappers over the media primitive (src/media/service.ts).
  *
- * Provides agent capabilities to:
- * - Generate images from text prompts (image_generate) — via fal.ai
- * - Generate videos from text prompts (video_generate) — via fal.ai
- * - Analyze/describe images using vision models (image_analyze) — via OpenAI/Anthropic
+ *   image_generate  a prompt (and reference images) → images, saved as instance assets with their
+ *                   provenance in the media log and copied to the agent's `path`
+ *   image_edit      change an image of the workspace (optionally inside a mask) → the same
+ *   image_analyze   look at an image of the workspace: a turn of the chat pipeline with the image
+ *                   attached (the agent's own model, or the one asked for), without tools
+ *   video_generate  unchanged (video-tools.ts): the next media type, same shape later
  *
- * Architecture: direct fetch() to provider REST APIs — zero vendor SDK dependencies.
- *
- * Providers:
- *   Image generation: fal.ai (FLUX models — fal-ai/flux/dev default)
- *   Video generation: fal.ai (Wan 2.2 — fal-ai/wan/v2.2-1.3b/text-to-video default)
- *   Vision/analysis:  openai (gpt-4.1-mini), anthropic (Claude)
- *
- * Credential resolution order (same as email tools):
- *   1. Agent vault (per-agent credentials — e.g. service "fal" with key "key")
- *   2. Environment variables (global fallback)
- *
- * Environment variables (fallback):
- *   FAL_KEY             — fal.ai image/video generation
- *   OPENAI_API_KEY      — openai vision provider
- *   ANTHROPIC_API_KEY   — anthropic vision provider
+ * No provider is called from here: the model, the gateway and its key are the instance's
+ * (settings.imageModel through the shared gateway resolver), every call is in the media log with the
+ * agent (and its task) as caller and its cost recorded as model usage. Given with the tool's name in
+ * the agent's allowedTools (or image_*), as before.
  */
 
-import { resolve, extname } from "node:path";
+import { readFileSync } from "node:fs";
+import { extname, resolve } from "node:path";
 import type { FileSystem } from "@polpo-ai/core/filesystem";
+import { sniffImageMime, type ImageInput, type MediaCaller } from "@polpo-ai/core/media";
 import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
 import { readBytes, toolFs, writeBytes } from "./tool-fs.js";
 import type { ResolvedVault } from "../vault/index.js";
+import { mediaServiceFor, type MediaResult, type MediaService } from "../media/service.js";
+import { createVideoGenerateTool } from "./video-tools.js";
 
 type ToolResult = AgentToolResult<any>;
 
-// ─── Constants ───
-
 const MAX_IMAGE_SIZE = 20 * 1024 * 1024; // 20 MB
-const DEFAULT_TIMEOUT = 120_000; // 2 min for image generation
-const VIDEO_TIMEOUT = 300_000; // 5 min for video generation
-const FAL_QUEUE_POLL_INTERVAL = 3_000; // 3 sec polling for async queue
 
-// ─── Helpers ───
+const EXT_MIME: Record<string, string> = {
+  ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
+};
 
-function requireEnv(key: string): string {
-  const val = process.env[key];
-  if (!val) throw new Error(`Missing environment variable: ${key}. Set it before using this tool.`);
-  return val;
+/** Where the agent's image tools reach the media service and who they act for. */
+export interface ImageToolsContext {
+  polpoDir?: string;
+  agent?: string;
+  taskId?: string;
+  missionId?: string;
+  sessionId?: string;
 }
 
-/** Resolve fal.ai API key: vault (service "fal-ai", key "key") > FAL_KEY env var. */
-function resolveFalKey(vault?: ResolvedVault): string {
-  const fromVault = vault?.getKey("fal-ai", "key");
-  if (fromVault) return fromVault;
-  return requireEnv("FAL_KEY");
+const errorResult = (text: string, details: Record<string, unknown> = {}): ToolResult => ({ content: [{ type: "text", text }], details: { error: true, ...details } });
+
+function serviceOf(ctx: ImageToolsContext): MediaService | undefined {
+  return ctx.polpoDir ? mediaServiceFor(ctx.polpoDir) : undefined;
 }
 
-function imageMime(ext: string): string {
-  const map: Record<string, string> = {
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".gif": "image/gif",
-    ".webp": "image/webp",
-    ".svg": "image/svg+xml",
-    ".bmp": "image/bmp",
-    ".tiff": "image/tiff",
+function callerOf(ctx: ImageToolsContext): MediaCaller {
+  return {
+    kind: "agent", ...(ctx.agent ? { id: ctx.agent } : {}), ...(ctx.taskId ? { taskId: ctx.taskId, label: `task ${ctx.taskId}` } : {}),
+    ...(ctx.missionId ? { missionId: ctx.missionId } : {}), ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}),
   };
-  return map[ext.toLowerCase()] ?? "image/png";
 }
 
 /**
- * Submit a request to fal.ai queue and poll until completion.
- * Uses the queue endpoint (POST https://queue.fal.run/<model>) for reliability,
- * then polls the status endpoint until the result is ready.
+ * The model asked for: "gateway:provider/model" or "provider/model" go to the media service; the old
+ * fal.ai ids ("fal-ai/flux/dev"…) are no longer called directly: the instance's image model answers.
  */
-async function falQueueRequest(
-  modelId: string,
-  input: Record<string, unknown>,
-  apiKey: string,
-  timeout: number,
-  signal?: AbortSignal,
-): Promise<Record<string, unknown>> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
-  if (signal) signal.addEventListener("abort", () => controller.abort(), { once: true });
+function modelParam(model: string | undefined): { model?: string; note?: string } {
+  if (!model?.trim()) return {};
+  if (/^fal-ai\//.test(model.trim())) return { note: `The fal.ai model "${model}" is no longer called directly: the instance's image model was used (Settings → Media).` };
+  return { model: model.trim() };
+}
 
-  try {
-    // Submit to queue
-    const submitResp = await fetch(`https://queue.fal.run/${modelId}`, {
-      method: "POST",
-      headers: {
-        Authorization: `Key ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(input),
-      signal: controller.signal,
-    });
+/** An image of the workspace as inline bytes for the media service. */
+async function workspaceImage(fs: FileSystem, file: string): Promise<{ base64: string; mimeType: string }> {
+  const bytes = await readBytes(fs, file);
+  if (bytes.byteLength > MAX_IMAGE_SIZE) throw new Error(`Image file too large: ${(bytes.byteLength / 1024 / 1024).toFixed(1)} MB (max ${MAX_IMAGE_SIZE / 1024 / 1024} MB)`);
+  const mimeType = sniffImageMime(new Uint8Array(bytes)) ?? EXT_MIME[extname(file).toLowerCase()] ?? "image/png";
+  return { base64: Buffer.from(bytes).toString("base64"), mimeType };
+}
 
-    if (!submitResp.ok) {
-      const errText = await submitResp.text();
-      throw new Error(`fal.ai queue submit ${submitResp.status}: ${errText}`);
-    }
+/** The output files: path for the first image, path-2, path-3… for the next (with each image's own extension). */
+function outputPaths(filePath: string, result: MediaResult): string[] {
+  const ext = extname(filePath);
+  const stem = ext ? filePath.slice(0, -ext.length) : filePath;
+  return result.images.map((img, i) => {
+    const own = `.${img.path.split(".").pop() ?? "png"}`;
+    const wanted = ext && (EXT_MIME[ext.toLowerCase()] === img.mimeType) ? ext : own;
+    return i === 0 ? `${stem}${wanted}` : `${stem}-${i + 1}${wanted}`;
+  });
+}
 
-    const queueData = await submitResp.json() as {
-      request_id: string;
-      status_url?: string;
-      response_url?: string;
-    };
-
-    const requestId = queueData.request_id;
-    const statusUrl = queueData.status_url ?? `https://queue.fal.run/${modelId}/requests/${requestId}/status`;
-    const responseUrl = queueData.response_url ?? `https://queue.fal.run/${modelId}/requests/${requestId}`;
-
-    // Poll for completion
-    while (true) {
-      await new Promise(r => setTimeout(r, FAL_QUEUE_POLL_INTERVAL));
-
-      const statusResp = await fetch(statusUrl, {
-        headers: { Authorization: `Key ${apiKey}` },
-        signal: controller.signal,
-      });
-
-      if (!statusResp.ok) {
-        throw new Error(`fal.ai status poll ${statusResp.status}`);
-      }
-
-      const status = await statusResp.json() as {
-        status: string;
-        error?: string;
-      };
-
-      if (status.status === "COMPLETED") {
-        break;
-      }
-      if (status.status === "FAILED") {
-        throw new Error(`fal.ai request failed: ${status.error ?? "unknown error"}`);
-      }
-      // IN_QUEUE or IN_PROGRESS — keep polling
-    }
-
-    // Fetch result
-    const resultResp = await fetch(responseUrl, {
-      headers: { Authorization: `Key ${apiKey}` },
-      signal: controller.signal,
-    });
-
-    if (!resultResp.ok) {
-      const errText = await resultResp.text();
-      throw new Error(`fal.ai result fetch ${resultResp.status}: ${errText}`);
-    }
-
-    return await resultResp.json() as Record<string, unknown>;
-  } finally {
-    clearTimeout(timer);
+/** Copy the result's images to the agent's workspace and describe them. */
+async function deliver(fs: FileSystem, filePath: string, result: MediaResult, note?: string): Promise<ToolResult> {
+  const paths = outputPaths(filePath, result);
+  for (const [i, img] of result.images.entries()) {
+    await writeBytes(fs, paths[i], readFileSync(img.file));
   }
+  const lines = [
+    ...result.images.map((img, i) => `Image saved: ${paths[i]} (${(img.bytes / 1024).toFixed(1)} KB${img.width && img.height ? `, ${img.width}x${img.height}` : ""})`),
+    `Model: ${result.model}${result.usedFallback ? " (fallback)" : ""} · cost $${result.costUsd.toFixed(4)} · media ${result.id}`,
+    ...(result.warnings.length ? [`Warnings: ${result.warnings.join("; ")}`] : []),
+    ...(note ? [note] : []),
+  ];
+  const first = result.images[0];
+  return {
+    content: [{ type: "text", text: lines.join("\n") }],
+    details: {
+      provider: "media", model: result.model, mediaId: result.id, path: paths[0], paths, bytes: first?.bytes,
+      ...(first?.width && first?.height ? { size: `${first.width}x${first.height}` } : {}), costUsd: result.costUsd,
+    },
+  };
 }
 
 // ─── Tool: image_generate ───
 
 const ImageGenerateSchema = Type.Object({
   prompt: Type.String({ description: "Text prompt describing the image to generate" }),
-  path: Type.String({ description: "Output file path (e.g. 'output.png'). Format inferred from extension." }),
-  model: Type.Optional(Type.String({
-    description: "fal.ai model ID. Default: 'fal-ai/flux/dev'. " +
-      "Other options: 'fal-ai/flux-pro/v1.1' (higher quality), 'fal-ai/flux/schnell' (faster).",
-  })),
-  size: Type.Optional(Type.String({
-    description: "Image size as 'WIDTHxHEIGHT' (e.g. '1024x1024', '1024x768', '768x1024'). Default: '1024x1024'.",
-  })),
-  num_inference_steps: Type.Optional(Type.Number({
-    description: "Number of inference steps (higher = better quality, slower). Default varies by model (typically 28).",
-  })),
-  guidance_scale: Type.Optional(Type.Number({
-    description: "Guidance scale / CFG — how closely to follow the prompt. Default: 3.5.",
-  })),
-  seed: Type.Optional(Type.Number({
-    description: "Random seed for reproducible results. Omit for random.",
-  })),
+  path: Type.String({ description: "Output file path (e.g. 'output.png'). Several images: output.png, output-2.png…" }),
+  model: Type.Optional(Type.String({ description: "Another image model than the instance's: 'gateway:provider/model' (e.g. 'vercel-ai-gateway:bfl/flux-2-pro'). Default: Settings → Media." })),
+  size: Type.Optional(Type.String({ description: "Image size as 'WIDTHxHEIGHT' (e.g. '1024x1024', '1536x1024'). Default: the model's." })),
+  n: Type.Optional(Type.Number({ description: "How many variants (default 1)." })),
+  seed: Type.Optional(Type.Number({ description: "Random seed for reproducible results (models that support it)." })),
+  reference_images: Type.Optional(Type.Array(Type.String(), { description: "Image files of the workspace the result should follow (style, subject)." })),
+  num_inference_steps: Type.Optional(Type.Number({ description: "Deprecated (fal.ai only): ignored." })),
+  guidance_scale: Type.Optional(Type.Number({ description: "Deprecated (fal.ai only): ignored." })),
 });
 
-function createGenerateTool(cwd: string, sandbox: string[], fs: FileSystem, vault?: ResolvedVault): AgentTool<typeof ImageGenerateSchema> {
+function createGenerateTool(cwd: string, sandbox: string[], fs: FileSystem, ctx: ImageToolsContext): AgentTool<typeof ImageGenerateSchema> {
   return {
     name: "image_generate",
     label: "Generate Image",
-    description: "Generate an image from a text prompt using fal.ai (FLUX models). " +
-      "Output format inferred from file extension (png, jpg, webp). " +
-      "Models: fal-ai/flux/dev (default, balanced), fal-ai/flux-pro/v1.1 (best quality), " +
-      "fal-ai/flux/schnell (fastest). Credentials resolved from: agent vault > FAL_KEY env var.",
+    description: "Generate images from a text prompt with the instance's image model (Settings → Media). "
+      + "The images are kept as assets with their provenance (Media page) and saved to `path` in your workspace. "
+      + "Optional reference_images (workspace files) guide style or subject.",
     parameters: ImageGenerateSchema,
-    async execute(_id, params, signal) {
+    async execute(_id, params) {
       const filePath = resolve(cwd, params.path);
       assertPathAllowed(filePath, sandbox, "image_generate");
-
+      const service = serviceOf(ctx);
+      if (!service) return errorResult("Image generation error: the media service is not available on this server");
       try {
-        return await generateFal(fs, filePath, params, vault, signal);
+        const refs: ImageInput[] = [];
+        for (const p of params.reference_images ?? []) {
+          const f = resolve(cwd, p);
+          assertPathAllowed(f, sandbox, "image_generate");
+          refs.push(await workspaceImage(fs, f));
+        }
+        const m = modelParam(params.model);
+        const result = await service.generateImage({
+          prompt: params.prompt, ...(params.size ? { size: params.size } : {}), ...(params.n ? { n: params.n } : {}),
+          ...(params.seed !== undefined ? { seed: params.seed } : {}), ...(m.model ? { model: m.model } : {}), ...(refs.length ? { referenceImages: refs } : {}),
+        }, callerOf(ctx));
+        return await deliver(fs, filePath, result, m.note);
       } catch (err: any) {
-        return {
-          content: [{ type: "text", text: `Image generation error: ${err.message}` }],
-          details: { error: err.message },
-        };
+        return errorResult(`Image generation error: ${err.message}`, { message: err.message });
       }
     },
   };
 }
 
-async function generateFal(
-  fs: FileSystem,
-  filePath: string,
-  params: {
-    prompt: string;
-    model?: string;
-    size?: string;
-    num_inference_steps?: number;
-    guidance_scale?: number;
-    seed?: number;
-  },
-  vault?: ResolvedVault,
-  signal?: AbortSignal,
-): Promise<ToolResult> {
-  const apiKey = resolveFalKey(vault);
-  const model = params.model ?? "fal-ai/flux/dev";
+// ─── Tool: image_edit ───
 
-  // Parse size into width/height
-  let width = 1024, height = 1024;
-  if (params.size) {
-    const parts = params.size.split("x").map(Number);
-    if (parts.length === 2 && parts[0] > 0 && parts[1] > 0) {
-      width = parts[0];
-      height = parts[1];
-    }
-  }
-
-  const input: Record<string, unknown> = {
-    prompt: params.prompt,
-    image_size: { width, height },
-    num_images: 1,
-  };
-  if (params.num_inference_steps != null) input.num_inference_steps = params.num_inference_steps;
-  if (params.guidance_scale != null) input.guidance_scale = params.guidance_scale;
-  if (params.seed != null) input.seed = params.seed;
-
-  const result = await falQueueRequest(model, input, apiKey, DEFAULT_TIMEOUT, signal);
-
-  // fal.ai FLUX response: { images: [{ url, width, height, content_type }], ... }
-  const images = result.images as { url: string; width: number; height: number; content_type?: string }[] | undefined;
-  if (!images || images.length === 0) {
-    throw new Error("No images in fal.ai response");
-  }
-
-  const imageUrl = images[0].url;
-  const imgResp = await fetch(imageUrl);
-  if (!imgResp.ok) throw new Error(`Failed to download generated image: ${imgResp.status}`);
-  const buffer = Buffer.from(await imgResp.arrayBuffer());
-
-  await writeBytes(fs, filePath, buffer);
-
-  const info = [
-    `Image saved: ${filePath}`,
-    `Size: ${(buffer.byteLength / 1024).toFixed(1)} KB`,
-    `Model: ${model}`,
-    `Dimensions: ${images[0].width}x${images[0].height}`,
-  ];
-
-  return {
-    content: [{ type: "text", text: info.join("\n") }],
-    details: {
-      provider: "fal",
-      model,
-      size: `${images[0].width}x${images[0].height}`,
-      path: filePath,
-      bytes: buffer.byteLength,
-    },
-  };
-}
-
-// ─── Tool: video_generate ───
-
-const VideoGenerateSchema = Type.Object({
-  prompt: Type.String({ description: "Text prompt describing the video to generate" }),
-  path: Type.String({ description: "Output file path (e.g. 'output.mp4')." }),
-  model: Type.Optional(Type.String({
-    description: "fal.ai video model ID. Default: 'fal-ai/wan/v2.2-1.3b/text-to-video'. " +
-      "Other options: 'fal-ai/wan/v2.2-a14b/text-to-video' (higher quality, slower).",
-  })),
-  num_frames: Type.Optional(Type.Number({
-    description: "Number of frames to generate. Default: 81 (~5 seconds at 16fps).",
-  })),
-  resolution: Type.Optional(Type.String({
-    description: "Video resolution as 'WIDTHxHEIGHT' (e.g. '854x480', '1280x720'). Default: '854x480' (480p).",
-  })),
-  num_inference_steps: Type.Optional(Type.Number({
-    description: "Number of inference steps (higher = better quality, slower). Default: 30.",
-  })),
-  guidance_scale: Type.Optional(Type.Number({
-    description: "Guidance scale — how closely to follow the prompt. Default: 5.0.",
-  })),
-  seed: Type.Optional(Type.Number({
-    description: "Random seed for reproducible results. Omit for random.",
-  })),
+const ImageEditSchema = Type.Object({
+  image: Type.Union([Type.String(), Type.Array(Type.String())], { description: "The image file to change (or several to compose), in your workspace" }),
+  prompt: Type.String({ description: "What to change, e.g. 'Add a watercolor effect'" }),
+  path: Type.String({ description: "Output file path (e.g. 'edited.png')" }),
+  mask: Type.Optional(Type.String({ description: "A mask image file: its transparent areas mark the region to replace (same size as the image)" })),
+  model: Type.Optional(Type.String({ description: "Another image model than the instance's: 'gateway:provider/model' (it must take image inputs)." })),
+  size: Type.Optional(Type.String({ description: "Output size 'WIDTHxHEIGHT'" })),
+  n: Type.Optional(Type.Number({ description: "How many variants (default 1)." })),
 });
 
-function createVideoGenerateTool(cwd: string, sandbox: string[], fs: FileSystem, vault?: ResolvedVault): AgentTool<typeof VideoGenerateSchema> {
+function createEditTool(cwd: string, sandbox: string[], fs: FileSystem, ctx: ImageToolsContext): AgentTool<typeof ImageEditSchema> {
   return {
-    name: "video_generate",
-    label: "Generate Video",
-    description: "Generate a video from a text prompt using fal.ai (Wan 2.2 models). " +
-      "Output saved as MP4. Models: fal-ai/wan/v2.2-1.3b/text-to-video (default, faster), " +
-      "fal-ai/wan/v2.2-a14b/text-to-video (best quality). " +
-      "Video generation takes 1-5 minutes depending on model and resolution. " +
-      "Credentials resolved from: agent vault > FAL_KEY env var.",
-    parameters: VideoGenerateSchema,
-    async execute(_id, params, signal) {
+    name: "image_edit",
+    label: "Edit Image",
+    description: "Change an image of your workspace with a prompt (or compose several images), optionally inside a mask, with the instance's image model "
+      + "(it must take image inputs, e.g. openai/gpt-image-2). The result is kept as an asset (Media page) and saved to `path`.",
+    parameters: ImageEditSchema,
+    async execute(_id, params) {
       const filePath = resolve(cwd, params.path);
-      assertPathAllowed(filePath, sandbox, "video_generate");
-
+      assertPathAllowed(filePath, sandbox, "image_edit");
+      const service = serviceOf(ctx);
+      if (!service) return errorResult("Image edit error: the media service is not available on this server");
       try {
-        return await generateVideo(fs, filePath, params, vault, signal);
+        const read = async (p: string) => { const f = resolve(cwd, p); assertPathAllowed(f, sandbox, "image_edit"); return workspaceImage(fs, f); };
+        const sources = await Promise.all((Array.isArray(params.image) ? params.image : [params.image]).map(read));
+        const mask = params.mask ? await read(params.mask) : undefined;
+        const m = modelParam(params.model);
+        const result = await service.editImage({
+          image: sources.length === 1 ? sources[0] : sources, prompt: params.prompt, ...(mask ? { mask } : {}),
+          ...(params.size ? { size: params.size } : {}), ...(params.n ? { n: params.n } : {}), ...(m.model ? { model: m.model } : {}),
+        }, callerOf(ctx));
+        return await deliver(fs, filePath, result, m.note);
       } catch (err: any) {
-        return {
-          content: [{ type: "text", text: `Video generation error: ${err.message}` }],
-          details: { error: err.message },
-        };
+        return errorResult(`Image edit error: ${err.message}`, { message: err.message });
       }
-    },
-  };
-}
-
-async function generateVideo(
-  fs: FileSystem,
-  filePath: string,
-  params: {
-    prompt: string;
-    model?: string;
-    num_frames?: number;
-    resolution?: string;
-    num_inference_steps?: number;
-    guidance_scale?: number;
-    seed?: number;
-  },
-  vault?: ResolvedVault,
-  signal?: AbortSignal,
-): Promise<ToolResult> {
-  const apiKey = resolveFalKey(vault);
-  const model = params.model ?? "fal-ai/wan/v2.2-1.3b/text-to-video";
-
-  const input: Record<string, unknown> = {
-    prompt: params.prompt,
-  };
-
-  if (params.num_frames != null) input.num_frames = params.num_frames;
-  if (params.num_inference_steps != null) input.num_inference_steps = params.num_inference_steps;
-  if (params.guidance_scale != null) input.guidance_scale = params.guidance_scale;
-  if (params.seed != null) input.seed = params.seed;
-
-  // Parse resolution
-  if (params.resolution) {
-    const parts = params.resolution.split("x").map(Number);
-    if (parts.length === 2 && parts[0] > 0 && parts[1] > 0) {
-      input.resolution = { width: parts[0], height: parts[1] };
-    }
-  }
-
-  const result = await falQueueRequest(model, input, apiKey, VIDEO_TIMEOUT, signal);
-
-  // fal.ai video response: { video: { url, content_type, file_name, file_size } }
-  const video = result.video as { url: string; content_type?: string; file_name?: string; file_size?: number } | undefined;
-  if (!video?.url) {
-    throw new Error("No video in fal.ai response");
-  }
-
-  const videoResp = await fetch(video.url);
-  if (!videoResp.ok) throw new Error(`Failed to download generated video: ${videoResp.status}`);
-  const buffer = Buffer.from(await videoResp.arrayBuffer());
-
-  await writeBytes(fs, filePath, buffer);
-
-  const sizeMB = (buffer.byteLength / 1024 / 1024).toFixed(2);
-  const info = [
-    `Video saved: ${filePath}`,
-    `Size: ${sizeMB} MB`,
-    `Model: ${model}`,
-  ];
-
-  return {
-    content: [{ type: "text", text: info.join("\n") }],
-    details: {
-      provider: "fal",
-      model,
-      path: filePath,
-      bytes: buffer.byteLength,
     },
   };
 }
@@ -397,237 +199,62 @@ async function generateVideo(
 
 const ImageAnalyzeSchema = Type.Object({
   path: Type.String({ description: "Path to the image file to analyze" }),
-  prompt: Type.Optional(Type.String({ description: "Question or instruction for the vision model (default: 'Describe this image in detail')" })),
-  provider: Type.Optional(Type.Union([
-    Type.Literal("openai"),
-    Type.Literal("anthropic"),
-  ], { description: "Vision provider (default: openai)" })),
-  model: Type.Optional(Type.String({ description: "Model name. OpenAI: 'gpt-4.1-mini' (default). Anthropic: 'claude-sonnet-4-20250514' (default)." })),
-  max_tokens: Type.Optional(Type.Number({ description: "Max tokens in response (default: 1024)" })),
+  prompt: Type.Optional(Type.String({ description: "Question or instruction about the image (default: 'Describe this image in detail')" })),
+  provider: Type.Optional(Type.String({ description: "With model: the model's provider (e.g. openai, anthropic). Default: your own model." })),
+  model: Type.Optional(Type.String({ description: "A vision-capable model to look with ('provider:model', or a model of `provider`). Default: your own model." })),
+  max_tokens: Type.Optional(Type.Number({ description: "Deprecated: ignored (the chat's limits apply)." })),
 });
 
-function createAnalyzeTool(cwd: string, sandbox: string[], fs: FileSystem, vault?: ResolvedVault): AgentTool<typeof ImageAnalyzeSchema> {
+function createAnalyzeTool(cwd: string, sandbox: string[], fs: FileSystem, ctx: ImageToolsContext): AgentTool<typeof ImageAnalyzeSchema> {
   return {
     name: "image_analyze",
     label: "Analyze Image",
-    description: "Analyze an image using AI vision models. Can describe contents, extract text (OCR), " +
-      "answer questions about the image, identify objects, read charts, etc. " +
-      "Providers: openai (GPT-4.1-mini, default), anthropic (Claude). " +
-      "Credentials resolved from: agent vault > OPENAI_API_KEY or ANTHROPIC_API_KEY env var.",
+    description: "Look at an image of your workspace and answer about it: describe it, read its text (OCR), answer questions, read charts. "
+      + "It is a chat turn with the image attached, with your own model by default (it must see images) or a vision model you name.",
     parameters: ImageAnalyzeSchema,
-    async execute(_id, params, signal) {
+    async execute(_id, params) {
       const filePath = resolve(cwd, params.path);
       assertPathAllowed(filePath, sandbox, "image_analyze");
-
-      let fileBuffer: Buffer;
+      let image: { base64: string; mimeType: string };
       try {
-        fileBuffer = await readBytes(fs, filePath);
+        image = await workspaceImage(fs, filePath);
       } catch (err: any) {
-        return {
-          content: [{ type: "text", text: `Error reading image file: ${err.message}` }],
-          details: { error: "file_read_error" },
-        };
+        return errorResult(`Error reading image file: ${err.message}`, { message: "file_read_error" });
       }
-
-      if (fileBuffer.byteLength > MAX_IMAGE_SIZE) {
-        return {
-          content: [{ type: "text", text: `Image file too large: ${(fileBuffer.byteLength / 1024 / 1024).toFixed(1)} MB (max ${MAX_IMAGE_SIZE / 1024 / 1024} MB)` }],
-          details: { error: "file_too_large", size: fileBuffer.byteLength },
-        };
-      }
-
-      const provider = params.provider ?? "openai";
-
+      const service = serviceOf(ctx);
+      if (!service) return errorResult("Image analysis error: the media service is not available on this server");
+      const model = params.model?.trim() ? (params.model.includes(":") ? params.model.trim() : `${params.provider ?? "openai"}:${params.model.trim()}`) : undefined;
       try {
-        if (provider === "openai") {
-          return await analyzeOpenAI(filePath, fileBuffer, params, vault, signal);
-        } else {
-          return await analyzeAnthropic(filePath, fileBuffer, params, vault, signal);
-        }
-      } catch (err: any) {
+        const r = await service.analyzeImage({
+          prompt: params.prompt ?? "Describe this image in detail.", image: { data: image.base64, mimeType: image.mimeType },
+          ...(model ? { model } : {}), ...(ctx.agent && !model ? { agent: ctx.agent } : {}),
+        });
         return {
-          content: [{ type: "text", text: `Image analysis error (${provider}): ${err.message}` }],
-          details: { provider, error: err.message },
+          content: [{ type: "text", text: r.text }],
+          details: { provider: "chat", ...(r.model ? { model: r.model } : {}), path: filePath, imageSize: Buffer.from(image.base64, "base64").byteLength, ...(r.costUsd !== undefined ? { costUsd: r.costUsd } : {}) },
         };
+      } catch (err: any) {
+        return errorResult(`Image analysis error: ${err.message}`, { message: err.message });
       }
-    },
-  };
-}
-
-async function analyzeOpenAI(
-  filePath: string,
-  fileBuffer: Buffer,
-  params: { prompt?: string; model?: string; max_tokens?: number },
-  vault?: ResolvedVault,
-  signal?: AbortSignal,
-): Promise<ToolResult> {
-  const apiKey = vault?.getKey("openai", "key") ?? requireEnv("OPENAI_API_KEY");
-  const model = params.model ?? "gpt-4.1-mini";
-  const prompt = params.prompt ?? "Describe this image in detail.";
-  const maxTokens = params.max_tokens ?? 1024;
-
-  const ext = extname(filePath).toLowerCase();
-  const mime = imageMime(ext);
-  const base64 = fileBuffer.toString("base64");
-  const dataUrl = `data:${mime};base64,${base64}`;
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT);
-  if (signal) signal.addEventListener("abort", () => controller.abort(), { once: true });
-
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: maxTokens,
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: prompt },
-            { type: "image_url", image_url: { url: dataUrl, detail: "auto" } },
-          ],
-        },
-      ],
-    }),
-    signal: controller.signal,
-  });
-
-  clearTimeout(timer);
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`OpenAI Vision API ${response.status}: ${errText}`);
-  }
-
-  const data = await response.json() as {
-    choices: { message: { content: string } }[];
-    usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
-  };
-
-  const analysis = data.choices[0]?.message?.content ?? "";
-  const usage = data.usage;
-
-  return {
-    content: [{ type: "text", text: analysis }],
-    details: {
-      provider: "openai",
-      model,
-      path: filePath,
-      imageSize: fileBuffer.byteLength,
-      tokens: usage?.total_tokens,
-      promptTokens: usage?.prompt_tokens,
-      completionTokens: usage?.completion_tokens,
-    },
-  };
-}
-
-async function analyzeAnthropic(
-  filePath: string,
-  fileBuffer: Buffer,
-  params: { prompt?: string; model?: string; max_tokens?: number },
-  vault?: ResolvedVault,
-  signal?: AbortSignal,
-): Promise<ToolResult> {
-  const apiKey = vault?.getKey("anthropic", "key") ?? requireEnv("ANTHROPIC_API_KEY");
-  const model = params.model ?? "claude-sonnet-4-20250514";
-  const prompt = params.prompt ?? "Describe this image in detail.";
-  const maxTokens = params.max_tokens ?? 1024;
-
-  const ext = extname(filePath).toLowerCase();
-  const mime = imageMime(ext);
-  const base64 = fileBuffer.toString("base64");
-
-  // Anthropic only supports specific media types
-  const supportedTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
-  const mediaType = supportedTypes.includes(mime) ? mime : "image/png";
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT);
-  if (signal) signal.addEventListener("abort", () => controller.abort(), { once: true });
-
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: maxTokens,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "image",
-              source: {
-                type: "base64",
-                media_type: mediaType,
-                data: base64,
-              },
-            },
-            { type: "text", text: prompt },
-          ],
-        },
-      ],
-    }),
-    signal: controller.signal,
-  });
-
-  clearTimeout(timer);
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Anthropic Vision API ${response.status}: ${errText}`);
-  }
-
-  const data = await response.json() as {
-    content: { type: string; text?: string }[];
-    usage?: { input_tokens: number; output_tokens: number };
-  };
-
-  const analysis = data.content
-    .filter(b => b.type === "text" && b.text)
-    .map(b => b.text)
-    .join("\n");
-
-  const usage = data.usage;
-
-  return {
-    content: [{ type: "text", text: analysis }],
-    details: {
-      provider: "anthropic",
-      model,
-      path: filePath,
-      imageSize: fileBuffer.byteLength,
-      inputTokens: usage?.input_tokens,
-      outputTokens: usage?.output_tokens,
     },
   };
 }
 
 // ─── Factory ───
 
-export type ImageToolName = "image_generate" | "image_analyze" | "video_generate";
+export type ImageToolName = "image_generate" | "image_edit" | "image_analyze" | "video_generate";
 
-export const ALL_IMAGE_TOOL_NAMES: ImageToolName[] = ["image_generate", "image_analyze", "video_generate"];
+export const ALL_IMAGE_TOOL_NAMES: ImageToolName[] = ["image_generate", "image_edit", "image_analyze", "video_generate"];
 
 /**
- * Create image & video tools for generation, vision analysis, and video creation.
+ * Create the image tools (and video_generate).
  *
  * @param cwd - Working directory for resolving file paths
  * @param allowedPaths - Sandbox paths for file validation
- * @param allowedTools - Optional filter — only include tools whose names appear here.
- *   Supports wildcards expanded upstream (e.g. "image_*", "video_*").
- * @param vault - Resolved vault for credential resolution (fal-ai, openai, anthropic).
- *   Credentials are resolved as: vault > environment variable.
- * @param fs - Where images and videos are read and saved (default: this machine's disk).
+ * @param allowedTools - Optional filter — only include tools whose names appear here (wildcards expanded upstream).
+ * @param vault - The agent's vault (video_generate's fal.ai key).
+ * @param fs - Where images are read and saved (default: this machine's disk).
+ * @param ctx - The media service's .polpo directory and who the tools act for (agent, task, mission, chat).
  */
 export function createImageTools(
   cwd: string,
@@ -635,13 +262,15 @@ export function createImageTools(
   allowedTools?: string[],
   vault?: ResolvedVault,
   fs?: FileSystem,
+  ctx: ImageToolsContext = {},
 ): AgentTool<any>[] {
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
   const _fs = toolFs(fs);
 
   const factories: Record<ImageToolName, () => AgentTool<any>> = {
-    image_generate: () => createGenerateTool(cwd, sandbox, _fs, vault),
-    image_analyze: () => createAnalyzeTool(cwd, sandbox, _fs, vault),
+    image_generate: () => createGenerateTool(cwd, sandbox, _fs, ctx),
+    image_edit: () => createEditTool(cwd, sandbox, _fs, ctx),
+    image_analyze: () => createAnalyzeTool(cwd, sandbox, _fs, ctx),
     video_generate: () => createVideoGenerateTool(cwd, sandbox, _fs, vault),
   };
 
@@ -651,3 +280,4 @@ export function createImageTools(
 
   return names.map(n => factories[n]());
 }
+

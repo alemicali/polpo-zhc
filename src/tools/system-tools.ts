@@ -876,6 +876,8 @@ export interface CreateAllToolsOptions {
   shell?: Shell;
   /** The run's effective sandbox provider: anything but "local" hides secret values from vault_get. */
   sandboxProvider?: string;
+  /** Where the run comes from, for the media log's provenance (image tools): its task, mission or chat. */
+  mediaContext?: { taskId?: string; missionId?: string; sessionId?: string };
 }
 
 /**
@@ -928,9 +930,11 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
     tools.push(...createEmailTools(cwd, allowedPaths, allowedTools, options.vault, options.emailAllowedDomains, options.outputDir, toolOutputDir, options.fs));
   }
 
-  // Image & video tools — activated when any image_* or video_* tool is in allowedTools
+  // Image & video tools — activated when any image_* or video_* tool is in allowedTools (images: the media primitive)
   if (categoryRequested(ALL_IMAGE_TOOL_NAMES)) {
-    tools.push(...createImageTools(cwd, allowedPaths, allowedTools, options.vault, options.fs));
+    tools.push(...createImageTools(cwd, allowedPaths, allowedTools, options.vault, options.fs, {
+      ...(options.polpoDir ? { polpoDir: options.polpoDir } : {}), agent: options.agentName ?? browserSession, ...options.mediaContext,
+    }));
   }
 
   // Audio tools — activated when any audio_* tool is in allowedTools
