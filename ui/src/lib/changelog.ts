@@ -32,6 +32,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-26-agent-send-notification",
+    date: "2026-11-26",
+    kind: "new",
+    title: "Gli agenti possono scrivere sui canali di notifica",
+    summary: "Un agente può pubblicare un messaggio su Slack (come bot di Polpo), Telegram, email, webhook o push, ma solo sui canali e sulle destinazioni che scegli tu, con un limite di messaggi al minuto.",
+    body: [
+      "- **Lo strumento `send_notification` per gli agenti**: un agente che lavora a un task o in chat può scrivere un messaggio su un canale di notifica, per esempio spiegare un lead in `#lead-black-friday` su Slack perché una persona lo riveda.",
+      "- **Decidi tu dove**: nella scheda dell'agente, Tools & Skills → **Notifications**, attiva lo strumento e scegli i canali; per ognuno puoi indicare le destinazioni ammesse (id dei canali Slack, chat Telegram, indirizzi email) oppure lasciare solo la destinazione predefinita del canale. Una richiesta fuori dall'elenco viene rifiutata e l'agente vede cosa può usare.",
+      "- **Limite al minuto** per agente (5 di default), così un agente non può inondare un canale.",
+      "- **Con ogni motore** (Polpo, Claude Code, Codex, OpenCode, CLI) e controllato dal server, che invia sempre come l'agente del task.",
+      "- **Nello storico delle notifiche** ogni messaggio dice quale agente l'ha mandato e da quale task, missione o chat.",
+      "- Anche da API, MCP (`notifyChannels` su `polpo_agent_update`), nella chat con Polpo e nell'SDK; le modifiche seguono bozza, pubblicazione e deploy come gli altri campi dell'agente. Guida: docs/agent-notifications.md.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri gli agenti", to: "/agents" },
+  },
+  {
     id: "2026-11-26-decision-branches-not-reached",
     date: "2026-11-26",
     kind: "fixed",
