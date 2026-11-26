@@ -15,8 +15,8 @@ export type ClaudeCodeAuth = "api-key" | "bedrock" | "vertex" | "ai-gateway" | "
 export const CLAUDE_CODE_AUTH_LABELS: Record<ClaudeCodeAuth, string> = {
   "api-key": "Anthropic API key", bedrock: "Amazon Bedrock", vertex: "Google Vertex AI", "ai-gateway": "Vercel AI Gateway", gateway: "Model gateway",
 };
-export type CodexAuth = "api-key" | "ai-gateway" | "gateway";
-export const CODEX_AUTH_LABELS: Record<CodexAuth, string> = { "api-key": "OpenAI API key", "ai-gateway": "Vercel AI Gateway", gateway: "Model gateway" };
+export type CodexAuth = "api-key" | "ai-gateway" | "gateway" | "chatgpt";
+export const CODEX_AUTH_LABELS: Record<CodexAuth, string> = { "api-key": "OpenAI API key", "ai-gateway": "Vercel AI Gateway", gateway: "Model gateway", chatgpt: "ChatGPT sign-in" };
 export type OpenCodeAuth = "api-key" | "bedrock" | "ai-gateway" | "gateway";
 export const OPENCODE_AUTH_LABELS: Record<OpenCodeAuth, string> = {
   "api-key": "Provider API key", bedrock: "Amazon Bedrock (API key)", "ai-gateway": "Vercel AI Gateway", gateway: "Model gateway",
@@ -135,7 +135,31 @@ export interface HarnessItem {
   settings?: ClaudeCodeSetting | CodexSetting | OpenCodeSetting;
   /** How the model key reaches the model: Polpo's relay, in the VM (no public URL), or not brokerable (Claude Code on Bedrock / Vertex). */
   brokering?: "relay" | "in-vm" | "not-brokered";
+  /** Codex signed in with ChatGPT: whether the vault entry holds a login (never its content). */
+  chatgpt?: CodexChatgptStatus;
   agents: string[];
+}
+
+/** Codex's ChatGPT sign-in, as the dashboard sees it (never the login itself). */
+export interface CodexChatgptStatus { signedIn: boolean; lastRefresh?: string }
+/** POST /harnesses/codex/chatgpt-login: the sign-in terminal on the agent's computer. */
+export interface CodexChatgptLogin extends CodexChatgptStatus {
+  mode: "terminal";
+  agent: string;
+  computer: string;
+  terminal: { agent: "codex-chatgpt-login"; harness_agent: string };
+  command: string;
+  codexHome: string;
+  credentialRef: VaultRef;
+  note: string;
+}
+/** POST /harnesses/codex/chatgpt-login/capture. */
+export interface CodexChatgptCapture extends CodexChatgptStatus {
+  agent: string;
+  computer: string;
+  credentialRef: VaultRef;
+  result: "updated" | "unchanged" | "missing" | "invalid" | "older";
+  message: string;
 }
 
 export interface HarnessesOverview {
@@ -245,6 +269,10 @@ export const harnessesApi = {
   cliLogin: (id: string) => request<CliLogin>(`/harnesses/cli/accounts/${encodeURIComponent(id)}/login`),
   cliInstall: (cli: CliId, computer?: string) => request<{ ok: boolean; output: string; version?: string }>("/harnesses/cli/install", json("POST", { cli, ...(computer ? { computer } : {}) })),
   setCliSettings: (s: { allowInstanceCodex: boolean }) => request<unknown>("/harnesses/cli/settings", json("PATCH", s)),
+  // ── Codex signed in with ChatGPT (the login lives in the vault and the agent's computer; never shown) ──
+  codexChatgptStatus: (agent: string) => request<CodexChatgptStatus & { agent: string; computer: string; credentialRef: VaultRef }>(`/harnesses/codex/chatgpt-login?agent=${encodeURIComponent(agent)}`),
+  codexChatgptLogin: (agent: string) => request<CodexChatgptLogin>("/harnesses/codex/chatgpt-login", json("POST", { agent })),
+  codexChatgptCapture: (agent: string) => request<CodexChatgptCapture>("/harnesses/codex/chatgpt-login/capture", json("POST", { agent })),
 };
 
 /** The settings as saved, from the overview (what the form edits). */

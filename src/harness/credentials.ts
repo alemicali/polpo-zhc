@@ -8,15 +8,18 @@
  * the harness engine brokers the credential (src/harness/relay.ts, or a provider's native egress
  * transformer): the VM gets a placeholder and the base URL of Polpo's relay, never the key.
  * Bedrock and Vertex sign their requests (SigV4, Google OAuth), so they are not brokered.
+ * Codex signed in with ChatGPT (auth "chatgpt") gets no key at all: its login cache (auth.json,
+ * from the vault) is written into the agent's CODEX_HOME in the computer (codex-chatgpt.ts).
  */
 import { randomBytes } from "node:crypto";
 import {
-  CLAUDE_SUBSCRIPTION_REFUSAL, CREDENTIAL_NAMES, DEFAULT_AI_GATEWAY_BASE_URL, HARNESS_NAMES, OPENCODE_AI_GATEWAY_PROVIDER, OPENCODE_BEDROCK_PROVIDER,
+  CLAUDE_SUBSCRIPTION_REFUSAL, CODEX_AUTH_JSON_FIELD, CREDENTIAL_NAMES, DEFAULT_AI_GATEWAY_BASE_URL, HARNESS_NAMES, OPENCODE_AI_GATEWAY_PROVIDER, OPENCODE_BEDROCK_PROVIDER,
   OPENCODE_GATEWAY_PROVIDER, OPENCODE_PROVIDERS, harnessCredentialRef, openCodeModelId, pickCredential, resolveVaultRef,
   type AgentHarnessEngine, type GatewayAuthScheme, type HarnessesSettings, type HarnessGatewaySettings, type OpenCodeHarnessSettings, type OpenCodeKeyHeader,
   type OpenCodeWireFormat, type VaultRef, type VaultStore,
 } from "@polpo-ai/core";
 import type { HarnessAuth, RequestTransformation } from "./types.js";
+import { codexAuthSecrets, parseCodexAuthJson } from "./codex-chatgpt.js";
 
 export class HarnessCredentialError extends Error {
   constructor(message: string) { super(message); this.name = "HarnessCredentialError"; }
@@ -69,6 +72,11 @@ export interface ResolvedHarnessAuth extends HarnessAuth {
   openCodeConfig?: Record<string, unknown>;
   /** OpenCode, brokered: Polpo's own credential rules (placeholder → key), for the relay or the provider. */
   credentialRules?: RequestTransformation[];
+  /**
+   * Codex signed in with ChatGPT: the vault entry that keeps the login cache, and its auth.json
+   * (absent before the first sign-in). No API key, no route: Codex reads $CODEX_HOME/auth.json.
+   */
+  chatgpt?: { ref: VaultRef; authJson?: string };
 }
 
 /**
@@ -314,6 +322,20 @@ export async function resolveHarnessAuth(
   const g = h.gateway;
   const model = engine.model ?? g?.models?.main ?? h.model;
   const secrets: string[] = [];
+
+  // ── Codex signed in with ChatGPT: no key; the login cache goes into the agent's CODEX_HOME ──
+  if (engine.harness === "codex" && h.auth === "chatgpt") {
+    if (!mainRef) throw new HarnessCredentialError(`Codex (${refWhere}): no vault entry for the ChatGPT sign-in (credentialRef)`);
+    const creds = await resolveVaultRef(vault, mainRef);
+    const file = parseCodexAuthJson(creds?.[CODEX_AUTH_JSON_FIELD]);
+    return {
+      // an explicit, empty authentication environment: nothing from this server; Codex in the
+      // computer reads its own $CODEX_HOME/auth.json (no OPENAI_BASE_URL, no CODEX_API_KEY)
+      auth: {}, env: {}, secrets: codexAuthSecrets(file?.raw), files: [], provider: "openai", providerLabel: "ChatGPT",
+      ...(model ? { model } : {}),
+      chatgpt: { ref: mainRef, ...(file ? { authJson: file.raw } : {}) },
+    };
+  }
 
   // ── gateways (both harnesses) ──
   if (h.auth === "ai-gateway" || h.auth === "gateway") {

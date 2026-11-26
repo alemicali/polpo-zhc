@@ -12,8 +12,11 @@
  * - Claude Code: an Anthropic API key, Amazon Bedrock, Google Vertex AI, the Vercel AI Gateway or a
  *   custom model gateway (Cloudflare AI Gateway, OpenRouter, LiteLLM, Portkey, Kong…). A Claude
  *   subscription (Pro/Max login, OAuth token) is refused: Anthropic's terms do not allow it in a
- *   product that serves other people. Codex: an OpenAI API key, the Vercel AI Gateway or a custom
- *   gateway that speaks the OpenAI Responses API (ChatGPT login is not supported yet).
+ *   product that serves other people. Codex: an OpenAI API key, the Vercel AI Gateway, a custom
+ *   gateway that speaks the OpenAI Responses API, or a ChatGPT login (auth "chatgpt", which OpenAI
+ *   supports for Codex: `codex login --device-auth`). The ChatGPT login cache (Codex's auth.json)
+ *   lives in a vault entry (custom field `authJson`), is written into the agent's computer before a
+ *   run (CODEX_HOME per agent) and read back after it when Codex refreshed its tokens.
  * - OpenCode: any model OpenCode supports, with an explicit credential only: a provider API key
  *   (Anthropic, OpenAI, Google, xAI, Mistral, Groq, DeepSeek, OpenRouter, Moonshot, Z.ai…), an
  *   Amazon Bedrock API key (open-weight models such as Kimi, GLM, Qwen, DeepSeek on Bedrock), the
@@ -36,8 +39,11 @@ export const HARNESS_NAMES: Record<HarnessId, string> = { "claude-code": "Claude
 
 export type ClaudeCodeAuth = "api-key" | "bedrock" | "vertex" | "ai-gateway" | "gateway";
 export const CLAUDE_CODE_AUTHS: readonly ClaudeCodeAuth[] = ["api-key", "bedrock", "vertex", "ai-gateway", "gateway"];
-export type CodexAuth = "api-key" | "ai-gateway" | "gateway";
-export const CODEX_AUTHS: readonly CodexAuth[] = ["api-key", "ai-gateway", "gateway"];
+/** Codex: an OpenAI API key, the Vercel AI Gateway, a custom gateway, or a ChatGPT login (OpenAI supports it for Codex). */
+export type CodexAuth = "api-key" | "ai-gateway" | "gateway" | "chatgpt";
+export const CODEX_AUTHS: readonly CodexAuth[] = ["api-key", "ai-gateway", "gateway", "chatgpt"];
+/** The vault entry's field with Codex's ChatGPT login cache (the whole auth.json). */
+export const CODEX_AUTH_JSON_FIELD = "authJson";
 /** OpenCode: a provider API key, a Bedrock API key, the Vercel AI Gateway or a custom gateway. */
 export type OpenCodeAuth = "api-key" | "bedrock" | "ai-gateway" | "gateway";
 export const OPENCODE_AUTHS: readonly OpenCodeAuth[] = ["api-key", "bedrock", "ai-gateway", "gateway"];
@@ -138,8 +144,6 @@ export interface HarnessGatewaySettings {
 const CLAUDE_SUBSCRIPTION_AUTHS = new Set(["subscription", "pro", "max", "oauth", "claude-ai", "claude.ai", "login", "native"]);
 export const CLAUDE_SUBSCRIPTION_REFUSAL =
   "A Claude subscription (Pro/Max login or OAuth token) cannot run Claude Code for Polpo agents: Anthropic's terms do not allow a consumer subscription in a product that runs agents for other people. Use an Anthropic API key, Amazon Bedrock, Google Vertex AI or a model gateway";
-export const CODEX_CHATGPT_REFUSAL =
-  "Codex with a ChatGPT login is not supported yet: use an OpenAI API key or a model gateway";
 /** Logins OpenCode can use on a laptop, refused for Polpo agents. */
 const OPENCODE_SUBSCRIPTION_AUTHS = new Set(["subscription", "login", "oauth", "native", "direct", "chatgpt", "codex", "copilot", "github-copilot", "opencode", "opencode-zen", "opencode-go", "zen", "gitlab", "gitlab-duo", "poe", "claude.ai", "pro", "max"]);
 export const OPENCODE_SUBSCRIPTION_REFUSAL =
@@ -161,7 +165,11 @@ export interface ClaudeCodeHarnessSettings {
 
 export interface CodexHarnessSettings {
   auth: CodexAuth;
-  /** api-key: the OpenAI API key's entry. Gateways keep theirs in gateway.credentialRef. */
+  /**
+   * api-key: the OpenAI API key's entry. chatgpt: the entry that keeps Codex's ChatGPT login cache
+   * (field authJson, the whole auth.json; missing or empty until someone signs in). Gateways keep
+   * theirs in gateway.credentialRef.
+   */
   credentialRef?: VaultRef;
   gateway?: HarnessGatewaySettings;
   model?: string;
@@ -467,8 +475,9 @@ function parseCodex(raw: unknown, where: string): CodexHarnessSettings {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new HarnessConfigError(`${where} must be an object { auth, credentialRef | gateway, model? }`);
   const r = raw as Record<string, unknown>;
   refuseSecrets(r, where);
-  const auth = str(r.auth)?.toLowerCase() ?? "api-key";
-  if (auth === "chatgpt" || auth === "subscription" || auth === "login" || auth === "oauth") throw new HarnessConfigError(`${where}.auth "${auth}": ${CODEX_CHATGPT_REFUSAL}`);
+  let auth = str(r.auth)?.toLowerCase() ?? "api-key";
+  // other names people use for the ChatGPT sign-in
+  if (auth === "subscription" || auth === "login" || auth === "oauth" || auth === "chatgpt-login") auth = "chatgpt";
   if (!(CODEX_AUTHS as string[]).includes(auth)) throw new HarnessConfigError(`${where}.auth must be one of ${CODEX_AUTHS.join(", ")}`);
   const model = parseModel(r.model, `${where}.model`);
   const out: CodexHarnessSettings = { auth: auth as CodexAuth };
