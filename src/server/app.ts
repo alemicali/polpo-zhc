@@ -598,6 +598,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       }));
       // decide: typed judgments from the decision model (allowedTools "decide")
       const { createDecisionTools } = await import("../tools/decision-tools.js");
+      if (agentConfig.allowedTools?.includes("decide")) decisions(); // the service for this .polpo directory
       tools.push(...createDecisionTools(polpoDir, agentConfig.name, agentConfig.allowedTools));
       // Connectors granted to this agent (mcp__<connector>__<tool>), filtered by allowedTools. A
       // connector that cannot connect is skipped (and logged): it never breaks the chat.

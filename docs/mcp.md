@@ -24,6 +24,9 @@ Every tool has a title and honest annotations (`readOnlyHint`, `destructiveHint`
 | `polpo_agents_list` | The agents. |
 | `polpo_agent_show` | An agent's card: in Claude and ChatGPT an interactive card (see below), elsewhere text: its engine (Polpo, Claude Code, Codex) and computer, the task at hand with its latest run (engine, model, computer, cost) or why it failed, and the connectors it may use with their accounts. |
 | `polpo_approvals_list`, `polpo_approval_resolve` | Decide on requests that wait for a person. |
+| `polpo_decide` | Typed decisions with probabilities from the decision model (docs/decisions.md): predicate (P(yes)), choice, score, rank on a state (text or JSON), with thresholds → uncertain. Costs money; every call is in the decision log. Without a decision model: an error with the Settings link (or Polpo's own model, `calibrated: false`). Needs `polpo:work`. |
+| `polpo_decisions`, `polpo_decision_resolve` | The decision log (filters, one decision with its state) and missions' decision nodes (`nodes: true`); `polpo_decision_resolve` (work) picks the branch of a node waiting for a person. |
+| `polpo_decision_show` | The decision card: each answer with probability bars, confidence and uncertain, the model and the cost; without `id`, the latest decisions. |
 
 ### tasks (on by default)
 
@@ -421,6 +424,15 @@ Both are one `ui://polpo/work-card.html` resource: one HTML document that loads 
 - **Trigger:** its definition in words (auth, contract, filter, dedupe, mapping, rate limit), the recent deliveries (filter by status) with the HTTP answer, reasons and contract errors, and the newest accepted delivery's **mapped values** — what an action will receive once the action engine exists. **All triggers** goes back.
 
 One `ui://polpo/trigger-card.html` resource (`polpo:read`); the card calls `polpo_trigger_show` again to refresh or switch view.
+
+## The decision card (MCP App)
+
+`polpo_decision_show` renders decisions (docs/decisions.md); call it with the `id` `polpo_decide` returned to show the answers.
+
+- **Decision:** each answer's headline (yes / no, the option, the score and level, the ranking) with a **probability bar** per outcome (the chosen one marked; a rank's bars are relative to the best), its confidence and threshold and an **Uncertain** chip; the model, cost, latency and caller, and **Uncalibrated** when Polpo's own model answered.
+- **Decisions:** the latest ones (optionally only uncertain), each opening its card.
+
+One `ui://polpo/decision-card.html` resource (`polpo:read`); the card calls `polpo_decision_show` again to refresh or switch view.
 
 ## The agent suite card (MCP App)
 
