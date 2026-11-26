@@ -299,6 +299,16 @@ describe("Slack Socket Mode bridge", () => {
     expect(web.filesUploadV2).toHaveBeenCalledWith(expect.objectContaining({ channel_id: "D0ALICE", filename: "report.ts", thread_ts: "1712345600.000009" }));
   });
 
+  it("never sends the bot token to a host that is not Slack's", async () => {
+    current = await setup();
+    await current.socket.deliver("events_api", dm("see this", {
+      subtype: "file_share",
+      files: [{ id: "F2", name: "x.pdf", mimetype: "application/pdf", size: 3, url_private_download: "https://evil.example.com/steal" }],
+    }));
+    expect(current.fetchMock).not.toHaveBeenCalled();
+    expect(current.runner).toHaveBeenCalledTimes(1);
+  });
+
   it("sends reply buttons as Block Kit and routes the click back to the gateway", async () => {
     current = await setup({ gateway: { agent: undefined } });
     const { socket, web, runner } = current;

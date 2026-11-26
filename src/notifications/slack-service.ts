@@ -133,6 +133,16 @@ interface SlackMessageEvent {
   files?: Array<{ id?: string; name?: string; title?: string; mimetype?: string; subtype?: string; size?: number; url_private_download?: string; url_private?: string }>;
 }
 
+/** Slack's private file URLs (https on files.slack.com or a workspace's *.slack.com files host). */
+export function isSlackFileUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" && (u.hostname === "files.slack.com" || u.hostname.endsWith(".slack.com"));
+  } catch {
+    return false;
+  }
+}
+
 function quietLogger(log: Log): SlackLogger {
   const out = (level: "info" | "warn", msg: unknown[]) => log(level, redactSlackTokens(msg.map((m) => (m instanceof Error ? m.message : typeof m === "string" ? m : "")).join(" ")).slice(0, 300));
   return {
@@ -378,6 +388,8 @@ export class SlackBridge {
     for (const file of files) {
       const url = file.url_private_download ?? file.url_private;
       if (!url || (file.size ?? 0) > MAX_FILE_BYTES) continue;
+      // the bot token only ever goes to Slack's own file host
+      if (!isSlackFileUrl(url)) continue;
       try {
         const res = await f(url, { headers: { Authorization: `Bearer ${this.o.tokens.botToken}` } });
         if (!res.ok) continue;
