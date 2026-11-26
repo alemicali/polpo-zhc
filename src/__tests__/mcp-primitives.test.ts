@@ -526,7 +526,7 @@ describe("skills", () => {
     const un = await call(deps(f), "polpo_skill_assign", { name: "weekly-report", agents: ["writer"], action: "unassign" });
     expect(un.structuredContent.assigned_to).toEqual(["coach"]);
     expect(await call(deps(f), "polpo_skill_assign", { name: "weekly-report", agents: ["ghost"] })).toMatchObject({ isError: true });
-  });
+  }, 30_000); // many sequential MCP calls on a full instance: slow CI runners exceed the 5 s default
 
   it("deletes a skill only with confirm (a global one in the global pool)", async () => {
     const f = fakeInstance();

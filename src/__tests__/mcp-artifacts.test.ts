@@ -123,5 +123,5 @@ describe("MCP: large artifacts without sending them whole", () => {
     expect(outline.content[0]!.text).toMatch(/0\. "Revenue" 8 cells \(A1:B4\)\n {2}1\. "Notes" 1 cells/);
     const badOp = await call(deps, "polpo_artifact_update", { id: sheetId, ops: [{ op: "delete_sheet", sheet: "Nope" }] });
     expect(badOp.content[0]!.text).toMatch(/No sheet "Nope"/);
-  });
+  }, 30_000); // many sequential MCP calls on a full instance: slow CI runners exceed the 5 s default
 });
