@@ -179,12 +179,17 @@ function ToolDetails({ tool }: { tool: ToolCallInfo }) {
 
   const args = tool.arguments && Object.keys(tool.arguments).length > 0 ? tool.arguments : undefined;
   const argsText = args ? JSON.stringify(args, null, 2) : undefined;
-  const command = tool.name === "bash" && typeof args?.command === "string" ? args.command : undefined;
+  // bash (Polpo), Bash (Claude Code), shell (Codex: the command may be a list)
+  const lower = tool.name.toLowerCase();
+  const rawCommand = lower === "bash" || lower === "shell" ? args?.command : undefined;
+  const command = typeof rawCommand === "string" ? rawCommand : Array.isArray(rawCommand) ? rawCommand.map(String).join(" ") : undefined;
   const result = tool.result;
   const isError = tool.state === "error";
-  const mono = !!result && (MONO_RESULT_TOOLS.has(tool.name) || looksLikeJson(result) || isError);
+  const mono = !!result && (MONO_RESULT_TOOLS.has(lower) || looksLikeJson(result) || isError);
+  // an edit with its diff: the change instead of the raw input
+  const diff = tool.diff;
 
-  const hasAnything = !!tool.progress || !!args || !!tool.argumentsText || !!result;
+  const hasAnything = !!tool.progress || !!args || !!tool.argumentsText || !!result || !!diff;
   if (!hasAnything) {
     return (
       <p className="text-caption text-muted-foreground/70">
@@ -204,6 +209,10 @@ function ToolDetails({ tool }: { tool: ToolCallInfo }) {
       {command !== undefined ? (
         <Section title="Command" copyText={command}>
           <pre className={cn(MONO, "text-muted-foreground")}>$ {command}</pre>
+        </Section>
+      ) : diff ? (
+        <Section title="Changes" copyText={diff}>
+          <div data-testid="tool-call-diff"><DiffText text={diff} /></div>
         </Section>
       ) : args && argsText ? (
         <Section title="Input" copyText={argsText}>

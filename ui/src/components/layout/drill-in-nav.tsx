@@ -24,7 +24,7 @@ import {
   type ReactNode,
 } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { ChevronLeft, ChevronRight, History, Loader2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, History, ListTree, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -43,6 +43,10 @@ import {
 } from "@/lib/nav-tree";
 import { PendingBadge } from "./pending-badge";
 import { BetaBadge } from "@/components/shared/beta-badge";
+
+const CodingNav = lazy(() =>
+  import("@/pages/coding/coding-nav").then((m) => ({ default: m.CodingNav })),
+);
 
 const ChatHistoryPanel = lazy(() =>
   import("@/pages/chat").then((m) => ({ default: m.ChatHistoryPanel })),
@@ -377,7 +381,7 @@ function Level({ path, tree, live, collapsed, variant, headingId, pathname, sear
         </div>
       )}
       {group?.panel && (
-        <PanelSlot panel={group.panel} live={live} collapsed={collapsed} sheet={sheet} onExpand={onExpand} onOpenChat={onOpenChat} />
+        <PanelSlot panel={group.panel} live={live} collapsed={collapsed} sheet={sheet} onExpand={onExpand} onOpenChat={onOpenChat} onNavigate={onNavigate} />
       )}
     </div>
   );
@@ -505,15 +509,44 @@ function Entry({ node, collapsed, sheet, active, onOpen, onNavigate }: {
   );
 }
 
-function PanelSlot({ panel, live, collapsed, sheet, onExpand, onOpenChat }: {
+function PanelSlot({ panel, live, collapsed, sheet, onExpand, onOpenChat, onNavigate }: {
   panel: NavPanel;
   live: boolean;
   collapsed: boolean;
   sheet: boolean;
   onExpand?: () => void;
+  onNavigate?: () => void;
   onOpenChat: () => void;
 }) {
-  if (panel !== "chat-history" || !live) return <div className="min-h-0 flex-1" />;
+  if (!live) return <div className="min-h-0 flex-1" />;
+  if (panel === "coding") {
+    if (collapsed) {
+      return (
+        <Tooltip delayDuration={0}>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              data-nav-item
+              aria-label="Show projects and sessions"
+              onClick={() => onExpand?.()}
+              className="flex h-10 w-10 items-center justify-center rounded-lg text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+            >
+              <ListTree className="h-4 w-4" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right" className="text-xs font-medium">Show projects and sessions</TooltipContent>
+        </Tooltip>
+      );
+    }
+    return (
+      <div role="region" aria-label="Projects and sessions" className={cn("flex min-h-0 flex-col", !sheet && "flex-1 -mx-3 -mb-3")}>
+        <Suspense fallback={<div className="flex flex-1 items-center justify-center py-6"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>}>
+          <CodingNav surface={sheet ? "page" : "sidebar"} onNavigate={onNavigate} />
+        </Suspense>
+      </div>
+    );
+  }
+  if (panel !== "chat-history") return <div className="min-h-0 flex-1" />;
   if (collapsed) {
     return (
       <Tooltip delayDuration={0}>

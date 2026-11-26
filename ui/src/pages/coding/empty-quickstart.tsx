@@ -34,7 +34,7 @@ export function EmptyWorkspaceQuickStart({ branch, projectName, cwd, onStart }: 
             How do you want to start?
           </h1>
           <p className="mt-1 max-w-md text-center text-small leading-relaxed text-muted-foreground">
-            A fresh git worktree is ready. Pick the agent — you can open more sessions in this
+            A fresh git worktree is ready. Start Claude Code or Codex as a chat (they edit and run commands here; risky actions ask you first), or a plain terminal — you can open more sessions in this
             workspace at any time.
           </p>
           <div className="mt-3 flex items-center gap-1.5 rounded-pill border border-border bg-muted/30 px-2.5 py-1 font-mono text-caption text-muted-foreground">
@@ -49,7 +49,7 @@ export function EmptyWorkspaceQuickStart({ branch, projectName, cwd, onStart }: 
           <AgentCard
             kind="claude"
             label="Claude"
-            description="Anthropic Claude Code"
+            description="Claude Code as a chat, on your own account"
             tint="bg-chart-2/[0.06] hover:bg-chart-2/[0.10] border-chart-2/15 hover:border-chart-2/35"
             icon={<img src="/claude-favicon.svg" alt="Claude" className="h-5 w-5" />}
             onStart={onStart}
@@ -57,7 +57,7 @@ export function EmptyWorkspaceQuickStart({ branch, projectName, cwd, onStart }: 
           <AgentCard
             kind="codex"
             label="Codex"
-            description="OpenAI Codex"
+            description="Codex as a chat, on your own account"
             tint="bg-chart-3/[0.05] hover:bg-chart-3/[0.10] border-chart-3/15 hover:border-chart-3/35"
             icon={<Icon icon="logos:openai-icon" className="h-5 w-5 dark:invert" />}
             onStart={onStart}
