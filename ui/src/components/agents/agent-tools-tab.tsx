@@ -1,5 +1,5 @@
 /**
- * AgentToolsTab — tools, skills, connectors, paths.
+ * AgentToolsTab — tools, skills, connectors, notification channels, paths.
  * Reads data from AgentDetailContext.
  */
 
@@ -22,6 +22,7 @@ import { SectionHeader } from "@/components/shared/section-header";
 import { useAgentDetail } from "./agent-detail-context";
 import { getToolMeta, getSkillMeta, toolCategories } from "@/lib/agent-meta";
 import { AgentConnectorsSection } from "@/components/connectors/agent-connectors-section";
+import { AgentNotificationsSection } from "./agent-notifications-section";
 
 
 export function AgentToolsTab() {
@@ -175,6 +176,9 @@ export function AgentToolsTab() {
           connectorTools={agent.connectorTools}
           onConnectorToolsSaved={refetch}
         />
+
+        {/* Notification channels it may post to (send_notification) */}
+        <AgentNotificationsSection />
 
         {/* Allowed Paths */}
         {agent.allowedPaths && agent.allowedPaths.length > 0 && (
