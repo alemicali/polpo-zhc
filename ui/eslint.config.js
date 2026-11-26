@@ -35,6 +35,8 @@ export default defineConfig([
             'usePromptInputAttachments',
             'usePromptInputReferencedSources',
             'LocalReferencedSourcesContext',
+            // mission-detail: the graph layout, exported for its tests
+            'buildGraphLayout',
           ],
         },
       ],
