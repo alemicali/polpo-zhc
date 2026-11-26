@@ -6,6 +6,8 @@ export { POLPO_EVENT_NAMES } from "./client/event-names.js";
 export type { PolpoEventName } from "./client/event-names.js";
 export type { ConnectionStatus, EventSourceConfig } from "./client/event-source.js";
 export { PolpoApiError } from "./client/errors.js";
+export { taskSkip, taskSkipText, taskSkipLabel, isTaskNotReached, countTaskOutcomes } from "./client/task-skip.js";
+export type { TaskSkip } from "./client/task-skip.js";
 
 // ── Store ─────────────────────────────────────────────────────
 export { PolpoStore } from "./store/polpo-store.js";

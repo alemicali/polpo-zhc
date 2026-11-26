@@ -34,6 +34,10 @@
       "types": "./dist/hook-events.d.ts",
       "import": "./dist/hook-events.js"
     },
+    "./task-skip": {
+      "types": "./dist/task-skip.d.ts",
+      "import": "./dist/task-skip.js"
+    },
     "./appearance": {
       "types": "./dist/appearance.d.ts",
       "import": "./dist/appearance.js"

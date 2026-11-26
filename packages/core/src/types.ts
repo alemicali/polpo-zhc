@@ -223,6 +223,11 @@ export interface TaskResult {
   assessment?: AssessmentResult;
   /** All previous assessments (oldest first). Current assessment is always in `assessment`. */
   assessmentHistory?: AssessmentResult[];
+  /**
+   * Set when a mission decision node took another branch: the task was closed (done) without
+   * running. Read it with `taskSkip()` (task-skip.ts), which also understands older skipped tasks.
+   */
+  skipped?: import("./task-skip.js").TaskSkip;
 }
 
 // === Agent Identity & Vault ===
@@ -799,11 +804,15 @@ export interface MissionReport {
     filesCreated: string[];
     filesEdited: string[];
     outcomes?: TaskOutcome[];      // outcomes produced by this task
+    /** A decision node took another branch: done without running (Task.result.skipped). */
+    notReached?: boolean;
   }[];
   filesCreated: string[];          // aggregated across all tasks
   filesEdited: string[];           // aggregated across all tasks
   outcomes?: TaskOutcome[];        // aggregated outcomes across all tasks
   avgScore?: number;               // average assessment score
+  /** Tasks a decision node left out (done without running), when any. */
+  notReached?: number;
 }
 
 // === Runner Config ===

@@ -24,7 +24,8 @@ export interface PolpoEventMap {
   // Task lifecycle
   "task:created": { task: Task };
   /** `reason` is set when the status was forced (recovery, races, manual set). */
-  "task:transition": { taskId: string; from: TaskStatus; to: TaskStatus; task: Task; reason?: string } & EventOrigin;
+  /** skipped: a decision node closed it without running (Task.result.skipped). */
+  "task:transition": { taskId: string; from: TaskStatus; to: TaskStatus; task: Task; reason?: string; skipped?: boolean } & EventOrigin;
   /** Any change of a task's fields; `fields` names them (status changes are task:transition). */
   "task:updated": { taskId: string; task: Task; fields?: string[] } & EventOrigin;
   "task:removed": { taskId: string; title?: string; group?: string; missionId?: string } & EventOrigin;

@@ -131,6 +131,8 @@ export interface Task {
   runs?: TaskRunContext[];
   /** Why it failed, in a line (GET /tasks/:id and slim lists; failed tasks only). */
   failure?: TaskFailure;
+  /** A mission decision node took another branch: closed (done) without running (GET /tasks and /tasks/:id). */
+  notReached?: import("./task-skip.js").TaskSkip;
   /** Optional narrowing of the run's tools; absent: everything the agent has. */
   toolScope?: TaskToolScope;
   /** The member (email) who started it, when known: a CLI engine on a personal sign-in runs only its owner's tasks. */
@@ -330,6 +332,8 @@ export interface TaskSlim {
   cost?: TaskCostSummary;
   /** Why it failed, in a line (failed tasks only). */
   failure?: TaskFailure;
+  /** A mission decision node took another branch: closed (done) without running. */
+  notReached?: import("./task-skip.js").TaskSkip;
   /** Its runs get only part of the agent's tools. */
   toolScope?: TaskToolScope;
 }
@@ -347,6 +351,11 @@ export interface TaskResult {
   assessment?: AssessmentResult;
   /** All previous assessments (oldest first). Current assessment is always in `assessment`. */
   assessmentHistory?: AssessmentResult[];
+  /**
+   * Set when a mission decision node took another branch: the task was closed (done) without
+   * running ("not reached"). Read it with `taskSkip()`, which also understands older skipped tasks.
+   */
+  skipped?: import("./task-skip.js").TaskSkip;
 }
 
 // === Agent ===
@@ -795,11 +804,15 @@ export interface MissionReport {
     filesCreated: string[];
     filesEdited: string[];
     outcomes?: TaskOutcome[];
+    /** A decision node took another branch: done without running. */
+    notReached?: boolean;
   }[];
   filesCreated: string[];
   filesEdited: string[];
   outcomes?: TaskOutcome[];
   avgScore?: number;
+  /** Tasks a decision node left out (done without running), when any. */
+  notReached?: number;
 }
 
 // === Notifications ===

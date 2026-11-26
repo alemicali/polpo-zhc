@@ -119,8 +119,11 @@ function wireConsoleEvents(orchestrator: Orchestrator): void {
     }
   });
 
-  orchestrator.on("task:transition", ({ taskId, to, task }) => {
-    if (to === "done") {
+  orchestrator.on("task:transition", ({ taskId, to, task, skipped }) => {
+    if (to === "done" && skipped) {
+      const ts = new Date().toLocaleTimeString();
+      console.log(chalk.dim(`[${ts}]`) + ` ${chalk.dim(`[${taskId}] NOT REACHED — ${task.title} (${task.result?.stdout ?? "skipped by a decision"})`)}`);
+    } else if (to === "done") {
       const ts = new Date().toLocaleTimeString();
       console.log(chalk.dim(`[${ts}]`) + ` ${chalk.green(`[${taskId}] DONE — ${task.title}`)}`);
     }
