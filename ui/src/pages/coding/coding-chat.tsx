@@ -8,7 +8,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { AlertTriangle, Check, KeyRound, Loader2, MessagesSquare, ShieldAlert, X } from "lucide-react";
+import { AlertTriangle, Check, History, KeyRound, Loader2, MessagesSquare, ShieldAlert, X } from "lucide-react";
 import { toast } from "sonner";
 import { useCodingChat, type CodingChatApproval, type CodingChatMessage } from "@polpo-ai/react";
 import { Message } from "@/components/ai-elements/message";
@@ -209,6 +209,14 @@ export function CodingChatPane({ chatId, createError, kind, active, onFilesChang
             <p className="max-w-sm text-caption">It edits files and runs commands here on its own; installs, network access, git push and anything outside the worktree ask you first.</p>
           </div>
         ) : null}
+        {session?.continuedFrom && (
+          <div className="mx-auto mt-3 max-w-3xl px-4" data-testid="coding-chat-continued" data-status={session.continuedFrom.status}>
+            <p className="flex items-start gap-2 rounded-control border border-border/70 bg-muted/30 px-3 py-2 text-caption text-muted-foreground">
+              <History className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>{session.continuedFrom.note}</span>
+            </p>
+          </div>
+        )}
         {session?.messages.map((m) => m.role === "user"
           ? <UserTurn key={m.id} message={m} />
           : <AssistantTurn key={m.id} message={m} program={program} approvals={approvals} busy={busy} onDecide={(id, d) => void decide(id, d)} />)}

@@ -182,6 +182,26 @@ describe("coding chats over MCP", () => {
     expect(stop.isError).toBeFalsy();
   });
 
+  test("open a terminal session as a chat: REST fromTerminal / resumeSessionId and MCP from_terminal / resume_session_id resume it", async () => {
+    const rest = await api("/coding/chats", { body: { kind: "claude", cwd: worktree, fromTerminal: { id: "terminal_1", label: "Session 1" }, resumeSessionId: "rest-term-uuid", prompt: "hello" } });
+    const r = (await json(rest)).data;
+    expect(r.continuedFrom).toMatchObject({ terminalId: "terminal_1", status: "pending" });
+    await until(async () => (await session(r.id)).status === "idle");
+    expect((await session(r.id)).continuedFrom.status).toBe("resumed");
+    expect(fakes.launched.at(-1)!.args).toEqual(expect.arrayContaining(["--resume", "rest-term-uuid"]));
+
+    const started = await call("polpo_coding_chat_start", {
+      kind: "claude", cwd: worktree, prompt: "hello", wait: true, timeout_seconds: 10,
+      from_terminal: { id: "terminal_2", label: "Session 2" }, resume_session_id: "mcp-term-uuid",
+    });
+    expect(started.isError).toBeFalsy();
+    expect(fakes.launched.at(-1)!.args).toEqual(expect.arrayContaining(["--resume", "mcp-term-uuid"]));
+    expect(fakes.launched.at(-1)!.cwd).toBe(worktree);
+    const id = started.structuredContent.session.id as string;
+    const read = await call("polpo_coding_chat_get", { id });
+    expect(read.content[0]!.text).toContain("Continued from terminal session “Session 2”");
+  });
+
   test("a missing account is said, with where to sign in", async () => {
     const r = await call("polpo_coding_chat_start", { kind: "codex", cwd: worktree, prompt: "hi" });
     expect(r.content[0]!.text).toMatch(/cannot run: .*Settings → Harnesses → CLI accounts/);

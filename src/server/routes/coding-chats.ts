@@ -55,6 +55,10 @@ const baseShape = {
   workspaceId: z.string().optional(), branch: z.string().optional(), owner: z.string().optional().openapi({ description: "The member whose CLI account runs it" }),
   account: z.string().optional(), runtimeSessionId: z.string().optional().openapi({ description: "The program's conversation (Claude session, Codex thread), resumed every turn" }),
   model: z.string().optional(), status: z.enum(["idle", "running", "awaiting-approval", "error"]), lastError: z.string().optional(), errorKind: errorKind.optional(),
+  continuedFrom: z.object({
+    terminalId: z.string(), label: z.string().optional(), resumeSessionId: z.string().optional(),
+    status: z.enum(["pending", "resumed", "new"]), note: z.string(),
+  }).optional().openapi({ description: "Opened from a terminal session (Open as chat): what it continues, and whether the conversation was resumed" }),
   usage: usageSchema, costUsd: z.number().openapi({ description: "The CLI's own estimate (the plan pays)" }), turns: z.number(), createdAt: z.string(), updatedAt: z.string(),
 };
 const summarySchema = z.object({ ...baseShape, messageCount: z.number(), pendingApprovals: z.number(), preview: z.string().optional() }).openapi("CodingChatSummary");
@@ -65,6 +69,10 @@ const createSchema = z.object({
   title: z.string().max(120).optional(), workspaceId: z.string().max(200).optional(), branch: z.string().max(300).optional(),
   account: z.string().max(40).optional().openapi({ description: "A CLI account id (default: yours for that CLI on this server)" }),
   model: z.string().max(200).optional(), prompt: z.string().max(100_000).optional().openapi({ description: "The first message: the turn starts at once" }),
+  fromTerminal: z.object({ id: z.string().min(1).max(200), label: z.string().max(200).optional() }).optional()
+    .openapi({ description: "Open as chat: the Coding app's terminal session this chat continues (it stays open)" }),
+  resumeSessionId: z.string().max(200).optional()
+    .openapi({ description: "The program's conversation to resume (Claude Code: the terminal's --session-id). When your CLI account cannot read it, a new conversation starts and continuedFrom says so" }),
 }).openapi("CodingChatCreate");
 const accountSchema = z.object({
   kind: kindEnum,
@@ -117,7 +125,7 @@ export function codingChatRoutes(deps: CodingChatRouteDeps): OpenAPIHono {
   app.openapi(createRoute({
     method: "post", path: "/", tags: TAG, summary: "Start a coding chat",
     description: "A new Claude Code or Codex session in a worktree (the program's working directory), on your own CLI account. With prompt the first turn starts at once. "
-      + "Without an account to run it the session is created with status error and errorKind no-account (lastError says how to sign in).",
+      + "With fromTerminal (and resumeSessionId) it continues a terminal session of the Coding app (Open as chat). Without an account to run it the session is created with status error and errorKind no-account (lastError says how to sign in).",
     request: body(createSchema),
     responses: { 201: json(okOf(sessionSchema), "Created"), 400: json(errorSchema, "Invalid request (kind, cwd outside the allowed roots…)") },
   }), (c) => guard(c, () => c.json({ ok: true as const, data: need().create(c.req.valid("json"), actor(c)) }, 201)));

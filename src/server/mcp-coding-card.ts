@@ -23,6 +23,8 @@ export interface CodingCardApproval { id: string; summary: string; reason: strin
 export interface CodingCardSession {
   id: string; title: string; kind: "claude" | "codex"; status: string; cwd: string; branch?: string; model?: string; owner?: string;
   turns: number; totalTokens: number; costUsd: number; lastError?: string; errorKind?: string;
+  /** Opened from a terminal session: what it continues. */
+  note?: string;
 }
 export interface CodingCard {
   kind: "coding-chat";
@@ -43,6 +45,7 @@ type SegmentShape = { type: "text"; text: string } | { type: "reasoning"; text: 
 export interface CodingSessionShape {
   id: string; title: string; kind: "claude" | "codex"; status: string; cwd: string; branch?: string; model?: string; owner?: string;
   turns: number; usage: { totalTokens: number }; costUsd: number; lastError?: string; errorKind?: string;
+  continuedFrom?: { note: string; status: string };
   messages: Array<{ id: string; role: "user" | "assistant"; ts: string; text?: string; kind?: string; segments?: SegmentShape[]; streaming?: boolean; error?: string }>;
   approvals: Array<{ id: string; summary: string; reason: string; category: string; state: string }>;
 }
@@ -84,6 +87,7 @@ export function buildCodingCard(o: { session: CodingSessionShape; key: CodingCar
       id: s.id, title: s.title, kind: s.kind, status: s.status, cwd: s.cwd, turns: s.turns, totalTokens: s.usage?.totalTokens ?? 0, costUsd: s.costUsd ?? 0,
       ...(s.branch ? { branch: s.branch } : {}), ...(s.model ? { model: s.model } : {}), ...(s.owner ? { owner: s.owner } : {}),
       ...(s.lastError ? { lastError: s.lastError } : {}), ...(s.errorKind ? { errorKind: s.errorKind } : {}),
+      ...(s.continuedFrom?.note ? { note: s.continuedFrom.note } : {}),
     },
     messages: recent.map((m) => {
       const segs = m.segments ?? [];
@@ -109,6 +113,7 @@ export function codingCardText(card: CodingCard): string {
   const s = card.session;
   const head = `${s.title} (${s.kind === "claude" ? "Claude Code" : "Codex"}${s.model ? `, ${s.model}` : ""}) · ${s.status} · ${s.branch ? `${s.branch} · ` : ""}${s.cwd} · ${s.turns} turn(s), ${s.totalTokens} tokens · id ${s.id}`;
   const lines = [head];
+  if (s.note) lines.push(s.note);
   if (s.lastError) lines.push(`Last error: ${s.lastError}`);
   if (card.earlier) lines.push(`(${card.earlier} earlier message(s) not shown)`);
   for (const m of card.messages) {

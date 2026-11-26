@@ -170,6 +170,39 @@ describe("the Coding page", () => {
     expect(within(sheet).getAllByTestId("coding-session-row").map((r) => r.textContent)).toEqual(["Old claude", "Chat"]);
   });
 
+  test("Open as chat: an older Claude Code terminal continues as a chat resuming its conversation; the terminal stays, marked", async () => {
+    const calls = stubFetch();
+    resetCodingStoreForTests({
+      workspaces: [workspace],
+      terminals: [{ id: "t-old", workspaceId: "w1", label: "Old claude", revision: 0, agentKind: "claude", agentSessionId: "uuid-1", cwdOverride: "/work/polpo-wt/rome", branch: "rome" }],
+      activeId: "t-old",
+    });
+    render(<MemoryRouter initialEntries={["/coding"]}><CodingPage /></MemoryRouter>);
+    const bar = await screen.findByTestId("coding-terminal-header");
+    expect(bar.textContent).toContain("Claude Code in a terminal");
+    await act(async () => { fireEvent.click(within(bar).getByRole("button", { name: /Open as chat/ })); });
+    await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/v1/coding/chats")).toBe(true));
+    expect(calls.find((c) => c.path === "/api/v1/coding/chats")!.body).toMatchObject({
+      kind: "claude", cwd: "/work/polpo-wt/rome", branch: "rome", workspaceId: "w1",
+      fromTerminal: { id: "t-old", label: "Old claude" }, resumeSessionId: "uuid-1",
+    });
+    // the view moved to the chat; the terminal is still there, now pointing at its chat
+    await screen.findByTestId("coding-chat");
+    expect(screen.queryByTestId("coding-terminal-header")).toBeNull();
+    expect(terminals.some((t) => t.sessionId === "t-old")).toBe(true);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Projects and sessions" })); });
+    const rows = within(await screen.findByTestId("coding-sessions-sheet")).getAllByTestId("coding-session-row").map((r) => r.textContent);
+    expect(rows).toEqual(["Old claude", "Old claude (chat)"]);
+  });
+
+  test("a chat continued from a terminal says so first", () => {
+    chat.session = session({ status: "idle", approvals: [], continuedFrom: { terminalId: "t-old", label: "Old claude", resumeSessionId: "uuid-1", status: "resumed", note: "Continued from terminal session “Old claude”: the first message resumes Claude Code's conversation uuid-1." } });
+    renderPane();
+    const note = screen.getByTestId("coding-chat-continued");
+    expect(note.dataset.status).toBe("resumed");
+    expect(note.textContent).toContain("Continued from terminal session “Old claude”");
+  });
+
   test("a new Claude Code session from the quick start is a chat created on the server in the worktree", async () => {
     const calls = stubFetch();
     resetCodingStoreForTests({
