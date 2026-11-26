@@ -7,7 +7,7 @@
  * with its name first.
  */
 import { useState } from "react";
-import { AlertTriangle, Activity, ArrowRightLeft, BookOpen, CheckCircle2, CircleDashed, Info, KeyRound, Loader2, Radio, Settings2, ShieldCheck, Trash2 } from "lucide-react";
+import { AlertTriangle, Activity, ArrowRightLeft, BookOpen, CheckCircle2, CircleDashed, Contact, Info, KeyRound, Loader2, PlugZap, Radio, Settings2, ShieldCheck, Trash2 } from "lucide-react";
 import type { NotificationChannelConfig, NotificationChannelType } from "@polpo-ai/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,8 @@ import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { ChannelLogo } from "@/components/shared/channel-logo";
-import { WaBusinessLive } from "@/components/config/whatsapp-business-section";
+import { WaBusinessContacts, WaBusinessLive } from "@/components/config/whatsapp-business-section";
+import { SlackConnection } from "./slack-connection";
 import { cn } from "@/lib/utils";
 import {
   CHANNEL_NAME_RE, CHANNEL_STATE_LABEL, channelEntry, channelState, channelSupportsInbound, defaultChannelConfig, nextChannelName,
@@ -102,7 +103,8 @@ function SheetBody({ target, channels, live, onOpenChange, onSave, onCreated, on
   const state = saved && savedName ? channelState(saved, live(savedName)) : null;
   const gateway = saved?.gateway;
   const otherChannels = Object.entries(channels).filter(([n]) => n !== savedName).map(([n, c]) => ({ name: n, type: c.type }));
-  const inbound = channelSupportsInbound(draft.type);
+  // a webhook's inbound part stays only where it is already on (new webhooks are outbound only)
+  const inbound = channelSupportsInbound(draft.type, saved);
 
   const save = async () => {
     const trimmed = name.trim();
@@ -206,6 +208,18 @@ function SheetBody({ target, channels, live, onOpenChange, onSave, onCreated, on
           </SheetSection>
         )}
 
+        {draft.type === "whatsapp-business" && saved && savedName && (
+          <SheetSection title="Contacts" icon={Contact} description="People who wrote to the number: the 24-hour window, opt-in and opt-out. Record what they told you, or erase a contact with its messages (GDPR)." testId="section-contacts">
+            <WaBusinessContacts channel={savedName} />
+          </SheetSection>
+        )}
+
+        {draft.type === "slack" && saved && savedName && (
+          <SheetSection title="Slack app" icon={PlugZap} description="The Socket Mode connection (no public URL needed) and the app's tokens, stored in the vault." testId="section-slack">
+            <SlackConnection channel={savedName} />
+          </SheetSection>
+        )}
+
         {draft.type === "push" && (
           <SheetSection title="This browser" icon={Radio} testId="section-push">
             <PushBrowserControls hasPushChannel={!!saved} />
@@ -216,7 +230,7 @@ function SheetBody({ target, channels, live, onOpenChange, onSave, onCreated, on
         {inbound && (
           <SheetSection title="Routing" icon={ArrowRightLeft} testId="section-routing">
             <InboundGatewayForm config={draft} onChange={setDraft} channelName={savedName} otherChannels={otherChannels} />
-            {saved && gateway?.enableInbound && (saved.type === "telegram" || saved.type === "whatsapp") && <ChannelAccess type={saved.type} />}
+            {saved && gateway?.enableInbound && (saved.type === "telegram" || saved.type === "whatsapp" || saved.type === "slack") && <ChannelAccess type={saved.type} />}
           </SheetSection>
         )}
       </div>

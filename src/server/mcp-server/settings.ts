@@ -24,7 +24,7 @@ export const GATE_HOOKS = [
   "task:create", "task:spawn", "task:transition", "task:complete", "task:fail", "task:retry", "mission:execute", "mission:complete",
   "assessment:run", "assessment:complete", "quality:gate", "quality:sla", "schedule:trigger", "orchestrator:tick", "orchestrator:shutdown",
 ] as const;
-export const CHANNEL_TYPES = ["slack", "email", "telegram", "whatsapp", "whatsapp-business", "webhook", "push"] as const;
+export const CHANNEL_TYPES = ["slack", "email", "telegram", "whatsapp", "whatsapp-business", "webhook", "push", "expo-push"] as const;
 
 /** A channel's secret fields: never accepted or returned here (capability URLs included). */
 const CHANNEL_SECRET_FIELDS = ["botToken", "apiKey", "webhookUrl", "url", "headers", "inboundSecret", "vapidPrivateKey"];
@@ -733,15 +733,16 @@ function registerChannelConfigTools(tool: Register, deps: McpDeps): void {
 
   tool("settings", "polpo_channel_save", {
     title: "Save a notification channel",
-    description: "Create or change a notification channel's setup (Telegram, Slack, email, WhatsApp, WhatsApp Business (Meta Cloud API), webhook, push): its fields "
-      + "(chat id, recipients, sender, SMTP host and port, WhatsApp profile, push options), the inbound gateway (who may write, which agent "
+    description: "Create or change a notification channel's setup (Telegram, Slack, email, WhatsApp, WhatsApp Business (Meta Cloud API), webhook, push, "
+      + "expo-push (the mobile app: no fields, devices register themselves)): its fields (chat id, recipients, sender, SMTP host and port, WhatsApp profile, "
+      + "push options, Slack's channel id and channel-message mode), the inbound gateway (who may write, which agent "
       + "answers, sessions). Only the fields given change. Secrets (bot token, API key, webhook URL, secret headers) never pass through "
       + "MCP — what is typed into an MCP client stays in its conversation history: the result lists the ones still missing with setup_url, "
       + "the dashboard link that opens this channel, and the steps for the person. Saved secrets are kept and never returned. Needs the admin scope.",
     inputSchema: {
       name: z.string().min(1).max(80).regex(/^[A-Za-z0-9_.-]+$/, "letters, digits, '.', '_' and '-'").describe("The channel's name (an existing one to change it)"),
       type: z.enum(CHANNEL_TYPES).optional().describe("Needed for a new channel"),
-      chat_id: z.string().min(1).optional().describe("Telegram / WhatsApp: the chat"),
+      chat_id: z.string().min(1).optional().describe("Telegram / WhatsApp: the chat; Slack: the channel id (C…) notifications are posted to with the bot token"),
       to: z.array(z.string().email()).optional().describe("Email: recipients"),
       from: z.string().min(1).optional().describe("Email: sender"),
       provider: z.enum(["resend", "smtp"]).optional().describe("Email: how it is sent"),
@@ -756,6 +757,9 @@ function registerChannelConfigTools(tool: Register, deps: McpDeps): void {
       waba_id: z.string().regex(/^\d{5,30}$/).optional().describe("WhatsApp Business: the WhatsApp Business Account id"),
       graph_api_version: z.string().regex(/^v\d{1,3}\.\d{1,2}$/).optional().describe("WhatsApp Business: Graph API version (default v23.0)"),
       business: businessInput.optional().describe("WhatsApp Business: audience, operators, window and template rules, caps, retention (replaces the current ones)"),
+      slack: z.object({
+        channelMessages: z.enum(["mentions", "all"]).optional().describe("In Slack channels: answer mentions, its threads and /polpo (default), or every message of an enabled channel"),
+      }).strict().optional().describe("Slack inbound (Socket Mode; its two tokens are entered in the dashboard)"),
       gateway: gatewayInput.nullable().optional().describe("Inbound messages: replaces the gateway settings; null turns them off"),
     },
     outputSchema: { channel: looseObject, created: z.boolean(), needs_secrets: z.array(z.string()), setup_url: z.string() },
@@ -768,7 +772,7 @@ function registerChannelConfigTools(tool: Register, deps: McpDeps): void {
     const fields: Record<string, unknown> = {
       type: a.type, chatId: a.chat_id, to: a.to, from: a.from, provider: a.provider, host: a.host, port: a.port, profileDir: a.profile_dir,
       vapidSubject: a.vapid_subject, vapidPublicKey: a.vapid_public_key, ttl: a.ttl, urgency: a.urgency,
-      phoneNumberId: a.phone_number_id, wabaId: a.waba_id, graphApiVersion: a.graph_api_version, business: a.business,
+      phoneNumberId: a.phone_number_id, wabaId: a.waba_id, graphApiVersion: a.graph_api_version, business: a.business, slack: a.slack,
     };
     // the stored channel as GET /config gives it (secrets masked: the server restores them)
     const next: Record<string, unknown> = { ...(current ?? {}) };
@@ -796,6 +800,20 @@ function registerChannelConfigTools(tool: Register, deps: McpDeps): void {
         : { setup_url: dashboardLink(deps, `/config?section=channels&channel=${enc(a.name)}`) };
       return ok(`${current ? "Updated" : "Created"} WhatsApp Business channel ${a.name}.`
         + `${absent.length ? ` It still needs ${absent.join(", ")} (secrets never pass through MCP). ${(handoff as { next_step: string }).next_step}` : " Check it with polpo_wabiz_status { test: true }."}`,
+      { channel: channelView(a.name, saved), created: !current, needs_secrets: absent, ...handoff });
+    }
+    if (saved.type === "slack") {
+      // the app's tokens live in the vault ($channels); inbound needs both, notifications a webhook URL or the bot token
+      const st = await apiGet(deps, `/slack/${enc(a.name)}/status`);
+      const secrets = (st.ok ? (st.data as { secrets?: Record<string, boolean> }).secrets : undefined) ?? { botToken: false, appToken: false };
+      const inbound = (saved.gateway as { enableInbound?: boolean } | undefined)?.enableInbound === true;
+      const absent = (inbound ? ["botToken", "appToken"] : saved.webhookUrl || saved.apiKey ? [] : ["botToken"]).filter((k) => !secrets[k]);
+      const what: Record<string, string> = { botToken: "bot token (xoxb-…)", appToken: "app-level token (xapp-…, connections:write)" };
+      const handoff = absent.length
+        ? setupHandoffs(deps, absent.map((k) => ({ target: { kind: "slack" as const, item: a.name, field: k }, what: what[k] ?? k })))
+        : { setup_url: dashboardLink(deps, `/config?section=channels&channel=${enc(a.name)}`) };
+      return ok(`${current ? "Updated" : "Created"} Slack channel ${a.name}.`
+        + `${absent.length ? ` It still needs the ${absent.map((k) => what[k]).join(" and ")} (secrets never pass through MCP; the person can paste a webhook URL instead for notifications only). ${(handoff as { next_step: string }).next_step}` : " Check it with polpo_slack_status { test: true }."}`,
       { channel: channelView(a.name, saved), created: !current, needs_secrets: absent, ...handoff });
     }
     const missing = (CHANNEL_REQUIRED_SECRETS[String(saved.type)] ?? []).filter((oneOf) => !oneOf.some((k) => saved[k]));

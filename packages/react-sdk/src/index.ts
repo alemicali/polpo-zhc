@@ -17,14 +17,14 @@ export { useMission } from "./hooks/use-mission.js";
 export { useMissionCost } from "./hooks/use-mission-cost.js";
 export type { UseMissionCostReturn } from "./hooks/use-mission-cost.js";
 export { useConnectors, connectorLabel } from "./hooks/use-connectors.js";
-export { useWaBusinessStatus, useWaTemplates, useWaConversation } from "./hooks/use-whatsapp-business.js";
+export { useWaBusinessStatus, useWaTemplates, useWaConversation, useWaContacts } from "./hooks/use-whatsapp-business.js";
+export { useSlackStatus, usePeers } from "./hooks/use-channels.js";
+export type { UseSlackStatusReturn, UsePeersReturn } from "./hooks/use-channels.js";
 export { useTriggers, useTriggerDeliveries, useTriggerDelivery } from "./hooks/use-triggers.js";
 export type { UseTriggersReturn, UseTriggerDeliveriesReturn, UseTriggerDeliveryReturn } from "./hooks/use-triggers.js";
 export { useDecide, useDecisions, useDecisionNodes } from "./hooks/use-decisions.js";
 export type { UseDecideReturn, UseDecisionsReturn } from "./hooks/use-decisions.js";
-export { useCodingChats, useCodingChat } from "./hooks/use-coding-chats.js";
-export type { UseCodingChatsReturn, UseCodingChatReturn } from "./hooks/use-coding-chats.js";
-export type { UseWaBusinessStatusReturn, UseWaTemplatesReturn, UseWaConversationReturn } from "./hooks/use-whatsapp-business.js";
+export type { UseWaBusinessStatusReturn, UseWaTemplatesReturn, UseWaConversationReturn, UseWaContactsReturn } from "./hooks/use-whatsapp-business.js";
 export type { UseConnectorsReturn } from "./hooks/use-connectors.js";
 export { useAgents } from "./hooks/use-agents.js";
 export type { UseAgentsReturn } from "./hooks/use-agents.js";
@@ -322,6 +322,11 @@ export type {
   WaBusinessEvent,
   WaBusinessEventPage,
   WaBusinessContact,
+  SlackStatus,
+  SlackSecretKind,
+  SlackConnectionState,
+  ChannelPeer,
+  PeerPresence,
   WaBusinessMessage,
   WaBusinessConversation,
   WaBusinessTemplate,

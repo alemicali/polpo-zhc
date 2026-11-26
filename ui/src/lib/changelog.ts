@@ -32,6 +32,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-26-slack-channels",
+    date: "2026-11-26",
+    kind: "new",
+    title: "Slack: parla con Polpo e con gli agenti",
+    summary: "Collega un'app Slack in Socket Mode, senza URL pubblici: messaggi diretti, menzioni nei canali e thread diventano conversazioni con Polpo o con un agente, con file, pulsanti e /polpo.",
+    body: [
+      "- **Slack in entrata, senza esporre l'istanza**: l'app si collega in **Socket Mode** (una connessione in uscita verso Slack), quindi funziona anche su un'istanza raggiungibile solo dalla tailnet. Incolli il **bot token** e l'**app-level token** nella scheda del canale: finiscono nel vault, non si vedono più e non passano mai da MCP né dai log.",
+      "- **Come Telegram**: messaggi diretti (con abbinamento, lista di chi può scrivere o accesso aperto), **menzioni** nei canali dove inviti l'app e, se vuoi, **tutti i messaggi** di un canale abilitato; ogni **thread** è una conversazione a sé e le risposte arrivano nel thread. File in entrata e in uscita, **pulsanti** (per esempio per scegliere l'agente) e il comando **/polpo** (`/polpo agent backend`, `/polpo new`…). Un'app può essere dedicata a un solo agente.",
+      "- **Invii ovunque**: Polpo, MCP e l'API possono mandare un messaggio su **qualsiasi canale**: Slack (a un canale e in un thread), WhatsApp Business (dentro la finestra delle 24 ore, mai a chi ha revocato il consenso), webhook, push del browser e app mobile.",
+      "- **Più controllo sui canali**: nella scheda di WhatsApp Business l'elenco dei **contatti** con consenso, revoca e **cancellazione** (GDPR); per Telegram e Slack **risposte nei gruppi** (menzioni o intento, con la soglia) e **chi può usare i comandi**; chi è attivo adesso e il **collegamento delle identità** della stessa persona su canali diversi (la conversazione continua da un canale all'altro).",
+      "- **Catalogo più chiaro**: **Discord** ed **Email in entrata** compaiono come «Coming soon»; i nuovi webhook servono solo per le notifiche in uscita (quelli già attivi in entrata continuano a funzionare). Arriva anche l'**app mobile** come canale di notifica.",
+      "- Tutto anche da MCP (stato di Slack, chi può scrivere campo per campo, presenza e collegamenti, storico e conteggi delle notifiche, consenso e cancellazione dei contatti) e nella chat con Polpo. Guida: docs/slack.md.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i canali", to: "/config?section=channels" },
+  },
+  {
     id: "2026-11-26-trigger-actions",
     date: "2026-11-26",
     kind: "new",

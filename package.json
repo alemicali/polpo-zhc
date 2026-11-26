@@ -96,6 +96,8 @@
     "@polpo-ai/core": "workspace:^0.3.12",
     "@polpo-ai/server": "workspace:*",
     "@polpo-ai/vault-crypto": "workspace:*",
+    "@slack/socket-mode": "^3.2.0",
+    "@slack/web-api": "^8.5.0",
     "@types/ws": "^8.18.1",
     "ai": "7.0.179",
     "chalk": "^5.4.1",

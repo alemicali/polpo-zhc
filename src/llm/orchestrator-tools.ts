@@ -1545,13 +1545,15 @@ const removeNotificationRuleTool: Tool = {
 
 const sendNotificationTool: Tool = {
   name: "send_notification",
-  description: "Send a direct notification to a channel, bypassing rules. Optionally delayed.",
+  description: "Send a direct notification to a channel (any type: Telegram, Slack, email, WhatsApp Business operators, webhook, push, expo-push), bypassing rules. Optionally delayed. On Slack, `to` picks the Slack channel (C0123…) and thread_ts the thread.",
   parameters: Type.Object({
     channel: Type.String({ description: "Channel ID to send to" }),
     title: Type.String({ description: "Notification title" }),
     body: Type.String({ description: "Notification body" }),
     severity: Type.Optional(Type.String({ description: "info, warning, or critical" })),
     delayMs: Type.Optional(Type.Number({ description: "Delay before sending (ms)" })),
+    to: Type.Optional(Type.String({ description: "Slack: the Slack channel id to post to (default: the channel's own)" })),
+    thread_ts: Type.Optional(Type.String({ description: "Slack: post in this thread (the parent message's ts, e.g. 1712345678.123456)" })),
   }),
 };
 
@@ -4813,6 +4815,10 @@ function execSendNotification(polpo: Orchestrator, args: Record<string, unknown>
     body: args.body as string,
     severity: args.severity as "info" | "warning" | "critical" | undefined,
     delayMs: args.delayMs as number | undefined,
+    ...(args.to || args.thread_ts ? { target: {
+      ...(typeof args.to === "string" && args.to ? { chatId: args.to } : {}),
+      ...(typeof args.thread_ts === "string" && args.thread_ts ? { threadTs: args.thread_ts } : {}),
+    } } : {}),
   }).catch((err) => {
     // Error is emitted as notification:failed event
   });

@@ -16,7 +16,7 @@ import {
   type McpDeps, type Register,
 } from "./kit.js";
 
-export const SETUP_KINDS = ["channel", "provider", "custom-provider", "sandbox", "sync", "vault", "connector", "data", "computer-webhook", "wabiz", "mcp-server", "trigger"] as const;
+export const SETUP_KINDS = ["channel", "provider", "custom-provider", "sandbox", "sync", "vault", "connector", "data", "computer-webhook", "wabiz", "mcp-server", "trigger", "slack"] as const;
 export type SetupKind = (typeof SETUP_KINDS)[number];
 
 /** What is awaited: a channel's field, a provider's key, a vault entry… */
@@ -59,6 +59,8 @@ export function setupPath(t: SetupTarget): string {
     case "data": return `/data?${q({ tab: "sources", source: t.item, focus: t.field ?? "password" })}`;
     case "computer-webhook": return `/config?${q({ section: "computers", provider: t.item, focus: t.field ?? "secret" })}`;
     case "wabiz": return `/config?${q({ section: "channels", channel: t.item, focus: t.field ?? "accessToken" })}`;
+    // a Slack app's token (vault $channels): the channel's sheet, the token's input focused
+    case "slack": return `/config?${q({ section: "channels", channel: t.item, focus: t.field ?? "botToken" })}`;
     // a hosted server's secret: its sheet, Settings tab, the secret's input focused
     case "mcp-server": return `/connectors?${q({ tab: "servers", server: t.item, focus: t.field ? `secret:${t.field}` : undefined })}`;
     // a trigger's HMAC signing secret: the trigger's sheet, the Auth section
@@ -155,6 +157,13 @@ export async function setupDone(deps: McpDeps, t: SetupTarget): Promise<boolean 
     case "wabiz": {
       // a WhatsApp Business channel's secret (vault $channels): whether it is set
       const r = await apiGet(deps, `/whatsapp-business/${enc(t.item ?? "")}/status`);
+      if (!r.ok) return r.status === 404 ? false : null;
+      const secrets = (r.data as { secrets?: Record<string, boolean> }).secrets ?? {};
+      return t.field ? !!secrets[t.field] : Object.values(secrets).every(Boolean);
+    }
+    case "slack": {
+      // a Slack channel's token (vault $channels): whether it is set
+      const r = await apiGet(deps, `/slack/${enc(t.item ?? "")}/status`);
       if (!r.ok) return r.status === 404 ? false : null;
       const secrets = (r.data as { secrets?: Record<string, boolean> }).secrets ?? {};
       return t.field ? !!secrets[t.field] : Object.values(secrets).every(Boolean);

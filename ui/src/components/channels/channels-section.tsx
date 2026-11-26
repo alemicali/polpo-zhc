@@ -12,8 +12,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { ArrowRightLeft, Loader2, Plus, Search, Send, Settings2, X } from "lucide-react";
-import { useWaBusinessStatus, type NotificationChannelConfig, type NotificationChannelType } from "@polpo-ai/react";
+import { ArrowRightLeft, Inbox, Loader2, MessagesSquare, Plus, Search, Send, Settings2, X } from "lucide-react";
+import { useSlackStatus, useWaBusinessStatus, type NotificationChannelConfig, type NotificationChannelType } from "@polpo-ai/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,8 +25,8 @@ import { productName, useInstanceBranding } from "@/lib/branding";
 import { cn } from "@/lib/utils";
 import { notifySetupSaved, readSetupParams } from "@/lib/setup-link";
 import {
-  CHANNEL_CATALOG, channelEntry, channelState, channelSummary, channelSupportsInbound, filterChannelCatalog, filterChannels, timeAgo,
-  type ChannelCatalogEntry, type ChannelLive,
+  CHANNEL_CATALOG, COMING_SOON_CHANNELS, channelEntry, channelState, channelSummary, channelSupportsInbound, filterChannelCatalog, filterChannels, timeAgo,
+  type ChannelCatalogEntry, type ChannelLive, type ComingSoonChannel,
 } from "./channel-catalog";
 import { channelApi } from "./channel-api";
 import { ChannelDetailSheet, ChannelStateBadge, type ChannelSheetTarget, type ChannelTestResult } from "./channel-detail-sheet";
@@ -56,7 +56,7 @@ function ChannelRow({ name, ch, live, onManage }: { name: string; ch: Notificati
         </span>
         <span className="mt-1 flex flex-wrap items-center gap-1.5">
           <ChannelStateBadge state={state} className="text-micro sm:hidden" />
-          {channelSupportsInbound(ch.type) && (
+          {channelSupportsInbound(ch.type, ch) && (
             <Badge variant="outline" className="text-micro font-normal text-muted-foreground">Inbound {gateway?.enableInbound ? "on" : "off"}</Badge>
           )}
           {gateway?.enableInbound && gateway.agent && (
@@ -93,6 +93,31 @@ function CatalogCard({ entry, configured, onAdd }: { entry: ChannelCatalogEntry;
         <Button size="sm" variant={configured > 0 ? "outline" : "default"} className="ml-auto h-7 px-3 text-xs" onClick={onAdd} aria-label={`Add ${entry.label}`}>
           {configured > 0 ? "Add another" : "Add"}
         </Button>
+      </div>
+    </div>
+  );
+}
+
+const COMING_SOON_ICON: Record<string, typeof Inbox> = { discord: MessagesSquare, "email-inbound": Inbox };
+
+/** A channel on its way: same card, not selectable. */
+function ComingSoonCard({ entry }: { entry: ComingSoonChannel }) {
+  const Icon = COMING_SOON_ICON[entry.id] ?? MessagesSquare;
+  return (
+    <div data-testid={`channel-coming-${entry.id}`} aria-disabled="true" className="flex flex-col gap-3 rounded-card border border-dashed bg-card p-4 opacity-70">
+      <div className="flex items-start gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control border bg-background">
+          <Icon className="h-5 w-5 text-muted-foreground" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-medium leading-tight">{entry.label}</p>
+          <p className="truncate text-xs text-muted-foreground">Notifications and chat</p>
+        </div>
+      </div>
+      <p className="line-clamp-2 min-h-[2.5rem] text-sm text-muted-foreground">{entry.description}</p>
+      <div className="mt-auto flex flex-wrap items-center gap-1.5">
+        <Badge variant="outline" className="text-micro font-normal text-muted-foreground">{entry.kind}</Badge>
+        <Badge variant="outline" className="ml-auto text-micro font-normal text-muted-foreground">Coming soon</Badge>
       </div>
     </div>
   );
@@ -152,17 +177,21 @@ export function ChannelsSection({ channels, onUpdateConfig }: {
   const [testing, setTesting] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, ChannelTestResult | null>>({});
   const { channels: waBiz } = useWaBusinessStatus();
+  const hasSlack = entries.some(([, c]) => c.type === "slack");
+  const { channels: slack } = useSlackStatus(undefined, hasSlack ? 15_000 : 0);
   const waProfiles = useWhatsAppProfiles(entries.some(([, c]) => c.type === "whatsapp"));
   const live = useCallback((name: string): ChannelLive => {
     const ch = channels[name];
     const result = testResults[name];
     const biz = ch?.type === "whatsapp-business" ? waBiz.find((s) => s.channel === name) : undefined;
+    const sl = ch?.type === "slack" ? slack.find((s) => s.channel === name) : undefined;
     return {
       ...(result ? { testOk: result.success, testError: result.error } : {}),
       ...(biz ? { waBizState: biz.state, lastEventAt: biz.lastEventAt, lastError: biz.lastError } : {}),
+      ...(sl ? { slackState: sl.state, slackBotToken: sl.secrets.botToken, lastEventAt: sl.lastEventAt, lastError: sl.lastError } : {}),
       ...(ch?.type === "whatsapp" && waProfiles ? { waLinked: !!waProfiles[ch.profileDir || "default"] } : {}),
     };
-  }, [channels, testResults, waBiz, waProfiles]);
+  }, [channels, testResults, waBiz, slack, waProfiles]);
 
   const save = async (name: string, config: NotificationChannelConfig) => {
     await onUpdateConfig({ path: `/${encodeURIComponent(name)}`, method: "PUT", body: config });
@@ -197,6 +226,7 @@ export function ChannelsSection({ channels, onUpdateConfig }: {
 
   const visible = useMemo(() => filterChannels(entries, query), [entries, query]);
   const catalog = useMemo(() => filterChannelCatalog(CHANNEL_CATALOG, query), [query]);
+  const comingSoon = useMemo(() => filterChannelCatalog(COMING_SOON_CHANNELS, query), [query]);
   const countByType = (type: string) => entries.filter(([, c]) => c.type === type).length;
   const addNew = (type: NotificationChannelType) => { setTab((t) => t ?? activeTab); open({ type }); };
 
@@ -205,7 +235,7 @@ export function ChannelsSection({ channels, onUpdateConfig }: {
       <div className="flex flex-wrap items-start gap-3">
         <p className="min-w-0 flex-1 text-caption leading-relaxed text-muted-foreground">
           Where {product} reaches people and where people reach it: notifications go out through every channel; Telegram, WhatsApp,
-          WhatsApp Business and webhooks can also take messages in and route them to an agent.
+          WhatsApp Business and Slack can also take messages in and route them to an agent.
         </p>
         <Button size="sm" onClick={() => setTab("add")}>
           <Plus className="h-4 w-4" /> Add channel
@@ -234,7 +264,7 @@ export function ChannelsSection({ channels, onUpdateConfig }: {
               <Send className="h-8 w-8 text-muted-foreground" />
               <div>
                 <p className="font-medium">No channels yet</p>
-                <p className="text-sm text-muted-foreground">Add Telegram, WhatsApp, Slack, email, a webhook or browser push.</p>
+                <p className="text-sm text-muted-foreground">Add Telegram, WhatsApp, Slack, email, a webhook, browser push or the mobile app.</p>
               </div>
               <Button onClick={() => setTab("add")}>Browse channels</Button>
             </div>
@@ -248,13 +278,14 @@ export function ChannelsSection({ channels, onUpdateConfig }: {
         </TabsContent>
 
         <TabsContent value="add">
-          {catalog.length === 0 ? (
+          {catalog.length === 0 && comingSoon.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">No channel type matches “{query}”.</p>
           ) : (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {catalog.map((entry) => (
                 <CatalogCard key={entry.type} entry={entry} configured={countByType(entry.type)} onAdd={() => addNew(entry.type)} />
               ))}
+              {comingSoon.map((entry) => <ComingSoonCard key={entry.id} entry={entry} />)}
             </div>
           )}
         </TabsContent>

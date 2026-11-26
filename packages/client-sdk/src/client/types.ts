@@ -803,7 +803,7 @@ export interface MissionReport {
 // === Notifications ===
 
 export type NotificationSeverity = "info" | "warning" | "critical";
-export type NotificationChannelType = "slack" | "email" | "telegram" | "whatsapp" | "whatsapp-business" | "webhook" | "push";
+export type NotificationChannelType = "slack" | "email" | "telegram" | "whatsapp" | "whatsapp-business" | "webhook" | "push" | "expo-push";
 export type NotificationStatus = "sent" | "failed";
 
 export type DmPolicy = "pairing" | "allowlist" | "open" | "disabled";
@@ -880,6 +880,8 @@ export interface NotificationChannelConfig {
   appSecretRef?: { owner: string; service: string };
   verifyTokenRef?: { owner: string; service: string };
   business?: WaBusinessSettings;
+  /** Slack inbound (Socket Mode): the tokens are in the vault, set with setSlackSecrets. */
+  slack?: { channelMessages?: "mentions" | "all" };
   gateway?: ChannelGatewayConfig;
 }
 
@@ -932,6 +934,56 @@ export interface SendNotificationRequest {
   body: string;
   severity?: NotificationSeverity;
   delayMs?: number;
+  /** Channels that can target a chat (Slack): the chat, e.g. a Slack channel id C0123. Default: the channel's own. */
+  to?: string;
+  /** Slack: post in this thread (the parent message's ts). */
+  threadTs?: string;
+  /** Fail (400) when the channel refuses the message, instead of only recording the failure. */
+  throwOnError?: boolean;
+}
+
+// === Slack (Socket Mode) ===
+
+export type SlackSecretKind = "botToken" | "appToken";
+export type SlackConnectionState = "not-configured" | "stopped" | "connecting" | "connected" | "reconnecting" | "error";
+
+/** A Slack channel's inbound connection (never a token's value). */
+export interface SlackStatus {
+  channel: string;
+  inbound: boolean;
+  /** Which tokens are in the vault. */
+  secrets: Record<SlackSecretKind, boolean>;
+  state: SlackConnectionState;
+  team?: string;
+  botUserId?: string;
+  botName?: string;
+  connectedAt?: string;
+  lastEventAt?: string;
+  lastError?: string;
+  /** Messages handled since the connection started. */
+  received: number;
+}
+
+// === Peers (people on the channels) ===
+
+export interface ChannelPeer {
+  /** "channel:externalId", e.g. slack:U0123. */
+  id: string;
+  channel: string;
+  externalId: string;
+  displayName?: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  /** Shares sessions with this identity. */
+  linkedTo?: string;
+}
+
+export interface PeerPresence {
+  peerId: string;
+  displayName?: string;
+  channel: string;
+  lastActivityAt: string;
+  activity: "idle" | "chatting" | "approving";
 }
 
 export interface SendNotificationResult {

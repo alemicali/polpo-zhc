@@ -26,14 +26,32 @@ export const CHANNEL_CATALOG: ChannelCatalogEntry[] = [
     description: "Link this server as a WhatsApp device with a QR code: notifications and chats from a trusted number." },
   { type: "whatsapp-business", label: "WhatsApp Business", kind: "Official", inbound: true, keywords: ["meta", "cloud api", "customers", "templates"],
     description: "Your business number on Meta's Cloud API: customers write to an agent, templates for messages you start." },
-  { type: "slack", label: "Slack", kind: "Webhook", inbound: false, keywords: ["incoming webhook"],
-    description: "Post notifications to a Slack channel through an incoming webhook." },
+  { type: "slack", label: "Slack", kind: "Socket Mode · Webhook", inbound: true, keywords: ["incoming webhook", "socket mode", "bot", "workspace"],
+    description: "A Slack app: people talk to Polpo or an agent in DMs, mentions and threads; notifications to a channel." },
   { type: "email", label: "Email", kind: "Resend · SendGrid · SMTP", inbound: false, keywords: ["mail", "smtp", "resend", "sendgrid"],
     description: "Send notifications by email through Resend, SendGrid or your SMTP server." },
-  { type: "webhook", label: "Webhook", kind: "HTTP", inbound: true, keywords: ["http", "shortcuts", "api", "curl"],
-    description: "HTTP in and out: talk to Polpo from Shortcuts or scripts, POST notifications to any endpoint." },
+  { type: "webhook", label: "Webhook", kind: "HTTP", inbound: false, keywords: ["http", "api", "curl", "post"],
+    description: "POST every notification as JSON to any endpoint." },
   { type: "push", label: "Push", kind: "Browser (PWA)", inbound: false, keywords: ["pwa", "browser", "notification"],
     description: "Push notifications to the browsers that subscribe to this instance." },
+  { type: "expo-push", label: "Mobile app", kind: "Expo push", inbound: false, keywords: ["expo", "ios", "android", "phone", "app"],
+    description: "Push notifications to the phones where the Polpo mobile app is signed in." },
+];
+
+/** A channel that is on its way: shown in the catalog, not selectable. */
+export interface ComingSoonChannel {
+  id: string;
+  label: string;
+  description: string;
+  kind: string;
+  keywords?: string[];
+}
+
+export const COMING_SOON_CHANNELS: ComingSoonChannel[] = [
+  { id: "discord", label: "Discord", kind: "Bot", keywords: ["server", "guild", "gaming", "community"],
+    description: "A Discord bot: people talk to Polpo or an agent in DMs and server channels." },
+  { id: "email-inbound", label: "Email (inbound)", kind: "Inbox", keywords: ["mail", "imap", "reply", "inbox"],
+    description: "Write to Polpo by email: each thread a conversation, replies by email." },
 ];
 
 const BY_TYPE = new Map(CHANNEL_CATALOG.map((e) => [e.type as string, e]));
@@ -50,8 +68,18 @@ export function channelLabel(type: string): string {
   return channelEntry(type).label;
 }
 
-export function channelSupportsInbound(type: string): boolean {
-  return type === "telegram" || type === "whatsapp" || type === "whatsapp-business" || type === "webhook";
+/**
+ * Can people write to Polpo through this channel? A webhook only when its inbound is already on
+ * (new webhooks are outbound only; existing inbound ones keep working and stay editable).
+ */
+export function channelSupportsInbound(type: string, config?: Pick<NotificationChannelConfig, "gateway">): boolean {
+  if (type === "webhook") return config?.gateway?.enableInbound === true;
+  return type === "telegram" || type === "whatsapp" || type === "whatsapp-business" || type === "slack";
+}
+
+/** Channels with groups (Telegram groups, Slack channels): group replies, intent, commands. */
+export function channelHasGroups(type: string): boolean {
+  return type === "telegram" || type === "slack";
 }
 
 /** Default empty config per channel type. */
@@ -59,9 +87,9 @@ export function defaultChannelConfig(type: NotificationChannelType): Notificatio
   switch (type) {
     case "telegram": return { type, botToken: "", chatId: "", gateway: { enableInbound: false, dmPolicy: "pairing" } };
     case "whatsapp": return { type, chatId: "", profileDir: "default", gateway: { enableInbound: false, dmPolicy: "pairing" } };
-    case "slack":    return { type, webhookUrl: "" };
+    case "slack":    return { type, gateway: { enableInbound: false, dmPolicy: "pairing" } };
     case "email":    return { type, provider: "resend", apiKey: "", from: "", to: [] };
-    case "webhook":  return { type, gateway: { enableInbound: false, dmPolicy: "open" } };
+    case "webhook":  return { type };
     case "whatsapp-business": return { type, business: { audience: "customers" }, gateway: { enableInbound: false, dmPolicy: "open" } };
     case "push":     return { type, vapidSubject: "mailto:hello@polpo.ai", ttl: 3600, urgency: "normal" };
     default:         return { type };
@@ -101,13 +129,16 @@ export interface ChannelLive {
   lastError?: string;
   /** WhatsApp (QR): the profile is linked. */
   waLinked?: boolean;
+  /** Slack: the Socket Mode connection's state (inbound), and whether the bot token is set. */
+  slackState?: "not-configured" | "stopped" | "connecting" | "connected" | "reconnecting" | "error";
+  slackBotToken?: boolean;
 }
 
 /** What a channel still needs before it can deliver, or null when nothing. */
 export function channelMissing(ch: NotificationChannelConfig): string | null {
   switch (ch.type) {
     case "telegram": return ch.botToken ? null : "the bot token";
-    case "slack": return ch.webhookUrl ? null : "the webhook URL";
+    case "slack": return ch.webhookUrl || ch.apiKey || ch.gateway?.enableInbound || ch.chatId ? null : "a webhook URL or the app's tokens";
     case "email": return ch.apiKey || ch.host ? null : "credentials";
     case "whatsapp-business": return ch.phoneNumberId && ch.wabaId ? null : "the number's ids";
     case "webhook": return ch.url || ch.gateway?.enableInbound ? null : "a URL or inbound";
@@ -125,6 +156,11 @@ export function channelState(ch: NotificationChannelConfig, live: ChannelLive = 
     return "configured";
   }
   if (ch.type === "whatsapp" && live.waLinked === false) return "needs_setup";
+  if (ch.type === "slack" && live.slackState) {
+    if (live.slackState === "error") return "error";
+    if (live.slackState === "not-configured" && (ch.gateway?.enableInbound || !ch.webhookUrl)) return "needs_setup";
+    if (live.slackState === "connected" && ch.gateway?.enableInbound) return "receiving";
+  }
   if (!BY_TYPE.has(ch.type)) return "configured";
   return "connected";
 }
@@ -136,18 +172,21 @@ export function channelSummary(ch: NotificationChannelConfig, orchestrator: stri
   if (missing) return `Needs ${missing}`;
   if (ch.type === "whatsapp" && live.waLinked === false) return `Profile ${ch.profileDir || "default"} is not linked: scan the QR code`;
   if (ch.type === "whatsapp-business" && live.waBizState === "not-configured") return "Add the access token, app secret and verify token";
+  if (ch.type === "slack" && live.slackState === "error" && live.lastError) return live.lastError;
+  if (ch.type === "slack" && live.slackState === "not-configured" && (ch.gateway?.enableInbound || !ch.webhookUrl)) return "Add the Slack app's bot token and app-level token";
   const parts: string[] = [];
   const gateway = ch.gateway;
   const customers = ch.type === "whatsapp-business" && (ch.business?.audience ?? "customers") === "customers";
   if (gateway?.enableInbound) parts.push(customers ? `Customers → ${gateway.agent ?? "no agent"}` : `Talks to ${gateway.agent ?? orchestrator}`);
-  else if (channelSupportsInbound(ch.type)) parts.push("Notifications only");
+  else if (channelSupportsInbound(ch.type, ch)) parts.push("Notifications only");
   switch (ch.type) {
     case "telegram": case "whatsapp": if (ch.chatId) parts.push(`chat ${ch.chatId}`); break;
     case "email": if (ch.to?.length) parts.push(`${ch.to.length} recipient${ch.to.length === 1 ? "" : "s"}`); break;
     case "whatsapp-business": if (ch.phoneNumberId) parts.push(`number ${ch.phoneNumberId}`); break;
     case "webhook": parts.push(ch.url ? "posts notifications" : "inbound only"); break;
     case "push": parts.push(`urgency ${ch.urgency ?? "normal"}`); break;
-    case "slack": parts.push(ch.apiKey ? "file uploads on" : "webhook"); break;
+    case "slack": parts.push(ch.gateway?.enableInbound ? "Socket Mode" : ch.webhookUrl ? (ch.apiKey ? "webhook, file uploads on" : "webhook") : "bot token"); break;
+    case "expo-push": parts.push("mobile app devices"); break;
   }
   return parts.join(" · ") || channelEntry(ch.type).description;
 }
@@ -156,10 +195,10 @@ export function channelSummary(ch: NotificationChannelConfig, orchestrator: stri
 
 const norm = (s: string) => s.toLowerCase().trim();
 
-export function filterChannelCatalog(entries: ChannelCatalogEntry[], query: string): ChannelCatalogEntry[] {
+export function filterChannelCatalog<T extends { label: string; description: string; kind: string; keywords?: string[]; type?: string; id?: string }>(entries: T[], query: string): T[] {
   const q = norm(query);
   if (!q) return entries;
-  return entries.filter((e) => [e.type, e.label, e.description, e.kind, ...(e.keywords ?? [])].some((s) => norm(s).includes(q)));
+  return entries.filter((e) => [e.type ?? e.id ?? "", e.label, e.description, e.kind, ...(e.keywords ?? [])].some((s) => norm(s).includes(q)));
 }
 
 export function filterChannels(channels: Array<[string, NotificationChannelConfig]>, query: string): Array<[string, NotificationChannelConfig]> {

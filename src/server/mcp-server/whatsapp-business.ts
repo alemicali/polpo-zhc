@@ -47,6 +47,44 @@ const SECRET_WHAT: Record<string, string> = {
 export function registerWaBusinessTools(tool: Register, deps: McpDeps): void {
   const isPolpo = () => deps.principal?.actor === "polpo";
 
+  tool("channels", "polpo_wabiz_contact", {
+    title: "Record a contact's opt-in or opt-out",
+    description: "Record that a WhatsApp Business contact opted in to business-initiated messages (marketing templates need it) or opted out (nothing "
+      + "is sent to them any more, templates included, until they opt in again). source: where it was given (a form, a call…). Needs the admin scope.",
+    inputSchema: {
+      channel: channelParam,
+      contact: toParam,
+      opt_in: z.boolean().describe("true: opted in; false: opted out"),
+      source: z.string().max(200).optional().describe("Where it was given (default: operator)"),
+    },
+    outputSchema: { channel: z.string(), contact: looseObject },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  }, async ({ channel, contact, opt_in, source }) => {
+    const p = await pickChannel(deps, channel);
+    if (!p.ok) return p.res;
+    const waId = contact.trim();
+    const r = await apiSend(deps, "PUT", `/whatsapp-business/${enc(p.name)}/contacts/${enc(waId)}/opt-in`, { optIn: opt_in, ...(source ? { source } : {}) });
+    if (!r.ok) return apiError(r, `Recording ${waId}'s ${opt_in ? "opt-in" : "opt-out"}`);
+    return ok(opt_in ? `${waId} opted in on ${p.name}.` : `${waId} opted out on ${p.name}: nothing will be sent to them.`, { channel: p.name, contact: r.data as Record<string, unknown> });
+  });
+
+  tool("channels", "polpo_wabiz_contact_erase", {
+    title: "Erase a contact (GDPR)",
+    description: "Erase a WhatsApp Business contact and every message kept for them (a GDPR erasure request). It cannot be undone. Needs confirm: true "
+      + "after the person agreed, and the admin scope.",
+    inputSchema: { channel: channelParam, contact: toParam, confirm: confirmParam("erase the contact and its messages") },
+    outputSchema: { channel: z.string(), contact: z.string(), erased: z.boolean() },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  }, async ({ channel, contact, confirm }) => {
+    const p = await pickChannel(deps, channel);
+    if (!p.ok) return p.res;
+    const waId = contact.trim();
+    if (confirm !== true) return fail(`Erasing ${waId} deletes the contact and every message kept for them on ${p.name}, for good: ask the person, then call again with confirm: true.`);
+    const r = await apiSend(deps, "DELETE", `/whatsapp-business/${enc(p.name)}/contacts/${enc(waId)}`);
+    if (!r.ok) return r.status === 404 ? fail(`No contact ${waId} on ${p.name}.`) : apiError(r, `Erasing ${waId}`);
+    return ok(`Erased ${waId} and their messages from ${p.name}.`, { channel: p.name, contact: waId, erased: true });
+  });
+
   tool("channels", "polpo_wabiz_status", {
     title: "WhatsApp Business status",
     description: "A WhatsApp Business (Meta Cloud API) channel: configured / receiving / not configured, what is missing (ids, secrets — only whether they "

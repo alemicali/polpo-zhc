@@ -197,7 +197,7 @@ export class DrizzlePeerStore implements PeerStore {
 
   // ── Identity linking ────────────────────────────────────────────────
 
-  async linkPeers(peerId: string, linkedTo: string): Promise<void> {
+  async linkPeers(peerId: string, linkedTo: string | null): Promise<void> {
     await this.db.update(this.schema.peers)
       .set({ linkedTo })
       .where(eq(this.schema.peers.id, peerId));
