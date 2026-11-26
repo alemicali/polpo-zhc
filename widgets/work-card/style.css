@@ -19,3 +19,7 @@
 .bar-over .bar-fill { background: var(--w-danger); }
 .chips .chip { gap: 6px; }
 .row .chip-sm { margin-inline-start: 0; }
+/* A task a decision node left out (done without running): dashed and muted, never the done colour. */
+.chip-not-reached { background: transparent; color: var(--fg3); border: var(--bw) dashed var(--line2); }
+.row-not-reached { color: var(--fg3); }
+.not-reached { border-radius: var(--r-sm); padding: 10px 12px; border: var(--bw) dashed var(--line2); color: var(--fg2); display: flex; flex-direction: column; gap: 4px; }

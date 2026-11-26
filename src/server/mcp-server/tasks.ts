@@ -6,6 +6,7 @@ import { describeTaskRun, summarizeTaskRun, type TaskRunContext, type TaskRunSum
 import { describeTaskFailure, taskFailure, type TaskFailure } from "@polpo-ai/core/task-failure";
 import { computeTaskCost, describeTaskCost, summarizeTaskCost, usdText, type TaskCost, type TaskCostSummary } from "@polpo-ai/core/task-cost";
 import { describeTaskToolScope, type TaskToolScope } from "@polpo-ai/core/task-tool-scope";
+import { taskSkip, taskSkipLabel, type TaskSkip } from "@polpo-ai/core/task-skip";
 import { parseSince } from "@polpo-ai/core/iso-duration";
 import { engineTypeText, modelWithEngineText } from "@polpo-ai/core/engine-label";
 import {
@@ -19,6 +20,9 @@ type TaskStatus = (typeof TASK_STATUSES)[number];
 /** Where a task waits for someone or is finished: what polpo_task_wait waits for by default. */
 const SETTLED: TaskStatus[] = ["done", "failed", "review", "awaiting_approval"];
 
+export const notReachedShape = z.object({ node: z.string(), branch: z.string().nullable(), answer: z.string().optional(), confidence: z.number().optional() }).passthrough()
+  .describe("A mission decision node took another branch: the task was closed (status done) without running. Not reached is not done: never count it as work that ran");
+
 const failureShape = z.object({ reason: z.string(), retryable: z.boolean(), kind: z.string() }).passthrough()
   .describe("Why it failed: the labelled reason of its last run; retryable false: not retried automatically (a re-run would fail the same way); kind: model_access, auth, budget, killed, assessment, error");
 
@@ -30,11 +34,14 @@ export const taskSummary = z.object({
   cost: z.object({ usd: z.number(), tokens: z.number(), runs: z.number(), partial: z.boolean().optional() }).passthrough().optional()
     .describe("What every run of it cost in all (first run, retries, continuations), USD; partial: older runs were dropped"),
   failure: failureShape.optional(),
+  not_reached: notReachedShape.optional(),
 }).passthrough();
 
 type TaskRow = {
   id: string; title: string; status: string; assignTo?: string; group?: string; missionId?: string; createdAt?: string; updatedAt?: string; phase?: string;
   lastRun?: TaskRunSummary; failure?: TaskFailure; toolScope?: TaskToolScope;
+  /** A decision node left it out (the API's, from result.skipped or the legacy result text). */
+  notReached?: TaskSkip;
   /** Slim lists: every run's total; GET /tasks/:id: the full breakdown. */
   cost?: TaskCostSummary | TaskCost;
 };
@@ -81,12 +88,19 @@ const TOOL_SCOPE_HINT = "The scope may only narrow what the agent has: polpo_con
 /** A row's total in a list line: " · $1.50 over 2 runs". */
 const costText = (c: TaskCostSummary | undefined) => (c?.runs && c.usd > 0 ? ` · ${usdText(c.usd)}${c.partial ? "+" : ""}${c.runs > 1 ? ` over ${c.runs} runs` : ""}` : "");
 
-export const taskLine = (t: TaskRow & { runs?: TaskRunContext[] }) => `- ${t.id} [${t.status}] ${short(t.title, 100)}${t.assignTo ? ` → ${t.assignTo}` : ""}${t.group ? ` (${t.group})` : ""}`
+/** A row's "not reached" marker: the API's, else from its result. */
+export const notReachedOf = (t: TaskRow & { result?: unknown }): TaskSkip | undefined => t.notReached ?? taskSkip(t as Parameters<typeof taskSkip>[0]);
+
+/** The status to show: "not reached" for a task a decision node left out (it is done without running). */
+export const taskStatusText = (t: TaskRow & { result?: unknown }) => (notReachedOf(t) ? "not reached" : t.status);
+
+export const taskLine = (t: TaskRow & { runs?: TaskRunContext[]; result?: unknown }) => `- ${t.id} [${taskStatusText(t)}] ${short(t.title, 100)}${t.assignTo ? ` → ${t.assignTo}` : ""}${t.group ? ` (${t.group})` : ""}`
   + `${t.lastRun && t.lastRun.engine !== "polpo" ? ` · ${t.lastRun.model ? modelWithEngineText(t.lastRun.model, t.lastRun.engine) : engineTypeText(t.lastRun.engine)}${t.lastRun.computerId !== "host" ? ` on ${t.lastRun.computerName ?? t.lastRun.computerId}` : ""}` : ""}`
   + costText(costOf(t))
   + `${t.updatedAt ? ` · updated ${t.updatedAt}` : ""}`
   + `${t.toolScope ? " · tools restricted" : ""}`
-  + `${t.failure ? ` · failed: ${short(t.failure.reason, 160)}${t.failure.retryable ? "" : " (not retried)"}` : ""}`;
+  + `${t.failure ? ` · failed: ${short(t.failure.reason, 160)}${t.failure.retryable ? "" : " (not retried)"}` : ""}`
+  + `${notReachedOf(t) ? ` · ${taskSkipLabel(notReachedOf(t)!)}` : ""}`;
 
 /** A row's failure: the API's (slim lists, GET /tasks/:id), else from its result. */
 const failureOf = (t: TaskRow & { result?: unknown }) => t.failure ?? taskFailure(t as Parameters<typeof taskFailure>[0]);
@@ -100,6 +114,7 @@ const summarize = (t: TaskRow & { runs?: TaskRunContext[]; result?: unknown }) =
   const last = t.lastRun ?? summarizeTaskRun(t.runs?.at(-1));
   const failure = failureOf(t);
   const cost = costOf(t);
+  const skip = notReachedOf(t);
   return {
     id: t.id, title: t.title, status: t.status,
     ...(t.assignTo ? { assignTo: t.assignTo } : {}), ...(t.group ? { group: t.group } : {}),
@@ -108,6 +123,7 @@ const summarize = (t: TaskRow & { runs?: TaskRunContext[]; result?: unknown }) =
     ...(last ? { last_run: last } : {}),
     ...(cost ? { cost } : {}),
     ...(failure ? { failure } : {}),
+    ...(skip ? { not_reached: skip } : {}),
   };
 };
 
@@ -156,7 +172,7 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
   tool("tasks", "polpo_tasks_list", {
     title: "List tasks",
     description: "Tasks, most recently updated first: id, title, status, agent, mission, when it was last updated, what it cost and, for a failed one, "
-      + "why (the labelled reason; whether it was retried). Filter by status, agent, mission, words or time (updated_since: \"24h\", \"7d\" or an ISO date, "
+      + "why (the labelled reason; whether it was retried); a task a decision node left out shows as not reached (not done). Filter by status, agent, mission, words or time (updated_since: \"24h\", \"7d\" or an ISO date, "
       + "for \"in the last 24 hours\"); page with cursor. Use polpo_task_get for one task in full.",
     inputSchema: {
       status: z.enum(TASK_STATUSES).optional().describe("Only tasks in this status"),
@@ -214,6 +230,7 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
     outputSchema: {
       task: looseObject,
       failure: failureShape.optional(),
+      not_reached: notReachedShape.optional(),
       dependencies: z.array(z.object({ id: z.string(), title: z.string(), status: z.string() }).passthrough()).optional()
         .describe("The tasks it depends on (their results reach its prompt; it reads them in full with task_result / dependency_results)"),
       runs: z.array(looseObject).describe("Where and with what each run executed: engine (polpo, claude-code, codex, opencode), model, auth kind, computer (id, kind, provider, VM id), sandbox, egress, session (resumed, bootstrapMs), cost (harnessUsd, modelUsd, tokens), budgetUsd, status, duration; newest last"),
@@ -232,6 +249,7 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
     }
     const res = t.result;
     const failure = failureOf(t);
+    const skip = notReachedOf(t);
     // every run's total: the API's (it recovers runs dropped past the latest 20), else from the runs
     const cost: TaskCost = t.cost && "perRun" in t.cost ? t.cost : computeTaskCost(t);
     let dependencies: Array<{ id: string; title: string; status: string; failure?: TaskFailure }> = [];
@@ -240,11 +258,12 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
       const rows = all.ok && Array.isArray(all.data) ? (all.data as TaskRow[]) : [];
       dependencies = t.dependsOn.map((d) => {
         const found = rows.find((x) => x.id === d) ?? rows.find((x) => x.title === d && (t.missionId ? x.missionId === t.missionId : x.group === t.group));
-        return found ? { id: found.id, title: found.title, status: found.status, ...(found.failure ? { failure: found.failure } : {}) } : { id: d, title: d, status: "missing" };
+        return found ? { id: found.id, title: found.title, status: taskStatusText(found), ...(found.failure ? { failure: found.failure } : {}) } : { id: d, title: d, status: "missing" };
       });
     }
     const lines = [
-      `${t.id} [${t.status}${t.phase ? `/${t.phase}` : ""}] ${t.title}`,
+      `${t.id} [${skip ? "not reached" : t.status}${t.phase && !skip ? `/${t.phase}` : ""}] ${t.title}`,
+      ...(skip ? [`${taskSkipLabel(skip)}${skip.answer ? ` (answer: ${skip.answer})` : ""}: closed without running (status done, but no work was done)`] : []),
       `agent: ${t.assignTo ?? "-"}${t.group ? ` · group: ${t.group}` : ""}${t.missionId ? ` · mission: ${t.missionId}` : ""}`,
       `retries: ${t.retries ?? 0}/${t.maxRetries ?? "-"}${t.sideEffects ? " · side effects" : ""}`,
       ...(dependencies.length ? [`depends on: ${dependencies.map((d) => `${d.id} [${d.status}] ${short(d.title, 60)}`).join(", ")}`] : []),
@@ -266,6 +285,7 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
     return ok(lines.join("\n"), {
       task: t as Record<string, unknown>,
       ...(failure ? { failure } : {}),
+      ...(skip ? { not_reached: skip } : {}),
       ...(dependencies.length ? { dependencies } : {}),
       runs: (t.runs ?? []) as unknown as Array<Record<string, unknown>>,
       ...(t.runs?.length ? { cost: cost as unknown as Record<string, unknown> } : {}),

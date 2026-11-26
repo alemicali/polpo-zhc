@@ -23,8 +23,10 @@ export const STRINGS = {
     of: "of", left: "left", partial: "older runs not counted", superseded: "There is a newer card for this below",
     totalCost: (n: number) => `In all, ${n} run${n === 1 ? "" : "s"}`, latest: "latest",
     kind: { model_access: "Model not enabled", auth: "Authentication", budget: "Spend limit", killed: "Stopped", assessment: "Review", error: "Error" } as Record<string, string>,
-    status: { pending: "Pending", assigned: "Assigned", in_progress: "In progress", review: "In review", done: "Done", failed: "Failed", awaiting_approval: "To approve", draft: "Draft", missing: "Missing", running: "Running", completed: "Completed", killed: "Stopped", active: "Active", paused: "Paused", cancelled: "Cancelled", scheduled: "Scheduled", recurring: "Recurring" } as Record<string, string>,
+    status: { pending: "Pending", assigned: "Assigned", in_progress: "In progress", review: "In review", done: "Done", failed: "Failed", awaiting_approval: "To approve", draft: "Draft", missing: "Missing", not_reached: "Not reached", running: "Running", completed: "Completed", killed: "Stopped", active: "Active", paused: "Paused", cancelled: "Cancelled", scheduled: "Scheduled", recurring: "Recurring" } as Record<string, string>,
     error: "Could not load the card",
+    chose: (node: string, branch: string | null) => `Decision ${node} chose ${branch ?? "no branch"}`,
+    notReachedWhy: "The decision took another branch: this task was closed without running.",
   },
   it: {
     open: "Apri", refresh: "Aggiorna", updated: "Aggiornato",
@@ -39,8 +41,10 @@ export const STRINGS = {
     of: "di", left: "restanti", partial: "esecuzioni più vecchie non contate", superseded: "C'è una scheda più recente più sotto",
     totalCost: (n: number) => `Totale ${n} esecuzion${n === 1 ? "e" : "i"}`, latest: "ultima",
     kind: { model_access: "Modello non abilitato", auth: "Autenticazione", budget: "Limite di spesa", killed: "Fermato", assessment: "Verifica", error: "Errore" } as Record<string, string>,
-    status: { pending: "In coda", assigned: "Assegnato", in_progress: "In corso", review: "In verifica", done: "Fatto", failed: "Fallito", awaiting_approval: "Da approvare", draft: "Bozza", missing: "Mancante", running: "In corso", completed: "Completata", killed: "Fermata", active: "Attiva", paused: "In pausa", cancelled: "Annullata", scheduled: "Programmata", recurring: "Ricorrente" } as Record<string, string>,
+    status: { pending: "In coda", assigned: "Assegnato", in_progress: "In corso", review: "In verifica", done: "Fatto", failed: "Fallito", awaiting_approval: "Da approvare", draft: "Bozza", missing: "Mancante", not_reached: "Non raggiunto", running: "In corso", completed: "Completata", killed: "Fermata", active: "Attiva", paused: "In pausa", cancelled: "Annullata", scheduled: "Programmata", recurring: "Ricorrente" } as Record<string, string>,
     error: "Non riesco a caricare la scheda",
+    chose: (node: string, branch: string | null) => `La decisione ${node} ha scelto ${branch ?? "nessun ramo"}`,
+    notReachedWhy: "La decisione ha preso un altro ramo: questo task è stato chiuso senza essere eseguito.",
   },
 };
 export type Strings = typeof STRINGS.en;
@@ -96,8 +100,12 @@ function formatTime(iso: string | undefined): string {
 
 const usd = (v: number | undefined) => (v === undefined || !Number.isFinite(v) ? "" : v === 0 ? "$0" : v < 0.01 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`);
 const dur = (ms: number | undefined) => (ms === undefined ? "" : ms < 1000 ? `${Math.round(ms)} ms` : ms < 60_000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.floor(ms / 60_000)} min ${Math.round((ms % 60_000) / 1000)} s`);
-const tone = (s: string) => (s === "done" || s === "completed" ? "success" : s === "failed" || s === "missing" || s === "killed" ? "danger" : s === "awaiting_approval" || s === "paused" ? "warning" : ["in_progress", "assigned", "review", "running", "active"].includes(s) ? "info" : "neutral");
+const tone = (s: string) => (s === "not_reached" ? "not-reached" : s === "done" || s === "completed" ? "success" : s === "failed" || s === "missing" || s === "killed" ? "danger" : s === "awaiting_approval" || s === "paused" ? "warning" : ["in_progress", "assigned", "review", "running", "active"].includes(s) ? "info" : "neutral");
 const chip = (s: Strings, status: string, small = true) => h("span", { class: `chip${small ? " chip-sm" : ""} chip-${tone(status)}` }, s.status[status] ?? status);
+/** A task a decision node left out: its own dashed, muted chip (never the done one), the decision in the tooltip. */
+const taskChip = (s: Strings, x: Pick<CardTaskRef, "status" | "notReached">, small = true) => x.notReached
+  ? h("span", { class: `chip${small ? " chip-sm" : ""} chip-not-reached`, title: s.chose(x.notReached.node, x.notReached.branch) }, s.status.not_reached)
+  : chip(s, x.status, small);
 
 function bar(used: number, label: string, over: boolean): HTMLElement {
   const pct = Math.round(used * 100);
@@ -130,7 +138,7 @@ function failureBox(f: NonNullable<CardTaskRef["failure"]>, s: Strings): HTMLEle
 }
 
 function taskRow(x: CardTaskRef & { lastRun?: MissionCard["tasks"][number]["lastRun"]; costUsd?: number }, s: Strings): HTMLElement {
-  return h("div", { class: "row" },
+  return h("div", { class: x.notReached ? "row row-not-reached" : "row" },
     h("div", { class: "row-main" },
       h("div", {}, x.title, x.toolScoped ? h("span", { class: "chip chip-sm chip-info" }, s.toolsRestricted) : null),
       h("div", { class: "muted small marks" },
@@ -138,8 +146,9 @@ function taskRow(x: CardTaskRef & { lastRun?: MissionCard["tasks"][number]["last
         // a list row: the model with the engine's mark only (its label in the tooltip)
         x.lastRun ? modelWithEngine(x.lastRun.modelLabel, { mark: x.lastRun.engineMark, label: x.lastRun.engineLabel, kind: x.lastRun.engineKind, id: x.lastRun.engine }, { compact: true }) : null,
         h("span", {}, [x.lastRun ? x.lastRun.computer.label : "", usd(x.costUsd)].filter(Boolean).join(" · "))),
-      x.failure ? h("div", { class: "small danger-text" }, `${x.failure.reason}${x.failure.retryable ? "" : ` (${s.notRetried.toLowerCase()})`}`) : null),
-    chip(s, x.status));
+      x.failure ? h("div", { class: "small danger-text" }, `${x.failure.reason}${x.failure.retryable ? "" : ` (${s.notRetried.toLowerCase()})`}`) : null,
+      x.notReached ? h("div", { class: "small muted" }, s.chose(x.notReached.node, x.notReached.branch)) : null),
+    taskChip(s, x));
 }
 
 function header(title: string, subtitle: string, status: string, s: Strings, extra?: Child): HTMLElement {
@@ -175,11 +184,14 @@ export function taskView(c: TaskCard, s: Strings, full: boolean): HTMLElement {
   facts.push([s.lastRun, last ? runLine(last, s, full) : s.noRuns]);
   if (c.cost) facts.push([s.cost, taskCostLine(c.cost, s)]);
   else if (c.costUsd !== undefined) facts.push([s.cost, `${usd(c.costUsd)} · ${s.runsN(c.runs.length)}`]);
-  if (c.dependencies.length) facts.push([s.dependsOn, h("div", { class: "deps" }, ...c.dependencies.map((d) => h("span", { class: "dep" }, d.title, chip(s, d.status))))]);
+  if (c.dependencies.length) facts.push([s.dependsOn, h("div", { class: "deps" }, ...c.dependencies.map((d) => h("span", { class: "dep" }, d.title, taskChip(s, d))))]);
   return h("div", { class: full ? "full" : "card" },
-    header(tk.title, [tk.id, tk.group].filter(Boolean).join(" · "), tk.status, s,
+    header(tk.title, [tk.id, tk.group].filter(Boolean).join(" · "), tk.notReached ? "not_reached" : tk.status, s,
       c.toolScope ? h("span", { class: "chip chip-info", title: c.toolScope.label }, s.toolsRestricted) : null),
     tk.failure ? failureBox(tk.failure, s) : null,
+    tk.notReached ? h("div", { class: "not-reached", title: s.chose(tk.notReached.node, tk.notReached.branch) },
+      h("div", {}, s.chose(tk.notReached.node, tk.notReached.branch), tk.notReached.answer ? h("span", { class: "muted" }, ` (${tk.notReached.answer})`) : null),
+      h("div", { class: "small muted" }, s.notReachedWhy)) : null,
     h("dl", { class: "facts" }, ...facts.flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])),
     full && c.runs.length > 1 ? h("section", {}, h("h3", {}, s.runs), ...c.runs.map((r) => h("div", { class: "row" },
       h("div", { class: "row-main" }, runLine(r, s, true), h("div", { class: "muted small" }, `${r.runId} · ${formatTime(r.startedAt)}`)), chip(s, r.status)))) : null,

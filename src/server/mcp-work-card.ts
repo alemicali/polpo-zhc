@@ -14,6 +14,7 @@
 import type { TaskRunContext } from "@polpo-ai/core/run-context";
 import type { MissionCost, MissionCostSummary } from "@polpo-ai/core/mission-cost";
 import { taskFailure, type TaskFailure } from "@polpo-ai/core/task-failure";
+import { taskSkip, taskSkipLabel, type TaskSkip } from "@polpo-ai/core/task-skip";
 import { computeTaskCost, type TaskCost } from "@polpo-ai/core/task-cost";
 import { describeTaskToolScope, type TaskToolScope } from "@polpo-ai/core/task-tool-scope";
 import { engineTypeText, modelWithEngineText } from "@polpo-ai/core/engine-label";
@@ -27,6 +28,8 @@ export interface CardTaskRef {
   status: string;
   assignTo?: string;
   failure?: TaskFailure;
+  /** A decision node took another branch: done without running. The card shows it "Not reached", never done. */
+  notReached?: TaskSkip;
   /** Its runs get only part of the agent's tools (Task.toolScope). */
   toolScoped?: boolean;
 }
@@ -112,6 +115,8 @@ type InTask = {
   outcomes?: Array<{ type?: string; label?: string; path?: string; url?: string; text?: string }>;
   runs?: TaskRunContext[];
   failure?: TaskFailure;
+  /** The API's not-reached marker (else read from result.skipped / the legacy result text). */
+  notReached?: TaskSkip;
   toolScope?: TaskToolScope;
   toolScopeStale?: string[];
   /** GET /tasks/:id: every run's cost in all (it recovers runs dropped past the latest 20). */
@@ -122,10 +127,12 @@ const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trim
 
 const ref = (t: InTask): CardTaskRef => {
   const failure = t.failure ?? taskFailure(t as Parameters<typeof taskFailure>[0]);
+  const skip = t.notReached ?? taskSkip(t as Parameters<typeof taskSkip>[0]);
   return {
     id: t.id, title: t.title, status: t.status,
     ...(t.assignTo ? { assignTo: t.assignTo } : {}),
     ...(failure ? { failure } : {}),
+    ...(skip ? { notReached: skip } : {}),
     ...(t.toolScope ? { toolScoped: true } : {}),
   };
 };
@@ -215,7 +222,8 @@ export function buildMissionCard(input: {
   const c = m.cost;
   const full = c && "byAgent" in c ? c : undefined;
   const counts: Record<string, number> = {};
-  for (const t of input.tasks) counts[t.status] = (counts[t.status] ?? 0) + 1;
+  // a task a decision node left out is not_reached, not done
+  for (const t of input.tasks) { const k = (t.notReached ?? taskSkip(t as Parameters<typeof taskSkip>[0])) ? "not_reached" : t.status; counts[k] = (counts[k] ?? 0) + 1; }
   const budget = m.budgetUsd ?? c?.budgetUsd;
   return {
     kind: "mission",
@@ -259,7 +267,8 @@ const failureText = (f: TaskFailure) => `${f.reason}${f.retryable ? "" : " (not 
 /** The task card as text, for the model and for clients that do not show apps. */
 export function taskCardText(card: TaskCard): string {
   const t = card.task;
-  const lines = [`${t.id} [${t.status}${t.phase ? `/${t.phase}` : ""}] ${t.title}${t.assignTo ? ` → ${t.assignTo}` : ""}`];
+  const lines = [`${t.id} [${t.notReached ? "not reached" : `${t.status}${t.phase ? `/${t.phase}` : ""}`}] ${t.title}${t.assignTo ? ` → ${t.assignTo}` : ""}`];
+  if (t.notReached) lines.push(`${taskSkipLabel(t.notReached)}${t.notReached.answer ? ` (answer: ${t.notReached.answer})` : ""}: closed without running`);
   if (card.task.failure) lines.push(`Failed: ${failureText(card.task.failure)}`);
   if (card.toolScope) lines.push(`Tools: ${card.toolScope.label}${card.toolScope.stale?.length ? ` (the agent no longer has: ${card.toolScope.stale.join("; ")})` : ""}`);
   const c = card.cost;
@@ -269,7 +278,7 @@ export function taskCardText(card: TaskCard): string {
       + `${c.byEngine.length > 1 ? ` (${c.byEngine.map((e) => `${e.label} ${formatUsd(e.usd)}`).join(", ")})` : ""}${c.partial ? " — older runs dropped, not counted" : ""}`);
   }
   if (card.runs.length) lines.push(`Runs (${c?.runs ?? card.runs.length}${card.runs.length < (c?.runs ?? 0) ? `, latest ${card.runs.length}` : ""}):`, ...card.runs.slice(0, 5).map((r) => `- ${r.runId} [${r.status}] ${runViewLine(r)}${r.durationMs !== undefined ? ` · ${formatMs(r.durationMs)}` : ""}`));
-  if (card.dependencies.length) lines.push(`Depends on: ${card.dependencies.map((d) => `${d.title} [${d.status}]`).join(", ")}`);
+  if (card.dependencies.length) lines.push(`Depends on: ${card.dependencies.map((d) => `${d.title} [${d.notReached ? "not reached" : d.status}]`).join(", ")}`);
   if (card.result?.text) lines.push(`Result: ${clip(card.result.text, 400)}`);
   if (card.outcomes.length) lines.push(`Outcomes: ${card.outcomes.map((o) => o.label).join(", ")}`);
   return lines.join("\n");
@@ -285,10 +294,10 @@ export function missionCardText(card: MissionCard): string {
     if (c.byEngine.length) lines.push(`By engine: ${c.byEngine.map((e) => `${e.label} ${formatUsd(e.usd)}`).join(", ")}`);
     if (c.byAgent.length) lines.push(`By agent: ${c.byAgent.map((a) => `${a.agent} ${formatUsd(a.usd)}`).join(", ")}`);
   }
-  const counts = Object.entries(card.counts).map(([k, v]) => `${v} ${k}`).join(", ");
+  const counts = Object.entries(card.counts).map(([k, v]) => `${v} ${k === "not_reached" ? "not reached" : k}`).join(", ");
   lines.push(`Tasks: ${counts || "none yet"}`);
   for (const t of card.tasks.slice(0, 20)) {
-    lines.push(`- ${t.id} [${t.status}] ${t.title}${t.assignTo ? ` → ${t.assignTo}` : ""}${t.toolScoped ? " · tools restricted" : ""}${t.lastRun ? ` (${t.lastRun.modelLabel ? modelWithEngineText(t.lastRun.modelLabel, t.lastRun.engine) : engineTypeText(t.lastRun.engine)})` : ""}${t.failure ? `: ${failureText(t.failure)}` : ""}`);
+    lines.push(`- ${t.id} [${t.notReached ? "not reached" : t.status}] ${t.title}${t.assignTo ? ` → ${t.assignTo}` : ""}${t.toolScoped ? " · tools restricted" : ""}${t.lastRun ? ` (${t.lastRun.modelLabel ? modelWithEngineText(t.lastRun.modelLabel, t.lastRun.engine) : engineTypeText(t.lastRun.engine)})` : ""}${t.failure ? `: ${failureText(t.failure)}` : ""}${t.notReached ? ` · ${taskSkipLabel(t.notReached)}` : ""}`);
   }
   return lines.join("\n");
 }
