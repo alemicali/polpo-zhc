@@ -50,6 +50,7 @@ import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { cronToHuman } from "@/lib/cron";
 import { missionStatusStyles, missionStatusFilterOptions } from "@/lib/status-tokens";
+import { countTaskOutcomes } from "@/lib/task-not-reached";
 import {
   TimeRangeFilter,
 } from "@/components/shared/time-range-filter";
@@ -138,7 +139,10 @@ function parseMissionAgents(data: string): string[] {
 // ── Mission stats shape ──
 
 export interface MissionStats {
+  /** Tasks that ran and finished (not the ones a decision left out). */
   done: number;
+  /** Tasks a decision left out (done without running). */
+  notReached?: number;
   failed: number;
   running: number;
   total: number;
@@ -179,7 +183,9 @@ function MissionRow({
 }) {
   const style = missionStatusStyles[mission.status];
   const StatusIcon = style.icon;
-  const progress = stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0;
+  // tasks a decision left out are neither done nor still to reach
+  const reachable = Math.max(0, stats.total - (stats.notReached ?? 0));
+  const progress = reachable > 0 ? Math.round((stats.done / reachable) * 100) : 0;
   const counts = useMemo(() => parseMissionCounts(mission.data), [mission.data]);
 
   const isActive = mission.status === "active";
@@ -251,7 +257,7 @@ function MissionRow({
       {isActive && stats.total > 0 && (
         <div className="flex items-center gap-2 shrink-0">
           <Progress value={progress} className="h-1.5 w-20 [&>div]:bg-primary" />
-          <span className="text-micro text-muted-foreground font-mono">{stats.done}/{stats.total}</span>
+          <span className="text-micro text-muted-foreground font-mono">{stats.done}/{reachable}</span>
         </div>
       )}
 
@@ -269,6 +275,9 @@ function MissionRow({
         )}
         {mission.status === "completed" && stats.done > 0 && (
           <Badge variant="secondary" className="text-micro">{stats.done} done</Badge>
+        )}
+        {(stats.notReached ?? 0) > 0 && (
+          <Badge variant="outline" className="text-micro border-dashed text-muted-foreground" title="A decision took another branch: these tasks were closed without running">{stats.notReached} not reached</Badge>
         )}
       </div>
 
@@ -501,13 +510,15 @@ export function MissionsPage() {
 
   // Compute task stats per mission group
   const missionStats = useMemo(() => {
-    const map: Record<string, { done: number; failed: number; running: number; total: number }> = {};
+    const map: Record<string, MissionStats> = {};
     for (const mission of missions) {
       const group = mission.name;
       const groupTasks = tasks.filter(t => t.group === group);
+      const outcome = countTaskOutcomes(groupTasks);
       map[mission.id] = {
-        done: groupTasks.filter(t => t.status === "done").length,
-        failed: groupTasks.filter(t => t.status === "failed").length,
+        done: outcome.done,
+        notReached: outcome.notReached,
+        failed: outcome.failed,
         running: groupTasks.filter(t => t.status === "in_progress" || t.status === "review").length,
         total: groupTasks.length || (() => { try { return JSON.parse(mission.data)?.tasks?.length ?? 0; } catch { return 0; } })(),
       };

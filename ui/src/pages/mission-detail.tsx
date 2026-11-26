@@ -217,7 +217,7 @@ interface DelayNodeData {
 
 // ── Task node component for ReactFlow ──
 
-function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
+export function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
   const navigate = useNavigate();
   const { taskDef, liveTask, index, expanded, chosenBranch } = data;
   // a decision took another branch: closed without running — muted, dashed, never the done colour
@@ -562,7 +562,7 @@ interface DecisionNodeData {
 
 const QUESTION_KIND: Record<string, string> = { predicate: "Yes / no", choice: "Choice", score: "Score", rank: "Rank" };
 
-function DecisionNodeComponent({ data, selected }: NodeProps<Node<DecisionNodeData>>) {
+export function DecisionNodeComponent({ data, selected }: NodeProps<Node<DecisionNodeData>>) {
   const { decision, view } = data;
   const conf = confidenceText(view.confidence);
   const status = view.status === "decided" ? `Chose ${view.branch ?? "no branch"}${conf ? ` · ${conf}` : ""}` : view.status === "awaiting" ? "Waiting for you" : view.status === "deciding" ? "Deciding" : "Not decided yet";
@@ -721,7 +721,7 @@ const NODE_HEIGHT = 140;
 const H_GAP = 60;
 const V_GAP = 80;
 
-function buildGraphLayout(
+export function buildGraphLayout(
   taskDefs: MissionTaskDef[],
   findLive: (title: string) => Task | undefined,
   checkpoints?: MissionCheckpointDef[],

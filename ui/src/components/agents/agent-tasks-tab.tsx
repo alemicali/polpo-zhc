@@ -11,12 +11,15 @@ import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { useAgentDetail } from "./agent-detail-context";
 import { taskStatusConfig } from "@/lib/agent-meta";
+import { notReachedOf, notReachedTooltip, taskDisplayStyle } from "@/lib/task-not-reached";
 import type { Task } from "@polpo-ai/react";
 
 // ── Task row ──
 
 function TaskRow({ task }: { task: Task }) {
-  const cfg = taskStatusConfig[task.status];
+  // a decision took another branch: "Not reached", never done
+  const skip = notReachedOf(task);
+  const cfg = skip ? taskDisplayStyle(task) : taskStatusConfig[task.status];
   const StatusIcon = cfg.icon;
   const score = task.result?.assessment?.globalScore;
 
@@ -40,7 +43,7 @@ function TaskRow({ task }: { task: Task }) {
             {Math.round(score * 100)}%
           </Badge>
         )}
-        <Badge variant="outline" className={cn("text-micro", cfg.color)}>{cfg.label}</Badge>
+        <Badge variant="outline" className={cn("text-micro", cfg.color, skip && "border-dashed")} title={skip ? notReachedTooltip(skip) : undefined}>{cfg.label}</Badge>
         {task.result?.duration != null && (
           <span className="text-micro text-muted-foreground">{Math.round(task.result.duration / 1000)}s</span>
         )}

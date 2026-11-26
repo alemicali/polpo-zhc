@@ -211,6 +211,30 @@ describe("task page header and Details tab", () => {
   });
 });
 
+describe("a task a decision left out", () => {
+  test("shows Not reached (not done) with the decision that chose another branch", async () => {
+    store.task = makeTask({
+      status: "done", failure: undefined, runs: [],
+      result: { exitCode: 0, stdout: 'Skipped: the decision "route" took the branch "support" (decision: support (0.81))', stderr: "", duration: 0,
+        skipped: { reason: "decision", node: "route", branch: "support", answer: "decision: support (0.81)", confidence: 0.81 } },
+    });
+    await renderAt("/tasks/task-123456789abc");
+    const badge = q("[data-testid=task-status-badge]")!;
+    expect(badge.textContent).toBe("Not reached");
+    expect(badge.getAttribute("title")).toBe("Decision route chose support");
+    expect(badge.className).not.toContain("text-success");
+    expect(text("[data-testid=task-not-reached]")).toContain("Decision route chose support");
+    expect(text("[data-testid=task-overview]")).not.toMatch(/\bDone\b/);
+  });
+
+  test("a task skipped before the marker existed is recognised from its result text", async () => {
+    store.task = makeTask({ status: "done", failure: undefined, runs: [], result: { exitCode: 0, stdout: 'Skipped: the decision "route" took no branch (no answer)', stderr: "", duration: 0 } });
+    await renderAt("/tasks/task-123456789abc");
+    expect(text("[data-testid=task-status-badge]")).toBe("Not reached");
+    expect(text("[data-testid=task-not-reached]")).toContain("Decision route chose no branch");
+  });
+});
+
 describe("Execution tab", () => {
   test("steer / continue lives only in Execution; the Log view is the event list", async () => {
     await renderAt("/tasks/task-123456789abc");

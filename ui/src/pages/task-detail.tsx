@@ -95,6 +95,7 @@ import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { taskStatusStyles, taskPhaseStyles, tones, scoreTone } from "@/lib/status-tokens";
+import { confidenceText, notReachedOf, notReachedTooltip, taskDisplayStyle } from "@/lib/task-not-reached";
 
 // ── Heavy-content helpers ──
 //
@@ -891,7 +892,9 @@ export function TaskDetailPage() {
     );
   }
 
-  const cfg = statusConfig[task.status];
+  // a decision took another branch: "Not reached" (closed without running), never done
+  const skip = notReachedOf(task);
+  const cfg = skip ? taskDisplayStyle(task) : statusConfig[task.status];
   const StatusIcon = cfg.icon;
   const assessment = task.result?.assessment;
   const phase = task.phase && task.phase !== "execution" ? phaseConfig[task.phase] : null;
@@ -933,7 +936,7 @@ export function TaskDetailPage() {
           </div>
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <h1 className="font-heading min-w-0 truncate text-h3 sm:text-h2">{task.title}</h1>
-            <Badge variant="outline" className={cn("text-xs shrink-0 border-border/40", cfg.color)} data-testid="task-status-badge">{cfg.label}</Badge>
+            <Badge variant="outline" className={cn("text-xs shrink-0 border-border/40", cfg.color, skip && "border-dashed")} data-testid="task-status-badge" title={skip ? notReachedTooltip(skip) : undefined}>{cfg.label}</Badge>
           </div>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
@@ -1465,6 +1468,20 @@ export function TaskDetailPage() {
 
               {/* ── Left column (3/5): failure, output, description ── */}
               <div className="lg:col-span-3 space-y-4">
+
+              {/* ── Not reached: a decision took another branch, the task was closed without running ── */}
+              {skip && (
+                <div className="rounded-lg border border-dashed border-border px-4 py-3 space-y-1" data-testid="task-not-reached">
+                  <p className="text-label text-muted-foreground flex items-center gap-1.5">
+                    <StatusIcon className="h-3 w-3" /> Not reached
+                  </p>
+                  <p className="text-sm">
+                    {notReachedTooltip(skip)}
+                    {skip.answer && <span className="text-muted-foreground"> ({skip.answer}{skip.confidence !== undefined && !skip.answer.includes(confidenceText(skip.confidence) ?? "") ? `, confidence ${confidenceText(skip.confidence)}` : ""})</span>}
+                  </p>
+                  <p className="text-xs text-muted-foreground">This task did not run: it was closed without running when the decision took another branch.</p>
+                </div>
+              )}
 
               {/* ── Why it failed (and whether it was retried) ── */}
               {task.status === "failed" && (task.failure || task.result?.retryable === false) && (
