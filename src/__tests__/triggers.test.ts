@@ -190,6 +190,11 @@ describe("POST /hooks/:id — authentication", () => {
     expect(verifyHmac(cfg, raw, headers({ ...ok, "webhook-signature": good }), { current: secret }, now + 301_000)).toMatchObject({ ok: false, reason: expect.stringContaining("tolerance") });
     expect(verifyHmac(cfg, raw, headers({ "webhook-timestamp": ts, "webhook-signature": good }), { current: secret }, now)).toMatchObject({ ok: false, reason: expect.stringContaining("webhook-id") });
     expect(verifyHmac(cfg, raw, headers({ ...ok, "webhook-signature": `v2,${sign(keyBytes)}` }), { current: secret }, now)).toMatchObject({ ok: false, reason: expect.stringContaining("v1") });
+    // a 43-character base64 part (not a multiple of 4) is decoded leniently, like the official libraries
+    const oddSecret = "whsec_tK0123456789abcdefghijklmnopqrstuvwxyzAB=";
+    const oddKey = Buffer.from(oddSecret.slice(6), "base64");
+    const oddSig = `v1,${createHmac("sha256", oddKey).update(`${id}.${ts}.`).update(raw).digest("base64")}`;
+    expect(verifyHmac(cfg, raw, headers({ ...ok, "webhook-signature": oddSig }), { current: oddSecret }, now)).toEqual({ ok: true, which: "current" });
     // senders that sign with the secret as text: accepted, and the delivery says so
     const asText = `v1,${createHmac("sha256", Buffer.from(secret)).update(`${id}.${ts}.`).update(raw).digest("base64")}`;
     expect(verifyHmac(cfg, raw, headers({ ...ok, "webhook-signature": asText }), { current: secret }, now)).toEqual({ ok: true, which: "current", note: "signed with the secret as text" });

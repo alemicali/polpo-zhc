@@ -126,7 +126,8 @@ export function verifyHmac(cfg: TriggerHmacConfig, raw: Buffer, header: (name: s
 /** The key of a Standard Webhooks secret: "whsec_<base64>" (or bare base64) decoded; anything else as UTF-8 bytes. */
 export function standardWebhookKey(secret: string): Buffer {
   const s = secret.trim().replace(/^whsec_/, "");
-  if (/^[A-Za-z0-9+/]+={0,2}$/.test(s) && s.length % 4 === 0) {
+  // decoded leniently, as the official standardwebhooks libraries do (a length that is not a multiple of 4 is fine)
+  if (/^[A-Za-z0-9+/]+={0,2}$/.test(s)) {
     const key = Buffer.from(s, "base64");
     if (key.length > 0) return key;
   }
