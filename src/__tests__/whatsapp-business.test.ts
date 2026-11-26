@@ -245,7 +245,7 @@ describe("inbox and idempotency", () => {
     expect(r.service.events("shop").events[0]).toMatchObject({ outcome: "ignored", reason: expect.stringContaining("5555555555") });
   });
 
-  it("turns interactive replies into text and other types into a placeholder", async () => {
+  it("turns interactive replies into text with their id, and says when a photo could not be kept", async () => {
     const r = await tracked();
     const handle = vi.fn<WaBizGatewayHandle["handle"]>().mockResolvedValue(undefined);
     r.service.setGateway("shop", { handle });
@@ -254,7 +254,7 @@ describe("inbox and idempotency", () => {
       { from: CUSTOMER, id: "wamid.I1", timestamp: String(NOW / 1000), type: "image", image: { id: "media1", caption: "lo scontrino" } },
     ] }));
     await r.service.idle();
-    expect(handle.mock.calls.map((c) => c[0].text)).toEqual(["Sì, confermo", "[immagine] lo scontrino"]);
+    expect(handle.mock.calls.map((c) => c[0].text)).toEqual(["Sì, confermo\n[button reply: id \"y\"]", expect.stringMatching(/^\[photo not available: .+\] lo scontrino$/)]);
   });
 });
 
@@ -490,7 +490,7 @@ describe("wabiz_* tools", () => {
   it("wabiz_send_template queues for approval; wabiz_send refuses outside the window", async () => {
     const r = await tracked();
     const tools = createWabizTools({ service: () => r.service, sender: "sales" }, ["wabiz_*"]);
-    expect(tools.map((t) => t.name).sort()).toEqual(["wabiz_conversation", "wabiz_send", "wabiz_send_template", "wabiz_templates"]);
+    expect(tools.map((t) => t.name).sort()).toEqual(["wabiz_conversation", "wabiz_react", "wabiz_send", "wabiz_send_flow", "wabiz_send_interactive", "wabiz_send_media", "wabiz_send_order", "wabiz_send_products", "wabiz_send_template", "wabiz_templates"]);
     const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
     const tpl = await byName.wabiz_send_template!.execute("1", { to: CUSTOMER, template: "order_update", params: ["a", "b"] });
     expect(tpl.content[0]).toMatchObject({ text: expect.stringContaining("queued for approval") });

@@ -32,6 +32,27 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "wabiz-full-cloud-api-2026-11-26",
+    date: "2026-11-26",
+    kind: "new",
+    title: "WhatsApp Business: tutta la Cloud API di Meta",
+    summary: "Foto, vocali (trascritti), video e documenti in entrata e in uscita, pulsanti, liste, link, posizione e flow, template completi con carosello e codici OTP, catalogo e ordini, pagamenti in India e Brasile, profilo, numero, blocchi e statistiche: dalla dashboard, dall'API, da MCP e nella chat con Polpo.",
+    body: [
+      "- **Media in entrata e in uscita**: foto, vocali, audio, video, documenti e sticker arrivano all'agente e restano con il messaggio; i **vocali vengono trascritti**. Nella conversazione del contatto le foto si vedono in miniatura, i vocali si ascoltano, i documenti si scaricano; puoi mandare un file dal computer o con un link.",
+      "- **Messaggi interattivi**: pulsanti di risposta, liste, pulsante con link, richiesta di posizione, posizione, flow, prodotti e catalogo. Le risposte del cliente (pulsante, voce della lista, flow completato, indirizzo) arrivano all'agente come dati strutturati e nella conversazione come etichette.",
+      "- **Template completi**: intestazione con testo, immagine, video, documento o posizione, variabili posizionali o con nome, valori dei pulsanti, **carosello**, offerte a tempo e **codici OTP**. Il compositore mostra quali valori servono, li controlla sulla definizione sincronizzata e fa vedere il testo compilato prima dell'invio. **Gestione dei template**: crea, modifica ed elimina (editor JSON dei componenti), con stato, qualità e categoria.",
+      "- **Reazioni, letture, digitazione e stati**: reagisci a un messaggio, segnalo come letto, spunte di consegna e lettura, errori di invio spiegati; citazioni, inoltri, messaggi modificati o eliminati dal cliente.",
+      "- **Catalogo e ordini**: messaggi con prodotti e liste di prodotti, gli ordini dal carrello arrivano all'agente; dettagli e stato dell'ordine.",
+      "- **Pagamenti in WhatsApp** dove Meta li offre: **India** (configurazione di pagamento) e **Brasile** (Pix, boleto, link di pagamento), con lo stato del pagamento.",
+      "- **Profilo, numero, blocchi e statistiche**: modifica il profilo aziendale (descrizione, indirizzo, email, siti, settore, foto); qualità, livello e revisione del nome del numero, registrazione, PIN, codice di verifica, iscrizione dell'app; blocca e sblocca contatti; statistiche di messaggi, costi e template in tabelle; il registro degli aggiornamenti dell'account da Meta.",
+      "- **App Meta condivisa**: più istanze con la stessa app Meta, inoltrando le consegne del numero giusto all'istanza che lo possiede, oppure con il webhook del singolo numero puntato qui.",
+      "- **Approvazioni** con l'anteprima completa del template e di ogni valore, approva o rifiuta con un motivo.",
+      "- Tutto anche da API, SDK e React SDK, MCP e nella chat con Polpo; in Claude la scheda **polpo_wabiz_show** mostra la conversazione con i media e i messaggi interattivi.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i canali", to: "/config?section=channels" },
+  },
+  {
     id: "2026-11-26-agent-comm-lines",
     date: "2026-11-26",
     kind: "new",

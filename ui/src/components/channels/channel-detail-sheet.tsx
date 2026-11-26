@@ -7,7 +7,7 @@
  * with its name first.
  */
 import { useState } from "react";
-import { AlertTriangle, Activity, ArrowRightLeft, BookOpen, CheckCircle2, CircleDashed, Contact, Info, KeyRound, Loader2, PlugZap, Radio, Settings2, ShieldCheck, Trash2 } from "lucide-react";
+import { AlertTriangle, Activity, ArrowRightLeft, BookOpen, Building2, CheckCircle2, CircleDashed, Contact, Info, KeyRound, Loader2, PlugZap, Radio, Settings2, ShieldCheck, Trash2 } from "lucide-react";
 import type { NotificationChannelConfig, NotificationChannelType } from "@polpo-ai/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { ChannelLogo } from "@/components/shared/channel-logo";
-import { WaBusinessContacts, WaBusinessLive } from "@/components/config/whatsapp-business-section";
+import { WaBusinessContacts, WaBusinessLive, WaBusinessManage } from "@/components/config/whatsapp-business-section";
 import { SlackConnection } from "./slack-connection";
 import { cn } from "@/lib/utils";
 import {
@@ -209,8 +209,14 @@ function SheetBody({ target, channels, live, onOpenChange, onSave, onCreated, on
         )}
 
         {draft.type === "whatsapp-business" && saved && savedName && (
-          <SheetSection title="Contacts" icon={Contact} description="People who wrote to the number: the 24-hour window, opt-in and opt-out. Record what they told you, or erase a contact with its messages (GDPR)." testId="section-contacts">
+          <SheetSection title="Contacts" icon={Contact} description="People who wrote to the number: the 24-hour window, opt-in and opt-out, blocks. Open one for the conversation (media, buttons, lists, templates, replies, reactions) and to write to them; record what they told you, block them, or erase a contact with its messages (GDPR)." testId="section-contacts">
             <WaBusinessContacts channel={savedName} />
+          </SheetSection>
+        )}
+
+        {draft.type === "whatsapp-business" && saved && savedName && (
+          <SheetSection title="WhatsApp Business account" icon={Building2} description="Templates (create, edit, delete, status and quality), the business profile, the phone number (quality, tier, registration, webhook override), analytics, Meta's account updates and blocked contacts." testId="section-wabiz-manage">
+            <WaBusinessManage channel={savedName} />
           </SheetSection>
         )}
 

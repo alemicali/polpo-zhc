@@ -1,0 +1,27 @@
+/* The WhatsApp Business card: on top of the cards' common look (agent-card/style.css); tokens only. */
+.danger-text { color: var(--w-danger); }
+.warning-text { color: var(--w-warning); }
+.fail-line { overflow-wrap: anywhere; }
+.mono { font-family: var(--font-mono, ui-monospace, monospace); overflow-wrap: anywhere; }
+.section-title { font-size: var(--t-xs); font-weight: var(--w-medium); color: var(--fg2); margin: 10px 0 4px; }
+.link-btn { background: none; border: 0; padding: 0; color: var(--fg); font: inherit; font-weight: var(--w-medium); text-align: start; cursor: pointer; text-decoration: underline; text-decoration-color: var(--line2); }
+.link-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.row-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.preview { overflow-wrap: anywhere; color: var(--fg2); }
+.conv { align-items: center; gap: 10px; }
+.thumb { flex: none; width: 36px; height: 36px; border-radius: var(--r-sm); object-fit: cover; background: var(--fill); }
+.thumb-empty { display: flex; align-items: center; justify-content: center; color: var(--fg2); font-size: var(--t-xs); font-weight: var(--w-medium); }
+.last { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; }
+.bubble { max-width: 85%; padding: 6px 10px; border-radius: var(--r-sm); border: var(--bw) solid var(--line); display: flex; flex-direction: column; gap: 4px; overflow-wrap: anywhere; }
+.bubble.in { align-self: flex-start; background: var(--fill); }
+.bubble.out { align-self: flex-end; background: color-mix(in srgb, var(--w-success-bg) 70%, transparent); }
+.bubble .text { white-space: pre-wrap; }
+.photo { max-width: 100%; max-height: 220px; border-radius: var(--r-sm); object-fit: cover; }
+.media { font-size: var(--t-xs); color: var(--fg2); padding: 4px 8px; border-radius: var(--r-sm); background: var(--fill); }
+.reply { font-size: var(--t-xs); font-weight: var(--w-medium); color: var(--w-info); }
+.wa-btn { text-align: center; font-size: var(--t-xs); font-weight: var(--w-medium); color: var(--w-info); padding: 4px 8px; border-top: var(--bw) solid var(--line); }
+.rows { margin: 0; padding-inline-start: 16px; font-size: var(--t-xs); color: var(--fg2); }
+.meta { display: flex; gap: 6px; justify-content: flex-end; align-items: center; font-size: var(--t-xs); color: var(--fg3); }
+.tick-read { color: var(--w-info); }
+.reactions { margin-inline-end: auto; }

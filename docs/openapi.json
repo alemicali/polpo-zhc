@@ -3896,6 +3896,1251 @@
           }
         }
       },
+      "WaBizOutbound": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "text"
+                ]
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 20000
+              },
+              "previewUrl": {
+                "type": "boolean"
+              },
+              "replyTo": {
+                "type": "string",
+                "description": "Quote this message (its wamid)"
+              }
+            },
+            "required": [
+              "type",
+              "text"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "media"
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "image",
+                  "audio",
+                  "video",
+                  "document",
+                  "sticker"
+                ]
+              },
+              "link": {
+                "type": "string",
+                "format": "uri"
+              },
+              "mediaId": {
+                "type": "string"
+              },
+              "caption": {
+                "type": "string",
+                "maxLength": 1024
+              },
+              "filename": {
+                "type": "string",
+                "maxLength": 240
+              },
+              "replyTo": {
+                "type": "string",
+                "description": "Quote this message (its wamid)"
+              }
+            },
+            "required": [
+              "type",
+              "kind"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "location"
+                ]
+              },
+              "latitude": {
+                "type": "number"
+              },
+              "longitude": {
+                "type": "number"
+              },
+              "name": {
+                "type": "string"
+              },
+              "address": {
+                "type": "string"
+              },
+              "replyTo": {
+                "type": "string",
+                "description": "Quote this message (its wamid)"
+              }
+            },
+            "required": [
+              "type",
+              "latitude",
+              "longitude"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "contacts"
+                ]
+              },
+              "contacts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "firstName": {
+                      "type": "string"
+                    },
+                    "lastName": {
+                      "type": "string"
+                    },
+                    "phones": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "phone": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          },
+                          "waId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "phone"
+                        ]
+                      }
+                    },
+                    "emails": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "email": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "email"
+                        ]
+                      }
+                    },
+                    "company": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "urls": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "url": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "url"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ]
+                },
+                "minItems": 1
+              },
+              "replyTo": {
+                "type": "string",
+                "description": "Quote this message (its wamid)"
+              }
+            },
+            "required": [
+              "type",
+              "contacts"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "reaction"
+                ]
+              },
+              "messageId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "emoji": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "messageId",
+              "emoji"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "buttons"
+                ]
+              },
+              "body": {
+                "type": "string"
+              },
+              "header": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "text"
+                        ]
+                      },
+                      "text": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 60
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "text"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "image",
+                          "video",
+                          "document"
+                        ]
+                      },
+                      "link": {
+                        "type": "string",
+                        "format": "uri"
+                      },
+                      "mediaId": {
+                        "type": "string"
+                      },
+                      "filename": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ]
+                  }
+                ]
+              },
+              "footer": {
+                "type": "string"
+              },
+              "buttons": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "title"
+                  ]
+                },
+                "minItems": 1,
+                "maxItems": 3
+              },
+              "replyTo": {
+                "type": "string",
+                "description": "Quote this message (its wamid)"
+              }
+            },
+            "required": [
+              "type",
+              "body",
+              "buttons"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "list"
+                ]
+              },
+              "body": {
+                "type": "string"
+              },
+              "header": {
+                "type": "string"
+              },
+              "footer": {
+                "type": "string"
+              },
+              "button": {
+                "type": "string"
+              },
+              "sections": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "title"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "rows"
+                  ]
+                },
+                "minItems": 1,
+                "maxItems": 10
+              },
+              "replyTo": {
+                "type": "string",
+                "description": "Quote this message (its wamid)"
+              }
+            },
+            "required": [
+              "type",
+              "body",
+              "button",
+              "sections"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cta_url"
+                ]
+              },
+              "body": {
+                "type": "string"
+              },
+              "header": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "text"
+                        ]
+                      },
+                      "text": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 60
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "text"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "image",
+                          "video",
+                          "document"
+                        ]
+                      },
+                      "link": {
+                        "type": "string",
+                        "format": "uri"
+                      },
+                      "mediaId": {
+                        "type": "string"
+                      },
+                      "filename": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ]
+                  }
+                ]
+              },
+              "footer": {
+                "type": "string"
+              },
+              "displayText": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "replyTo": {
+                "type": "string",
+                "description": "Quote this message (its wamid)"
+              }
+            },
+            "required": [
+              "type",
+              "body",
+              "displayText",
+              "url"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "location_request"
+                ]
+              },
+              "body": {
+                "type": "string"
+              },
+              "replyTo": {
+                "type": "string",
+                "description": "Quote this message (its wamid)"
+              }
+            },
+            "required": [
+              "type",
+              "body"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "flow"
+                ]
+              },
+              "body": {
+                "type": "string"
+              },
+              "header": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "text"
+                        ]
+                      },
+                      "text": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 60
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "text"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "image",
+                          "video",
+                          "document"
+                        ]
+                      },
+                      "link": {
+                        "type": "string",
+                        "format": "uri"
+                      },
+                      "mediaId": {
+                        "type": "string"
+                      },
+                      "filename": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ]
+                  }
+                ]
+              },
+              "footer": {
+                "type": "string"
+              },
+              "flowId": {
+                "type": "string"
+              },
+              "flowName": {
+                "type": "string"
+              },
+              "cta": {
+                "type": "string"
+              },
+              "flowToken": {
+                "type": "string"
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "published",
+                  "draft"
+                ]
+              },
+              "action": {
+                "type": "string",
+                "enum": [
+                  "navigate",
+                  "data_exchange"
+                ]
+              },
+              "screen": {
+                "type": "string"
+              },
+              "data": {
+                "type": "object",
+                "additionalProperties": {
+                  "nullable": true
+                }
+              },
+              "replyTo": {
+                "type": "string",
+                "description": "Quote this message (its wamid)"
+              }
+            },
+            "required": [
+              "type",
+              "body",
+              "cta"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "product"
+                ]
+              },
+              "catalogId": {
+                "type": "string"
+              },
+              "productRetailerId": {
+                "type": "string"
+              },
+              "body": {
+                "type": "string"
+              },
+              "footer": {
+                "type": "string"
+              },
+              "replyTo": {
+                "type": "string",
+                "description": "Quote this message (its wamid)"
+              }
+            },
+            "required": [
+              "type",
+              "productRetailerId"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "product_list"
+                ]
+              },
+              "catalogId": {
+                "type": "string"
+              },
+              "header": {
+                "type": "string"
+              },
+              "body": {
+                "type": "string"
+              },
+              "footer": {
+                "type": "string"
+              },
+              "sections": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "productRetailerIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "minItems": 1
+                    }
+                  },
+                  "required": [
+                    "title",
+                    "productRetailerIds"
+                  ]
+                },
+                "minItems": 1,
+                "maxItems": 10
+              },
+              "replyTo": {
+                "type": "string",
+                "description": "Quote this message (its wamid)"
+              }
+            },
+            "required": [
+              "type",
+              "header",
+              "body",
+              "sections"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "catalog"
+                ]
+              },
+              "body": {
+                "type": "string"
+              },
+              "footer": {
+                "type": "string"
+              },
+              "thumbnailProductRetailerId": {
+                "type": "string"
+              },
+              "replyTo": {
+                "type": "string",
+                "description": "Quote this message (its wamid)"
+              }
+            },
+            "required": [
+              "type",
+              "body"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "voice_call"
+                ]
+              },
+              "body": {
+                "type": "string"
+              },
+              "displayText": {
+                "type": "string"
+              },
+              "ttlMinutes": {
+                "type": "integer"
+              },
+              "payload": {
+                "type": "string"
+              },
+              "replyTo": {
+                "type": "string",
+                "description": "Quote this message (its wamid)"
+              }
+            },
+            "required": [
+              "type",
+              "body"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "call_permission_request"
+                ]
+              },
+              "body": {
+                "type": "string"
+              },
+              "replyTo": {
+                "type": "string",
+                "description": "Quote this message (its wamid)"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "address"
+                ]
+              },
+              "body": {
+                "type": "string"
+              },
+              "country": {
+                "type": "string",
+                "enum": [
+                  "IN"
+                ]
+              },
+              "values": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "savedAddresses": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "nullable": true
+                  }
+                }
+              },
+              "validationErrors": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "replyTo": {
+                "type": "string",
+                "description": "Quote this message (its wamid)"
+              }
+            },
+            "required": [
+              "type",
+              "body",
+              "country"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "order_details"
+                ]
+              },
+              "body": {
+                "type": "string"
+              },
+              "header": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "text"
+                        ]
+                      },
+                      "text": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 60
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "text"
+                    ]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "image",
+                          "video",
+                          "document"
+                        ]
+                      },
+                      "link": {
+                        "type": "string",
+                        "format": "uri"
+                      },
+                      "mediaId": {
+                        "type": "string"
+                      },
+                      "filename": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ]
+                  }
+                ]
+              },
+              "footer": {
+                "type": "string"
+              },
+              "referenceId": {
+                "type": "string"
+              },
+              "goods": {
+                "type": "string",
+                "enum": [
+                  "digital-goods",
+                  "physical-goods"
+                ]
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "retailerId": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "amount": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "quantity": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "saleAmount": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "amount",
+                    "quantity"
+                  ]
+                },
+                "minItems": 1
+              },
+              "tax": {
+                "type": "number"
+              },
+              "shipping": {
+                "type": "number"
+              },
+              "discount": {
+                "type": "number"
+              },
+              "catalogId": {
+                "type": "string"
+              },
+              "expiresAt": {
+                "type": "string"
+              },
+              "expirationText": {
+                "type": "string"
+              },
+              "paymentSettings": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "nullable": true
+                  }
+                }
+              },
+              "replyTo": {
+                "type": "string",
+                "description": "Quote this message (its wamid)"
+              }
+            },
+            "required": [
+              "type",
+              "body",
+              "referenceId",
+              "items"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "order_status"
+                ]
+              },
+              "body": {
+                "type": "string"
+              },
+              "referenceId": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "processing",
+                  "partially-shipped",
+                  "shipped",
+                  "completed",
+                  "canceled"
+                ]
+              },
+              "description": {
+                "type": "string"
+              },
+              "payment": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string"
+                  },
+                  "timestamp": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              },
+              "replyTo": {
+                "type": "string",
+                "description": "Quote this message (its wamid)"
+              }
+            },
+            "required": [
+              "type",
+              "body",
+              "referenceId",
+              "status"
+            ]
+          }
+        ]
+      },
+      "WaBizTemplateInput": {
+        "type": "object",
+        "properties": {
+          "header": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "text"
+                    ]
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "text"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "image",
+                      "video",
+                      "document"
+                    ]
+                  },
+                  "link": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "mediaId": {
+                    "type": "string"
+                  },
+                  "filename": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "location"
+                    ]
+                  },
+                  "latitude": {
+                    "type": "number"
+                  },
+                  "longitude": {
+                    "type": "number"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "address": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "latitude",
+                  "longitude"
+                ]
+              }
+            ]
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            ]
+          },
+          "buttons": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "index": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "payload": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "couponCode": {
+                  "type": "string"
+                },
+                "flowToken": {
+                  "type": "string"
+                },
+                "flowActionData": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "nullable": true
+                  }
+                },
+                "action": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "nullable": true
+                  }
+                }
+              },
+              "required": [
+                "index"
+              ]
+            }
+          },
+          "offerExpiresAt": {
+            "type": "string"
+          },
+          "carousel": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "header": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "image",
+                        "video"
+                      ]
+                    },
+                    "link": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "mediaId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ]
+                },
+                "body": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    }
+                  ]
+                },
+                "buttons": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "index": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "payload": {
+                        "type": "string"
+                      },
+                      "text": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "index"
+                    ]
+                  }
+                }
+              }
+            },
+            "maxItems": 10
+          },
+          "otp": {
+            "type": "string",
+            "maxLength": 15
+          }
+        }
+      },
       "SlackStatus": {
         "type": "object",
         "properties": {
@@ -33382,6 +34627,65 @@
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 3650
+                      },
+                      "media": {
+                        "type": "object",
+                        "properties": {
+                          "download": {
+                            "type": "boolean"
+                          },
+                          "maxBytes": {
+                            "type": "integer",
+                            "minimum": 1024,
+                            "maximum": 104857600
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "catalogId": {
+                        "type": "string",
+                        "pattern": "^\\d{5,30}$"
+                      },
+                      "payments": {
+                        "type": "object",
+                        "properties": {
+                          "market": {
+                            "type": "string",
+                            "enum": [
+                              "IN",
+                              "BR"
+                            ]
+                          },
+                          "configurationName": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          }
+                        },
+                        "required": [
+                          "market"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "marketingMessagesApi": {
+                        "type": "boolean"
+                      },
+                      "appId": {
+                        "type": "string",
+                        "pattern": "^\\d{5,30}$"
+                      },
+                      "sharedApp": {
+                        "type": "object",
+                        "properties": {
+                          "routes": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "string",
+                              "format": "uri"
+                            }
+                          }
+                        },
+                        "additionalProperties": false
                       }
                     },
                     "additionalProperties": false
@@ -46898,6 +48202,9 @@
                   "by": {
                     "type": "string",
                     "maxLength": 80
+                  },
+                  "replyTo": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -46929,6 +48236,629 @@
                   "required": [
                     "ok"
                   ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refused (a rule: window, opt-out, cap, template, or a bad request)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such channel, contact or pending send",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Meta refused the request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/whatsapp-business/{name}/messages": {
+      "post": {
+        "tags": [
+          "WhatsApp Business"
+        ],
+        "summary": "Send any message type (inside the 24-hour window)",
+        "description": "Text, media (image, audio, video, document, sticker: by Meta media id, public link, or a base64 file uploaded first), location, contact cards, a reaction, reply buttons, a list, a CTA URL button, a location request, a flow, a product / product list / the catalog, a call button, a call permission request, an address request (India), order details with payment (India, Brazil: business.payments) and order status. Checked against Meta's limits (characters, counts, media types and sizes), the window and the block list.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "whatsapp-shop",
+              "description": "The channel's name (settings.notifications.channels)"
+            },
+            "required": true,
+            "description": "The channel's name (settings.notifications.channels)",
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "to": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "message": {
+                    "$ref": "#/components/schemas/WaBizOutbound"
+                  },
+                  "file": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "The file, base64 (at most 20 MB; larger documents go by link)"
+                      },
+                      "mimeType": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "filename": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 240
+                      }
+                    },
+                    "required": [
+                      "data",
+                      "mimeType",
+                      "filename"
+                    ]
+                  },
+                  "by": {
+                    "type": "string",
+                    "maxLength": 80
+                  }
+                },
+                "required": [
+                  "to",
+                  "message"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sent: the message id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refused (a rule: window, opt-out, cap, template, or a bad request)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such channel, contact or pending send",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Meta refused the request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/whatsapp-business/{name}/react": {
+      "post": {
+        "tags": [
+          "WhatsApp Business"
+        ],
+        "summary": "React to a message (an empty emoji removes the reaction)",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "whatsapp-shop",
+              "description": "The channel's name (settings.notifications.channels)"
+            },
+            "required": true,
+            "description": "The channel's name (settings.notifications.channels)",
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "to": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "messageId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "emoji": {
+                    "type": "string",
+                    "maxLength": 16
+                  },
+                  "by": {
+                    "type": "string",
+                    "maxLength": 80
+                  }
+                },
+                "required": [
+                  "to",
+                  "messageId",
+                  "emoji"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refused (a rule: window, opt-out, cap, template, or a bad request)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such channel, contact or pending send",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Meta refused the request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/whatsapp-business/{name}/read": {
+      "post": {
+        "tags": [
+          "WhatsApp Business"
+        ],
+        "summary": "Mark a contact's message read (and show typing)",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "whatsapp-shop",
+              "description": "The channel's name (settings.notifications.channels)"
+            },
+            "required": true,
+            "description": "The channel's name (settings.notifications.channels)",
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "messageId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "typing": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "messageId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Marked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refused (a rule: window, opt-out, cap, template, or a bad request)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such channel, contact or pending send",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Meta refused the request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/whatsapp-business/{name}/media/{messageId}": {
+      "get": {
+        "tags": [
+          "WhatsApp Business"
+        ],
+        "summary": "A message's file (inbound downloads, outbound sends)",
+        "description": "The bytes of the media kept with a message (image, audio, voice note, video, document, sticker), with its type. Kept for the retention.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "whatsapp-shop",
+              "description": "The channel's name (settings.notifications.channels)"
+            },
+            "required": true,
+            "description": "The channel's name (settings.notifications.channels)",
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "messageId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "nullable": true
                 }
               }
             }
@@ -47074,6 +49004,9 @@
                   "reason": {
                     "type": "string",
                     "maxLength": 500
+                  },
+                  "components": {
+                    "$ref": "#/components/schemas/WaBizTemplateInput"
                   }
                 },
                 "required": [
@@ -47197,6 +49130,191 @@
       }
     },
     "/api/v1/whatsapp-business/{name}/templates": {
+      "post": {
+        "tags": [
+          "WhatsApp Business"
+        ],
+        "summary": "Create a template (it goes to Meta's review)",
+        "description": "Meta's definition: name (lowercase, digits, underscores), language, category (UTILITY, MARKETING, AUTHENTICATION), components, parameterFormat. Its status comes back through the message_template_status_update webhook and a sync.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "whatsapp-shop",
+              "description": "The channel's name (settings.notifications.channels)"
+            },
+            "required": true,
+            "description": "The channel's name (settings.notifications.channels)",
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512
+                  },
+                  "language": {
+                    "type": "string",
+                    "minLength": 2
+                  },
+                  "category": {
+                    "type": "string",
+                    "enum": [
+                      "UTILITY",
+                      "MARKETING",
+                      "AUTHENTICATION"
+                    ]
+                  },
+                  "components": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "nullable": true
+                      }
+                    },
+                    "minItems": 1,
+                    "description": "Meta's template components (HEADER, BODY, FOOTER, BUTTONS, CAROUSEL…) with their examples"
+                  },
+                  "parameterFormat": {
+                    "type": "string",
+                    "enum": [
+                      "POSITIONAL",
+                      "NAMED"
+                    ]
+                  },
+                  "allowCategoryChange": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "name",
+                  "language",
+                  "category",
+                  "components"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Created: id, status, category",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refused (a rule: window, opt-out, cap, template, or a bad request)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such channel, contact or pending send",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Meta refused the request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
       "get": {
         "tags": [
           "WhatsApp Business"
@@ -47230,6 +49348,1715 @@
         "responses": {
           "200": {
             "description": "Templates (name, language, status, category, components)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refused (a rule: window, opt-out, cap, template, or a bad request)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such channel, contact or pending send",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Meta refused the request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/whatsapp-business/{name}/templates/{id}": {
+      "patch": {
+        "tags": [
+          "WhatsApp Business"
+        ],
+        "summary": "Edit a template (it goes back to review)",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "whatsapp-shop",
+              "description": "The channel's name (settings.notifications.channels)"
+            },
+            "required": true,
+            "description": "The channel's name (settings.notifications.channels)",
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "components": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "nullable": true
+                      }
+                    },
+                    "minItems": 1,
+                    "description": "Meta's template components (HEADER, BODY, FOOTER, BUTTONS, CAROUSEL…) with their examples"
+                  },
+                  "category": {
+                    "type": "string",
+                    "enum": [
+                      "UTILITY",
+                      "MARKETING",
+                      "AUTHENTICATION"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Edited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refused (a rule: window, opt-out, cap, template, or a bad request)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such channel, contact or pending send",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Meta refused the request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/whatsapp-business/{name}/templates/{template}": {
+      "delete": {
+        "tags": [
+          "WhatsApp Business"
+        ],
+        "summary": "Delete a template (every language, or one by id)",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "whatsapp-shop",
+              "description": "The channel's name (settings.notifications.channels)"
+            },
+            "required": true,
+            "description": "The channel's name (settings.notifications.channels)",
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "template",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "id",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refused (a rule: window, opt-out, cap, template, or a bad request)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such channel, contact or pending send",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Meta refused the request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/whatsapp-business/{name}/profile": {
+      "get": {
+        "tags": [
+          "WhatsApp Business"
+        ],
+        "summary": "The business profile (about, address, description, email, websites, vertical, photo)",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "whatsapp-shop",
+              "description": "The channel's name (settings.notifications.channels)"
+            },
+            "required": true,
+            "description": "The channel's name (settings.notifications.channels)",
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refused (a rule: window, opt-out, cap, template, or a bad request)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such channel, contact or pending send",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Meta refused the request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "WhatsApp Business"
+        ],
+        "summary": "Update the business profile (and its photo)",
+        "description": "about ≤ 139, description ≤ 512, address ≤ 256, email ≤ 128, up to 2 websites, vertical. The photo (JPEG or PNG ≤ 5 MB) needs business.appId (Resumable Upload).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "whatsapp-shop",
+              "description": "The channel's name (settings.notifications.channels)"
+            },
+            "required": true,
+            "description": "The channel's name (settings.notifications.channels)",
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "about": {
+                    "type": "string"
+                  },
+                  "address": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string"
+                  },
+                  "websites": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 2
+                  },
+                  "vertical": {
+                    "type": "string"
+                  },
+                  "photo": {
+                    "type": "object",
+                    "properties": {
+                      "data": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "The file, base64 (at most 20 MB; larger documents go by link)"
+                      },
+                      "mimeType": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "filename": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 240
+                      }
+                    },
+                    "required": [
+                      "data",
+                      "mimeType",
+                      "filename"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refused (a rule: window, opt-out, cap, template, or a bad request)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such channel, contact or pending send",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Meta refused the request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/whatsapp-business/{name}/block": {
+      "post": {
+        "tags": [
+          "WhatsApp Business"
+        ],
+        "summary": "Block or unblock contacts",
+        "description": "Meta blocks only people who wrote in the last 24 hours; a blocked contact cannot write to the number and nothing is sent to them.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "whatsapp-shop",
+              "description": "The channel's name (settings.notifications.channels)"
+            },
+            "required": true,
+            "description": "The channel's name (settings.notifications.channels)",
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "users": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "minItems": 1,
+                    "maxItems": 1000
+                  },
+                  "block": {
+                    "type": "boolean"
+                  },
+                  "by": {
+                    "type": "string",
+                    "maxLength": 80
+                  }
+                },
+                "required": [
+                  "users",
+                  "block"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Done and failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refused (a rule: window, opt-out, cap, template, or a bad request)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such channel, contact or pending send",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Meta refused the request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/whatsapp-business/{name}/blocked": {
+      "get": {
+        "tags": [
+          "WhatsApp Business"
+        ],
+        "summary": "Blocked contacts (at Meta)",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "whatsapp-shop",
+              "description": "The channel's name (settings.notifications.channels)"
+            },
+            "required": true,
+            "description": "The channel's name (settings.notifications.channels)",
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refused (a rule: window, opt-out, cap, template, or a bad request)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such channel, contact or pending send",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Meta refused the request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/whatsapp-business/{name}/analytics": {
+      "get": {
+        "tags": [
+          "WhatsApp Business"
+        ],
+        "summary": "Analytics: messages, pricing, templates",
+        "description": "messages: sent and delivered (granularity HALF_HOUR, DAY, MONTH); pricing: cost and volume per category (DAILY, HALF_HOUR, MONTHLY; dimensions COUNTRY, PHONE, PRICING_CATEGORY, PRICING_TYPE, TIER); templates: sent, delivered, read, clicked per template (DAILY, up to 10 ids, 90 days). Conversation analytics are retired by Meta (November 2026).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "whatsapp-shop",
+              "description": "The channel's name (settings.notifications.channels)"
+            },
+            "required": true,
+            "description": "The channel's name (settings.notifications.channels)",
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "messages",
+                "pricing",
+                "templates"
+              ]
+            },
+            "required": true,
+            "name": "kind",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "nullable": true
+            },
+            "required": false,
+            "name": "start",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "nullable": true
+            },
+            "required": false,
+            "name": "end",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "granularity",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "templateIds",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "dimensions",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Meta's data points",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refused (a rule: window, opt-out, cap, template, or a bad request)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such channel, contact or pending send",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Meta refused the request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/whatsapp-business/{name}/phone": {
+      "post": {
+        "tags": [
+          "WhatsApp Business"
+        ],
+        "summary": "Phone number: register, deregister, two-step PIN, verification code, subscribe the app",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "whatsapp-shop",
+              "description": "The channel's name (settings.notifications.channels)"
+            },
+            "required": true,
+            "description": "The channel's name (settings.notifications.channels)",
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "register",
+                      "deregister",
+                      "set_pin",
+                      "request_code",
+                      "verify_code",
+                      "subscribe_app"
+                    ]
+                  },
+                  "pin": {
+                    "type": "string",
+                    "pattern": "^\\d{6}$"
+                  },
+                  "code": {
+                    "type": "string",
+                    "pattern": "^\\d{4,8}$"
+                  },
+                  "method": {
+                    "type": "string",
+                    "enum": [
+                      "SMS",
+                      "VOICE"
+                    ]
+                  },
+                  "language": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "action"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Done",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refused (a rule: window, opt-out, cap, template, or a bad request)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such channel, contact or pending send",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Meta refused the request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/whatsapp-business/{name}/webhook-override": {
+      "get": {
+        "tags": [
+          "WhatsApp Business"
+        ],
+        "summary": "This number's callback at Meta (one app shared by several instances)",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "whatsapp-shop",
+              "description": "The channel's name (settings.notifications.channels)"
+            },
+            "required": true,
+            "description": "The channel's name (settings.notifications.channels)",
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The callback URL here and Meta's configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refused (a rule: window, opt-out, cap, template, or a bad request)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such channel, contact or pending send",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Meta refused the request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "WhatsApp Business"
+        ],
+        "summary": "Point this number's deliveries at this instance (or back to the app's callback)",
+        "description": "set: true overrides the callback for this phone number with this instance's (POLPO_PUBLIC_URL) and its verify token; false removes the override.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "whatsapp-shop",
+              "description": "The channel's name (settings.notifications.channels)"
+            },
+            "required": true,
+            "description": "The channel's name (settings.notifications.channels)",
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "set": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "set"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refused (a rule: window, opt-out, cap, template, or a bad request)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such channel, contact or pending send",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Meta refused the request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/whatsapp-business/{name}/account-events": {
+      "get": {
+        "tags": [
+          "WhatsApp Business"
+        ],
+        "summary": "Account updates from Meta",
+        "description": "Quality rating and messaging limit changes, display name reviews, template status / quality / category changes, capabilities, alerts, newest first.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "whatsapp-shop",
+              "description": "The channel's name (settings.notifications.channels)"
+            },
+            "required": true,
+            "description": "The channel's name (settings.notifications.channels)",
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Events",
             "content": {
               "application/json": {
                 "schema": {

@@ -757,6 +757,15 @@ const WaBusinessSettingsSchema = z.object({
     perAgentPerDay: z.record(z.string(), z.number().int().min(0)).optional(),
   }).strict().optional(),
   retentionDays: z.number().int().min(1).max(3650).optional(),
+  media: z.object({
+    download: z.boolean().optional(),
+    maxBytes: z.number().int().min(1024).max(100 * 1024 * 1024).optional(),
+  }).strict().optional(),
+  catalogId: z.string().regex(/^\d{5,30}$/).optional(),
+  payments: z.object({ market: z.enum(["IN", "BR"]), configurationName: z.string().min(1).max(200).optional() }).strict().optional(),
+  marketingMessagesApi: z.boolean().optional(),
+  appId: z.string().regex(/^\d{5,30}$/).optional(),
+  sharedApp: z.object({ routes: z.record(z.string().regex(/^\d{5,30}$/), z.string().url()).optional() }).strict().optional(),
 }).strict();
 
 /** A value masked by GET /config ("••••1234"); the server restores the stored secret on save. */

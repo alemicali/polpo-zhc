@@ -101,6 +101,7 @@ export const TOOLSETS = {
   watchers: { default: false, description: "Watchers that act when a task reaches a status" },
   vault: { default: false, description: "Vault entries' names and metadata (never values), delete (needs vault scope)" },
   apps: { default: false, description: "Registered apps (start, stop, restart) and browser profiles" },
+  "whatsapp-business": { default: false, description: "WhatsApp Business beyond text and templates: media, buttons, lists, flows, products, orders and payments, reactions, template management, the business profile, blocked contacts, analytics, the phone number, and the polpo_wabiz_show card (sending needs messages scope, changes admin scope)" },
   admin: { default: false, description: "Read-only REST fallback: polpo_api_search, polpo_api_get" },
 } as const;
 

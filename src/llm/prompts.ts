@@ -104,8 +104,8 @@ export function buildReachabilitySection(
     if (ch.type === "whatsapp-business") {
       const audience = (ch as { business?: { audience?: string } }).business?.audience === "operators" ? "operators" : "customers";
       return audience === "customers"
-        ? `- WhatsApp Business "${name}" (official number, Meta Cloud API): customers write to it and only agent ${ch.gateway?.agent ?? "(none set)"} answers them, never you; text only. Business-initiated messages go out only as approved templates (wabiz_* tools).`
-        : `- WhatsApp Business "${name}" (official number): the team's operators write to it${ch.gateway?.agent ? `, answered by agent ${ch.gateway.agent}` : ", and talk to you"}; text only.`;
+        ? `- WhatsApp Business "${name}" (official number, Meta Cloud API): customers write to it and only agent ${ch.gateway?.agent ?? "(none set)"} answers them, never you. Inside the 24-hour window anything can go out (text, media, buttons, lists, flows, products: wabiz_* tools); outside it only approved templates, which wait for an operator's approval.`
+        : `- WhatsApp Business "${name}" (official number): the team's operators write to it${ch.gateway?.agent ? `, answered by agent ${ch.gateway.agent}` : ", and talk to you"} (text, media, voice notes, buttons).`;
     }
     const handle = botUsernames.get(name) ? `@${botUsernames.get(name)}` : `channel "${name}"`;
     const target = ch.gateway?.agent
