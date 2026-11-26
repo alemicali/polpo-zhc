@@ -263,6 +263,51 @@
         ],
         "additionalProperties": false
       },
+      "AgentNotifyChannels": {
+        "anyOf": [
+          {
+            "type": "string",
+            "enum": [
+              "*"
+            ]
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "channel": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+                  "description": "A configured channel's name (settings.notifications.channels)",
+                  "example": "slack"
+                },
+                "targets": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 320
+                  },
+                  "maxItems": 100,
+                  "description": "Targets it may pick (`to`): Slack channel ids, Telegram chat ids, email addresses, or \"*\" for any. Absent: the channel's default target only.",
+                  "example": [
+                    "C0LEADBF"
+                  ]
+                }
+              },
+              "required": [
+                "channel"
+              ],
+              "additionalProperties": false
+            },
+            "maxItems": 50
+          }
+        ],
+        "description": "Channels (and targets) the agent may post to with send_notification"
+      },
       "SuiteRole": {
         "type": "object",
         "properties": {
@@ -2511,6 +2556,13 @@
       "TriggerHmacConfig": {
         "type": "object",
         "properties": {
+          "scheme": {
+            "type": "string",
+            "enum": [
+              "standard-webhooks"
+            ],
+            "description": "standard-webhooks: webhook-id / webhook-timestamp / webhook-signature (v1,<base64>), signed \"{id}.{timestamp}.{body}\", whsec_ secret; the other fields are set for you"
+          },
           "header": {
             "type": "string",
             "example": "x-hub-signature-256"
@@ -2987,6 +3039,13 @@
                 "type": "object",
                 "nullable": true,
                 "properties": {
+                  "scheme": {
+                    "type": "string",
+                    "enum": [
+                      "standard-webhooks"
+                    ],
+                    "description": "standard-webhooks: webhook-id / webhook-timestamp / webhook-signature (v1,<base64>), signed \"{id}.{timestamp}.{body}\", whsec_ secret; the other fields are set for you"
+                  },
                   "header": {
                     "type": "string",
                     "example": "x-hub-signature-256"
@@ -3222,6 +3281,9 @@
                   "current",
                   "previous"
                 ]
+              },
+              "hmacNote": {
+                "type": "string"
               }
             }
           },
@@ -3484,6 +3546,9 @@
                   "current",
                   "previous"
                 ]
+              },
+              "hmacNote": {
+                "type": "string"
               }
             }
           },
@@ -12869,6 +12934,14 @@
                       ]
                     }
                   },
+                  "notifyChannels": {
+                    "$ref": "#/components/schemas/AgentNotifyChannels"
+                  },
+                  "notifyRateLimit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 60
+                  },
                   "voiceReplies": {
                     "type": "string",
                     "enum": [
@@ -12958,6 +13031,13 @@
                       "properties": {
                         "added": {
                           "type": "boolean"
+                        },
+                        "warnings": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "e.g. notifyChannels naming a channel that is not configured (yet)"
                         }
                       },
                       "required": [
@@ -13591,6 +13671,15 @@
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "notifyChannels": {
+                    "$ref": "#/components/schemas/AgentNotifyChannels"
+                  },
+                  "notifyRateLimit": {
+                    "type": "integer",
+                    "nullable": true,
+                    "minimum": 1,
+                    "maximum": 60
                   },
                   "team": {
                     "type": "string"
