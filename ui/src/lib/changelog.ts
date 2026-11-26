@@ -32,6 +32,18 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-27-agent-profile-polish",
+    date: "2026-11-27",
+    kind: "improved",
+    title: "Pagina dell'agente più da profilo",
+    summary: "Ruolo, personalità e modo di comunicare in una sezione «About», responsabilità subito dopo, icone social nei colori originali.",
+    body: [
+      "Nella pagina di un agente la scheda Overview si legge come un profilo: in **About** il ruolo fa da presentazione, poi la personalità e come comunica, in testo pieno. Le **responsabilità** vengono subito dopo, prima dell'organigramma e delle linee di comunicazione.",
+      "",
+      "Le icone dei social hanno i colori originali (Instagram con il suo sfumato, Facebook blu; X, Threads e GitHub nel colore del testo, per il tema scuro). La testa della scheda del profilo resta della stessa altezza anche con una bio lunga, e in Hierarchy «Manager» e «Direct reports» non sono più in maiuscolo come i titoli. In Tools & Skills i connettori sono divisi: prima quelli **attivi** per l'agente, poi quelli **disponibili**.",
+    ].join("\n"),
+  },
+  {
     id: "2026-11-26-agent-socials-links",
     date: "2026-11-26",
     kind: "improved",

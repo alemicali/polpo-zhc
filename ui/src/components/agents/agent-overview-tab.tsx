@@ -26,94 +26,80 @@ export function AgentOverviewTab() {
     <div>
       <div className="space-y-6 pr-4 pb-bottom-nav lg:pb-4">
 
-        {/* Role */}
+        {/* About — a profile: the role as the headline, then who it is and how it talks */}
         <div>
-          <SectionHeader title="Role" icon={Shield} />
+          <SectionHeader title="About" icon={Shield} />
           <Card className="py-0 gap-0">
-            <CardContent className="pt-3 pb-3">
+            <CardContent className="pt-4 pb-4 space-y-4" data-testid="agent-about">
               {agent.role ? (
-                <MessageResponse>{agent.role}</MessageResponse>
+                <div className="text-body leading-relaxed text-foreground">
+                  <MessageResponse>{agent.role}</MessageResponse>
+                </div>
               ) : (
                 <p className="text-xs text-muted-foreground/40 italic">No role configured</p>
+              )}
+              {identity?.personality && (
+                <div className="space-y-1">
+                  <p className="flex items-center gap-1.5 text-caption font-medium text-muted-foreground">
+                    <Heart className="h-3 w-3 text-chart-2" /> Personality
+                  </p>
+                  <p className="text-small leading-relaxed text-foreground">{identity.personality}</p>
+                </div>
+              )}
+              {identity?.tone && (
+                <div className="space-y-1">
+                  <p className="flex items-center gap-1.5 text-caption font-medium text-muted-foreground">
+                    <MessageSquare className="h-3 w-3 text-info" /> How it communicates
+                  </p>
+                  <p className="text-small leading-relaxed text-foreground">{identity.tone}</p>
+                </div>
+              )}
+              {!identity?.personality && !identity?.tone && (
+                <p className="text-xs text-muted-foreground/40 italic">Personality and tone not configured</p>
               )}
             </CardContent>
           </Card>
         </div>
 
-        {/* Personality & Tone */}
+        {/* Responsibilities */}
         <div>
-          <SectionHeader title="Personality & Tone" icon={Heart} />
+          <SectionHeader title="Responsibilities" icon={ListChecks} count={identity?.responsibilities?.length} />
           <Card className="py-0 gap-0">
-            <CardContent className="pt-3 pb-3 divide-y divide-border/20">
-              <div className="pb-3">
-                <div className="flex items-center gap-1.5 mb-1">
-                  <Heart className="h-3 w-3 text-chart-2" />
-                  <span className="text-label text-muted-foreground">Personality</span>
-                </div>
-                {identity?.personality ? (
-                  <p className="text-xs text-muted-foreground leading-relaxed">{identity.personality}</p>
-                ) : (
-                  <p className="text-xs text-muted-foreground/40 italic">Not configured</p>
-                )}
-              </div>
-              <div className="pt-3">
-                <div className="flex items-center gap-1.5 mb-1">
-                  <MessageSquare className="h-3 w-3 text-info" />
-                  <span className="text-label text-muted-foreground">Communication Tone</span>
-                </div>
-                {identity?.tone ? (
-                  <p className="text-xs text-muted-foreground leading-relaxed">{identity.tone}</p>
-                ) : (
-                  <p className="text-xs text-muted-foreground/40 italic">Not configured</p>
-                )}
-              </div>
+            <CardContent className="pt-1 pb-1">
+              {identity?.responsibilities && identity.responsibilities.length > 0 ? (
+                <ul className="divide-y divide-border/40" data-testid="agent-responsibilities">
+                  {identity.responsibilities.map((resp, i) => (
+                    <li key={i} className="py-3 space-y-1">
+                      {typeof resp === "string" ? (
+                        <p className="text-small leading-relaxed text-foreground">{resp}</p>
+                      ) : (
+                        <>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-small font-medium text-foreground">{resp.area}</span>
+                            {resp.priority && (
+                              <Badge
+                                variant="outline"
+                                className={cn("text-micro capitalize", responsibilityPriorityColors[resp.priority])}
+                              >
+                                {resp.priority}
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="text-small leading-relaxed text-muted-foreground">{resp.description}</p>
+                        </>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="py-3 text-xs text-muted-foreground/40 italic">No responsibilities configured</p>
+              )}
             </CardContent>
           </Card>
         </div>
 
         {/* Org chart and communication lines */}
         <AgentCommunicationSection />
-
-        {/* Responsibilities */}
-        <div>
-          <SectionHeader title="Responsibilities" icon={ListChecks} count={identity?.responsibilities?.length} />
-          <Card className="py-0 gap-0">
-            <CardContent className="pt-3 pb-3">
-              {identity?.responsibilities && identity.responsibilities.length > 0 ? (
-                <div className="space-y-2">
-                  {identity.responsibilities.map((resp, i) => {
-                    if (typeof resp === "string") {
-                      return (
-                        <div key={i} className="flex items-start gap-2 text-xs">
-                          <div className="h-1.5 w-1.5 rounded-pill bg-primary mt-1.5 shrink-0" />
-                          <span className="text-muted-foreground">{resp}</span>
-                        </div>
-                      );
-                    }
-                    return (
-                      <div key={i} className="rounded-md border border-border/30 bg-muted/10 px-3 py-2 space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-medium">{resp.area}</span>
-                          {resp.priority && (
-                            <Badge
-                              variant="outline"
-                              className={cn("text-micro capitalize", responsibilityPriorityColors[resp.priority])}
-                            >
-                              {resp.priority}
-                            </Badge>
-                          )}
-                        </div>
-                        <p className="text-caption text-muted-foreground leading-relaxed">{resp.description}</p>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground/40 italic">No responsibilities configured</p>
-              )}
-            </CardContent>
-          </Card>
-        </div>
 
       </div>
     </div>
