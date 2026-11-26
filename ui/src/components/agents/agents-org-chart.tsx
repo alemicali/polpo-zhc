@@ -1,6 +1,9 @@
 /**
  * OrgChartView — ReactFlow-based org chart with team clusters.
  * Consumes AgentsPageContext for teams, agents, and processes.
+ *
+ * The org chart (reportsTo) is always drawn; the communication lines (who may talk to whom,
+ * GET /agents/lines) are an optional overlay, off by default, remembered per viewer.
  */
 
 import { useState, useMemo, useCallback, useEffect } from "react";
@@ -23,8 +26,9 @@ import {
   type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Users, ChevronRight, Zap } from "lucide-react";
-import type { AgentConfig, AgentProcess, Team } from "@polpo-ai/react";
+import { Users, ChevronRight, Zap, Network } from "lucide-react";
+import { useAgentLines } from "@polpo-ai/react";
+import type { AgentConfig, AgentLinesChart, AgentProcess, Team } from "@polpo-ai/react";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { useAgentsPage } from "./agents-page-context";
 import { getTeamColor } from "./agents-team-colors";
@@ -47,6 +51,8 @@ type AgentNodeData = {
   subordinateCount: number;
   teamName: string;
   teamColorIdx: number;
+  /** With the communication lines shown: its lines mode (explicit: false = not restricted yet). */
+  lines?: { mode: string; explicit: boolean };
 };
 
 // ─── Custom nodes ────────────────────────────────────────
@@ -120,6 +126,15 @@ function AgentNode({ data, selected }: NodeProps<Node<AgentNodeData>>) {
             </Badge>
           )}
           {subordinateCount > 0 && <Badge variant="outline" className="text-micro px-1.5 py-0">{subordinateCount} report{subordinateCount !== 1 ? "s" : ""}</Badge>}
+          {data.lines && (
+            <Badge
+              variant="outline"
+              data-testid="agent-node-lines"
+              className={cn("text-micro px-1.5 py-0", !data.lines.explicit && "text-warning border-warning/30")}
+            >
+              {data.lines.explicit ? LINES_LABEL[data.lines.mode] ?? data.lines.mode : "talks to anyone"}
+            </Badge>
+          )}
         </div>
       </div>
       {/* Navigate button — only visible when selected */}
@@ -142,6 +157,54 @@ function AgentNode({ data, selected }: NodeProps<Node<AgentNodeData>>) {
 }
 
 const nodeTypes = { agent: AgentNode, teamHeader: TeamHeaderNode };
+
+// ─── Communication lines overlay ─────────────────────────
+
+const LINES_LABEL: Record<string, string> = { org: "org lines", list: "listed agents", anyone: "talks to anyone", none: "talks to nobody" };
+
+/** Where the viewer's choice to show the communication lines is kept (this browser only). */
+export const SHOW_LINES_KEY = "polpo.orgChart.showLines";
+
+export function readShowLines(): boolean {
+  try { return globalThis.localStorage?.getItem(SHOW_LINES_KEY) === "1"; } catch { return false; }
+}
+
+export function writeShowLines(on: boolean): void {
+  try { globalThis.localStorage?.setItem(SHOW_LINES_KEY, on ? "1" : "0"); } catch { /* storage unavailable */ }
+}
+
+const LINE_COLOR = "color-mix(in oklch, var(--chart-3) 70%, transparent)";
+
+/**
+ * The communication lines between the agents on the chart, one edge per pair (both directions:
+ * arrows at both ends). Agents that talk to anyone ("open") get no edges (they would join
+ * everyone): their node says so instead.
+ */
+export function communicationLineEdges(chart: AgentLinesChart, onChart: ReadonlySet<string>): Edge[] {
+  const directed = chart.edges.filter((e) => e.kind !== "open" && onChart.has(e.from) && onChart.has(e.to));
+  const has = new Set(directed.map((e) => `${e.from}>${e.to}`));
+  const edges: Edge[] = [];
+  const done = new Set<string>();
+  for (const e of directed) {
+    const pair = [e.from, e.to].sort().join("~");
+    if (done.has(pair)) continue;
+    done.add(pair);
+    const both = has.has(`${e.to}>${e.from}`);
+    const marker = { type: MarkerType.ArrowClosed, width: 12, height: 12, color: LINE_COLOR };
+    edges.push({
+      id: `line-${pair}`,
+      source: e.from,
+      target: e.to,
+      type: "default",
+      className: "communication-line",
+      style: { stroke: LINE_COLOR, strokeWidth: 1.5, strokeDasharray: "3 4" },
+      markerEnd: marker,
+      ...(both ? { markerStart: { ...marker, orient: "auto-start-reverse" } } : {}),
+      data: { kind: "communication", both },
+    });
+  }
+  return edges;
+}
 
 // ─── Layout constants ────────────────────────────────────
 
@@ -569,17 +632,34 @@ function OrgChartInner() {
     return buildShowAllLayout(teams, processes, onClickTeam);
   }, [mode, focusedTeam, teams, processes, onClickTeam]);
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(layoutEdges);
+  // the communication lines: an overlay the viewer turns on (remembered in this browser)
+  const [showLines, setShowLinesState] = useState(readShowLines);
+  const setShowLines = useCallback((on: boolean) => { setShowLinesState(on); writeShowLines(on); }, []);
+  const { chart } = useAgentLines();
+  const linesOverlay = useMemo(() => {
+    if (!showLines || !chart || mode === "clusters") return { nodes: layoutNodes, edges: layoutEdges };
+    const byAgent = new Map(chart.agents.map((l) => [l.agent, l]));
+    const onChart = new Set(layoutNodes.filter((n) => n.type === "agent").map((n) => n.id));
+    return {
+      nodes: layoutNodes.map((n) => {
+        const l = n.type === "agent" ? byAgent.get(n.id) : undefined;
+        return l ? { ...n, data: { ...n.data, lines: { mode: l.mode, explicit: l.explicit } } } : n;
+      }),
+      edges: [...layoutEdges, ...communicationLineEdges(chart, onChart)],
+    };
+  }, [showLines, chart, mode, layoutNodes, layoutEdges]);
+
+  const [nodes, setNodes, onNodesChange] = useNodesState(linesOverlay.nodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(linesOverlay.edges);
 
   useEffect(() => {
-    setNodes(layoutNodes);
-    setEdges(layoutEdges);
+    setNodes(linesOverlay.nodes);
+    setEdges(linesOverlay.edges);
     requestAnimationFrame(() => {
       const padding = mode === "detail" ? 0.1 : 0.25;
       fitView({ padding, duration: 300 });
     });
-  }, [layoutNodes, layoutEdges, setNodes, setEdges, fitView, mode]);
+  }, [linesOverlay, setNodes, setEdges, fitView, mode]);
 
   if (agents.length === 0) return null;
 
@@ -606,7 +686,24 @@ function OrgChartInner() {
           </Badge>
         )}
       </div>
-      <div className="absolute top-3 right-3 z-10">
+      <div className="absolute top-3 right-3 z-10 flex items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          aria-pressed={showLines}
+          data-testid="toggle-communication-lines"
+          className={cn(
+            "h-7 text-xs backdrop-blur-surface shadow-card border",
+            showLines
+              ? "bg-primary/15 border-primary/40 text-primary hover:bg-primary/25"
+              : "bg-card/90 border-border/40 text-muted-foreground hover:text-foreground",
+          )}
+          onClick={() => setShowLines(!showLines)}
+          title={showLines ? "Hide communication lines" : "Show who may talk to whom"}
+        >
+          <Network className="h-3 w-3 mr-1" />
+          Communication lines
+        </Button>
         {mode !== "detail" && (
           <Button
             variant="outline"
@@ -623,6 +720,22 @@ function OrgChartInner() {
           </Button>
         )}
       </div>
+
+      {showLines && chart && (
+        <div
+          className="absolute bottom-3 right-3 z-10 max-w-xs rounded-md border border-border/40 bg-card/90 px-3 py-2 text-caption text-muted-foreground backdrop-blur-surface shadow-card"
+          data-testid="communication-lines-legend"
+        >
+          {mode === "clusters"
+            ? "Open a team (or Show all) to see who may talk to whom."
+            : "Dashed lines: who may talk to whom (arrows both ways: both can). Polpo talks to every agent; every agent can escalate to its manager."}
+          {chart.unrestricted.length > 0 && (
+            <p className="mt-1 text-warning">
+              {chart.unrestricted.length} agent{chart.unrestricted.length === 1 ? "" : "s"} not restricted yet (talk to anyone): set their lines on their page.
+            </p>
+          )}
+        </div>
+      )}
 
       <ReactFlow
         nodes={nodes} edges={edges}

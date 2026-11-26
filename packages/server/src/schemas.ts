@@ -583,6 +583,13 @@ export const AgentConnectorToolsSchema = z.record(
   z.union([z.literal("*"), z.array(z.string().trim().min(1).max(200)).max(1000)]),
 );
 
+/** Communication lines: who the agent may talk to (ask_agent, message_agent, rooms). See @polpo-ai/core agent-lines. */
+export const AgentTalksToSchema = z.object({
+  mode: z.enum(["org", "list", "anyone", "none"]).openapi({ description: "org: its manager, its direct reports and the extra agents; list: only the listed agents; anyone: every agent; none: no agent (Polpo always talks to it)" }),
+  agents: z.array(z.string().min(1)).optional().openapi({ description: "Extra agents (org) or the only agents (list)" }),
+  acceptFrom: z.enum(["anyone", "lines"]).optional().openapi({ description: "lines: refuse senders outside its own lines (default anyone)" }),
+}).strict().openapi("AgentTalksTo");
+
 export const AddAgentSchema = z.object({
   name: z.string().min(1).refine((n) => !n.trim().startsWith("$"), { message: 'Agent names starting with "$" are reserved' }),
   role: z.string().optional(),
@@ -598,6 +605,8 @@ export const AddAgentSchema = z.object({
   // Identity & hierarchy (vault credentials managed via encrypted store)
   identity: AgentIdentitySchema.optional(),
   reportsTo: z.string().optional(),
+  /** Communication lines; omitted: { mode: "org" } for a new agent. */
+  talksTo: AgentTalksToSchema.optional(),
   // Extended tool categories (browser, email, vault, image, video, audio, excel, pdf, docx, search — HTTP is always-on core)
   browserProfile: z.string().optional(),
   browserEgress: z.string().optional(),
@@ -636,6 +645,8 @@ export const UpdateAgentSchema = z.object({
   maxConcurrency: z.number().int().positive().optional(),
   identity: AgentIdentitySchema.optional(),
   reportsTo: z.string().optional(),
+  /** Communication lines; null removes them (the agent talks to anyone, as agents from before the lines). */
+  talksTo: AgentTalksToSchema.nullable().optional(),
   reasoning: z.string().optional(),
   /** Where this agent's tools run (normalized server-side; see packages/core/src/sandbox.ts). */
   sandbox: z.any().optional(),

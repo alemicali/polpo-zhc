@@ -17,6 +17,9 @@
  * new message from a person stops the chain that was running, except the answers of agents that
  * person's earlier message mentioned: a mention is always answered (a quick follow-up never
  * swallows it).
+ *
+ * Communication lines: an agent's reply sets off (by mention or by intent) only the agents its
+ * lines reach (`mayTalk`); Polpo's replies and a person's messages are not limited.
  */
 
 import { nanoid } from "nanoid";
@@ -68,6 +71,8 @@ export interface RoomEngineOptions {
   /** Who an agent is, for its messages and the classifier. */
   profile: (agent: string) => Promise<AgentProfile>;
   intent?: GroupIntentArbiter;
+  /** Communication lines: whether agent `from` may set off agent `to` (Polpo is never limited). Without it: anyone. */
+  mayTalk?: (from: string, to: string) => boolean | Promise<boolean>;
   emit: (event: RoomEvent) => void;
   log?: (level: "info" | "warn", message: string) => void;
 }
@@ -166,7 +171,12 @@ export class RoomEngine {
     // agents' rounds stop when a person wrote again; a person's own message still gets the agents it mentions
     if (hop > 0 && this.stale(room, chain)) return;
 
-    const profiles = (await this.profiles(room)).filter((p) => !(message.authorKind === "agent" && p.id === message.authorId));
+    let profiles = (await this.profiles(room)).filter((p) => !(message.authorKind === "agent" && p.id === message.authorId));
+    // an agent's reply reaches only the agents its communication lines allow (Polpo talks to all)
+    if (message.authorKind === "agent" && message.authorId !== POLPO && this.opts.mayTalk) {
+      const allowed = await Promise.all(profiles.map(async (p) => p.id === POLPO || await this.opts.mayTalk!(message.authorId, p.id)));
+      profiles = profiles.filter((_, i) => allowed[i]);
+    }
     if (profiles.length === 0) return;
     const mentioned = [...new Set([...mentionedAgents(message.text, profiles),
       ...(message.authorKind === "person" ? (message.addressedTo ?? []).filter((id) => profiles.some((p) => p.id === id)) : [])])];

@@ -69,7 +69,7 @@ import { bridgedReadOnly, bridgedTools, BRIDGED_TOOLS, executeBridgedTool, isBri
 import { connectorManagerFor, connectorRedirectUri } from "../mcp/runtime.js";
 import { isMcpToolName, toolResultText } from "../mcp/tools.js";
 import { computerContext, normalizeSandboxSettings, unknownComputersProblem, type EffectiveSandbox } from "@polpo-ai/core/sandbox";
-import { normalizeConnectorTools, describeTaskToolScope } from "@polpo-ai/core";
+import { normalizeConnectorTools, describeTaskToolScope, normalizeTalksTo, talksToProblem, type AgentTalksTo } from "@polpo-ai/core";
 import { TaskToolScopeError } from "../core/task-tool-scope.js";
 import { loadPolpoConfig, savePolpoConfig } from "../core/config.js";
 import { inkApiUrl, inkRegistry } from "../core/ink-config.js";
@@ -995,6 +995,7 @@ const addAgentTool: Tool = {
     allowedPaths: Type.Optional(Type.Array(Type.String(), { description: "Filesystem paths this agent can access (relative to workDir)" })),
     allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (e.g. ['read','write','bash','browser_*','email_*','image_*','video_*','audio_*','excel_*','pdf_*','docx_*','whatsapp_*','phone_*']). phone_* enables VAPI calls for this agent. Vault tools are always available. Omit for core coding tools only." })),
     reportsTo: Type.Optional(Type.String({ description: "Name of the agent this one reports to (org chart hierarchy, e.g. 'lead-dev')" })),
+    talksTo: Type.Optional(talksToParam("Its communication lines (default for a new agent: org)")),
     team: Type.Optional(Type.String({ description: "Team name to add the agent to (default: first team)" })),
     reasoning: Type.Optional(Type.Union([Type.Literal("off"), Type.Literal("minimal"), Type.Literal("low"), Type.Literal("medium"), Type.Literal("high"), Type.Literal("xhigh"), Type.Literal("max")], { description: "Agent thinking/reasoning level. Overrides global settings.reasoning." })),
     maxTurns: Type.Optional(Type.Number({ description: "Max conversation turns before agent stops. Default: 200" })),
@@ -1047,6 +1048,17 @@ const agentSandboxParam = Type.Optional(Type.Object({
   inherit: Type.Optional(Type.Boolean({ description: "true = remove the agent's overrides and use the instance defaults" })),
 }, { description: "Where this agent's commands run (sandbox). Omit to keep current. Default: inherit the instance (this machine unless configured). When the instance isolates agents that read external content, those run at least in bwrap unless a person allows otherwise in the agent's Sandbox tab." }));
 
+/** Communication lines (agent-lines.ts): who an agent may talk to with ask_agent / message_agent and in rooms. */
+function talksToParam(description: string) {
+  return Type.Object({
+    mode: Type.Union([Type.Literal("org"), Type.Literal("list"), Type.Literal("anyone"), Type.Literal("none")], {
+      description: "org: its manager, its direct reports and the extra agents; list: only the listed agents; anyone: every agent; none: no agent. You (Polpo) always talk to it, and it can always escalate to its manager",
+    }),
+    agents: Type.Optional(Type.Array(Type.String(), { description: "Extra agents (org) or the only agents (list)" })),
+    acceptFrom: Type.Optional(Type.Union([Type.Literal("anyone"), Type.Literal("lines")], { description: "lines: it also refuses senders outside its own lines (default anyone)" })),
+  }, { description });
+}
+
 const updateAgentTool: Tool = {
   name: "update_agent",
   description: "Update an existing agent's configuration or move it to another team: role, model, prompt, tools, skills, engine (polpo or a Claude Code / Codex / OpenCode harness), "
@@ -1066,6 +1078,7 @@ const updateAgentTool: Tool = {
     allowedPaths: Type.Optional(Type.Array(Type.String(), { description: "New allowed paths (replaces existing)" })),
     allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (replaces existing). Include 'browser_*', 'email_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*', 'whatsapp_*', 'storage_*' or 'phone_*' to grant those categories. storage_* gives the storage tools for the buckets granted to the agent on the Storage page. phone_* enables the VAPI phone tools for this agent and requires VAPI credentials in its vault or environment. When adding a category, preserve the agent's existing allowedTools entries. Vault tools are always available. Omit to keep current." })),
     reportsTo: Type.Optional(Type.String({ description: "Name of the agent this one reports to. Use empty string to remove." })),
+    talksTo: Type.Optional(talksToParam("Its communication lines (replaces them); mode anyone lifts every restriction")),
     team: Type.Optional(Type.String({ description: "Move agent to a different team" })),
     reasoning: Type.Optional(Type.Union([Type.Literal("off"), Type.Literal("minimal"), Type.Literal("low"), Type.Literal("medium"), Type.Literal("high"), Type.Literal("xhigh"), Type.Literal("max")], { description: "Agent thinking/reasoning level" })),
     maxTurns: Type.Optional(Type.Number({ description: "Max conversation turns" })),
@@ -4419,6 +4432,7 @@ async function execAddAgent(polpo: Orchestrator, args: Record<string, unknown>):
     allowedPaths: args.allowedPaths as string[] | undefined,
     allowedTools: args.allowedTools as string[] | undefined,
     reportsTo: args.reportsTo as string | undefined,
+    talksTo: args.talksTo ? normalizeTalksTo(args.talksTo as AgentTalksTo) : undefined,
     reasoning: args.reasoning as string | undefined,
     maxTurns: args.maxTurns as number | undefined,
     maxConcurrency: args.maxConcurrency as number | undefined,
@@ -4478,6 +4492,11 @@ async function execUpdateAgent(polpo: Orchestrator, args: Record<string, unknown
   if (args.allowedPaths !== undefined) updates.allowedPaths = args.allowedPaths as string[];
   if (args.allowedTools !== undefined) updates.allowedTools = args.allowedTools as string[];
   if (args.reportsTo !== undefined) updates.reportsTo = reportsTo;
+  if (args.talksTo !== undefined) {
+    const problem = talksToProblem(args.talksTo);
+    if (problem) return `Error: ${problem}`;
+    updates.talksTo = normalizeTalksTo(args.talksTo as AgentTalksTo);
+  }
   if (args.reasoning !== undefined) updates.reasoning = args.reasoning as string;
   if (args.maxTurns !== undefined) updates.maxTurns = args.maxTurns as number;
   if (args.maxConcurrency !== undefined) updates.maxConcurrency = args.maxConcurrency as number;

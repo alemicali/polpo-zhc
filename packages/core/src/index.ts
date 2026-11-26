@@ -53,6 +53,7 @@ export type { PeerStore } from "./peer-store.js";
 export type { TeamStore } from "./team-store.js";
 export type { AgentStore } from "./agent-store.js";
 export * from "./agent-versions.js";
+export * from "./agent-lines.js";
 export * from "./agent-tests.js";
 export * from "./agent-suites.js";
 export type { VaultStore } from "./vault-store.js";

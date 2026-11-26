@@ -81,6 +81,8 @@ export interface AddAgentRequest {
   // Identity & hierarchy (vault credentials managed via encrypted store)
   identity?: import("../core/types.js").AgentIdentity;
   reportsTo?: string;
+  /** Communication lines (omitted: { mode: "org" } for a new agent). */
+  talksTo?: import("@polpo-ai/core").AgentTalksTo;
   // Extended tool categories (browser, email, vault, image, video, audio, excel, pdf, docx, search — HTTP is always-on core)
   browserProfile?: string;
 }

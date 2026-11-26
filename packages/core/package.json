@@ -58,6 +58,10 @@
       "types": "./dist/agent-versions.d.ts",
       "import": "./dist/agent-versions.js"
     },
+    "./agent-lines": {
+      "types": "./dist/agent-lines.d.ts",
+      "import": "./dist/agent-lines.js"
+    },
     "./agent-tests": {
       "types": "./dist/agent-tests.d.ts",
       "import": "./dist/agent-tests.js"

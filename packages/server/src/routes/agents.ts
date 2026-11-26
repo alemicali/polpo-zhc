@@ -1,7 +1,7 @@
 import { normalizeSandboxSettings } from "@polpo-ai/core/sandbox";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { join, extname } from "node:path";
-import { normalizeConnectorTools, unknownComputersProblem, type FileSystem } from "@polpo-ai/core";
+import { agentLinesChart, normalizeConnectorTools, normalizeTalksTo, unknownComputersProblem, type FileSystem } from "@polpo-ai/core";
 import { AddAgentSchema, UpdateAgentSchema, RenameTeamSchema, AddTeamSchema } from "../schemas.js";
 import { redactAgentConfig, redactTeam, sanitizeTranscriptEntry } from "../security.js";
 import { buildETag, contentFingerprint, handleConditional } from "../etag.js";
@@ -186,6 +186,7 @@ export function agentRoutes(getDeps: () => {
           model: a.model,
           team: a.team,
           reportsTo: a.reportsTo,
+          ...(a.talksTo ? { talksTo: a.talksTo } : {}),
           volatile: a.volatile,
           createdAt: a.createdAt,
           ...(slimIdentity && Object.keys(slimIdentity).length > 0 ? { identity: slimIdentity } : {}),
@@ -251,6 +252,7 @@ export function agentRoutes(getDeps: () => {
         pipeline: body.pipeline,
         identity: body.identity,
         reportsTo: body.reportsTo,
+        ...(body.talksTo ? { talksTo: normalizeTalksTo(body.talksTo) } : {}),
         browserProfile: body.browserProfile,
         browserEgress: body.browserEgress,
         ...(body.computers !== undefined && { computers: body.computers }),
@@ -573,6 +575,8 @@ export function agentRoutes(getDeps: () => {
       ...(body.allowedPaths !== undefined && { allowedPaths: body.allowedPaths }),
       ...(body.allowedTools !== undefined && { allowedTools: body.allowedTools }),
       ...(typeof body.reportsTo === "string" && { reportsTo }),
+      // null: no lines (talks to anyone)
+      ...(body.talksTo !== undefined && { talksTo: body.talksTo ? normalizeTalksTo(body.talksTo) : undefined }),
       ...(body.reasoning !== undefined && { reasoning: body.reasoning }),
       ...(body.sandbox !== undefined && { sandbox: normalizeSandboxSettings(body.sandbox) }),
       ...(body.compaction !== undefined && { compaction: body.compaction ?? undefined }),
@@ -630,6 +634,35 @@ export function agentRoutes(getDeps: () => {
     const updated = (await deps.getAgents()).find(a => a.name === name);
     const state = updated ? await versionState(deps, updated) : undefined;
     return c.json({ ok: true, data: updated ? { ...redactAgentConfig(updated), ...(state ? { versioning: { ...state, ...versioning } } : {}) } : null }, 200);
+  });
+
+  // GET /agents/lines — the org chart and the communication lines between agents
+  const getLinesRoute = createRoute({
+    method: "get",
+    path: "/lines",
+    tags: ["Agents"],
+    summary: "Org chart and communication lines",
+    description: "Every agent's communication lines (mode, manager, direct reports, extra agents, who it can reach) and the directed edges "
+      + "between agents (from may talk to to). `unrestricted`: agents with no lines set (from before the lines): they talk to anyone. Polpo talks to every agent.",
+    responses: {
+      200: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({
+          agents: z.array(z.object({
+            agent: z.string(), mode: z.enum(["org", "list", "anyone", "none"]), explicit: z.boolean(), manager: z.string().optional(),
+            reports: z.array(z.string()), agents: z.array(z.string()), acceptFrom: z.enum(["anyone", "lines"]), reachable: z.array(z.string()),
+          })),
+          edges: z.array(z.object({ from: z.string(), to: z.string(), kind: z.enum(["manager", "report", "extra", "open"]) })),
+          unrestricted: z.array(z.string()),
+        }) }) } },
+        description: "The team's lines",
+      },
+    },
+  });
+
+  app.openapi(getLinesRoute, async (c) => {
+    const deps = getDeps();
+    const agents = (await deps.getAgents()).filter((a) => !a.volatile);
+    return c.json({ ok: true, data: agentLinesChart(agents) }, 200);
   });
 
   // GET /agents/:name — single agent detail (registered after static routes to avoid conflicts)

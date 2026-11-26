@@ -433,6 +433,13 @@ export interface AgentConfig {
   /** Agent this one reports to — org chart hierarchy for escalation.
    *  When a task fails or needs a decision, escalates up the chain. */
   reportsTo?: string;
+  /**
+   * Communication lines: which agents this one may talk to with ask_agent / message_agent (and set
+   * off in rooms). Missing = "anyone" (agents created before the lines existed); new agents get
+   * `{ mode: "org" }`. Polpo always talks to everyone, and escalate always reaches reportsTo.
+   * See agent-lines.ts.
+   */
+  talksTo?: import("./agent-lines.js").AgentTalksTo;
   /** System prompt appended to the agent's base prompt */
   systemPrompt?: string;
   /** Installed skill names (e.g. "find-skills", "frontend-design") */
@@ -831,6 +838,11 @@ export interface RunnerConfig {
   whatsappDbPath?: string;
   /** WhatsApp Baileys profile path (for whatsapp_send — creates a temporary connection). */
   whatsappProfilePath?: string;
+  /**
+   * Who the agent can talk to from this run (its communication lines when the run started): the
+   * run's ask_agent / message_agent / escalate tools name them, and go through notifySocket.
+   */
+  agentLines?: { reachable: string[]; manager?: string; mode: import("./agent-lines.js").AgentLinesMode };
 }
 
 // === Polpo File Config (.polpo/polpo.json — persistent project configuration) ===

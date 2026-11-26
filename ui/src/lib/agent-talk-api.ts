@@ -12,13 +12,15 @@ export interface AgentExchange {
   id: string;
   from: string;
   to: string;
-  kind: "question" | "handoff";
+  kind: "question" | "handoff" | "escalation";
   message: string;
   status: "working" | "answered" | "failed";
   answer?: string;
   error?: string;
   /** The conversation the writer was in (the answer goes back there). */
   fromSessionId?: string;
+  /** The task the writer was working, when it wrote from a task run. */
+  fromTaskId?: string;
   /** The pair's conversation (a session of the receiving agent). */
   dmSessionId?: string;
   startedAt: string;

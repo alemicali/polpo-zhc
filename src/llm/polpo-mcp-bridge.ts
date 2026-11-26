@@ -53,6 +53,7 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_setup_wait", name: "setup_wait" },
   // Team
   { mcp: "polpo_agent_get", name: "agent_get" },
+  { mcp: "polpo_agent_lines", name: "agent_lines", group: "learning" },
   // Connectors: adding one never takes a secret in chat (token / OAuth app → setup link)
   { mcp: "polpo_connector_add", name: "connector_add" },
   { mcp: "polpo_connector_catalog", name: "connector_catalog", group: "connectors" },

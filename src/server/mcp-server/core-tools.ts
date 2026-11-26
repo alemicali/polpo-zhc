@@ -33,19 +33,22 @@ async function loadAgentCard(deps: McpDeps, name: string): Promise<{ ok: true; c
   const list = (agents.data as AgentCardAgent[]) ?? [];
   const agent = list.find((a) => a.name === name) ?? list.find((a) => a.name.toLowerCase() === name.toLowerCase() || a.identity?.displayName?.toLowerCase() === name.toLowerCase());
   if (!agent) return { ok: false, error: `No agent "${name}". Agents: ${list.map((a) => a.name).join(", ") || "none"}` };
-  const [tasks, drive, connectors, appearance, detail] = await Promise.all([
+  const [tasks, drive, connectors, appearance, detail, lines] = await Promise.all([
     deps.api("GET", "/api/v1/tasks").then(unwrap),
     deps.api("GET", `/api/v1/drive/${enc(agent.name)}`).then(unwrap),
     deps.api("GET", "/api/v1/connectors").then(unwrap),
     cardAppearance(deps),
     // its production version and draft state (agent versions)
     deps.api("GET", `/api/v1/agents/${enc(agent.name)}`).then(unwrap),
+    // its communication lines
+    deps.api("GET", "/api/v1/agents/lines").then(unwrap),
   ]);
   const versioning = detail.ok ? (detail.data as { versioning?: AgentCardAgent["versioning"] })?.versioning : undefined;
   const card = buildAgentCard({
     agent: versioning ? { ...agent, versioning } : agent,
     tasks: tasks.ok ? (tasks.data as Parameters<typeof buildAgentCard>[0]["tasks"]) ?? [] : [],
     ...(drive.ok ? { drive: drive.data as Parameters<typeof buildAgentCard>[0]["drive"] } : {}),
+    ...(lines.ok ? { lines: lines.data as Parameters<typeof buildAgentCard>[0]["lines"] } : {}),
     ...(connectors.ok ? { connectors: (connectors.data as { connectors?: Parameters<typeof buildAgentCard>[0]["connectors"] })?.connectors ?? [] } : {}),
     now: new Date(),
     key: { createdAt: Date.now(), seq: ++cardSeq },
@@ -74,6 +77,7 @@ const cardOutput = z.object({
   routine: z.array(looseObject).optional().describe("What it does on a schedule, and what it proposes"),
   journal: z.array(looseObject).optional().describe("Its latest reflections"),
   connectors: z.array(looseObject).optional().describe("The connectors it may use, with their accounts (gmail, gmail-2…) and how many of their tools it gets"),
+  lines: looseObject.optional().describe("Its communication lines: mode, whether set, the agents it can talk to, its manager (escalate)"),
 }).passthrough();
 
 const cardResult = (card: AgentCard) => ({
