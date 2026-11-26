@@ -754,7 +754,7 @@ const orMasked = <T extends z.ZodTypeAny>(schema: T, allowMasked: boolean) =>
   allowMasked ? z.union([schema, MaskedSecret]) : schema;
 
 const channelConfigSchema = (allowMasked: boolean) => z.object({
-  type: z.enum(["slack", "email", "telegram", "whatsapp", "whatsapp-business", "webhook", "push"]),
+  type: z.enum(["slack", "email", "telegram", "whatsapp", "whatsapp-business", "webhook", "push", "expo-push"]),
   // Slack
   webhookUrl: orMasked(z.string().url(), allowMasked).optional(),
   // Email
@@ -788,6 +788,8 @@ const channelConfigSchema = (allowMasked: boolean) => z.object({
   appSecretRef: VaultRefSchema.optional(),
   verifyTokenRef: VaultRefSchema.optional(),
   business: WaBusinessSettingsSchema.optional(),
+  // Slack inbound (Socket Mode): the tokens are in the vault ($channels), never here
+  slack: z.object({ channelMessages: z.enum(["mentions", "all"]).optional() }).strict().optional(),
   // Gateway
   gateway: ChannelGatewaySchema.optional(),
 });
@@ -809,6 +811,12 @@ export const SendNotificationSchema = z.object({
   body: z.string().min(1),
   severity: z.enum(["info", "warning", "critical"]).optional(),
   delayMs: z.number().int().min(0).optional(),
+  /** Channels that can target a chat: the chat (a Slack channel id, C…/D…/G…). Default: the channel's own. */
+  to: z.string().min(1).max(200).optional(),
+  /** Slack: post in this thread (the parent message's ts, e.g. "1712345678.123456"). */
+  threadTs: z.string().regex(/^\d{1,10}\.\d{6}$/, "a Slack message ts like 1712345678.123456").optional(),
+  /** Answer 400 when the channel refuses the message (immediate sends), instead of recording the failure only. */
+  throwOnError: z.boolean().optional(),
 });
 
 // ── Approval schemas ──────────────────────────────────────────────────

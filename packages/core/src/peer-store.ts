@@ -39,7 +39,8 @@ export interface PeerStore {
   clearSession(peerId: string): Promise<void>;
 
   // Identity linking
-  linkPeers(peerId: string, linkedTo: string): Promise<void>;
+  /** Link a peer to another identity (sessions shared across channels); null unlinks it. */
+  linkPeers(peerId: string, linkedTo: string | null): Promise<void>;
   resolveCanonicalId(peerId: string): Promise<string>;
 
   // Presence (in-memory, ephemeral)

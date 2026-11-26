@@ -307,7 +307,7 @@ export function TelegramConnect({ api, channel, gatewayRunning, currentChatId, o
 interface PairingRequest { code: string; peerId: string; displayName?: string; externalId: string; createdAt: string }
 interface Peer { id: string; displayName?: string; channel: string; lastSeenAt?: string }
 
-export function ChannelAccessPanel({ api, channel }: { api: PolpoApi; channel: "telegram" | "whatsapp" }) {
+export function ChannelAccessPanel({ api, channel }: { api: PolpoApi; channel: "telegram" | "whatsapp" | "slack" }) {
   const [pending, setPending] = useState<PairingRequest[]>([]);
   const [allowed, setAllowed] = useState<string[]>([]);
   const [peers, setPeers] = useState<Record<string, Peer>>({});

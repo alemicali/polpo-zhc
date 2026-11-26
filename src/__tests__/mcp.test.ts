@@ -141,7 +141,7 @@ describe("Polpo MCP server", () => {
       "polpo_sync_run", "polpo_custom_providers_list", "polpo_custom_provider_save", "polpo_custom_provider_remove", "polpo_provider_disconnect",
       "polpo_channel_save", "polpo_channel_remove",
       "polpo_channel_routes_list", "polpo_channel_route_set", "polpo_telegram_verify", "polpo_channel_invite",
-      "polpo_channel_peers", "polpo_channel_allowlist", "polpo_channel_pairing", "polpo_whatsapp_login", "polpo_whatsapp_login_wait", "polpo_whatsapp_logout",
+      "polpo_channel_peers", "polpo_channel_allowlist", "polpo_channel_pairing", "polpo_channel_access_set", "polpo_peer_presence", "polpo_peer_link", "polpo_slack_status", "polpo_whatsapp_login", "polpo_whatsapp_login_wait", "polpo_whatsapp_logout",
       "polpo_setup_wait",
       "polpo_rooms_list", "polpo_room_create", "polpo_room_update", "polpo_room_delete", "polpo_room_messages", "polpo_room_post", "polpo_room_wait",
       "polpo_chat_sessions_list", "polpo_chat_messages", "polpo_chat_session_update", "polpo_chat_session_delete",
@@ -157,9 +157,9 @@ describe("Polpo MCP server", () => {
       "polpo_connectors_list", "polpo_connector_catalog", "polpo_connector_add", "polpo_connector_update", "polpo_connector_test", "polpo_connector_connect", "polpo_connector_disconnect", "polpo_connector_remove",
       "polpo_mcp_servers_list", "polpo_mcp_server_get", "polpo_mcp_server_create", "polpo_mcp_server_templates", "polpo_mcp_server_install", "polpo_mcp_server_generate", "polpo_mcp_server_update", "polpo_mcp_server_test",
       "polpo_mcp_server_publish", "polpo_mcp_server_deploy", "polpo_mcp_server_logs", "polpo_mcp_server_delete",
-      "polpo_channels_list", "polpo_channel_test", "polpo_message_send", "polpo_notification_rule_save", "polpo_notification_rule_delete",
+      "polpo_channels_list", "polpo_channel_test", "polpo_message_send", "polpo_notifications_list", "polpo_notifications_stats", "polpo_notification_rule_save", "polpo_notification_rule_delete",
       "polpo_computers_list", "polpo_computer_get", "polpo_computer_webhooks", "polpo_computer_save", "polpo_computer_control", "polpo_egress_status", "polpo_computer_delete",
-      "polpo_wabiz_status", "polpo_wabiz_events", "polpo_wabiz_templates", "polpo_wabiz_conversation", "polpo_wabiz_send", "polpo_wabiz_send_template", "polpo_wabiz_approval",
+      "polpo_wabiz_contact", "polpo_wabiz_contact_erase", "polpo_wabiz_status", "polpo_wabiz_events", "polpo_wabiz_templates", "polpo_wabiz_conversation", "polpo_wabiz_send", "polpo_wabiz_send_template", "polpo_wabiz_approval",
       "polpo_harnesses_get", "polpo_harnesses_update", "polpo_harness_sessions_list", "polpo_harness_session_control",
     ]);
     const byName = Object.fromEntries(tools.map((t) => [t.name, t]));

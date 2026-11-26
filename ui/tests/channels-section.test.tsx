@@ -17,12 +17,28 @@ const wabizStatus = {
   note: "Expose the path.", counts: { accepted: 3, ignored: 0, rejected: 0, error: 0 }, inbox: 0, pendingApprovals: 0, sentToday: 1,
   limits: { businessInitiatedPerDay: 50, perAgentPerDay: {} }, lastEventAt: new Date(Date.now() - 5 * 60_000).toISOString(),
 };
+const live = vi.hoisted(() => ({
+  slack: [] as Array<Record<string, unknown>>,
+  setSecrets: (() => {}) as (...a: unknown[]) => unknown,
+  peers: [] as Array<Record<string, unknown>>,
+  presence: {} as Record<string, unknown>,
+  link: (() => {}) as (...a: unknown[]) => unknown,
+  contacts: [] as Array<Record<string, unknown>>,
+  setOptIn: (() => {}) as (...a: unknown[]) => unknown,
+  erase: (() => {}) as (...a: unknown[]) => unknown,
+}));
 vi.mock("@polpo-ai/react", () => ({
   usePolpo: () => ({ client: { getWaBusinessPending: vi.fn(async () => []), testWaBusiness: vi.fn(), generateWaBusinessVerifyToken: vi.fn() } }),
   useWaBusinessStatus: (channel?: string) => ({
     status: channel === "shop" || !channel ? wabizStatus : undefined, channels: [wabizStatus], isLoading: false, error: null, refetch: vi.fn(async () => {}),
   }),
   useEvents: () => ({ events: [] }),
+  useSlackStatus: (channel?: string) => {
+    const channels = live.slack.filter((c) => !channel || c.channel === channel);
+    return { channels, status: channels[0], isLoading: false, error: null, refetch: vi.fn(), setSecrets: live.setSecrets, removeSecret: vi.fn(), test: vi.fn(async () => true) };
+  },
+  usePeers: () => ({ peers: live.peers, presence: live.presence, isLoading: false, unavailable: false, refetch: vi.fn(), link: live.link }),
+  useWaContacts: () => ({ contacts: live.contacts, isLoading: false, error: null, refetch: vi.fn(), setOptIn: live.setOptIn, erase: live.erase }),
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
@@ -258,7 +274,7 @@ describe("Channels section", () => {
     shop: ["Setup", "Phone number ID", "WhatsApp Business Account ID", "Who writes to it", "Graph API version", "Operators", "Business-initiated a day", "Keep messages (days)",
       "Template categories agents may send", "Templates from agents and Polpo", "Notifications outside 24 h", "Meta Cloud API", "Access token", "App secret", "Verify token",
       "Generate", "Test", "Callback URL", "Expose it (Tailscale Funnel)", "Events", "Routing", "Agent that answers customers (required)", "DM Policy", "Allow From"],
-    eng: ["Setup", "Webhook URL", "API Key"],
+    eng: ["Setup", "Channel ID", "Webhook URL", "API Key", "Slack app", "Routing"],
     mail: ["Setup", "Provider", "API Key", "From Address", "Recipients"],
     hook: ["Setup", "Notification URL", "Headers", "Routing", "Endpoint", "Secret", "New", "iOS Shortcuts", "Dedicated agent", "Replies go to", "DM Policy"],
     browser: ["Setup", "VAPID Subject", "TTL Seconds", "Urgency", "This browser", "Enable"],
@@ -287,5 +303,135 @@ describe("Channels section", () => {
     expect(container.querySelectorAll('[data-testid^="channel-row-"]').length).toBe(1);
     await selectTab(/Add channel/);
     expect([...container.querySelectorAll('[data-testid^="channel-catalog-"]')].map((e) => e.getAttribute("data-testid"))).toEqual(["channel-catalog-slack"]);
+  });
+});
+
+// ── Slack, coming soon, webhook inbound, group settings, contacts, linked identities ──
+
+/** Radix Select: open it from the keyboard, then pick an option by its text. */
+async function pick(trigger: HTMLElement | null, option: RegExp) {
+  expect(trigger).toBeTruthy();
+  await act(async () => { trigger!.focus(); trigger!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
+  const opt = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((o) => option.test(o.textContent ?? ""));
+  expect(opt, String(option)).toBeTruthy();
+  await act(async () => { opt!.focus(); opt!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
+  await act(async () => {});
+}
+
+describe("Channels: Slack, parity controls and cleanup", () => {
+  beforeEach(() => {
+    Element.prototype.scrollIntoView ??= () => {};
+    Element.prototype.hasPointerCapture ??= () => false;
+    live.slack = [];
+    live.peers = [];
+    live.presence = {};
+    live.contacts = [];
+    live.setSecrets = vi.fn(async () => {});
+    live.link = vi.fn(async () => {});
+    live.setOptIn = vi.fn(async () => {});
+    live.erase = vi.fn(async () => {});
+  });
+
+  it("shows Discord and inbound email as coming soon, not selectable", async () => {
+    await render("/config?section=channels", {});
+    for (const id of ["discord", "email-inbound"]) {
+      const card = container.querySelector(`[data-testid="channel-coming-${id}"]`)!;
+      expect(card.textContent).toContain("Coming soon");
+      expect(card.querySelector("button")).toBeNull();
+    }
+    expect(byLabel("Add Discord")).toBeNull();
+  });
+
+  it("a new webhook is outbound only: no inbound part", async () => {
+    await render("/config?section=channels", {});
+    await click(byLabel("Add Webhook"));
+    expect(sheet()!.querySelector('[data-testid="section-routing"]')).toBeNull();
+    expect(sheet()!.textContent).not.toContain("iOS Shortcuts");
+  });
+
+  it("an existing webhook with inbound on keeps its Routing, endpoint and secret", async () => {
+    await render("/config?section=channels&channel=hook");
+    expect(sheet()!.querySelector('[data-testid="section-routing"]')).toBeTruthy();
+    expect(sheet()!.textContent).toContain("iOS Shortcuts");
+  });
+
+  it("connects a Slack app: Socket Mode state, tokens saved write-only, channel messages and group settings", async () => {
+    live.slack = [{ channel: "eng", inbound: true, secrets: { botToken: true, appToken: false }, state: "not-configured", received: 0 }];
+    const eng: NotificationChannelConfig = { type: "slack", chatId: "C0OPS", gateway: { enableInbound: true, dmPolicy: "pairing" } };
+    await render("/config?section=channels&channel=eng", { eng });
+    const slack = sheet()!.querySelector('[data-testid="slack-connection"]')!;
+    expect(slack.querySelector('[data-testid="slack-state"]')!.textContent).toBe("Not configured");
+    expect(slack.querySelector('[data-testid="slack-secret-botToken"]')!.textContent).toContain("Stored");
+    expect(slack.querySelector('[data-testid="slack-secret-appToken"]')!.textContent).toContain("Not set");
+    const input = slack.querySelector<HTMLInputElement>('input[data-setup-field="appToken"]')!;
+    expect(input.type).toBe("password");
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => { setter.call(input, "xapp-1-A1-secret"); input.dispatchEvent(new Event("input", { bubbles: true })); });
+    await click(byText("Save", slack.querySelector('[data-testid="slack-secret-appToken"]')!));
+    expect(live.setSecrets).toHaveBeenCalledWith({ appToken: "xapp-1-A1-secret" });
+    expect(input.value).toBe("");
+    // the row: needs setup until both tokens are in
+    expect(container.querySelector('[data-testid="channel-row-eng"]')!.textContent).toContain("Needs setup");
+
+    const routing = sheet()!.querySelector('[data-testid="section-routing"]')!;
+    expect(routing.textContent).toContain("In Slack channels");
+    expect(routing.textContent).toContain("Dedicated agent");
+    await pick(routing.querySelector('[aria-label="In Slack channels"]'), /Every message/);
+    await pick(routing.querySelector('[aria-label="Group replies"]'), /intent/);
+    const threshold = routing.querySelector<HTMLInputElement>('input[aria-label="Intent threshold"]')!;
+    await act(async () => { setter.call(threshold, "0.85"); threshold.dispatchEvent(new Event("input", { bubbles: true })); });
+    await pick(routing.querySelector('[aria-label="Commands"]'), /Operators only/);
+    await click(byText("Save changes", sheet()!));
+    expect(actions.at(-1)).toEqual({ path: "/eng", method: "PUT", body: expect.objectContaining({
+      type: "slack", slack: { channelMessages: "all" },
+      gateway: expect.objectContaining({ enableInbound: true, groupReplies: "intent", intentThreshold: 0.85, commands: "operators" }),
+    }) });
+  });
+
+  it("sets group replies, the intent threshold and commands on a Telegram channel", async () => {
+    await render("/config?section=channels&channel=ops");
+    const routing = sheet()!.querySelector('[data-testid="section-routing"]')!;
+    expect(routing.querySelector('[data-testid="group-replies"]')).toBeTruthy();
+    expect(routing.querySelector('input[aria-label="Intent threshold"]')).toBeNull();
+    await pick(routing.querySelector('[aria-label="Group replies"]'), /intent/);
+    expect(routing.querySelector('input[aria-label="Intent threshold"]')).toBeTruthy();
+    await pick(routing.querySelector('[aria-label="Commands"]'), /Nobody/);
+    await click(byText("Save changes", sheet()!));
+    expect(actions.at(-1)!.body).toMatchObject({ gateway: { groupReplies: "intent", commands: "none" } });
+  });
+
+  it("records a WhatsApp Business contact's opt-out and erases a contact after confirming", async () => {
+    live.contacts = [
+      { channel: "shop", waId: "393331234567", name: "Mario", optIn: null, optOut: null, window: { open: true }, createdAt: "", updatedAt: "" },
+      { channel: "shop", waId: "393339999999", optIn: null, optOut: { at: "", keyword: "STOP" }, window: { open: false }, createdAt: "", updatedAt: "" },
+    ];
+    await render("/config?section=channels&channel=shop");
+    const contacts = sheet()!.querySelector('[data-testid="wabiz-contacts"]')!;
+    const mario = contacts.querySelector('[data-testid="wabiz-contact-393331234567"]')!;
+    expect(mario.textContent).toContain("Window open");
+    await click(byText("Opt out", mario));
+    expect(live.setOptIn).toHaveBeenCalledWith("393331234567", false);
+    const stopped = contacts.querySelector('[data-testid="wabiz-contact-393339999999"]')!;
+    expect(stopped.textContent).toContain("Opted out");
+    await click(byText("Record opt-in", stopped));
+    expect(live.setOptIn).toHaveBeenLastCalledWith("393339999999", true);
+
+    await click(byLabel("Erase 393331234567"));
+    expect(live.erase).not.toHaveBeenCalled();
+    await click(buttons().filter((b) => b.textContent?.trim() === "Erase").at(-1));
+    expect(live.erase).toHaveBeenCalledWith("393331234567");
+  });
+
+  it("shows who is active on a channel and links two identities of the same person", async () => {
+    live.peers = [
+      { id: "telegram:42", channel: "telegram", externalId: "42", displayName: "Alice", firstSeenAt: "", lastSeenAt: new Date().toISOString() },
+      { id: "slack:UALICE", channel: "slack", externalId: "UALICE", displayName: "Alice (Slack)", firstSeenAt: "", lastSeenAt: new Date().toISOString() },
+    ];
+    live.presence = { "telegram:42": { peerId: "telegram:42", channel: "telegram", activity: "chatting", lastActivityAt: new Date().toISOString() } };
+    await render("/config?section=channels&channel=ops");
+    const links = sheet()!.querySelector('[data-testid="peer-links"]')!;
+    expect(links.querySelector('[data-testid="peer-telegram:42"]')!.textContent).toContain("active · chatting");
+    await pick(links.querySelector('[aria-label="Link telegram:42"]'), /Alice \(Slack\)/);
+    expect(live.link).toHaveBeenCalledWith("telegram:42", "slack:UALICE");
   });
 });

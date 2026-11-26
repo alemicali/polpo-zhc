@@ -1,6 +1,7 @@
 /**
  * Channels: where the instance talks to people (notification channels, Telegram bots and the chats
- * they reach, WhatsApp, email), sending a message or a file now, and the notification rules. The
+ * they reach, WhatsApp, email, Slack, WhatsApp Business, webhooks, push), sending a message or a file
+ * now, the notification history and the notification rules. The
  * vault: which credentials each agent has (names and metadata, never values).
  *
  * Secrets never pass through here: bot tokens, SMTP passwords and API keys are entered in the
@@ -9,8 +10,8 @@
  */
 import { z } from "zod";
 import {
-  BAD_CURSOR, DESTRUCTIVE, READ, UPDATE, apiError, apiGet, apiSend, confirmParam, cursorParam, dashboardLink, enc, fail, limitParam, ok,
-  page, pageOutput, short,
+  BAD_CURSOR, DESTRUCTIVE, READ, UPDATE, apiError, apiGet, apiSend, confirmParam, cursorParam, dashboardLink, enc, fail, limitParam, looseObject, ok,
+  page, pageOutput, qs, short,
   type McpDeps, type Register,
 } from "./kit.js";
 import { unknownAgents } from "./tasks.js";
@@ -18,6 +19,10 @@ import { unknownAgents } from "./tasks.js";
 type Rule = { id: string; name?: string; events: string[]; channels: string[]; severity?: string; template?: string; cooldownMs?: number };
 
 const channelItem = z.object({ name: z.string(), type: z.string() });
+/** Every channel polpo_message_send can send on. */
+const SEND_CHANNELS = ["telegram", "whatsapp", "email", "slack", "whatsapp-business", "webhook", "push", "expo-push"] as const;
+/** The ones sent through the notification router (POST /notifications/send), by configured channel name. */
+const ROUTER_CHANNELS = ["slack", "whatsapp-business", "webhook", "push", "expo-push"] as const;
 const ruleItem = z.object({ id: z.string(), name: z.string().optional(), events: z.array(z.string()), channels: z.array(z.string()), severity: z.string().optional() });
 
 export function registerChannelTools(tool: Register, deps: McpDeps): void {
@@ -26,13 +31,15 @@ export function registerChannelTools(tool: Register, deps: McpDeps): void {
   tool("channels", "polpo_channels_list", {
     title: "List channels",
     description: "Where the instance reaches people: notification channels (Telegram, Slack, email, webhooks…; name and type only, never their tokens), "
-      + "notification rules, the Telegram bots and the groups, topics and people they can write to, WhatsApp profiles and whether they are signed in. "
+      + "notification rules, the Telegram bots and the groups, topics and people they can write to, WhatsApp profiles and whether they are signed in, "
+      + "Slack apps and their Socket Mode connection. "
       + "Use a chat's id or name as `to` in polpo_message_send.",
     inputSchema: {},
     outputSchema: {
       channels: z.array(channelItem), rules: z.array(ruleItem),
       telegram: z.object({ bots: z.array(z.object({ key: z.string(), agent: z.string().optional() })), chats: z.array(z.object({ id: z.string(), kind: z.string(), name: z.string() })) }),
       whatsapp: z.array(z.object({ profile: z.string(), status: z.string() })),
+      slack: z.array(z.object({ channel: z.string(), state: z.string(), inbound: z.boolean() })),
       setup_url: z.string(),
     },
     annotations: READ,
@@ -40,6 +47,8 @@ export function registerChannelTools(tool: Register, deps: McpDeps): void {
     const [cfg, tg, wa] = await Promise.all([apiGet(deps, "/config"), apiGet(deps, "/telegram/chats"), apiGet(deps, "/whatsapp/profiles")]);
     if (!cfg.ok) return apiError(cfg, "Reading the channels");
     const n = (cfg.data as { settings?: { notifications?: { channels?: Record<string, { type?: string }>; rules?: Rule[] } } })?.settings?.notifications;
+    // the Slack apps' connection, only when there is one (each call counts against the API's rate limit)
+    const sl = Object.values(n?.channels ?? {}).some((c) => c?.type === "slack") ? await apiGet(deps, "/slack") : undefined;
     const channels = Object.entries(n?.channels ?? {}).map(([name, c]) => ({ name, type: c?.type ?? "unknown" }));
     const rules = (n?.rules ?? []).map((r) => ({ id: r.id, ...(r.name ? { name: r.name } : {}), events: r.events ?? [], channels: r.channels ?? [], ...(r.severity ? { severity: r.severity } : {}) }));
     const tgd = (tg.ok ? tg.data : {}) as { bots?: Array<{ key: string; agent?: string }>; chats?: Array<{ id: string; kind: string; name: string }> };
@@ -48,15 +57,17 @@ export function registerChannelTools(tool: Register, deps: McpDeps): void {
       chats: (tgd.chats ?? []).map((c) => ({ id: c.id, kind: c.kind, name: c.name })),
     };
     const whatsapp = ((wa.ok ? (wa.data as { profiles?: Array<{ profileDir: string; status: string }> })?.profiles : []) ?? []).map((p) => ({ profile: p.profileDir, status: p.status }));
+    const slack = ((sl?.ok ? (sl.data as { channels?: Array<{ channel: string; state: string; inbound: boolean }> })?.channels : []) ?? []).map((s) => ({ channel: s.channel, state: s.state, inbound: s.inbound }));
     const text = [
       `notification channels: ${channels.map((c) => `${c.name} (${c.type})`).join(", ") || "none"}`,
       `rules: ${rules.map((r) => `${r.name ?? r.id} [${r.events.join(", ")} → ${r.channels.join(", ")}]`).join("; ") || "none"}`,
       `Telegram bots: ${telegram.bots.map((b) => `${b.key}${b.agent ? ` (as ${b.agent})` : " (as Polpo)"}`).join(", ") || "none"}`,
       ...(telegram.chats.length ? ["Telegram chats:", ...telegram.chats.slice(0, 50).map((c) => `- ${c.id} (${c.kind}) ${c.name}`)] : []),
       `WhatsApp: ${whatsapp.map((w) => `${w.profile} (${w.status})`).join(", ") || "not set up"}`,
+      ...(slack.length ? [`Slack: ${slack.map((s) => `${s.channel} (${s.inbound ? s.state : "notifications only"})`).join(", ")}`] : []),
       `To set up a channel: polpo_channel_save (its tokens and keys: ${setupUrl})`,
     ].join("\n");
-    return ok(text, { channels, rules, telegram, whatsapp, setup_url: setupUrl });
+    return ok(text, { channels, rules, telegram, whatsapp, slack, setup_url: setupUrl });
   });
 
   tool("channels", "polpo_channel_test", {
@@ -78,34 +89,67 @@ export function registerChannelTools(tool: Register, deps: McpDeps): void {
 
   tool("channels", "polpo_message_send", {
     title: "Send a message",
-    description: "Send a message now, as Polpo or an agent: on Telegram (to a group, topic or person by name or id from polpo_channels_list; with files from the workspace), "
-      + "on WhatsApp (to a phone number or chat; text, or one file with a caption), or by email (with the agent's mail account; attachments from the workspace). "
+    description: "Send a message now, as Polpo or an agent, on any channel: Telegram (to a group, topic or person by name or id from polpo_channels_list; "
+      + "with files from the workspace), WhatsApp (to a phone number or chat; text, or one file with a caption), email (with the agent's mail account; "
+      + "attachments from the workspace), Slack (to a channel id like C0123 or a DM, optionally in a thread: thread_ts; default the channel's own), "
+      + "WhatsApp Business (to a contact: free-form only inside the 24-hour window and never to someone who opted out — templates go with "
+      + "polpo_wabiz_send_template; without `to`, a notification to the operators), a webhook (POSTs to its URL), browser push or the mobile app "
+      + "(expo-push: every registered device). `name` picks the configured channel when there are several of that type. "
       + "It is real and cannot be undone: show the person the message, then call with confirm: true.",
     inputSchema: {
-      channel: z.enum(["telegram", "whatsapp", "email"]).describe("How to send it"),
-      to: z.union([z.string().min(1), z.array(z.string().min(1)).min(1)]).describe("Telegram: a chat's name or id; WhatsApp: a phone number (+39…) or chat; email: one address or a list"),
+      channel: z.enum(SEND_CHANNELS).describe("How to send it"),
+      name: z.string().min(1).optional().describe("Slack, webhook, push, expo-push, WhatsApp Business: the configured channel's name (default: the only one of that type)"),
+      to: z.union([z.string().min(1), z.array(z.string().min(1)).min(1)]).optional()
+        .describe("Telegram: a chat's name or id; WhatsApp: a phone number (+39…) or chat; email: one address or a list; Slack: a channel id (default: the channel's); WhatsApp Business: the contact (+39…)"),
       text: z.string().max(20_000).optional().describe("The message (email: the body)"),
+      title: z.string().max(200).optional().describe("Slack, webhook, push, expo-push: the notification's title"),
       subject: z.string().max(500).optional().describe("Email: the subject"),
       html: z.boolean().optional().describe("Email: the body is HTML"),
       cc: z.array(z.string()).optional().describe("Email: cc"),
-      files: z.array(z.string().min(1)).max(10).optional().describe("Paths in the workspace to send (WhatsApp: one file, text is its caption)"),
+      files: z.array(z.string().min(1)).max(10).optional().describe("Telegram, WhatsApp, email: paths in the workspace to send (WhatsApp: one file, text is its caption)"),
       agent: z.string().optional().describe("The agent it is sent as (its Telegram bot, its mail account); omit for Polpo"),
       topic: z.number().int().optional().describe("Telegram: a forum topic inside the group"),
+      thread_ts: z.string().regex(/^\d{1,10}\.\d{6}$/, "a Slack message ts like 1712345678.123456").optional().describe("Slack: reply in this thread (the parent message's ts)"),
       confirm: confirmParam("send it (after the person saw it and agreed)"),
     },
-    outputSchema: { sent: z.boolean(), channel: z.string(), message_id: z.string().optional(), to: z.unknown().optional() },
+    outputSchema: { sent: z.boolean(), channel: z.string(), name: z.string().optional(), message_id: z.string().optional(), to: z.unknown().optional() },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
     scope: "polpo:messages",
-  }, async ({ channel, to, text, subject, html, cc, files, agent, topic, confirm }) => {
+  }, async ({ channel, name, to, text, title, subject, html, cc, files, agent, topic, thread_ts, confirm }) => {
     const missing = await unknownAgents(deps, [agent]);
     if (missing) return fail(missing);
-    const recipients = Array.isArray(to) ? to : [to];
+    const recipients = to === undefined ? [] : Array.isArray(to) ? to : [to];
+    const viaRouter = ROUTER_CHANNELS.includes(channel as (typeof ROUTER_CHANNELS)[number]);
+    if (!viaRouter && recipients.length === 0) return fail(`${channel} needs \`to\`.`);
     if (channel !== "email" && recipients.length > 1) return fail(`${channel} sends to one chat at a time: call once per recipient.`);
     if (channel === "email" && (!subject?.trim() || !text?.trim())) return fail("An email needs subject and text (the body).");
     if (channel === "whatsapp" && (files?.length ?? 0) > 1) return fail("WhatsApp sends one file at a time: call once per file.");
+    if (viaRouter && files?.length) return fail(`${channel} sends text only here: send files on Telegram, WhatsApp or email.`);
+    if ((channel === "webhook" || channel === "push" || channel === "expo-push") && recipients.length) return fail(`${channel} has no recipient: it goes to the channel's URL or every subscribed device. Leave \`to\` out.`);
+    if (thread_ts && channel !== "slack") return fail("thread_ts is for Slack.");
     if (!text?.trim() && !files?.length) return fail("Nothing to send: give text or files.");
+
+    // the configured channel, for the channels sent through the notification router
+    let channelName: string | undefined;
+    if (viaRouter) {
+      const cfg = await apiGet(deps, "/config");
+      if (!cfg.ok) return apiError(cfg, "Reading the channels");
+      const all = Object.entries((cfg.data as { settings?: { notifications?: { channels?: Record<string, { type?: string }> } } })?.settings?.notifications?.channels ?? {});
+      const ofType = all.filter(([, c]) => c?.type === channel).map(([n]) => n);
+      if (name) {
+        const c = all.find(([n]) => n === name)?.[1];
+        if (!c) return fail(`There is no channel "${name}". ${ofType.length ? `${channel} channels: ${ofType.join(", ")}.` : `Set one up with polpo_channel_save (type ${channel}).`}`);
+        if (c.type !== channel) return fail(`${name} is a ${String(c.type)} channel, not ${channel}.`);
+        channelName = name;
+      } else if (ofType.length === 1) channelName = ofType[0];
+      else return fail(ofType.length ? `Say which ${channel} channel (name): ${ofType.join(", ")}.` : `There is no ${channel} channel: set one up with polpo_channel_save (its secrets: ${setupUrl}).`);
+    }
+
     if (confirm !== true) {
-      const preview = channel === "email" ? `Email to ${recipients.join(", ")}: "${subject}"\n${short(text, 600)}` : `${channel} to ${recipients[0]}${topic !== undefined ? ` (topic ${topic})` : ""}: ${short(text ?? "", 600)}`;
+      const where = channelName ? `${channel} (${channelName})` : channel;
+      const preview = channel === "email"
+        ? `Email to ${recipients.join(", ")}: "${subject}"\n${short(text, 600)}`
+        : `${where}${recipients[0] ? ` to ${recipients[0]}` : ""}${topic !== undefined ? ` (topic ${topic})` : ""}${thread_ts ? ` (thread ${thread_ts})` : ""}: ${title ? `${title} — ` : ""}${short(text ?? "", 600)}`;
       return fail(`Ready to send, not sent:\n${preview}${files?.length ? `\nfiles: ${files.join(", ")}` : ""}\nShow it to the person; if they agree, call again with confirm: true.`);
     }
     let r;
@@ -115,19 +159,67 @@ export function registerChannelTools(tool: Register, deps: McpDeps): void {
       r = files?.length
         ? await apiSend(deps, "POST", "/whatsapp/send-file", { to: recipients[0], path: files[0], ...(text ? { caption: text } : {}) })
         : await apiSend(deps, "POST", "/whatsapp/send", { to: recipients[0], message: text });
-    } else {
+    } else if (channel === "email") {
       r = await apiSend(deps, "POST", "/email/send", {
         to: recipients.length === 1 ? recipients[0] : recipients, subject, body: text, ...(html ? { html } : {}), ...(cc?.length ? { cc } : {}),
         ...(files?.length ? { attachments: files.map((path) => ({ path })) } : {}), ...(agent ? { agent } : {}),
       });
+    } else if (channel === "whatsapp-business" && recipients[0]) {
+      // a contact: the service checks the 24-hour window and the opt-out
+      r = await apiSend(deps, "POST", `/whatsapp-business/${enc(channelName!)}/send`, { to: recipients[0], text, by: agent ?? "polpo" });
+    } else {
+      // the notification router: the channel applies its own rules (Slack's target, the business number's window and caps)
+      r = await apiSend(deps, "POST", "/notifications/send", {
+        channel: channelName, title: title ?? (agent ? `Message from ${agent}` : "Message"), body: text, throwOnError: true,
+        ...(recipients[0] ? { to: recipients[0] } : {}), ...(thread_ts ? { threadTs: thread_ts } : {}),
+      });
     }
     if (!r.ok) {
       if (r.status === 503) return fail(`${channel} is not set up on this instance: the person sets it up in the dashboard (${setupUrl}).`);
-      return apiError(r, `Sending on ${channel}`, "Nothing was sent. Check the recipient (polpo_channels_list) and the files' paths.");
+      return apiError(r, `Sending on ${channelName ?? channel}`, "Nothing was sent. Check the recipient (polpo_channels_list), the channel's setup (polpo_channel_test) and the files' paths.");
     }
-    const d = r.data as { id?: string; to?: unknown; bot?: string };
-    return ok(`Sent on ${channel} to ${recipients.join(", ")}${d.id ? ` (id ${d.id})` : ""}.`,
-      { sent: true, channel, ...(d.id ? { message_id: String(d.id) } : {}), ...(d.to ? { to: d.to } : {}) });
+    const d = r.data as { id?: string; to?: unknown; bot?: string; ids?: string[] };
+    const id = d.id ?? d.ids?.[0];
+    return ok(`Sent on ${channelName ? `${channel} (${channelName})` : channel}${recipients.length ? ` to ${recipients.join(", ")}` : ""}${id ? ` (id ${id})` : ""}.`,
+      { sent: true, channel, ...(channelName ? { name: channelName } : {}), ...(id ? { message_id: String(id) } : {}), ...(d.to ? { to: d.to } : recipients[0] ? { to: recipients[0] } : {}) });
+  });
+
+  // ── Notification history ──
+
+  tool("channels", "polpo_notifications_list", {
+    title: "List sent notifications",
+    description: "The notification history, newest first: what each rule (or a direct send) sent, on which channel, when, and whether it was sent or "
+      + "failed (with the error). Filter by status, channel or rule.",
+    inputSchema: {
+      status: z.enum(["sent", "failed"]).optional().describe("Only sent or only failed ones"),
+      channel: z.string().min(1).optional().describe("Only this channel"),
+      rule: z.string().min(1).optional().describe("Only this rule's id (direct sends: direct)"),
+      limit: z.number().int().min(1).max(500).optional().describe("How many (default 50)"),
+    },
+    outputSchema: { notifications: z.array(looseObject) },
+    annotations: READ,
+  }, async ({ status, channel, rule, limit }) => {
+    const filters = [status, channel, rule].filter(Boolean).length;
+    if (filters > 1) return fail("Filter by one of status, channel or rule at a time.");
+    const r = await apiGet(deps, `/notifications${qs({ limit: String(limit ?? 50), status, channel, rule })}`);
+    if (!r.ok) return apiError(r, "Reading the notification history");
+    const list = (Array.isArray(r.data) ? r.data : []) as Array<{ id: string; timestamp: string; ruleName?: string; ruleId?: string; channel: string; status: string; title?: string; error?: string }>;
+    return ok(list.map((n) => `- ${n.timestamp} ${n.status} ${n.channel} [${n.ruleName ?? n.ruleId ?? "?"}] ${short(n.title ?? "", 120)}${n.error ? ` — ${short(n.error, 200)}` : ""}`).join("\n") || "No notifications yet.",
+      { notifications: list as unknown as Array<Record<string, unknown>> });
+  });
+
+  tool("channels", "polpo_notifications_stats", {
+    title: "Notification counts",
+    description: "How many notifications were sent and how many failed, in total.",
+    inputSchema: {},
+    outputSchema: { total: z.number(), sent: z.number(), failed: z.number() },
+    annotations: READ,
+  }, async () => {
+    const r = await apiGet(deps, "/notifications/stats");
+    if (!r.ok) return apiError(r, "Reading the notification counts");
+    const d = r.data as { total?: number; sent?: number; failed?: number };
+    const out = { total: d.total ?? 0, sent: d.sent ?? 0, failed: d.failed ?? 0 };
+    return ok(`${out.total} notifications: ${out.sent} sent, ${out.failed} failed.`, out);
   });
 
   tool("channels", "polpo_notification_rule_save", {

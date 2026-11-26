@@ -85,6 +85,7 @@ import { cliChatRunner } from "../cli-engine/chat.js";
 import { computerWebhooksFor } from "../sandbox/computer-webhooks.js";
 import { computerWebhookAdminRoutes, computerWebhookInboundRoutes } from "./routes/computer-webhooks.js";
 import { waBusinessAdminRoutes, waBusinessWebhookRoutes } from "./routes/whatsapp-business.js";
+import { slackRoutes } from "./routes/slack.js";
 import { computerSandbox } from "../sandbox/manager.js";
 import { whatsappRoutes } from "./routes/whatsapp.js";
 import { emailRoutes } from "./routes/email.js";
@@ -1882,6 +1883,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     return {
       peerStore: o.getPeerStore(),
       getGateway: (channel?: string) => o.getChannelGateway(channel),
+      getChannelType: (channel?: string) => (channel ? channels[channel]?.type : undefined),
       getConfiguredTelegramTokens: () => Object.values(channels)
         .filter((ch) => ch?.type === "telegram" && ch.botToken)
         .map((ch) => String(ch.botToken).trim()),
@@ -2045,6 +2047,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   authed.route("/triggers", triggerAdminRoutes({ service: triggerService }));
   // WhatsApp Business channels: status, secrets (vault, write-only), events, contacts, sends, templates, approvals
   authed.route("/whatsapp-business", waBusinessAdminRoutes({ service: waBusiness }));
+  // Slack channels (Socket Mode inbound): status, tokens (vault, write-only), test
+  authed.route("/slack", slackRoutes({ service: () => (orchestrator?.isInitialized ? orchestrator.getSlack() : undefined) }));
   // the CLI engine's accounts (personal Claude Code / Codex sign-ins: config directories, never tokens)
   authed.route("/harnesses/cli", cliAccountRoutes({
     settings: () => o.getConfig()?.settings,

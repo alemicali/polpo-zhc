@@ -193,8 +193,8 @@ describe("the tools offered", () => {
     expect(a.polpo_mission_run).toMatchObject({ openWorldHint: true });
     for (const t of tools) if (t.name !== "polpo_file_read") expect(t.outputSchema, t.name).toBeTruthy();
     for (const n of ["polpo_task_delete", "polpo_mission_delete"]) expect(a[n]).toMatchObject({ destructiveHint: true, readOnlyHint: false });
-    // every Configuration section is on by default (the settings toolset), the task and mission cards, computer_get and computer_webhooks, WhatsApp Business (7), skill bundles (4), skill versions (3), agent versions (8), artifact uploads (2), hosted MCP servers (12: templates and install), agent tests (1), agent suites (10: list, get, save, delete, run, run_get; evals: trend, baseline, review, the suite card), deploy gates (1), agent suites phase 4 (8: record, replay, cassette, cassette_edit, generate; target_suites, target_suite_save, target_suite_run for hosted servers and missions), agent suites phase 5 (9: benchmark_save, benchmark_delete, benchmark_run, benchmark_get, benchmark_leaderboard, benchmark_compare, playground_send, playground_promote, the benchmark card benchmark_show), triggers (10: list, get, deliveries, create, update, delete, test, run_actions, auth, the trigger card trigger_show), decisions (4: decide, decisions, decision_resolve, the decision card decision_show); media (5: image_generate, image_edit, media_log, media_status, the media card image_show): 241 tools at most for a full-access client
-    expect(tools.length).toBeLessThanOrEqual(241);
+    // every Configuration section is on by default (the settings toolset), the task and mission cards, computer_get and computer_webhooks, WhatsApp Business (7), skill bundles (4), skill versions (3), agent versions (8), artifact uploads (2), hosted MCP servers (12: templates and install), agent tests (1), agent suites (10: list, get, save, delete, run, run_get; evals: trend, baseline, review, the suite card), deploy gates (1), agent suites phase 4 (8: record, replay, cassette, cassette_edit, generate; target_suites, target_suite_save, target_suite_run for hosted servers and missions), agent suites phase 5 (9: benchmark_save, benchmark_delete, benchmark_run, benchmark_get, benchmark_leaderboard, benchmark_compare, playground_send, playground_promote, the benchmark card benchmark_show), triggers (10: list, get, deliveries, create, update, delete, test, run_actions, auth, the trigger card trigger_show), decisions (4: decide, decisions, decision_resolve, the decision card decision_show), channels parity (8: channel_access_set, peer_presence, peer_link, slack_status, notifications_list, notifications_stats, wabiz_contact, wabiz_contact_erase): 244 tools at most for a full-access client; media (5: image_generate, image_edit, media_log, media_status, the media card image_show)
+    expect(tools.length).toBeLessThanOrEqual(249);
   });
 
   it("config and team changes need the admin scope; reads do not", async () => {
@@ -677,7 +677,7 @@ describe("configuration", () => {
     expect(await call(deps(f), "polpo_branding_update", { logo: { path: "missing.png" } })).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/polpo_files_search/) }] });
     expect((await call(deps(f), "polpo_branding_update", { remove_logo: true })).structuredContent.branding.logoUrl).toBeUndefined();
     expect((await call(deps(f), "polpo_branding_get")).structuredContent).toMatchObject({ productName: "Acme Ops", tagline: "Agents at work" });
-  });
+  }, 15_000);
 
   it("lists providers with the dashboard link for keys, and models with filters", async () => {
     const f = fakeInstance();

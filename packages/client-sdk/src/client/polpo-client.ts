@@ -158,6 +158,10 @@ import type {
   WaBusinessEvent,
   WaBusinessEventPage,
   WaBusinessContact,
+  SlackStatus,
+  SlackSecretKind,
+  ChannelPeer,
+  PeerPresence,
   WaBusinessMessage,
   WaBusinessConversation,
   WaBusinessTemplate,
@@ -1093,6 +1097,47 @@ export class PolpoClient {
   /** Check the token and the number at Meta: quality rating and messaging tier when Graph returns them. */
   testWaBusiness(channel: string): Promise<NonNullable<WaBusinessStatus["phone"]>> {
     return this.post(`/whatsapp-business/${encodeURIComponent(channel)}/test`);
+  }
+
+  // ── Slack (Socket Mode) ────────────────────────────────────
+
+  /** Every Slack channel's inbound connection (never a token's value). */
+  getSlackChannels(): Promise<SlackStatus[]> {
+    return this.get<{ channels: SlackStatus[] }>("/slack").then((d) => d.channels);
+  }
+
+  getSlackStatus(channel: string): Promise<SlackStatus> {
+    return this.get<SlackStatus>(`/slack/${encodeURIComponent(channel)}/status`);
+  }
+
+  /** Store the app's tokens in the vault (dashboard); only the ones given change. Returns which are set. */
+  setSlackSecrets(channel: string, secrets: Partial<Record<SlackSecretKind, string>>): Promise<{ secrets: Record<SlackSecretKind, boolean> }> {
+    return this.put(`/slack/${encodeURIComponent(channel)}/secrets`, secrets);
+  }
+
+  removeSlackSecret(channel: string, kind: SlackSecretKind): Promise<{ secrets: Record<SlackSecretKind, boolean> }> {
+    return this.del(`/slack/${encodeURIComponent(channel)}/secrets/${kind}`);
+  }
+
+  /** auth.test with the bot token. */
+  testSlack(channel: string): Promise<{ ok: boolean; status: SlackStatus }> {
+    return this.post(`/slack/${encodeURIComponent(channel)}/test`);
+  }
+
+  // ── Peers: the people on the channels ──────────────────────
+
+  getPeers(channel?: string): Promise<ChannelPeer[]> {
+    return this.get<ChannelPeer[]>(`/peers${channel ? `?channel=${encodeURIComponent(channel)}` : ""}`);
+  }
+
+  /** Who is active on the channels right now. */
+  getPeerPresence(): Promise<PeerPresence[]> {
+    return this.get<PeerPresence[]>("/peers/presence");
+  }
+
+  /** Link a peer to another identity of the same person (shared sessions); null unlinks it. */
+  linkPeers(peerId: string, linkedTo: string | null): Promise<{ peerId: string; linkedTo: string | null }> {
+    return this.post("/peers/link", { peerId, linkedTo });
   }
 
   getConnector(id: string): Promise<Connector> {

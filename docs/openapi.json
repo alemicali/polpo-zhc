@@ -3860,6 +3860,71 @@
             "description": "Test delivery: also run the trigger's actions (default false: a test runs nothing)"
           }
         }
+      },
+      "SlackStatus": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "type": "string"
+          },
+          "inbound": {
+            "type": "boolean"
+          },
+          "secrets": {
+            "type": "object",
+            "properties": {
+              "botToken": {
+                "type": "boolean"
+              },
+              "appToken": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "botToken",
+              "appToken"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "not-configured",
+              "stopped",
+              "connecting",
+              "connected",
+              "reconnecting",
+              "error"
+            ]
+          },
+          "team": {
+            "type": "string"
+          },
+          "botUserId": {
+            "type": "string"
+          },
+          "botName": {
+            "type": "string"
+          },
+          "connectedAt": {
+            "type": "string"
+          },
+          "lastEventAt": {
+            "type": "string"
+          },
+          "lastError": {
+            "type": "string"
+          },
+          "received": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "channel",
+          "inbound",
+          "secrets",
+          "state",
+          "received"
+        ]
       }
     },
     "parameters": {}
@@ -29681,6 +29746,18 @@
                   "delayMs": {
                     "type": "integer",
                     "minimum": 0
+                  },
+                  "to": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "threadTs": {
+                    "type": "string",
+                    "pattern": "^\\d{1,10}\\.\\d{6}$"
+                  },
+                  "throwOnError": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -32172,7 +32249,8 @@
                       "whatsapp",
                       "whatsapp-business",
                       "webhook",
-                      "push"
+                      "push",
+                      "expo-push"
                     ]
                   },
                   "webhookUrl": {
@@ -32424,6 +32502,19 @@
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 3650
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "slack": {
+                    "type": "object",
+                    "properties": {
+                      "channelMessages": {
+                        "type": "string",
+                        "enum": [
+                          "mentions",
+                          "all"
+                        ]
                       }
                     },
                     "additionalProperties": false
@@ -34461,10 +34552,15 @@
                 "type": "object",
                 "properties": {
                   "peerId": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The peer to link, e.g. slack:U0123"
                   },
                   "linkedTo": {
-                    "type": "string"
+                    "type": "string",
+                    "nullable": true,
+                    "minLength": 1,
+                    "description": "The identity it shares sessions with (another known peer, e.g. telegram:12345); null unlinks it"
                   }
                 },
                 "required": [
@@ -34498,7 +34594,7 @@
             }
           },
           "400": {
-            "description": "Missing fields",
+            "description": "Missing fields, or a peer linked to itself",
             "content": {
               "application/json": {
                 "schema": {
@@ -34520,7 +34616,7 @@
             }
           },
           "404": {
-            "description": "Gateway not configured",
+            "description": "Unknown peer, or gateway not configured",
             "content": {
               "application/json": {
                 "schema": {
@@ -47043,6 +47139,552 @@
           },
           "502": {
             "description": "Meta refused the request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/slack": {
+      "get": {
+        "tags": [
+          "Slack"
+        ],
+        "summary": "Every Slack channel's status",
+        "description": "Per Slack channel: inbound on, which tokens are in the vault (never their values), the Socket Mode connection, the bot and workspace, the last event.",
+        "responses": {
+          "200": {
+            "description": "Statuses",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "channels": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/SlackStatus"
+                          }
+                        }
+                      },
+                      "required": [
+                        "channels"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/slack/{name}/status": {
+      "get": {
+        "tags": [
+          "Slack"
+        ],
+        "summary": "A Slack channel's status",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "slack",
+              "description": "The channel's name (settings.notifications.channels)"
+            },
+            "required": true,
+            "description": "The channel's name (settings.notifications.channels)",
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/SlackStatus"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refused (not a Slack token, no vault)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such Slack channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/slack/{name}/secrets": {
+      "put": {
+        "tags": [
+          "Slack"
+        ],
+        "summary": "Set the Slack app's tokens (dashboard)",
+        "description": "The bot token (xoxb-…, OAuth & Permissions) and the app-level token (xapp-…, Basic Information → App-Level Tokens, scope connections:write). They go to the vault (owner $channels) and are never returned or logged; the Socket Mode connection restarts. Only the fields given change.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "slack",
+              "description": "The channel's name (settings.notifications.channels)"
+            },
+            "required": true,
+            "description": "The channel's name (settings.notifications.channels)",
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "botToken": {
+                    "type": "string"
+                  },
+                  "appToken": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Which tokens are set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "secrets": {
+                          "type": "object",
+                          "properties": {
+                            "botToken": {
+                              "type": "boolean"
+                            },
+                            "appToken": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "botToken",
+                            "appToken"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "secrets"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refused (not a Slack token, no vault)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such Slack channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/slack/{name}/secrets/{kind}": {
+      "delete": {
+        "tags": [
+          "Slack"
+        ],
+        "summary": "Remove one of the Slack app's tokens",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "slack",
+              "description": "The channel's name (settings.notifications.channels)"
+            },
+            "required": true,
+            "description": "The channel's name (settings.notifications.channels)",
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "botToken",
+                "appToken"
+              ]
+            },
+            "required": true,
+            "name": "kind",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Which tokens are set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "secrets": {
+                          "type": "object",
+                          "properties": {
+                            "botToken": {
+                              "type": "boolean"
+                            },
+                            "appToken": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "botToken",
+                            "appToken"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "secrets"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refused (not a Slack token, no vault)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such Slack channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/slack/{name}/test": {
+      "post": {
+        "tags": [
+          "Slack"
+        ],
+        "summary": "Check the Slack app's bot token",
+        "description": "auth.test with the bot token: whether Slack accepts it. The status then shows the bot and the workspace.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "example": "slack",
+              "description": "The channel's name (settings.notifications.channels)"
+            },
+            "required": true,
+            "description": "The channel's name (settings.notifications.channels)",
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        },
+                        "status": {
+                          "$ref": "#/components/schemas/SlackStatus"
+                        }
+                      },
+                      "required": [
+                        "ok",
+                        "status"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Refused (not a Slack token, no vault)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such Slack channel",
             "content": {
               "application/json": {
                 "schema": {
