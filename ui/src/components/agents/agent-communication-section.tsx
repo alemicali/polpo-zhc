@@ -24,7 +24,7 @@ import { useAgentDetail } from "./agent-detail-context";
 
 type Mode = AgentTalksTo["mode"];
 
-export const LINES_MODES: Array<{ id: Mode; label: string; help: string }> = [
+const LINES_MODES: Array<{ id: Mode; label: string; help: string }> = [
   { id: "org", label: "Org chart", help: "Its manager, its direct reports and the extra agents below" },
   { id: "list", label: "Only listed agents", help: "Only the agents selected below" },
   { id: "anyone", label: "Anyone", help: "Every agent of the team" },

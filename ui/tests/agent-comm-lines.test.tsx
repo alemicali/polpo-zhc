@@ -40,9 +40,8 @@ vi.mock("../src/components/agents/agents-page-context", () => ({
 }));
 
 import { AgentCommunicationSection } from "../src/components/agents/agent-communication-section";
-import {
-  OrgChartView, SHOW_LINES_KEY, communicationLineEdges, readShowLines, writeShowLines,
-} from "../src/components/agents/agents-org-chart";
+import { OrgChartView } from "../src/components/agents/agents-org-chart";
+import { SHOW_LINES_KEY, communicationLineEdges, readShowLines, writeShowLines } from "../src/lib/communication-lines";
 
 let root: Root;
 let container: HTMLDivElement;
