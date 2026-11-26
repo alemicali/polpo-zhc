@@ -78,6 +78,13 @@ export function AgentHeroCard() {
           </div>
         )}
 
+        {/* Bio — under the name, like a LinkedIn / X profile */}
+        {identity?.bio && (
+          <p className="whitespace-pre-line break-words text-small leading-relaxed text-foreground" data-testid="agent-hero-bio">
+            {identity.bio}
+          </p>
+        )}
+
         {/* Identity fields */}
         <div className="divide-y divide-border/60 text-small">
           <div className="flex items-center gap-2 py-1.5">

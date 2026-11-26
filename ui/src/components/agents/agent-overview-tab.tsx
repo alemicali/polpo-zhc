@@ -26,18 +26,6 @@ export function AgentOverviewTab() {
     <div>
       <div className="space-y-6 pr-4 pb-bottom-nav lg:pb-4">
 
-        {/* Bio */}
-        {identity?.bio && (
-          <div>
-            <SectionHeader title="Bio" icon={MessageSquare} />
-            <Card className="py-0 gap-0">
-              <CardContent className="pt-3 pb-3">
-                <p className="text-sm text-muted-foreground leading-relaxed">{identity.bio}</p>
-              </CardContent>
-            </Card>
-          </div>
-        )}
-
         {/* Role */}
         <div>
           <SectionHeader title="Role" icon={Shield} />
