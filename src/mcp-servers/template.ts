@@ -28,6 +28,11 @@ export interface TemplateScope {
   settings?: Record<string, unknown>;
   /** Present only where secrets may appear (headers, query). */
   secrets?: Record<string, string>;
+  /**
+   * Other named roots (e.g. a trigger's `body`, `headers`, `query`): `{{body.x}}` reads vars.body.x.
+   * Checked after input / settings / secrets.
+   */
+  vars?: Record<string, unknown>;
 }
 
 export class TemplateError extends Error {}
@@ -78,7 +83,9 @@ function lookup(expr: string, scope: TemplateScope): unknown {
     if (!scope.secrets) throw new TemplateError(`Secrets are only allowed in headers and query parameters ("${expr}")`);
     return getPath(scope.secrets, rest);
   }
-  throw new TemplateError(`Unknown template variable "${expr}": use input.*, settings.* or secrets.*`);
+  if (scope.vars && typeof root === "string" && Object.prototype.hasOwnProperty.call(scope.vars, root)) return getPath(scope.vars[root], rest);
+  const roots = scope.vars ? Object.keys(scope.vars).map((k) => `${k}.*`).join(", ") : "input.*, settings.* or secrets.*";
+  throw new TemplateError(`Unknown template variable "${expr}": use ${roots}`);
 }
 
 function fallback(raw: string | undefined, scope: TemplateScope): unknown {

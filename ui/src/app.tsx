@@ -33,6 +33,7 @@ const ConfigPage = lazy(() => import("@/pages/config").then(m => ({ default: m.C
 const SkillsPage = lazy(() => import("@/pages/skills").then(m => ({ default: m.SkillsPage })));
 const SkillDetailPage = lazy(() => import("@/pages/skill-detail").then(m => ({ default: m.SkillDetailPage })));
 const SchedulesPage = lazy(() => import("@/pages/schedules").then(m => ({ default: m.SchedulesPage })));
+const TriggersPage = lazy(() => import("@/pages/triggers").then(m => ({ default: m.TriggersPage })));
 
 const FilesPage = lazy(() => import("@/pages/files").then(m => ({ default: m.FilesPage })));
 const BrowserPage = lazy(() => import("@/pages/browser").then(m => ({ default: m.BrowserPage })));
@@ -218,6 +219,7 @@ export function App() {
           <Route path="playbooks" element={<Suspense fallback={<PageLoader />}><PlaybooksPage /></Suspense>} />
           <Route path="playbooks/:name" element={<Suspense fallback={<PageLoader />}><PlaybookDetailPage /></Suspense>} />
           <Route path="schedules" element={<Suspense fallback={<PageLoader />}><SchedulesPage /></Suspense>} />
+          <Route path="triggers" element={<Suspense fallback={<PageLoader />}><TriggersPage /></Suspense>} />
           <Route path="config" element={<Suspense fallback={<PageLoader />}><ConfigPage /></Suspense>} />
           <Route path="files" element={<Suspense fallback={<PageLoader />}><FilesPage /></Suspense>} />
           <Route path="browser" element={<Suspense fallback={<PageLoader />}><BrowserPage /></Suspense>} />

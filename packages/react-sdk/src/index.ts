@@ -18,6 +18,8 @@ export { useMissionCost } from "./hooks/use-mission-cost.js";
 export type { UseMissionCostReturn } from "./hooks/use-mission-cost.js";
 export { useConnectors, connectorLabel } from "./hooks/use-connectors.js";
 export { useWaBusinessStatus, useWaTemplates, useWaConversation } from "./hooks/use-whatsapp-business.js";
+export { useTriggers, useTriggerDeliveries } from "./hooks/use-triggers.js";
+export type { UseTriggersReturn, UseTriggerDeliveriesReturn } from "./hooks/use-triggers.js";
 export type { UseWaBusinessStatusReturn, UseWaTemplatesReturn, UseWaConversationReturn } from "./hooks/use-whatsapp-business.js";
 export type { UseConnectorsReturn } from "./hooks/use-connectors.js";
 export { useAgents } from "./hooks/use-agents.js";
@@ -326,4 +328,19 @@ export type {
   ComputerWebhookEventSummary,
   ComputerWebhookEvent,
   ComputerWebhookEventPage,
+  TriggerContentType,
+  TriggerDeliveryStatus,
+  TriggerFilterOp,
+  TriggerHmacConfig,
+  TriggerContract,
+  TriggerFilter,
+  Trigger,
+  TriggerInput,
+  TriggerDeliverySummary,
+  TriggerDelivery,
+  TriggerDeliveryPage,
+  TriggerSample,
+  TriggerDraft,
+  TriggerDryRun,
+  TriggerContractRevision,
 } from "@polpo-ai/sdk";

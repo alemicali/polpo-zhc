@@ -16,7 +16,7 @@ import {
   type McpDeps, type Register,
 } from "./kit.js";
 
-export const SETUP_KINDS = ["channel", "provider", "custom-provider", "sandbox", "sync", "vault", "connector", "data", "computer-webhook", "wabiz", "mcp-server"] as const;
+export const SETUP_KINDS = ["channel", "provider", "custom-provider", "sandbox", "sync", "vault", "connector", "data", "computer-webhook", "wabiz", "mcp-server", "trigger"] as const;
 export type SetupKind = (typeof SETUP_KINDS)[number];
 
 /** What is awaited: a channel's field, a provider's key, a vault entry… */
@@ -61,6 +61,8 @@ export function setupPath(t: SetupTarget): string {
     case "wabiz": return `/config?${q({ section: "channels", channel: t.item, focus: t.field ?? "accessToken" })}`;
     // a hosted server's secret: its sheet, Settings tab, the secret's input focused
     case "mcp-server": return `/connectors?${q({ tab: "servers", server: t.item, focus: t.field ? `secret:${t.field}` : undefined })}`;
+    // a trigger's HMAC signing secret: the trigger's sheet, the Auth section
+    case "trigger": return `/triggers?${q({ trigger: t.item, focus: t.field ?? "hmac" })}`;
   }
 }
 
@@ -163,6 +165,12 @@ export async function setupDone(deps: McpDeps, t: SetupTarget): Promise<boolean 
       if (!r.ok) return r.status === 404 ? false : null;
       const secrets = (r.data as { secrets?: Record<string, boolean> }).secrets ?? {};
       return t.field ? !!secrets[t.field] : Object.values(secrets).every(Boolean);
+    }
+    case "trigger": {
+      // a trigger's HMAC signing secret (vault $triggers): whether it is set
+      const r = await apiGet(deps, `/triggers/${enc(t.item ?? "")}`);
+      if (!r.ok) return r.status === 404 ? false : null;
+      return !!(r.data as { hmacSecret?: { secretSet?: boolean } }).hmacSecret?.secretSet;
     }
   }
 }

@@ -151,6 +151,10 @@ export const POLPO_TOOL_GROUPS: ToolGroupRule[] = [
   { id: "chats", label: "Search everything (chat messages, tasks, missions, agents, artifacts, files, data, skills, memory… as ⌘K) and chat sessions: list, read, rename, star, delete", prefixes: ["chat_"], names: ["search"] },
   { id: "automation", label: "Automation extras: run a schedule now, change or delete a recurring check", names: ["schedule_run", "check_update", "check_delete"] },
   {
+    id: "triggers", label: "Triggers: public endpoints (POST /hooks/{id}) receiving form submissions and webhooks — create, change, delete, deliveries, test / validate / infer a schema / replay, secrets, HMAC and IP allowlist (no actions run yet)",
+    prefixes: ["trigger_"], names: ["triggers_list"],
+  },
+  {
     id: "learning", label: "Agent learning and drive",
     names: ["get_agent_learning", "review_agent_learning", "revert_agent_learning", "get_agent_drive", "reflect_agent"],
   },

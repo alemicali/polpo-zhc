@@ -2800,6 +2800,149 @@ export interface ComputerWebhookEventPage {
   counts: Record<ComputerWebhookOutcome, number>;
 }
 
+// ── Triggers (POST /hooks/{id}: forms and webhooks; no actions yet) ────
+
+export type TriggerContentType = "json" | "form" | "multipart" | "text";
+export type TriggerDeliveryStatus = "accepted" | "rejected" | "filtered" | "duplicate" | "rate_limited";
+export type TriggerFilterOp = "equals" | "not_equals" | "contains" | "in" | "gte" | "lte" | "exists" | "not_exists";
+
+export interface TriggerHmacConfig {
+  header: string;
+  algorithm: "sha256" | "sha1";
+  encoding: "hex" | "base64";
+  prefix?: string;
+  timestampHeader?: string;
+  toleranceSeconds?: number;
+  /** {body} (default) or e.g. {timestamp}.{body} */
+  signedPayload?: string;
+}
+
+export interface TriggerContract {
+  contentTypes: TriggerContentType[];
+  maxBodyBytes: number;
+  maxFileBytes?: number;
+  schema?: Record<string, unknown>;
+}
+
+export interface TriggerFilter {
+  mode?: "all" | "any";
+  conditions: Array<{ path: string; op: TriggerFilterOp; value?: unknown }>;
+}
+
+export interface Trigger {
+  id: string;
+  name: string;
+  description?: string;
+  enabled: boolean;
+  owner?: string;
+  createdAt: string;
+  updatedAt: string;
+  auth: { secret: boolean; allowQueryToken?: boolean; hmac?: TriggerHmacConfig; ipAllowlist?: string[] };
+  /** Generated secrets still valid: hints only, never the value. */
+  secrets: Array<{ id: string; hint: string; createdAt: string; expiresAt?: string }>;
+  hmacSecret?: { secretSet: boolean; previousUntil?: string };
+  contract: TriggerContract;
+  contractVersion: number;
+  filter?: TriggerFilter;
+  dedupe?: { key: string; ttlSeconds: number };
+  rateLimitPerMinute: number;
+  mapping?: Record<string, string>;
+  retention: number;
+  /** POLPO_PUBLIC_URL + /hooks/{id} (the path when the public URL is unknown). */
+  endpoint: string;
+  path: string;
+  stats: { counts: Record<TriggerDeliveryStatus, number>; total: number; lastDeliveryAt?: string; lastStatus?: TriggerDeliveryStatus };
+}
+
+/** create / update. null clears an optional part. */
+export interface TriggerInput {
+  id?: string;
+  name?: string;
+  description?: string | null;
+  enabled?: boolean;
+  owner?: string | null;
+  auth?: { secret?: boolean; allowQueryToken?: boolean; hmac?: Partial<TriggerHmacConfig> | null; ipAllowlist?: string[] };
+  contract?: Partial<Omit<TriggerContract, "schema">> & { schema?: Record<string, unknown> | null };
+  contractNote?: string;
+  filter?: TriggerFilter | null;
+  dedupe?: { key: string; ttlSeconds?: number } | null;
+  rateLimitPerMinute?: number;
+  mapping?: Record<string, string> | null;
+  retention?: number;
+}
+
+export interface TriggerDeliverySummary {
+  id: string;
+  triggerId: string;
+  receivedAt: string;
+  status: TriggerDeliveryStatus;
+  httpStatus: number;
+  reasons: string[];
+  errors?: string[];
+  test?: boolean;
+  ip?: string;
+  auth?: { secret?: "header" | "bearer" | "query"; secretId?: string; hmac?: "current" | "previous" };
+  contentType?: string;
+  kind?: TriggerContentType;
+  bytes: number;
+  bodyTruncated?: boolean;
+  mappingErrors?: string[];
+  contractVersion: number;
+  dedupeHash?: string;
+  duplicateOf?: string;
+  count?: number;
+}
+
+export interface TriggerDelivery extends TriggerDeliverySummary {
+  headers: Record<string, string>;
+  query: Record<string, string | string[]>;
+  body?: unknown;
+  files?: Array<{ field: string; filename: string; contentType: string; size: number; sha256: string }>;
+  mapped?: Record<string, unknown>;
+}
+
+export interface TriggerDeliveryPage {
+  deliveries: TriggerDeliverySummary[];
+  nextCursor?: string;
+  total: number;
+  counts: Record<TriggerDeliveryStatus, number>;
+}
+
+export interface TriggerSample {
+  body: unknown;
+  contentType?: TriggerContentType;
+  headers?: Record<string, string>;
+  query?: Record<string, string | string[]>;
+}
+
+export interface TriggerDraft {
+  contract?: TriggerInput["contract"];
+  filter?: TriggerFilter | null;
+  dedupe?: TriggerInput["dedupe"];
+  mapping?: Record<string, string> | null;
+}
+
+export interface TriggerDryRun {
+  status: TriggerDeliveryStatus;
+  reasons: string[];
+  errors: string[];
+  filterMatched: boolean;
+  dedupeKey?: string;
+  duplicateOf?: string;
+  mapped?: Record<string, unknown>;
+  mappingErrors?: string[];
+  contractVersion: number;
+  replayOf?: string;
+}
+
+export interface TriggerContractRevision {
+  version: number;
+  contract: TriggerContract;
+  createdAt: string;
+  by?: string;
+  note?: string;
+}
+
 // ── WhatsApp Business (Meta Cloud API) ─────────────────────────────────
 
 export type WaBizOutcome = "accepted" | "ignored" | "rejected" | "error";

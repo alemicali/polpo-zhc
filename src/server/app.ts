@@ -105,8 +105,10 @@ import { queryOrchestratorText } from "../llm/query.js";
 import { effectiveOrchestratorModel, requireOrchestratorModel } from "../llm/orchestrator-model.js";
 import {
   connectorManagerFor, connectorsPromptSection, notePublicOrigin, clientMetadataDocument, connectorDashboardBase, connectorPublicBase,
-  CONNECTOR_CLIENT_METADATA_PATH, CONNECTOR_OAUTH_CALLBACK_PATH,
+  CONNECTOR_CLIENT_METADATA_PATH, CONNECTOR_OAUTH_CALLBACK_PATH, knownPublicOrigin,
 } from "../mcp/runtime.js";
+import { triggerServiceFor, TRIGGER_PUBLIC_PATH } from "../triggers/service.js";
+import { triggerAdminRoutes, triggerInboundRoutes } from "./routes/triggers.js";
 import { isMcpToolName, toolResultText } from "../mcp/tools.js";
 import { connectorLabel } from "../mcp/view.js";
 import { AgentTalk } from "./agent-talk.js";
@@ -146,6 +148,7 @@ import { isTerminalEnabled, type TerminalWebSocketHandle } from "./terminal.js";
 import type { CodeServerManager } from "./code-server.js";
 import type { SyncScheduler } from "./sync-scheduler.js";
 import { withEventOrigin, currentEventOrigin } from "../core/events.js";
+import type { PolpoEventMap } from "@polpo-ai/core";
 import { POLPO_PACKAGE_VERSION } from "../core/version.js";
 
 export interface AppOptions {
@@ -262,6 +265,24 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     ), log);
   };
   app.route("/api/v1/computers/webhooks", computerWebhookInboundRoutes({ webhooks: computerWebhooks }));
+
+  // Triggers: POST /hooks/:id, public (outside /api and the auth gate), authenticated by the
+  // trigger's own secret / HMAC signature / IP allowlist, with its own rate limit and body cap.
+  // The only public path of the feature: behind Tailscale Funnel publish /<instance>/hooks/ (docs/triggers.md).
+  const triggerService = () => {
+    if (!orchestrator?.isInitialized) return undefined;
+    const polpoDir = orchestrator.getPolpoDir();
+    return triggerServiceFor(polpoDir, {
+      polpoDir: () => polpoDir,
+      vault: () => orchestrator.getVaultStore?.(),
+      publicBase: () => knownPublicOrigin(),
+      emit: (kind, payload) => {
+        if (kind === "changed") orchestrator.emit("trigger:changed", payload as PolpoEventMap["trigger:changed"]);
+        else orchestrator.emit("trigger:delivery", payload as PolpoEventMap["trigger:delivery"]);
+      },
+    });
+  };
+  app.route(TRIGGER_PUBLIC_PATH, triggerInboundRoutes({ service: triggerService }));
 
   // Config status + initialize — always available so setup wizard works
   if (opts?.workDir) {
@@ -1906,6 +1927,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   };
   authed.route("/computers", computerRoutes(computerDeps));
   authed.route("/computer-webhooks", computerWebhookAdminRoutes({ webhooks: computerWebhooks }));
+  // Triggers: definitions, secrets (rotation, the HMAC secret in the vault), deliveries, test tools (no actions yet)
+  authed.route("/triggers", triggerAdminRoutes({ service: triggerService }));
   // WhatsApp Business channels: status, secrets (vault, write-only), events, contacts, sends, templates, approvals
   authed.route("/whatsapp-business", waBusinessAdminRoutes({ service: waBusiness }));
   // the CLI engine's accounts (personal Claude Code / Codex sign-ins: config directories, never tokens)

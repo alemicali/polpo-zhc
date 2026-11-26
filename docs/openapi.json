@@ -853,6 +853,946 @@
           "processingMs",
           "bytes"
         ]
+      },
+      "Trigger": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          },
+          "auth": {
+            "type": "object",
+            "properties": {
+              "secret": {
+                "type": "boolean"
+              },
+              "allowQueryToken": {
+                "type": "boolean"
+              },
+              "hmac": {
+                "$ref": "#/components/schemas/TriggerHmacConfig"
+              },
+              "ipAllowlist": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "secret"
+            ]
+          },
+          "secrets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "hint": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": "string"
+                },
+                "expiresAt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "hint",
+                "createdAt"
+              ]
+            },
+            "description": "Generated secrets still valid (hints only, never the value)"
+          },
+          "hmacSecret": {
+            "type": "object",
+            "properties": {
+              "secretSet": {
+                "type": "boolean"
+              },
+              "previousUntil": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "secretSet"
+            ]
+          },
+          "contract": {
+            "$ref": "#/components/schemas/TriggerContract"
+          },
+          "contractVersion": {
+            "type": "integer"
+          },
+          "filter": {
+            "$ref": "#/components/schemas/TriggerFilter"
+          },
+          "dedupe": {
+            "$ref": "#/components/schemas/TriggerDedupe"
+          },
+          "rateLimitPerMinute": {
+            "type": "integer"
+          },
+          "mapping": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "retention": {
+            "type": "integer"
+          },
+          "endpoint": {
+            "type": "string",
+            "description": "POLPO_PUBLIC_URL + /hooks/{id} (the path when the public URL is unknown)"
+          },
+          "path": {
+            "type": "string"
+          },
+          "stats": {
+            "type": "object",
+            "properties": {
+              "counts": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "number"
+                }
+              },
+              "total": {
+                "type": "number"
+              },
+              "lastDeliveryAt": {
+                "type": "string"
+              },
+              "lastStatus": {
+                "type": "string",
+                "enum": [
+                  "accepted",
+                  "rejected",
+                  "filtered",
+                  "duplicate",
+                  "rate_limited"
+                ]
+              }
+            },
+            "required": [
+              "counts",
+              "total"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "enabled",
+          "createdAt",
+          "updatedAt",
+          "auth",
+          "secrets",
+          "contract",
+          "contractVersion",
+          "rateLimitPerMinute",
+          "retention",
+          "endpoint",
+          "path",
+          "stats"
+        ]
+      },
+      "TriggerHmacConfig": {
+        "type": "object",
+        "properties": {
+          "header": {
+            "type": "string",
+            "example": "x-hub-signature-256"
+          },
+          "algorithm": {
+            "type": "string",
+            "enum": [
+              "sha256",
+              "sha1"
+            ]
+          },
+          "encoding": {
+            "type": "string",
+            "enum": [
+              "hex",
+              "base64"
+            ]
+          },
+          "prefix": {
+            "type": "string",
+            "example": "sha256="
+          },
+          "timestampHeader": {
+            "type": "string"
+          },
+          "toleranceSeconds": {
+            "type": "integer"
+          },
+          "signedPayload": {
+            "type": "string",
+            "description": "What is signed: {body} (default) or e.g. {timestamp}.{body}"
+          }
+        },
+        "required": [
+          "header",
+          "algorithm",
+          "encoding"
+        ]
+      },
+      "TriggerContract": {
+        "type": "object",
+        "properties": {
+          "contentTypes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "json",
+                "form",
+                "multipart",
+                "text"
+              ]
+            }
+          },
+          "maxBodyBytes": {
+            "type": "integer"
+          },
+          "maxFileBytes": {
+            "type": "integer"
+          },
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            },
+            "description": "A JSON Schema for the parsed body"
+          }
+        },
+        "required": [
+          "contentTypes",
+          "maxBodyBytes"
+        ]
+      },
+      "TriggerFilter": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "all",
+              "any"
+            ]
+          },
+          "conditions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "example": "body.status"
+                },
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "equals",
+                    "not_equals",
+                    "contains",
+                    "in",
+                    "gte",
+                    "lte",
+                    "exists",
+                    "not_exists"
+                  ]
+                },
+                "value": {
+                  "nullable": true
+                }
+              },
+              "required": [
+                "path",
+                "op"
+              ]
+            }
+          }
+        },
+        "required": [
+          "conditions"
+        ]
+      },
+      "TriggerDedupe": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "example": "{{body.submission_id}}"
+          },
+          "ttlSeconds": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "ttlSeconds"
+        ]
+      },
+      "TriggerInput": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "create: a slug the id starts with (a random suffix is added)"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "owner": {
+            "type": "string",
+            "nullable": true
+          },
+          "auth": {
+            "type": "object",
+            "properties": {
+              "secret": {
+                "type": "boolean"
+              },
+              "allowQueryToken": {
+                "type": "boolean"
+              },
+              "hmac": {
+                "type": "object",
+                "nullable": true,
+                "properties": {
+                  "header": {
+                    "type": "string",
+                    "example": "x-hub-signature-256"
+                  },
+                  "algorithm": {
+                    "type": "string",
+                    "enum": [
+                      "sha256",
+                      "sha1"
+                    ]
+                  },
+                  "encoding": {
+                    "type": "string",
+                    "enum": [
+                      "hex",
+                      "base64"
+                    ]
+                  },
+                  "prefix": {
+                    "type": "string",
+                    "example": "sha256="
+                  },
+                  "timestampHeader": {
+                    "type": "string"
+                  },
+                  "toleranceSeconds": {
+                    "type": "integer"
+                  },
+                  "signedPayload": {
+                    "type": "string",
+                    "description": "What is signed: {body} (default) or e.g. {timestamp}.{body}"
+                  }
+                }
+              },
+              "ipAllowlist": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "contract": {
+            "type": "object",
+            "properties": {
+              "contentTypes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "json",
+                    "form",
+                    "multipart",
+                    "text"
+                  ]
+                }
+              },
+              "maxBodyBytes": {
+                "type": "integer"
+              },
+              "maxFileBytes": {
+                "type": "integer"
+              },
+              "schema": {
+                "type": "object",
+                "nullable": true,
+                "additionalProperties": {
+                  "nullable": true
+                }
+              }
+            }
+          },
+          "contractNote": {
+            "type": "string"
+          },
+          "filter": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TriggerFilter"
+              },
+              {
+                "nullable": true
+              }
+            ]
+          },
+          "dedupe": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "key": {
+                "type": "string",
+                "example": "{{body.submission_id}}"
+              },
+              "ttlSeconds": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "key"
+            ]
+          },
+          "rateLimitPerMinute": {
+            "type": "integer"
+          },
+          "mapping": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "retention": {
+            "type": "integer"
+          }
+        }
+      },
+      "TriggerContractRevision": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "number"
+          },
+          "contract": {
+            "$ref": "#/components/schemas/TriggerContract"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "by": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "contract",
+          "createdAt"
+        ]
+      },
+      "TriggerDeliverySummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "triggerId": {
+            "type": "string"
+          },
+          "receivedAt": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "rejected",
+              "filtered",
+              "duplicate",
+              "rate_limited"
+            ]
+          },
+          "httpStatus": {
+            "type": "number"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "test": {
+            "type": "boolean"
+          },
+          "ip": {
+            "type": "string"
+          },
+          "auth": {
+            "type": "object",
+            "properties": {
+              "secret": {
+                "type": "string",
+                "enum": [
+                  "header",
+                  "bearer",
+                  "query"
+                ]
+              },
+              "secretId": {
+                "type": "string"
+              },
+              "hmac": {
+                "type": "string",
+                "enum": [
+                  "current",
+                  "previous"
+                ]
+              }
+            }
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "json",
+              "form",
+              "multipart",
+              "text"
+            ]
+          },
+          "bytes": {
+            "type": "number"
+          },
+          "bodyTruncated": {
+            "type": "boolean"
+          },
+          "mappingErrors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "contractVersion": {
+            "type": "number"
+          },
+          "dedupeHash": {
+            "type": "string"
+          },
+          "duplicateOf": {
+            "type": "string"
+          },
+          "count": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "triggerId",
+          "receivedAt",
+          "status",
+          "httpStatus",
+          "reasons",
+          "bytes",
+          "contractVersion"
+        ]
+      },
+      "TriggerDelivery": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "triggerId": {
+            "type": "string"
+          },
+          "receivedAt": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "rejected",
+              "filtered",
+              "duplicate",
+              "rate_limited"
+            ]
+          },
+          "httpStatus": {
+            "type": "number"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "test": {
+            "type": "boolean"
+          },
+          "ip": {
+            "type": "string"
+          },
+          "auth": {
+            "type": "object",
+            "properties": {
+              "secret": {
+                "type": "string",
+                "enum": [
+                  "header",
+                  "bearer",
+                  "query"
+                ]
+              },
+              "secretId": {
+                "type": "string"
+              },
+              "hmac": {
+                "type": "string",
+                "enum": [
+                  "current",
+                  "previous"
+                ]
+              }
+            }
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "json",
+              "form",
+              "multipart",
+              "text"
+            ]
+          },
+          "bytes": {
+            "type": "number"
+          },
+          "bodyTruncated": {
+            "type": "boolean"
+          },
+          "mappingErrors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "contractVersion": {
+            "type": "number"
+          },
+          "dedupeHash": {
+            "type": "string"
+          },
+          "duplicateOf": {
+            "type": "string"
+          },
+          "count": {
+            "type": "number"
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "query": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
+            }
+          },
+          "body": {
+            "nullable": true
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "filename": {
+                  "type": "string"
+                },
+                "contentType": {
+                  "type": "string"
+                },
+                "size": {
+                  "type": "number"
+                },
+                "sha256": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "field",
+                "filename",
+                "contentType",
+                "size",
+                "sha256"
+              ]
+            }
+          },
+          "mapped": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            }
+          }
+        },
+        "required": [
+          "id",
+          "triggerId",
+          "receivedAt",
+          "status",
+          "httpStatus",
+          "reasons",
+          "bytes",
+          "contractVersion",
+          "headers",
+          "query"
+        ]
+      },
+      "TriggerDryRun": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "rejected",
+              "filtered",
+              "duplicate",
+              "rate_limited"
+            ]
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "filterMatched": {
+            "type": "boolean"
+          },
+          "dedupeKey": {
+            "type": "string"
+          },
+          "duplicateOf": {
+            "type": "string"
+          },
+          "mapped": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            }
+          },
+          "mappingErrors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "contractVersion": {
+            "type": "number"
+          },
+          "replayOf": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "reasons",
+          "errors",
+          "filterMatched",
+          "contractVersion"
+        ]
+      },
+      "TriggerDraft": {
+        "type": "object",
+        "properties": {
+          "contract": {
+            "type": "object",
+            "properties": {
+              "contentTypes": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "json",
+                    "form",
+                    "multipart",
+                    "text"
+                  ]
+                }
+              },
+              "maxBodyBytes": {
+                "type": "integer"
+              },
+              "maxFileBytes": {
+                "type": "integer"
+              },
+              "schema": {
+                "type": "object",
+                "nullable": true,
+                "additionalProperties": {
+                  "nullable": true
+                }
+              }
+            }
+          },
+          "filter": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TriggerFilter"
+              },
+              {
+                "nullable": true
+              }
+            ]
+          },
+          "dedupe": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "key": {
+                "type": "string",
+                "example": "{{body.submission_id}}"
+              },
+              "ttlSeconds": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "key"
+            ]
+          },
+          "mapping": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "TriggerSample": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "nullable": true
+          },
+          "contentType": {
+            "type": "string",
+            "enum": [
+              "json",
+              "form",
+              "multipart",
+              "text"
+            ]
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "query": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
+            }
+          }
+        }
       }
     },
     "parameters": {}
@@ -37282,6 +38222,1986 @@
                     },
                     "code": {
                       "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/triggers": {
+      "get": {
+        "tags": [
+          "Triggers"
+        ],
+        "summary": "List triggers",
+        "description": "Every trigger with its endpoint (POLPO_PUBLIC_URL + /hooks/{id}), auth (never a secret: hints only), contract, filter, dedupe, mapping and delivery counts.",
+        "responses": {
+          "200": {
+            "description": "Triggers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Trigger"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Triggers"
+        ],
+        "summary": "Create a trigger",
+        "description": "A new trigger. With the generated secret on (the default unless only an HMAC is configured), `secret` is returned this once: only its hash is kept. Nothing runs on a delivery yet: the action engine comes later; deliveries are recorded and announced (trigger:delivery).",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TriggerInput"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {},
+                    "required": [
+                      "name"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "trigger": {
+                          "$ref": "#/components/schemas/Trigger"
+                        },
+                        "secret": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "trigger"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such trigger (or delivery)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/triggers/infer-schema": {
+      "post": {
+        "tags": [
+          "Triggers"
+        ],
+        "summary": "Infer a JSON Schema from a sample",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sample": {
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "schema": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "nullable": true
+                          }
+                        }
+                      },
+                      "required": [
+                        "schema"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/triggers/{id}": {
+      "get": {
+        "tags": [
+          "Triggers"
+        ],
+        "summary": "Get a trigger",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The trigger",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/Trigger"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such trigger (or delivery)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Triggers"
+        ],
+        "summary": "Change a trigger",
+        "description": "Only the fields given change; null clears filter, dedupe, mapping, description, auth.hmac, contract.schema. A contract change makes a new contract version. Turning the generated secret on when there is none returns `secret` this once.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TriggerInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "trigger": {
+                          "$ref": "#/components/schemas/Trigger"
+                        },
+                        "secret": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "trigger"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such trigger (or delivery)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Triggers"
+        ],
+        "summary": "Delete a trigger",
+        "description": "The trigger, its deliveries, its contract history and its HMAC secret (vault).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "deleted": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "deleted"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such trigger (or delivery)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/triggers/{id}/rotate-secret": {
+      "post": {
+        "tags": [
+          "Triggers"
+        ],
+        "summary": "Rotate the generated secret",
+        "description": "A new secret, returned this once; the previous one keeps working for overlapSeconds (default 86400; 0 revokes it now).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "overlapSeconds": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rotated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "secret": {
+                          "type": "string"
+                        },
+                        "previousValidUntil": {
+                          "type": "string"
+                        },
+                        "trigger": {
+                          "$ref": "#/components/schemas/Trigger"
+                        }
+                      },
+                      "required": [
+                        "secret",
+                        "trigger"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such trigger (or delivery)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/triggers/{id}/hmac-secret": {
+      "put": {
+        "tags": [
+          "Triggers"
+        ],
+        "summary": "Set the HMAC signing secret",
+        "description": "Stores the sender's signing secret (`secret`) in the vault, or one Polpo generates (`generate: true`, returned this once). The previous keeps working for overlapSeconds. Never echoed.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "secret": {
+                    "type": "string"
+                  },
+                  "generate": {
+                    "type": "boolean"
+                  },
+                  "overlapSeconds": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "secret": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "object",
+                          "properties": {
+                            "secretSet": {
+                              "type": "boolean"
+                            },
+                            "previousUntil": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "secretSet"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "status"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such trigger (or delivery)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No vault",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Triggers"
+        ],
+        "summary": "Remove the HMAC signing secret",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "secretSet": {
+                          "type": "boolean"
+                        },
+                        "previousUntil": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "secretSet"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such trigger (or delivery)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/triggers/{id}/contract-versions": {
+      "get": {
+        "tags": [
+          "Triggers"
+        ],
+        "summary": "A trigger's contract versions",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revisions, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TriggerContractRevision"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such trigger (or delivery)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/triggers/{id}/contract-versions/diff": {
+      "get": {
+        "tags": [
+          "Triggers"
+        ],
+        "summary": "Diff two contract versions",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "nullable": true
+            },
+            "required": false,
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "nullable": true
+            },
+            "required": false,
+            "name": "to",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A unified diff",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "from": {
+                          "type": "number"
+                        },
+                        "to": {
+                          "type": "number"
+                        },
+                        "diff": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "from",
+                        "to",
+                        "diff"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such trigger (or delivery)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/triggers/{id}/deliveries": {
+      "get": {
+        "tags": [
+          "Triggers"
+        ],
+        "summary": "A trigger's deliveries",
+        "description": "Newest first, without bodies (GET /{id}/deliveries/{deliveryId}). `counts`: kept deliveries per status.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated: accepted, rejected, filtered, duplicate, rate_limited"
+            },
+            "required": false,
+            "description": "Comma-separated: accepted, rejected, filtered, duplicate, rate_limited",
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "required": false,
+            "name": "test",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deliveries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "deliveries": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/TriggerDeliverySummary"
+                          }
+                        },
+                        "nextCursor": {
+                          "type": "string"
+                        },
+                        "total": {
+                          "type": "number"
+                        },
+                        "counts": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "number"
+                          }
+                        }
+                      },
+                      "required": [
+                        "deliveries",
+                        "total",
+                        "counts"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such trigger (or delivery)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/triggers/{id}/deliveries/{deliveryId}": {
+      "get": {
+        "tags": [
+          "Triggers"
+        ],
+        "summary": "One delivery",
+        "description": "With its headers (secrets redacted), query, body (capped; keys that look secret redacted), files' metadata and mapped values.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "deliveryId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The delivery",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/TriggerDelivery"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such trigger (or delivery)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/triggers/{id}/deliveries/{deliveryId}/replay": {
+      "post": {
+        "tags": [
+          "Triggers"
+        ],
+        "summary": "Replay a delivery (dry run)",
+        "description": "Runs a stored delivery through the current contract, filter, dedupe and mapping (or a draft of them) and shows the result. Nothing is recorded and no action runs.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "deliveryId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "draft": {
+                    "$ref": "#/components/schemas/TriggerDraft"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/TriggerDryRun"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such trigger (or delivery)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/triggers/{id}/test": {
+      "post": {
+        "tags": [
+          "Triggers"
+        ],
+        "summary": "Send a test delivery",
+        "description": "Records a delivery marked test: true, through the contract, filter, dedupe and mapping (no secret, IP or rate limit check) and announces it (trigger:delivery).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TriggerSample"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The recorded delivery",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/TriggerDelivery"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such trigger (or delivery)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/triggers/{id}/validate": {
+      "post": {
+        "tags": [
+          "Triggers"
+        ],
+        "summary": "Validate a sample (dry run)",
+        "description": "A sample against the contract, filter, dedupe and mapping — the saved ones or a draft — without recording anything: contract errors, whether the filter matches, the mapped values.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sample": {
+                    "$ref": "#/components/schemas/TriggerSample"
+                  },
+                  "draft": {
+                    "$ref": "#/components/schemas/TriggerDraft"
+                  }
+                },
+                "required": [
+                  "sample"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/TriggerDryRun"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such trigger (or delivery)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/triggers/{id}/infer-schema": {
+      "post": {
+        "tags": [
+          "Triggers"
+        ],
+        "summary": "Infer a JSON Schema from a sample or a delivery",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sample": {
+                    "nullable": true
+                  },
+                  "deliveryId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "schema": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "nullable": true
+                          }
+                        }
+                      },
+                      "required": [
+                        "schema"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such trigger (or delivery)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
                     }
                   },
                   "required": [
