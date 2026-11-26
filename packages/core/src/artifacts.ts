@@ -34,7 +34,7 @@ Use type "html" and the matching kind for these editable workspaces. Pass the JS
  *   instance's storage directory instead of inside the artifact's record (default 256 KB).
  * - versions.maxCount / versions.maxTotalBytes: earlier versions kept per artifact — the newest, at
  *   most maxCount and at most maxTotalBytes in all (identical contents counted once, the current one
- *   not counted); the oldest are pruned first, the current content never (default 30 versions, 500 MB).
+ *   not counted); the oldest are pruned first, the current content never (default 1000 versions, 1 GB).
  * - maxEditBytes: the largest content changed in place (update, ops, patch) or read by part, which the
  *   server holds in memory to do it (default 50 MB); a larger one is replaced by upload.
  * - maxTotalBytes: every artifact of the instance together (contents and versions); over it new content
@@ -53,7 +53,7 @@ export const DEFAULT_ARTIFACT_LIMITS: Readonly<ArtifactLimits> = Object.freeze({
   inlineBytes: 256 * 1024,
   maxEditBytes: 50 * 1024 * 1024,
   maxTotalBytes: 20 * 1024 * 1024 * 1024,
-  versions: Object.freeze({ maxCount: 30, maxTotalBytes: 500 * 1024 * 1024 }),
+  versions: Object.freeze({ maxCount: 1000, maxTotalBytes: 1024 * 1024 * 1024 }),
 });
 
 /** settings.artifacts: every field optional. */

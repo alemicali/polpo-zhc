@@ -32,6 +32,18 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-26-artifact-versions-1000",
+    date: "2026-11-26",
+    kind: "improved",
+    title: "Artefatti: fino a 1000 versioni",
+    summary: "Ogni artefatto tiene ora fino a 1000 versioni precedenti e fino a 1 GB di cronologia, invece di 30 versioni e 500 MB.",
+    body: [
+      "- **Più cronologia**: le ultime 1000 versioni per artefatto, fino a 1 GB; oltre, si eliminano le più vecchie (il contenuto attuale mai).",
+      "- **Spazio dell'istanza invariato**: il totale resta 20 GB, con l'avviso dall'80%.",
+      "- **Configurabile** in `settings.artifacts.versions` (`maxCount`, `maxTotalBytes`).",
+    ].join("\n"),
+  },
+  {
     id: "2026-11-26-triggers",
     date: "2026-11-26",
     kind: "new",

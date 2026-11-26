@@ -53,11 +53,11 @@ async function fixture() {
 const blobFiles = async (polpoDir: string, id: string) => (await readdir(join(polpoDir, "artifact-blobs", id)).catch(() => [] as string[])).filter((n) => /^[a-f0-9]{64}$/.test(n));
 
 describe("limits", () => {
-  it("defaults to 100 MB per artifact, 30 versions / 500 MB, and takes settings.artifacts (invalid values keep the default)", () => {
+  it("defaults to 100 MB per artifact, 1000 versions / 1 GB, and takes settings.artifacts (invalid values keep the default)", () => {
     expect(artifactLimits()).toEqual(DEFAULT_ARTIFACT_LIMITS);
     expect(DEFAULT_ARTIFACT_LIMITS.maxBytes).toBe(100 * 1024 * 1024);
     const set = setArtifactLimits({ maxBytes: 2048, versions: { maxCount: 3 }, inlineBytes: -1 });
-    expect(set).toMatchObject({ maxBytes: 2048, inlineBytes: DEFAULT_ARTIFACT_LIMITS.inlineBytes, versions: { maxCount: 3, maxTotalBytes: 500 * 1024 * 1024 } });
+    expect(set).toMatchObject({ maxBytes: 2048, inlineBytes: DEFAULT_ARTIFACT_LIMITS.inlineBytes, versions: { maxCount: 3, maxTotalBytes: 1024 * 1024 * 1024 } });
   });
 });
 
@@ -74,7 +74,7 @@ describe("blob storage", () => {
     expect(record.excerpt).toBe(content);
     expect(await blobFiles(polpoDir, id)).toEqual([record.blob!.sha256]);
     // the API hydrates it (under the viewer limit), lists its size
-    expect((await request("GET", `/${id}`)).body.data).toMatchObject({ content, size: Buffer.byteLength(content), usage: { count: 0, maxCount: 30 } });
+    expect((await request("GET", `/${id}`)).body.data).toMatchObject({ content, size: Buffer.byteLength(content), usage: { count: 0, maxCount: 1000 } });
     expect((await request("GET", `/${id}?content=none`)).body.data).toMatchObject({ content: "", contentOmitted: true });
     expect((await request("GET", "")).body.data[0]).toMatchObject({ id, size: Buffer.byteLength(content) });
 
@@ -398,7 +398,7 @@ describe("artifact_from_file and the agents' reads", () => {
     const first = await executeArtifactTool("artifact_get", { id }, polpo);
     expect(first).toMatch(/--- outline ---\nTabs:\n {2}0\. one "One" \(70000 characters\)\n {2}1\. two "Two"/);
     expect(first).toMatch(/bytes 0–60000 of \d+; more: offset 60000/);
-    expect(first).toMatch(/0 earlier versions, 0 B of 500 MB/);
+    expect(first).toMatch(/0 earlier versions, 0 B of 1(\.0)? GB/);
     expect(await executeArtifactTool("artifact_get", { id, tab: "two" }, polpo)).toMatch(/Tab two "Two":\nSecond tab$/);
     expect(await executeArtifactTool("artifact_get", { id, offset: 70_100, limit: 30 }, polpo)).toMatch(/bytes 70100–70130/);
     expect(await executeArtifactTool("artifact_update", { id, old_str: "Second tab", new_str: "2nd tab" }, polpo)).toMatch(/now v2, 1 update/);
