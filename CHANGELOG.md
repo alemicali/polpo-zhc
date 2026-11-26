@@ -63,6 +63,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- JSON Schema checks (trigger contracts, suite `tool_args` schema matching, hosted MCP server tools) now validate `format`: `email`, `uri`, `url`, `uuid`, `date`, `time`, `date-time`, `ipv4`, `ipv6`, `hostname`. Unknown formats are still ignored. A trigger accepted `{"email": "nope"}` against `format: email`.
+
 - **Agent suites on the CLI engine: tool calls traced once.** The official program's tool calls reached the trace twice (the tool server's call and the reply's, under different ids); they are now matched by name and arguments.
 - **Agent suites: the LLM judge works with reasoning models** (Codex and others that refuse `temperature`): the judge is a chat turn (see Changed), so no provider option is set by suites code.
 - Hosted MCP server generation (from API or description), Polpo chat, Spotlight ask and channel replies use the effective orchestrator model: the configured `settings.orchestratorModel`, else a model of a connected provider; with neither, a clear `NO_MODEL` error pointing to Settings → Orchestrator instead of "No model configured".

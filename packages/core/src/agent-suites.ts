@@ -1786,9 +1786,38 @@ export function argsMatch(expected: unknown, actual: unknown, mode: ArgsMatchMod
   }
 }
 
+const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+const TIME_RE = /^(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-]\d{2}:\d{2})$/i;
+function validDate(v: string): boolean {
+  const m = DATE_RE.exec(v);
+  if (!m) return false;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d;
+}
+function validTime(v: string): boolean {
+  const m = TIME_RE.exec(v);
+  return !!m && Number(m[1]) < 24 && Number(m[2]) < 60 && Number(m[3]) < 61;
+}
+
+/** The `format` values validateJsonSchema checks (JSON Schema 2020-12 names). */
+export const JSON_SCHEMA_FORMATS: Record<string, (v: string) => boolean> = {
+  email: (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) && v.length <= 254,
+  uri: (v) => { try { return !!new URL(v).protocol; } catch { return false; } },
+  url: (v) => { try { return /^https?:$/.test(new URL(v).protocol); } catch { return false; } },
+  uuid: (v) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v),
+  date: validDate,
+  time: validTime,
+  "date-time": (v) => { const i = v.search(/[Tt ]/); return i === 10 && validDate(v.slice(0, 10)) && validTime(v.slice(11)); },
+  ipv4: (v) => /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/.test(v),
+  ipv6: (v) => v.includes(":") && /^[0-9a-f:.]+$/i.test(v) && (() => { try { return new URL(`http://[${v}]/`).hostname.length > 2; } catch { return false; } })(),
+  hostname: (v) => v.length <= 253 && /^(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))*$/i.test(v),
+};
+
 /**
  * A small JSON Schema check (type, properties, required, additionalProperties, items, enum, const,
- * minimum / maximum, minLength / maxLength, pattern, minItems / maxItems, anyOf / oneOf / allOf, not).
+ * minimum / maximum, minLength / maxLength, pattern, format, minItems / maxItems, anyOf / oneOf / allOf, not).
+ * Known formats ({@link JSON_SCHEMA_FORMATS}) are checked; unknown ones are ignored, as the spec allows.
  * Returns the problems ("$.rate: must be a number"), empty when valid.
  */
 export function validateJsonSchema(schema: unknown, value: unknown, path = "$"): string[] {
@@ -1815,6 +1844,10 @@ export function validateJsonSchema(schema: unknown, value: unknown, path = "$"):
     if (typeof schema.minLength === "number" && value.length < schema.minLength) errs.push(`${path}: shorter than ${schema.minLength}`);
     if (typeof schema.maxLength === "number" && value.length > schema.maxLength) errs.push(`${path}: longer than ${schema.maxLength}`);
     if (typeof schema.pattern === "string") { try { if (!new RegExp(schema.pattern).test(value)) errs.push(`${path}: does not match /${schema.pattern}/`); } catch { /* bad pattern: ignored */ } }
+    if (typeof schema.format === "string") {
+      const check = JSON_SCHEMA_FORMATS[schema.format];
+      if (check && !check(value)) errs.push(`${path}: must be a valid ${schema.format}`);
+    }
   }
   if (Array.isArray(value)) {
     if (typeof schema.minItems === "number" && value.length < schema.minItems) errs.push(`${path}: fewer than ${schema.minItems} items`);
