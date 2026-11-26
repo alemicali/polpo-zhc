@@ -1,18 +1,16 @@
 import { defineConfig } from "vitest/config";
 
-// On CI runners (4 vCPU) every worker used to build the full MCP server many times (≈ 150–250 ms of
-// zod schema construction and GC each; now the tool catalog is declared once per process, see
-// src/server/mcp-server/catalog.ts): with the default cpus−1 forks they starved each other, the
-// long multi-call tests cross the 5 s default, and a worker can stall long enough that its
-// "onTaskUpdate" RPC to the main process times out (60 s) after every test has passed. Fewer
-// forks and a CI-sized timeout keep the job reliable; locally nothing changes.
+// CI runners (4 vCPU): the default cpus−1 forks again (the MCP tool catalog is declared once per
+// process since src/server/mcp-server/catalog.ts, so building a server per request no longer
+// starves the workers — the cause of the "onTaskUpdate" RPC timeouts). A 10 s test timeout keeps a
+// little headroom over the 5 s local default for slow runners; locally nothing changes.
 const ci = !!process.env.CI;
 
 export default defineConfig({
   test: {
     include: ["src/**/*.test.ts"],
     pool: "forks",
-    ...(ci ? { maxWorkers: 2, minWorkers: 1, testTimeout: 30_000, hookTimeout: 30_000 } : {}),
+    ...(ci ? { testTimeout: 10_000, hookTimeout: 10_000 } : {}),
     coverage: {
       provider: "v8",
       reporter: ["text", "text-summary", "lcov", "json-summary"],
