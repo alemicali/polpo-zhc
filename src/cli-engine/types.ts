@@ -13,6 +13,8 @@ export const ZERO_USAGE: CliUsage = Object.freeze({ inputTokens: 0, outputTokens
 export type CliEvent =
   | { type: "session"; sessionId: string; model?: string }
   | { type: "text"; text: string }
+  /** A piece of the assistant's text as it is written (Claude Code --include-partial-messages, Codex agentMessage deltas); the whole text follows as "text". */
+  | { type: "text-delta"; text: string }
   | { type: "reasoning"; text: string }
   | { type: "tool-call"; id: string; name: string; input: unknown }
   | { type: "tool-result"; id: string; name?: string; output: unknown; isError: boolean }

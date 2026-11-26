@@ -66,7 +66,7 @@ export type NavBadge = "approvals";
 /** A label shown next to an entry: "beta" (a page still in beta). */
 export type NavTag = "beta";
 /** A panel a group shows in its level (rendered by the sidebar). */
-export type NavPanel = "chat-history";
+export type NavPanel = "chat-history" | "coding";
 
 export interface NavLinkNode {
   kind: "link";
@@ -147,7 +147,8 @@ export const DRILL_IN_NAV: NavNode[] = [
   },
   {
     kind: "group", id: "tools", label: "Tools", icon: Wrench, children: [
-      link("coding", "Coding", Code2, "/coding"),
+      // Coding opens its own level: projects → worktrees → sessions (the page has no sidebar of its own)
+      { kind: "group", id: "coding", label: "Coding", icon: Code2, to: "/coding", panel: "coding", children: [] },
       link("terminal", "Terminal", Terminal, "/terminal"),
       link("apps", "Apps", Boxes, "/apps"),
       link("browser", "App Preview", AppWindow, "/browser"),

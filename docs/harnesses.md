@@ -607,3 +607,10 @@ message to a person (`email_send`, `whatsapp_send`) becomes the chat's preview c
 sends, changes or cancels it. The account answers only its owner's chats (the signed-in member);
 channel turns (WhatsApp, Telegram…) are refused. The CLI handles its own context (no manual
 compaction). Tokens go to the usage store as `agent_chat`, cost 0.
+
+### Coding chats
+
+The Coding app's Claude Code and Codex sessions run on the CLI engine too, in a worktree, with the
+account of the person who opens them (the same policy guard), as a chat with in-chat approvals of
+risky actions (Claude Code's `--permission-prompt-tool` answered by a Polpo MCP tool; Codex's
+`approvalPolicy: "on-request"` requests): see [coding.md](coding.md).

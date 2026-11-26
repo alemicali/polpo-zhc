@@ -3960,6 +3960,619 @@
           "state",
           "received"
         ]
+      },
+      "CodingChatSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "claude",
+              "codex"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "cwd": {
+            "type": "string",
+            "description": "The worktree: the program's working directory"
+          },
+          "workspaceId": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string",
+            "description": "The member whose CLI account runs it"
+          },
+          "account": {
+            "type": "string"
+          },
+          "runtimeSessionId": {
+            "type": "string",
+            "description": "The program's conversation (Claude session, Codex thread), resumed every turn"
+          },
+          "model": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "idle",
+              "running",
+              "awaiting-approval",
+              "error"
+            ]
+          },
+          "lastError": {
+            "type": "string"
+          },
+          "errorKind": {
+            "type": "string",
+            "enum": [
+              "no-account",
+              "not-allowed",
+              "not-signed-in",
+              "usage-limit",
+              "not-installed",
+              "interrupted",
+              "other"
+            ]
+          },
+          "usage": {
+            "type": "object",
+            "properties": {
+              "inputTokens": {
+                "type": "number"
+              },
+              "outputTokens": {
+                "type": "number"
+              },
+              "cacheReadTokens": {
+                "type": "number"
+              },
+              "cacheWriteTokens": {
+                "type": "number"
+              },
+              "totalTokens": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "inputTokens",
+              "outputTokens",
+              "cacheReadTokens",
+              "cacheWriteTokens",
+              "totalTokens"
+            ]
+          },
+          "costUsd": {
+            "type": "number",
+            "description": "The CLI's own estimate (the plan pays)"
+          },
+          "turns": {
+            "type": "number"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          },
+          "messageCount": {
+            "type": "number"
+          },
+          "pendingApprovals": {
+            "type": "number"
+          },
+          "preview": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "cwd",
+          "status",
+          "usage",
+          "costUsd",
+          "turns",
+          "createdAt",
+          "updatedAt",
+          "messageCount",
+          "pendingApprovals"
+        ]
+      },
+      "CodingChatSession": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "claude",
+              "codex"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "cwd": {
+            "type": "string",
+            "description": "The worktree: the program's working directory"
+          },
+          "workspaceId": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string",
+            "description": "The member whose CLI account runs it"
+          },
+          "account": {
+            "type": "string"
+          },
+          "runtimeSessionId": {
+            "type": "string",
+            "description": "The program's conversation (Claude session, Codex thread), resumed every turn"
+          },
+          "model": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "idle",
+              "running",
+              "awaiting-approval",
+              "error"
+            ]
+          },
+          "lastError": {
+            "type": "string"
+          },
+          "errorKind": {
+            "type": "string",
+            "enum": [
+              "no-account",
+              "not-allowed",
+              "not-signed-in",
+              "usage-limit",
+              "not-installed",
+              "interrupted",
+              "other"
+            ]
+          },
+          "usage": {
+            "type": "object",
+            "properties": {
+              "inputTokens": {
+                "type": "number"
+              },
+              "outputTokens": {
+                "type": "number"
+              },
+              "cacheReadTokens": {
+                "type": "number"
+              },
+              "cacheWriteTokens": {
+                "type": "number"
+              },
+              "totalTokens": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "inputTokens",
+              "outputTokens",
+              "cacheReadTokens",
+              "cacheWriteTokens",
+              "totalTokens"
+            ]
+          },
+          "costUsd": {
+            "type": "number",
+            "description": "The CLI's own estimate (the plan pays)"
+          },
+          "turns": {
+            "type": "number"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CodingChatMessage"
+            }
+          },
+          "approvals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CodingChatApproval"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "cwd",
+          "status",
+          "usage",
+          "costUsd",
+          "turns",
+          "createdAt",
+          "updatedAt",
+          "messages",
+          "approvals"
+        ]
+      },
+      "CodingChatMessage": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant"
+            ]
+          },
+          "ts": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "prompt",
+              "steer"
+            ]
+          },
+          "segments": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "text"
+                      ]
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "text"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "reasoning"
+                      ]
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "text"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "tool"
+                      ]
+                    },
+                    "tool": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string",
+                          "description": "The program's own tool (Edit, Bash, Read… / shell, apply_patch…)"
+                        },
+                        "input": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "nullable": true
+                          }
+                        },
+                        "output": {
+                          "type": "string"
+                        },
+                        "diff": {
+                          "type": "string",
+                          "description": "Edits: a unified diff of the change"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "running",
+                            "completed",
+                            "error",
+                            "interrupted"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "state"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "tool"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "approval"
+                      ]
+                    },
+                    "approvalId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "approvalId"
+                  ]
+                }
+              ]
+            }
+          },
+          "streaming": {
+            "type": "boolean"
+          },
+          "model": {
+            "type": "string"
+          },
+          "usage": {
+            "type": "object",
+            "properties": {
+              "inputTokens": {
+                "type": "number"
+              },
+              "outputTokens": {
+                "type": "number"
+              },
+              "cacheReadTokens": {
+                "type": "number"
+              },
+              "cacheWriteTokens": {
+                "type": "number"
+              },
+              "totalTokens": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "inputTokens",
+              "outputTokens",
+              "cacheReadTokens",
+              "cacheWriteTokens",
+              "totalTokens"
+            ]
+          },
+          "costUsd": {
+            "type": "number"
+          },
+          "error": {
+            "type": "string"
+          },
+          "errorKind": {
+            "type": "string",
+            "enum": [
+              "no-account",
+              "not-allowed",
+              "not-signed-in",
+              "usage-limit",
+              "not-installed",
+              "interrupted",
+              "other"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "ts"
+        ]
+      },
+      "CodingChatApproval": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "toolUseId": {
+            "type": "string"
+          },
+          "input": {
+            "nullable": true
+          },
+          "summary": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "network-install",
+              "network",
+              "git-push",
+              "outside-worktree",
+              "privileged",
+              "unknown-tool"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "denied",
+              "expired"
+            ]
+          },
+          "requestedAt": {
+            "type": "string"
+          },
+          "resolvedAt": {
+            "type": "string"
+          },
+          "resolvedBy": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tool",
+          "summary",
+          "reason",
+          "category",
+          "state",
+          "requestedAt"
+        ]
+      },
+      "CodingChatCreate": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "claude",
+              "codex"
+            ],
+            "description": "claude: Claude Code; codex: Codex"
+          },
+          "cwd": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The worktree (inside the agent workspace or an allowed root)"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "workspaceId": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "branch": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "account": {
+            "type": "string",
+            "maxLength": 40,
+            "description": "A CLI account id (default: yours for that CLI on this server)"
+          },
+          "model": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "prompt": {
+            "type": "string",
+            "maxLength": 100000,
+            "description": "The first message: the turn starts at once"
+          }
+        },
+        "required": [
+          "kind",
+          "cwd"
+        ]
+      },
+      "CodingChatAccount": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "claude",
+              "codex"
+            ]
+          },
+          "account": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "owner": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "owner"
+            ]
+          },
+          "problem": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "signInUrl": {
+            "type": "string",
+            "description": "Where to add an account and sign in (the dashboard)"
+          }
+        },
+        "required": [
+          "kind",
+          "signInUrl"
+        ]
       }
     },
     "parameters": {}
@@ -47867,6 +48480,835 @@
           },
           "404": {
             "description": "No such Slack channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/coding/chats": {
+      "get": {
+        "tags": [
+          "Coding"
+        ],
+        "summary": "Coding chat sessions",
+        "description": "Claude Code and Codex sessions of the Coding app (run through the CLI engine with the person's own CLI account), newest first, without their transcripts.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "cwd",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "workspaceId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "claude",
+                "codex"
+              ]
+            },
+            "required": false,
+            "name": "kind",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sessions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CodingChatSummary"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Coding"
+        ],
+        "summary": "Start a coding chat",
+        "description": "A new Claude Code or Codex session in a worktree (the program's working directory), on your own CLI account. With prompt the first turn starts at once. Without an account to run it the session is created with status error and errorKind no-account (lastError says how to sign in).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CodingChatCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/CodingChatSession"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (kind, cwd outside the allowed roots…)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/coding/chats/account": {
+      "get": {
+        "tags": [
+          "Coding"
+        ],
+        "summary": "Your CLI account for coding chats",
+        "description": "The CLI account a coding chat of yours would use on this server (Claude Code or Codex), or why none can (and where to sign in).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "claude",
+                "codex"
+              ]
+            },
+            "required": true,
+            "name": "kind",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The account, or the problem",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/CodingChatAccount"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/coding/chats/{id}": {
+      "get": {
+        "tags": [
+          "Coding"
+        ],
+        "summary": "One coding chat",
+        "description": "A session with its transcript (messages with text, reasoning, tool calls with diffs and output, approvals in place) and its approvals.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/CodingChatSession"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Coding"
+        ],
+        "summary": "Delete a coding chat",
+        "description": "Stops its turn and deletes the transcript (the worktree and the program's own session files stay).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "deleted": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "deleted"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not your session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/coding/chats/{id}/messages": {
+      "post": {
+        "tags": [
+          "Coding"
+        ],
+        "summary": "Send a message to a coding chat",
+        "description": "Starts a turn (the program resumes the session's conversation), or reaches the running turn at once (steered: true). Only the session's owner can send.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100000
+                  }
+                },
+                "required": [
+                  "text"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "steered": {
+                          "type": "boolean"
+                        },
+                        "session": {
+                          "$ref": "#/components/schemas/CodingChatSession"
+                        }
+                      },
+                      "required": [
+                        "steered",
+                        "session"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not your session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/coding/chats/{id}/stop": {
+      "post": {
+        "tags": [
+          "Coding"
+        ],
+        "summary": "Stop a coding chat's turn",
+        "description": "Ends the running turn (approvals waiting are denied); the conversation stays and the next message resumes it.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stopped",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/CodingChatSession"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not your session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/coding/chats/{id}/approvals/{approvalId}": {
+      "post": {
+        "tags": [
+          "Coding"
+        ],
+        "summary": "Approve or deny a risky action",
+        "description": "A risky action (network installs, other network access, git push, files outside the worktree, sudo / docker / kill, an unknown tool) waits for the session's owner: approve runs it, deny tells the program it was refused.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "approvalId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "decision": {
+                    "type": "string",
+                    "enum": [
+                      "approve",
+                      "deny"
+                    ]
+                  }
+                },
+                "required": [
+                  "decision"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Answered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/CodingChatApproval"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not your session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such session or approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already answered, or no longer waiting",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/coding/chats/{id}/events": {
+      "get": {
+        "tags": [
+          "Coding"
+        ],
+        "summary": "A coding chat's live events",
+        "description": "Server-Sent Events: session (status, usage), message (a message as it is written: the whole message each time), approval, files-changed (the worktree changed: refresh its changes), deleted. The first event is the session.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The event stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "event: <type>, data: the event as JSON"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such session",
             "content": {
               "application/json": {
                 "schema": {

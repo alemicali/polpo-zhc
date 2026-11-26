@@ -163,6 +163,10 @@ export const POLPO_TOOL_GROUPS: ToolGroupRule[] = [
     prefixes: ["image_"], names: ["media_log", "media_status"],
   },
   {
+    id: "coding", label: "Coding chats: Claude Code or Codex sessions in a git worktree of the Coding app, on the person's own CLI account (start one in a worktree and ask it to do something, send messages, read the transcript, stop, approve or deny risky actions the person decided on)",
+    prefixes: ["coding_chat"],
+  },
+  {
     id: "learning", label: "Agent learning and drive; the org chart and the agents' communication lines (who may talk to whom)",
     names: ["get_agent_learning", "review_agent_learning", "revert_agent_learning", "get_agent_drive", "reflect_agent", "agent_lines"],
   },

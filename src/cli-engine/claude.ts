@@ -83,6 +83,15 @@ export function parseClaudeLine(line: string):
   let m: Json;
   try { m = JSON.parse(t) as Json; } catch { return { kind: "ignore" }; }
   switch (m.type) {
+    case "stream_event": {
+      // --include-partial-messages: the text as it is written (the whole block follows as "assistant")
+      const ev = (m.event ?? {}) as Json;
+      const delta = (ev.delta ?? {}) as Json;
+      if (ev.type === "content_block_delta" && delta.type === "text_delta" && typeof delta.text === "string" && delta.text) {
+        return { kind: "events", events: [{ type: "text-delta", text: delta.text }] };
+      }
+      return { kind: "ignore" };
+    }
     case "system": {
       if (m.subtype === "init" && typeof m.session_id === "string") {
         return { kind: "events", events: [{ type: "session", sessionId: m.session_id, ...(typeof m.model === "string" ? { model: m.model } : {}) }] };

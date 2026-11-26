@@ -94,6 +94,10 @@ import { applyChatLinkParams, requestNewGroup, setActiveChatRoom } from "@/hooks
 const ChatPage = lazy(() =>
   import("@/pages/chat").then((module) => ({ default: module.ChatPage })),
 );
+/** The Coding app's navigation (projects → worktrees → sessions): a column next to the page on /coding. */
+const CodingNav = lazy(() =>
+  import("@/pages/coding/coding-nav").then((module) => ({ default: module.CodingNav })),
+);
 
 function ChatLoader() {
   return (
@@ -551,6 +555,13 @@ function RightPanelContent() {
           <div className="flex min-h-0 shrink-0 max-lg:hidden">
             <MoreNavigation pathname={pathname} />
           </div>
+        )}
+        {(pathname === "/coding" || pathname.startsWith("/coding/")) && (
+          <aside aria-label="Projects and sessions" className="flex min-h-0 w-64 shrink-0 flex-col border-r border-border/50 pt-2 max-lg:hidden" data-testid="chat-first-coding-nav">
+            <Suspense fallback={null}>
+              <CodingNav />
+            </Suspense>
+          </aside>
         )}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           {!fullBleed && title && (

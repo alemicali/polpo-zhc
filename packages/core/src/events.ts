@@ -351,6 +351,21 @@ export interface PolpoEventMap {
     status: "ok" | "error";
     error?: string;
   };
+  /**
+   * A coding chat (a Claude Code / Codex session of the Coding app, on a person's own CLI account)
+   * was created, changed status (running, waiting for an approval, idle, error) or was deleted.
+   */
+  "coding:chat": {
+    id: string;
+    action: "created" | "updated" | "deleted";
+    kind: "claude" | "codex";
+    status: "idle" | "running" | "awaiting-approval" | "error";
+    cwd: string;
+    title: string;
+    branch?: string;
+    workspaceId?: string;
+    owner?: string;
+  };
   /** A mission's decision node is deciding, took a branch, or waits for a person to choose one. */
   "decision:node": {
     group: string;

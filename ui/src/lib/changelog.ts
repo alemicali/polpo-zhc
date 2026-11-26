@@ -49,6 +49,22 @@ export const CHANGELOG: ChangelogEntry[] = [
     cta: { label: "Apri gli agenti", to: "/agents" },
   },
   {
+    id: "2026-11-26-coding-cli-chat",
+    date: "2026-11-26",
+    kind: "new",
+    title: "Coding: Claude Code e Codex come chat, con il tuo account",
+    summary: "Nell'app Coding le nuove sessioni Claude Code e Codex sono chat: il programma ufficiale lavora nel worktree con il tuo account CLI, le modifiche e i comandi si vedono come schede, e le azioni rischiose ti chiedono l'approvazione nella chat. La navigazione di Coding ora sta nella barra laterale.",
+    body: [
+      "- **Navigazione nella barra laterale**: Strumenti → Coding apre progetti → worktree → sessioni direttamente nella barra laterale (con il pulsante Indietro, come la Chat); la pagina usa tutta la larghezza. Funziona anche nel layout chat-first, sul telefono e con la barra classica (pulsante Progetti e sessioni).",
+      "- **Sessioni come chat**: Claude Code e Codex girano tramite il motore CLI, con il **tuo account** (Impostazioni → Harness → Account CLI), nella cartella del worktree. Vedi il testo mentre viene scritto, le chiamate agli strumenti come schede apribili (le **modifiche con il diff**, i **comandi con l'output**), modello, token e costo stimato; puoi continuare la conversazione, scrivere mentre lavora o fermarlo.",
+      "- **Approvazioni nella chat**: modifiche e comandi dentro il worktree vanno da soli; installazioni di pacchetti, altri accessi alla rete, `git push`, file fuori dal worktree, sudo / docker / kill chiedono **Approva / Rifiuta** nella chat.",
+      "- **La cronologia resta**: le sessioni si riprendono dopo un ricaricamento o un riavvio del server; il pannello Modifiche si aggiorna appena il programma cambia i file. Le sessioni terminale di prima restano terminali, e il Terminale resta un terminale.",
+      "- Anche via API, MCP (con la scheda della sessione, da cui puoi approvare) e nella chat con Polpo: «apri una sessione Claude Code sul worktree di polpo e chiedile di…».",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri Coding", to: "/coding" },
+  },
+  {
     id: "2026-11-26-media-images",
     date: "2026-11-26",
     kind: "new",

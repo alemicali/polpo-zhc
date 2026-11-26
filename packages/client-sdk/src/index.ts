@@ -328,3 +328,7 @@ export type {
   ImageInput, GenerateImageRequest, EditImageRequest, MediaAsset, MediaImage, MediaResult, MediaCallerKind, MediaCaller, MediaLogEntry, MediaLogPage,
   MediaStatus, MediaSettings, ImageNodeState, MissionImage,
 } from "./client/media-types.js";
+export type {
+  CodingChatKind, CodingChatStatus, CodingChatErrorKind, CodingRiskCategory, CodingChatToolCall, CodingChatSegment, CodingChatUsage, CodingChatMessage,
+  CodingChatApproval, CodingChatSession, CodingChatSummary, CodingChatCreateRequest, CodingChatAccountInfo, CodingChatEvent,
+} from "./client/coding-types.js";
