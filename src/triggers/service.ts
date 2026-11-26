@@ -616,6 +616,7 @@ export class TriggerService {
         return { status: 401, body: { deliveryId: d.id, status: d.status, error: "Unauthorized" } };
       }
       auth.hmac = r.which;
+      if (r.note) auth.hmacNote = r.note;
     }
 
     const contentType = req.header("content-type") ?? "";

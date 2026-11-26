@@ -396,7 +396,7 @@ export interface TriggerDelivery {
   /** The source IP (as seen through the proxy). */
   ip?: string;
   /** How it authenticated. */
-  auth?: { secret?: "header" | "bearer" | "query"; secretId?: string; hmac?: "current" | "previous" };
+  auth?: { secret?: "header" | "bearer" | "query"; secretId?: string; hmac?: "current" | "previous"; /** How the signature matched when not by the spec (e.g. "signed with the secret as text"). */ hmacNote?: string };
   contentType?: string;
   kind?: TriggerContentType;
   bytes: number;
