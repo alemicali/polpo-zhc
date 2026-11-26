@@ -5,6 +5,7 @@
  */
 import { z } from "zod";
 import { agentEffectiveModel, agentEngineIdOf, modelWithEngineText } from "@polpo-ai/core/engine-label";
+import { AGENT_NOTIFY_TOOL, agentNotifyPerMinute, allowedToolsInclude, describeAgentNotifyAllowlist, type AgentNotifyChannels } from "@polpo-ai/core";
 import { MAX_LOGO_BYTES, fetchPublicImage, sniffImage } from "./config.js";
 import {
   DESTRUCTIVE, READ, UPDATE, WRITE, apiError, apiGet, apiSend, confirmParam, dashboardLink, enc, fail, hasScope, looseObject, ok, qs, short,
@@ -27,6 +28,28 @@ const connectorToolsParam = z.record(
 const CONNECTOR_TOOLS_HELP = "Which tools of each connector granted to it the agent gets, keyed by connector id: \"*\" (or no key) = all its tools, current and future; "
   + "a list = only those tools (the server's tool names as polpo_connectors_list with id shows them, not mcp__…). It never grants a connector (polpo_connector_update_access does).";
 
+/** Notification channels an agent may post to (send_notification). */
+const notifyChannelsParam = z.union([
+  z.literal("*"),
+  z.array(z.object({
+    channel: z.string().min(1).max(64).describe("A configured channel's name (polpo_channels_list), e.g. slack"),
+    targets: z.array(z.string().min(1).max(320)).max(100).optional()
+      .describe("Targets it may pick with `to`: Slack channel ids (C0…), Telegram chat ids, email addresses, or \"*\" for any; omit for the channel's default target only"),
+  })).max(50),
+]);
+const NOTIFY_CHANNELS_HELP = "Notification channels it may post to with its send_notification tool (Slack as the Polpo bot, Telegram, email, webhook, push…): "
+  + "\"*\" = every configured channel's default target, or a list of { channel, targets? }. The agent also needs send_notification in allowedTools. "
+  + "A channel not configured yet is kept, with a warning.";
+
+/** "slack (to: C0LEADS) · max 5/min" or why it has no tool. */
+function notifyLine(a: { allowedTools?: string[]; notifyChannels?: AgentNotifyChannels; notifyRateLimit?: number }): string | undefined {
+  const has = a.notifyChannels === "*" || (Array.isArray(a.notifyChannels) && a.notifyChannels.length > 0);
+  if (!has) return undefined;
+  const toolOn = allowedToolsInclude(a.allowedTools, AGENT_NOTIFY_TOOL);
+  return `notifications: ${describeAgentNotifyAllowlist(a.notifyChannels)} · max ${agentNotifyPerMinute(a)}/min`
+    + (toolOn ? "" : ` · ⚠ off: add ${AGENT_NOTIFY_TOOL} to allowedTools`);
+}
+
 const agentFields = {
   role: z.string().optional().describe("What it does, in a line (shown everywhere)"),
   model: z.string().optional().describe("provider:model (polpo_models_list); omit for the default"),
@@ -43,6 +66,8 @@ const agentFields = {
     acceptFrom: z.enum(["anyone", "lines"]).optional().describe("lines: it also refuses senders outside its own lines (default anyone)"),
   }).optional().describe("Its communication lines: which agents it may talk to (ask_agent, message_agent) and set off in rooms (polpo_agent_lines shows the team's)"),
   maxTurns: z.number().int().positive().max(1000).optional().describe("Most steps per run"),
+  notifyChannels: notifyChannelsParam.optional().describe(NOTIFY_CHANNELS_HELP),
+  notifyRateLimit: z.number().int().min(1).max(60).optional().describe("send_notification messages per minute (default 5)"),
   browserEgress: z.string().regex(/^[A-Za-z0-9_-]*$/, "the name of an egress proxy").optional()
     .describe("Where its browser goes out to the internet: the name of a proxy in the settings' egress proxies (polpo_config_get); '' for direct"),
   computers: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/)).optional()
@@ -86,6 +111,7 @@ async function unknownEgress(deps: McpDeps, name: string | undefined): Promise<s
 type Agent = {
   name: string; role?: string; model?: string; systemPrompt?: string; allowedTools?: string[]; skills?: string[]; identity?: { displayName?: string; title?: string };
   reportsTo?: string; talksTo?: { mode: string; agents?: string[]; acceptFrom?: string }; engine?: unknown; connectorTools?: Record<string, "*" | string[]>;
+  notifyChannels?: AgentNotifyChannels; notifyRateLimit?: number;
   versioning?: { production?: string; latest?: string; draft?: { hasChanges?: boolean; changedFields?: string[]; stale?: boolean; warning?: string } };
 };
 
@@ -177,6 +203,7 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
       `communication lines: ${linesText(a.talksTo)}`,
       `tools: ${a.allowedTools?.join(", ") ?? "defaults"} · skills: ${a.skills?.join(", ") || "none"}`,
       ...(connectorLine ? [connectorLine] : []),
+      ...(notifyLine(a) ? [notifyLine(a)!] : []),
       ...(a.engine && typeof a.engine === "object"
         ? [(a.engine as { type?: string }).type === "cli"
           ? `engine: ${(a.engine as { cli?: string }).cli} CLI${(a.engine as { account?: string }).account ? ` (account ${(a.engine as { account?: string }).account})` : ""}${(a.engine as { model?: string }).model ? ` (${(a.engine as { model?: string }).model})` : ""}`
@@ -197,7 +224,7 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
       connector_tools: connectorToolsParam.optional().describe(CONNECTOR_TOOLS_HELP),
       team: z.string().optional().describe("The team to add it to (default the main team)"),
     },
-    outputSchema: { agent: looseObject },
+    outputSchema: { agent: looseObject, warnings: z.array(z.string()).optional() },
     annotations: WRITE,
   }, async ({ team, connector_tools, ...fields }) => {
     const body = { ...fields, ...(connector_tools ? { connectorTools: connector_tools } : {}) };
@@ -208,12 +235,14 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
     const r = await apiSend(deps, "POST", `/agents${team ? `?team=${enc(team)}` : ""}`, body);
     if (!r.ok) return apiError(r, `Creating agent ${body.name}`);
     const created = await loadAgent(deps, body.name);
-    return ok(`Created agent ${body.name}${body.role ? `: ${body.role}` : ""}.`, { agent: (created.ok ? created.agent : body) as Record<string, unknown> });
+    const warnings = (r.data as { warnings?: string[] } | undefined)?.warnings ?? [];
+    return ok(`Created agent ${body.name}${body.role ? `: ${body.role}` : ""}.${warnings.length ? `\n⚠ ${warnings.join("\n⚠ ")}` : ""}`,
+      { agent: (created.ok ? created.agent : body) as Record<string, unknown>, ...(warnings.length ? { warnings } : {}) });
   });
 
   tool("team", "polpo_agent_update", {
     title: "Update an agent",
-    description: "Change an agent's role, model, instructions, tools (and which tools of each connector: connector_tools), skills, identity, manager, communication lines (talksTo), browser egress proxy, computer (defaultComputer) or engine (polpo, or a Claude Code / Codex / OpenCode harness). Only the fields given change "
+    description: "Change an agent's role, model, instructions, tools (and which tools of each connector: connector_tools), the notification channels it may post to (notifyChannels, with send_notification in allowedTools), skills, identity, manager, communication lines (talksTo), browser egress proxy, computer (defaultComputer) or engine (polpo, or a Claude Code / Codex / OpenCode harness). Only the fields given change "
       + "(a list given replaces the old one); the result lists what changed. Agents are versioned: the change goes to its draft; publish: false keeps it there "
       + "(publish later with polpo_agent_publish), publish: true makes a new version, deploy: true also deploys it to production. Without either flag the instance setting "
       + "decides (by default: published and deployed, so it applies to its next runs).",
@@ -224,6 +253,8 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
         .describe("Computers it may use (ids from polpo_computers_list), replacing the list; null or [] clears it (\"host\", this server, is always allowed)"),
       connector_tools: connectorToolsParam.nullable().optional()
         .describe(`${CONNECTOR_TOOLS_HELP} Replaces the whole selection; null clears it (every tool of every granted connector).`),
+      notifyChannels: notifyChannelsParam.nullable().optional().describe(`${NOTIFY_CHANNELS_HELP} Replaces the whole list; null or [] removes it (no send_notification).`),
+      notifyRateLimit: z.number().int().min(1).max(60).nullable().optional().describe("send_notification messages per minute (default 5); null resets it"),
       publish: z.boolean().optional().describe("false: only the draft changes; true: publish the draft as a new version (default: the instance setting, normally publish and deploy)"),
       deploy: z.boolean().optional().describe("true: publish and deploy the new version to production now"),
       bump: z.enum(["major", "minor", "patch"]).optional().describe("The published version's bump (default: suggested from the change)"),
@@ -238,7 +269,7 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
     const before = await loadAgent(deps, name);
     if (!before.ok) return before.status === 404 ? fail(`There is no agent "${name}". Find the name with polpo_agents_list.`) : apiError(before, `Reading agent ${name}`);
     const body = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
-    if (Object.keys(body).length === 0) return fail("Nothing to change: give at least one field (role, model, systemPrompt, allowedTools, connector_tools, skills, identity, reportsTo, talksTo, maxTurns, browserEgress, defaultComputer, engine).");
+    if (Object.keys(body).length === 0) return fail("Nothing to change: give at least one field (role, model, systemPrompt, allowedTools, connector_tools, notifyChannels, notifyRateLimit, skills, identity, reportsTo, talksTo, maxTurns, browserEgress, defaultComputer, engine).");
     const egress = await unknownEgress(deps, patch.browserEgress as string | undefined);
     if (egress) return fail(egress);
     const r = await apiSend(deps, "PATCH", `/agents/${enc(name)}`, { ...body, ...flags });
@@ -274,7 +305,9 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
     const agent = (after.ok ? after.agent : { ...before.agent, ...body }) as Record<string, unknown>;
     const changed = Object.keys(body).filter((k) => JSON.stringify((before.agent as Record<string, unknown>)[k]) !== JSON.stringify(agent[k]));
     const versionNote = v?.deployed ? ` Version ${v.deployed.to} deployed to production${v.deployed.from ? ` (was ${v.deployed.from})` : ""}.` : "";
-    return ok(changed.length ? `Updated ${name}: ${changed.join(", ")}.${versionNote}` : `Nothing changed on ${name} (the values were the same).`,
+    const warnings = Array.isArray(result?.warnings) ? result.warnings as string[] : [];
+    return ok((changed.length ? `Updated ${name}: ${changed.join(", ")}.${versionNote}` : `Nothing changed on ${name} (the values were the same).`)
+      + (warnings.length ? `\n⚠ ${warnings.join("\n⚠ ")}` : ""),
       { agent, changed, ...(v ? { versioning: v as Record<string, unknown> } : {}) });
   });
 
