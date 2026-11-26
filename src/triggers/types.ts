@@ -214,6 +214,8 @@ interface TriggerActionBase {
   name?: string;
   /** Retries after a failure, with backoff (default 2; 0 for agent turns). Never repeats what was already created. */
   retries?: number;
+  /** When this action fails, still run the later ones (default false: they are skipped). */
+  continueOnError?: boolean;
 }
 
 /**

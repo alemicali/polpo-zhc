@@ -311,7 +311,9 @@ export function instantiatePlaybook(
   for (const [key, value] of Object.entries(resolved)) {
     const placeholder = `{{${key}}}`;
     // Use split+join for global replace (avoids regex special chars)
-    json = json.split(placeholder).join(String(value));
+    // The mission is stringified JSON, so a placeholder always sits inside a string: escape the
+    // value (quotes, backslashes, newlines) or a parameter like a JSON object breaks the mission.
+    json = json.split(placeholder).join(JSON.stringify(String(value)).slice(1, -1));
   }
 
   // Check for unreplaced placeholders

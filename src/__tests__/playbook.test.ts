@@ -261,15 +261,13 @@ describe("instantiatePlaybook", () => {
     expect(() => JSON.parse(result.data)).not.toThrow();
   });
 
-  it("handles special characters in parameter values", () => {
+  it("handles special characters in parameter values (quotes, backslashes, newlines, a JSON object)", () => {
     const pb = makePlaybook();
-    const result = instantiatePlaybook(pb, {
-      module: "src/core",
-      depth: "normal",
-      retries: 2,
-    });
-
+    const module = '{"nome":"Ada \\"Lady\\" Lovelace","note":"riga 1\nriga 2 C:\\temp"}';
+    const result = instantiatePlaybook(pb, { module, depth: "normal", retries: 2 });
     expect(() => JSON.parse(result.data)).not.toThrow();
+    // the value comes back exactly as given
+    expect(JSON.stringify(JSON.parse(result.data))).toContain(JSON.stringify(module).slice(1, -1));
   });
 
   it("handles empty resolved params", () => {

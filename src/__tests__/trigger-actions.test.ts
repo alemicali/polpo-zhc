@@ -201,7 +201,7 @@ describe("running actions on deliveries", () => {
     const { trigger } = await service.create({
       name: "Retry", actions: [
         { kind: "task", id: "t", title: "x", description: "y", assignTo: "dev" },
-        { kind: "agent", id: "a", instructions: "go" },
+        { kind: "agent", id: "a", instructions: "go", continueOnError: true },
         { kind: "notify", id: "n", channel: "tg", body: "z", retries: 0 },
       ],
     });
@@ -213,6 +213,24 @@ describe("running actions on deliveries", () => {
     expect(runs[2]).toMatchObject({ status: "done" });
     expect(service.delivery(trigger.id, d.id).actionsStatus).toBe("partial");
     expect(calls.filter((c) => c.kind === "agent")).toHaveLength(1);
+  });
+
+  it("a failed action skips the later ones (their inputs would be missing) unless it continues on error", async () => {
+    const { host, calls } = fakeHost({ runPlaybook: () => { throw new Error("bad params"); } });
+    const { service } = setup({ host });
+    const { trigger } = await service.create({
+      name: "Chain", actions: [
+        { kind: "playbook", id: "p", playbook: "x", retries: 0 },
+        { kind: "notify", id: "n", channel: "tg", body: "{{steps.p.result}}" },
+      ],
+    });
+    const d = service.test(trigger.id, { body: {}, runActions: true });
+    await service.actions.drain();
+    const runs = service.delivery(trigger.id, d.id).actions!;
+    expect(runs[0]).toMatchObject({ status: "failed", error: "bad params" });
+    expect(runs[1]).toMatchObject({ status: "skipped" });
+    expect(runs[1]!.reason).toContain('earlier action "p" failed');
+    expect(calls.filter((c) => c.kind === "notify")).toHaveLength(0);
   });
 
   it("an agent turn that answered is not repeated when only the reply's delivery fails", async () => {
@@ -245,7 +263,7 @@ describe("running actions on deliveries", () => {
     const { host, calls } = fakeHost({ waitMission: async () => "timeout", waitTask: async () => ({ status: "failed", result: "boom" }) });
     const { service } = setup({ host });
     const { trigger } = await service.create({ name: "Wait2", actions: [
-      { kind: "mission", mission: "m", waitSeconds: 5 },
+      { kind: "mission", mission: "m", waitSeconds: 5, continueOnError: true },
       { kind: "task", title: "t", description: "d", assignTo: "dev", waitSeconds: 5 },
     ] });
     const d = service.test(trigger.id, { body: {}, runActions: true });

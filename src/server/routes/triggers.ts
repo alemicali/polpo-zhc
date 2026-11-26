@@ -120,6 +120,7 @@ const actionCommon = {
   enabled: z.boolean().optional().openapi({ description: "Default true; a disabled action is recorded as skipped" }),
   name: z.string().optional(),
   retries: z.number().int().optional().openapi({ description: "Retries after a failure with backoff (default 2; 0 for agent). What was created is never created again" }),
+  continueOnError: z.boolean().optional().openapi({ description: "When this action fails, still run the later ones (default false: they are skipped)" }),
 };
 const waitSeconds = z.number().int().optional().openapi({ description: "Wait until it ends (at most 3600 s): later actions read {{steps.<id>.result}} and .status" });
 const actionSchema = z.discriminatedUnion("kind", [

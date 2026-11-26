@@ -290,6 +290,10 @@ export function ActionsTab({ t, save }: { t: Trigger; save: (input: TriggerInput
                 <Field label="Retries" hint={`After a failure, with backoff (default ${d.kind === "agent" ? "0 for an agent turn" : "2"}); what was created is never created again.`} className="max-w-48">
                   <Input className="h-8" inputMode="numeric" value={d.retries} placeholder={d.kind === "agent" ? "0" : "2"} onChange={(e) => update(i, { retries: e.target.value.replace(/\D/g, "") })} aria-label={`Action ${i + 1} retries`} />
                 </Field>
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Switch checked={d.continueOnError} onCheckedChange={(v) => update(i, { continueOnError: v })} aria-label={`Action ${i + 1} continue on error`} />
+                  If it fails, still run the next actions (otherwise they are skipped)
+                </label>
               </li>
             ))}
           </ol>

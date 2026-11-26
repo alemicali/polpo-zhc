@@ -106,6 +106,8 @@ Every action has an `id` (generated when absent; keep it when you edit), `enable
 
 The renderer of the mapping, with more roots: `{{mapped.email}}`, `{{body.data.fields[0].value}}`, `{{headers.x-github-event}}`, `{{query.ref ?? "direct"}}`, `{{trigger.name}}`, `{{trigger.id}}`, `{{delivery.id}}`, `{{delivery.receivedAt}}`, and earlier actions' outputs `{{steps.<actionId>.<key>}}` — `missionId`, `missionName` (playbook, mission), `taskId` (task), `sessionId` and `reply` (agent), `notificationId` (notify), and with `waitSeconds` the finished work's `status` and `result`. A template that is one placeholder keeps its value; in a playbook parameter an object or list is passed as JSON (`"fields": "{{body}}"`). **Secrets never reach a template**: templates read the delivery as stored (secret headers, query tokens and secret-looking body keys redacted) and there is no `secrets` root — `{{secrets.X}}` is refused when you save.
 
+A **failed action skips the later ones** (recorded as skipped: "the earlier action … failed"), since they would run on its missing result; set `continueOnError: true` on an action to run the next ones anyway.
+
 `waitSeconds` (playbook, mission, task; at most 3600): wait until the mission or task ends, so later actions can use its `result` (each task's final answer). A wait that runs out fails the action (the work goes on); what was started is never started again.
 
 ### Agent turns: the payload is data
