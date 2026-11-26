@@ -519,6 +519,14 @@ export interface AgentConfig {
    *  When set, emails can only be sent to addresses in these domains.
    *  When omitted, all domains are allowed (backwards compatible). */
   emailAllowedDomains?: string[];
+  /**
+   * Notification channels it may post to with send_notification (also needs send_notification in
+   * allowedTools): "*" = every configured channel's default target, or per channel the targets it
+   * may pick ("*" = any; none = the default only). See agent-notify.ts.
+   */
+  notifyChannels?: import("./agent-notify.js").AgentNotifyChannels;
+  /** send_notification messages per minute (default 5, at most 60). */
+  notifyRateLimit?: number;
 
   // ── Ink registry metadata (optional) ──
 

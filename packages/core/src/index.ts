@@ -54,6 +54,8 @@ export type { TeamStore } from "./team-store.js";
 export type { AgentStore } from "./agent-store.js";
 export * from "./agent-versions.js";
 export * from "./agent-lines.js";
+// Agents posting to notification channels (send_notification): the per-agent allowlist
+export * from "./agent-notify.js";
 export * from "./agent-tests.js";
 export * from "./agent-suites.js";
 export type { VaultStore } from "./vault-store.js";
