@@ -47,6 +47,7 @@ import { registerTriggerTools } from "./mcp-server/triggers.js";
 import { registerTriggerCards } from "./mcp-server/trigger-cards.js";
 import { registerDecisionTools } from "./mcp-server/decisions.js";
 import { registerDecisionCards } from "./mcp-server/decision-cards.js";
+import { registerCodingCard, registerCodingTools } from "./mcp-server/coding.js";
 
 export type { ApiResponse, McpDeps, McpPrincipal, PolpoScope, ToolScope, ToolsetName } from "./mcp-server/kit.js";
 export {
@@ -100,6 +101,8 @@ export function createPolpoMcpServer(deps: McpDeps, catalog?: ToolScope[]): McpS
   registerTriggerCards(server, deps, enabled, principal, catalog);
   registerDecisionTools(tool, deps);
   registerDecisionCards(server, deps, enabled, principal, catalog);
+  registerCodingTools(tool, deps);
+  registerCodingCard(server, deps, enabled, principal, catalog);
   registerConnectorTools(tool, deps);
   registerMcpServerTools(tool, deps);
   registerChannelTools(tool, deps);
