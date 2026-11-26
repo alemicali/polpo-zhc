@@ -953,6 +953,15 @@ describe.each(DIALECTS)("%s", (dialect) => {
       expect(all).toHaveLength(2);
     });
 
+    it("keeps who sent it (an agent's send_notification); none for rules", async () => {
+      const origin = { kind: "agent", agent: "lead-notifier", taskId: "t1", missionId: "m1" };
+      await stores.notificationStore.append(makeNotification("n1", { ruleId: "direct", origin }) as any);
+      await stores.notificationStore.append(makeNotification("n2") as any);
+      const all = await stores.notificationStore.list();
+      expect(all.find((r) => r.id === "n1")?.origin).toEqual(origin);
+      expect(all.find((r) => r.id === "n2")).not.toHaveProperty("origin");
+    });
+
     it("listByChannel filters", async () => {
       await stores.notificationStore.append(makeNotification("n1", { channel: "slack" }) as any);
       await stores.notificationStore.append(makeNotification("n2", { channel: "email" }) as any);
