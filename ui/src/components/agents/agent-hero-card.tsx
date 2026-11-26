@@ -38,7 +38,7 @@ export function AgentHeroCard() {
   return (
     <Card className="gap-0 overflow-hidden py-0">
       {/* Gradient header bar — colored by team */}
-      <div className={cn("h-10 bg-gradient-to-r to-transparent", tc.gradientFrom, tc.gradientVia)} />
+      <div className={cn("h-10 shrink-0 bg-gradient-to-r to-transparent", tc.gradientFrom, tc.gradientVia)} />
       <CardContent className="pt-0 -mt-5 pb-4 space-y-3">
         {/* Avatar + name */}
         <div className="flex items-center gap-3">
@@ -76,6 +76,13 @@ export function AgentHeroCard() {
               </Badge>
             )}
           </div>
+        )}
+
+        {/* Bio — under the name, like a LinkedIn / X profile */}
+        {identity?.bio && (
+          <p className="whitespace-pre-line break-words text-small leading-relaxed text-foreground" data-testid="agent-hero-bio">
+            {identity.bio}
+          </p>
         )}
 
         {/* Identity fields */}

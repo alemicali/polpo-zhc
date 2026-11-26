@@ -32,6 +32,18 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-27-agent-profile-polish",
+    date: "2026-11-27",
+    kind: "improved",
+    title: "Pagina dell'agente più da profilo",
+    summary: "Ruolo, personalità e modo di comunicare in una sezione «About», responsabilità subito dopo, icone social nei colori originali.",
+    body: [
+      "Nella pagina di un agente la scheda Overview si legge come un profilo: in **About** il ruolo fa da presentazione, poi la personalità e come comunica, in testo pieno. Le **responsabilità** vengono subito dopo, prima dell'organigramma e delle linee di comunicazione.",
+      "",
+      "Le icone dei social hanno i colori originali (Instagram con il suo sfumato, Facebook blu; X, Threads e GitHub nel colore del testo, per il tema scuro). La testa della scheda del profilo resta della stessa altezza anche con una bio lunga, e in Hierarchy «Manager» e «Direct reports» non sono più in maiuscolo come i titoli. In Tools & Skills i connettori sono divisi: prima quelli **attivi** per l'agente, poi quelli **disponibili**.",
+    ].join("\n"),
+  },
+  {
     id: "2026-11-26-codex-chatgpt-login",
     date: "2026-11-26",
     kind: "new",
@@ -46,6 +58,20 @@ export const CHANGELOG: ChangelogEntry[] = [
     ].join("\n"),
     highlight: true,
     cta: { label: "Apri gli harness", to: "/config?section=harnesses" },
+  },
+  {
+    id: "2026-11-26-agent-socials-links",
+    date: "2026-11-26",
+    kind: "improved",
+    title: "Profilo degli agenti: bio in evidenza e social cliccabili",
+    summary: "La bio di un agente sta sotto il nome, come su LinkedIn e X, e ogni account social ha la sua icona e si apre con un clic.",
+    body: [
+      "Nella pagina di un agente la **bio** ora sta nella scheda del profilo, subito sotto il nome e prima di titolo e azienda, come su LinkedIn e X.",
+      "",
+      "La scheda **Social** mostra l'icona di Instagram, Facebook, X, TikTok, YouTube, GitHub, WhatsApp, Telegram e delle altre piattaforme più usate, e il nome dell'account.",
+      "",
+      "Un clic apre il profilo in una nuova scheda: va bene sia l'indirizzo completo sia il solo nome utente (per esempio `@nina.ferraro_`), da cui Polpo ricava il link. I valori che non sono un indirizzo web restano come testo.",
+    ].join("\n"),
   },
   {
     id: "2026-11-26-agent-send-notification",

@@ -1,6 +1,6 @@
 /**
  * Agent page → Tools: which connectors this agent can use, with a switch to grant or revoke each
- * one (PATCH the connector's access). Connectors open to every agent show as granted; turning one
+ * one (PATCH the connector's access). Enabled connectors are listed first, then the available ones. Connectors open to every agent show as granted; turning one
  * off keeps every other agent. A granted connector expands to choose which of its tools the agent
  * gets (all, or only selected ones: agent.connectorTools).
  */
@@ -66,8 +66,14 @@ export function AgentConnectorsSection({
           No connectors yet. <Link to="/connectors" className="text-primary hover:underline">Connect an app</Link> (Linear, Notion, GitHub…) and give this agent its tools.
         </p>
       ) : (
-        <div className="space-y-1.5">
-          {connectors.map((connector) => {
+        <div className="space-y-3">
+          {[
+            { key: "enabled", title: "Enabled", list: connectors.filter((c) => agentHasAccess(c.access, agentName)) },
+            { key: "available", title: "Available", list: connectors.filter((c) => !agentHasAccess(c.access, agentName)) },
+          ].filter((group) => group.list.length > 0).map((group) => (
+          <div key={group.key} className="space-y-1.5" data-testid={`agent-connectors-${group.key}`}>
+          <p className="text-caption font-medium text-muted-foreground">{group.title} ({group.list.length})</p>
+          {group.list.map((connector) => {
             const on = agentHasAccess(connector.access, agentName);
             const blockedByAllowlist = on && !allowedToolsCoverConnector(allowedTools, connector.id);
             const entry = connectorToolsEntry(current, connector.id);
@@ -128,6 +134,8 @@ export function AgentConnectorsSection({
               </div>
             );
           })}
+          </div>
+          ))}
           <Link to="/connectors" className="inline-block pt-1 text-xs text-primary hover:underline">Manage connectors</Link>
         </div>
       )}
