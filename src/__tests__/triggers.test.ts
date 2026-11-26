@@ -7,6 +7,7 @@
  * the test tools (test delivery, dry run, replay, schema inference, contract diff).
  */
 import { afterEach, describe, expect, it } from "vitest";
+import { createHmac } from "node:crypto";
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -164,6 +165,33 @@ describe("POST /hooks/:id — authentication", () => {
     expect((await post(trigger.id, body, { ...JSON_CT, "x-hub-signature-256": signHmac(hmac, body, "s3cret-one") })).status).toBe(401);
     // the secret is never echoed
     expect(JSON.stringify(await service.get(trigger.id))).not.toContain("s3cret");
+  });
+
+  it("verifies Standard Webhooks (webhook-id / -timestamp / -signature v1,<base64>, whsec_ secret, rotation)", () => {
+    const now = Date.parse("2026-11-26T19:40:12Z");
+    const cfg = { scheme: "standard-webhooks" as const, header: "webhook-signature", algorithm: "sha256" as const, encoding: "base64" as const };
+    const keyBytes = Buffer.from("polpo-standard-webhooks-test-key-32b!");
+    const secret = `whsec_${keyBytes.toString("base64")}`;
+    const raw = Buffer.from('{"type":"site.offer_reserved.v1","data":{"attivita":"Barberia Mario"}}');
+    const id = "msg_2Kq9";
+    const ts = String(Math.floor(now / 1000));
+    const sign = (key: Buffer) => createHmac("sha256", key).update(`${id}.${ts}.`).update(raw).digest("base64");
+    const good = `v1,${sign(keyBytes)}`;
+    const headers = (h: Record<string, string>) => (n: string) => h[n];
+    const ok = { "webhook-id": id, "webhook-timestamp": ts };
+    expect(verifyHmac(cfg, raw, headers({ ...ok, "webhook-signature": good }), { current: secret }, now)).toEqual({ ok: true, which: "current" });
+    // two signatures after a sender-side rotation: any match is enough
+    expect(verifyHmac(cfg, raw, headers({ ...ok, "webhook-signature": `v1,${sign(Buffer.from("old"))} ${good}` }), { current: secret }, now)).toEqual({ ok: true, which: "current" });
+    expect(verifyHmac(cfg, raw, headers({ ...ok, "webhook-signature": `v1,${sign(Buffer.from("old"))}` }), { current: secret }, now)).toMatchObject({ ok: false, reason: "Invalid signature" });
+    // the body or the id changed: invalid
+    expect(verifyHmac(cfg, Buffer.from(raw.toString() + " "), headers({ ...ok, "webhook-signature": good }), { current: secret }, now)).toMatchObject({ ok: false });
+    expect(verifyHmac(cfg, raw, headers({ ...ok, "webhook-id": "msg_other", "webhook-signature": good }), { current: secret }, now)).toMatchObject({ ok: false });
+    // older than 5 minutes, missing headers, no v1 entry
+    expect(verifyHmac(cfg, raw, headers({ ...ok, "webhook-signature": good }), { current: secret }, now + 301_000)).toMatchObject({ ok: false, reason: expect.stringContaining("tolerance") });
+    expect(verifyHmac(cfg, raw, headers({ "webhook-timestamp": ts, "webhook-signature": good }), { current: secret }, now)).toMatchObject({ ok: false, reason: expect.stringContaining("webhook-id") });
+    expect(verifyHmac(cfg, raw, headers({ ...ok, "webhook-signature": `v2,${sign(keyBytes)}` }), { current: secret }, now)).toMatchObject({ ok: false, reason: expect.stringContaining("v1") });
+    // the secret's previous value during our own overlap
+    expect(verifyHmac(cfg, raw, headers({ ...ok, "webhook-signature": good }), { current: "whsec_b3RoZXI=", previous: secret }, now)).toEqual({ ok: true, which: "previous" });
   });
 
   it("verifies base64 signatures over {timestamp}.{body} within the tolerance only", () => {

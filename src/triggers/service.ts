@@ -199,7 +199,12 @@ export class TriggerService {
       if (a.allowQueryToken !== undefined) next.auth.allowQueryToken = !!a.allowQueryToken;
       if (a.hmac === null) delete next.auth.hmac;
       else if (a.hmac !== undefined) {
-        const h: TriggerHmacConfig = {
+        const std = a.hmac.scheme === "standard-webhooks";
+        const h: TriggerHmacConfig = std ? {
+          scheme: "standard-webhooks", header: "webhook-signature", algorithm: "sha256", encoding: "base64", timestampHeader: "webhook-timestamp",
+          ...(a.hmac.toleranceSeconds !== undefined ? { toleranceSeconds: a.hmac.toleranceSeconds } : {}),
+        } : {
+          ...(a.hmac.scheme !== undefined ? { scheme: a.hmac.scheme } : {}),
           header: String(a.hmac.header ?? "").trim().toLowerCase(), algorithm: a.hmac.algorithm ?? "sha256", encoding: a.hmac.encoding ?? "hex",
           ...(a.hmac.prefix ? { prefix: a.hmac.prefix } : {}),
           ...(a.hmac.timestampHeader ? { timestampHeader: a.hmac.timestampHeader.trim().toLowerCase() } : {}),

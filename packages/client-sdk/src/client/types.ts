@@ -2921,6 +2921,8 @@ export interface TriggerHmacConfig {
   toleranceSeconds?: number;
   /** {body} (default) or e.g. {timestamp}.{body} */
   signedPayload?: string;
+  /** "standard-webhooks": webhook-id / webhook-timestamp / webhook-signature (v1,<base64>), whsec_ secret. */
+  scheme?: "standard-webhooks";
 }
 
 export interface TriggerContract {

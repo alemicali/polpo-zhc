@@ -81,6 +81,13 @@ export const TRIGGER_LIMITS = {
 
 /** An HMAC signature check: the sender signs the raw body (optionally with a timestamp) with a shared secret. */
 export interface TriggerHmacConfig {
+  /**
+   * "standard-webhooks" (https://www.standardwebhooks.com, Svix-style): the headers webhook-id /
+   * webhook-timestamp / webhook-signature, the signed content "{id}.{timestamp}.{body}", signatures
+   * "v1,<base64>" separated by spaces, and a "whsec_<base64>" secret used as its decoded bytes. The
+   * other fields are then ignored (except toleranceSeconds, default 300). Absent: the generic HMAC below.
+   */
+  scheme?: "standard-webhooks";
   /** The header carrying the signature, e.g. x-hub-signature-256, typeform-signature, x-signature. */
   header: string;
   algorithm: TriggerHmacAlgorithm;

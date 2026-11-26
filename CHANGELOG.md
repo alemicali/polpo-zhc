@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Triggers: Standard Webhooks signatures** (`hmac.scheme: "standard-webhooks"`): `webhook-id` / `webhook-timestamp` / `webhook-signature` (`v1,<base64>`, several after a rotation), signed `{id}.{timestamp}.{body}`, `whsec_` secrets decoded, 5-minute tolerance — for SitoInChat, Svix and other Standard Webhooks senders. Dashboard (Auth → Format), REST, MCP `polpo_trigger_auth`, SDK.
+
 ## [0.8.0] — 2026-11-26 — Agent tests and evals, triggers, decisions, media, CLI coding chats
 
 ### Added
