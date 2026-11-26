@@ -277,3 +277,56 @@ export function cleanTemplateInput(input: WaBizTemplateInput): WaBizTemplateInpu
   if (input.offerExpiresAt) out.offerExpiresAt = input.offerExpiresAt;
   return out;
 }
+
+// ── Shared by the account panels (manage.tsx) ─────────────────────
+
+export type WaTone = "success" | "warning" | "destructive" | "info" | "muted";
+
+export function templateStatusTone(status: string): WaTone {
+  const s = status.toUpperCase();
+  if (s === "APPROVED") return "success";
+  if (s === "PENDING" || s === "IN_APPEAL" || s === "PENDING_DELETION") return "warning";
+  if (s === "REJECTED" || s === "DISABLED" || s === "PAUSED") return "destructive";
+  return "muted";
+}
+
+export function qualityTone(q: string | undefined): WaTone {
+  const s = String(q ?? "").toUpperCase();
+  if (s === "GREEN" || s === "HIGH") return "success";
+  if (s === "YELLOW" || s === "MEDIUM") return "warning";
+  if (s === "RED" || s === "LOW") return "destructive";
+  return "muted";
+}
+
+/** Why the components JSON cannot be sent to Meta, or undefined. */
+export function componentsProblem(json: string): string | undefined {
+  let v: unknown;
+  try { v = JSON.parse(json); } catch (e) { return `Not valid JSON: ${(e as Error).message}`; }
+  if (!Array.isArray(v) || !v.length) return "A list of components: [{ \"type\": \"BODY\", \"text\": \"…\" }, …]";
+  const types = ["HEADER", "BODY", "FOOTER", "BUTTONS", "CAROUSEL", "LIMITED_TIME_OFFER"];
+  for (const [i, c] of v.entries()) {
+    if (!c || typeof c !== "object" || Array.isArray(c)) return `Component ${i + 1} is not an object`;
+    const t = String((c as { type?: unknown }).type ?? "").toUpperCase();
+    if (!types.includes(t)) return `Component ${i + 1}: type must be ${types.join(", ")}`;
+  }
+  if (!v.some((c) => String((c as { type?: unknown }).type).toUpperCase() === "BODY")) return "Every template has a BODY";
+  return undefined;
+}
+
+/** Meta's data points, wherever they are in the answer (analytics, pricing_analytics, template_analytics). */
+export function analyticsRows(data: unknown): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = [];
+  const walk = (v: unknown) => {
+    if (Array.isArray(v)) { v.forEach(walk); return; }
+    if (!v || typeof v !== "object") return;
+    for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+      if (k === "data_points" && Array.isArray(x)) out.push(...x.filter((p) => p && typeof p === "object") as Array<Record<string, unknown>>);
+      else walk(x);
+    }
+  };
+  walk(data);
+  return out;
+}
+
+/** Reactions offered on a message. */
+export const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];

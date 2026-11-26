@@ -389,7 +389,7 @@ function TemplateComposer({ templates, optedOut, sendTemplate }: { templates: Wa
   const [key, setKey] = useState("");
   const [input, setInput] = useState<WaBizTemplateInput>({});
   const t = approved.find((x) => `${x.name}|${x.language}` === key);
-  const needs = useMemo(() => (t ? templateNeeds(t) : undefined), [t]);
+  const needs = t ? templateNeeds(t) : undefined;
   const missing = needs ? templateInputProblems(needs, input) : [];
   if (optedOut) return <p className="text-caption text-warning">The contact opted out: no template can be sent until they opt in again.</p>;
   if (!approved.length) return <p className="text-caption text-muted-foreground">No approved templates: create one in Templates and wait for Meta's review, then sync.</p>;

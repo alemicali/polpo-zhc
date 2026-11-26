@@ -24,7 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { cn } from "@/lib/utils";
-import { WA_PROFILE_VERTICALS, fileToBase64, formatBytes, templateNeeds } from "./wabiz-lib";
+import { WA_PROFILE_VERTICALS, analyticsRows, componentsProblem, fileToBase64, formatBytes, qualityTone, templateNeeds, templateStatusTone } from "./wabiz-lib";
 
 const TONE = {
   success: "border-success/30 bg-success/10 text-success",
@@ -34,21 +34,7 @@ const TONE = {
   muted: "text-muted-foreground",
 } as const;
 
-export function templateStatusTone(status: string): keyof typeof TONE {
-  const s = status.toUpperCase();
-  if (s === "APPROVED") return "success";
-  if (s === "PENDING" || s === "IN_APPEAL" || s === "PENDING_DELETION") return "warning";
-  if (s === "REJECTED" || s === "DISABLED" || s === "PAUSED") return "destructive";
-  return "muted";
-}
 
-export function qualityTone(q: string | undefined): keyof typeof TONE {
-  const s = String(q ?? "").toUpperCase();
-  if (s === "GREEN" || s === "HIGH") return "success";
-  if (s === "YELLOW" || s === "MEDIUM") return "warning";
-  if (s === "RED" || s === "LOW") return "destructive";
-  return "muted";
-}
 
 function useRun() {
   const [busy, setBusy] = useState<string | null>(null);
@@ -88,20 +74,6 @@ const STARTER_COMPONENTS = JSON.stringify([
   { type: "BUTTONS", buttons: [{ type: "QUICK_REPLY", text: "Thanks" }] },
 ], null, 2);
 
-/** Why the components JSON cannot be sent to Meta, or undefined. */
-export function componentsProblem(json: string): string | undefined {
-  let v: unknown;
-  try { v = JSON.parse(json); } catch (e) { return `Not valid JSON: ${(e as Error).message}`; }
-  if (!Array.isArray(v) || !v.length) return "A list of components: [{ \"type\": \"BODY\", \"text\": \"…\" }, …]";
-  const types = ["HEADER", "BODY", "FOOTER", "BUTTONS", "CAROUSEL", "LIMITED_TIME_OFFER"];
-  for (const [i, c] of v.entries()) {
-    if (!c || typeof c !== "object" || Array.isArray(c)) return `Component ${i + 1} is not an object`;
-    const t = String((c as { type?: unknown }).type ?? "").toUpperCase();
-    if (!types.includes(t)) return `Component ${i + 1}: type must be ${types.join(", ")}`;
-  }
-  if (!v.some((c) => String((c as { type?: unknown }).type).toUpperCase() === "BODY")) return "Every template has a BODY";
-  return undefined;
-}
 
 function TemplateEditor({ open, template, onOpenChange, create, edit }: {
   open: boolean;
@@ -389,20 +361,6 @@ export function WaPhonePanel({ channel, status }: { channel: string; status: WaB
 
 // ── Analytics ────────────────────────────────────────────────────────
 
-/** Meta's data points, wherever they are in the answer (analytics, pricing_analytics, template_analytics). */
-export function analyticsRows(data: unknown): Array<Record<string, unknown>> {
-  const out: Array<Record<string, unknown>> = [];
-  const walk = (v: unknown) => {
-    if (Array.isArray(v)) { v.forEach(walk); return; }
-    if (!v || typeof v !== "object") return;
-    for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
-      if (k === "data_points" && Array.isArray(x)) out.push(...x.filter((p) => p && typeof p === "object") as Array<Record<string, unknown>>);
-      else walk(x);
-    }
-  };
-  walk(data);
-  return out;
-}
 
 const cell = (k: string, v: unknown) => {
   if ((k === "start" || k === "end") && typeof v === "number") return new Date(v * 1000).toLocaleDateString();

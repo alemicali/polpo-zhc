@@ -15,14 +15,13 @@ import { useWaMedia, type WaBusinessMessage, type WaBizMedia } from "@polpo-ai/r
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { formatBytes } from "./wabiz-lib";
+import { formatBytes, QUICK_REACTIONS } from "./wabiz-lib";
 
 type Content = Record<string, unknown>;
 const str = (v: unknown) => (typeof v === "string" ? v : v === undefined || v === null ? "" : String(v));
 const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 const obj = (v: unknown): Content => (v && typeof v === "object" && !Array.isArray(v) ? (v as Content) : {});
 
-export const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
 /** A file kept with a message, fetched with the dashboard's credentials. */
 export function WaMediaView({ channel, message }: { channel: string; message: WaBusinessMessage & { media: WaBizMedia } }) {

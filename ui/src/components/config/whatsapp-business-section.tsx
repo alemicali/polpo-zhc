@@ -33,7 +33,7 @@ import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { notifySetupSaved } from "@/lib/setup-link";
 import { cn } from "@/lib/utils";
 import { WaContactSheet } from "./whatsapp-business/contact-sheet";
-import { qualityTone } from "./whatsapp-business/manage";
+import { qualityTone } from "./whatsapp-business/wabiz-lib";
 
 export { WaBusinessManage } from "./whatsapp-business/manage";
 

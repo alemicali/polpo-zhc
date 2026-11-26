@@ -67,9 +67,9 @@ import { WaTranscript } from "../src/components/config/whatsapp-business/transcr
 import { WaComposer } from "../src/components/config/whatsapp-business/composer";
 import { WaContactSheet } from "../src/components/config/whatsapp-business/contact-sheet";
 import {
-  WaAccountEventsList, WaAnalyticsPanel, WaBlockedList, WaPhonePanel, WaProfileEditor, analyticsRows, componentsProblem,
+  WaAccountEventsList, WaAnalyticsPanel, WaBlockedList, WaPhonePanel, WaProfileEditor,
 } from "../src/components/config/whatsapp-business/manage";
-import { templateInputProblems, templateNeeds, templatePreviewText, outboundProblem } from "../src/components/config/whatsapp-business/wabiz-lib";
+import { analyticsRows, componentsProblem, templateInputProblems, templateNeeds, templatePreviewText, outboundProblem } from "../src/components/config/whatsapp-business/wabiz-lib";
 
 let root: Root;
 let container: HTMLDivElement;
