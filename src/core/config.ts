@@ -6,7 +6,8 @@ import { getPolpoDir } from "./constants.js";
 import { normalizeOrchestratorName, ORCHESTRATOR_NAME_MAX_LENGTH } from "./orchestrator-name.js";
 import { normalizeVaultRef } from "@polpo-ai/core/vault-ref";
 import { parseStoredProvider } from "@polpo-ai/core/provider-config";
-import { sanitizeAppearanceSettings, isEmptyAppearance, parseEgressProxies, parseComputers, parseTailscaleSettings, computerEgressProblem, isRemoteComputer, COMPUTER_ID_PATTERN, HOST_COMPUTER_ID, parseHarnessesSettings, parseAgentEngine, connectorToolsProblems, normalizeConnectorTools, normalizeDependencyResultsSettings } from "@polpo-ai/core";
+import { setArtifactLimits } from "@polpo-ai/core/artifacts";
+import { sanitizeAppearanceSettings, isEmptyAppearance, parseEgressProxies, parseComputers, parseTailscaleSettings, computerEgressProblem, isRemoteComputer, COMPUTER_ID_PATTERN, HOST_COMPUTER_ID, parseHarnessesSettings, parseAgentEngine, connectorToolsProblems, normalizeConnectorTools, normalizeDependencyResultsSettings, normalizeDecisionSettings, normalizeMediaSettings, talksToProblem, normalizeTalksTo } from "@polpo-ai/core";
 
 const DEFAULT_SETTINGS: PolpoSettings = {
   maxRetries: 3,
@@ -182,6 +183,12 @@ export function validateAgents(agents: any[]): void {
     // Validate reportsTo — self-reference
     if (agent.reportsTo === agent.name) {
       throw new Error(`Agent "${agent.name}": cannot report to itself`);
+    }
+    // Communication lines (talksTo): names that no longer exist are ignored, not refused
+    if (agent.talksTo !== undefined) {
+      const problem = talksToProblem(agent.talksTo);
+      if (problem) throw new Error(`Agent "${agent.name}": ${problem}`);
+      agent.talksTo = normalizeTalksTo(agent.talksTo);
     }
 
     validateAgentLoops(agent);
@@ -432,6 +439,13 @@ function parseSettings(raw: any): PolpoSettings {
     else console.warn(`[polpo] Ignoring invalid settings.orchestratorName in polpo.json (1–${ORCHESTRATOR_NAME_MAX_LENGTH} characters): the default "Polpo" applies`);
   }
   if (raw?.imageModel && typeof raw.imageModel === "string") settings.imageModel = raw.imageModel;
+  // the decision model (decide()): kept as written; an invalid one is reported where it is used (Settings → Decisions, decide's error)
+  if (raw?.decisionModel && (typeof raw.decisionModel === "string" || typeof raw.decisionModel === "object")) settings.decisionModel = raw.decisionModel;
+  const decisionSettings = normalizeDecisionSettings(raw?.decisions);
+  if (decisionSettings) settings.decisions = decisionSettings;
+  // media: the image fallback model, the gateway key, limits and the log's retention (imageModel above is the model)
+  const mediaSettings = normalizeMediaSettings(raw?.media);
+  if (mediaSettings) settings.media = mediaSettings;
   if (raw?.modelAllowlist && typeof raw.modelAllowlist === "object") settings.modelAllowlist = raw.modelAllowlist;
   if (raw?.enableVolatileTeams != null) settings.enableVolatileTeams = raw.enableVolatileTeams;
   if (raw?.volatileCleanup) settings.volatileCleanup = raw.volatileCleanup;
@@ -497,6 +511,24 @@ function parseSettings(raw: any): PolpoSettings {
     const keys = parseMcpKeyConfigs(raw.mcp.keys);
     if (keys.length) mcp.keys = keys;
     if (mcp.toolsets || mcp.keys) settings.mcp = mcp;
+  }
+  if (raw?.artifacts && typeof raw.artifacts === "object") {
+    // positive numbers only (anything else keeps the default), see ArtifactLimits
+    const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.floor(v) : undefined);
+    const a = raw.artifacts as Record<string, any>;
+    const artifacts: NonNullable<PolpoSettings["artifacts"]> = {};
+    for (const key of ["maxBytes", "inlineBytes", "maxEditBytes", "maxTotalBytes"] as const) {
+      const value = num(a[key]);
+      if (value !== undefined) artifacts[key] = value;
+    }
+    if (a.versions && typeof a.versions === "object") {
+      const maxCount = num(a.versions.maxCount);
+      const maxTotalBytes = num(a.versions.maxTotalBytes);
+      if (maxCount !== undefined || maxTotalBytes !== undefined) {
+        artifacts.versions = { ...(maxCount !== undefined ? { maxCount } : {}), ...(maxTotalBytes !== undefined ? { maxTotalBytes } : {}) };
+      }
+    }
+    settings.artifacts = artifacts;
   }
 
   // Storage backend.
@@ -569,6 +601,8 @@ export async function parseConfig(workDir: string): Promise<PolpoConfig> {
   // polpo.json only contains: project, settings, providers.
 
   const settings = parseSettings(polpoConfig.settings ?? {});
+  // the artifact size limits in force in this process (settings.artifacts, defaults otherwise)
+  setArtifactLimits(settings.artifacts);
   const providers = polpoConfig.providers
     ? parseProviders(polpoConfig.providers as Record<string, unknown>)
     : undefined;

@@ -129,6 +129,11 @@ export interface Task {
   title: string;
   description: string;
   assignTo: string;
+  /**
+   * A published version of the assignee to run (e.g. "1.2.0"), instead of the one deployed to
+   * production. Absent: production. `assignTo: "writer@1.2.0"` on creation sets it.
+   */
+  agentVersion?: string;
   group?: string;
   /** ID of the mission this task belongs to (set when created via executeMission). */
   missionId?: string;
@@ -172,12 +177,36 @@ export interface Task {
    */
   runs?: import("./run-context.js").TaskRunContext[];
   /**
+   * The member (email) who started this task, when known (the dashboard or the API with a member's
+   * session). A CLI engine signed in with a person's plan runs only work its owner started.
+   */
+  requestedBy?: string;
+  /**
    * Optional narrowing of the tools this task's runs may use (connectors, their tools, built-in
    * tools). Absent: everything the agent has. It never grants. See task-tool-scope.ts.
    */
   toolScope?: import("./task-tool-scope.js").TaskToolScope;
+  /** What started it, when it was not a person: a trigger's delivery (open the delivery from the task). */
+  origin?: WorkOrigin;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Where a piece of work (a task, a mission, a chat session) came from when an automation started
+ * it: today a trigger's delivery (POST /hooks/{id}) through one of the trigger's actions. Optional
+ * everywhere: work started by a person has none.
+ */
+export interface WorkOrigin {
+  kind: "trigger";
+  triggerId: string;
+  deliveryId: string;
+  /** The trigger's name when the action ran (for lists; the id is what links). */
+  triggerName?: string;
+  /** The action on the trigger that created it. */
+  actionId?: string;
+  /** Loop guard: how many triggers deep the chain is (1: a delivery from outside). */
+  depth?: number;
 }
 
 export interface TaskResult {
@@ -404,6 +433,13 @@ export interface AgentConfig {
   /** Agent this one reports to — org chart hierarchy for escalation.
    *  When a task fails or needs a decision, escalates up the chain. */
   reportsTo?: string;
+  /**
+   * Communication lines: which agents this one may talk to with ask_agent / message_agent (and set
+   * off in rooms). Missing = "anyone" (agents created before the lines existed); new agents get
+   * `{ mode: "org" }`. Polpo always talks to everyone, and escalate always reaches reportsTo.
+   * See agent-lines.ts.
+   */
+  talksTo?: import("./agent-lines.js").AgentTalksTo;
   /** System prompt appended to the agent's base prompt */
   systemPrompt?: string;
   /** Installed skill names (e.g. "find-skills", "frontend-design") */
@@ -464,7 +500,7 @@ export interface AgentConfig {
   // Core tools (always available): read, write, edit, bash, glob, grep, ls, http_fetch, http_download, register_outcome, vault_get, vault_list.
   // Extended tool categories are activated via allowedTools (e.g. ["browser_*", "email_*"]).
   // No enable flags needed — if a tool name appears in allowedTools, it's loaded.
-  // Available extension categories: browser_*, email_*, image_*, video_*, audio_*, excel_*, pdf_*, docx_*, search_*, whatsapp_*, phone_*, data_*.
+  // Available extension categories: browser_*, email_*, image_*, video_*, audio_*, excel_*, pdf_*, docx_*, search_*, whatsapp_*, wabiz_* (WhatsApp Business, explicit only), phone_*, data_*.
   // Git and dependency operations should be done via bash.
 
   /** Browser profile name for persistent context (cookies, auth, localStorage).
@@ -738,6 +774,13 @@ export interface Mission {
   budgetUsd?: number;
   /** Why the mission is paused, when the orchestrator paused it on its own: "budget". */
   pauseReason?: MissionPauseReason;
+  /**
+   * The member (email) who created it, when known: its schedule's runs are this member's work
+   * (their tasks carry requestedBy = owner). A run a member starts by hand carries that member.
+   */
+  owner?: string;
+  /** What started it, when it was not a person: a trigger's delivery (its tasks carry it too). */
+  origin?: WorkOrigin;
   createdAt: string;
   updatedAt: string;
 }
@@ -795,6 +838,11 @@ export interface RunnerConfig {
   whatsappDbPath?: string;
   /** WhatsApp Baileys profile path (for whatsapp_send — creates a temporary connection). */
   whatsappProfilePath?: string;
+  /**
+   * Who the agent can talk to from this run (its communication lines when the run started): the
+   * run's ask_agent / message_agent / escalate tools name them, and go through notifySocket.
+   */
+  agentLines?: { reachable: string[]; manager?: string; mode: import("./agent-lines.js").AgentLinesMode };
 }
 
 // === Polpo File Config (.polpo/polpo.json — persistent project configuration) ===
@@ -983,8 +1031,16 @@ export interface PolpoSettings {
   orchestratorName?: string;
   /** Polpo's voice replies in chats (Telegram); default "off". Polpo can change it (set_voice_replies). */
   voiceReplies?: VoiceReplyMode;
-  /** Image-capable model for tasks that need vision (falls back to orchestratorModel). */
+  /** Image generation model for the media primitive (generateImage / editImage, the image_generate tool,
+   *  image nodes): "gateway:provider/model", e.g. "vercel-ai-gateway:openai/gpt-image-2" (see media.ts). */
   imageModel?: string;
+  /** Media: the image fallback model, the gateway key (vault entry), limits and the media log's retention. */
+  media?: import("./media.js").MediaSettings;
+  /** Decision model for decide() (typed decisions with probabilities): "vercel-ai-gateway:typesafe-ai/jev",
+   *  or { gateway, model, fallback?, credentialRef?, credentialField?, zeroDataRetention? } (see decisions.ts). */
+  decisionModel?: import("./decisions.js").DecisionModelSetting;
+  /** Decisions: what happens without a decision model, and the decision log's retention. */
+  decisions?: import("./decisions.js").DecisionSettings;
   /** Model allowlist — when set, only these models can be used.
    *  Keys are model specs (e.g. "anthropic:claude-opus-4-6"), values are aliases/params. */
   modelAllowlist?: Record<string, ModelAllowlistEntry>;
@@ -1007,6 +1063,17 @@ export interface PolpoSettings {
   tools?: import("./progressive-tools.js").ToolsSettings;
   /** How much of their dependencies' results tasks receive in their prompt (characters per dependency, in total). */
   dependencyResults?: import("./dependency-results.js").DependencyResultsSettings;
+  /** Agent configuration management. */
+  agents?: {
+    versioning?: {
+      /**
+       * An API or MCP update without publish/deploy flags also publishes the draft and deploys it
+       * to production, so existing clients keep their immediate effect. Default true. The dashboard
+       * always goes through draft → publish → deploy.
+       */
+      autoDeployApiUpdates?: boolean;
+    };
+  };
   /** Where agents' tools run: default sandbox and what lower levels may choose. */
   sandbox?: import("./sandbox.js").SandboxSettings;
   /** Persistent machines agents work on (agent.defaultComputer); "host" (this server) is implicit. */
@@ -1053,6 +1120,13 @@ export interface PolpoSettings {
      */
     keys?: Array<{ name: string; keyRef: import("./vault-ref.js").VaultRef; scopes?: string[] }>;
   };
+  /**
+   * Artifact size limits: maxBytes (one content, default 100 MB), inlineBytes (larger contents are kept
+   * as blob files, default 256 KB), maxEditBytes (largest content changed in place or read by part,
+   * default 50 MB), maxTotalBytes (every artifact of the instance, default 20 GB) and versions
+   * { maxCount (1000), maxTotalBytes (1 GB) } per artifact.
+   */
+  artifacts?: import("./artifacts.js").ArtifactSettings;
 }
 
 // === Polpo State (persisted in .polpo/state.json) ===
@@ -1163,7 +1237,7 @@ export interface ApprovalRequest {
 // === Channel Gateway & Peer Identity ===
 
 /** Supported messaging channel types for inbound message routing. */
-export type ChannelType = "telegram" | "whatsapp" | "slack" | "discord" | "webchat" | "webhook";
+export type ChannelType = "telegram" | "whatsapp" | "whatsapp-business" | "slack" | "discord" | "webchat" | "webhook";
 
 /**
  * Peer identity — represents a person talking to the bot from a messaging channel.
@@ -1260,6 +1334,12 @@ export interface ChannelGatewayConfig {
   groupReplies?: "mentions" | "intent";
   /** groupReplies "intent": how sure the classifier must be (0–1) before the agent joins in. Default 0.7. */
   intentThreshold?: number;
+  /**
+   * Who may use slash commands (/help, /new, /agent, /pair…). "all" (default): everyone allowed to write;
+   * "operators": only operators (WhatsApp Business: business.operators; elsewhere: people paired or in allowFrom);
+   * "none": nobody, every message is chat. A WhatsApp Business channel facing customers always uses "operators".
+   */
+  commands?: "all" | "operators" | "none";
 }
 
 /** Channel a conversation reply is delivered through. */
@@ -1301,7 +1381,7 @@ export interface PresenceEntry {
 
 // === Notification System ===
 
-export type NotificationChannelType = "slack" | "email" | "telegram" | "whatsapp" | "webhook" | "push" | "expo-push";
+export type NotificationChannelType = "slack" | "email" | "telegram" | "whatsapp" | "whatsapp-business" | "webhook" | "push" | "expo-push";
 
 export interface NotificationChannelConfig {
   type: NotificationChannelType;
@@ -1344,8 +1424,37 @@ export interface NotificationChannelConfig {
   port?: number;
   /** SMTP from address. */
   from?: string;
+  /** WhatsApp Business (Meta Cloud API): the phone number's id. */
+  phoneNumberId?: string;
+  /** WhatsApp Business: the WhatsApp Business Account id (templates, subscriptions). */
+  wabaId?: string;
+  /** WhatsApp Business: Graph API version. Default "v23.0". */
+  graphApiVersion?: string;
+  /** WhatsApp Business: the system user's access token (vault reference, owner "$channels", set from the dashboard). */
+  accessTokenRef?: import("./vault-ref.js").VaultRefLike;
+  /** WhatsApp Business: the Meta app's secret, to verify webhook signatures (vault reference, owner "$channels"). */
+  appSecretRef?: import("./vault-ref.js").VaultRefLike;
+  /** WhatsApp Business: the webhook verify token (vault reference, owner "$channels"). */
+  verifyTokenRef?: import("./vault-ref.js").VaultRefLike;
+  /** WhatsApp Business: who it talks to, limits and policies (see whatsapp-business.ts). */
+  business?: import("./whatsapp-business.js").WaBusinessSettings;
+  /**
+   * Slack inbound (Socket Mode): the bot token (xoxb-) and the app-level token (xapp-) live in the
+   * vault (owner "$channels", set from the dashboard), never here. `chatId` is the default Slack
+   * channel id notifications are posted to with the bot token.
+   */
+  slack?: SlackChannelSettings;
   /** Channel gateway config — enables inbound message routing for this channel. */
   gateway?: ChannelGatewayConfig;
+}
+
+/** Slack inbound settings (no secrets: the tokens are in the vault). */
+export interface SlackChannelSettings {
+  /**
+   * In Slack channels: "mentions" (default) answers messages that mention the bot, replies in its
+   * threads and /polpo; "all" answers every message of an enabled channel.
+   */
+  channelMessages?: "mentions" | "all";
 }
 
 export type NotificationSeverity = "info" | "warning" | "critical";
@@ -1560,6 +1669,47 @@ export interface MissionDelay {
   message?: string;
 }
 
+/** Decision node defined within a mission — a typed decision (decisions.ts) that picks a branch.
+ *
+ * When ALL afterTasks have finished, the state (its template over their results, or every after
+ * task's result) is decided by the decision model; the branch matching the answer runs, the other
+ * branches' tasks (and the tasks that only depend on them) are skipped (done, marked skipped).
+ * An uncertain answer (below `threshold`) or a failed decision goes to `onUncertain`: by default a
+ * person chooses (the mission pauses at a checkpoint), or a named branch runs. The tasks a
+ * branch starts get the decision in their description. */
+export interface MissionDecision {
+  /** Decision name (unique in the mission; used in events and the decision log). */
+  name: string;
+  /** Tasks whose results make the state; the decision is taken when they have all finished. */
+  afterTasks: string[];
+  /** The state: a template with {{tasks.<title>}} (that task's result). Default: every after task's result. */
+  state?: string;
+  question: {
+    type: "predicate" | "choice" | "score" | "rank";
+    instructions: string;
+    /** choice: the options. */
+    choices?: Array<{ value: string; description?: string }>;
+    /** score (rank: the rating scale): ordered levels, lowest first. */
+    levels?: Array<string | { label: string; description?: string }>;
+    /** rank: the items, or a template ({{tasks.<title>}}) whose lines are the items. */
+    items?: string | Array<string | { id?: string; label: string; description?: string }>;
+  };
+  /**
+   * Answer → the tasks it starts: predicate "yes" / "no"; choice an option's value; score a level
+   * index, a range ("0-1") or a level's label; rank "ranked" (the sorted list goes to its tasks).
+   * An answer with no branch runs none of them.
+   */
+  branches: Record<string, string[]>;
+  /** Confidence (0..1) below which the answer is uncertain. */
+  threshold?: number;
+  /** An uncertain answer or a failed decision: "human" (default: a person chooses) or { branch }. */
+  onUncertain?: "human" | { branch: string };
+  /** A decision model for this node ("gateway:model"); default settings.decisionModel. */
+  model?: string;
+  /** Notification channels when a person must choose. */
+  notifyChannels?: string[];
+}
+
 /** SLA configuration for deadline monitoring. */
 export interface SLAConfig {
   /** Percentage of deadline elapsed before emitting a warning (0-1). Default: 0.8 */
@@ -1621,6 +1771,8 @@ export interface ScheduleEntry {
   nextRunAt?: string;
   /** Deadline offset — auto-set task/mission deadline to N ms after execution start. */
   deadlineOffsetMs?: number;
+  /** The member (email) who owns the schedule (the mission's owner): its runs' tasks carry requestedBy = owner. */
+  owner?: string;
   /** A run missed while the server was down: "once" (default) runs it at startup when it is at most one interval late, "none" skips to the next. */
   catchUp?: "none" | "once";
   /** How the last run went: started (in progress), completed, failed, skipped (a hook or another process), missed (server down), expired (endDate). */

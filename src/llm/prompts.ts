@@ -5,6 +5,7 @@
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { AgentConfig, PolpoState } from "../core/types.js";
 import { HOOK_EVENT_CATALOG, HOOK_EVENT_GLOBS, todayLine } from "@polpo-ai/core";
+import { agentEffectiveModel, agentEngineIdOf, modelWithEngineText } from "@polpo-ai/core/engine-label";
 import { discoverSkills, loadOrchestratorSkills, buildSkillPrompt, type SkillInfo } from "./skills.js";
 import { buildModelListingForPrompt, listModels, resolveModelSpec } from "./pi-client.js";
 import { readSystemContext } from "./orchestrator-tools.js";
@@ -24,7 +25,7 @@ function describeAgentCapabilities(agent: AgentConfig, skillPool?: SkillInfo[]):
   const hasPattern = (prefix: string) => allowed.some(t => t.toLowerCase().startsWith(prefix));
   if (hasPattern("browser_")) caps.push("browser_navigate/snapshot/click/fill/eval/set_user_agent (browser tools via agent-browser)");
   if (hasPattern("email_")) caps.push("email_send, email_draft, email_verify, email_list, email_read, email_search, email_count, email_download_attachment");
-  if (hasPattern("image_")) caps.push("image_generate (fal.ai FLUX), image_analyze (OpenAI/Anthropic vision)");
+  if (hasPattern("image_")) caps.push("image_generate / image_edit (the instance's image model, Settings → Media), image_analyze (a chat turn with the image)");
   if (hasPattern("video_")) caps.push("video_generate (fal.ai Wan 2.2 text-to-video)");
   if (hasPattern("audio_")) caps.push("audio_transcribe (STT: OpenAI Whisper / Deepgram Nova), audio_speak (TTS: OpenAI / Deepgram / ElevenLabs / Edge — free fallback)");
   if (hasPattern("excel_")) caps.push("excel_read, excel_write, excel_query, excel_info");
@@ -34,7 +35,7 @@ function describeAgentCapabilities(agent: AgentConfig, skillPool?: SkillInfo[]):
   if (hasPattern("whatsapp_")) caps.push("whatsapp_list, whatsapp_read (markRead=false reads hidden), whatsapp_send, whatsapp_send_file, whatsapp_search, whatsapp_contacts");
   if (hasPattern("phone_")) caps.push("phone_call, phone_get_call, phone_list_calls, phone_hangup, phone_setup_inbound, phone_get_inbound_config, phone_disable_inbound (VAPI)");
   if (hasPattern("data_")) caps.push("scoped structured data discovery, query, read-only SQL, and mutation");
-  if (hasPattern("artifact_")) caps.push("artifacts: artifact_create / artifact_update (editable Docs, Slides, Sheets, Design and Motion, HTML dashboards with data, SVG and Mermaid), artifact_get, artifact_list, artifact_delete");
+  if (hasPattern("artifact_")) caps.push("artifacts: artifact_create / artifact_update (editable Docs, Slides, Sheets, Design and Motion, HTML dashboards with data, SVG and Mermaid; update old_str → new_str for small changes, rewrite only when most of it changes, ops for one tab, slide, sheet range, artboard or scene), artifact_from_file (publish a large file you wrote in your workspace), artifact_get (by part or byte range), artifact_list, artifact_delete");
   if (hasPattern("brain_")) caps.push("scoped Company Brain search, semantic context, evidence-aware enrichment, and knowledge graph maintenance");
   if (agent.skills?.length) {
     // Show skill names with descriptions when available from the pool
@@ -92,13 +93,19 @@ export function buildReachabilitySection(
   botUsernames: Map<string, string> = new Map(),
 ): string {
   const entries = Object.entries(channels);
-  const inbound = entries.filter(([, ch]) => (ch.type === "telegram" || ch.type === "whatsapp" || ch.type === "webhook") && ch.gateway?.enableInbound);
+  const inbound = entries.filter(([, ch]) => (ch.type === "telegram" || ch.type === "whatsapp" || ch.type === "whatsapp-business" || ch.type === "webhook") && ch.gateway?.enableInbound);
   const outboundOnly = entries.filter(([, ch]) => !inbound.some(([, i]) => i === ch));
 
   const describeInbound = ([name, ch]: [string, ReachabilityChannel]) => {
     if (ch.type === "webhook") {
       const target = ch.gateway?.agent ? `dedicated to agent ${ch.gateway.agent}` : "talks to you; /agent NAME switches to an agent";
       return `- Webhook "${name}" (HTTP, e.g. iOS Shortcuts or scripts): \`POST /api/v1/channels/${name}/inbound\` with the channel secret; ${target}; the reply comes back in the HTTP response. Accepts text and files.`;
+    }
+    if (ch.type === "whatsapp-business") {
+      const audience = (ch as { business?: { audience?: string } }).business?.audience === "operators" ? "operators" : "customers";
+      return audience === "customers"
+        ? `- WhatsApp Business "${name}" (official number, Meta Cloud API): customers write to it and only agent ${ch.gateway?.agent ?? "(none set)"} answers them, never you; text only. Business-initiated messages go out only as approved templates (wabiz_* tools).`
+        : `- WhatsApp Business "${name}" (official number): the team's operators write to it${ch.gateway?.agent ? `, answered by agent ${ch.gateway.agent}` : ", and talk to you"}; text only.`;
     }
     const handle = botUsernames.get(name) ? `@${botUsernames.get(name)}` : `channel "${name}"`;
     const target = ch.gateway?.agent
@@ -118,6 +125,7 @@ export function buildReachabilitySection(
     "expo-push": "Polpo sends mobile push notifications",
     telegram: "Polpo sends notifications to Telegram (inbound disabled)",
     whatsapp: "Polpo sends notifications to WhatsApp (inbound disabled)",
+    "whatsapp-business": "Polpo notifies the operators on the official WhatsApp Business number (inside the 24-hour window, or with the notification template)",
   };
 
   return [
@@ -571,6 +579,8 @@ export async function buildChatSystemPrompt(
     `- Quality gates: block downstream tasks until predecessors meet a minimum score`,
     `- Checkpoints: human-in-the-loop pause points (mission pauses, emits notification, waits for resume)`,
     `- Delays: timed pause points — like checkpoints but auto-expire after an ISO 8601 duration (e.g. PT2H). Use delays when tasks must wait a fixed time (cooldowns, rate-limit windows, deployment bake times). NEVER use shell sleep or polling workarounds — always use native delays.`,
+    `- Decision nodes (decisions[]): after some tasks, a typed decision by the decision model (predicate yes/no, choice, score, rank) on their results picks the branch of tasks that runs; the other branches are skipped; an uncertain answer pauses the mission for a person. Use them to route work by content (e.g. billing vs support) instead of an agent judging it.`,
+    `- Image nodes (images[]): after some tasks, an image is generated by the instance's image model from a prompt over their results ({{tasks.<title>}}); the forTasks wait for it and get its files (e.g. form → an agent writes the post → an image → an agent sends both on Telegram).`,
     `- Volatile agents: temporary team members created for the mission, cleaned up on completion`,
     `- Progress tracking and aggregated reporting (scores, durations, outcomes)`,
     `- Scheduled and recurring execution via the built-in scheduler`,
@@ -721,6 +731,8 @@ export async function buildChatSystemPrompt(
     `  - delays[].blocksTasks (required): array of task titles blocked until the delay timer expires. These tasks MUST have dependsOn including the afterTasks.`,
     `  - delays[].duration (required): ISO 8601 duration (e.g. "PT2H" = 2 hours, "PT30M" = 30 minutes, "P1D" = 1 day).`,
     `  - delays[].message: human-readable description shown when the delay starts.`,
+    `  - decisions[] (optional): { name, afterTasks: [titles], state?: "template with {{tasks.<title>}}", question: { type: "predicate"|"choice"|"score"|"rank", instructions, choices?: [{ value, description }], levels?: [labels, lowest first], items?: [labels] or "{{tasks.<title>}}" }, branches: { "<answer>": [task titles] } (predicate yes/no, choice values, score index/range "0-1"/label, rank "ranked"), threshold?: 0..1, onUncertain?: "human" | { branch } }. Branch tasks need no dependsOn on the afterTasks.`,
+    `  - images[] (optional): { name, afterTasks: [titles], prompt: "template with {{tasks.<title>}}", forTasks: [titles that receive the image], size?: "1024x1024", n?: 1, model?: "gateway:provider/model", onError?: "continue"|"fail" }. forTasks need no dependsOn on the afterTasks.`,
     `  - qualityGates[].name (required): unique gate identifier.`,
     `  - qualityGates[].afterTasks (required): array of task titles whose scores are evaluated.`,
     `  - qualityGates[].blocksTasks (required): array of task titles blocked until gate passes. These tasks MUST have dependsOn including the afterTasks.`,
@@ -785,14 +797,16 @@ export async function buildChatSystemPrompt(
     `  - **allowedPaths**: Filesystem sandbox — directories the agent can access (relative to workDir).`,
     `  - **allowedTools**: Restrict to specific tool names (e.g. ["read", "write", "bash", "glob"]).`,
     `    Omit to grant all core tools. Use this for security — limit what an agent CAN do.`,
-    `  - **reportsTo**: Org chart parent (e.g. "lead-dev"). Used for escalation.`,
+    `  - **reportsTo**: Org chart parent (e.g. "lead-dev"). Used for escalation (the agent's escalate tool).`,
+    `  - **talksTo**: Communication lines — which agents it may talk to (ask_agent, message_agent, rooms): { mode: "org" | "list" | "anyone" | "none", agents?, acceptFrom? }.`,
+    `    org (default for new agents): its manager, its direct reports and the extra agents; list: only the listed agents; anyone; none. You always talk to every agent. agent_lines shows the team's lines.`,
     `  - **team**: Target team name (default: first team).`,
     `  - **reasoning**: Per-agent thinking level: "off", "low", "medium", "high". Overrides global setting.`,
     `  - **maxTurns**: Max conversation turns before forced stop (default 200).`,
     `  - **maxConcurrency**: Max concurrent tasks (default 1).`,
     `  - **allowedTools patterns**: Include "browser_*" in allowedTools for browser tools (navigate, click, screenshot — 18 tools via agent-browser).`,
     `    Include "email_*" for email tools (send, draft, list, read, search, count — requires vault SMTP/IMAP credentials).`,
-    `    Include "image_*" for image tools (image_generate via fal.ai FLUX, image_analyze via OpenAI/Anthropic vision — requires FAL_KEY for generation).`,
+    `    Include "image_*" for image tools (image_generate and image_edit with the instance's image model — Settings → Media —, image_analyze through the chat with a vision-capable model).`,
     `    Include "video_*" for video generation (video_generate via fal.ai Wan 2.2 — requires FAL_KEY).`,
     `    Include "audio_*" for audio tools (audio_transcribe for STT via OpenAI Whisper / Deepgram Nova, audio_speak for TTS via OpenAI / Deepgram / ElevenLabs / Edge).`,
     `    Include "excel_*" for Excel/CSV tools (read, write, query, info).`,
@@ -1371,8 +1385,10 @@ export async function buildChatSystemPrompt(
     `- For an editable presentation, workbook or animation, use type html and kind slides, sheets or motion. Follow the versioned JSON schema in artifact_create. For Sheets, write the kind before content and cells in reading order so the grid fills in as you work.`,
     `- When working with an artifact already open in the dashboard, read its current content with artifact_get and edit that id with artifact_update, passing expectedVersion (the version you read) so a person's edit made meanwhile is never overwritten. Preserve existing tabs, artboards, layers, and stable identifiers when changing one part.`,
     `- **svg**: a drawing or an illustration. **mermaid**: a diagram (flow, sequence, ER, Gantt…).`,
-    `Change an artifact with artifact_update (edits for small changes, content to rewrite it); every change keeps the`,
-    `previous version, so people can go back. After creating one, navigate_to({ target: "artifact", id }) so the person sees it.`,
+    `Change an artifact with artifact_update: command update (old_str → new_str, several with updates[]) for small changes, rewrite (content)`,
+    `only when most of it changes, ops / patch for one tab, slide, sheet range, artboard or scene; every change keeps the previous version,`,
+    `so people can go back. A large artifact (over ~20 KB): write the file and publish it with artifact_from_file instead of sending it`,
+    `in a tool call; read a large one by part or byte range (artifact_get). After creating one, navigate_to({ target: "artifact", id }) so the person sees it.`,
     `Use render_widget only for a small, throwaway visual inside the chat (no data sources, not kept).`,
     ``,
     `### Connectors (external apps over MCP)`,
@@ -1507,6 +1523,12 @@ export async function buildChatSystemPrompt(
     `link (setup_url) where the person enters it; give them that link, then setup_wait and harnesses_get { test }. Sessions: harness_sessions_list,`,
     `harness_session_control (stop, or reset with confirm). "Create an agent on Claude Code with a computer" = harnesses_get (enable or`,
     `set the credential if needed) → computer_save (kind daytona) → add_agent with engine and defaultComputer.`,
+    `**CLI engine**: engine { type: "cli", cli: "claude" | "codex", account?, model?, permissionMode?, effort?, maxBudgetUsd? } runs the`,
+    `official Claude Code / Codex program signed in with a person's own plan (a CLI account: harnesses_get cli, added and signed in`,
+    `from Settings → Harnesses → CLI accounts; sign-in on a remote computer opens a terminal there). It has Polpo's tools like a harness,`,
+    `runs tasks AND chats (on this server, or on a Daytona v2 / E2B computer), and appears in harness_sessions_list. A personal account`,
+    `runs only its owner's work: tasks they create (also through you), missions they start, schedules they set, their own chats;`,
+    `never channel contacts or ownerless work. Its tokens are counted, not billed (the plan pays).`,
     ``,
     `**Residential egress**: an egress proxy (settings.egressProxies, e.g. a home line over Tailscale; config_update egress_proxies) is`,
     `for the browser only, for sites that block datacenter addresses: per agent (browserEgress) or per computer (computer_save egress).`,
@@ -1670,9 +1692,10 @@ export async function buildChatSystemPrompt(
     `- For HTTP/API calls: "Use http_fetch to call the API" (always available). For simple lookups,`,
     `  you can also call http_fetch directly yourself instead of creating a task.`,
     `- For email: "Use email_send" to send immediately or "Use email_draft" to save a draft (requires email_* in allowedTools + vault credentials)`,
-    `- For image generation: "Use image_generate" (requires image_* in allowedTools + vault fal-ai key or FAL_KEY env var)`,
+    `- For image generation: "Use image_generate" (or image_edit to change an image; requires image_* in allowedTools + an image model in Settings → Media).`,
+    `  For a mission that turns earlier steps' results into an image for later steps, use an image node (mission "images": [{ name, afterTasks, prompt with {{tasks.<title>}}, forTasks }]).`,
     `- For video generation: "Use video_generate" (requires video_* in allowedTools + vault fal-ai key or FAL_KEY env var)`,
-    `- For image analysis/vision: "Use image_analyze" (requires image_* in allowedTools + vault or OPENAI_API_KEY/ANTHROPIC_API_KEY)`,
+    `- For image analysis/vision: "Use image_analyze" (requires image_* in allowedTools; it uses the agent's own model, which must see images, or a vision model named in the call)`,
     `- For audio transcription: "Use audio_transcribe" (requires audio_* in allowedTools + vault or OPENAI_API_KEY/DEEPGRAM_API_KEY).`,
     `  Always pass the \`language\` parameter (ISO 639-1, e.g. "it", "en", "es") — infer it from context (user locale, task description, agent identity timezone, or the content being discussed).`,
     `- For text-to-speech: "Use audio_speak" (requires audio_* in allowedTools). Providers: openai, deepgram, elevenlabs (need credentials), edge (free, no API key — auto-fallback if cloud provider fails).`,
@@ -1850,7 +1873,7 @@ export async function buildChatSystemPrompt(
     parts.push(`Agents:`);
     for (const a of team.agents) {
       const dn = a.identity?.displayName;
-      let line = `  - ${a.name}${dn ? ` (${dn})` : ""}: ${a.role || "general"} (${a.model || "default model"})`;
+      let line = `  - ${a.name}${dn ? ` (${dn})` : ""}: ${a.role || "general"} (${modelWithEngineText(agentEffectiveModel(a), agentEngineIdOf(a.engine), "default model")})`;
       if (a.reportsTo) line += ` → reports to: ${a.reportsTo}`;
       if (a.skills?.length) line += ` [skills: ${a.skills.join(", ")}]`;
       const caps = describeAgentCapabilities(a, availableAgentSkills);

@@ -14,11 +14,14 @@ import type { AgentHarnessEngine, HarnessId } from "./harnesses.js";
 import type { ComputerConfig, ComputerKind } from "./computers.js";
 import type { SandboxProviderId } from "./sandbox.js";
 import type { TaskToolScope } from "./task-tool-scope.js";
+import { agentCliEngine } from "./cli-engine.js";
+import { engineTypeText, modelWithEngineText } from "./engine-label.js";
 
-export type RunEngine = "polpo" | HarnessId;
+/** "claude-cli" / "codex-cli": the official program signed in with a person's account (agent.engine { type: "cli" }). */
+export type RunEngine = "polpo" | HarnessId | "claude-cli" | "codex-cli";
 export type RunContextStatus = "running" | "completed" | "failed" | "killed";
 /** How the harness authenticates (the kind only). */
-export type RunAuthKind = "api-key" | "bedrock" | "vertex" | "ai-gateway" | "gateway";
+export type RunAuthKind = "api-key" | "bedrock" | "vertex" | "ai-gateway" | "gateway" | "subscription";
 
 export interface RunComputerContext {
   /** "host" (this server), a computer id, or "ephemeral" (a sandbox made for this run). */
@@ -58,9 +61,10 @@ export interface RunCostContext {
   /**
    * Where harnessUsd comes from: "gateway" (the gateway reported it), "runtime" (Claude Code's own
    * estimate, Anthropic prices), "runtime-estimate" (that estimate for a model behind a gateway:
-   * approximate), "tokens-only" (no reliable price: non-Claude models; only tokens are recorded).
+   * approximate), "tokens-only" (no reliable price: non-Claude models; only tokens are recorded),
+   * "subscription" (a CLI signed in with a person's plan: tokens only, no USD billed by Polpo).
    */
-  costSource?: "gateway" | "runtime" | "runtime-estimate" | "tokens-only";
+  costSource?: "gateway" | "runtime" | "runtime-estimate" | "tokens-only" | "subscription";
 }
 
 /** What the engine reports while the run goes (AgentActivity.runContext). */
@@ -80,6 +84,8 @@ export interface TaskRunContext {
   continuation?: boolean;
   /** The agent that ran it (the task's assignee at the time; reassignments change it). */
   agent?: string;
+  /** The agent's published version the run used (production's, or the task's pinned one). */
+  agentVersion?: string;
   engine: RunEngine;
   /** Model id (the agent's for Polpo's engine; the harness model for a harness). */
   model?: string;
@@ -121,6 +127,8 @@ export interface BuildRunContextInput {
   continuation?: boolean;
   /** The task's tool scope (Task.toolScope), recorded as the run had it. */
   toolScope?: TaskToolScope;
+  /** The agent's published version the run uses. */
+  agentVersion?: string;
 }
 
 /** The agent's harness engine (lenient: the engine was validated when the agent was saved). */
@@ -167,6 +175,7 @@ function daytonaApi(settings: BuildRunContextInput["settings"]): "v0" | "v2" {
 /** The context the orchestrator knows when it spawns a run (no secrets). */
 export function buildRunContext(i: BuildRunContextInput): TaskRunContext {
   const harness = harnessOf(i.agent.engine);
+  const cli = agentCliEngine(i.agent);
   const provider = i.sandbox?.provider ?? "local";
   const c = i.sandbox?.computer;
   const remote = provider === "daytona" || provider === "e2b";
@@ -186,6 +195,7 @@ export function buildRunContext(i: BuildRunContextInput): TaskRunContext {
     status: "running",
     ...(i.continuation ? { continuation: true } : {}),
     agent: i.agent.name,
+    ...(i.agentVersion ? { agentVersion: i.agentVersion } : {}),
     engine: harness ? harness.harness : "polpo",
     computer,
     sandbox: { provider, ephemeral: !c && remote, ...(i.sandbox?.fallback ? { fallbackFrom: i.sandbox.fallback.from } : {}) },
@@ -200,6 +210,13 @@ export function buildRunContext(i: BuildRunContextInput): TaskRunContext {
     ctx.permissionMode = harness.permissionMode ?? "allow-all";
     if (harness.effort) ctx.effort = harness.effort;
     if (harness.maxBudgetUsd) ctx.budgetUsd = harness.maxBudgetUsd;
+  } else if (cli) {
+    ctx.engine = cli.cli === "claude" ? "claude-cli" : "codex-cli";
+    if (cli.model) ctx.model = cli.model;
+    ctx.auth = { kind: "subscription" };
+    ctx.permissionMode = cli.permissionMode ?? "allow-all";
+    if (cli.effort) ctx.effort = cli.effort;
+    if (cli.maxBudgetUsd) ctx.budgetUsd = cli.maxBudgetUsd;
   } else if (i.agent.model) {
     ctx.model = i.agent.model;
   }
@@ -281,8 +298,9 @@ function describeScopeShort(scope: TaskToolScope): string {
 
 /** One line describing a run, for text outputs (MCP). */
 export function describeTaskRun(ctx: TaskRunContext): string {
-  const engine = ctx.engine === "polpo" ? "Polpo" : ctx.engine === "claude-code" ? "Claude Code" : ctx.engine === "opencode" ? "OpenCode" : "Codex";
-  const kind = ctx.auth?.kind === "bedrock" ? "Bedrock" : ctx.auth?.kind === "vertex" ? "Vertex" : ctx.auth?.kind === "ai-gateway" ? "AI Gateway" : ctx.auth?.kind === "gateway" ? "gateway" : "API key";
+  // the model, then its engine and type: "claude-sonnet-4-6 (Claude Code · CLI)", "gpt-6 (Polpo)"
+  const engine = ctx.model ? modelWithEngineText(ctx.model, ctx.engine) : engineTypeText(ctx.engine);
+  const kind = ctx.auth?.kind === "bedrock" ? "Bedrock" : ctx.auth?.kind === "vertex" ? "Vertex" : ctx.auth?.kind === "ai-gateway" ? "AI Gateway" : ctx.auth?.kind === "gateway" ? "gateway" : ctx.auth?.kind === "subscription" ? "a personal subscription" : "API key";
   const auth = ctx.auth ? ` via ${kind}${ctx.auth.provider && ctx.auth.kind === "api-key" ? ` (${ctx.auth.provider})` : ""}${ctx.auth.region ? ` (${ctx.auth.region})` : ""}` : "";
   const where = ctx.computer.kind === "host" && ctx.computer.id === "host"
     ? "this server"
@@ -294,7 +312,7 @@ export function describeTaskRun(ctx: TaskRunContext): string {
   const usd = ctx.cost?.harnessUsd ?? ctx.cost?.modelUsd;
   const cost = usd !== undefined ? `$${usd.toFixed(4)}${ctx.budgetUsd ? ` of $${ctx.budgetUsd}` : ""}` : ctx.budgetUsd ? `budget $${ctx.budgetUsd}` : "";
   return [
-    `${ctx.runId} [${ctx.status}]${ctx.continuation ? " continuation" : ""} ${engine}${ctx.model ? ` ${ctx.model}` : ""}${auth}`,
+    `${ctx.runId} [${ctx.status}]${ctx.continuation ? " continuation" : ""} ${engine}${auth}`,
     `on ${where}`, egress, session, cost,
     ctx.toolScope ? `tools ${describeScopeShort(ctx.toolScope)}` : "",
     ctx.durationMs !== undefined ? `${Math.round(ctx.durationMs / 1000)} s` : "",

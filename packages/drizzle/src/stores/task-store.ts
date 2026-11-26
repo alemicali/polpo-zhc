@@ -117,6 +117,9 @@ export class DrizzleTaskStore implements TaskStore {
       revisionCount: row.revisionCount ?? undefined,
       ...(row.runs != null ? { runs: deserializeJson(row.runs, undefined, d) } : {}),
       ...(row.toolScope != null ? { toolScope: deserializeJson(row.toolScope, undefined, d) } : {}),
+      ...(row.requestedBy ? { requestedBy: row.requestedBy } : {}),
+      ...(row.agentVersion ? { agentVersion: row.agentVersion } : {}),
+      ...(row.origin != null ? { origin: deserializeJson(row.origin, undefined, d) } : {}),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -155,6 +158,10 @@ export class DrizzleTaskStore implements TaskStore {
     if (task.runs !== undefined) v.runs = serializeJson(task.runs, d);
     // present with undefined/null: cleared (back to inheriting the agent's tools)
     if ("toolScope" in task) v.toolScope = task.toolScope ? serializeJson(task.toolScope, d) : null;
+    if (task.requestedBy !== undefined) v.requestedBy = task.requestedBy || null;
+    // present with undefined: cleared (back to production)
+    if ("agentVersion" in task) v.agentVersion = task.agentVersion || null;
+    if (task.origin !== undefined) v.origin = serializeJson(task.origin, d);
     if (task.createdAt !== undefined) v.createdAt = task.createdAt;
     if (task.updatedAt !== undefined) v.updatedAt = task.updatedAt;
     return v;
@@ -176,6 +183,8 @@ export class DrizzleTaskStore implements TaskStore {
       executionCount: row.executionCount ?? 0,
       ...(row.budgetUsd ? { budgetUsd: Number(row.budgetUsd) } : {}),
       ...(row.pauseReason ? { pauseReason: row.pauseReason } : {}),
+      ...(row.owner ? { owner: row.owner } : {}),
+      ...(row.origin != null ? { origin: deserializeJson(row.origin, undefined, d) } : {}),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -491,6 +500,9 @@ export class DrizzleTaskStore implements TaskStore {
       revisionCount: r.revision_count,
       runs: r.runs,
       toolScope: r.tool_scope,
+      requestedBy: r.requested_by,
+      agentVersion: r.agent_version,
+      origin: r.origin,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     };
@@ -590,6 +602,8 @@ export class DrizzleTaskStore implements TaskStore {
       executionCount: mission.executionCount ?? 0,
       budgetUsd: mission.budgetUsd != null ? String(mission.budgetUsd) : null,
       pauseReason: mission.pauseReason ?? null,
+      owner: mission.owner ?? null,
+      origin: mission.origin ? serializeJson(mission.origin, d) : null,
       createdAt: mission.createdAt,
       updatedAt: mission.updatedAt,
     });
@@ -635,6 +649,8 @@ export class DrizzleTaskStore implements TaskStore {
     // present with undefined (or null) clears them
     if ("budgetUsd" in updates) values.budgetUsd = updates.budgetUsd != null ? String(updates.budgetUsd) : null;
     if ("pauseReason" in updates) values.pauseReason = updates.pauseReason ?? null;
+    if ("owner" in updates) values.owner = updates.owner ?? null;
+    if ("origin" in updates) values.origin = updates.origin ? serializeJson(updates.origin, d) : null;
 
     await this.db.update(this.schema.missions).set(values)
       .where(eq(this.schema.missions.id, missionId));

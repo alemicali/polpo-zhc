@@ -12,7 +12,7 @@ import { StatusBadge } from "@/components/computers/status-badge";
 import { BrandIcon } from "@/components/shared/brand-icon";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { EngineBadge } from "@/components/shared/run-context";
-import { HARNESS_NAMES, type HarnessSession } from "@/lib/harnesses-api";
+import { CLI_NAMES, HARNESS_NAMES, type HarnessSession } from "@/lib/harnesses-api";
 import { computerBrand, formatUsd } from "@/lib/run-context";
 import {
   availableActions, formatLastUsed, formatSnapshot, formatUptime, kindLabel, type Computer, type ComputerAction,
@@ -98,7 +98,7 @@ export function ComputerCard({
         <div className="space-y-1" data-testid="computer-harness-sessions">
           <p className="text-label text-muted-foreground">Harness sessions</p>
           {harnessSessions.map((s) => (
-            <div key={s.key} className="flex min-w-0 items-center gap-1.5 text-xs" title={`${HARNESS_NAMES[s.harness]} · ${s.key}`}>
+            <div key={s.key} className="flex min-w-0 items-center gap-1.5 text-xs" title={`${s.engine === "cli" ? `${CLI_NAMES[s.cli ?? "claude"]} · ${s.account ?? ""}` : HARNESS_NAMES[s.harness]} · ${s.key}`}>
               <BrandIcon name={s.harness} size={14} />
               <span className="truncate">{s.agent}{s.taskId ? <span className="text-muted-foreground"> · task {s.taskId.slice(0, 8)}</span> : null}</span>
               <span className={s.live ? "text-status-running" : s.state === "error" ? "text-destructive" : "text-muted-foreground"}>{s.live ? "running" : s.state}</span>

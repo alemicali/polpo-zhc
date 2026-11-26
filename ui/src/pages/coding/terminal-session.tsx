@@ -15,7 +15,9 @@ type Props = {
   cwd: string;
   active: boolean;
   /** Agent CLI to run inside the terminal. Defaults to a raw shell. */
-  agent?: "terminal" | "claude" | "codex";
+  agent?: "terminal" | "claude" | "codex" | "cli-login";
+  /** agent "cli-login": the CLI account to sign in (the server runs its official login command). */
+  cliAccount?: string;
   /** Stable id used by the agent CLI for `--continue` / `--resume`. */
   agentSessionId?: string;
   /** Override the shell command executed for this agent session. When unset
@@ -31,7 +33,7 @@ type Props = {
  * websocket URL is keyed off `sessionId + revision` so the server can replay
  * the scrollback buffer when we reconnect (see `/ws/terminal` handler).
  */
-export function TerminalSession({ sessionId, revision, cwd, active, agent, agentSessionId, agentCommand, onConnectionChange }: Props) {
+export function TerminalSession({ sessionId, revision, cwd, active, agent, agentSessionId, agentCommand, cliAccount, onConnectionChange }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -101,9 +103,10 @@ export function TerminalSession({ sessionId, revision, cwd, active, agent, agent
     if (agent && agent !== "terminal") url.searchParams.set("agent", agent);
     if (agentSessionId) url.searchParams.set("agent_session_id", agentSessionId);
     if (agentCommand && agentCommand.trim()) url.searchParams.set("agent_command", agentCommand.trim());
+    if (cliAccount) url.searchParams.set("cli_account", cliAccount);
     if (config.apiKey) url.searchParams.set("api_key", config.apiKey);
     return url.toString();
-  }, [agent, agentSessionId, agentCommand, cwd, sessionId, revision]);
+  }, [agent, agentSessionId, agentCommand, cliAccount, cwd, sessionId, revision]);
 
   // WebSocket lifecycle — opens once xterm is ready, sends input + resize,
   // pipes pty output into the terminal.

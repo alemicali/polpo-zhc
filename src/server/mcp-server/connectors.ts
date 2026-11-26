@@ -71,8 +71,8 @@ async function loadConnector(deps: McpDeps, id: string) {
 const notFound = (id: string) => fail(`There is no connector "${id}". List them with polpo_connectors_list.`);
 
 export function registerConnectorTools(tool: Register, deps: McpDeps): void {
-  const apiBase = (deps.publicUrl ?? "").replace(/\/+$/, "");
-  const view = (c: Connector) => baseView(c, { api: (p) => `${apiBase}${p}`, dashboard: (p) => dashboardLink(deps, p) });
+  const apiBase = () => (deps.publicUrl ?? "").replace(/\/+$/, "");
+  const view = (c: Connector) => baseView(c, { api: (p) => `${apiBase()}${p}`, dashboard: (p) => dashboardLink(deps, p) });
   const setupUrl = (id?: string, field?: string) => (id ? setupHandoff(deps, { kind: "connector", item: id, ...(field ? { field } : {}) }, "connector's credentials").setup_url : dashboardLink(deps, "/connectors"));
 
   /** The OAuth link to open (or that it is authorized already). */

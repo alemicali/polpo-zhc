@@ -6,7 +6,8 @@
  * a gateway; its logins and subscriptions are not offered. Credentials are vault
  * references (the picker; the key itself is added in an agent's Credentials tab). A Claude
  * subscription is not offered (Anthropic's terms). "Test connection" (and every save) sends one
- * tiny model request from the Polpo server and shows the result. Below: the harness sessions.
+ * tiny model request from the Polpo server and shows the result. Below: the CLI engine's accounts
+ * (personal Claude Code / Codex sign-ins, cli-accounts-section.tsx) and the harness sessions.
  */
 import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, Loader2, PlugZap, RefreshCw, Save, ShieldCheck, Square, Trash2 } from "lucide-react";
@@ -18,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { VaultRefPicker } from "@/components/vault/vault-ref-picker";
 import { BrandIcon } from "@/components/shared/brand-icon";
+import { EngineMark } from "@/components/shared/model-with-engine";
 import { ProviderIcon } from "@/components/shared/provider-icon";
 import { authBrand, computerBrand } from "@/lib/run-context";
 import {
@@ -28,6 +30,7 @@ import {
 } from "@/lib/harnesses-api";
 import { HarnessGatewayFields } from "./harness-gateway-fields";
 import { HarnessTestLine } from "./harness-test-line";
+import { CliAccountsSection } from "./cli-accounts-section";
 
 const selectClass = "h-8 rounded-md border bg-transparent px-2 text-xs";
 
@@ -309,6 +312,9 @@ export function HarnessesSection() {
         {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} Save
       </Button>
 
+      {/* The CLI engine: personal Claude Code / Codex sign-ins */}
+      <CliAccountsSection />
+
       {/* Sessions */}
       <div className="space-y-2">
         <div className="flex items-center gap-2 text-label text-muted-foreground">
@@ -317,10 +323,10 @@ export function HarnessesSection() {
         </div>
         {sessions.length === 0 ? <p className="text-xs text-muted-foreground">No harness sessions yet.</p> : sessions.map((s) => (
           <div key={s.key} className="flex flex-wrap items-center gap-2 rounded-lg border p-2 text-xs" data-testid={`harness-session-${s.key}`}>
-            <BrandIcon name={s.harness} size={16} />
+            <EngineMark engine={s.harness} size={16} className="font-medium" />
             <code>{s.key}</code>
             <span className="inline-flex items-center gap-1">
-              {s.agent} · {HARNESS_NAMES[s.harness]} on
+              {s.agent} on
               <BrandIcon name={s.computerId === "host" ? "host" : computerBrand({ kind: "daytona", provider: "daytona" })} size={12} />
               {s.computerId}
             </span>

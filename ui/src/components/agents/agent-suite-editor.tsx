@@ -1,0 +1,536 @@
+/**
+ * A suite's editor in the Suites tab: a structured form (the suite's name, default mode and budgets;
+ * each case's input, mode, dataset, scripted model turns, tool mocks and assertions), the datasets
+ * (rows, CSV / JSON import) and the whole suite as JSON or YAML. Saving sends the revision it
+ * started from, so a save over someone else's change is refused.
+ */
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
+import { Code2, Database, FileText, Gauge, ListChecks, Loader2, Plus, Save, ShieldCheck, Trash2, Upload } from "lucide-react";
+import type { AgentSuite, AgentSuiteInput, SuiteRole, SuiteAssertion, SuiteAssertionType, SuiteCase, SuiteEvalSettings, SuiteGate, SuiteMockMode, SuiteScorer, SuiteScorerType, ToolMock, ScriptedTurn, UseAgentSuitesReturn } from "@polpo-ai/react";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ASSERTION_LABELS, ASSERTION_TEMPLATES, SCORER_LABELS, SCORER_TEMPLATES, SUITE_MODES, blankCase } from "@/lib/agent-suites";
+import { SuiteRolePicker } from "./suite-role-picker";
+import { cn } from "@/lib/utils";
+
+type View = "form" | "evals" | "gate" | "datasets" | "json" | "yaml";
+type Draft = AgentSuiteInput & { id?: string };
+
+/** A JSON value edited as text: applied when it parses, the error shown when it does not. */
+function JsonField({ value, onChange, label, rows = 2, placeholder }: { value: unknown; onChange: (v: unknown) => void; label: string; rows?: number; placeholder?: string }) {
+  const [text, setText] = useState(() => (value === undefined ? "" : JSON.stringify(value, null, 1)));
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <label className="block min-w-0">
+      <span className="text-micro text-muted-foreground">{label}</span>
+      <Textarea
+        value={text}
+        rows={rows}
+        placeholder={placeholder}
+        aria-label={label}
+        className={cn("font-mono text-caption", error && "border-destructive")}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={() => {
+          if (!text.trim()) { setError(null); onChange(undefined); return; }
+          try { onChange(JSON.parse(text)); setError(null); } catch (err) { setError((err as Error).message); }
+        }}
+      />
+      {error && <span className="text-micro text-destructive">{error}</span>}
+    </label>
+  );
+}
+
+function ModeSelect({ value, onChange, inherit }: { value: SuiteMockMode | undefined; onChange: (m: SuiteMockMode | undefined) => void; inherit?: string }) {
+  return (
+    <Select value={value ?? "inherit"} onValueChange={(v) => onChange(v === "inherit" ? undefined : v as SuiteMockMode)}>
+      <SelectTrigger size="sm" className="w-48" aria-label="Mock mode"><SelectValue /></SelectTrigger>
+      <SelectContent>
+        {inherit && <SelectItem value="inherit">{inherit}</SelectItem>}
+        {SUITE_MODES.map((m) => <SelectItem key={m.id} value={m.id}>{m.label}</SelectItem>)}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function RowHeader({ title, onRemove }: { title: string; onRemove?: () => void }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="min-w-0 flex-1 truncate text-micro font-medium uppercase tracking-label text-muted-foreground">{title}</span>
+      {onRemove && <Button variant="ghost" size="sm" className="h-6 px-1.5" onClick={onRemove} aria-label={`Remove ${title}`}><Trash2 className="h-3 w-3" /></Button>}
+    </div>
+  );
+}
+
+/** Scorers (evals): each a type and its parameters (JSON), with a threshold and a weight. */
+function ScorerList({ value, onChange, title, hint }: { value: SuiteScorer[]; onChange: (s: SuiteScorer[]) => void; title: string; hint?: string }) {
+  const [newType, setNewType] = useState<SuiteScorerType>("exact");
+  const set = (i: number, sc: SuiteScorer) => onChange(value.map((x, j) => (j === i ? sc : x)));
+  return (
+    <div className="space-y-2" data-testid="suite-scorers">
+      <RowHeader title={title} />
+      {hint && <p className="text-micro text-muted-foreground">{hint}</p>}
+      {value.map((sc, i) => {
+        const { type, threshold, weight, ...all } = sc;
+        // an LLM judge's own judge is picked below, not in the JSON (its old `model` reads as a model block)
+        const { judge: ownJudge, model: oldModel, ...params } = all as typeof all & { judge?: SuiteRole; model?: string };
+        const judge = type === "llm_judge" ? ownJudge ?? (oldModel ? { model: oldModel } : undefined) : undefined;
+        const shown = type === "llm_judge" ? params : all;
+        return (
+          <div key={`${i}-${type}`} className="flex flex-wrap items-start gap-2" data-testid="suite-scorer-form">
+            <span className="mt-2 w-36 shrink-0 text-caption font-medium">{SCORER_LABELS[type]}</span>
+            <div className="min-w-0 flex-1 basis-64">
+              <JsonField label={`${type} parameters`} value={shown} onChange={(v) => set(i, { ...(v as object ?? {}), type, ...(judge ? { judge } : {}), ...(threshold !== undefined ? { threshold } : {}), ...(weight !== undefined ? { weight } : {}) } as SuiteScorer)} />
+              {type === "llm_judge" && (
+                <div className="mt-2">
+                  <SuiteRolePicker label="Judge of this scorer" inheritLabel="The suite's judge" value={judge} testId="suite-scorer-judge"
+                    onChange={(role) => set(i, { ...params, type, ...(role ? { judge: role } : {}), ...(threshold !== undefined ? { threshold } : {}), ...(weight !== undefined ? { weight } : {}) } as SuiteScorer)} />
+                </div>
+              )}
+            </div>
+            <label className="w-20 shrink-0">
+              <span className="text-micro text-muted-foreground">Threshold</span>
+              <Input type="number" min={0} max={1} step={0.05} value={threshold ?? ""} placeholder={type === "similarity" ? "0.8" : type === "llm_judge" ? "0.6" : "1"} aria-label={`Scorer ${i + 1} threshold`} className="h-8 text-caption"
+                onChange={(e) => set(i, { ...sc, threshold: e.target.value === "" ? undefined : Number(e.target.value) } as SuiteScorer)} />
+            </label>
+            <label className="w-16 shrink-0">
+              <span className="text-micro text-muted-foreground">Weight</span>
+              <Input type="number" min={0} step={0.5} value={weight ?? ""} placeholder="1" aria-label={`Scorer ${i + 1} weight`} className="h-8 text-caption"
+                onChange={(e) => set(i, { ...sc, weight: e.target.value === "" ? undefined : Number(e.target.value) } as SuiteScorer)} />
+            </label>
+            <Button variant="ghost" size="sm" className="mt-4 h-7 px-1.5" aria-label={`Remove scorer ${i + 1}`} onClick={() => onChange(value.filter((_, j) => j !== i))}><Trash2 className="h-3 w-3" /></Button>
+          </div>
+        );
+      })}
+      <div className="flex items-center gap-2">
+        <Select value={newType} onValueChange={(v) => setNewType(v as SuiteScorerType)}>
+          <SelectTrigger size="sm" className="w-48" aria-label="Scorer type"><SelectValue /></SelectTrigger>
+          <SelectContent>{(Object.keys(SCORER_LABELS) as SuiteScorerType[]).map((t) => <SelectItem key={t} value={t}>{SCORER_LABELS[t]}</SelectItem>)}</SelectContent>
+        </Select>
+        <Button variant="outline" size="sm" className="h-7" data-testid="suite-add-scorer"
+          onClick={() => onChange([...value, { type: newType, ...SCORER_TEMPLATES[newType] } as SuiteScorer])}>
+          <Plus className="mr-1 h-3 w-3" /> Scorer
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** The suite's eval settings and default scorers. */
+function EvalsView({ draft, setDraft }: { draft: Draft; setDraft: (d: Draft) => void }) {
+  const evals: SuiteEvalSettings = draft.evals ?? {};
+  const setEvals = (e: Partial<SuiteEvalSettings>) => {
+    const next = { ...evals, ...e };
+    for (const k of Object.keys(next) as Array<keyof SuiteEvalSettings>) if (next[k] === undefined) delete next[k];
+    setDraft({ ...draft, evals: Object.keys(next).length ? next : undefined });
+  };
+  const num = (v: string) => (v === "" ? undefined : Number(v));
+  return (
+    <div className="space-y-4 px-4 py-3" data-testid="suite-evals">
+      {/* who plays the LLM roles: Polpo, an agent, or a model + engine block (each a chat turn without tools) */}
+      <div className="grid gap-3 lg:grid-cols-2" data-testid="suite-roles">
+        <SuiteRolePicker label="Judge (LLM judge scorers)" value={evals.judge ?? (evals.judgeModel ? { model: evals.judgeModel } : undefined)} testId="suite-role-judge"
+          onChange={(judge) => setEvals({ judge, judgeModel: undefined })} />
+        <SuiteRolePicker label="Simulated user (multi-turn cases)" value={draft.simulator ?? (draft.simulatorModel ? { model: draft.simulatorModel } : undefined)} testId="suite-role-simulator"
+          onChange={(simulator) => { const { simulatorModel: _old, ...rest } = draft; setDraft({ ...rest, ...(simulator ? { simulator } : { simulator: undefined }) }); }} />
+        <SuiteRolePicker label="Case generator (Generate cases, dataset rows)" value={draft.generator} testId="suite-role-generator"
+          onChange={(generator) => setDraft({ ...draft, generator })} />
+        <SuiteRolePicker label="Reviewer (Explain this run)" value={evals.reviewer} testId="suite-role-reviewer"
+          onChange={(reviewer) => setEvals({ reviewer })} />
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block min-w-0">
+          <span className="text-micro text-muted-foreground">Repetitions (runs per case: mean, stddev, flakiness)</span>
+          <Input type="number" min={1} max={10} value={evals.repetitions ?? ""} placeholder="1" aria-label="Repetitions" className="h-8 text-caption" onChange={(e) => setEvals({ repetitions: num(e.target.value) })} />
+        </label>
+        <label className="block min-w-0">
+          <span className="text-micro text-muted-foreground">Regression tolerance (score or pass-rate change ignored)</span>
+          <Input type="number" min={0} max={1} step={0.01} value={evals.regressionTolerance ?? ""} placeholder="0.05" aria-label="Regression tolerance" className="h-8 text-caption" onChange={(e) => setEvals({ regressionTolerance: num(e.target.value) })} />
+        </label>
+        <label className="block min-w-0">
+          <span className="text-micro text-muted-foreground">Baseline when none is marked</span>
+          <Select value={evals.baseline ?? "previous"} onValueChange={(v) => setEvals({ baseline: v === "previous" ? undefined : v as SuiteEvalSettings["baseline"] })}>
+            <SelectTrigger size="sm" className="w-full" aria-label="Baseline policy"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="previous">The previous run</SelectItem>
+              <SelectItem value="production">The latest run on production</SelectItem>
+              <SelectItem value="none">No comparison</SelectItem>
+            </SelectContent>
+          </Select>
+        </label>
+      </div>
+      <ScorerList value={draft.scorers ?? []} onChange={(sc) => setDraft({ ...draft, scorers: sc.length ? sc : undefined })} title="Default scorers (every case)"
+        hint="A case's own scorer with the same id replaces a default. Expected values can come from a dataset: {{row.expected}}." />
+    </div>
+  );
+}
+
+/** The suite as a deploy gate: required before production, its thresholds, run on publish, real tools. */
+function GateView({ draft, setDraft }: { draft: Draft; setDraft: (d: Draft) => void }) {
+  const gate: SuiteGate = draft.gate ?? {};
+  const setGate = (g: Partial<SuiteGate>) => {
+    const next: SuiteGate = { ...gate, ...g };
+    for (const k of Object.keys(next) as Array<keyof SuiteGate>) if (next[k] === undefined || next[k] === false) delete next[k];
+    setDraft({ ...draft, gate: Object.keys(next).length ? next : undefined });
+  };
+  const num = (v: string) => (v === "" ? undefined : Number(v));
+  return (
+    <div className="space-y-4 px-4 py-3" data-testid="suite-gate">
+      <label className="flex items-start gap-2">
+        <Checkbox checked={!!gate.required} onCheckedChange={(v) => setGate({ required: v === true || undefined })} aria-label="Required to deploy" data-testid="suite-gate-required" />
+        <span className="min-w-0">
+          <span className="block text-xs font-medium">Required to deploy</span>
+          <span className="block text-caption text-muted-foreground">Every deploy of this agent to production runs this suite against the version first: production moves only if it passes. Rollbacks are never gated; an admin can deploy anyway with a reason.</span>
+        </span>
+      </label>
+      <div className={cn("grid gap-3 sm:grid-cols-2", !gate.required && "opacity-60")}>
+        <label className="block min-w-0">
+          <span className="text-micro text-muted-foreground">Minimum pass rate (0–1)</span>
+          <Input type="number" min={0} max={1} step={0.05} value={gate.minPassRate ?? ""} placeholder="1" aria-label="Minimum pass rate" className="h-8 text-caption" onChange={(e) => setGate({ minPassRate: num(e.target.value) })} />
+        </label>
+        <label className="block min-w-0">
+          <span className="text-micro text-muted-foreground">Largest drop versus the baseline (pass rate or score)</span>
+          <Input type="number" min={0} max={1} step={0.01} value={gate.maxRegression ?? ""} placeholder="no check" aria-label="Maximum regression" className="h-8 text-caption" onChange={(e) => setGate({ maxRegression: num(e.target.value) })} />
+        </label>
+      </div>
+      <JsonField label="Score thresholds: minimum mean per scorer id (score: the overall score)" value={gate.scoreThresholds ?? {}} placeholder='{ "judge": 0.7, "score": 0.8 }'
+        onChange={(v) => setGate({ scoreThresholds: v && typeof v === "object" && Object.keys(v as object).length ? v as Record<string, number> : undefined })} />
+      <label className="flex items-start gap-2">
+        <Checkbox checked={!!gate.onPublish} onCheckedChange={(v) => setGate({ onPublish: v === true || undefined })} aria-label="Also run on publish" data-testid="suite-gate-on-publish" />
+        <span className="min-w-0">
+          <span className="block text-xs font-medium">Also run on publish</span>
+          <span className="block text-caption text-muted-foreground">A non-blocking check when a version is published: the Versions tab shows the result before anyone deploys it.</span>
+        </span>
+      </label>
+      <label className="flex items-start gap-2">
+        <Checkbox checked={!!gate.allowRealTools} onCheckedChange={(v) => setGate({ allowRealTools: v === true || undefined })} aria-label="Let the gate run real tools" data-testid="suite-gate-real-tools" />
+        <span className="min-w-0">
+          <span className="block text-xs font-medium">Let the gate run real tools</span>
+          <span className="block text-caption text-muted-foreground">Cases in mode model or live (or unmocked tools run for real) may send, write or spend at every deploy. Off: such a suite blocks the deploy without running. Admins only.</span>
+        </span>
+      </label>
+    </div>
+  );
+}
+
+function CaseForm({ value, onChange, onRemove, defaultMode, datasets }: { value: SuiteCase; onChange: (c: SuiteCase) => void; onRemove: () => void; defaultMode: SuiteMockMode; datasets: Array<{ id: string; name: string }> }) {
+  const mode = value.mode ?? defaultMode;
+  const mocksModel = mode === "model" || mode === "all";
+  const mocksTools = mode === "tools" || mode === "all";
+  const turns = value.mocks?.model?.turns ?? [];
+  const tools = value.mocks?.tools ?? [];
+  const setMocks = (m: Partial<NonNullable<SuiteCase["mocks"]>>) => onChange({ ...value, mocks: { ...value.mocks, ...m } });
+  const setTurn = (i: number, t: ScriptedTurn) => setMocks({ model: { ...value.mocks?.model, turns: turns.map((x, j) => (j === i ? t : x)) } });
+  const setTool = (i: number, t: ToolMock) => setMocks({ tools: tools.map((x, j) => (j === i ? t : x)) });
+  const setAssertion = (i: number, a: SuiteAssertion) => onChange({ ...value, assertions: value.assertions.map((x, j) => (j === i ? a : x)) });
+  const [newType, setNewType] = useState<SuiteAssertionType>("tool_called");
+  return (
+    <li className="space-y-3 border-b border-border/40 px-4 py-3 last:border-b-0" data-testid="suite-case-form">
+      <div className="flex flex-wrap items-center gap-2">
+        <Input value={value.name} onChange={(e) => onChange({ ...value, name: e.target.value })} aria-label="Case name" className="h-8 min-w-0 flex-1 text-xs font-medium" />
+        <Select value={value.input.kind} onValueChange={(k) => onChange({ ...value, input: { ...value.input, kind: k as "chat" | "task" } })}>
+          <SelectTrigger size="sm" className="w-28" aria-label="Input kind"><SelectValue /></SelectTrigger>
+          <SelectContent><SelectItem value="chat">Chat</SelectItem><SelectItem value="task">Task</SelectItem></SelectContent>
+        </Select>
+        <ModeSelect value={value.mode} onChange={(m) => onChange({ ...value, mode: m })} inherit="Suite default" />
+        <Select value={value.dataset ?? "none"} onValueChange={(d) => onChange({ ...value, dataset: d === "none" ? undefined : d })}>
+          <SelectTrigger size="sm" className="w-40" aria-label="Dataset"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none">No dataset</SelectItem>
+            {datasets.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Button variant="ghost" size="sm" className="h-8" onClick={onRemove} aria-label={`Remove ${value.name}`}><Trash2 className="h-3.5 w-3.5" /></Button>
+      </div>
+      <Textarea value={value.input.message} rows={2} aria-label="Message" placeholder={value.input.kind === "task" ? "The task description ({{row.column}} from the dataset)" : "The message to the agent ({{row.column}} from the dataset)"}
+        className="text-xs" onChange={(e) => onChange({ ...value, input: { ...value.input, message: e.target.value } })} />
+
+      {mocksModel && (
+        <div className="space-y-2">
+          <RowHeader title="Scripted model turns" />
+          {turns.map((t, i) => (
+            <div key={i} className="grid gap-2 sm:grid-cols-2" data-testid="suite-turn">
+              <Textarea value={t.text ?? ""} rows={2} aria-label={`Turn ${i + 1} text`} placeholder={`Turn ${i + 1}: what the model says`} className="text-xs"
+                onChange={(e) => setTurn(i, { ...t, text: e.target.value || undefined })} />
+              <div className="flex gap-1">
+                <div className="min-w-0 flex-1"><JsonField label={`Turn ${i + 1} tool calls`} value={t.toolCalls} placeholder='[{"name": "mcp__printful__shipping_rates", "args": {"country": "IT"}}]'
+                  onChange={(v) => setTurn(i, { ...t, toolCalls: v as ScriptedTurn["toolCalls"] })} /></div>
+                <Button variant="ghost" size="sm" className="h-7 px-1.5" aria-label={`Remove turn ${i + 1}`} onClick={() => setMocks({ model: { ...value.mocks?.model, turns: turns.filter((_, j) => j !== i) } })}><Trash2 className="h-3 w-3" /></Button>
+              </div>
+            </div>
+          ))}
+          <Button variant="outline" size="sm" className="h-7" onClick={() => setMocks({ model: { ...value.mocks?.model, turns: [...turns, { text: "" }] } })}><Plus className="mr-1 h-3 w-3" /> Turn</Button>
+        </div>
+      )}
+
+      {mocksTools && (
+        <div className="space-y-2">
+          <RowHeader title="Tool mocks" />
+          {tools.map((t, i) => (
+            <div key={i} className="grid gap-2 border-l-2 border-border/60 pl-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]" data-testid="suite-tool-mock">
+              <Input value={t.tool} aria-label={`Mock ${i + 1} tool`} placeholder="tool or glob (mcp__printful__*)" className="h-8 font-mono text-caption" onChange={(e) => setTool(i, { ...t, tool: e.target.value })} />
+              <JsonField label="When args" value={t.when?.args} placeholder='{"country": "IT"}' onChange={(v) => setTool(i, { ...t, when: v === undefined ? undefined : { ...t.when, args: v } })} />
+              {t.error !== undefined
+                ? <Input value={t.error} aria-label={`Mock ${i + 1} error`} className="h-8 text-caption" onChange={(e) => setTool(i, { ...t, error: e.target.value })} />
+                : <JsonField label="Response" value={t.response} placeholder='{"rates": []}' onChange={(v) => setTool(i, { ...t, response: v })} />}
+              <div className="flex items-start gap-1">
+                <Button variant="ghost" size="sm" className="h-7 px-1.5 text-micro" onClick={() => setTool(i, t.error !== undefined ? { ...t, error: undefined, response: "" } : { ...t, response: undefined, error: "" })}>{t.error !== undefined ? "Respond" : "Fail"}</Button>
+                <Button variant="ghost" size="sm" className="h-7 px-1.5" aria-label={`Remove mock ${i + 1}`} onClick={() => setMocks({ tools: tools.filter((_, j) => j !== i) })}><Trash2 className="h-3 w-3" /></Button>
+              </div>
+            </div>
+          ))}
+          <Button variant="outline" size="sm" className="h-7" onClick={() => setMocks({ tools: [...tools, { tool: "", response: "" }] })}><Plus className="mr-1 h-3 w-3" /> Tool mock</Button>
+        </div>
+      )}
+
+      <div className="space-y-2" data-testid="suite-simulated-user">
+        <RowHeader title="Multi-turn (simulated or scripted user)" onRemove={value.mocks?.simulatedUser ? () => setMocks({ simulatedUser: undefined }) : undefined} />
+        {value.mocks?.simulatedUser ? (
+          <div className="grid gap-2 border-l-2 border-border/60 pl-3 sm:grid-cols-2">
+            <Input value={value.mocks.simulatedUser.persona ?? ""} aria-label="Persona" placeholder="Persona: who the user is" className="h-8 text-caption"
+              onChange={(e) => setMocks({ simulatedUser: { ...value.mocks!.simulatedUser, persona: e.target.value || undefined } })} />
+            <Input value={value.mocks.simulatedUser.goal ?? ""} aria-label="Goal" placeholder="Goal: what the user wants done" className="h-8 text-caption"
+              onChange={(e) => setMocks({ simulatedUser: { ...value.mocks!.simulatedUser, goal: e.target.value || undefined } })} />
+            <JsonField label="Constraints" value={value.mocks.simulatedUser.constraints} placeholder='["answers in Italian"]' onChange={(v) => setMocks({ simulatedUser: { ...value.mocks!.simulatedUser, constraints: v as string[] | undefined } })} />
+            <JsonField label="Script (fixed user turns: no simulator)" value={value.mocks.simulatedUser.script} placeholder='["and to Germany?"]' onChange={(v) => setMocks({ simulatedUser: { ...value.mocks!.simulatedUser, script: v as string[] | undefined } })} />
+            <Input type="number" min={1} max={20} value={value.mocks.simulatedUser.maxTurns ?? ""} aria-label="Max user turns" placeholder="Max user turns (5)" className="h-8 text-caption"
+              onChange={(e) => setMocks({ simulatedUser: { ...value.mocks!.simulatedUser, maxTurns: e.target.value ? Number(e.target.value) : undefined } })} />
+            <Select value={value.mocks.simulatedUser.stop ?? "goal"} onValueChange={(v) => setMocks({ simulatedUser: { ...value.mocks!.simulatedUser, stop: v === "goal" ? undefined : v as "scorer" | "max_turns", ...(v === "scorer" ? {} : { stopScorer: undefined }) } })}>
+              <SelectTrigger size="sm" className="w-full" aria-label="Stop condition" data-testid="suite-simulated-stop"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="goal">Stop when the goal is reached</SelectItem>
+                <SelectItem value="scorer">Stop when a scorer passes</SelectItem>
+                <SelectItem value="max_turns">Always run every turn</SelectItem>
+              </SelectContent>
+            </Select>
+            {value.mocks.simulatedUser.stop === "scorer" && (
+              <Input value={value.mocks.simulatedUser.stopScorer ?? ""} aria-label="Stop when this scorer passes" placeholder="The scorer's id" className="h-8 font-mono text-caption"
+                onChange={(e) => setMocks({ simulatedUser: { ...value.mocks!.simulatedUser, stopScorer: e.target.value || undefined } })} />
+            )}
+            <div className="sm:col-span-2">
+              <SuiteRolePicker label="Who plays this user" inheritLabel="The suite's simulated user" testId="suite-case-simulator"
+                value={value.mocks.simulatedUser.simulator ?? (value.mocks.simulatedUser.model ? { model: value.mocks.simulatedUser.model } : undefined)}
+                onChange={(simulator) => setMocks({ simulatedUser: { ...value.mocks!.simulatedUser, simulator, model: undefined } })} />
+            </div>
+          </div>
+        ) : (
+          <Button variant="outline" size="sm" className="h-7" onClick={() => setMocks({ simulatedUser: { persona: "", goal: "", maxTurns: 5 } })} data-testid="suite-add-simulated-user"><Plus className="mr-1 h-3 w-3" /> Simulated user</Button>
+        )}
+      </div>
+
+      {value.mocks?.cassette && (
+        <div className="flex flex-wrap items-center gap-2 text-caption" data-testid="suite-case-cassette-ref">
+          <span className="font-medium">Cassette</span>
+          <span className="font-mono">{value.mocks.cassette.id}</span>
+          <Select value={value.mocks.cassette.match ?? "exact"} onValueChange={(m) => setMocks({ cassette: { ...value.mocks!.cassette!, match: m as "exact" } })}>
+            <SelectTrigger size="sm" className="w-36" aria-label="Cassette matching"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="exact">Exact arguments</SelectItem>
+              <SelectItem value="partial">Partial arguments</SelectItem>
+              <SelectItem value="tool">Tool name only</SelectItem>
+              <SelectItem value="sequence">In sequence</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={value.mocks.cassette.onUnmatched ?? "block"} onValueChange={(m) => setMocks({ cassette: { ...value.mocks!.cassette!, onUnmatched: m as "block" } })}>
+            <SelectTrigger size="sm" className="w-44" aria-label="Unmatched calls"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="block">Unmatched: blocked</SelectItem>
+              <SelectItem value="fail">Unmatched: the case fails</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
+      <ScorerList value={value.scorers ?? []} onChange={(sc) => onChange({ ...value, scorers: sc.length ? sc : undefined })} title="Scorers (evals)" />
+
+      <div className="space-y-2">
+        <RowHeader title="Assertions" />
+        {value.assertions.map((a, i) => {
+          const { type, ...params } = a;
+          return (
+            <div key={`${i}-${type}`} className="flex items-start gap-2" data-testid="suite-assertion-form">
+              <span className="mt-2 w-36 shrink-0 text-caption font-medium">{ASSERTION_LABELS[type]}</span>
+              <div className="min-w-0 flex-1">
+                <JsonField label={`${type} parameters`} value={params} onChange={(v) => setAssertion(i, { ...(v as object ?? {}), type } as SuiteAssertion)} />
+              </div>
+              <Button variant="ghost" size="sm" className="mt-1 h-7 px-1.5" aria-label={`Remove assertion ${i + 1}`} onClick={() => onChange({ ...value, assertions: value.assertions.filter((_, j) => j !== i) })}><Trash2 className="h-3 w-3" /></Button>
+            </div>
+          );
+        })}
+        <div className="flex items-center gap-2">
+          <Select value={newType} onValueChange={(v) => setNewType(v as SuiteAssertionType)}>
+            <SelectTrigger size="sm" className="w-48" aria-label="Assertion type"><SelectValue /></SelectTrigger>
+            <SelectContent>{(Object.keys(ASSERTION_LABELS) as SuiteAssertionType[]).map((t) => <SelectItem key={t} value={t}>{ASSERTION_LABELS[t]}</SelectItem>)}</SelectContent>
+          </Select>
+          <Button variant="outline" size="sm" className="h-7" data-testid="suite-add-assertion"
+            onClick={() => onChange({ ...value, assertions: [...value.assertions, { type: newType, ...ASSERTION_TEMPLATES[newType] } as SuiteAssertion] })}>
+            <Plus className="mr-1 h-3 w-3" /> Assertion
+          </Button>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function DatasetsView({ draft, setDraft, saved, suites }: { draft: Draft; setDraft: (d: Draft) => void; saved?: AgentSuite; suites: UseAgentSuitesReturn }) {
+  const [format, setFormat] = useState<"csv" | "json">("csv");
+  const [text, setText] = useState("");
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const datasets = draft.datasets ?? [];
+  const importIt = async () => {
+    if (!saved) { toast.error("Save the suite first, then import its datasets"); return; }
+    setBusy(true);
+    try {
+      const s = await suites.importDataset(saved.id, { format, text, ...(name.trim() ? { name: name.trim() } : {}) });
+      setDraft({ ...draft, datasets: s.datasets });
+      setText("");
+      toast.success(`Imported: ${s.datasets.map((d) => `${d.name} (${d.rows.length} rows)`).join(", ")}`);
+    } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
+  };
+  return (
+    <div className="space-y-3 px-4 py-3" data-testid="suite-datasets">
+      {datasets.length === 0 && <p className="text-caption text-muted-foreground">No datasets. A case with a dataset runs once per row, with {"{{row.column}}"} filled in its message, mocks and assertions.</p>}
+      {datasets.map((d, i) => (
+        <div key={d.id ?? i} className="space-y-1">
+          <div className="flex items-center gap-2">
+            <Database className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate text-xs font-medium">{d.name} <span className="font-mono text-micro text-muted-foreground">{d.id}</span> · {d.rows.length} rows</span>
+            <Button variant="ghost" size="sm" className="h-6 px-1.5" aria-label={`Remove ${d.name}`} onClick={() => setDraft({ ...draft, datasets: datasets.filter((_, j) => j !== i) })}><Trash2 className="h-3 w-3" /></Button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-caption">
+              <thead><tr>{(d.columns ?? Object.keys(d.rows[0] ?? {})).map((c) => <th key={c} className="border-b border-border/40 px-2 py-1 text-left font-medium text-muted-foreground">{c}</th>)}</tr></thead>
+              <tbody>
+                {d.rows.slice(0, 5).map((r, j) => <tr key={j}>{(d.columns ?? Object.keys(r)).map((c) => <td key={c} className="border-b border-border/20 px-2 py-1 font-mono">{String(r[c] ?? "")}</td>)}</tr>)}
+              </tbody>
+            </table>
+            {d.rows.length > 5 && <p className="px-2 pt-1 text-micro text-muted-foreground">… {d.rows.length - 5} more rows</p>}
+          </div>
+        </div>
+      ))}
+      <div className="space-y-2 border-t border-border/40 pt-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Upload className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-xs font-medium">Import</span>
+          <Select value={format} onValueChange={(f) => setFormat(f as "csv" | "json")}>
+            <SelectTrigger size="sm" className="w-24" aria-label="Format"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="csv">CSV</SelectItem><SelectItem value="json">JSON</SelectItem></SelectContent>
+          </Select>
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Dataset name" aria-label="Dataset name" className="h-8 w-48 text-xs" />
+          <input type="file" accept=".csv,.json,.tsv,text/csv,application/json" aria-label="Dataset file" className="max-w-56 text-caption"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) { void f.text().then(setText); if (!name) setName(f.name.replace(/\.[^.]+$/, "")); if (/\.json$/i.test(f.name)) setFormat("json"); } }} />
+        </div>
+        <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} aria-label="Dataset text" placeholder={format === "csv" ? "country,rate\nIT,4.99\nFR,5.49" : '[{"country": "IT", "rate": 4.99}]'} className="font-mono text-caption" />
+        <Button size="sm" disabled={!text.trim() || busy} onClick={() => void importIt()} data-testid="suite-import">
+          {busy ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Upload className="mr-1 h-3.5 w-3.5" />} Import rows
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+export function AgentSuiteEditor({ saved, initial, suites, onSaved, onClose }: {
+  saved?: AgentSuite;
+  initial: Draft;
+  suites: UseAgentSuitesReturn;
+  onSaved: (s: AgentSuite) => void;
+  onClose: () => void;
+}) {
+  const [draft, setDraft] = useState<Draft>(initial);
+  const [view, setView] = useState<View>("form");
+  const [jsonText, setJsonText] = useState("");
+  const [yamlText, setYamlText] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { if (view === "json") setJsonText(JSON.stringify(draft, null, 2)); }, [view]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (view !== "yaml" || !saved) return;
+    let cancelled = false;
+    setYamlText(null);
+    suites.yaml(saved.id).then((y) => { if (!cancelled) setYamlText(y.yaml); }).catch((e) => toast.error((e as Error).message));
+    return () => { cancelled = true; };
+  }, [view, saved, suites]);
+
+  const save = async (body: Draft | { yaml: string }) => {
+    setSaving(true);
+    try {
+      const s = await suites.save(body, saved ? { id: saved.id, revision: saved.revision } : {});
+      toast.success(`Saved ${s.name} (revision ${s.revision})`);
+      onSaved(s);
+    } catch (e) { toast.error((e as Error).message); } finally { setSaving(false); }
+  };
+  const saveCurrent = () => {
+    if (view === "yaml") { if (yamlText !== null) void save({ yaml: yamlText }); return; }
+    if (view === "json") {
+      try { void save(JSON.parse(jsonText) as Draft); } catch (e) { toast.error(`JSON: ${(e as Error).message}`); }
+      return;
+    }
+    void save(draft);
+  };
+  const cases = (draft.cases ?? []) as SuiteCase[];
+  const views: Array<{ id: View; label: string; icon: typeof ListChecks; disabled?: boolean }> = [
+    { id: "form", label: "Cases", icon: ListChecks },
+    { id: "evals", label: "Evals", icon: Gauge },
+    { id: "gate", label: "Gate", icon: ShieldCheck },
+    { id: "datasets", label: "Datasets", icon: Database },
+    { id: "json", label: "JSON", icon: Code2 },
+    { id: "yaml", label: "YAML", icon: FileText, disabled: !saved },
+  ];
+
+  return (
+    <section aria-label="Suite editor" className="rounded-lg border border-border/40 bg-card/80" data-testid="suite-editor">
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border/40 px-4 py-3">
+        <Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} aria-label="Suite name" className="h-8 min-w-0 flex-1 text-xs font-medium" />
+        <ModeSelect value={draft.defaultMode} onChange={(m) => setDraft({ ...draft, defaultMode: m ?? "all" })} />
+        <Button size="sm" disabled={saving} onClick={saveCurrent} data-testid="suite-save">
+          {saving ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1 h-3.5 w-3.5" />} Save
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
+      </header>
+      <nav className="flex gap-1 overflow-x-auto border-b border-border/40 px-3 py-1.5" aria-label="Editor views">
+        {views.map((v) => (
+          <Button key={v.id} variant={view === v.id ? "secondary" : "ghost"} size="sm" className="h-7" disabled={v.disabled} aria-pressed={view === v.id}
+            onClick={() => { if (view === "json" && v.id !== "json") { try { setDraft(JSON.parse(jsonText) as Draft); } catch { /* keep the form's */ } } setView(v.id); }}
+            title={v.disabled ? "Save the suite first" : undefined} data-testid={`suite-view-${v.id}`}>
+            <v.icon className="mr-1 h-3.5 w-3.5" /> {v.label}
+          </Button>
+        ))}
+      </nav>
+      {view === "form" && (
+        <>
+          <ul>
+            {cases.map((c, i) => (
+              <CaseForm key={`${i}-${c.id ?? ""}`} value={c} defaultMode={draft.defaultMode ?? "all"} datasets={(draft.datasets ?? []).map((d, j) => ({ id: d.id ?? `dataset-${j}`, name: d.name }))}
+                onChange={(n) => setDraft({ ...draft, cases: cases.map((x, j) => (j === i ? n : x)) })}
+                onRemove={() => setDraft({ ...draft, cases: cases.filter((_, j) => j !== i) })} />
+            ))}
+          </ul>
+          <div className="px-4 py-3">
+            <Button variant="outline" size="sm" onClick={() => setDraft({ ...draft, cases: [...cases, blankCase(cases.length + 1)] })} data-testid="suite-add-case">
+              <Plus className="mr-1 h-3.5 w-3.5" /> Case
+            </Button>
+          </div>
+        </>
+      )}
+      {view === "evals" && <EvalsView draft={draft} setDraft={setDraft} />}
+      {view === "gate" && <GateView draft={draft} setDraft={setDraft} />}
+      {view === "datasets" && <DatasetsView draft={draft} setDraft={setDraft} saved={saved} suites={suites} />}
+      {view === "json" && (
+        <div className="px-4 py-3">
+          <Textarea value={jsonText} onChange={(e) => setJsonText(e.target.value)} rows={18} aria-label="Suite JSON" className="font-mono text-caption" data-testid="suite-json" />
+        </div>
+      )}
+      {view === "yaml" && (
+        <div className="px-4 py-3">
+          {yamlText === null
+            ? <div className="flex justify-center py-6"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
+            : <Textarea value={yamlText} onChange={(e) => setYamlText(e.target.value)} rows={18} aria-label="Suite YAML" className="font-mono text-caption" data-testid="suite-yaml" />}
+        </div>
+      )}
+    </section>
+  );
+}

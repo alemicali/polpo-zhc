@@ -51,15 +51,18 @@ import { join, sep } from "node:path";
 import { resolveModel, resolveSummaryModel, streamSimpleWithAuth, completeSimpleWithAuth, enforceModelAllowlist } from "../llm/pi-client.js";
 import { createSystemTools, createAllTools, expandToolWildcards, ALL_EXTENDED_TOOL_NAMES } from "../tools/system-tools.js";
 import { canonicalPath } from "../tools/path-sandbox.js";
+import { getGlobalPolpoDir } from "../core/constants.js";
 import { createInkTools as createInkToolsFn } from "../tools/ink-tools.js";
 import { loadAgentSkills, buildSkillPrompt } from "../llm/skills.js";
 import { nanoid } from "nanoid";
 import { createDataAgentTools } from "../tools/data-tools.js";
-import { createArtifactAgentTools } from "../tools/artifact-tools.js";
+import { createArtifactAgentTools, workspaceFileReader } from "../tools/artifact-tools.js";
 import { getArtifactStore } from "../server/artifact-runtime.js";
 import { createStorageAgentTools } from "../tools/storage-tools.js";
 import { createCompanyBrainAgentTools } from "../tools/company-brain-tools.js";
+import { createDecisionTools } from "../tools/decision-tools.js";
 import { createTaskResultTools, wantsTaskResultTools } from "../tools/task-result-tools.js";
+import { createAgentTalkTools } from "../tools/agent-talk-tools.js";
 import { databaseStoresFor } from "../core/storage.js";
 import { FileTaskStore } from "../stores/file-task-store.js";
 import { inkRegistry } from "../core/ink-config.js";
@@ -196,8 +199,9 @@ export function describeToolsForAgent(agent: AgentConfig): string {
     extended.push(
       "",
       "**Image:**",
-      "- `image_generate` — generate images with AI (fal.ai FLUX)",
-      "- `image_analyze` — analyze/describe images with vision models",
+      "- `image_generate` — generate images with the instance's image model (kept as assets with their provenance, saved to `path`)",
+      "- `image_edit` — change an image of your workspace with a prompt (optionally inside a mask)",
+      "- `image_analyze` — look at an image and answer about it (a chat turn with the image, your own model by default)",
     );
   }
 
@@ -360,6 +364,17 @@ export interface MailboxPromptInfo {
  * caller resolves it from the agent's vault before calling this (avoids a
  * vault dependency reaching into the prompt builder).
  */
+/**
+ * The global skill pool (~/.polpo/skills, resolved) when the agent has a skill from it, so its
+ * bundled files can be read; undefined otherwise (project skills are already reachable).
+ */
+export function globalSkillPoolReadable(cwd: string, polpoDir: string, agent: AgentConfig): string | undefined {
+  let pool: string;
+  try { pool = canonicalPath(join(getGlobalPolpoDir(), "skills")); } catch { return undefined; }
+  const skills = loadAgentSkills(cwd, polpoDir, agent.name, agent.skills);
+  return skills.some((s) => s.dir && (s.dir === pool || s.dir.startsWith(pool + sep))) ? pool : undefined;
+}
+
 export function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: string, outputDir?: string, allowedPaths?: string[], mailboxes?: MailboxPromptInfo[]): string {
   // Load skills (sync, Node.js filesystem)
   const skills = polpoDir
@@ -580,6 +595,11 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
     effectiveAllowedPaths = [...(effectiveAllowedPaths ?? [cwd]), whatsappMediaDir];
   }
 
+  // Skills from the global pool (~/.polpo/skills) assigned to this agent: their bundled files
+  // (references, scripts) must be readable like the project pool's (.polpo/skills, a protected-path exception)
+  const globalSkillsDir = globalSkillPoolReadable(cwd, ctx.polpoDir, agentConfig);
+  if (globalSkillsDir) effectiveAllowedPaths = [...(effectiveAllowedPaths ?? [cwd]), globalSkillsDir];
+
   // Volumes mounted on this machine: visible to file tools and commands at the same path
   const remoteRun = ctx?.sandbox?.provider === "daytona" || ctx?.sandbox?.provider === "e2b";
   const hostMounts = remoteRun ? [] : hostVolumeMounts(ctx?.volumes);
@@ -596,7 +616,7 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
         // output directory (copied back); here: the allowed paths as before
         writable: [...(outputDir ? [outputDir] : []), ...(remoteRun ? [] : (effectiveAllowedPaths ?? []).filter((p) => !hostMounts.some((m) => m.hostPath === p)))],
         // skills and playbooks may ship scripts the agent runs; the rest of .polpo stays hidden
-        readable: ctx.polpoDir ? [join(ctx.polpoDir, "skills"), join(ctx.polpoDir, "playbooks")] : [],
+        readable: ctx.polpoDir ? [join(ctx.polpoDir, "skills"), join(ctx.polpoDir, "playbooks"), ...(globalSkillsDir ? [globalSkillsDir] : [])] : [],
         // bound at their host directory by local workspaces, attached at /volumes/<name> in remote VMs
         volumes: ctx.volumes ?? [],
         hide: ctx.polpoDir ? [ctx.polpoDir] : [],
@@ -1043,23 +1063,42 @@ export async function buildAgentToolset(o: {
       shell,
       fs: remoteFs,
       sandboxProvider,
+      agentName: agentConfig.name,
+      ...(o.task ? { mediaContext: { taskId: o.task.id, ...(o.task.missionId ? { missionId: o.task.missionId } : {}) } } : {}),
     });
   }
   if (ctx?.polpoDir) {
     allTools.push(...createDataAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
     const artifactPolpoDir = ctx.polpoDir;
+    // artifact_from_file publishes a file of the agent's workspace (its allowed folders; a sandbox's files are copied out)
+    const readArtifactFile = workspaceFileReader({
+      cwd, ...(effectiveAllowedPaths ? { allowedPaths: effectiveAllowedPaths } : {}),
+      tempDir: join(artifactPolpoDir, "tmp"), ...(remoteFs ? { remote: remoteFs } : {}),
+    });
     allTools.push(...createArtifactAgentTools(agentConfig.allowedTools, () => ({
       store: getArtifactStore(artifactPolpoDir),
       author: agentConfig.name,
       ...(o.task ? { taskId: o.task.id, ...(o.task.missionId ? { missionId: o.task.missionId } : {}) } : {}),
+      readFile: readArtifactFile,
     })));
     allTools.push(...createCompanyBrainAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
     allTools.push(...createStorageAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, { vaultStore: ctx.vaultStore as any, cwd, allowedPaths: effectiveAllowedPaths, outputDir, fs: remoteFs }));
+    // decide: typed judgments from the decision model (allowedTools "decide")
+    allTools.push(...createDecisionTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, o.task ? { taskId: o.task.id } : {}));
     // the results of the tasks it depends on and of its mission's tasks (read fresh from the task store)
     if (wantsTaskResultTools(o.task)) {
       const taskPolpoDir = ctx.polpoDir;
       allTools.push(...createTaskResultTools(o.task!, () => taskStoreFor(taskPolpoDir).getAllTasks()));
     }
+  }
+  // Talking to other agents while working the task (every engine: these become host tools for a
+  // harness or a CLI), within the agent's communication lines: ask_agent and escalate wait for the
+  // answer, message_agent hands off (the reply reaches the task)
+  if (ctx?.agentTalk && o.task) {
+    const { talk, reach, task } = ctx.agentTalk;
+    const taken = new Set(allTools.map((tool) => tool.name));
+    allTools.push(...createAgentTalkTools(talk, () => ({ agent: agentConfig.name, chain: [], task }), { reach, task: true })
+      .filter((tool) => !taken.has(tool.name)));
   }
   // Connectors granted to the agent (mcp__<connector>__<tool>): a connector that cannot connect is
   // skipped with a note in the prompt, never failing the run.

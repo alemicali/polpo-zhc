@@ -124,3 +124,42 @@ export function brandMark(name: BrandMark | string, size = 16, title?: string): 
     default: return glyph(label.slice(0, 1).toUpperCase(), size, label, String(name));
   }
 }
+
+/**
+ * A model followed by the engine that runs it, the dashboard's rule (ModelWithEngine):
+ * "Sonnet 4.5 · [mark] Claude Code Harness", "gpt-6 · [mark] Polpo"; compact: the mark only (the
+ * label in the tooltip). The tooltip names the model, the engine and how it authenticates.
+ */
+export function modelWithEngine(
+  model: string | undefined,
+  engine: { mark: BrandMark | string; label: string; kind?: string; id?: string },
+  opts: { size?: number; compact?: boolean; auth?: string } = {},
+): HTMLElement {
+  const wrap = document.createElement("span");
+  wrap.className = "marks model-engine";
+  wrap.title = [model ? `Model: ${model}` : "", `Engine: ${engine.label}`, opts.auth ? `Auth: ${opts.auth}` : ""].filter(Boolean).join("\n");
+  if (model) {
+    const name = document.createElement("span");
+    name.className = "model-name";
+    name.textContent = model;
+    const sep = document.createElement("span");
+    sep.className = "muted";
+    sep.setAttribute("aria-hidden", "true");
+    sep.textContent = "·";
+    wrap.append(name, sep);
+  }
+  const mark = document.createElement("span");
+  mark.className = "marks engine-mark";
+  mark.setAttribute("data-engine", engine.id ?? String(engine.mark));
+  if (engine.kind) mark.setAttribute("data-engine-kind", engine.kind);
+  mark.append(brandMark(engine.mark, opts.size ?? 14, engine.label));
+  if (opts.compact) mark.setAttribute("aria-label", engine.label);
+  else {
+    const label = document.createElement("span");
+    label.className = "engine-label";
+    label.textContent = engine.label;
+    mark.append(label);
+  }
+  wrap.append(mark);
+  return wrap;
+}

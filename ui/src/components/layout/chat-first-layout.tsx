@@ -10,7 +10,6 @@
  */
 
 import { ErrorBoundary } from "@/components/error-boundary";
-import { InkHubButton } from "@/components/layout/ink-hub-button";
 import { lazy, memo, Suspense, useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
@@ -18,6 +17,8 @@ import {
   ListChecks,
   Target,
   Bot,
+  Gauge,
+  Columns3,
   Plug,
   Brain,
   Sparkles,
@@ -32,15 +33,9 @@ import {
   Boxes,
   MousePointerClick,
   MessagesSquare,
-  Sun,
-  Moon,
-  Monitor,
-  Github,
-  PanelLeft,
   History,
   ChevronsLeft,
   Menu,
-  Palette as PaletteIcon,
   Check,
   ChevronDown,
   Layers3,
@@ -48,10 +43,12 @@ import {
   Rows3,
   SlidersHorizontal,
   CalendarClock,
+  Webhook,
+  Scale,
+  Images,
   Database,
   Shapes,
   BrainCircuit,
-  Megaphone,
   Radio,
 } from "lucide-react";
 import {
@@ -70,37 +67,36 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { useChatActions } from "@/hooks/chat-context";
 import { useProjectInfo } from "@/hooks/use-polpo";
 import {
   setChatFirstNavMode,
-  setLayoutMode,
   toggleChatFirstSessions,
   useChatFirstNavMode,
   useChatFirstSessionsOpen,
   type ChatFirstNavMode,
 } from "@/hooks/use-layout-mode";
-import { useTheme } from "@/hooks/use-theme";
-import { usePalette, PALETTES } from "@/lib/palette";
 import { cn } from "@/lib/utils";
-import { PwaInstallQrButton } from "./pwa-install-qr-button";
-import { LogoutButton } from "./logout-button";
 import { BrandMark } from "@/components/shared/brand-mark";
 import { productName, productTagline, useInstanceBranding } from "@/lib/branding";
 import { MobileNavSheet } from "./mobile-nav-sheet";
+import { HeaderMoreMenu, WhatsNewButton } from "./header-actions";
+import { BetaBadge } from "@/components/shared/beta-badge";
+import { isBetaPath } from "@/lib/beta";
 import { PersistentPageOutlet } from "./persistent-page-outlet";
 import { ChatTabs } from "./chat-tabs";
 import { ChatRoomRouteSync } from "./chat-room-route-sync";
 import { NewChatMenu } from "@/components/groups/new-chat-menu";
-import { WhatsNewDot } from "@/components/whats-new/whats-new-dot";
 import { applyChatLinkParams, requestNewGroup, setActiveChatRoom } from "@/hooks/use-chat-room";
-import { openWhatsNew, useWhatsNewOpen } from "@/hooks/use-whats-new-drawer";
 
 const ChatPage = lazy(() =>
   import("@/pages/chat").then((module) => ({ default: module.ChatPage })),
+);
+/** The Coding app's navigation (projects → worktrees → sessions): a column next to the page on /coding. */
+const CodingNav = lazy(() =>
+  import("@/pages/coding/coding-nav").then((module) => ({ default: module.CodingNav })),
 );
 
 function ChatLoader() {
@@ -129,6 +125,8 @@ const pinnedTabs: TabDef[] = [
   { path: "/missions", icon: Target, label: "Missions" },
   { path: "/tasks", icon: ListChecks, label: "Tasks" },
   { path: "/agents", icon: Bot, label: "Agents" },
+  { path: "/benchmarks", icon: Gauge, label: "Benchmarks" },
+  { path: "/playground", icon: Columns3, label: "Playground" },
   { path: "/connectors", icon: Plug, label: "Connectors" },
   { path: "/agent-talk", icon: MessagesSquare, label: "Agent conversations" },
   { path: "/files", icon: FolderOpen, label: "Files" },
@@ -149,6 +147,10 @@ const secondaryGroups: TabGroup[] = [
       { path: "/approvals", icon: ShieldCheck, label: "Approvals" },
       { path: "/notifications", icon: Bell, label: "Notifications" },
       { path: "/schedules", icon: CalendarClock, label: "Schedules" },
+      { path: "/triggers", icon: Webhook, label: "Triggers" },
+      { path: "/decisions", icon: Scale, label: "Decisions" },
+  { path: "/media", icon: Images, label: "Media" },
+      { path: "/media", icon: Images, label: "Media" },
     ],
   },
   {
@@ -179,6 +181,8 @@ const tabs: TabDef[] = [
   { path: "/tasks", icon: ListChecks, label: "Tasks" },
   { path: "/approvals", icon: ShieldCheck, label: "Approvals" },
   { path: "/agents", icon: Bot, label: "Agents" },
+  { path: "/benchmarks", icon: Gauge, label: "Benchmarks" },
+  { path: "/playground", icon: Columns3, label: "Playground" },
   { path: "/connectors", icon: Plug, label: "Connectors" },
   { path: "/agent-talk", icon: MessagesSquare, label: "Agent conversations" },
   { path: "/skills", icon: Sparkles, label: "Skills" },
@@ -195,6 +199,8 @@ const tabs: TabDef[] = [
   { path: "/agent-live", icon: MousePointerClick, label: "Browser Automation" },
   { path: "/notifications", icon: Bell, label: "Notifications" },
   { path: "/schedules", icon: CalendarClock, label: "Schedules" },
+  { path: "/triggers", icon: Webhook, label: "Triggers" },
+  { path: "/decisions", icon: Scale, label: "Decisions" },
   { path: "/config", icon: Settings2, label: "Configuration" },
 ];
 
@@ -296,6 +302,7 @@ function HeaderTabButton({ tab, active, onSelect }: {
     >
       <Icon className="h-4 w-4 shrink-0" />
       {active && <span className="text-xs font-medium">{tab.label}</span>}
+      {active && isBetaPath(tab.path) && <BetaBadge />}
     </button>
   );
 }
@@ -346,6 +353,7 @@ function GroupedHeaderNavigation({ pathname, navigate }: {
                   <DropdownMenuItem key={tab.path} onSelect={() => navigate(tab.path)} className="text-xs">
                     <Icon className="h-3.5 w-3.5" />
                     {tab.label}
+                    {isBetaPath(tab.path) && <BetaBadge />}
                     {active && <Check className="ml-auto h-3.5 w-3.5 text-primary" />}
                   </DropdownMenuItem>
                 );
@@ -415,10 +423,7 @@ function NavigationModeMenu({ mode }: { mode: ChatFirstNavMode }) {
 
 const PagesPanelHeader = memo(function PagesPanelHeader() {
   const { pathname } = useLocation();
-  const whatsNewOpen = useWhatsNewOpen();
   const navigate = useNavigate();
-  const { theme, resolved, setTheme } = useTheme();
-  const { palette, setPalette } = usePalette();
   const navMode = useChatFirstNavMode();
 
   return (
@@ -456,114 +461,12 @@ const PagesPanelHeader = memo(function PagesPanelHeader() {
 
       <div className="h-5 w-px bg-border/50 shrink-0" />
 
-      {/* Right actions — Phone/GitHub/Theme are desktop-only; mobile uses
-          the MobileNavSheet drawer for these. */}
+      {/* Right actions — What's new, navigation mode, the look (desktop) and ⋯ (Install app,
+          Ink Hub, GitHub, Log out); on mobile the look lives in the MobileNavSheet drawer. */}
       <div className="flex items-center gap-1 shrink-0">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className={cn(
-                "relative h-8 w-8 rounded-lg transition-all",
-                whatsNewOpen
-                  ? "text-primary bg-primary/10 hover:bg-primary/15"
-                  : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
-              )}
-              onClick={openWhatsNew}
-              aria-label="Novità"
-            >
-              <Megaphone className="h-4 w-4" />
-              <WhatsNewDot className="absolute right-1 top-1" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="text-xs">Novità</TooltipContent>
-        </Tooltip>
+        <WhatsNewButton />
         <NavigationModeMenu mode={navMode} />
-        <div className="hidden lg:block">
-          <PwaInstallQrButton />
-        </div>
-        <LogoutButton />
-        <InkHubButton />
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <a
-              href="https://github.com/alemicali/polpo-zhc"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hidden lg:inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all"
-            >
-              <Github className="h-4 w-4" />
-            </a>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="text-xs">GitHub</TooltipContent>
-        </Tooltip>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="hidden lg:inline-flex h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all"
-            >
-              {resolved === "dark" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-[220px] bg-popover/95 backdrop-blur-surface border-border/50">
-            <DropdownMenuLabel className="text-label text-muted-foreground/70">
-              Mode
-            </DropdownMenuLabel>
-            <DropdownMenuItem onSelect={() => setTheme("light")} className="gap-2.5 text-xs">
-              <Sun className="h-3.5 w-3.5" /> Light
-              {theme === "light" && <Check className="ml-auto h-3 w-3 text-primary" />}
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setTheme("dark")} className="gap-2.5 text-xs">
-              <Moon className="h-3.5 w-3.5" /> Dark
-              {theme === "dark" && <Check className="ml-auto h-3 w-3 text-primary" />}
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setTheme("system")} className="gap-2.5 text-xs">
-              <Monitor className="h-3.5 w-3.5" /> System
-              {theme === "system" && <Check className="ml-auto h-3 w-3 text-primary" />}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-label text-muted-foreground/70 flex items-center gap-1.5">
-              <PaletteIcon className="h-3 w-3" /> Palette
-            </DropdownMenuLabel>
-            {PALETTES.map((p) => {
-              const swatch = resolved === "dark" ? p.swatchDark : p.swatchLight;
-              return (
-                <DropdownMenuItem
-                  key={p.id}
-                  onSelect={() => setPalette(p.id)}
-                  className="gap-2.5 text-xs py-1.5"
-                >
-                  <span className="relative inline-flex shrink-0 h-4 w-4 items-center justify-center">
-                    <span className="absolute inset-0 rounded-pill ring-1 ring-border/60" style={{ backgroundColor: swatch[0] }} />
-                    <span className="absolute h-3 w-3 rounded-pill" style={{ backgroundColor: swatch[1], left: "30%", top: "10%" }} />
-                    <span className="absolute h-2 w-2 rounded-pill" style={{ backgroundColor: swatch[2], left: "55%", top: "50%" }} />
-                  </span>
-                  <span className="flex-1 min-w-0">
-                    <span className="block leading-tight">{p.name}</span>
-                    <span className="block text-micro text-muted-foreground/70 leading-tight">{p.blurb}</span>
-                  </span>
-                  {palette === p.id && <Check className="h-3 w-3 text-primary shrink-0" />}
-                </DropdownMenuItem>
-              );
-            })}
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all"
-              onClick={() => setLayoutMode("sidebar")}
-            >
-              <PanelLeft className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="text-xs">Switch to sidebar layout</TooltipContent>
-        </Tooltip>
+        <HeaderMoreMenu showSidebarStyle={false} />
       </div>
     </header>
   );
@@ -605,6 +508,7 @@ function MoreNavigation({ pathname }: { pathname: string }) {
                   >
                     <Icon className="h-4 w-4 shrink-0" />
                     <span className="hidden truncate text-xs font-medium lg:block">{tab.label}</span>
+                    {isBetaPath(tab.path) && <BetaBadge className="hidden lg:inline-flex" />}
                   </button>
                 );
               })}
@@ -652,10 +556,18 @@ function RightPanelContent() {
             <MoreNavigation pathname={pathname} />
           </div>
         )}
+        {(pathname === "/coding" || pathname.startsWith("/coding/")) && (
+          <aside aria-label="Projects and sessions" className="flex min-h-0 w-64 shrink-0 flex-col border-r border-border/50 pt-2 max-lg:hidden" data-testid="chat-first-coding-nav">
+            <Suspense fallback={null}>
+              <CodingNav />
+            </Suspense>
+          </aside>
+        )}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           {!fullBleed && title && (
             <div className="flex shrink-0 items-center px-5 pb-1 pt-3">
               <span className="truncate text-sm font-bold text-foreground">{title}</span>
+              {isBetaPath(pathname) && <BetaBadge className="ml-2" />}
             </div>
           )}
           <main className={cn(
@@ -746,11 +658,16 @@ function resolvePageTitle(pathname: string): string {
     "/agents": "Agents",
     "/connectors": "Connectors",
     "/agent-talk": "Agent conversations",
+    "/benchmarks": "Benchmarks",
+    "/playground": "Playground",
     "/skills": "Skills",
     "/memory": "Memory",
     "/notifications": "Notifications",
     "/events": "Events",
     "/schedules": "Schedules",
+    "/triggers": "Triggers",
+    "/decisions": "Decisions",
+    "/media": "Media",
     "/approvals": "Approvals",
     "/playbooks": "Playbooks",
     "/files": "Files",

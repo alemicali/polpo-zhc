@@ -97,7 +97,7 @@ function tellModel(): void {
     ? `The person is looking at mission ${c.mission.id} (${c.mission.name}, ${c.mission.status}) in Polpo: ${usd(c.cost?.usd)}${c.cost?.budgetUsd !== undefined ? ` of ${usd(c.cost.budgetUsd)}` : ""}; `
       + `failed tasks: ${c.tasks.filter((x) => x.failure).map((x) => `${x.id} (${x.failure!.reason})`).join("; ") || "none"}.`
     : `The person is looking at task ${c.task.id} (${c.task.title}, ${c.task.status}) in Polpo${c.task.failure ? `; it failed: ${c.task.failure.reason}${c.task.failure.retryable ? "" : " (not retried)"}` : ""}; `
-      + `latest run: ${c.runs[0] ? `${c.runs[0].engineLabel} ${c.runs[0].modelLabel ?? ""} on ${c.runs[0].computer.label}` : "none"}.`;
+      + `latest run: ${c.runs[0] ? `${c.runs[0].modelLabel ? `${c.runs[0].modelLabel} · ` : ""}${c.runs[0].engineLabel} on ${c.runs[0].computer.label}` : "none"}.`;
   void app.updateModelContext({ content: [{ type: "text", text }] }).catch(() => {});
 }
 

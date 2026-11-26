@@ -38,6 +38,7 @@ Every member can edit Configuration (members have no roles), so every member see
 - `custom.light` / `custom.dark`: any subset of the tokens below. A token not given keeps the palette's value.
 - `custom.derive` (default `true`): fill the tokens not given from those given (see Derivation).
 - `fonts`: web fonts to load, so a font stack can name a family the dashboard does not ship (see Web fonts). At most 8, one per family.
+- `sidebarStyle`: the navigation sidebar everyone gets by default, `drill-in` (unset: the built-in default) or `classic` (see Navigation sidebar).
 
 Values are checked by the REST route and MCP, which refuse invalid input (400), and by the config loader, which ignores the invalid part of a hand-edited `polpo.json` with a warning in the log (the rest applies; the instance always starts):
 
@@ -55,6 +56,15 @@ Values are checked by the REST route and MCP, which refuse invalid input (400), 
 The dashboard loads Satoshi (variable, 300–900), IBM Plex Sans (400–700), Inter (400–700), JetBrains Mono (400–700) and Newsreader (400–700) from their font services (declared only: a family is downloaded when the page uses it) and bundles Inter Tight — every preset in the editor.
 
 The old shape (`primary`, `secondary`, `text`, `fontFamily`, `radius` per mode) is still read: `text` is `foreground`.
+
+## Navigation sidebar
+
+The sidebar layout has two navigation styles:
+
+- **Drill-in** (the default when `settings.appearance.sidebarStyle` is unset): a short top level — Dashboard, Chat, Approvals (with its pending count) and the groups **Work** (Missions, Tasks, Schedules, Playbooks, Events), **Team** (Agents, Agent conversations, Skills, Memory), **Content** (Artifacts, Files, Data, Company Brain), **Tools** (Coding, Terminal, Apps, App Preview, Browser Automation, Computers), with **Settings** pinned at the bottom of the sidebar, under the What's new cards and above the connection status (Workspace: General, Appearance, Members, Cloud sync · Models & agents: Providers, Harnesses, Orchestrator · Execution: Sandbox, Computers, Policies, Rules · Integrations: Connectors, Channels, MCP access, Notifications). A group opens its pages as a second level inside the sidebar, with a Back row on top; **Chat** opens the chat and shows its history (groups, threads by agent or all, starred, new chat / new group) in the sidebar. The level follows the page: a link to `/tasks` opens the sidebar at Work with Tasks current. The levels slide (forward from the right, back from the left), not with `prefers-reduced-motion`. Keyboard: ↑/↓ move, Enter or → opens a group, ← or Escape go back. The collapsed icon rail and the mobile navigation drawer use the same levels. With the drill-in sidebar the Configuration page shows the current section's title instead of its own tab bar (the Settings level lists the sections); the classic sidebar and the chat-first layout keep the tabs.
+- **Classic**: every page in one list, grouped by Overview, Work, Knowledge, System — when the instance sets `classic` or a person picks it.
+
+Two layers, like the look: **this person's choice** (Configuration → Appearance → Navigation sidebar "For you", the header's ⋯ menu, or the banner at the bottom of the sidebar — "Try the new sidebar" / "Switch back", dismissible; kept in the browser) wins over **the instance default** (`settings.appearance.sidebarStyle`: Configuration → Appearance → Navigation sidebar "Instance default", `PATCH /api/v1/config/settings { appearance: { …, sidebarStyle } }`, MCP and Polpo chat `polpo_branding_update { sidebar_style: "drill-in" }`, read by `polpo_branding_get` and the public `GET /api/v1/config/appearance`). Saving or clearing the look as the instance default in Configuration → Appearance keeps the sidebar style; MCP `reset_appearance` drops it with the rest.
 
 ## Web fonts
 

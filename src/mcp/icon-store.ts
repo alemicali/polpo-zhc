@@ -17,6 +17,7 @@ import {
   type FetchPolicy, type IconFetcher, type IconImage,
 } from "./icons.js";
 import type { ConnectorStore } from "./store.js";
+import { hostedBundledIcon } from "./view.js";
 
 /** How long after a discovery that found nothing it is tried again (on list / connect). */
 const RETRY_AFTER_MS = 24 * 60 * 60_000;
@@ -45,8 +46,9 @@ export interface ServerInfoIcons {
 
 export class IconInputError extends Error {}
 
-/** Whether a connector gets a discovered / custom icon (not a catalog one). */
-export const iconEligible = (c: Pick<ConnectorConfig, "catalogId">) => !c.catalogId;
+/** Whether a connector gets a discovered / custom icon (not a catalog one, nor a ready-made hosted server's bundled mark). */
+export const iconEligible = (c: Pick<ConnectorConfig, "catalogId"> & Partial<Pick<ConnectorConfig, "icon" | "transport">>) =>
+  !c.catalogId && !hostedBundledIcon(c).iconUrl;
 
 const ageMs = (iso: string | undefined) => (iso ? Date.now() - Date.parse(iso) : Infinity);
 

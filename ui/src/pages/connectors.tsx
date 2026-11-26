@@ -11,17 +11,22 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAgents } from "@polpo-ai/react";
 import { toast } from "sonner";
-import { BadgeCheck, KeyRound, Loader2, Plug, Plus, Search, Settings2, UserPlus, X } from "lucide-react";
+import { BadgeCheck, KeyRound, Loader2, Plug, Plus, Search, Server, Sparkles, UserPlus, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ConnectorIcon } from "@/components/connectors/connector-icon";
 import { StateBadge } from "@/components/connectors/connector-bits";
+import { ConnectorCard, ConnectorListRow } from "@/components/connectors/connector-card";
 import { ConnectDialog } from "@/components/connectors/connect-dialog";
 import { ConnectorDetailSheet, type AgentOption } from "@/components/connectors/connector-detail-sheet";
 import { CustomConnectorDialog } from "@/components/connectors/custom-connector-dialog";
 import { OAuthAppsDialog } from "@/components/connectors/oauth-apps-dialog";
+import { CreateServerDialog, HostedServersList } from "@/components/connectors/hosted-servers";
+import { HostedServerSheet } from "@/components/connectors/hosted-server-sheet";
+import { ReadyMadeConnectors } from "@/components/connectors/ready-made-connectors";
+import { hostedLabel } from "@/lib/mcp-servers";
 import { useConnectFlow } from "@/components/connectors/use-connect-flow";
 import { useConnectors } from "@/hooks/use-connectors";
 import {
@@ -66,17 +71,14 @@ function CatalogCard({
   // an added connector waiting for sign-in (or setup) can also be managed: sign in, or remove it
   const manageToo = primary && !!connector;
   return (
-    <div data-testid={`catalog-card-${entry.id}`} className="flex flex-col gap-3 rounded-card border bg-card p-4 transition-colors hover:border-foreground/20">
-      <div className="flex items-start gap-3">
-        <ConnectorIcon catalogId={entry.id} name={entry.name} color={entry.icon?.color} />
-        <div className="min-w-0 flex-1">
-          <p className="truncate font-medium leading-tight">{entry.name}</p>
-          <p className="truncate text-xs text-muted-foreground">{entry.category}{accounts > 1 ? ` · ${accounts} accounts` : ""}</p>
-        </div>
-        {state !== "connect" && <StateBadge state={state} />}
-      </div>
-      <p className="line-clamp-2 min-h-[2.5rem] text-sm text-muted-foreground">{entry.description}</p>
-      <div className="mt-auto flex items-center gap-1.5">
+    <ConnectorCard
+      testId={`catalog-card-${entry.id}`}
+      icon={<ConnectorIcon catalogId={entry.id} name={entry.name} color={entry.icon?.color} />}
+      title={entry.name}
+      subtitle={`${entry.category}${accounts > 1 ? ` · ${accounts} accounts` : ""}`}
+      status={state !== "connect" ? <StateBadge state={state} /> : undefined}
+      description={entry.description}
+      footer={<>
         <Badge variant="outline" className="text-micro font-normal text-muted-foreground">{authLabel(entry)}</Badge>
         {entry.inClaudeDirectory && (
           <Badge variant="outline" className="gap-1 text-micro font-normal text-muted-foreground" title="Listed in Claude's connector directory">
@@ -105,8 +107,8 @@ function CatalogCard({
         >
           {actionLabel(state)}
         </Button>
-      </div>
-    </div>
+      </>}
+    />
   );
 }
 
@@ -122,39 +124,39 @@ function ConnectorRow({
   const state = connectorState(connector);
   const needsSignIn = state === "needs_auth" || state === "needs_reauth";
   return (
-    <div data-testid={`connector-row-${connector.id}`} className="flex items-center gap-3 rounded-card border bg-card px-3 py-3 sm:px-4">
-      <ConnectorIcon catalogId={connector.catalogId} name={connector.name} color={connector.icon?.color} iconUrl={connector.iconUrl} iconDarkUrl={connector.iconDarkUrl} />
-      <button type="button" onClick={onManage} className="min-w-0 flex-1 text-left">
-        <span className="flex items-center gap-2">
-          <span className="truncate font-medium">{connector.name}</span>
-          {account && <span className="min-w-0 truncate text-xs text-muted-foreground" data-testid={`connector-account-${connector.id}`}>{account}</span>}
-          {!connector.catalogId && <Badge variant="secondary" className="text-micro font-normal">Custom</Badge>}
-        </span>
-        <span className="block truncate text-xs text-muted-foreground">
-          {state === "needs_reauth" ? `${product} lost access to ${connector.name}. Sign in again to keep using it.`
-            : state === "error" && connector.lastError ? connector.lastError
-            : `${accessSummary(connector, agentLabel, product)}${connector.toolCount !== undefined && state === "connected" ? ` · ${connector.toolCount} tools` : ""}`}
-        </span>
-      </button>
-      <StateBadge state={state} className="hidden sm:inline-flex" />
-      {needsSignIn && <Button size="sm" className="h-8" onClick={onReconnect}>{actionLabel(state)}</Button>}
-      {/* always reachable: the sheet signs in again, disconnects or removes it */}
-      <Button size="icon" variant="ghost" className="h-8 w-8" onClick={onManage} aria-label={`Manage ${connector.name}`}>
-        <Settings2 className="h-4 w-4" />
-      </Button>
-    </div>
+    <ConnectorListRow
+      testId={`connector-row-${connector.id}`}
+      icon={<ConnectorIcon catalogId={connector.catalogId} name={connector.name} color={connector.icon?.color} iconUrl={connector.iconUrl} iconDarkUrl={connector.iconDarkUrl} />}
+      title={connector.name}
+      badges={<>
+        {account && <span className="min-w-0 truncate text-xs text-muted-foreground" data-testid={`connector-account-${connector.id}`}>{account}</span>}
+        {connector.transport.type === "hosted"
+          ? <Badge variant="secondary" className="text-micro font-normal" data-testid={`hosted-badge-${connector.id}`}>{hostedLabel(product, connector.hostedVersion)}</Badge>
+          : !connector.catalogId && <Badge variant="secondary" className="text-micro font-normal">Custom</Badge>}
+      </>}
+      summary={state === "needs_reauth" ? `${product} lost access to ${connector.name}. Sign in again to keep using it.`
+        : state === "error" && connector.lastError ? connector.lastError
+        : `${accessSummary(connector, agentLabel, product)}${connector.toolCount !== undefined && state === "connected" ? ` · ${connector.toolCount} tools` : ""}`}
+      status={<StateBadge state={state} />}
+      actions={needsSignIn ? <Button size="sm" className="h-8" onClick={onReconnect}>{actionLabel(state)}</Button> : undefined}
+      onOpen={onManage}
+      manageLabel={`Manage ${connector.name}`}
+    />
   );
 }
 
 export function ConnectorsPage() {
   const [params, setParams] = useSearchParams();
   const connectedParam = params.get("connected");
+  const serverParam = params.get("server");
   const { connectors, catalog, loading, error, refresh, refreshCatalog, upsert, drop } = useConnectors({ withCatalog: true });
   const { agents } = useAgents();
   const product = productName(useInstanceBranding());
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string | null>(null);
-  const [tab, setTab] = useState<string | null>(connectedParam ? "connected" : null);
+  const [tab, setTab] = useState<string | null>(connectedParam ? "connected" : serverParam || params.get("tab") === "servers" ? "servers" : null);
+  const [serverId, setServerId] = useState<string | null>(serverParam);
+  const [createServerOpen, setCreateServerOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(connectedParam);
   const [customOpen, setCustomOpen] = useState(false);
   const [appsOpen, setAppsOpen] = useState(false);
@@ -204,6 +206,9 @@ export function ConnectorsPage() {
           <Button variant="outline" onClick={() => setAppsOpen(true)}>
             <KeyRound className="h-4 w-4" /> OAuth apps
           </Button>
+          <Button variant="outline" onClick={() => setCreateServerOpen(true)}>
+            <Sparkles className="h-4 w-4" /> Create server
+          </Button>
           <Button onClick={() => setCustomOpen(true)}>
             <Plus className="h-4 w-4" /> Add custom connector
           </Button>
@@ -237,7 +242,21 @@ export function ConnectorsPage() {
         <TabsList>
           <TabsTrigger value="connected">Connected{connectors.length ? ` (${connectors.length})` : ""}</TabsTrigger>
           <TabsTrigger value="browse">Browse{entries.length ? ` (${entries.length})` : ""}</TabsTrigger>
+          <TabsTrigger value="servers"><Server className="h-3.5 w-3.5" /> Hosted servers</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="servers" className="space-y-6">
+          <ReadyMadeConnectors agents={agentOptions} onOpenServer={setServerId} />
+          <section className="space-y-3" aria-labelledby="hosted-servers-title">
+            <div>
+              <h2 id="hosted-servers-title" className="text-sm font-medium">Your hosted servers</h2>
+              <p className="text-sm text-muted-foreground">
+                MCP servers {product} builds and hosts — from an API's docs, a description or a template. Each becomes a connector when published.
+              </p>
+            </div>
+            <HostedServersList onOpen={setServerId} onCreate={() => setCreateServerOpen(true)} />
+          </section>
+        </TabsContent>
 
         <TabsContent value="connected" className="space-y-2">
           {loading ? (
@@ -368,6 +387,12 @@ export function ConnectorsPage() {
         onChanged={refreshCatalog}
       />
 
+      <CreateServerDialog open={createServerOpen} onOpenChange={setCreateServerOpen} onCreated={(id) => { setTab("servers"); setServerId(id); }} />
+      <HostedServerSheet
+        key={serverId ?? "none"} id={serverId} open={!!serverId} onOpenChange={(o) => { if (!o) setServerId(null); }}
+        onOpenConnector={(id) => { setServerId(null); setSelectedId(id); }}
+      />
+
       <ConnectorDetailSheet
         connector={selected}
         entry={selectedEntry}
@@ -380,6 +405,7 @@ export function ConnectorsPage() {
         onSetupApp={(c, appId) => { setSelectedId(null); flow.open({ connector: c, entry: selectedEntry, oauthApp: appId }); }}
         accountCount={selectedEntry ? catalogCardState(selectedEntry, connectors, oauthApps).accounts.length : 0}
         onAddAccount={selectedEntry ? () => addAccount(selectedEntry) : undefined}
+        onOpenHostedServer={(id) => { setSelectedId(null); setServerId(id); }}
       />
     </div>
   );

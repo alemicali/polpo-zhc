@@ -1,7 +1,8 @@
 import { nanoid } from "nanoid";
 import type { OrchestratorContext } from "./orchestrator-context.js";
-import type { Task, TaskResult, RunnerConfig } from "./types.js";
+import type { AgentConfig, Task, TaskResult, RunnerConfig } from "./types.js";
 import { agentMemoryScope } from "./memory-store.js";
+import { reachableAgents, resolveAgentLines } from "./agent-lines.js";
 import { agentEgressName, computerContext, tailnetEgressFor, normalizeSandboxSettings, resolveSandbox, SandboxVolumeGrantError, type ResolvedSandboxVolume, type SandboxSettings } from "./sandbox.js";
 import type { RunRecord } from "./run-store.js";
 import { buildRunContext, finishRunContext, mergeRunContext, upsertTaskRun } from "./run-context.js";
@@ -41,6 +42,19 @@ export class TaskRunner {
   private knownRunContexts = new Map<string, string>();
 
   constructor(private ctx: OrchestratorContext) {}
+
+  /** The run's communication lines: who the agent may reach (and its manager), for its talk tools. */
+  private async agentLinesFor(agentName: string): Promise<Pick<RunnerConfig, "agentLines">> {
+    try {
+      const agents = await this.ctx.agentStore.getAgents();
+      const self = agents.find((a) => a.name === agentName);
+      if (!self) return {};
+      const lines = resolveAgentLines(self, agents);
+      return { agentLines: { reachable: reachableAgents(agentName, agents), ...(lines.manager ? { manager: lines.manager } : {}), mode: lines.mode } };
+    } catch {
+      return {};
+    }
+  }
 
   /**
    * Collect results from terminal runs and pass them to the callback.
@@ -518,9 +532,25 @@ export class TaskRunner {
   }
 
   async spawnForTask(task: Task): Promise<void> {
-    const agent = await this.ctx.agentStore.getAgent(task.assignTo);
+    // production's config, or the published version the task is pinned to (agentVersion)
+    let agent: AgentConfig | undefined;
+    let agentVersion: string | undefined;
+    let resolveError: string | undefined;
+    if (this.ctx.agentVersions) {
+      try {
+        const resolved = await this.ctx.agentVersions.resolve(task.assignTo, task.agentVersion);
+        agent = resolved?.agent;
+        agentVersion = resolved?.version;
+      } catch (err) {
+        resolveError = err instanceof Error ? err.message : String(err);
+      }
+    } else {
+      agent = await this.ctx.agentStore.getAgent(task.assignTo);
+    }
     if (!agent) {
-      this.ctx.emitter.emit("log", { level: "error", message: `No agent "${task.assignTo}" for task "${task.title}"` });
+      this.ctx.emitter.emit("log", { level: "error", message: resolveError
+        ? `[${task.id}] ${resolveError} (task "${task.title}")`
+        : `No agent "${task.assignTo}" for task "${task.title}"` });
       await this.ctx.registry.transition(task.id, "assigned");
       await this.ctx.registry.transition(task.id, "in_progress");
       await this.ctx.registry.transition(task.id, "failed");
@@ -722,6 +752,7 @@ export class TaskRunner {
       ...(volumes.length ? { volumes } : {}),
       whatsappDbPath,
       whatsappProfilePath,
+      ...(await this.agentLinesFor(agent.name)),
     };
 
     try {
@@ -751,6 +782,7 @@ export class TaskRunner {
         runCtx = buildRunContext({
           runId, startedAt: now, agent, settings: this.ctx.config.settings as never, sandbox,
           browserEgress: runnerConfig.browserEgress, continuation,
+          ...(agentVersion ? { agentVersion } : {}),
           ...(task.toolScope ? { toolScope: task.toolScope } : {}),
         });
         const fresh = await this.ctx.registry.getTask(task.id);

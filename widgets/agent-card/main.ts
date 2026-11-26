@@ -20,7 +20,7 @@ import {
   type McpUiHostContext,
 } from "@modelcontextprotocol/ext-apps";
 import type { AgentCard, AgentCardRoutineItem, AgentCardTask } from "../../src/server/mcp-agent-card.js";
-import { brandMark } from "../shared/brand.js";
+import { modelWithEngine } from "../shared/brand.js";
 import { applyInstanceAppearance } from "../shared/theme.js";
 
 // ── Text ─────────────────────────────────────────────────────────────────
@@ -43,6 +43,8 @@ const STRINGS = {
     error: "Could not load the agent",
     on: "on", connectors: "Connectors", allTools: "all tools", tools: (n: number) => `${n} tool${n === 1 ? "" : "s"}`,
     notRetried: "not retried", failedBecause: "Failed", toolsRestricted: "Tools restricted",
+    lines: "Communication", talksTo: "Talks to", anyAgent: "any agent", noAgent: "no other agent", notSet: "not restricted yet",
+    escalatesTo: "Escalates to", linesMode: { org: "Org chart", list: "Only listed agents", anyone: "Anyone", none: "Nobody" } as Record<string, string>,
   },
   it: {
     working: "Al lavoro", idle: "Libero", waiting: "In attesa di te",
@@ -61,6 +63,8 @@ const STRINGS = {
     error: "Non riesco a caricare l'agente",
     on: "su", connectors: "Connettori", allTools: "tutti gli strumenti", tools: (n: number) => `${n} strument${n === 1 ? "o" : "i"}`,
     notRetried: "non ritentato", failedBecause: "Fallito", toolsRestricted: "Strumenti ristretti",
+    lines: "Comunicazione", talksTo: "Parla con", anyAgent: "qualsiasi agente", noAgent: "nessun altro agente", notSet: "non ancora limitato",
+    escalatesTo: "Escala a", linesMode: { org: "Organigramma", list: "Solo gli agenti elencati", anyone: "Chiunque", none: "Nessuno" } as Record<string, string>,
   },
 };
 type Strings = typeof STRINGS.en;
@@ -141,8 +145,11 @@ function header(c: AgentCard, s: Strings): HTMLElement {
     h("div", { class: "who" },
       h("div", { class: "name" }, name),
       h("div", { class: "role" }, [c.agent.role, c.agent.displayName ? c.agent.name : undefined].filter(Boolean).join(" · ")),
-      c.agent.engine ? h("div", { class: "role marks" }, brandMark(c.agent.engine.mark, 14),
-        [c.agent.engine.label, c.agent.engine.modelLabel, c.agent.computer ? `${s.on} ${c.agent.computer}` : undefined].filter(Boolean).join(" · ")) : null),
+      // the model it runs, then its engine (mark + Polpo / Harness / CLI), then its computer
+      c.agent.engine ? h("div", { class: "role marks agent-model" }, modelWithEngine(c.agent.engine.modelLabel, c.agent.engine),
+        c.agent.computer ? h("span", { class: "muted" }, `· ${s.on} ${c.agent.computer}`) : null,
+        // the version production runs (agent versions)
+        c.agent.version ? h("span", { class: "muted agent-version", title: c.agent.draftChanges ? "draft has unpublished changes" : "production" }, `· v${c.agent.version}${c.agent.draftChanges ? "*" : ""}`) : null) : null),
     h("span", { class: `chip chip-${c.status === "working" ? "info" : c.status === "waiting" ? "warning" : "neutral"}` }, s[c.status]));
 }
 
@@ -170,8 +177,8 @@ function taskSummary(x: AgentCardTask, s: Strings): HTMLElement {
   const cost = r?.costUsd === undefined ? "" : r.costUsd < 0.01 ? `$${r.costUsd.toFixed(4)}` : `$${r.costUsd.toFixed(2)}`;
   return h("div", { class: "task-sum" },
     h("div", {}, x.title, x.toolScoped ? h("span", { class: "chip chip-sm chip-info" }, s.toolsRestricted) : null),
-    r ? h("div", { class: "muted small marks" }, brandMark(r.engineMark, 14),
-      [`${r.engineLabel}${r.modelLabel ? ` ${r.modelLabel}` : ""}`, r.auth ? r.auth.label : "", `${s.on} ${r.computer.label}`, cost].filter(Boolean).join(" · ")) : null,
+    r ? h("div", { class: "muted small marks" }, modelWithEngine(r.modelLabel, { mark: r.engineMark, label: r.engineLabel, kind: r.engineKind, id: r.engine }, { auth: r.auth?.label }),
+      h("span", {}, [r.auth ? r.auth.label : "", `${s.on} ${r.computer.label}`, cost].filter(Boolean).join(" · "))) : null,
     x.failure ? h("div", { class: "small fail-text" }, `${s.failedBecause}: ${x.failure.reason}${x.failure.retryable ? "" : ` (${s.notRetried})`}`) : null);
 }
 
@@ -180,6 +187,18 @@ function connectorsSection(c: AgentCard, s: Strings): HTMLElement | null {
   return h("section", {}, h("h3", {}, s.connectors), ...c.connectors.map((x) => h("div", { class: "row" },
     h("div", { class: "row-main" }, h("div", {}, x.label), h("div", { class: "muted small" }, `${x.id} · ${x.tools === "all" ? s.allTools : s.tools(x.tools)}`)),
     x.status ? h("span", { class: `chip chip-sm chip-${x.status === "connected" ? "success" : x.status === "error" || x.status === "needs_reauth" ? "danger" : "neutral"}` }, x.status.replace(/_/g, " ")) : null)));
+}
+
+/** Who it may talk to (its communication lines) and who it escalates to. */
+function linesSection(c: AgentCard, s: Strings): HTMLElement | null {
+  const l = c.lines;
+  if (!l) return null;
+  const who = l.mode === "anyone" ? s.anyAgent : l.reachable.join(", ") || s.noAgent;
+  return h("section", {}, h("h3", {}, s.lines),
+    h("div", { class: "row" },
+      h("div", { class: "row-main" }, h("div", {}, `${s.talksTo}: ${who}`),
+        l.manager ? h("div", { class: "muted small" }, `${s.escalatesTo}: ${l.manager}`) : null),
+      h("span", { class: `chip chip-sm chip-${l.explicit ? "neutral" : "warning"}` }, l.explicit ? (s.linesMode[l.mode] ?? l.mode) : s.notSet)));
 }
 
 function tabs(s: Strings): HTMLElement {
@@ -197,6 +216,7 @@ function overviewTab(c: AgentCard, s: Strings): HTMLElement {
     c.portrait ? h("section", {}, h("h3", {}, s.portrait), h("p", { class: "prose" }, c.portrait)) : null,
     top.length ? h("section", {}, h("h3", {}, s.goals), ...top.map((g) => goalRow(g, s))) : null,
     connectorsSection(c, s),
+    linesSection(c, s),
     c.journal.length ? h("section", {}, h("h3", {}, s.reflections), ...c.journal.map((j) => h("div", { class: "row" }, h("div", { class: "row-main" }, h("div", { class: "prose" }, j.summary)), h("div", { class: "muted small" }, formatTime(j.at))))) : null);
 }
 

@@ -6,6 +6,7 @@
  * Pure, and type-only imports: the widgets (widgets/*) bundle it for the browser.
  */
 import type { TaskRunContext } from "@polpo-ai/core/run-context";
+import { engineKindOf, engineMarkLabel, engineTypeText, type EngineKind } from "@polpo-ai/core/engine-label";
 
 /** The marks the widgets draw (widgets/shared/brand.ts). */
 export type BrandMark =
@@ -20,8 +21,10 @@ export interface RunView {
   continuation?: boolean;
   agent?: string;
   engine: TaskRunContext["engine"];
-  /** "Claude Code", "Codex", "OpenCode", "Polpo". */
+  /** The engine marker shown after the model: "Polpo", "Claude Code Harness", "Codex CLI". */
   engineLabel: string;
+  /** polpo, harness or cli. */
+  engineKind: EngineKind;
   engineMark: BrandMark;
   model?: string;
   /** "Sonnet 4.5", "gpt-5-codex". */
@@ -38,11 +41,13 @@ export interface RunView {
   durationMs?: number;
 }
 
-export const ENGINE_LABELS: Record<string, string> = { polpo: "Polpo", "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode" };
-const AUTH_LABELS: Record<string, string> = { bedrock: "Bedrock", vertex: "Vertex AI", "api-key": "API key", "ai-gateway": "Vercel AI Gateway", gateway: "model gateway" };
+export const ENGINE_LABELS: Record<string, string> = { polpo: "Polpo", "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", "claude-cli": "Claude Code CLI", "codex-cli": "Codex CLI" };
+const AUTH_LABELS: Record<string, string> = { bedrock: "Bedrock", vertex: "Vertex AI", "api-key": "API key", "ai-gateway": "Vercel AI Gateway", gateway: "model gateway", subscription: "personal plan" };
 const isHarness = (x: unknown): x is "claude-code" | "codex" | "opencode" => x === "claude-code" || x === "codex" || x === "opencode";
 
 export function engineMark(engine: string | undefined): BrandMark {
+  if (engine === "claude-cli") return "claude-code";
+  if (engine === "codex-cli") return "codex";
   return isHarness(engine) ? engine : "polpo";
 }
 
@@ -50,7 +55,8 @@ export function engineMark(engine: string | undefined): BrandMark {
 export function agentEngine(engine: unknown): { id: TaskRunContext["engine"]; model?: string } {
   if (isHarness(engine)) return { id: engine };
   if (engine && typeof engine === "object") {
-    const e = engine as { harness?: unknown; model?: unknown };
+    const e = engine as { harness?: unknown; model?: unknown; type?: unknown; cli?: unknown };
+    if (e.type === "cli" && (e.cli === "claude" || e.cli === "codex")) return { id: e.cli === "claude" ? "claude-cli" : "codex-cli", ...(typeof e.model === "string" && e.model ? { model: e.model } : {}) };
     if (isHarness(e.harness)) return { id: e.harness, ...(typeof e.model === "string" && e.model ? { model: e.model } : {}) };
   }
   return { id: "polpo" };
@@ -69,6 +75,7 @@ export function modelLabel(model: string | undefined): string | undefined {
 }
 
 export function authMark(kind: string | undefined, engine?: string, provider?: string): BrandMark {
+  if (kind === "subscription") return engine === "codex-cli" ? "openai" : "anthropic";
   if (kind === "bedrock") return "bedrock";
   if (kind === "vertex") return "vertex";
   if (engine === "opencode") return kind === "api-key" && provider === "anthropic" ? "anthropic" : kind === "api-key" && provider === "openai" ? "openai" : "api-key";
@@ -135,7 +142,8 @@ export function runView(run: TaskRunContext): RunView {
     ...(run.continuation ? { continuation: true } : {}),
     ...(run.agent ? { agent: run.agent } : {}),
     engine: run.engine,
-    engineLabel: ENGINE_LABELS[run.engine] ?? run.engine,
+    engineLabel: engineMarkLabel(run.engine),
+    engineKind: engineKindOf(run.engine),
     engineMark: engineMark(run.engine),
     ...(run.model ? { model: run.model } : {}),
     ...(label ? { modelLabel: label } : {}),
@@ -164,11 +172,11 @@ export function runView(run: TaskRunContext): RunView {
   };
 }
 
-/** "Claude Code · Sonnet 4.5 via Bedrock · on gpu-box (Daytona v2) · $0.42" */
+/** "Sonnet 4.5 (Claude Code · Harness) via Bedrock · on gpu-box (Daytona v2) · $0.42" */
 export function runViewLine(r: RunView): string {
   const cost = formatUsd(r.costUsd);
   return [
-    `${r.engineLabel}${r.modelLabel ? ` · ${r.modelLabel}` : ""}${r.auth ? ` via ${r.auth.label}` : ""}`,
+    `${r.modelLabel ? `${r.modelLabel} (${engineTypeText(r.engine)})` : engineTypeText(r.engine)}${r.auth ? ` via ${r.auth.label}` : ""}`,
     `on ${r.computer.label}${r.computer.kindLabel !== "Host" ? ` (${r.computer.kindLabel})` : ""}`,
     cost ? `${cost}${r.budgetUsd ? ` of $${r.budgetUsd}` : ""}` : "",
   ].filter(Boolean).join(" · ");

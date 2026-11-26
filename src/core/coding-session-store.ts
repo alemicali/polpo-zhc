@@ -31,6 +31,10 @@ export interface CodingTerminal {
   /** Tab is hidden from the UI but the underlying pty still runs — the
    * user re-opens it via the History popover. Distinct from archiving. */
   tabHidden?: boolean;
+  /** A coding chat (src/coding): the session is a Claude Code / Codex chat through the CLI engine, not a terminal. */
+  chatId?: string;
+  /** "Open as chat": the coding chat that continues this terminal session (the terminal stays). */
+  convertedToChatId?: string;
 }
 
 export interface CodingCodeServerSession {

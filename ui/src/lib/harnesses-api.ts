@@ -81,6 +81,38 @@ export interface AgentHarnessEngine {
   credentialRef?: VaultRef;
 }
 
+/** The CLI engine: the official Claude Code / Codex program signed in with a person's own plan. */
+export type CliId = "claude" | "codex";
+export const CLI_NAMES: Record<CliId, string> = { claude: "Claude Code (CLI)", codex: "Codex (CLI)" };
+export interface AgentCliEngine {
+  type: "cli";
+  cli: CliId;
+  account?: string;
+  model?: string;
+  permissionMode?: HarnessPermissionMode;
+  effort?: HarnessEffort;
+  /** Claude Code only: --max-budget-usd. */
+  maxBudgetUsd?: number;
+  args?: string[];
+}
+export interface CliAccount { id: string; cli: CliId; computer: string; configDir: string; owner: string; label?: string }
+export interface CliSettings { accounts: CliAccount[]; allowInstanceCodex?: boolean }
+export interface CliAccountReport {
+  installed: boolean;
+  version?: string;
+  status?: { signedIn: boolean; who?: string; method?: string; plan?: string; detail?: string };
+  error?: string;
+}
+export interface CliAccountView extends CliAccount { report?: CliAccountReport; agents: string[]; manageable: boolean }
+export interface CliOverview { accounts: CliAccountView[]; allowInstanceCodex: boolean }
+export type CliLogin =
+  | { mode: "terminal"; terminal: { agent: "cli-login"; cli_account: string }; command: string; computer?: string; note?: string }
+  | { mode: "command"; computer: string; command: string; note: string };
+
+export function isCliEngine(e: unknown): e is AgentCliEngine {
+  return !!e && typeof e === "object" && (e as { type?: unknown }).type === "cli";
+}
+
 export interface ClaudeCodeSetting { auth: ClaudeCodeAuth; credentialRef?: VaultRef; gateway?: HarnessGateway; bedrock?: { region: string }; vertex?: { region: string; projectId: string }; model?: string }
 export interface CodexSetting { auth: CodexAuth; credentialRef?: VaultRef; gateway?: HarnessGateway; model?: string }
 export interface OpenCodeSetting { auth: OpenCodeAuth; provider?: OpenCodeProviderId; credentialRef?: VaultRef; gateway?: HarnessGateway; bedrock?: { region: string }; model?: string }
@@ -113,12 +145,18 @@ export interface HarnessesOverview {
   computers: string[];
   /** Polpo's model relay (credential brokering). */
   relay?: { available: boolean; url?: string; path: string; warning?: string };
+  /** The CLI engine's accounts as saved (kept when the harness settings are saved). */
+  cli?: CliSettings;
 }
 
 export interface HarnessSession {
   key: string;
   agent: string;
   harness: HarnessId;
+  /** "cli": a CLI engine run (the official program signed in with a person's account). */
+  engine?: "harness" | "cli";
+  cli?: CliId;
+  account?: string;
   computerId: string;
   scope: "task" | "chat";
   taskId?: string;
@@ -145,6 +183,7 @@ export interface HarnessesSettings {
   "claude-code"?: ClaudeCodeSetting;
   codex?: CodexSetting;
   opencode?: OpenCodeSetting;
+  cli?: CliSettings;
 }
 
 /** POST /harnesses/test: one tiny model request from the Polpo server. */
@@ -194,8 +233,18 @@ export const harnessesApi = {
   /** Test a harness's connection from the Polpo server: the saved settings, the ones being edited, or an agent's own credential. */
   test: (harness: HarnessId, o: { settings?: HarnessesSettings; agent?: string } = {}) =>
     request<HarnessTestResult>("/harnesses/test", json("POST", { harness, ...o })),
-  /** An agent's engine: "polpo" (Polpo's own) or a harness. */
-  setEngine: (agent: string, engine: "polpo" | AgentHarnessEngine) => request<unknown>(`/agents/${encodeURIComponent(agent)}`, json("PATCH", { engine })),
+  /** An agent's engine: "polpo" (Polpo's own), a harness, or the CLI engine. */
+  setEngine: (agent: string, engine: "polpo" | AgentHarnessEngine | AgentCliEngine) => request<unknown>(`/agents/${encodeURIComponent(agent)}`, json("PATCH", { engine, publish: false })),
+  // ── CLI accounts (personal sign-ins; Polpo never sees a token) ──
+  cliAccounts: (o: { status?: boolean } = {}) => request<CliOverview>(`/harnesses/cli/accounts${o.status === false ? "?status=0" : ""}`),
+  addCliAccount: (a: { cli: CliId; computer?: string; label?: string; id?: string }) => request<CliAccount>("/harnesses/cli/accounts", json("POST", a)),
+  updateCliAccount: (id: string, patch: { label?: string; owner?: string }) => request<CliAccount>(`/harnesses/cli/accounts/${encodeURIComponent(id)}`, json("PATCH", patch)),
+  removeCliAccount: (id: string) => request<unknown>(`/harnesses/cli/accounts/${encodeURIComponent(id)}`, json("DELETE")),
+  cliStatus: (id: string) => request<CliAccountReport>(`/harnesses/cli/accounts/${encodeURIComponent(id)}/status`),
+  cliLogout: (id: string) => request<{ ok: boolean; output: string }>(`/harnesses/cli/accounts/${encodeURIComponent(id)}/logout`, json("POST")),
+  cliLogin: (id: string) => request<CliLogin>(`/harnesses/cli/accounts/${encodeURIComponent(id)}/login`),
+  cliInstall: (cli: CliId, computer?: string) => request<{ ok: boolean; output: string; version?: string }>("/harnesses/cli/install", json("POST", { cli, ...(computer ? { computer } : {}) })),
+  setCliSettings: (s: { allowInstanceCodex: boolean }) => request<unknown>("/harnesses/cli/settings", json("PATCH", s)),
 };
 
 /** The settings as saved, from the overview (what the form edits). */
@@ -212,6 +261,8 @@ export function settingsFromOverview(o: HarnessesOverview): HarnessesSettings {
     ...(cc?.settings ? { "claude-code": strip(cc.settings as ClaudeCodeSetting) } : {}),
     ...(cx?.settings ? { codex: strip(cx.settings as CodexSetting) } : {}),
     ...(oc?.settings ? { opencode: strip(oc.settings as OpenCodeSetting) } : {}),
+    // the CLI accounts are kept as they are (they change through /harnesses/cli)
+    ...(o.cli ? { cli: o.cli } : {}),
   };
 }
 

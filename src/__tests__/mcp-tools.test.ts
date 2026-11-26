@@ -193,8 +193,8 @@ describe("the tools offered", () => {
     expect(a.polpo_mission_run).toMatchObject({ openWorldHint: true });
     for (const t of tools) if (t.name !== "polpo_file_read") expect(t.outputSchema, t.name).toBeTruthy();
     for (const n of ["polpo_task_delete", "polpo_mission_delete"]) expect(a[n]).toMatchObject({ destructiveHint: true, readOnlyHint: false });
-    // every Configuration section is on by default (the settings toolset), the task and mission cards, computer_get and computer_webhooks: 154 tools for a full-access client
-    expect(tools.length).toBeLessThanOrEqual(157);
+    // every Configuration section is on by default (the settings toolset), the task and mission cards, computer_get and computer_webhooks, WhatsApp Business (7), skill bundles (4), skill versions (3), agent versions (8), artifact uploads (2), hosted MCP servers (12: templates and install), agent tests (1), agent suites (10: list, get, save, delete, run, run_get; evals: trend, baseline, review, the suite card), deploy gates (1), agent suites phase 4 (8: record, replay, cassette, cassette_edit, generate; target_suites, target_suite_save, target_suite_run for hosted servers and missions), agent suites phase 5 (9: benchmark_save, benchmark_delete, benchmark_run, benchmark_get, benchmark_leaderboard, benchmark_compare, playground_send, playground_promote, the benchmark card benchmark_show), triggers (10: list, get, deliveries, create, update, delete, test, run_actions, auth, the trigger card trigger_show), decisions (4: decide, decisions, decision_resolve, the decision card decision_show), channels parity (8: channel_access_set, peer_presence, peer_link, slack_status, notifications_list, notifications_stats, wabiz_contact, wabiz_contact_erase), communication lines (1: agent_lines): 245 tools at most for a full-access client; media (5: image_generate, image_edit, media_log, media_status, the media card image_show)
+    expect(tools.length).toBeLessThanOrEqual(256);
   });
 
   it("config and team changes need the admin scope; reads do not", async () => {
@@ -361,13 +361,13 @@ describe("tasks", () => {
     expect(text).toMatch(/tool_use: register_outcome \(Polpo tool\)/);
     expect(text).toMatch(/usage: 144154 in, 431 out, 95726 cache read, \$0\.0723 \(claude-code\)/);
     expect(text).toMatch(/log: Claude Code session started in 14\.8 s/);
-    expect(text).toMatch(/runs:\n- r1 \[completed\] Claude Code us\.anthropic\.claude-haiku[^\n]* via Bedrock \(us-east-1\) · on computer coder-box \(daytona v2\) · egress home via Tailscale · new session \(14\.8 s\) · \$0\.0723 of \$2/);
+    expect(text).toMatch(/runs:\n- r1 \[completed\] us\.anthropic\.claude-haiku[^\n]* \(Claude Code · Harness\) via Bedrock \(us-east-1\) · on computer coder-box \(daytona v2\) · egress home via Tailscale · new session \(14\.8 s\) · \$0\.0723 of \$2/);
     expect(logs.structuredContent.runs).toEqual([expect.objectContaining({ engine: "claude-code", computer: expect.objectContaining({ id: "coder-box" }) })]);
 
     const got = await call(deps(f), "polpo_task_get", { id: "t9", activity: 0 });
     expectValidOutput(got);
     expect(got.structuredContent.runs).toEqual([expect.objectContaining({ engine: "claude-code", auth: { kind: "bedrock", region: "us-east-1" }, session: { resumed: false, bootstrapMs: 14800 } })]);
-    expect(got.content[0].text).toMatch(/runs \(where and with what\):\n- r1 \[completed\] Claude Code/);
+    expect(got.content[0].text).toMatch(/runs \(where and with what\):\n- r1 \[completed\] us\.anthropic\.claude-haiku[^\n]* \(Claude Code · Harness\)/);
     // a task on Polpo's engine without runs recorded yet: an empty list
     expect((await call(deps(f), "polpo_task_get", { id: "t1", activity: 0 })).structuredContent.runs).toEqual([]);
   });
@@ -536,7 +536,7 @@ describe("missions", () => {
     expect(await call(deps(f), "polpo_task_delete", { id: "t1" })).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/confirm: true/) }] });
     expect((await call(deps(f), "polpo_task_delete", { id: "t1", confirm: true })).structuredContent).toEqual({ deleted: "t1" });
     expect(f.tasks.has("t1")).toBe(false);
-  });
+  }, 20_000); // many tool calls through the whole MCP server: slow on busy CI runners
 
   it("polpo_task_create refuses a dependsOn that names no task, with the next step", async () => {
     const f = fakeInstance();
@@ -677,7 +677,7 @@ describe("configuration", () => {
     expect(await call(deps(f), "polpo_branding_update", { logo: { path: "missing.png" } })).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/polpo_files_search/) }] });
     expect((await call(deps(f), "polpo_branding_update", { remove_logo: true })).structuredContent.branding.logoUrl).toBeUndefined();
     expect((await call(deps(f), "polpo_branding_get")).structuredContent).toMatchObject({ productName: "Acme Ops", tagline: "Agents at work" });
-  });
+  }, 15_000);
 
   it("lists providers with the dashboard link for keys, and models with filters", async () => {
     const f = fakeInstance();

@@ -1,12 +1,23 @@
+/**
+ * The Coding app. Its navigation (projects → worktrees → sessions) lives in the main sidebar's
+ * Coding level (drill-in), in the chat-first layout's column, or — when neither is on screen — in
+ * the Sessions sheet of this page's header; the workspace gets the full width.
+ *
+ * A session is a coding chat (Claude Code / Codex through the CLI engine, as a chat) or a terminal
+ * (xterm: the shell, and older claude / codex sessions). Changes, browser, the side terminal and
+ * VS Code stay in the right panel.
+ */
 import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Cloud,
   GitBranch,
   GitMerge,
   GitPullRequest as GitPullRequestIcon,
   Laptop,
+  ListTree,
+  MessageSquare,
   Loader2,
-  PanelLeft,
   PanelRight,
   RefreshCcw,
   ShieldAlert,
@@ -14,17 +25,21 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
-import { apiUrl, endpointHost, isLocalEndpoint } from "@/lib/config";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { apiFetch, apiUrl, endpointHost, isLocalEndpoint } from "@/lib/config";
 import { cn } from "@/lib/utils";
-import { useCodingState } from "./coding/use-coding-state";
+import { codingActions, useCodingState } from "./coding/use-coding-state";
 import { useGitInfo } from "./coding/use-git-info";
-import { CodingSidebar } from "./coding/sidebar";
+import { CodingNav } from "./coding/coding-nav";
 import { RightPanel } from "./coding/right-panel";
 import { SessionTabs } from "./coding/session-tabs";
 import { TerminalSession } from "./coding/terminal-session";
+import { CodingChatPane } from "./coding/coding-chat";
+import { canOpenAsChat, isChatSession } from "./coding/chat-parts";
 import { EmptyWorkspaceQuickStart } from "./coding/empty-quickstart";
 import { useCodingSettings } from "./coding/coding-settings";
 import { useLocalState } from "./coding/use-local-state";
+import type { CodingTerminal } from "./coding/types";
 
 type TerminalStatus = {
   enabled: boolean;
@@ -37,121 +52,40 @@ export function CodingPage() {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<TerminalStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useLocalState<boolean>("polpo:coding:sidebarOpen", true);
   const [rightOpen, setRightOpen] = useLocalState<boolean>("polpo:coding:rightOpen", true);
-  // react-resizable-panels v4 dropped autoSaveId — wire defaultLayout and
-  // onLayoutChanged manually. Layout is { panelId: percentage }.
+  const [sessionsOpen, setSessionsOpen] = useState(false);
+  // react-resizable-panels v4 dropped autoSaveId: defaultLayout and onLayoutChanged by hand
   const [panelLayout, setPanelLayout] = useLocalState<Record<string, number>>("polpo:coding:panelLayout", {});
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const {
-    workspaces,
-    terminals,
-    activeId,
-    connections,
-    setActiveId,
-    addWorkspace,
-    closeWorkspace,
-    addTerminal,
-    closeTerminal,
-    hideTerminalTab,
-    unhideTerminalTab,
-    reorderTerminal,
-    renameTerminal,
-    setConnection,
+    workspaces, terminals, activeId, connections, pendingWorkspaces, activePendingKey, changesRevision, navPanels,
+    setActiveId, addTerminal, hideTerminalTab, unhideTerminalTab, reorderTerminal, renameTerminal, setConnection,
   } = useCodingState();
 
   const [codingSettings] = useCodingSettings();
   const [busy, setBusy] = useState(false);
   const [surfaceWidth, setSurfaceWidth] = useState(() => window.innerWidth);
 
-  /** Empty worktrees that exist on disk but haven't spawned a session yet.
-   * Survives reloads via localStorage; removed when the first session lands.
-   * Keyed by `${projectId}::${branch}::${cwd}` to match WorkspaceGroup keys. */
-  type Pending = { key: string; projectId: string; branch: string; cwd: string; label: string };
-  const [pendingWorkspaces, setPendingWorkspaces] = useLocalState<Pending[]>("polpo:coding:pendingWorkspaces", []);
-  const [activePendingKey, setActivePendingKey] = useLocalState<string | null>("polpo:coding:activePendingKey", null);
-
   const activeTerminal = terminals.find((t) => t.id === activeId);
   const activeWorkspace = workspaces.find((w) => w.id === activeTerminal?.workspaceId);
   const activeCwd = activeWorkspace?.cwd ?? ".";
   const activeRevision = activeTerminal?.revision ?? 0;
-  // Header git info follows the active *worktree* (where the user is
-  // actually working) rather than the project root — otherwise branch /
-  // PR / diff stats up top stay frozen on `main` while sessions live in
-  // their own worktree branches.
+  // the header follows the active worktree (its branch, PR and diff), not the project root
   const headerCwd = activeTerminal?.cwdOverride || activeCwd;
-  const git = useGitInfo(headerCwd, activeRevision);
+  const git = useGitInfo(headerCwd, activeRevision + changesRevision);
 
-  /** Conductor-style auto-name. The branch must be unique inside the repo
-   * so we keep the suffix; the workspace label is just the city,
-   * capitalized — that's the thing the user identifies the worktree by,
-   * and it survives any future `git branch -m` rename. */
-  const autoNames = () => {
-    const cities = [
-      "nagoya", "montreal", "salvador", "khartoum", "lisbon", "tokyo", "oslo",
-      "vienna", "paris", "kyoto", "helsinki", "dublin", "prague", "vancouver",
-      "lima", "athens", "dakar", "manila", "tunis", "cairo", "hanoi", "rome",
-      "berlin", "madrid", "london", "sydney", "austin", "denver", "taipei",
-      "seoul", "beirut", "mumbai", "bogota", "nairobi", "riga", "sofia",
-      "zurich", "geneva", "valencia", "porto", "naples", "milan", "turin",
-      "bologna", "florence", "venice", "palermo", "genoa", "bari", "trieste",
-    ];
-    const c = cities[Math.floor(Math.random() * cities.length)] ?? "session";
-    const s = Math.random().toString(36).slice(2, 5);
-    // Label and branch start identical — the label persists if the agent
-    // later renames the branch, but at creation we don't prettify.
-    const branch = `${c}-${s}`;
-    return { branch, label: branch };
-  };
-
-  /** "+ Add workspace" handler — creates the worktree on disk in one shot
-   * and lands the user on the empty quick-start screen. No agent picker,
-   * no branch input. */
-  const addWorkspaceFast = async (projectId: string) => {
-    const project = workspaces.find((w) => w.id === projectId);
-    if (!project) return;
-    const { branch, label } = autoNames();
-    try {
-      const res = await fetch(apiUrl("/api/v1/git/worktree/create"), {
-        method: "POST",
-        credentials: "include",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ cwd: project.cwd, branch }),
-      });
-      const body = await res.json().catch(() => null);
-      if (!res.ok || !body?.ok) throw new Error(body?.error || `Worktree create failed (${res.status})`);
-      const cwd = body.data.path as string;
-      const resolvedBranch = (body.data.branch as string) || branch;
-      const key = `${projectId}::${resolvedBranch}::${cwd}`;
-      setPendingWorkspaces((prev) => prev.some((p) => p.key === key) ? prev : [...prev, { key, projectId, branch: resolvedBranch, cwd, label }]);
-      setActivePendingKey(key);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to create workspace");
-    }
-  };
-
-  /** Quick-start spawn from the empty workspace screen — adds a session in
-   * the pending worktree's branch+cwd and drops the pending placeholder. */
-  const startQuickSession = (kind: "terminal" | "claude" | "codex") => {
-    if (!activePendingKey) return;
-    const pending = pendingWorkspaces.find((p) => p.key === activePendingKey);
-    if (!pending) return;
-    addTerminal(pending.projectId, {
-      agentKind: kind,
-      cwdOverride: pending.cwd,
-      branch: pending.branch,
-      workspaceLabel: pending.label,
-    });
-    setPendingWorkspaces((prev) => prev.filter((p) => p.key !== pending.key));
-    setActivePendingKey(null);
-  };
+  // a link to a coding chat (/coding?chat=cc_…, from MCP's card or Polpo's chat): open it
+  const chatParam = searchParams.get("chat");
+  useEffect(() => {
+    if (!chatParam) return;
+    void codingActions.openChat(chatParam).catch((err: unknown) => toast.error(err instanceof Error ? err.message : "Could not open the session"));
+    setSearchParams((p) => { p.delete("chat"); return p; }, { replace: true });
+  }, [chatParam, setSearchParams]);
 
   const openPR = () => {
-    // Spin up a one-shot Claude session that stages, commits, pushes, and
-    // opens the PR for the active terminal's branch — using the user's
-    // configured `prCommand` (default is non-interactive end-to-end).
-    // `silent: true` means we do NOT steal focus; the session lives in the
-    // sidebar so the user can peek at progress (or kill it from Activity).
+    // a one-shot Claude Code command in a terminal (the configured prCommand): stage, commit, push,
+    // open the PR; silent, so the current session stays in view
     if (!activeTerminal || !activeWorkspace) {
       toast.error("Open a workspace first");
       return;
@@ -164,16 +98,15 @@ export function CodingPage() {
       label: "PR",
       silent: true,
     });
-    toast.success("PR session started — see sidebar / Activity");
+    toast.success("PR session started — see the sessions list / Activity");
   };
 
   const mergePR = async () => {
     if (busy || !git?.pr) return;
     setBusy(true);
     try {
-      const res = await fetch(apiUrl("/api/v1/git/pr/merge"), {
+      const res = await apiFetch(apiUrl("/api/v1/git/pr/merge"), {
         method: "POST",
-        credentials: "include",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ cwd: activeCwd, number: git.pr.number, method: "squash" }),
       });
@@ -191,8 +124,7 @@ export function CodingPage() {
     let cancelled = false;
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 8_000);
-
-    fetch(apiUrl("/api/v1/terminal/status"), { credentials: "include", signal: controller.signal })
+    apiFetch(apiUrl("/api/v1/terminal/status"), { signal: controller.signal })
       .then(async (res) => {
         const body = await res.json().catch(() => null);
         if (!res.ok || !body?.ok) throw new Error(body?.error || `Terminal status failed (${res.status})`);
@@ -205,7 +137,6 @@ export function CodingPage() {
           ? "Terminal status request timed out."
           : err instanceof Error ? err.message : "Terminal status failed");
       });
-
     return () => {
       cancelled = true;
       window.clearTimeout(timeout);
@@ -245,41 +176,50 @@ export function CodingPage() {
     );
   }
 
-  const showCodingSidebar = sidebarOpen && surfaceWidth >= 480;
-  const showCodingRightPanel = rightOpen && (surfaceWidth >= 860 || !showCodingSidebar);
+  const showCodingRightPanel = rightOpen && surfaceWidth >= 640;
+  const pending = activePendingKey ? pendingWorkspaces.find((p) => p.key === activePendingKey) : undefined;
+  const sameWorktree = (t: CodingTerminal) => !!activeTerminal && t.workspaceId === activeTerminal.workspaceId
+    && (t.cwdOverride || "") === (activeTerminal.cwdOverride || "") && (t.branch || "") === (activeTerminal.branch || "");
 
   return (
     <div ref={surfaceRef} className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-background text-foreground">
-      {/* Coding-local controls only; platform navigation stays outside. */}
+      <Sheet open={sessionsOpen} onOpenChange={setSessionsOpen}>
+        <SheetContent side="left" className="flex w-80 max-w-[90vw] flex-col gap-0 p-0" data-testid="coding-sessions-sheet">
+          <SheetHeader className="border-b border-border/70 px-3 py-2.5">
+            <SheetTitle className="text-sm">Coding</SheetTitle>
+          </SheetHeader>
+          {sessionsOpen && <CodingNav onNavigate={() => setSessionsOpen(false)} />}
+        </SheetContent>
+      </Sheet>
+      {/* Coding-local controls only; the navigation is the sidebar's Coding level */}
       <header className="flex h-12 shrink-0 items-center gap-1 border-b border-border/70 bg-background px-3">
         <Button
           variant="ghost"
           size="icon"
-          className={cn(
-            "h-8 w-8 transition-colors",
-            showCodingSidebar ? "bg-muted text-foreground" : "text-muted-foreground",
-          )}
-          onClick={() => setSidebarOpen((v) => !v)}
-          title="Toggle sidebar"
+          className={cn("h-8 w-8 text-muted-foreground", navPanels > 0 && !sessionsOpen && "lg:hidden")}
+          onClick={() => setSessionsOpen(true)}
+          title="Projects and sessions"
+          aria-label="Projects and sessions"
         >
-          <PanelLeft className="h-3.5 w-3.5" />
+          <ListTree className="h-3.5 w-3.5" />
         </Button>
         <Button
           variant="ghost"
           size="icon"
-          className={cn(
-            "h-8 w-8 transition-colors",
-            showCodingRightPanel ? "bg-muted text-foreground" : "text-muted-foreground",
-          )}
+          className={cn("h-8 w-8 transition-colors", showCodingRightPanel ? "bg-muted text-foreground" : "text-muted-foreground")}
           onClick={() => setRightOpen((v) => !v)}
           title="Toggle right panel"
+          aria-label="Toggle right panel"
         >
           <PanelRight className="h-3.5 w-3.5" />
         </Button>
 
-        {/* Center: repo · branch · PR · connection pill */}
-        <div className="flex flex-1 items-center justify-center gap-2 text-small min-w-0">
-          <HeaderInfo workspace={activeWorkspace} state={(activeTerminal && connections[activeTerminal.id]) ?? "loading"} git={git} />
+        <div className="flex min-w-0 flex-1 items-center justify-center gap-2 text-small">
+          <HeaderInfo
+            workspace={activeWorkspace}
+            state={activeTerminal && isChatSession(activeTerminal) ? "connected" : (activeTerminal && connections[activeTerminal.id]) ?? "loading"}
+            git={git}
+          />
         </div>
 
         {git?.pr ? (
@@ -293,13 +233,7 @@ export function CodingPage() {
             <GitMerge className="h-3.5 w-3.5" /> Merge
           </Button>
         ) : (
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={busy || !git?.branch}
-            className="h-8 gap-1.5 px-2.5 text-xs"
-            onClick={openPR}
-          >
+          <Button variant="outline" size="sm" disabled={busy || !git?.branch} className="h-8 gap-1.5 px-2.5 text-xs" onClick={openPR}>
             <GitPullRequestIcon className="h-3.5 w-3.5" /> Open PR
           </Button>
         )}
@@ -313,94 +247,63 @@ export function CodingPage() {
           onLayoutChanged={(layout) => setPanelLayout(layout)}
           className="flex-1"
         >
-          {showCodingSidebar && (
-            <>
-              <ResizablePanel
-                id="sidebar"
-                defaultSize="272px"
-                minSize="180px"
-                maxSize="480px"
-                className="border-r border-border/70 bg-background"
-              >
-                <CodingSidebar
-                  workspaces={workspaces}
-                  terminals={terminals}
-                  activeId={activeId}
-                  pendingWorkspaces={pendingWorkspaces}
-                  activePendingKey={activePendingKey}
-                  workDir={status.workDir}
-                  onSelectTerminal={(id) => { setActiveId(id); setActivePendingKey(null); }}
-                  onSelectPending={(key) => { setActivePendingKey(key); }}
-                  onAddProject={addWorkspace}
-                  onCloseProject={closeWorkspace}
-                  onAddWorkspace={addWorkspaceFast}
-                  onCloseTerminal={closeTerminal}
-                />
-              </ResizablePanel>
-              <ResizableHandle />
-            </>
-          )}
-
           <ResizablePanel id="main">
             <main className="relative flex h-full w-full flex-col overflow-hidden bg-background">
-              {activePendingKey ? (() => {
-                const pending = pendingWorkspaces.find((p) => p.key === activePendingKey);
-                return pending ? (
-                  <EmptyWorkspaceQuickStart
-                    branch={pending.branch}
-                    projectName={workspaces.find((w) => w.id === pending.projectId)?.name ?? ""}
-                    cwd={pending.cwd}
-                    onStart={startQuickSession}
-                  />
-                ) : null;
-              })() : (<>
-              <SessionTabs
-                workspace={activeWorkspace}
-                terminals={terminals.filter((t) => {
-                  // Visible tabs of the active worktree.
-                  if (!activeTerminal) return false;
-                  if (t.workspaceId !== activeTerminal.workspaceId) return false;
-                  if (t.tabHidden) return false;
-                  return (t.cwdOverride || "") === (activeTerminal.cwdOverride || "")
-                    && (t.branch || "") === (activeTerminal.branch || "");
-                })}
-                hidden={terminals.filter((t) => {
-                  // Hidden tabs = "history" — only those of the active
-                  // worktree, so the popover stays scoped.
-                  if (!activeTerminal) return false;
-                  if (t.workspaceId !== activeTerminal.workspaceId) return false;
-                  if (!t.tabHidden) return false;
-                  return (t.cwdOverride || "") === (activeTerminal.cwdOverride || "")
-                    && (t.branch || "") === (activeTerminal.branch || "");
-                })}
-                activeId={activeId}
-                activeTerminal={activeTerminal}
-                connections={connections}
-                onSelect={setActiveId}
-                onCloseTab={hideTerminalTab}
-                onUnhideTab={unhideTerminalTab}
-                onReorder={reorderTerminal}
-                onRename={renameTerminal}
-                onAddTerminal={addTerminal}
-              />
-              <div className="relative flex-1 min-h-0">
-                {terminals.map((terminal) => {
-                  const ws = workspaces.find((w) => w.id === terminal.workspaceId);
-                  return (
-                    <TerminalSession
-                      key={terminal.id}
-                      sessionId={terminal.id}
-                      revision={terminal.revision}
-                      cwd={terminal.cwdOverride || ws?.cwd || "."}
-                      active={terminal.id === activeId}
-                      agent={terminal.agentKind}
-                      agentSessionId={terminal.agentSessionId}
-                      agentCommand={terminal.agentCommand ?? (terminal.agentKind ? codingSettings.agentCommands[terminal.agentKind] : undefined)}
-                      onConnectionChange={(state) => setConnection(terminal.id, state)}
-                    />
-                  );
-                })}
-              </div>
+              {pending ? (
+                <EmptyWorkspaceQuickStart
+                  branch={pending.branch}
+                  projectName={workspaces.find((w) => w.id === pending.projectId)?.name ?? ""}
+                  cwd={pending.cwd}
+                  onStart={codingActions.startQuickSession}
+                />
+              ) : (<>
+                <SessionTabs
+                  workspace={activeWorkspace}
+                  terminals={terminals.filter((t) => sameWorktree(t) && !t.tabHidden)}
+                  hidden={terminals.filter((t) => sameWorktree(t) && !!t.tabHidden)}
+                  activeId={activeId}
+                  activeTerminal={activeTerminal}
+                  connections={connections}
+                  onSelect={setActiveId}
+                  onCloseTab={hideTerminalTab}
+                  onUnhideTab={unhideTerminalTab}
+                  onReorder={reorderTerminal}
+                  onRename={renameTerminal}
+                  onAddTerminal={addTerminal}
+                />
+                {activeTerminal && canOpenAsChat(activeTerminal) && (
+                  <OpenAsChatBar terminal={activeTerminal} chats={terminals} />
+                )}
+                <div className="relative min-h-0 flex-1">
+                  {terminals.map((terminal) => {
+                    const ws = workspaces.find((w) => w.id === terminal.workspaceId);
+                    if (isChatSession(terminal)) {
+                      return (
+                        <CodingChatPane
+                          key={terminal.id}
+                          chatId={terminal.chatId}
+                          createError={terminal.chatError}
+                          kind={terminal.agentKind === "codex" ? "codex" : "claude"}
+                          active={terminal.id === activeId}
+                          onFilesChanged={codingActions.bumpChanges}
+                        />
+                      );
+                    }
+                    return (
+                      <TerminalSession
+                        key={terminal.id}
+                        sessionId={terminal.id}
+                        revision={terminal.revision}
+                        cwd={terminal.cwdOverride || ws?.cwd || "."}
+                        active={terminal.id === activeId}
+                        agent={terminal.agentKind}
+                        agentSessionId={terminal.agentSessionId}
+                        agentCommand={terminal.agentCommand ?? (terminal.agentKind ? codingSettings.agentCommands[terminal.agentKind] : undefined)}
+                        onConnectionChange={(state) => setConnection(terminal.id, state)}
+                      />
+                    );
+                  })}
+                </div>
               </>)}
             </main>
           </ResizablePanel>
@@ -408,34 +311,53 @@ export function CodingPage() {
           {showCodingRightPanel && (
             <>
               <ResizableHandle />
-              <ResizablePanel
-                id="right"
-                defaultSize="288px"
-                minSize="288px"
-                maxSize="80%"
-                className="border-l border-border/70 bg-background"
-              >
+              <ResizablePanel id="right" defaultSize="288px" minSize="288px" maxSize="80%" className="border-l border-border/70 bg-background">
                 <RightPanel
                   workspaces={workspaces}
                   terminals={terminals.map((t) => {
                     const ws = workspaces.find((w) => w.id === t.workspaceId);
-                    return {
-                      id: t.id,
-                      workspaceId: t.workspaceId,
-                      cwd: t.cwdOverride || ws?.cwd || ".",
-                      revision: t.revision,
-                    };
+                    // a coding chat's edits refresh the changes too
+                    return { id: t.id, workspaceId: t.workspaceId, cwd: t.cwdOverride || ws?.cwd || ".", revision: t.revision + changesRevision };
                   })}
                   activeWorkspaceId={activeWorkspace?.id}
                   activeTerminalId={activeTerminal?.id}
                   cwd={activeCwd}
-                  refreshKey={activeRevision}
+                  refreshKey={activeRevision + changesRevision}
                 />
               </ResizablePanel>
             </>
           )}
         </ResizablePanelGroup>
       </div>
+    </div>
+  );
+}
+
+
+/** The header of an older Claude Code / Codex terminal session: continue it as a coding chat. */
+function OpenAsChatBar({ terminal, chats }: { terminal: CodingTerminal; chats: CodingTerminal[] }) {
+  const [busy, setBusy] = useState(false);
+  const program = terminal.agentKind === "codex" ? "Codex" : "Claude Code";
+  const converted = terminal.convertedToChatId ? chats.find((t) => t.chatId === terminal.convertedToChatId) : undefined;
+  const open = async () => {
+    setBusy(true);
+    try {
+      await codingActions.openTerminalAsChat(terminal.id);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not open the session as a chat");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border/60 px-3 text-caption text-muted-foreground" data-testid="coding-terminal-header">
+      <span className="min-w-0 flex-1 truncate">
+        {program} in a terminal{converted ? ` · continued as the chat “${converted.label}”` : ""}
+      </span>
+      <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs" disabled={busy} onClick={() => void open()}>
+        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" /> : <MessageSquare className="h-3.5 w-3.5" />}
+        {converted ? "Go to chat" : "Open as chat"}
+      </Button>
     </div>
   );
 }

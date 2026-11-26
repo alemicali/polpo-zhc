@@ -115,17 +115,25 @@ describe("Polpo MCP server", () => {
 
     const tools = (await rpc(deps, "tools/list")).body.result.tools as Array<{ name: string; annotations?: Record<string, unknown>; outputSchema?: unknown; inputSchema: { properties?: Record<string, { description?: string }> } }>;
     expect(tools.map((t) => t.name)).toEqual([
-      "polpo_ask", "polpo_agent_chat", "polpo_answer",
+      "polpo_ask", "polpo_agent_chat", "polpo_answer", "polpo_search", "polpo_search_ask",
       "polpo_agents_list", "polpo_agent_show", "agent_card_refresh", "agent_intention_decide",
       "polpo_approvals_list", "polpo_approval_resolve",
       "polpo_tasks_list", "polpo_task_get", "polpo_task_create", "polpo_task_update", "polpo_task_retry", "polpo_task_kill", "polpo_task_delete", "polpo_task_direct", "polpo_task_wait", "polpo_task_logs",
       "polpo_missions_list", "polpo_mission_get", "polpo_mission_create", "polpo_mission_update", "polpo_mission_run", "polpo_mission_abort", "polpo_mission_delete", "polpo_mission_wait", "polpo_playbooks_list", "polpo_playbook_run",
       "polpo_task_show", "polpo_mission_show",
-      "polpo_artifacts_list", "polpo_artifact_get", "polpo_artifact_create", "polpo_artifact_update",
+      "polpo_artifacts_list", "polpo_artifact_get", "polpo_artifact_create", "polpo_artifact_update", "polpo_artifact_upload_prepare", "polpo_artifact_upload_finalize",
       "polpo_data_sources_list", "polpo_data_query", "polpo_data_source_get", "polpo_data_source_save", "polpo_data_source_test", "polpo_data_source_delete",
       "polpo_data_activity", "polpo_data_sql", "polpo_data_mutate", "polpo_data_views_list", "polpo_data_view_get", "polpo_data_view_save", "polpo_data_view_delete",
       "polpo_files_list", "polpo_files_search", "polpo_file_read", "polpo_file_write", "polpo_file_manage",
-      "polpo_agent_get", "polpo_agent_create", "polpo_agent_update", "polpo_agent_delete", "polpo_agent_avatar_set", "polpo_teams_list", "polpo_team_save", "polpo_team_delete",
+      "polpo_agent_lines", "polpo_agent_get", "polpo_agent_create", "polpo_agent_update",
+      "polpo_agent_versions", "polpo_agent_version_get", "polpo_agent_version_diff", "polpo_agent_draft", "polpo_agent_publish", "polpo_agent_deploy", "polpo_agent_deploy_gates", "polpo_agent_rollback", "polpo_agent_deploys", "polpo_agent_test",
+      "polpo_agent_delete", "polpo_agent_avatar_set", "polpo_teams_list", "polpo_team_save", "polpo_team_delete",
+      "polpo_agent_suite_list", "polpo_agent_suite_get", "polpo_agent_suite_save", "polpo_agent_suite_delete", "polpo_agent_suite_run", "polpo_agent_suite_run_get",
+      "polpo_agent_suite_trend", "polpo_agent_suite_baseline", "polpo_agent_suite_review",
+      "polpo_agent_suite_record", "polpo_agent_suite_replay", "polpo_agent_suite_cassette", "polpo_agent_suite_cassette_edit", "polpo_agent_suite_generate",
+      "polpo_target_suites", "polpo_target_suite_save", "polpo_target_suite_run",
+      "polpo_benchmark_save", "polpo_benchmark_delete", "polpo_benchmark_run", "polpo_benchmark_get", "polpo_benchmark_leaderboard", "polpo_benchmark_compare",
+      "polpo_playground_send", "polpo_playground_promote", "polpo_agent_suite_show", "polpo_benchmark_show",
       "polpo_config_get", "polpo_config_update", "polpo_branding_get", "polpo_branding_update", "polpo_providers_list", "polpo_models_list",
       "polpo_sandbox_get", "polpo_sandbox_update", "polpo_sandbox_provider_test", "polpo_policies_get", "polpo_policies_update",
       "polpo_approval_gate_save", "polpo_approval_gate_delete", "polpo_members_list", "polpo_members_invite", "polpo_members_remove",
@@ -133,17 +141,26 @@ describe("Polpo MCP server", () => {
       "polpo_sync_run", "polpo_custom_providers_list", "polpo_custom_provider_save", "polpo_custom_provider_remove", "polpo_provider_disconnect",
       "polpo_channel_save", "polpo_channel_remove",
       "polpo_channel_routes_list", "polpo_channel_route_set", "polpo_telegram_verify", "polpo_channel_invite",
-      "polpo_channel_peers", "polpo_channel_allowlist", "polpo_channel_pairing", "polpo_whatsapp_login", "polpo_whatsapp_login_wait", "polpo_whatsapp_logout",
+      "polpo_channel_peers", "polpo_channel_allowlist", "polpo_channel_pairing", "polpo_channel_access_set", "polpo_peer_presence", "polpo_peer_link", "polpo_slack_status", "polpo_whatsapp_login", "polpo_whatsapp_login_wait", "polpo_whatsapp_logout",
       "polpo_setup_wait",
       "polpo_rooms_list", "polpo_room_create", "polpo_room_update", "polpo_room_delete", "polpo_room_messages", "polpo_room_post", "polpo_room_wait",
       "polpo_chat_sessions_list", "polpo_chat_messages", "polpo_chat_session_update", "polpo_chat_session_delete",
       "polpo_memory_get", "polpo_memory_update",
       "polpo_skills_list", "polpo_skill_get", "polpo_skill_create", "polpo_skill_update", "polpo_skill_install", "polpo_skill_delete", "polpo_skill_assign",
+      "polpo_skill_upload_prepare", "polpo_skill_upload_finalize", "polpo_skill_files", "polpo_skill_file_read",
+      "polpo_skill_versions", "polpo_skill_version_diff", "polpo_skill_restore",
       "polpo_schedules_list", "polpo_schedule_create", "polpo_schedule_update", "polpo_schedule_delete", "polpo_schedule_run",
       "polpo_checks_list", "polpo_check_create", "polpo_check_update", "polpo_check_cancel", "polpo_check_delete",
+      "polpo_triggers_list", "polpo_trigger_get", "polpo_trigger_deliveries", "polpo_trigger_create", "polpo_trigger_update", "polpo_trigger_delete", "polpo_trigger_test", "polpo_trigger_run_actions", "polpo_trigger_auth", "polpo_trigger_show",
+      "polpo_decide", "polpo_decisions", "polpo_decision_resolve", "polpo_decision_show",
+      "polpo_image_generate", "polpo_image_edit", "polpo_media_log", "polpo_media_status", "polpo_image_show",
+      "polpo_coding_chats_list", "polpo_coding_chat_get", "polpo_coding_chat_start", "polpo_coding_chat_send", "polpo_coding_chat_control", "polpo_coding_chat_show",
       "polpo_connectors_list", "polpo_connector_catalog", "polpo_connector_add", "polpo_connector_update", "polpo_connector_test", "polpo_connector_connect", "polpo_connector_disconnect", "polpo_connector_remove",
-      "polpo_channels_list", "polpo_channel_test", "polpo_message_send", "polpo_notification_rule_save", "polpo_notification_rule_delete",
+      "polpo_mcp_servers_list", "polpo_mcp_server_get", "polpo_mcp_server_create", "polpo_mcp_server_templates", "polpo_mcp_server_install", "polpo_mcp_server_generate", "polpo_mcp_server_update", "polpo_mcp_server_test",
+      "polpo_mcp_server_publish", "polpo_mcp_server_deploy", "polpo_mcp_server_logs", "polpo_mcp_server_delete",
+      "polpo_channels_list", "polpo_channel_test", "polpo_message_send", "polpo_notifications_list", "polpo_notifications_stats", "polpo_notification_rule_save", "polpo_notification_rule_delete",
       "polpo_computers_list", "polpo_computer_get", "polpo_computer_webhooks", "polpo_computer_save", "polpo_computer_control", "polpo_egress_status", "polpo_computer_delete",
+      "polpo_wabiz_contact", "polpo_wabiz_contact_erase", "polpo_wabiz_status", "polpo_wabiz_events", "polpo_wabiz_templates", "polpo_wabiz_conversation", "polpo_wabiz_send", "polpo_wabiz_send_template", "polpo_wabiz_approval",
       "polpo_harnesses_get", "polpo_harnesses_update", "polpo_harness_sessions_list", "polpo_harness_session_control",
     ]);
     const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
@@ -289,8 +306,8 @@ describe("Polpo MCP server", () => {
   it("curated reads are compact text with structured content", async () => {
     const { api } = fakeApi();
     const agents = await call({ api, version: "x" }, "polpo_agents_list");
-    expect(agents.content[0].text).toBe("- coach: Health coach (anthropic:claude-opus-5-5)");
-    expect(agents.structuredContent.items).toEqual([{ name: "coach", role: "Health coach", model: "anthropic:claude-opus-5-5" }]);
+    expect(agents.content[0].text).toBe("- coach: Health coach (anthropic:claude-opus-5-5 (Polpo))");
+    expect(agents.structuredContent.items).toEqual([{ name: "coach", role: "Health coach", model: "anthropic:claude-opus-5-5", engine: "polpo", engine_label: "Polpo" }]);
     const tasks = await call({ api, version: "x" }, "polpo_tasks_list", { status: "in_progress", limit: 1 });
     expect(tasks.content[0].text).toMatch(/^- t2 \[in_progress\] Log meals → coach/);
     expect(tasks.structuredContent.next_cursor).toEqual(expect.any(String));
@@ -314,7 +331,7 @@ describe("Polpo MCP server", () => {
 
 describe("toolsets and scopes", () => {
   it("resolves configured toolsets", () => {
-    const defaults = ["core", "tasks", "missions", "artifacts", "data", "files", "team", "config", "rooms", "chat", "memory", "skills", "automation", "connectors", "channels", "computers", "settings"];
+    const defaults = ["core", "tasks", "missions", "artifacts", "data", "files", "team", "config", "rooms", "chat", "memory", "skills", "automation", "connectors", "channels", "computers", "coding", "settings"];
     expect(resolveToolsets()).toEqual(defaults);
     expect(resolveToolsets("core, admin")).toEqual(["core", "admin"]);
     expect(resolveToolsets(undefined, ["all"])).toEqual([...defaults, "brain", "learning", "watchers", "vault", "apps", "admin"]);

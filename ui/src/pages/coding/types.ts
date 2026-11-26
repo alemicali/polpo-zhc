@@ -51,7 +51,17 @@ export type CodingTerminal = {
    * is *still alive* on the server. The user can re-open it via the
    * History button. Distinct from "Archive" (which kills the process). */
   tabHidden?: boolean;
+  /** A coding chat (Claude Code / Codex through the CLI engine, shown as a chat): its server id.
+   * Sessions without it are terminals (xterm), as before. */
+  chatId?: string;
+  /** The chat could not be created (shown in its place). */
+  chatError?: string;
+  /** "Open as chat": the coding chat that continues this terminal session (the terminal stays). */
+  convertedToChatId?: string;
 };
+
+/** A worktree created on disk that has no session yet (the quick-start screen). */
+export type PendingWorkspace = { key: string; projectId: string; branch: string; cwd: string; label: string };
 
 export type CodingCodeServerSession = {
   id: string;

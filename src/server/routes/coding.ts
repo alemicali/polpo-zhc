@@ -49,6 +49,8 @@ const CodingTerminalSchema = z.object({
   branch: z.string().optional(),
   workspaceLabel: z.string().optional(),
   tabHidden: z.boolean().optional(),
+  chatId: z.string().optional(),
+  convertedToChatId: z.string().optional(),
 });
 
 const CodingCodeServerSchema = z.object({

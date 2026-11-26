@@ -8,7 +8,8 @@
 import type { TaskRunContext } from "@polpo-ai/core/run-context";
 import { taskFailure, type TaskFailure } from "@polpo-ai/core/task-failure";
 import { agentColorIndex } from "@polpo-ai/core/appearance";
-import { ENGINE_LABELS, agentEngine, computerLabel, engineMark, formatUsd, modelLabel, runCostUsd, runView, type BrandMark, type RunView } from "./mcp-run-view.js";
+import { engineKindOf, engineMarkLabel, modelWithEngineText } from "@polpo-ai/core/engine-label";
+import { agentEngine, computerLabel, engineMark, formatUsd, modelLabel, runCostUsd, runView, type BrandMark, type RunView } from "./mcp-run-view.js";
 
 export type AgentCardStatus = "working" | "idle" | "waiting";
 
@@ -18,7 +19,7 @@ export interface AgentCardTask {
   status: string;
   updatedAt?: string;
   /** Where and with what its latest run executed. */
-  run?: Pick<RunView, "engine" | "engineLabel" | "engineMark" | "modelLabel" | "auth" | "computer" | "costUsd">;
+  run?: Pick<RunView, "engine" | "engineLabel" | "engineKind" | "engineMark" | "modelLabel" | "auth" | "computer" | "costUsd">;
   /** Why it failed (the labelled reason) and whether it was retried. */
   failure?: TaskFailure;
   /** Its runs get only part of the agent's tools (Task.toolScope). */
@@ -69,9 +70,12 @@ export interface AgentCard {
   agent: {
     name: string; displayName?: string; role?: string; model?: string; timezone?: string;
     /** Its engine: Polpo's own or an agent harness (Claude Code, Codex, OpenCode), with the mark the card draws. */
-    engine?: { id: string; label: string; mark: BrandMark; model?: string; modelLabel?: string };
+    engine?: { id: string; /** "Polpo", "Claude Code Harness", "Codex CLI". */ label: string; kind?: string; mark: BrandMark; model?: string; modelLabel?: string };
     /** The computer its chats and tasks run on (defaultComputer): "this server" or its id. */
     computer?: string;
+    /** The published version production runs (agent versions), and whether its draft has unpublished changes. */
+    version?: string;
+    draftChanges?: boolean;
     /** Its colour: the look's agent colour 1…10 (identity.color, else from its name), for the avatar. */
     color: number;
   };
@@ -95,6 +99,16 @@ export interface AgentCard {
   journal: Array<{ at: string; summary: string }>;
   /** The connectors it may use (external apps over MCP), with their accounts. */
   connectors: AgentCardConnector[];
+  /** Its communication lines: who it may talk to (GET /agents/lines). */
+  lines?: AgentCardLines;
+}
+
+export interface AgentCardLines {
+  mode: string;
+  /** false: not set (an agent from before the lines: it talks to anyone). */
+  explicit: boolean;
+  manager?: string;
+  reachable: string[];
 }
 
 export interface AgentCardInput {
@@ -107,11 +121,15 @@ export interface AgentCardInput {
     engine?: unknown;
     defaultComputer?: string;
     connectorTools?: Record<string, "*" | string[]>;
+    /** GET /agents/{name}: production version and draft state. */
+    versioning?: { production?: string; draft?: { hasChanges?: boolean } };
   };
   tasks: Array<{
     id: string; title: string; status: string; assignTo?: string; updatedAt?: string; createdAt?: string;
     runs?: TaskRunContext[]; toolScope?: unknown; result?: { stderr?: string; exitCode?: number; retryable?: boolean; assessment?: { passed?: boolean; llmReview?: string; globalScore?: number } };
   }>;
+  /** GET /agents/lines: the team's lines (the agent's row is used). */
+  lines?: { agents: Array<{ agent: string; mode: string; explicit: boolean; manager?: string; reachable: string[] }> };
   /** GET /connectors: the agent's are those whose access lists it (or "*"). */
   connectors?: Array<{ id: string; name: string; account?: string; status?: string; enabled?: boolean; access?: { agents?: string[] | "*" } }>;
   drive?: {
@@ -152,7 +170,7 @@ function cardTask(t: InputTask): AgentCardTask {
     id: t.id, title: t.title, status: t.status,
     ...(t.updatedAt ? { updatedAt: t.updatedAt } : {}),
     ...(v ? { run: {
-      engine: v.engine, engineLabel: v.engineLabel, engineMark: v.engineMark, computer: v.computer,
+      engine: v.engine, engineLabel: v.engineLabel, engineKind: v.engineKind, engineMark: v.engineMark, computer: v.computer,
       ...(v.modelLabel ? { modelLabel: v.modelLabel } : {}), ...(v.auth ? { auth: v.auth } : {}), ...(cost !== undefined ? { costUsd: cost } : {}),
     } } : {}),
     ...(failure ? { failure } : {}),
@@ -237,6 +255,8 @@ export function buildAgentCard(input: AgentCardInput): AgentCard {
       ...(timezone ? { timezone } : {}),
       engine: engineOf(agent),
       ...(agent.defaultComputer ? { computer: computerLabel({ id: agent.defaultComputer, kind: agent.defaultComputer === "host" ? "host" : "computer" }) } : {}),
+      ...(agent.versioning?.production ? { version: agent.versioning.production } : {}),
+      ...(agent.versioning?.draft?.hasChanges ? { draftChanges: true } : {}),
       color: agentColorIndex(agent.name, agent.identity?.color),
     },
     status: waitingTasks + proposals > 0 ? "waiting" : active ? "working" : "idle",
@@ -257,7 +277,15 @@ export function buildAgentCard(input: AgentCardInput): AgentCard {
     routine: routine.slice(0, 20),
     journal: (input.drive?.journal ?? []).slice(0, 5).map((j) => ({ at: j.at, summary: clip(j.summary, 400) })),
     connectors: agentConnectors(input),
+    ...linesOf(input),
   };
+}
+
+function linesOf(input: AgentCardInput): { lines?: AgentCardLines } {
+  const rows = input.lines?.agents;
+  const row = Array.isArray(rows) ? rows.find((l) => l.agent === input.agent.name) : undefined;
+  if (!row) return {};
+  return { lines: { mode: row.mode, explicit: row.explicit, ...(row.manager ? { manager: row.manager } : {}), reachable: row.reachable.slice(0, 50) } };
 }
 
 /** The agent's engine: a harness (with its model), else Polpo's own engine with the agent's model. */
@@ -265,24 +293,30 @@ function engineOf(agent: AgentCardInput["agent"]): NonNullable<AgentCard["agent"
   const e = agentEngine(agent.engine);
   const model = e.id === "polpo" ? agent.model : e.model;
   const label = modelLabel(model);
-  return { id: e.id, label: ENGINE_LABELS[e.id] ?? e.id, mark: engineMark(e.id), ...(model ? { model } : {}), ...(label ? { modelLabel: label } : {}) };
+  return { id: e.id, label: engineMarkLabel(e.id), kind: engineKindOf(e.id), mark: engineMark(e.id), ...(model ? { model } : {}), ...(label ? { modelLabel: label } : {}) };
 }
 
 /** The card as text, for the model and for clients that do not show apps. */
 export function agentCardText(card: AgentCard): string {
   const name = card.agent.displayName ? `${card.agent.displayName} (${card.agent.name})` : card.agent.name;
   const lines = [`${name}${card.agent.role ? ` — ${card.agent.role}` : ""}: ${card.status === "working" ? "working" : card.status === "waiting" ? "waiting for a person" : "idle"}.`];
-  if (card.agent.engine && card.agent.engine.id !== "polpo") lines.push(`Engine: ${card.agent.engine.label}${card.agent.engine.modelLabel ? ` (${card.agent.engine.modelLabel})` : ""}${card.agent.computer ? ` on ${card.agent.computer}` : ""}.`);
+  // the model it runs, then its engine and type: "Model: Sonnet 4.5 (Claude Code · Harness) on gpu-box."
+  if (card.agent.engine) lines.push(`Model: ${modelWithEngineText(card.agent.engine.modelLabel, card.agent.engine.id, "default")}${card.agent.computer ? ` on ${card.agent.computer}` : ""}.`);
+  if (card.agent.version) lines.push(`Version ${card.agent.version} in production${card.agent.draftChanges ? " (its draft has unpublished changes)" : ""}.`);
   if (card.current) {
     const run = card.current.run;
     lines.push(`${card.current.active ? "Working on" : "Last finished"}: ${card.current.title} [${card.current.status}] (${card.current.id})`
-      + `${run ? ` with ${run.engineLabel}${run.modelLabel ? ` ${run.modelLabel}` : ""} on ${run.computer.label}${run.costUsd !== undefined ? `, ${formatUsd(run.costUsd)}` : ""}` : ""}.`);
+      + `${run ? ` with ${modelWithEngineText(run.modelLabel, run.engine)} on ${run.computer.label}${run.costUsd !== undefined ? `, ${formatUsd(run.costUsd)}` : ""}` : ""}.`);
     if (card.current.failure) lines.push(`It failed: ${card.current.failure.reason}${card.current.failure.retryable ? "" : " (not retried: a re-run would fail the same way)"}.`);
   }
   lines.push(`Today: ${card.today.done} done, ${card.today.failed} failed, ${card.today.waiting} waiting for a person.`);
   if (card.next) lines.push(`Next: ${card.next.at} — ${card.next.text}${card.next.proposed ? " (proposed, to confirm)" : ""}.`);
   if (card.goal) lines.push(`Main goal: ${card.goal.title}${card.goal.progress !== undefined ? ` (${card.goal.progress}%)` : ""}.`);
   if (!card.drive) lines.push("Goals and initiative (drive) are off for this agent.");
+  if (card.lines) {
+    lines.push(`Communication lines: ${card.lines.explicit ? card.lines.mode : "anyone (not set)"}`
+      + ` — talks to ${card.lines.mode === "anyone" ? "any agent" : card.lines.reachable.join(", ") || "no agent"}${card.lines.manager ? `; escalates to ${card.lines.manager}` : ""}.`);
+  }
   if (card.connectors.length) lines.push(`Connectors: ${card.connectors.map((c) => `${c.label} [${c.id}]${c.tools === "all" ? "" : ` (${c.tools} tools)`}`).join(", ")}.`);
   return lines.join("\n");
 }

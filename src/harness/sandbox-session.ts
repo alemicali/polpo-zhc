@@ -42,7 +42,7 @@ export interface HarnessMachine {
   list(path: string): Promise<Array<{ name: string; type: "file" | "directory" | "symlink" | "other" }> | null>;
   /** false when it did not exist. */
   remove(path: string): Promise<boolean>;
-  spawn(command: string, opts: { cwd?: string; env?: Record<string, string> }): Promise<RemoteProcess>;
+  spawn(command: string, opts: { cwd?: string; env?: Record<string, string>; stdin?: boolean }): Promise<RemoteProcess>;
   portEndpoint(port: number, protocol: "http" | "https" | "ws"): Promise<RemotePortEndpoint>;
   /** Stop following process output (processes keep running). */
   close(): void;
@@ -143,7 +143,7 @@ export function remoteHarnessMachine(o: {
     spawn: async (command, x) => {
       const d = await o.driver();
       if (!d.spawn) throw new Error(`Computer ${o.label} cannot start long-running processes (agent harnesses need a Daytona v2 computer)`);
-      const p = await d.spawn(command, { cwd: x.cwd ? abs(x.cwd) : o.workDir, env: x.env });
+      const p = await d.spawn(command, { cwd: x.cwd ? abs(x.cwd) : o.workDir, env: x.env, ...(x.stdin ? { stdin: true } : {}) });
       followed.add(p);
       void p.wait().finally(() => followed.delete(p));
       return p;

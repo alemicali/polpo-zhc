@@ -41,6 +41,7 @@ import { gitClone, gitPullFastForward, gitHeadCommit, sourceCacheKey } from "../
 import { isReservedVaultOwner } from "@polpo-ai/core/vault-store";
 import { redactSecrets } from "@polpo-ai/core/secret-redaction";
 import { describeMissionCost, isValidBudgetUsd, type MissionCostSummary } from "@polpo-ai/core/mission-cost";
+import { agentEffectiveModel, agentEngineIdOf, modelWithEngineText } from "@polpo-ai/core/engine-label";
 import { computeTaskCost, describeTaskCost, usdText } from "@polpo-ai/core/task-cost";
 import { describeTaskRun } from "@polpo-ai/core/run-context";
 import { describeTaskFailure, taskFailure } from "@polpo-ai/core/task-failure";
@@ -59,7 +60,7 @@ import { discoverAppPreviewTargets } from "../server/routes/app-preview.js";
 import { captureAppScreenshot, removeAppScreenshot, verifyAppDomain } from "../server/routes/apps.js";
 import { getAppRegistryRuntime } from "../server/app-runtime-manager.js";
 import { DATA_ORCHESTRATOR_TOOLS, executeDataTool } from "../tools/data-tools.js";
-import { ARTIFACT_TOOLS, executeArtifactTool } from "../tools/artifact-tools.js";
+import { ARTIFACT_TOOLS, executeArtifactTool, workspaceFileReader } from "../tools/artifact-tools.js";
 import { getArtifactStore } from "../server/artifact-runtime.js";
 import { BRAIN_ORCHESTRATOR_TOOLS, executeCompanyBrainTool } from "../tools/company-brain-tools.js";
 import { STORAGE_ORCHESTRATOR_TOOLS, executeStorageTool } from "../tools/storage-tools.js";
@@ -68,7 +69,7 @@ import { bridgedReadOnly, bridgedTools, BRIDGED_TOOLS, executeBridgedTool, isBri
 import { connectorManagerFor, connectorRedirectUri } from "../mcp/runtime.js";
 import { isMcpToolName, toolResultText } from "../mcp/tools.js";
 import { computerContext, normalizeSandboxSettings, unknownComputersProblem, type EffectiveSandbox } from "@polpo-ai/core/sandbox";
-import { normalizeConnectorTools, describeTaskToolScope } from "@polpo-ai/core";
+import { normalizeConnectorTools, describeTaskToolScope, normalizeTalksTo, talksToProblem, type AgentTalksTo } from "@polpo-ai/core";
 import { TaskToolScopeError } from "../core/task-tool-scope.js";
 import { loadPolpoConfig, savePolpoConfig } from "../core/config.js";
 import { inkApiUrl, inkRegistry } from "../core/ink-config.js";
@@ -994,6 +995,7 @@ const addAgentTool: Tool = {
     allowedPaths: Type.Optional(Type.Array(Type.String(), { description: "Filesystem paths this agent can access (relative to workDir)" })),
     allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (e.g. ['read','write','bash','browser_*','email_*','image_*','video_*','audio_*','excel_*','pdf_*','docx_*','whatsapp_*','phone_*']). phone_* enables VAPI calls for this agent. Vault tools are always available. Omit for core coding tools only." })),
     reportsTo: Type.Optional(Type.String({ description: "Name of the agent this one reports to (org chart hierarchy, e.g. 'lead-dev')" })),
+    talksTo: Type.Optional(talksToParam("Its communication lines (default for a new agent: org)")),
     team: Type.Optional(Type.String({ description: "Team name to add the agent to (default: first team)" })),
     reasoning: Type.Optional(Type.Union([Type.Literal("off"), Type.Literal("minimal"), Type.Literal("low"), Type.Literal("medium"), Type.Literal("high"), Type.Literal("xhigh"), Type.Literal("max")], { description: "Agent thinking/reasoning level. Overrides global settings.reasoning." })),
     maxTurns: Type.Optional(Type.Number({ description: "Max conversation turns before agent stops. Default: 200" })),
@@ -1046,11 +1048,22 @@ const agentSandboxParam = Type.Optional(Type.Object({
   inherit: Type.Optional(Type.Boolean({ description: "true = remove the agent's overrides and use the instance defaults" })),
 }, { description: "Where this agent's commands run (sandbox). Omit to keep current. Default: inherit the instance (this machine unless configured). When the instance isolates agents that read external content, those run at least in bwrap unless a person allows otherwise in the agent's Sandbox tab." }));
 
+/** Communication lines (agent-lines.ts): who an agent may talk to with ask_agent / message_agent and in rooms. */
+function talksToParam(description: string) {
+  return Type.Object({
+    mode: Type.Union([Type.Literal("org"), Type.Literal("list"), Type.Literal("anyone"), Type.Literal("none")], {
+      description: "org: its manager, its direct reports and the extra agents; list: only the listed agents; anyone: every agent; none: no agent. You (Polpo) always talk to it, and it can always escalate to its manager",
+    }),
+    agents: Type.Optional(Type.Array(Type.String(), { description: "Extra agents (org) or the only agents (list)" })),
+    acceptFrom: Type.Optional(Type.Union([Type.Literal("anyone"), Type.Literal("lines")], { description: "lines: it also refuses senders outside its own lines (default anyone)" })),
+  }, { description });
+}
+
 const updateAgentTool: Tool = {
   name: "update_agent",
   description: "Update an existing agent's configuration or move it to another team: role, model, prompt, tools, skills, engine (polpo or a Claude Code / Codex / OpenCode harness), "
     + "computers and defaultComputer, per-connector tool selection (connectorTools), browser egress proxy, progressive tools, sandbox, learning, drive. "
-    + "Changes are applied immediately; do not reload config. Only provided fields are changed; omitted fields keep their current value. Use empty string for reportsTo to remove hierarchy.",
+    + "By default (instance setting) the change is published as a new version and deployed to production right away; publish: false keeps it in the draft. Do not reload config. Only provided fields are changed; omitted fields keep their current value. Use empty string for reportsTo to remove hierarchy.",
   parameters: Type.Object({
     name: Type.String({ description: "Agent name to update" }),
     role: Type.Optional(Type.String({ description: "New role description" })),
@@ -1065,6 +1078,7 @@ const updateAgentTool: Tool = {
     allowedPaths: Type.Optional(Type.Array(Type.String(), { description: "New allowed paths (replaces existing)" })),
     allowedTools: Type.Optional(Type.Array(Type.String(), { description: "Tool names/wildcards to enable (replaces existing). Include 'browser_*', 'email_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*', 'whatsapp_*', 'storage_*' or 'phone_*' to grant those categories. storage_* gives the storage tools for the buckets granted to the agent on the Storage page. phone_* enables the VAPI phone tools for this agent and requires VAPI credentials in its vault or environment. When adding a category, preserve the agent's existing allowedTools entries. Vault tools are always available. Omit to keep current." })),
     reportsTo: Type.Optional(Type.String({ description: "Name of the agent this one reports to. Use empty string to remove." })),
+    talksTo: Type.Optional(talksToParam("Its communication lines (replaces them); mode anyone lifts every restriction")),
     team: Type.Optional(Type.String({ description: "Move agent to a different team" })),
     reasoning: Type.Optional(Type.Union([Type.Literal("off"), Type.Literal("minimal"), Type.Literal("low"), Type.Literal("medium"), Type.Literal("high"), Type.Literal("xhigh"), Type.Literal("max")], { description: "Agent thinking/reasoning level" })),
     maxTurns: Type.Optional(Type.Number({ description: "Max conversation turns" })),
@@ -1081,6 +1095,9 @@ const updateAgentTool: Tool = {
     learning: agentLearningParam,
     voiceReplies: agentVoiceRepliesParam,
     drive: agentDriveParam,
+    publish: Type.Optional(Type.Boolean({ description: "Agents are versioned: false keeps the change in the draft (publish later: agent_publish); true publishes a new version. Default: the instance setting (normally publish and deploy)" })),
+    deploy: Type.Optional(Type.Boolean({ description: "true: publish and deploy the new version to production now" })),
+    note: Type.Optional(Type.String({ description: "Release note of the published version" })),
   }),
 };
 
@@ -1541,13 +1558,15 @@ const removeNotificationRuleTool: Tool = {
 
 const sendNotificationTool: Tool = {
   name: "send_notification",
-  description: "Send a direct notification to a channel, bypassing rules. Optionally delayed.",
+  description: "Send a direct notification to a channel (any type: Telegram, Slack, email, WhatsApp Business operators, webhook, push, expo-push), bypassing rules. Optionally delayed. On Slack, `to` picks the Slack channel (C0123…) and thread_ts the thread.",
   parameters: Type.Object({
     channel: Type.String({ description: "Channel ID to send to" }),
     title: Type.String({ description: "Notification title" }),
     body: Type.String({ description: "Notification body" }),
     severity: Type.Optional(Type.String({ description: "info, warning, or critical" })),
     delayMs: Type.Optional(Type.Number({ description: "Delay before sending (ms)" })),
+    to: Type.Optional(Type.String({ description: "Slack: the Slack channel id to post to (default: the channel's own)" })),
+    thread_ts: Type.Optional(Type.String({ description: "Slack: post in this thread (the parent message's ts, e.g. 1712345678.123456)" })),
   }),
 };
 
@@ -2385,7 +2404,8 @@ export const WRITE_TOOLS = new Set([
   // Browser profiles (deleting one signs its agents out)
   "browser_profile_clear",
   // Artifacts
-  "artifact_create", "artifact_update", "artifact_delete",
+  "artifact_create", "artifact_update", "artifact_from_file", "artifact_delete",
+  "artifact_upload_prepare", "artifact_upload_finalize",
   // Notification rules
   "add_notification_rule", "remove_notification_rule", "send_notification",
   // Task watchers
@@ -2587,6 +2607,7 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
 const TOOL_LABELS: Record<string, string> = {
   artifact_create: "Create Artifact",
   artifact_update: "Update Artifact",
+  artifact_from_file: "Publish Artifact From File",
   artifact_get: "Read Artifact",
   artifact_list: "List Artifacts",
   artifact_delete: "Delete Artifact",
@@ -2865,12 +2886,18 @@ export async function executeOrchestratorTool(
       case "capture_app_screenshot": return execCaptureAppScreenshot(polpo, args);
 
       // ── Artifacts ──
-      case "artifact_create": case "artifact_update": case "artifact_get": case "artifact_list": case "artifact_delete":
+      case "artifact_create": case "artifact_update": case "artifact_get": case "artifact_list": case "artifact_delete": case "artifact_from_file":
         return executeArtifactTool(toolName, args, {
           store: getArtifactStore(polpo.getPolpoDir()),
           author: "polpo",
           ...(context.sessionId ? { sessionId: context.sessionId } : {}),
           emit: (payload) => polpo.emit("artifact:changed", payload),
+          // Polpo publishes files of the project, of the agents' workspace and of .polpo (chat attachments)
+          readFile: workspaceFileReader({
+            cwd: polpo.getWorkDir(),
+            allowedPaths: [...new Set([polpo.getWorkDir(), polpo.getAgentWorkDir(), polpo.getPolpoDir()])],
+            tempDir: join(polpo.getPolpoDir(), "tmp"),
+          }),
         });
 
       // ── Structured data ──
@@ -3855,7 +3882,8 @@ async function execListAgents(polpo: Orchestrator): Promise<string> {
     const dn = a.identity?.displayName;
     const parts = [`• ${a.name}${dn ? ` (${dn})` : ""}`];
     if (a.role) parts.push(`— ${a.role}`);
-    if (a.model) parts.push(`[${a.model}]`);
+    // the model it runs, with its engine: [claude-sonnet-4-6 (Claude Code · CLI)]
+    parts.push(`[${modelWithEngineText(agentEffectiveModel(a), agentEngineIdOf(a.engine), "default model")}]`);
     if (a.reportsTo) parts.push(`→ reports to: ${a.reportsTo}`);
     if (a.skills?.length) parts.push(`skills: ${a.skills.join(", ")}`);
     if (a.systemPrompt) parts.push("(has system prompt)");
@@ -4406,6 +4434,7 @@ async function execAddAgent(polpo: Orchestrator, args: Record<string, unknown>):
     allowedPaths: args.allowedPaths as string[] | undefined,
     allowedTools: args.allowedTools as string[] | undefined,
     reportsTo: args.reportsTo as string | undefined,
+    talksTo: args.talksTo ? normalizeTalksTo(args.talksTo as AgentTalksTo) : undefined,
     reasoning: args.reasoning as string | undefined,
     maxTurns: args.maxTurns as number | undefined,
     maxConcurrency: args.maxConcurrency as number | undefined,
@@ -4465,6 +4494,11 @@ async function execUpdateAgent(polpo: Orchestrator, args: Record<string, unknown
   if (args.allowedPaths !== undefined) updates.allowedPaths = args.allowedPaths as string[];
   if (args.allowedTools !== undefined) updates.allowedTools = args.allowedTools as string[];
   if (args.reportsTo !== undefined) updates.reportsTo = reportsTo;
+  if (args.talksTo !== undefined) {
+    const problem = talksToProblem(args.talksTo);
+    if (problem) return `Error: ${problem}`;
+    updates.talksTo = normalizeTalksTo(args.talksTo as AgentTalksTo);
+  }
   if (args.reasoning !== undefined) updates.reasoning = args.reasoning as string;
   if (args.maxTurns !== undefined) updates.maxTurns = args.maxTurns as number;
   if (args.maxConcurrency !== undefined) updates.maxConcurrency = args.maxConcurrency as number;
@@ -4496,15 +4530,33 @@ async function execUpdateAgent(polpo: Orchestrator, args: Record<string, unknown
   if ("error" in platform) return platform.error;
   Object.assign(updates, platform.fields);
 
+  // versioned: the draft, then (flags or the instance setting) publish and deploy
+  // (a host without versioning writes the agent live, as before)
+  const versioned = typeof polpo.updateAgentVersioned === "function";
+  const mode = args.deploy === true ? "deploy" : args.publish === true ? "publish" : args.publish === false ? "draft"
+    : !versioned || polpo.autoDeployApiUpdates() ? "deploy" : "draft";
+  delete (updates as Record<string, unknown>).publish;
+  delete (updates as Record<string, unknown>).deploy;
+  delete (updates as Record<string, unknown>).note;
+  let result: Awaited<ReturnType<Orchestrator["updateAgentVersioned"]>>;
   try {
-    await polpo.updateAgent(name, updates as any);
+    result = versioned
+      ? await polpo.updateAgentVersioned(name, updates as any, {
+        actor: "polpo", mode, ...(typeof args.note === "string" && args.note ? { note: args.note } : {}),
+      })
+      : { agent: await polpo.updateAgent(name, updates as any), draftChanged: false };
   } catch (err) {
-    const message = engineError(err);
+    const message = engineError(err) ?? (err instanceof Error && err.name === "AgentVersionError" ? err.message : undefined);
     if (message) return `${message} Nothing was changed.`;
     throw err;
   }
-  const changes = Object.keys(args).filter(k => k !== "name").join(", ");
-  return `Agent "${name}" updated: ${changes}${sandboxNote}`;
+  const changes = Object.keys(args).filter(k => k !== "name" && k !== "publish" && k !== "deploy" && k !== "note").join(", ");
+  const where = result.deployed ? ` (version ${result.deployed.to} deployed to production)`
+    : result.published && result.deploy?.status === "pending" ? ` (published as ${result.published.version}; not deployed yet: ${result.deploy.message} Status: agent_deploy_gates)`
+    : result.published && result.deploy?.status === "blocked" ? ` (published as ${result.published.version} but NOT deployed: ${result.deploy.message})`
+    : result.published ? ` (published as ${result.published.version}, not deployed: agent_deploy)`
+    : result.draftChanged ? " (saved in the draft, production unchanged: agent_publish)" : "";
+  return `Agent "${name}" updated: ${changes}${where}${sandboxNote}`;
 }
 
 async function execSandboxStatus(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
@@ -4782,6 +4834,10 @@ function execSendNotification(polpo: Orchestrator, args: Record<string, unknown>
     body: args.body as string,
     severity: args.severity as "info" | "warning" | "critical" | undefined,
     delayMs: args.delayMs as number | undefined,
+    ...(args.to || args.thread_ts ? { target: {
+      ...(typeof args.to === "string" && args.to ? { chatId: args.to } : {}),
+      ...(typeof args.thread_ts === "string" && args.thread_ts ? { threadTs: args.thread_ts } : {}),
+    } } : {}),
   }).catch((err) => {
     // Error is emitted as notification:failed event
   });
@@ -5465,7 +5521,7 @@ function execCreateOrchestratorSkill(polpo: Orchestrator, args: Record<string, u
     return `Error: Orchestrator skill "${name}" already exists. Use update_orchestrator_skill to modify it.`;
   }
 
-  const path = createOrchestratorSkill(polpo.getPolpoDir(), name, description, content, { allowedTools });
+  const path = createOrchestratorSkill(polpo.getPolpoDir(), name, description, content, { allowedTools, author: "polpo" });
   emitSkillChanged(polpo, "orchestrator", "created", name);
   return `Created orchestrator skill "${name}" at ${path}`;
 }
@@ -5477,7 +5533,7 @@ function execUpdateOrchestratorSkill(polpo: Orchestrator, args: Record<string, u
   if (args.content !== undefined) updates.content = args.content as string;
   if (args.allowedTools !== undefined) updates.allowedTools = args.allowedTools as string[];
 
-  const ok = updateOrchestratorSkill(polpo.getPolpoDir(), name, updates);
+  const ok = updateOrchestratorSkill(polpo.getPolpoDir(), name, updates, false, "polpo");
   if (!ok) return `Error: Orchestrator skill "${name}" not found.`;
 
   emitSkillChanged(polpo, "orchestrator", "updated", name);
@@ -5488,7 +5544,7 @@ function execUpdateOrchestratorSkill(polpo: Orchestrator, args: Record<string, u
 
 function execRemoveOrchestratorSkill(polpo: Orchestrator, args: Record<string, unknown>): string {
   const name = args.name as string;
-  const ok = removeOrchestratorSkill(polpo.getPolpoDir(), name);
+  const ok = removeOrchestratorSkill(polpo.getPolpoDir(), name, false, "polpo");
   if (!ok) return `Error: Orchestrator skill "${name}" not found.`;
   emitSkillChanged(polpo, "orchestrator", "deleted", name);
   return `Removed orchestrator skill "${name}"`;
@@ -5499,7 +5555,7 @@ function execInstallOrchestratorSkill(polpo: Orchestrator, args: Record<string, 
   const skillNames = args.skillNames as string[] | undefined;
   const force = args.force as boolean | undefined;
 
-  const result = installOrchestratorSkills(source, polpo.getPolpoDir(), { skillNames, force });
+  const result = installOrchestratorSkills(source, polpo.getPolpoDir(), { skillNames, force, author: "polpo" });
   if (result.installed.length > 0) emitSkillChanged(polpo, "orchestrator", "installed");
 
   const lines: string[] = [];
@@ -5536,7 +5592,7 @@ function execInstallAgentSkill(polpo: Orchestrator, args: Record<string, unknown
   const skillNames = args.skillNames as string[] | undefined;
   const force = args.force as boolean | undefined;
 
-  const result = installSkills(source, polpo.getPolpoDir(), { skillNames, force });
+  const result = installSkills(source, polpo.getPolpoDir(), { skillNames, force, author: "polpo" });
   if (result.installed.length > 0) emitSkillChanged(polpo, "agent", "installed");
 
   const lines: string[] = [];
@@ -5576,14 +5632,14 @@ function execCreateAgentSkill(polpo: Orchestrator, args: Record<string, unknown>
     return `Error: Agent skill "${name}" already exists. Use install_agent_skill with force, or remove it first.`;
   }
 
-  const skillPath = createAgentSkill(polpoDir, name, description, content, { allowedTools });
+  const skillPath = createAgentSkill(polpoDir, name, description, content, { allowedTools, author: "polpo" });
   emitSkillChanged(polpo, "agent", "created", name);
   return `Created agent skill "${name}" at ${skillPath}. Assign it to agents with update_agent (add to their skills array).`;
 }
 
 function execRemoveAgentSkill(polpo: Orchestrator, args: Record<string, unknown>): string {
   const name = args.name as string;
-  const ok = removeSkill(polpo.getPolpoDir(), name);
+  const ok = removeSkill(polpo.getPolpoDir(), name, false, "polpo");
   if (!ok) return `Error: Agent skill "${name}" not found.`;
   emitSkillChanged(polpo, "agent", "deleted", name);
   return `Removed agent skill "${name}"`;

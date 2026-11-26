@@ -35,6 +35,12 @@ export const tasksSqlite = sqliteTable("tasks", {
   runs: text("runs"),
   /** Optional narrowing of the run's tools (connectors, their tools, built-in tools): Task.toolScope. */
   toolScope: text("tool_scope"),
+  /** The member (email) who started the task, when known: Task.requestedBy. */
+  requestedBy: text("requested_by"),
+  /** The assignee's published version the task is pinned to (absent: production): Task.agentVersion. */
+  agentVersion: text("agent_version"),
+  /** What started it when not a person (a trigger's delivery), JSON: Task.origin. */
+  origin: text("origin"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
   /** Bumped by every update: lets readers cache rows safely (updated_at can repeat within a millisecond). */
@@ -61,6 +67,9 @@ export const missionsSqlite = sqliteTable("missions", {
   executionCount: integer("execution_count").notNull().default(0),
   budgetUsd: text("budget_usd"),
   pauseReason: text("pause_reason"),
+  owner: text("owner"),
+  /** What started it when not a person (a trigger's delivery), JSON: Mission.origin. */
+  origin: text("origin"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 }, (table) => [
@@ -118,6 +127,12 @@ export const tasksPg = pgTable("tasks", {
   runs: jsonb("runs"),
   /** Optional narrowing of the run's tools (connectors, their tools, built-in tools): Task.toolScope. */
   toolScope: jsonb("tool_scope"),
+  /** The member (email) who started the task, when known: Task.requestedBy. */
+  requestedBy: pgText("requested_by"),
+  /** The assignee's published version the task is pinned to (absent: production): Task.agentVersion. */
+  agentVersion: pgText("agent_version"),
+  /** What started it when not a person (a trigger's delivery): Task.origin. */
+  origin: jsonb("origin"),
   createdAt: pgText("created_at").notNull(),
   updatedAt: pgText("updated_at").notNull(),
   /** Bumped by every update: lets readers cache rows safely (updated_at can repeat within a millisecond). */
@@ -144,6 +159,9 @@ export const missionsPg = pgTable("missions", {
   executionCount: pgInteger("execution_count").notNull().default(0),
   budgetUsd: pgText("budget_usd"),
   pauseReason: pgText("pause_reason"),
+  owner: pgText("owner"),
+  /** What started it when not a person (a trigger's delivery): Mission.origin. */
+  origin: jsonb("origin"),
   createdAt: pgText("created_at").notNull(),
   updatedAt: pgText("updated_at").notNull(),
 }, (table) => [

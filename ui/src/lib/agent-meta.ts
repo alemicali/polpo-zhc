@@ -43,6 +43,7 @@ import {
   HardDrive,
   type LucideIcon,
   Shapes,
+  Scale,
 } from "lucide-react";
 import type { TaskStatus } from "@polpo-ai/react";
 import { agentColorClasses } from "@/lib/agent-colors";
@@ -82,6 +83,7 @@ export function getToolMeta(name: string): ToolMeta {
   if (n.startsWith("search_")) return { icon: Search, ...kind(6) };
   if (n.startsWith("data_")) return { icon: Database, ...kind(9) };
   if (n.startsWith("artifact_")) return { icon: Shapes, ...kind(4) };
+  if (n === "decide") return { icon: Scale, ...kind(8) };
   if (n.startsWith("dep_") || n === "bulk_rename") return { icon: Package, ...kind(5) };
   if (n === "register_outcome") return { icon: Target, ...kind(9) };
   return { icon: Wrench, color: "text-muted-foreground", bg: "bg-muted/30" };
@@ -115,14 +117,15 @@ export function getSkillMeta(name: string): { icon: LucideIcon; color: string } 
 export const toolCategories: { prefix: string; label: string; tools: string; icon: LucideIcon; color: string }[] = [
   { prefix: "browser_", label: "Browser", tools: "browser_navigate, browser_click, browser_fill, browser_snapshot, browser_screenshot, ...", icon: Globe, color: kind(7).color },
   { prefix: "email_", label: "Email", tools: "email_send, email_draft, email_verify, email_list, email_read, email_search, email_count, email_download_attachment", icon: Mail, color: kind(10).color },
-  { prefix: "image_", label: "Image", tools: "image_generate (fal.ai FLUX), image_analyze (OpenAI/Anthropic vision)", icon: Image, color: kind(3).color },
+  { prefix: "image_", label: "Image", tools: "image_generate, image_edit (the instance's image model, Settings → Media), image_analyze (a chat turn with the image)", icon: Image, color: kind(3).color },
   { prefix: "video_", label: "Video", tools: "video_generate (fal.ai Wan 2.2 text-to-video)", icon: Video, color: kind(2).color },
   { prefix: "audio_", label: "Audio", tools: "audio_transcribe (STT), audio_speak (TTS)", icon: Mic, color: kind(10).color },
   { prefix: "search_", label: "Web Search", tools: "search_web (Exa semantic search), search_find_similar", icon: Search, color: kind(6).color },
   { prefix: "phone_", label: "Phone (VAPI)", tools: "phone_call, phone_get_call, phone_list_calls, phone_hangup, inbound call configuration", icon: PhoneCall, color: kind(8).color },
   { prefix: "data_", label: "Structured Data", tools: "source registry, scoped grants, typed queries and mutations", icon: Database, color: kind(9).color },
-  { prefix: "artifact_", label: "Artifacts", tools: "artifact_create, artifact_update, artifact_get, artifact_list, artifact_delete (documents, html dashboards and designs on its data sources, diagrams)", icon: Shapes, color: kind(4).color },
+  { prefix: "artifact_", label: "Artifacts", tools: "artifact_create, artifact_update, artifact_from_file, artifact_get, artifact_list, artifact_delete (documents, html dashboards and designs on its data sources, diagrams; large files published from its workspace)", icon: Shapes, color: kind(4).color },
   { prefix: "storage_", label: "Storage", tools: "storage_list, storage_read, storage_write, storage_delete, storage_presign (S3/R2 buckets granted to the agent)", icon: HardDrive, color: kind(6).color },
+  { prefix: "decide", label: "Decisions", tools: "decide (typed judgments with probabilities from the decision model: yes/no, choice, score, rank)", icon: Scale, color: kind(8).color },
 ];
 
 // ── Task status display config ──

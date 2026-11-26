@@ -8,7 +8,6 @@ import { Loader2, Monitor, RotateCcw, Save } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { SandboxEditor } from "@/components/sandbox/sandbox-editor";
 import { useSandboxOverview } from "@/hooks/use-sandbox-overview";
 import { compactSandbox, describeSandbox, sandboxApi, PLACEMENT_INFO, toolPlacement, type SandboxSettings, type ToolPlacement } from "@/lib/sandbox-api";
@@ -17,7 +16,7 @@ import { useComputers } from "@/hooks/use-computers";
 import { useAgentDetail } from "./agent-detail-context";
 
 /** Same list as the server (EXTERNAL_CONTENT_TOOLS in @polpo-ai/core/sandbox). */
-const EXTERNAL_CONTENT_TOOLS = ["browser_*", "http_fetch", "http_download", "search_*", "email_*", "whatsapp_*", "web_*"];
+const EXTERNAL_CONTENT_TOOLS = ["browser_*", "http_fetch", "http_download", "search_*", "email_*", "whatsapp_*", "wabiz_*", "web_*"];
 
 function readsExternal(tools: string[] | undefined): boolean {
   // no list means every core tool, http_fetch included
@@ -55,7 +54,7 @@ export function AgentSandboxTab() {
   };
 
   return (
-    <ScrollArea className="h-full">
+    <div>
       <div className="pr-4 pb-bottom-nav lg:pb-4 space-y-4">
         <AgentComputerPointer defaultComputer={(agent as { defaultComputer?: string }).defaultComputer} />
         <Card className="py-0 gap-0">
@@ -102,7 +101,7 @@ export function AgentSandboxTab() {
         )}
         <ToolPlacementCard tools={agent.allowedTools} provider={effective?.task.provider} chatProvider={effective?.chat.provider} />
       </div>
-    </ScrollArea>
+    </div>
   );
 }
 

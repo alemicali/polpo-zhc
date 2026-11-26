@@ -79,7 +79,7 @@ describe("the scope model", () => {
     for (const t of m) {
       if (t.destructive) expect(t.scope, t.name).not.toBe("polpo:read");
       // reads need read, except the vault's, the REST fallback, and the lists that name people and their access (admin)
-      const adminReads = ["polpo_members_list", "polpo_mcp_access_list", "polpo_channel_peers", "polpo_whatsapp_login_wait"];
+      const adminReads = ["polpo_members_list", "polpo_mcp_access_list", "polpo_channel_peers", "polpo_peer_presence", "polpo_whatsapp_login_wait"];
       if (t.readOnly && t.toolset !== "vault" && t.toolset !== "admin") expect(t.scope, t.name).toBe(adminReads.includes(t.name) ? "polpo:admin" : "polpo:read");
     }
     expect(by).toMatchObject({
@@ -255,7 +255,7 @@ describe("OAuth with scopes", () => {
     expect(box("polpo:read")).toMatch(/checked disabled/);
     expect(box("polpo:work")).toMatch(/ checked/);
     for (const s of ["polpo:files", "polpo:messages", "polpo:connectors", "polpo:computers", "polpo:vault", "polpo:admin"]) expect(box(s), s).not.toMatch(/checked/);
-    expect(html).toContain("Send messages on Telegram, WhatsApp and email");
+    expect(html).toContain("Send messages on any channel (Telegram, WhatsApp, email, Slack");
     expect(html).toContain('<input type="hidden" name="grant_scope" value="polpo:read">');
     expect(html).toContain("(not asked for)");
   });

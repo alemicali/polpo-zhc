@@ -1,3 +1,4 @@
+import { mcpServerServiceFor } from "./mcp-servers-runtime.js";
 import { existsSync } from "node:fs";
 import { resolve, basename, join } from "node:path";
 import { getPolpoDir } from "../core/constants.js";
@@ -152,6 +153,9 @@ export class PolpoServer {
       log: (level, message) => o.emit("log", { level, message }),
     });
     this.harnessJanitor.start({ on: (e, fn) => o.on(e, fn), off: (e, fn) => o.off(e, fn) });
+
+    // Hosted MCP servers: approval tool calls become Approvals requests, approved calls run here
+    mcpServerServiceFor(o);
 
     // Start the SSE bridge. After a setup from the dashboard, reuse the placeholder bridge:
     // the routes and the connected browsers hold that instance, and a new bridge would

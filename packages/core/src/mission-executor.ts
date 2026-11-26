@@ -1,7 +1,8 @@
+import { parseAgentRef } from "./agent-versions.js";
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { TaskManager } from "./task-manager.js";
 import type { AgentManager } from "./agent-manager.js";
-import type { Mission, MissionStatus, MissionReport, Task, TaskExpectation, ExpectedOutcome, MissionQualityGate, MissionCheckpoint, MissionDelay, ScopedNotificationRules, TaskOutcome } from "./types.js";
+import type { Mission, MissionStatus, MissionReport, Task, TaskExpectation, ExpectedOutcome, MissionQualityGate, MissionCheckpoint, MissionDelay, ScopedNotificationRules, TaskOutcome, WorkOrigin } from "./types.js";
 import type { QualityController } from "./quality-controller.js";
 import { normalizeTaskToolScope, type TaskToolScope } from "./task-tool-scope.js";
 import { sanitizeExpectations, parseMissionDocument, dependencyOrder, type MissionDocumentParsed } from "./schemas.js";
@@ -10,6 +11,13 @@ import type { DelayStore, DelayState } from "./delay-store.js";
 import type { NotificationRouterPort } from "./notification-router-port.js";
 import { parseISO8601Duration } from "./iso-duration.js";
 import { isValidBudgetUsd, missionSpentUsd, tasksOfMission } from "./mission-cost.js";
+import type { MissionDecision } from "./types.js";
+import {
+  decisionCheckpointName, decisionNodeBranch, decisionNodeItems, decisionNodeQuestion, decisionNodeTasks, describeDecisionAnswer, renderDecisionNodeState,
+  type DecisionAnswer, type DecisionNodeState, type DecisionNodeStore, type MissionDecider,
+} from "./decisions.js";
+import { MissionImageNodes } from "./mission-images.js";
+import type { ImageNodeState, MissionImage, MissionImager } from "./media.js";
 
 // ── In-memory fallback stores (no Node.js deps) ─────────────────────────
 
@@ -29,6 +37,12 @@ class InMemoryCheckpointStore implements CheckpointStore {
     state.resumed = state.resumed.filter(k => !k.startsWith(group + ":"));
     return state;
   }
+}
+
+class InMemoryDecisionNodeStore implements DecisionNodeStore {
+  private state: Record<string, DecisionNodeState> = {};
+  async load(): Promise<Record<string, DecisionNodeState>> { return this.state; }
+  async save(state: Record<string, DecisionNodeState>): Promise<void> { this.state = state; }
 }
 
 class InMemoryDelayStore implements DelayStore {
@@ -106,6 +120,14 @@ export class MissionExecutor {
   private delayState!: DelayState;
   /** Track which delay notification rules have been registered (by delayKey) */
   private registeredDelayRules = new Set<string>();
+  /** Mission decision nodes: their definitions by group (from the document), their state (persisted). */
+  private decisionsByGroup = new Map<string, MissionDecision[]>();
+  private nodeStore: DecisionNodeStore;
+  private nodeState: Record<string, DecisionNodeState> = {};
+  /** Takes a node's decision (the decision service); absent: nodes fail over to onUncertain. */
+  private decider?: MissionDecider;
+  /** Mission image nodes (media.ts MissionImage): their tasks wait for the generated image. */
+  private images: MissionImageNodes;
   /** Track the pre-execution status for scheduled/recurring missions (by group name).
    *  When a mission completes/fails, this determines whether to return to scheduled/recurring. */
   private scheduledOrigin = new Map<string, "scheduled" | "recurring">();
@@ -117,6 +139,8 @@ export class MissionExecutor {
   ) {
     this.cpStore = ctx.checkpointStore ?? new InMemoryCheckpointStore();
     this.delayStore = ctx.delayStore ?? new InMemoryDelayStore();
+    this.nodeStore = ctx.decisionNodeStore ?? new InMemoryDecisionNodeStore();
+    this.images = new MissionImageNodes(ctx);
 
     // Rebuild cleanedGroups from persisted task state — groups where ALL tasks
     // are already terminal don't need to be re-processed after a server restart.
@@ -131,6 +155,9 @@ export class MissionExecutor {
   private async initStoresAndRebuild(): Promise<void> {
     this.cpState = await this.cpStore.load();
     this.delayState = await this.delayStore.load();
+    // a decision cut short by a restart is taken again
+    this.nodeState = Object.fromEntries(Object.entries(await this.nodeStore.load()).filter(([, s]) => s.status !== "deciding"));
+    await this.images.ready;
     await this.rebuildCleanedGroups();
   }
 
@@ -271,10 +298,13 @@ export class MissionExecutor {
    * Resume a checkpoint, unblocking its blocksTasks.
    * Returns true if the checkpoint was active and is now resumed, false if not found.
    */
-  async resumeCheckpoint(group: string, checkpointName: string): Promise<boolean> {
+  async resumeCheckpoint(group: string, checkpointName: string, resolvedBy?: string): Promise<boolean> {
     const cpKey = `${group}:${checkpointName}`;
     const active = this.cpState.active[cpKey];
     if (!active) return false;
+    // a decision node waiting for a person: resuming its checkpoint takes the model's suggestion
+    const waiting = Object.values(this.nodeState).find((s) => s.group === group && s.status === "awaiting" && decisionCheckpointName(s.node) === checkpointName);
+    if (waiting) await this.resolveDecisionNode(group, waiting.node, waiting.suggested ?? null, resolvedBy ?? "person", { resume: false });
 
     this.cpState.resumed.push(cpKey);
     delete this.cpState.active[cpKey];
@@ -301,6 +331,8 @@ export class MissionExecutor {
   async releaseGroupFlow(group: string): Promise<void> {
     this.cpState = await this.cpStore.removeGroup(this.cpState, group);
     this.delayState = await this.delayStore.removeGroup(this.delayState, group);
+    await this.dropDecisionNodes(group);
+    await this.images.drop(group);
   }
 
   /** Get all active (unresumed) checkpoints across all mission groups. */
@@ -450,6 +482,201 @@ export class MissionExecutor {
     return undefined;
   }
 
+  // ─── Image nodes ─────────────────────────────────────
+
+  /** Set who generates image nodes' images (the media service, wired by the server). */
+  setImager(imager: MissionImager | undefined): void {
+    this.images.setImager(imager);
+  }
+
+  /** Is a task waiting for an image node? (started once its after tasks have finished) */
+  async getBlockingImage(group: string, taskTitle: string, taskId: string, tasks: Task[], missionData?: string): Promise<{ image: MissionImage } | undefined> {
+    return this.images.blocking(group, taskTitle, taskId, tasks, missionData);
+  }
+
+  /** Images being generated: the engine does not call that a deadlock. */
+  hasPendingImages(): boolean {
+    return this.images.hasPending();
+  }
+
+  /** Every image node's state, newest first. */
+  listImageNodes(): ImageNodeState[] {
+    return this.images.list();
+  }
+
+  // ─── Decision nodes ──────────────────────────────────
+
+  /** Set who takes node decisions (the decision service, wired by the server). */
+  setDecider(decider: MissionDecider | undefined): void {
+    this.decider = decider;
+  }
+
+  /** A group's decision nodes: known since the run started, else read from the mission's document (after a restart). */
+  getDecisionNodes(group: string, missionData?: string): MissionDecision[] {
+    const known = this.decisionsByGroup.get(group);
+    if (known) return known;
+    if (!missionData) return [];
+    try {
+      const doc = JSON.parse(missionData) as { decisions?: MissionDecision[] };
+      const list = Array.isArray(doc.decisions) ? doc.decisions : [];
+      this.decisionsByGroup.set(group, list);
+      return list;
+    } catch { return []; }
+  }
+
+  /** Every node's state (deciding, decided, waiting for a person), newest first. */
+  listDecisionNodes(): DecisionNodeState[] {
+    return Object.values(this.nodeState).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  }
+
+  /** Decisions in flight or waiting for a person: the engine does not call that a deadlock. */
+  hasPendingDecisions(): boolean {
+    return Object.values(this.nodeState).some((s) => s.status !== "decided");
+  }
+
+  /**
+   * Is a task held by a decision node? A task in a node's branches waits until the node decides
+   * (the decision starts once its after tasks have all finished); then the chosen branch's tasks
+   * go on and the others are skipped. Returns the node holding it, undefined when it may proceed.
+   */
+  async getBlockingDecision(group: string, taskTitle: string, taskId: string, tasks: Task[], missionData?: string): Promise<{ decision: MissionDecision; state?: DecisionNodeState } | undefined> {
+    for (const d of this.getDecisionNodes(group, missionData)) {
+      const held = decisionNodeTasks(d);
+      if (!held.includes(taskTitle) && !held.includes(taskId)) continue;
+      const key = `${group}:${d.name}`;
+      const st = this.nodeState[key];
+      if (st?.status === "decided") {
+        const chosen = st.branch ? d.branches[st.branch] ?? [] : [];
+        if (chosen.includes(taskTitle) || chosen.includes(taskId)) continue;
+        return { decision: d, state: st };
+      }
+      if (st) return { decision: d, state: st };
+      const after = tasks.filter((t) => d.afterTasks.includes(t.title) || d.afterTasks.includes(t.id));
+      const finished = after.length >= d.afterTasks.length && after.every((t) => t.status === "done" || t.status === "failed");
+      if (!finished) return { decision: d };
+      return { decision: d, state: this.startDecision(group, d, tasks) };
+    }
+    return undefined;
+  }
+
+  /** Take a node's decision in the background; its outcome is applied when it arrives. */
+  private startDecision(group: string, d: MissionDecision, tasks: Task[]): DecisionNodeState {
+    const key = `${group}:${d.name}`;
+    const missionId = tasks.find((t) => t.group === group && t.missionId)?.missionId;
+    const st: DecisionNodeState = { group, ...(missionId ? { missionId } : {}), node: d.name, status: "deciding", startedAt: new Date().toISOString() };
+    this.nodeState[key] = st;
+    void this.nodeStore.save(this.nodeState);
+    this.ctx.emitter.emit("decision:node", { group, missionId, node: d.name, status: "deciding" });
+    const run = async () => {
+      if (!this.decider) throw new Error("Decisions are not available here (no server)");
+      const items = decisionNodeItems(d, tasks);
+      return this.decider({
+        state: renderDecisionNodeState(d, tasks) || "(the tasks before this decision produced no result)",
+        questions: [decisionNodeQuestion(d, items)],
+        ...(d.model ? { model: d.model } : {}),
+        caller: { kind: "mission", ...(missionId ? { id: missionId } : {}), label: `${group} → ${d.name}` },
+      });
+    };
+    void run().then(
+      (r) => this.decisionOutcome(group, d, { id: r.id, answer: r.answers[0], calibrated: r.calibrated }),
+      (err) => this.decisionOutcome(group, d, { error: err instanceof Error ? err.message : String(err) }),
+    ).catch((err) => this.ctx.emitter.emit("log", { level: "error", message: `Decision "${d.name}" (${group}): ${err instanceof Error ? err.message : String(err)}` }));
+    return st;
+  }
+
+  /** A node's decision arrived (or failed): take its branch, the onUncertain branch, or wait for a person. */
+  private async decisionOutcome(group: string, d: MissionDecision, r: { id?: string; answer?: DecisionAnswer; calibrated?: boolean; error?: string }): Promise<void> {
+    const key = `${group}:${d.name}`;
+    const st = this.nodeState[key];
+    if (!st || st.status !== "deciding") return; // the run was aborted meanwhile
+    const suggested = r.answer ? decisionNodeBranch(d, r.answer) ?? null : null;
+    const base = { ...st, ...(r.id ? { decisionId: r.id } : {}), ...(r.answer ? { answer: r.answer } : {}), ...(r.calibrated !== undefined ? { calibrated: r.calibrated } : {}), suggested };
+    const unsure = r.error ? `The decision failed: ${r.error}` : r.answer?.uncertain ? `The answer is uncertain (confidence ${r.answer.confidence?.toFixed(2) ?? "unknown"} below ${r.answer.threshold})` : undefined;
+    if (!unsure) { await this.applyDecisionBranch(group, d, { ...base, branch: suggested }, "model"); return; }
+    const u = d.onUncertain;
+    if (u && u !== "human") { await this.applyDecisionBranch(group, d, { ...base, branch: u.branch, reason: unsure }, "onUncertain"); return; }
+    // a person chooses: the mission pauses at a checkpoint (the existing notification, resume, events)
+    this.nodeState[key] = { ...base, status: "awaiting", reason: unsure };
+    await this.nodeStore.save(this.nodeState);
+    const cp: MissionCheckpoint = {
+      name: decisionCheckpointName(d.name), afterTasks: d.afterTasks, blocksTasks: decisionNodeTasks(d),
+      message: `${unsure}.${r.answer ? ` Model: ${describeDecisionAnswer(r.answer)}.` : ""} Resume to take ${suggested ? `"${suggested}"` : "no branch"}, or choose a branch on the Decisions page (polpo_decision_resolve).`,
+      ...(d.notifyChannels?.length ? { notifyChannels: d.notifyChannels } : {}),
+    };
+    const defs = (this.cpState.definitions[group] ?? []).filter((c) => c.name !== cp.name);
+    this.cpState.definitions[group] = [...defs, cp];
+    this.cpState.resumed = this.cpState.resumed.filter((k) => k !== `${group}:${cp.name}`);
+    await this.cpStore.save(this.cpState);
+    this.ctx.emitter.emit("decision:node", { group, missionId: st.missionId, node: d.name, status: "awaiting", suggested, ...(r.id ? { decisionId: r.id } : {}), reason: unsure });
+  }
+
+  /**
+   * A person chooses a waiting node's branch (null: none of its tasks run). The node's checkpoint
+   * is resumed (the mission goes on). Throws when the node is not waiting or the branch is unknown.
+   */
+  async resolveDecisionNode(group: string, node: string, branch: string | null, by: string, opts: { resume?: boolean } = {}): Promise<DecisionNodeState> {
+    const key = `${group}:${node}`;
+    const st = this.nodeState[key];
+    if (!st) throw new Error(`No decision "${node}" in "${group}"`);
+    if (st.status !== "awaiting") throw new Error(`The decision "${node}" is not waiting for a person (${st.status})`);
+    const d = this.getDecisionNodes(group).find((x) => x.name === node);
+    if (!d) throw new Error(`The decision "${node}" is no longer in "${group}"`);
+    if (branch !== null && !(branch in d.branches)) throw new Error(`"${branch}" is not a branch of "${node}" (${Object.keys(d.branches).join(", ")})`);
+    const next = await this.applyDecisionBranch(group, d, { ...st, branch }, by);
+    const cpName = decisionCheckpointName(node);
+    this.cpState.definitions[group] = (this.cpState.definitions[group] ?? []).filter((c) => c.name !== cpName);
+    await this.cpStore.save(this.cpState);
+    if (opts.resume !== false && this.cpState.active[`${group}:${cpName}`]) await this.resumeCheckpoint(group, cpName, by);
+    return next;
+  }
+
+  /**
+   * Take a branch: its tasks go on (with the decision in their description), every other branch
+   * task is skipped (done, its result says why), and so are the tasks whose dependencies are all skipped.
+   */
+  private async applyDecisionBranch(group: string, d: MissionDecision, st: DecisionNodeState, decidedBy: string): Promise<DecisionNodeState> {
+    const key = `${group}:${d.name}`;
+    // the node is marked decided only once its tasks are skipped / annotated: until then they stay held
+    const next: DecisionNodeState = { ...st, status: "decided", branch: st.branch ?? null, decidedAt: new Date().toISOString(), decidedBy };
+    const groupTasks = (await this.ctx.registry.getAllTasks()).filter((t) => t.group === group && (!st.missionId || t.missionId === st.missionId));
+    const chosen = new Set(next.branch ? d.branches[next.branch] ?? [] : []);
+    const held = new Set(decisionNodeTasks(d));
+    const open = (t: Task) => t.status === "pending" || t.status === "draft";
+    const skipped = new Set(groupTasks.filter((t) => held.has(t.title) && !chosen.has(t.title) && open(t)).map((t) => t.id));
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const t of groupTasks) {
+        if (skipped.has(t.id) || !open(t) || chosen.has(t.title) || t.dependsOn.length === 0) continue;
+        if (t.dependsOn.every((dep) => skipped.has(dep))) { skipped.add(t.id); grew = true; }
+      }
+    }
+    const answerText = next.answer ? describeDecisionAnswer(next.answer) : "no answer";
+    const why = `Skipped: the decision "${d.name}" took ${next.branch ? `the branch "${next.branch}"` : "no branch"} (${answerText})`;
+    for (const t of groupTasks.filter((x) => skipped.has(x.id))) {
+      const from = t.status;
+      await this.ctx.registry.updateTask(t.id, { result: { exitCode: 0, stdout: why, stderr: "", duration: 0 } });
+      const done = await this.ctx.registry.unsafeSetStatus(t.id, "done", `skipped by decision "${d.name}"`);
+      this.ctx.emitter.emit("task:transition", { taskId: t.id, from, to: "done", task: done, reason: `skipped by decision "${d.name}"` });
+    }
+    const ranking = next.answer?.ranking?.length ? `\n${next.answer.ranking.map((r, i) => `${i + 1}. ${r.label} (score ${r.score.toFixed(2)})`).join("\n")}` : "";
+    const note = `\n\n## Decision "${d.name}"\n${d.question.instructions}\nAnswer: ${answerText}${ranking}${decidedBy !== "model" ? `\nBranch "${next.branch ?? "none"}" chosen by ${decidedBy}${next.reason ? ` (${next.reason})` : ""}.` : ""}`;
+    for (const t of groupTasks.filter((x) => chosen.has(x.title) && open(x))) {
+      await this.ctx.registry.updateTask(t.id, { description: `${t.description}${note}` });
+    }
+    this.nodeState[key] = next;
+    await this.nodeStore.save(this.nodeState);
+    this.ctx.emitter.emit("decision:node", { group, missionId: st.missionId, node: d.name, status: "decided", branch: next.branch ?? null, decidedBy, ...(st.decisionId ? { decisionId: st.decisionId } : {}), skipped: skipped.size });
+    return next;
+  }
+
+  /** Forget a group's decision nodes (its run ended or was aborted). */
+  private async dropDecisionNodes(group: string): Promise<void> {
+    this.decisionsByGroup.delete(group);
+    let changed = false;
+    for (const [k, s] of Object.entries(this.nodeState)) if (s.group === group) { delete this.nodeState[k]; changed = true; }
+    if (changed) await this.nodeStore.save(this.nodeState);
+  }
+
   /** Get all active (unexpired) delays across all mission groups. */
   getActiveDelays(): Array<{ group: string; delayName: string; delay: MissionDelay; startedAt: string; expiresAt: string }> {
     const result: Array<{ group: string; delayName: string; delay: MissionDelay; startedAt: string; expiresAt: string }> = [];
@@ -496,7 +723,7 @@ export class MissionExecutor {
     return this.resolveMissionForGroup(groupTasks, group);
   }
 
-  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules; budgetUsd?: number }): Promise<Mission> {
+  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules; budgetUsd?: number; owner?: string; origin?: WorkOrigin }): Promise<Mission> {
     if (!this.ctx.registry.saveMission) throw new Error("Store does not support missions");
     if (opts.budgetUsd !== undefined && !isValidBudgetUsd(opts.budgetUsd)) throw new Error("budgetUsd must be a positive number of USD");
     const requested = opts.name ?? (await this.ctx.registry.nextMissionName?.()) ?? `mission-${Date.now()}`;
@@ -508,6 +735,8 @@ export class MissionExecutor {
       status: opts.status ?? "draft",
       notifications: opts.notifications,
       ...(opts.budgetUsd !== undefined ? { budgetUsd: opts.budgetUsd } : {}),
+      ...(opts.owner ? { owner: opts.owner.toLowerCase() } : {}),
+      ...(opts.origin ? { origin: opts.origin } : {}),
     });
     this.ctx.emitter.emit("mission:saved", { missionId: mission.id, name: mission.name, status: mission.status });
     return mission;
@@ -689,7 +918,11 @@ export class MissionExecutor {
     return state.recurring ? "recurring" : "scheduled";
   }
 
-  async executeMission(missionId: string): Promise<{ tasks: Task[]; group: string }> {
+  /**
+   * `requestedBy`: the member this run is for (who started it, or the schedule's owner): its tasks
+   * carry it (a CLI engine on a personal sign-in runs only its owner's work).
+   */
+  async executeMission(missionId: string, opts: { requestedBy?: string; origin?: WorkOrigin } = {}): Promise<{ tasks: Task[]; group: string }> {
     const mission = await this.ctx.registry.getMission?.(missionId);
     if (!mission) throw new Error("Mission not found");
     const executableStates = ["draft", "scheduled", "recurring", "failed", "cancelled"];
@@ -734,7 +967,8 @@ export class MissionExecutor {
     const allAgents = await this.agentMgr.getAgents();
     const referencedModels: string[] = [];
     for (const t of doc.tasks) {
-      const agentName = t.assignTo || allAgents[0]?.name;
+      // "writer@1.2.0": the agent, pinned to a published version
+      const agentName = t.assignTo ? parseAgentRef(t.assignTo).name : allAgents[0]?.name;
       const agent = allAgents.find(a => a.name === agentName);
       if (agent?.model) {
         referencedModels.push(agent.model);
@@ -792,6 +1026,9 @@ export class MissionExecutor {
         notifications: t.notifications,
         sideEffects: t.sideEffects,
         ...(normalizeTaskToolScope(t.toolScope) ? { toolScope: normalizeTaskToolScope(t.toolScope) } : {}),
+        ...(opts.requestedBy ? { requestedBy: opts.requestedBy.toLowerCase() } : {}),
+        // what started this run (a trigger's delivery), else what started the mission
+        ...((opts.origin ?? mission.origin) ? { origin: opts.origin ?? mission.origin } : {}),
       });
       titleToId.set(t.title, task.id);
       tasks.push(task);
@@ -809,6 +1046,13 @@ export class MissionExecutor {
       this.delayState.definitions[group] = doc.delays as MissionDelay[];
       await this.delayStore.save(this.delayState);
     }
+    // Decision nodes: a new run decides again
+    await this.dropDecisionNodes(group);
+    if (doc.decisions && doc.decisions.length > 0) {
+      this.decisionsByGroup.set(group, doc.decisions as MissionDecision[]);
+    }
+    // Image nodes: a new run generates again
+    await this.images.startRun(group, (doc as { images?: MissionImage[] }).images);
 
     // Track scheduled origin so we know where to return after completion
     if (scheduledStatus) {
@@ -913,6 +1157,8 @@ export class MissionExecutor {
         this.cpState = await this.cpStore.removeGroup(this.cpState, group);
         // Clean up persisted delay entries for this group
         this.delayState = await this.delayStore.removeGroup(this.delayState, group);
+        // and its decision nodes (the decision log keeps the decisions)
+        await this.dropDecisionNodes(group);
       }
     }
   }
@@ -1005,6 +1251,10 @@ export class MissionExecutor {
         fc.afterTasks = rename(fc.afterTasks);
         fc.blocksTasks = rename(fc.blocksTasks);
       }
+      for (const d of doc.decisions ?? []) {
+        d.afterTasks = rename(d.afterTasks);
+        for (const k of Object.keys(d.branches)) d.branches[k] = rename(d.branches[k]);
+      }
     }
     return this.persistMissionData(missionId, doc, { section: "task", action: "updated", item: taskTitle });
   }
@@ -1043,6 +1293,14 @@ export class MissionExecutor {
         dl.blocksTasks = dl.blocksTasks.filter(t => t !== taskTitle);
       }
       doc.delays = doc.delays.filter(dl => dl.afterTasks.length > 0 && dl.blocksTasks.length > 0);
+    }
+    if (doc.decisions) {
+      for (const d of doc.decisions) {
+        d.afterTasks = d.afterTasks.filter(t => t !== taskTitle);
+        for (const k of Object.keys(d.branches)) d.branches[k] = d.branches[k].filter(t => t !== taskTitle);
+      }
+      doc.decisions = doc.decisions.filter(d => d.afterTasks.length > 0);
+      if (doc.decisions.length === 0) delete (doc as { decisions?: unknown }).decisions;
     }
     // Ensure at least 1 task remains (Zod will catch this, but give a nicer error)
     if (doc.tasks.length === 0) throw new Error("Cannot remove the last task from a mission");

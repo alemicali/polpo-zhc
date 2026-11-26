@@ -28,11 +28,24 @@ import { sandboxedAssessFn } from "../assessment/sandboxed.js";
 import { analyzeBlockedTasks, resolveDeadlock, isResolving } from "./deadlock-resolver.js";
 import { OrchestratorEngine } from "@polpo-ai/core";
 import type { DeadlockResolverPort, DeadlockFacade, MissionEdit } from "@polpo-ai/core";
-import { MISSION_EDIT } from "@polpo-ai/core";
+import { MISSION_EDIT, mayTalk } from "@polpo-ai/core";
 import { agentEngineProblem, HarnessConfigError, parseAgentEngine } from "@polpo-ai/core";
 import { agentHarnessBudgetUsd, computeMissionCost, plannedAgentsOf, summarizeMissionCost, tasksOfMission, type MissionCost, type MissionCostSummary } from "@polpo-ai/core";
 import { daytonaApiVersion } from "@polpo-ai/core/sandbox";
-import { TypedEmitter, withEventOrigin } from "./events.js";
+import { TypedEmitter, currentEventOrigin, withEventOrigin } from "./events.js";
+
+const MEMBER_EMAIL = /^[^\s@:]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * The member (email) the code running now acts for: a person's API call, Polpo's chat or Polpo's
+ * MCP connector on their behalf. Not an agent's tools (`by` is the agent), a channel contact
+ * ("telegram:123") or a schedule: their work has no member unless it says so.
+ */
+export function originMember(): string | undefined {
+  const o = currentEventOrigin();
+  if (!o?.by || (o.source !== "api" && o.source !== "polpo")) return undefined;
+  return MEMBER_EMAIL.test(o.by) ? o.by.toLowerCase() : undefined;
+}
 import type { PolpoEventMap } from "@polpo-ai/core";
 import type { TaskStore } from "./task-store.js";
 import type { RunStore } from "./run-store.js";
@@ -51,6 +64,7 @@ import type {
   MissionStatus,
   RetryPolicy,
   ScopedNotificationRules,
+  WorkOrigin,
 } from "./types.js";
 import { AgentManager } from "./agent-manager.js";
 import { TaskManager } from "./task-manager.js";
@@ -76,6 +90,8 @@ import { ApprovalManager } from "./approval-manager.js";
 import { FileApprovalStore } from "../stores/file-approval-store.js";
 import { FileCheckpointStore } from "../stores/file-checkpoint-store.js";
 import { FileDelayStore } from "../stores/file-delay-store.js";
+import { FileDecisionNodeStore } from "../stores/file-decision-node-store.js";
+import { FileImageNodeStore } from "../stores/file-image-node-store.js";
 import { NotificationRouter } from "../notifications/index.js";
 import { FileNotificationStore } from "../stores/file-notification-store.js";
 import { TelegramCallbackPoller } from "../notifications/channels/telegram.js";
@@ -89,12 +105,23 @@ import { TelegramGatewayAdapter } from "../notifications/telegram-gateway-adapte
 import { WebhookGatewayAdapter } from "../notifications/webhook-gateway-adapter.js";
 import { WhatsAppBridge, WhatsAppChannel } from "../notifications/channels/whatsapp.js";
 import { WhatsAppGatewayAdapter } from "../notifications/whatsapp-gateway-adapter.js";
+import { WaBusinessService, registerWaBusinessService } from "../notifications/whatsapp-business-service.js";
+import { WaBusinessGatewayAdapter } from "../notifications/whatsapp-business-gateway-adapter.js";
+import { SlackService, registerSlackService, type SlackClientFactory } from "../notifications/slack-service.js";
+import { FileWaBusinessStore } from "../stores/file-whatsapp-business-store.js";
+import { resolveWaBusinessSettings, type WaBusinessStore } from "@polpo-ai/core/whatsapp-business";
 import { WhatsAppStore } from "../stores/whatsapp-store.js";
 import type { WhatsAppMessageStore } from "@polpo-ai/core/whatsapp-store";
 import { FilePeerStore } from "./peer-store.js";
 import type { PeerStore } from "./peer-store.js";
 import { FileTeamStore } from "../stores/file-team-store.js";
 import { FileAgentStore } from "../stores/file-agent-store.js";
+import { FileAgentVersionStore } from "../stores/file-agent-version-store.js";
+import {
+  AgentVersioning, AgentVersionError, PRODUCTION_POINTER, parseAgentRef,
+  type AgentDeployEntry, type AgentVersion, type AgentVersionBump, type AgentVersionStore,
+} from "@polpo-ai/core/agent-versions";
+import type { AgentDeployGate, AgentDeployGateHook, AgentDeployOutcome, AgentDeployRequest } from "@polpo-ai/core/agent-suites";
 import type { TeamStore } from "./team-store.js";
 import type { AgentStore } from "./agent-store.js";
 import { EscalationManager } from "./escalation-manager.js";
@@ -109,6 +136,7 @@ import { DriveManager, FileDriveStore, type ReflectionRunner } from "./drive.js"
 import {
   assignSkillToAgent, createAgentSkill, loadSkillIndex, removeSkill, removeSkillFromIndex, unassignSkillFromAgent, updateSkillIndex,
 } from "../llm/skills.js";
+import { listSkillVersions, withSkillVersion } from "../llm/skill-versions.js";
 import type { ApprovalRequest, ApprovalStatus, ChannelReplyTarget, NotificationAction } from "./types.js";
 import { EncryptedVaultStore } from "../vault/encrypted-store.js";
 import type { VaultStore } from "./vault-store.js";
@@ -216,8 +244,20 @@ export class Orchestrator extends TypedEmitter {
   private webhookGateways = new Map<string, { gateway: ChannelGateway; adapter: WebhookGatewayAdapter }>();
   private whatsappBridge?: WhatsAppBridge;
   private whatsappStore?: WhatsAppMessageStore;
+  /** WhatsApp Business (Meta Cloud API) channels: webhook, inbox, sends, templates, approvals. */
+  private waBusiness?: WaBusinessService;
+  private waBusinessStore?: WaBusinessStore;
+  /** Slack apps over Socket Mode (inbound), and the bot token for posting. */
+  private slack?: SlackService;
+  private slackClients?: SlackClientFactory;
+  /** Inbound Slack channels' gateways by channel name. */
+  private slackGateways = new Map<string, ChannelGateway>();
   private peerStore?: PeerStore;
   private teamStore!: TeamStore;
+  private agentVersionStore!: AgentVersionStore;
+  private agentVersions!: AgentVersioning;
+  /** The deploy gate (required agent suites), set by the server: absent, deploys are immediate. */
+  private agentDeployGate?: AgentDeployGateHook;
   private agentStore!: AgentStore;
   private channelGateway?: ChannelGateway;
   private channelChatRunner?: ChannelChatRunner;
@@ -234,6 +274,10 @@ export class Orchestrator extends TypedEmitter {
   private agentMgr!: AgentManager;
   private taskMgr!: TaskManager;
   private missionExec!: MissionExecutor;
+  /** Who takes mission decision nodes' decisions (set by the server; kept across re-initialization). */
+  private missionDecider?: import("@polpo-ai/core").MissionDecider;
+  /** Who generates mission image nodes' images (set by the server; kept across re-initialization). */
+  private missionImager?: import("@polpo-ai/core").MissionImager;
   private runner!: TaskRunner;
   private assessor!: AssessmentOrchestrator;
 
@@ -253,7 +297,7 @@ export class Orchestrator extends TypedEmitter {
   /** Primary gateway, or the gateway of a specific channel by name. */
   getChannelGateway(channelName?: string): ChannelGateway | undefined {
     return channelName
-      ? this.channelGateways.get(channelName) ?? this.webhookGateways.get(channelName)?.gateway
+      ? this.channelGateways.get(channelName) ?? this.webhookGateways.get(channelName)?.gateway ?? this.slackGateways.get(channelName)
       : this.channelGateway;
   }
   /** Inbound adapter of a webhook channel with gateway.enableInbound. */
@@ -526,14 +570,14 @@ export class Orchestrator extends TypedEmitter {
   async learningTools(agent: AgentConfig): Promise<import("@earendil-works/pi-agent-core").AgentTool<any>[]> {
     const { createLearningTools } = await import("../tools/learning-tools.js");
     const { buildSkillFrontmatter } = await import("@polpo-ai/core");
-    const skills = this.learningSkillPort();
+    const skills = this.learningSkillPort(agent.name);
     return createLearningTools({
       agent,
       manager: this.learningMgr,
       skills,
       ownedSkills: () => Object.entries(loadSkillIndex(this.polpoDir) ?? {}).filter(([, e]) => e.owner === agent.name).map(([name]) => name),
       createOwnedSkill: async (name, description, content) => {
-        createAgentSkill(this.polpoDir, name, description, content);
+        createAgentSkill(this.polpoDir, name, description, content, { author: agent.name });
         updateSkillIndex(this.polpoDir, name, { owner: agent.name, category: "learned" });
         await skills.assign(agent.name, name, true);
         this.emit("skill:changed", { scope: "agent", action: "created", skillName: name, agentName: agent.name, timestamp: new Date().toISOString() });
@@ -545,19 +589,22 @@ export class Orchestrator extends TypedEmitter {
   }
 
   /** The agent skill pool, as learning reads and writes it (SKILL.md files, assignment to the agent). */
-  private learningSkillPort(): LearningSkillPort {
+  private learningSkillPort(author = "learning"): LearningSkillPort {
     const file = (name: string) => join(this.polpoDir, "skills", name, "SKILL.md");
     const changed = (action: "updated" | "deleted" | "assigned" | "unassigned", skillName: string, agentName?: string) =>
       this.emit("skill:changed", { scope: "agent", action, skillName, ...(agentName ? { agentName } : {}), timestamp: new Date().toISOString() });
     return {
       read: (name) => { try { return readFileSync(file(name), "utf-8"); } catch { return undefined; } },
       write: (name, content) => {
-        mkdirSync(dirname(file(name)), { recursive: true });
-        writeFileSync(file(name), content, "utf-8");
+        // recorded as a version (an agent's own skill, or learning's review and revert)
+        withSkillVersion(this.polpoDir, { pool: "agent", name }, { author, source: "edit" }, () => {
+          mkdirSync(dirname(file(name)), { recursive: true });
+          writeFileSync(file(name), content, "utf-8");
+        });
         changed("updated", name);
       },
       remove: (name) => {
-        removeSkill(this.polpoDir, name);
+        removeSkill(this.polpoDir, name, false, author);
         removeSkillFromIndex(this.polpoDir, name);
         changed("deleted", name);
       },
@@ -587,6 +634,12 @@ export class Orchestrator extends TypedEmitter {
     this.backgroundWaitMgr?.setContinuation(handler);
   }
   getWhatsAppStore(): WhatsAppMessageStore | undefined { return this.whatsappStore; }
+  /** The WhatsApp Business service (undefined before init). */
+  getWaBusiness(): WaBusinessService | undefined { return this.waBusiness; }
+  /** The Slack service (undefined before init). */
+  getSlack(): SlackService | undefined { return this.slack; }
+  /** Replace the Slack clients (tests: mocked socket and web clients). Before init. */
+  setSlackClients(factory: SlackClientFactory | undefined): void { this.slackClients = factory; }
   getWhatsAppBridge(): WhatsAppBridge | undefined { return this.whatsappBridge; }
 
   /** Re-point the orchestrator at a different project directory (before init). */
@@ -901,6 +954,7 @@ export class Orchestrator extends TypedEmitter {
     // Team & Agent stores — Drizzle when available, otherwise file-based
     this.teamStore = this.drizzleStores?.teamStore ?? new FileTeamStore(this.polpoDir);
     this.agentStore = this.drizzleStores?.agentStore ?? new FileAgentStore(this.polpoDir);
+    this.initAgentVersioning();
 
     // Vault first: custom provider keys live there ("$providers"), and the key check below
     // must see them (otherwise vault-only custom providers are reported as missing).
@@ -914,6 +968,10 @@ export class Orchestrator extends TypedEmitter {
 
     // Sync config.teams from stores (authoritative source — agents.json / teams.json)
     await this.agentMgr.syncConfigCache();
+
+    // Agents under versioning: 1.0.0 deployed to production for those without versions
+    // (idempotent), a new version for those changed outside it (CLI, file edits)
+    await this.migrateAgentVersions();
 
     this.playbookStore = this.withPlaybookEvents(this.drizzleStores?.playbookStore ?? new FilePlaybookStore(this.workDir, this.polpoDir));
   }
@@ -1014,6 +1072,7 @@ export class Orchestrator extends TypedEmitter {
       sessionStore: this.sessionStore,
       teamStore: this.teamStore,
       agentStore: this.agentStore,
+      agentVersions: this.agentVersions,
       hooks: this.hookRegistry,
       config: this.config,
       workDir: this.workDir,
@@ -1042,6 +1101,9 @@ export class Orchestrator extends TypedEmitter {
       // Schedules' state and the claims that keep a run to one process: never only in memory
       scheduleStore: this.getScheduleStore(),
       leaseStore: this.getLeaseStore(),
+      // Mission decision nodes: per-instance files whatever the store (like the decision log)
+      decisionNodeStore: new FileDecisionNodeStore(this.polpoDir),
+      imageNodeStore: new FileImageNodeStore(this.polpoDir),
 
       // Inject Drizzle stores when storage is "sqlite" or "postgres"
       ...(this.drizzleStores ? {
@@ -1068,6 +1130,8 @@ export class Orchestrator extends TypedEmitter {
     this.taskMgr = new TaskManager(ctx);
     this.missionExec = new MissionExecutor(ctx, this.taskMgr, this.agentMgr);
     await this.missionExec.ready;
+    this.missionExec.setDecider(this.missionDecider);
+    this.missionExec.setImager(this.missionImager);
     this.runner = new TaskRunner(ctx);
     this.assessor = new AssessmentOrchestrator(ctx);
 
@@ -1082,6 +1146,11 @@ export class Orchestrator extends TypedEmitter {
         host: msg.host, port: msg.port, reason: msg.reason,
       }),
       (msg) => this.reportRemoteSandboxEvent(msg.event as any, { workspaceId: msg.runId, provider: msg.provider, taskId: msg.taskId, agentName: msg.agentName }),
+      // a task run's agent talking to another agent (ask_agent, message_agent, escalate)
+      async (msg) => {
+        const { handleAgentTalkWire } = await import("./agent-talk-bridge.js");
+        return handleAgentTalkWire(msg, { talk: this.agentTalk, run: (runId) => this.runStore.getRun(runId) });
+      },
     );
 
     // Initialize approval gates if configured
@@ -1154,6 +1223,8 @@ export class Orchestrator extends TypedEmitter {
     }
 
     this.startWebhookGateways();
+    this.startWaBusiness();
+    this.startSlack();
 
     // Initialize escalation manager if configured
     if (this.config.settings.escalationPolicy) {
@@ -1184,7 +1255,7 @@ export class Orchestrator extends TypedEmitter {
     // Initialize scheduler (always available — zero cost when no schedules exist)
     if (this.config.settings.enableScheduler !== false) {
       this.scheduler = new Scheduler(ctx);
-      this.scheduler.setExecutor((missionId) => withEventOrigin({ source: "schedule" }, () => this.missionExec.executeMission(missionId)));
+      this.scheduler.setExecutor((missionId) => this.runScheduledMission(missionId));
       this.scheduler.init();
     }
 
@@ -1383,6 +1454,7 @@ export class Orchestrator extends TypedEmitter {
     // Team & Agent stores — Drizzle when available, otherwise file-based
     this.teamStore = this.drizzleStores?.teamStore ?? new FileTeamStore(this.polpoDir);
     this.agentStore = this.drizzleStores?.agentStore ?? new FileAgentStore(this.polpoDir);
+    this.initAgentVersioning();
 
     // Populate stores with the teams passed to initInteractive
     // (this is project creation, not migration — teams come from the caller)
@@ -1411,6 +1483,8 @@ export class Orchestrator extends TypedEmitter {
 
     // Sync config.teams from stores (authoritative source — agents.json / teams.json)
     await this.agentMgr.syncConfigCache();
+    // the team's agents start at 1.0.0 in production
+    await this.migrateAgentVersions();
 
     this.initVaultStore();
     await refreshCustomProviderSecretStatus();
@@ -1473,10 +1547,19 @@ export class Orchestrator extends TypedEmitter {
     notifications?: ScopedNotificationRules; sideEffects?: boolean; draft?: boolean; maxRetries?: number;
     /** Narrowing of the run's tools (validated: it may only narrow what the agent has). */
     toolScope?: unknown;
+    /** The member (email) who started it, when known (a CLI engine on a personal sign-in checks it). */
+    requestedBy?: string;
+    /** A published version of the assignee (absent: production); \`assignTo: "name@1.2.0"\` sets it too. */
+    agentVersion?: string;
+    /** What started it when not a person: a trigger's delivery. */
+    origin?: WorkOrigin;
   }): Promise<Task> {
-    const { toolScope, ...rest } = opts;
+    const { toolScope, ...given } = opts;
+    // the member this work is for: given, or the person whose call (dashboard, API, Polpo's chat) created it
+    const member = given.requestedBy ?? originMember();
+    const rest = { ...given, ...(member ? { requestedBy: member } : {}) };
     if (toolScope === undefined || toolScope === null) return this.engine.addTask(rest);
-    const scope = await requireTaskToolScope(this.toolScopeHost(), opts.assignTo, toolScope, { live: true });
+    const scope = await requireTaskToolScope(this.toolScopeHost(), parseAgentRef(opts.assignTo).name, toolScope, { live: true });
     return this.engine.addTask({ ...rest, ...(scope ? { toolScope: scope } : {}) });
   }
 
@@ -1566,6 +1649,10 @@ export class Orchestrator extends TypedEmitter {
   async rejectRequest(requestId: string, feedback: string, resolvedBy?: string): Promise<ApprovalRequest | null> {
     return this.engine.rejectRequest(requestId, feedback, resolvedBy);
   }
+  /** A human approval asked by the system itself (no configured gate), e.g. a hosted MCP server's approval tool call. */
+  async requestHumanApproval(opts: { gateId: string; gateName: string; taskId?: string; missionId?: string; payload?: unknown }): Promise<ApprovalRequest | null> {
+    return (await this.approvalMgr?.requestHumanApproval(opts)) ?? null;
+  }
   async canRejectRequest(requestId: string): Promise<{ allowed: boolean; rejectionCount: number; maxRejections: number }> {
     return this.engine.canRejectRequest(requestId);
   }
@@ -1591,6 +1678,8 @@ export class Orchestrator extends TypedEmitter {
   getCodingSessionStore(): CodingSessionStore { return this.codingSessionStore; }
   getTeamStore(): TeamStore { return this.teamStore; }
   getAgentStore(): AgentStore { return this.agentStore; }
+  /** Agent versions: drafts, published versions, the production pointer, deploy history. */
+  getAgentVersioning(): AgentVersioning { return this.agentVersions; }
   /** Drizzle-backed AttachmentStore when storage is sqlite/postgres, undefined for file mode. */
   getAttachmentStore(): import("@polpo-ai/core/attachment-store").AttachmentStore | undefined {
     return this.drizzleStores?.attachmentStore;
@@ -1737,6 +1826,8 @@ export class Orchestrator extends TypedEmitter {
       sessions: this.sessionStore,
       runner: () => this.channelChatRunner,
       intent: this.getGroupIntent(),
+      // communication lines: an agent's reply sets off only the agents it may talk to
+      mayTalk: async (from, to) => mayTalk({ from, to }, await this.getAgents()),
       profile: async (name) => {
         if (name === POLPO) {
           return { id: POLPO, name: orchestratorName(this.getConfig()?.settings), role: "the orchestrator: plans and coordinates the company's work, assigns tasks to the agents", responsibilities: [] };
@@ -1821,15 +1912,36 @@ export class Orchestrator extends TypedEmitter {
       if (!engine) delete agent.engine;
     }
     await this.engine.addAgent(agent, teamName);
+    // its first version: 1.0.0, deployed to production
+    if (!agent.volatile) await this.agentVersions.ensureInitial(agent.name, this.versionActor()).catch(() => undefined);
     await this.emitTeamSnapshot("agent:created", { agentName: agent.name, teamName });
     this.refreshDedicatedTelegramBots(agent.name);
   }
   async removeAgent(name: string): Promise<boolean> {
     const removed = await this.engine.removeAgent(name);
-    if (removed) await this.emitTeamSnapshot("agent:removed", { agentName: name });
+    if (removed) {
+      await this.agentVersions.forget(name).catch(() => undefined);
+      await this.emitTeamSnapshot("agent:removed", { agentName: name });
+    }
     return removed;
   }
+  /**
+   * Change an agent live (applies to its next runs right away). The change is recorded as a new
+   * published version deployed to production, so the history stays complete: Polpo's own tools,
+   * an agent changing its settings (voice replies, learning), skill assignment. People and API
+   * clients go through {@link updateAgentVersioned} (draft → publish → deploy).
+   */
   async updateAgent(name: string, updates: AgentUpdate): Promise<AgentConfig> {
+    const agent = await this.writeAgentLive(name, updates);
+    if (!agent.volatile) {
+      await this.agentVersions.recordLive(name, { actor: this.versionActor(), note: "Applied directly", updates })
+        .catch((err) => this.emit("log", { level: "warn", message: `Agent ${name}: could not record the change as a version: ${err instanceof Error ? err.message : String(err)}` }));
+    }
+    return agent;
+  }
+
+  /** Write an agent's live (production) config: engine checked, events, Telegram bots. */
+  private async writeAgentLive(name: string, updates: AgentUpdate): Promise<AgentConfig> {
     if ("engine" in updates || "defaultComputer" in updates) {
       const current = (await this.engine.getAgents()).find((a) => a.name === name);
       if (current) {
@@ -1841,6 +1953,144 @@ export class Orchestrator extends TypedEmitter {
     await this.emitTeamSnapshot("agent:updated", { agentName: agent.name });
     this.refreshDedicatedTelegramBots(agent.name);
     return agent;
+  }
+
+  /** Who is making a change now (attribution of versions and deploys). */
+  versionActor(fallback = "system"): string {
+    const origin = currentEventOrigin();
+    if (!origin) return fallback;
+    if (origin.source === "polpo") return "polpo";
+    if (origin.source === "agent" && origin.by) return origin.by;
+    if (origin.source === "schedule") return "system:schedule";
+    if (origin.by) return origin.by.includes(":") ? origin.by : `person:${origin.by}`;
+    return origin.source ? `system:${origin.source}` : fallback;
+  }
+
+  /** API/MCP updates without publish/deploy flags publish and deploy (settings.agents.versioning). */
+  autoDeployApiUpdates(): boolean {
+    return this.config?.settings?.agents?.versioning?.autoDeployApiUpdates !== false;
+  }
+
+  /**
+   * Change an agent through versioning: the changes go to its draft; then, as asked, the draft is
+   * published as a new version and deployed to production. `mode`:
+   *   - "draft": only the draft (the dashboard; publish and deploy are separate steps);
+   *   - "publish": draft + publish;
+   *   - "deploy": draft + publish + deploy to production (the immediate effect API clients had).
+   */
+  async updateAgentVersioned(name: string, updates: AgentUpdate, opts: {
+    actor: string;
+    mode: "draft" | "publish" | "deploy";
+    bump?: AgentVersionBump;
+    version?: string;
+    note?: string;
+    /** mode deploy through the gate: wait up to this long for the required suites (default: return pending). */
+    gateWaitMs?: number;
+  }): Promise<{ agent: AgentConfig; draftChanged: boolean; published?: AgentVersion; deployed?: AgentDeployEntry; deploy?: AgentDeployOutcome; check?: AgentDeployGate }> {
+    const current = (await this.engine.getAgents()).find((a) => a.name === name);
+    if (!current) throw new AgentVersionError(`Agent "${name}" not found`, "NOT_FOUND");
+    const { team, ...fields } = updates as AgentUpdate & { team?: string };
+    // team membership is not versioned: it applies right away
+    if (team !== undefined) await this.writeAgentLive(name, { team } as AgentUpdate);
+    if (current.volatile) {
+      // mission-scoped agents are not versioned
+      return { agent: Object.keys(fields).length ? await this.writeAgentLive(name, fields) : current, draftChanged: false };
+    }
+    // check the engine the draft would have (it must be runnable before it can be deployed)
+    if ("engine" in fields || "defaultComputer" in fields) {
+      const before = (await this.agentVersions.draftConfig(name)).config;
+      const engine = this.checkAgentEngine({ ...current, ...before, ...fields, name } as AgentConfig);
+      if ("engine" in fields) (fields as AgentUpdate).engine = engine;
+    }
+    // an agent with required suites: publish, then deploy through the gate (production moves when they pass)
+    const gated = opts.mode === "deploy" && !!this.agentDeployGate && await this.agentDeployGate.applies(name).catch(() => false);
+    const mode = gated ? "publish" : opts.mode;
+    const { draftChanged, published, deployed: direct } = await this.agentVersions.update(name, fields, {
+      actor: opts.actor, mode, bump: opts.bump, version: opts.version, note: opts.note,
+    });
+    let deployed = direct;
+    let deploy: AgentDeployOutcome | undefined;
+    let check: AgentDeployGate | undefined;
+    if (gated && published && this.agentDeployGate) {
+      deploy = await this.agentDeployGate.request(name, published.version, {
+        actor: opts.actor, trigger: "api-update", ...(opts.note ? { note: opts.note } : {}), ...(opts.gateWaitMs ? { waitMs: opts.gateWaitMs } : {}),
+      });
+      if (deploy.status === "deployed" && deploy.entry) deployed = deploy.entry;
+      else if (deploy.status === "deployed" && deploy.gate?.deployId) deployed = (await this.agentVersions.deploys(name, { limit: 20 })).find((e) => e.id === deploy!.gate!.deployId);
+    } else if (opts.mode === "publish" && published && this.agentDeployGate) {
+      check = await this.agentDeployGate.published(name, published.version, opts.actor).catch(() => undefined);
+    }
+    const agent = (await this.engine.getAgents()).find((a) => a.name === name) ?? current;
+    if (!deployed) await this.emitTeamSnapshot("agent:updated", { agentName: name });
+    return { agent, draftChanged, ...(published ? { published } : {}), ...(deployed ? { deployed } : {}), ...(deploy ? { deploy } : {}), ...(check ? { check } : {}) };
+  }
+
+  /** The server's deploy gate (required agent suites); undefined removes it. */
+  setAgentDeployGate(gate: AgentDeployGateHook | undefined): void { this.agentDeployGate = gate; }
+
+  /**
+   * Deploy a published version to production through the deploy gate: deployed now (no required
+   * suites, or an admin's override), pending (the required suites are running) or blocked.
+   */
+  async requestAgentDeploy(name: string, version: string, req: AgentDeployRequest): Promise<AgentDeployOutcome> {
+    if (this.agentDeployGate) return this.agentDeployGate.request(name, version, req);
+    const entry = await this.deployAgentVersion(name, version, { actor: req.actor, ...(req.note ? { note: req.note } : {}) });
+    return { status: "deployed", entry, message: `Deployed ${name}@${version} to production${entry.from ? ` (was ${entry.from})` : ""}.` };
+  }
+
+  /** A version was published (not deployed): its publish checks (suites with gate.onPublish). */
+  async agentVersionPublished(name: string, version: string, actor: string): Promise<AgentDeployGate | undefined> {
+    return this.agentDeployGate?.published(name, version, actor).catch(() => undefined);
+  }
+
+  /** Tell live clients an agent's versions changed (publish, draft discarded): agent:updated. */
+  async notifyAgentChanged(name: string): Promise<void> {
+    await this.emitTeamSnapshot("agent:updated", { agentName: name });
+  }
+
+  /**
+   * Deploy a published version to production, ungated (the deploy gate calls it when the suites
+   * pass): written live, recorded in the history. Requests go through {@link requestAgentDeploy}.
+   */
+  async deployAgentVersion(name: string, version: string, opts: { actor: string; note?: string; id?: string }): Promise<AgentDeployEntry> {
+    return this.agentVersions.deploy(name, version, { actor: opts.actor, note: opts.note, pointer: PRODUCTION_POINTER, ...(opts.id ? { id: opts.id } : {}) });
+  }
+
+  /** Roll production back: never gated (it must always work); verifications in flight stop. */
+  async rollbackAgentVersion(name: string, opts: { actor: string; note?: string; to?: string }): Promise<AgentDeployEntry> {
+    await this.agentDeployGate?.rollingBack(name, opts.actor).catch(() => undefined);
+    return this.agentVersions.rollback(name, opts);
+  }
+
+  private initAgentVersioning(): void {
+    this.agentVersionStore = (this.drizzleStores as { agentVersionStore?: AgentVersionStore } | undefined)?.agentVersionStore
+      ?? new FileAgentVersionStore(this.polpoDir);
+    this.agentVersions = new AgentVersioning(this.agentVersionStore, {
+      getAgent: (name) => this.agentStore.getAgent(name),
+      getAgents: () => this.agentStore.getAgents(),
+      writeLive: (name, updates) => this.writeAgentLive(name, updates),
+    }, {
+      // skills pinned at the version current when the agent version is published
+      skillVersions: (skills) => {
+        const pins: Record<string, number> = {};
+        for (const name of skills) {
+          const current = listSkillVersions(this.polpoDir, { pool: "agent", name })?.current
+            ?? listSkillVersions(this.polpoDir, { pool: "agent", global: true, name })?.current;
+          if (current !== undefined) pins[name] = current;
+        }
+        return pins;
+      },
+    });
+  }
+
+  private async migrateAgentVersions(): Promise<void> {
+    try {
+      const { initialized, reconciled } = await this.agentVersions.migrateAll();
+      if (initialized.length) this.emit("log", { level: "info", message: `Agent versions: ${initialized.length} agent(s) at 1.0.0 in production (${initialized.join(", ")})` });
+      if (reconciled.length) this.emit("log", { level: "info", message: `Agent versions: recorded changes made outside versioning for ${reconciled.join(", ")}` });
+    } catch (err) {
+      this.emit("log", { level: "warn", message: `Agent versions: migration failed: ${err instanceof Error ? err.message : String(err)}` });
+    }
   }
   async findAgentTeam(name: string): Promise<Team | undefined> { return this.engine.findAgentTeam(name); }
   async addVolatileAgent(agent: AgentConfig, group: string): Promise<void> { return this.engine.addVolatileAgent(agent, group); }
@@ -1861,9 +2111,11 @@ export class Orchestrator extends TypedEmitter {
 
   // ─── Mission Management (delegates to OrchestratorEngine → MissionExecutor) ──
 
-  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules; budgetUsd?: number }): Promise<Mission> {
+  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules; budgetUsd?: number; owner?: string; origin?: WorkOrigin }): Promise<Mission> {
     await this.checkMissionToolScopes(opts.data);
-    return this.engine.saveMission(opts);
+    // its owner: the member who creates it (its schedule's runs are their work)
+    const owner = opts.owner ?? originMember();
+    return this.engine.saveMission({ ...opts, ...(owner ? { owner } : {}) });
   }
 
   /**
@@ -1898,7 +2150,9 @@ export class Orchestrator extends TypedEmitter {
   async getAllMissions(): Promise<Mission[]> { return this.engine.getAllMissions(); }
   async updateMission(missionId: string, updates: Partial<Omit<Mission, "id">>): Promise<Mission> {
     await this.checkMissionToolScopes(updates.data);
-    return this.engine.updateMission(missionId, updates);
+    // a schedule belongs to the member who sets it: its runs are their work
+    const member = updates.schedule && !("owner" in updates) ? originMember() : undefined;
+    return this.engine.updateMission(missionId, member ? { ...updates, owner: member } : updates);
   }
   async deleteMission(missionId: string): Promise<boolean> { return this.engine.deleteMission(missionId); }
 
@@ -2062,7 +2316,17 @@ export class Orchestrator extends TypedEmitter {
 
   async getResumableMissions(): Promise<Mission[]> { return this.engine.getResumableMissions(); }
   async resumeMission(missionId: string, opts?: { retryFailed?: boolean }): Promise<{ retried: number; pending: number }> { return this.engine.resumeMission(missionId, opts); }
-  async executeMission(missionId: string): Promise<{ tasks: Task[]; group: string }> { return this.engine.executeMission(missionId); }
+  /** Run a mission now: its tasks are for the member who started it (their API call or Polpo's chat), when known. */
+  async executeMission(missionId: string, opts: { requestedBy?: string; origin?: WorkOrigin } = {}): Promise<{ tasks: Task[]; group: string }> {
+    const requestedBy = opts.requestedBy ?? originMember();
+    return this.engine.executeMission(missionId, { ...(requestedBy ? { requestedBy } : {}), ...(opts.origin ? { origin: opts.origin } : {}) });
+  }
+
+  /** A schedule's run: its tasks are for the schedule's owner (the mission's owner), when it has one. */
+  private async runScheduledMission(missionId: string): Promise<unknown> {
+    const mission = await Promise.resolve(this.registry.getMission?.(missionId)).catch(() => undefined);
+    return withEventOrigin({ source: "schedule" }, () => this.missionExec.executeMission(missionId, mission?.owner ? { requestedBy: mission.owner } : {}));
+  }
 
   // ─── Checkpoints (delegates to OrchestratorEngine) ──
 
@@ -2077,6 +2341,37 @@ export class Orchestrator extends TypedEmitter {
   /** Resume a checkpoint by mission ID and checkpoint name. Returns true if resumed. */
   async resumeCheckpointByMissionId(missionId: string, checkpointName: string): Promise<boolean> {
     return this.engine.resumeCheckpointByMissionId(missionId, checkpointName);
+  }
+
+  // ─── Decision nodes (the mission executor) ─────
+
+  /** Who takes mission decision nodes' decisions (the server's decision service). */
+  setMissionDecider(decider: import("@polpo-ai/core").MissionDecider | undefined): void {
+    this.missionDecider = decider;
+    this.missionExec?.setDecider(decider);
+  }
+
+  /** Mission decision nodes: deciding, decided, or waiting for a person. */
+  getDecisionNodes(): import("@polpo-ai/core").DecisionNodeState[] {
+    return this.missionExec?.listDecisionNodes() ?? [];
+  }
+
+  /** A person chooses the branch of a node waiting for one (null: none of its tasks run). */
+  async resolveDecisionNode(group: string, node: string, branch: string | null, by: string): Promise<import("@polpo-ai/core").DecisionNodeState> {
+    return this.missionExec.resolveDecisionNode(group, node, branch, by);
+  }
+
+  // ─── Image nodes (the mission executor) ─────
+
+  /** Who generates mission image nodes' images (the server's media service). */
+  setMissionImager(imager: import("@polpo-ai/core").MissionImager | undefined): void {
+    this.missionImager = imager;
+    this.missionExec?.setImager(imager);
+  }
+
+  /** Mission image nodes: generating, done or failed. */
+  getImageNodes(): import("@polpo-ai/core").ImageNodeState[] {
+    return this.missionExec?.listImageNodes() ?? [];
   }
 
   // ─── Delays (delegates to OrchestratorEngine) ─────
@@ -2165,6 +2460,13 @@ export class Orchestrator extends TypedEmitter {
     this.whatsappBridge?.stop();
     this.whatsappStore?.close();
     this.whatsappStore = undefined;
+    this.waBusiness?.dispose();
+    registerWaBusinessService(this.polpoDir, undefined);
+    this.waBusiness = undefined;
+    await this.slack?.dispose();
+    registerSlackService(this.polpoDir, undefined);
+    this.slack = undefined;
+    this.slackGateways.clear();
     this.notificationServer?.close();
     this.approvalMgr?.dispose();
     this.notificationRouter?.dispose();
@@ -2313,6 +2615,8 @@ export class Orchestrator extends TypedEmitter {
     }
 
     this.startWebhookGateways();
+    this.startWaBusiness();
+    this.startSlack();
 
     // Escalation manager
     if (this.config.settings.escalationPolicy) {
@@ -2344,7 +2648,7 @@ export class Orchestrator extends TypedEmitter {
     if (this.config.settings.enableScheduler !== false) {
       if (!this.scheduler) {
         this.scheduler = new Scheduler(ctx);
-        this.scheduler.setExecutor((missionId) => withEventOrigin({ source: "schedule" }, () => this.missionExec.executeMission(missionId)));
+        this.scheduler.setExecutor((missionId) => this.runScheduledMission(missionId));
       }
       this.scheduler.init();
     } else {
@@ -2631,6 +2935,15 @@ export class Orchestrator extends TypedEmitter {
       return;
     }
 
+    if (config.type === "slack" && this.slack) {
+      const chatId = target.chatId || config.chatId;
+      if (!chatId) throw new Error(`No Slack channel for "${target.channel}": set replyTo.chatId or the channel's chat ID`);
+      if (event.kind === "echo") await this.slack.post(target.channel, chatId, `_↪ ${event.from} · ${event.via}_\n${event.text}`);
+      else if (event.kind === "partial") await this.slack.post(target.channel, chatId, event.text);
+      else await this.slack.post(target.channel, chatId, event.reply.text, { buttons: event.reply.buttons, files: event.reply.files });
+      return;
+    }
+
     if (event.kind !== "reply") return;
     const channel = this.notificationRouter?.getChannel(target.channel);
     if (!channel) throw new Error(`Channel "${target.channel}" is not running`);
@@ -2688,6 +3001,113 @@ export class Orchestrator extends TypedEmitter {
       const target = channelConfig.gateway.agent ? `agent: ${channelConfig.gateway.agent}` : "orchestrator";
       this.emit("log", { level: "info", message: `Webhook channel gateway "${key}" ready (${target})` });
     }
+  }
+
+  // ── WhatsApp Business (Meta Cloud API) ──
+
+  /**
+   * The instance's WhatsApp Business service (created once, reading the configuration live) and a
+   * gateway per whatsapp-business channel with gateway.enableInbound. Customers (business.audience,
+   * the default) talk only with gateway.agent, never use commands and are never told about pairing;
+   * operators may use commands. Called at start and on every reload.
+   */
+  private startWaBusiness(): void {
+    if (!this.waBusiness) {
+      this.waBusinessStore = this.waBusinessStore ?? this.drizzleStores?.waBusinessStore ?? new FileWaBusinessStore(this.polpoDir);
+      const store = this.waBusinessStore;
+      this.waBusiness = new WaBusinessService({
+        polpoDir: () => this.polpoDir,
+        channels: () => this.config.settings.notifications?.channels ?? {},
+        store: () => store,
+        vault: () => this.vaultStore,
+        emit: (event, payload) => { this.emit(event, payload as never); },
+        log: (level, message) => this.emit("log", { level, message: `[whatsapp-business] ${message}` }),
+        publicBase: () => process.env.POLPO_PUBLIC_URL?.trim() || undefined,
+        instance: () => {
+          const port = Number(process.env.POLPO_PORT ?? process.env.PORT);
+          return Number.isFinite(port) && port > 0 ? { port } : {};
+        },
+      });
+      registerWaBusinessService(this.polpoDir, this.waBusiness);
+      this.waBusiness.start();
+    }
+    const service = this.waBusiness;
+    service.clearGateways();
+    const channels = this.config.settings.notifications?.channels ?? {};
+    for (const [key, channelConfig] of Object.entries(channels)) {
+      if (channelConfig?.type !== "whatsapp-business" || !channelConfig.gateway?.enableInbound) continue;
+      const business = resolveWaBusinessSettings(channelConfig.business);
+      const customers = business.audience === "customers";
+      if (customers && !channelConfig.gateway.agent) {
+        this.emit("log", { level: "warn", message: `WhatsApp Business "${key}": inbound is on but gateway.agent is not set: customers' messages are stored, not answered` });
+        continue;
+      }
+      this.peerStore = this.peerStore ?? this.drizzleStores?.peerStore ?? new FilePeerStore(this.polpoDir);
+      const operators = new Set(business.operators);
+      const gatewayConfig = customers
+        ? { dmPolicy: "open" as const, ...channelConfig.gateway, commands: channelConfig.gateway.commands === "none" ? "none" as const : "operators" as const }
+        : { dmPolicy: "allowlist" as const, ...channelConfig.gateway, allowFrom: [...new Set([...(channelConfig.gateway.allowFrom ?? []), ...operators])] };
+      const gateway = new ChannelGateway({
+        orchestrator: this,
+        peerStore: this.peerStore!,
+        sessionStore: this.sessionStore,
+        channelConfig: { ...channelConfig, gateway: gatewayConfig },
+        approvalResolver: customers ? undefined : this.createApprovalResolver(),
+        onTyping: (chatId) => service.typing(key, chatId),
+        key,
+        customerMode: customers,
+        isOperator: (externalId) => operators.has(externalId),
+      });
+      gateway.setPartialResponseHandler(async (chatId, text) => { await service.sendReply(key, chatId, text); });
+      if (!customers) gateway.setReplyRouter((target, event) => this.routeChannelReply(target, event));
+      service.setGateway(key, new WaBusinessGatewayAdapter(gateway));
+      this.emit("log", { level: "info", message: `WhatsApp Business channel "${key}" ready (${customers ? `customers → ${channelConfig.gateway.agent}` : "operators"})` });
+    }
+    void service.drain();
+  }
+
+  // ── Slack (Socket Mode) ──
+
+  /**
+   * The instance's Slack service (created once, reading the configuration live) and a gateway per
+   * Slack channel with gateway.enableInbound: the service keeps one Socket Mode connection per app
+   * (both tokens in the vault) and only reconnects when a token changed. Called at start and on
+   * every reload.
+   */
+  private startSlack(): void {
+    if (!this.slack) {
+      this.slack = new SlackService({
+        channels: () => this.config.settings.notifications?.channels ?? {},
+        vault: () => this.vaultStore,
+        log: (level, message) => this.emit("log", { level, message: `[slack] ${message}` }),
+        ...(this.slackClients ? { clients: this.slackClients } : {}),
+      });
+      registerSlackService(this.polpoDir, this.slack);
+    }
+    const service = this.slack;
+    service.clearGateways();
+    this.slackGateways.clear();
+    const channels = this.config.settings.notifications?.channels ?? {};
+    for (const [key, channelConfig] of Object.entries(channels)) {
+      if (channelConfig?.type !== "slack" || !channelConfig.gateway?.enableInbound) continue;
+      this.peerStore = this.peerStore ?? this.drizzleStores?.peerStore ?? new FilePeerStore(this.polpoDir);
+      const gateway = new ChannelGateway({
+        orchestrator: this,
+        peerStore: this.peerStore!,
+        sessionStore: this.sessionStore,
+        channelConfig: { ...channelConfig, gateway: { dmPolicy: "pairing", ...channelConfig.gateway } },
+        approvalResolver: this.createApprovalResolver(),
+        key,
+        roomStore: this.getRoomStore(),
+      });
+      gateway.setIntentArbiter(this.getGroupIntent());
+      gateway.setReplyRouter((target, event) => this.routeChannelReply(target, event));
+      service.setGateway(key, gateway);
+      this.slackGateways.set(key, gateway);
+      const target = channelConfig.gateway.agent ? `agent: ${channelConfig.gateway.agent}` : "orchestrator";
+      this.emit("log", { level: "info", message: `Slack channel gateway "${key}" ready (dmPolicy: ${channelConfig.gateway.dmPolicy ?? "pairing"}, ${target})` });
+    }
+    void service.sync();
   }
 
   // ── WhatsApp Bridge ──

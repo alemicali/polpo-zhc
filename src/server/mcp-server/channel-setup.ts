@@ -1,7 +1,9 @@
 /**
  * The rest of Configuration → Channels, so a connector can set a channel up end to end: who answers
- * on each channel (routes), Telegram (check a bot, invites, pairings, the allowlist of
- * people who may write) and WhatsApp (sign in with a QR code, wait for it, sign out).
+ * on each channel (routes), who may write (DM policy and allowFrom, one field at a time), Telegram
+ * (check a bot, invites, pairings, the allowlist of people who may write), Slack (the Socket Mode
+ * connection and which tokens are set), people across channels (presence, linking identities) and
+ * WhatsApp (sign in with a QR code, wait for it, sign out).
  *
  * In the settings toolset: changes need polpo:admin, and so do the reads that name people (peers,
  * pairings). Secrets (bot tokens…) never pass through: the person enters them in the dashboard.
@@ -12,7 +14,7 @@ import {
   DESTRUCTIVE, MAX_WAIT_SECONDS, READ, UPDATE, apiError, apiGet, apiSend, confirmParam, dashboardLink, enc, fail, looseObject, ok, orchestratorLabel, progress, qs, sleep,
   type CallToolResult, type McpDeps, type Register,
 } from "./kit.js";
-import { setupHandoff } from "./setup.js";
+import { setupHandoff, setupHandoffs } from "./setup.js";
 
 type Gateway = Record<string, unknown> & { agent?: string; replyTo?: { channel: string; chatId?: string; echoInbound?: boolean } };
 type Channel = Record<string, unknown> & { type?: string; gateway?: Gateway };
@@ -32,9 +34,26 @@ function routeView(name: string, c: Channel): Record<string, unknown> {
     ...(g.groupReplies ? { group_replies: g.groupReplies } : {}), ...(g.intentThreshold !== undefined ? { intent_threshold: g.intentThreshold } : {}),
     ...(g.sessionMode ? { session_mode: g.sessionMode } : {}), ...(g.sessionIdleMinutes !== undefined ? { session_idle_minutes: g.sessionIdleMinutes } : {}),
     ...(g.agentSessions ? { agent_sessions: g.agentSessions } : {}),
-    ...(g.dmPolicy ? { dm_policy: g.dmPolicy } : {}),
+    dm_policy: g.dmPolicy ?? defaultDmPolicy(c.type),
+    ...(Array.isArray(g.allowFrom) && g.allowFrom.length ? { allow_from: g.allowFrom } : {}),
+    ...(g.commands ? { commands: g.commands } : {}),
   };
 }
+
+/** The DM policy a channel's gateway uses when none is set (as the orchestrator starts it). */
+function defaultDmPolicy(type: string | undefined): string {
+  return type === "webhook" ? "open" : type === "slack" ? "pairing" : type === "whatsapp-business" ? "open (customers) / allowlist (operators)" : "allowlist";
+}
+
+/** The channels whose inbound gateway exists (who may write applies to them). */
+const INBOUND_TYPES = ["telegram", "whatsapp", "whatsapp-business", "webhook", "slack"];
+
+type SlackStatus = { channel: string; inbound: boolean; secrets: { botToken: boolean; appToken: boolean }; state: string; team?: string; botName?: string; lastEventAt?: string; lastError?: string; received: number };
+
+const SLACK_WHAT: Record<string, string> = {
+  botToken: "bot token (xoxb-…, Slack app → OAuth & Permissions)",
+  appToken: "app-level token (xapp-…, Slack app → Basic Information → App-Level Tokens, scope connections:write)",
+};
 
 type WaSession = { id: string; profileDir: string; status: string; qr?: string; error?: string; expiresAt?: string };
 
@@ -56,7 +75,7 @@ const loginText = (s: WaSession) => s.status === "qr"
       : `The WhatsApp login ${s.status}${s.error ? `: ${s.error}` : ""}. Start a new one with polpo_whatsapp_login.`;
 
 export function registerChannelSetupTools(tool: Register, deps: McpDeps): void {
-  const setup = dashboardLink(deps, "/config?section=channels");
+  const setup = () => dashboardLink(deps, "/config?section=channels");
 
   // ── Routes: who answers on each channel ──
 
@@ -178,7 +197,7 @@ export function registerChannelSetupTools(tool: Register, deps: McpDeps): void {
     title: "List channel peers and pairings",
     description: "The people the channels know (peers, with their channel and external id), the allowlist of who may write, and the pairing "
       + "requests waiting for approval (codes). Needs the admin scope (it names people).",
-    inputSchema: { channel: z.enum(["telegram", "whatsapp", "slack", "discord", "webchat"]).optional().describe("Only this channel's peers") },
+    inputSchema: { channel: z.enum(["telegram", "whatsapp", "whatsapp-business", "slack", "webhook"]).optional().describe("Only this channel type's peers") },
     outputSchema: { peers: z.array(looseObject), allowlist: z.array(z.unknown()), pairings: z.array(looseObject) },
     annotations: READ,
     scope: "polpo:admin",
@@ -231,6 +250,130 @@ export function registerChannelSetupTools(tool: Register, deps: McpDeps): void {
     const r = approve ? await apiSend(deps, "POST", "/peers/pair", { code }) : await apiSend(deps, "POST", `/peers/pairings/${enc(code)}/reject`);
     if (!r.ok) return r.status === 404 ? fail(`No pending pairing "${code}" (it may have expired). List them with polpo_channel_peers.`) : apiError(r, `Answering pairing ${code}`);
     return ok(approve ? `Approved ${code}: they can write now.` : `Rejected ${code}.`, { code, approved: approve, ...(approve ? { request: r.data } : {}) });
+  });
+
+  // ── Who may write: DM policy and allowFrom, one field at a time ──
+
+  tool("settings", "polpo_channel_access_set", {
+    title: "Set who may write on a channel",
+    description: "Change a channel's DM policy (pairing: unknown people get a code to approve; allowlist: only allowed people; open: anyone who reaches "
+      + "the channel; disabled: nobody) and its allowFrom list (external ids, e.g. a Telegram user id, a Slack user id U0123, a phone number) without "
+      + "replacing the rest of the gateway: allow_from replaces the list, allow_add / allow_remove change it. Pairing approvals and invites stay in "
+      + "polpo_channel_pairing / polpo_channel_invite. Needs the admin scope.",
+    inputSchema: {
+      channel: z.string().min(1).describe("The channel's name (polpo_channel_routes_list)"),
+      dm_policy: z.enum(["pairing", "allowlist", "open", "disabled"]).optional().describe("Who may start a conversation"),
+      allow_from: z.array(z.string().min(1)).max(500).optional().describe("Replace allowFrom with these external ids ([] empties it)"),
+      allow_add: z.array(z.string().min(1)).max(100).optional().describe("Add these external ids to allowFrom"),
+      allow_remove: z.array(z.string().min(1)).max(100).optional().describe("Remove these external ids from allowFrom"),
+    },
+    outputSchema: { route: looseObject, changed: z.array(z.string()) },
+    annotations: UPDATE,
+  }, async (a) => {
+    if (a.dm_policy === undefined && a.allow_from === undefined && !a.allow_add?.length && !a.allow_remove?.length) {
+      return fail("Nothing to change: give dm_policy, allow_from, allow_add or allow_remove.");
+    }
+    if (a.allow_from !== undefined && (a.allow_add?.length || a.allow_remove?.length)) return fail("Give allow_from (the whole list) or allow_add / allow_remove, not both.");
+    const c = await channelsNow(deps);
+    if (!c.ok) return c.res;
+    const current = c.channels[a.channel];
+    if (!current) return fail(`There is no channel "${a.channel}". List them with polpo_channel_routes_list.`);
+    if (!INBOUND_TYPES.includes(String(current.type))) return fail(`${a.channel} (${String(current.type)}) only sends notifications: nobody writes to it.`);
+    const before = { ...(current.gateway ?? {}) } as Gateway & { dmPolicy?: string; allowFrom?: string[] };
+    const g = { ...before };
+    if (a.dm_policy !== undefined) g.dmPolicy = a.dm_policy;
+    let list = a.allow_from ?? [...(Array.isArray(before.allowFrom) ? before.allowFrom : [])];
+    for (const id of a.allow_add ?? []) if (!list.includes(id)) list.push(id);
+    if (a.allow_remove?.length) list = list.filter((id) => !a.allow_remove!.includes(id));
+    if (a.allow_from !== undefined || a.allow_add?.length || a.allow_remove?.length) {
+      if (list.length) g.allowFrom = [...new Set(list)]; else delete g.allowFrom;
+    }
+    const changed = ["dmPolicy", "allowFrom"].filter((k) => JSON.stringify((before as Record<string, unknown>)[k]) !== JSON.stringify((g as Record<string, unknown>)[k]));
+    if (!changed.length) return ok("Nothing changed (the values were the same).", { route: routeView(a.channel, current), changed });
+    // the stored channel comes back with its secrets masked: the server restores them
+    const r = await apiSend(deps, "PUT", `/config/channels/${enc(a.channel)}`, { ...current, gateway: g });
+    if (!r.ok) return apiError(r, `Saving who may write on ${a.channel}`);
+    const route = routeView(a.channel, { ...current, gateway: g });
+    const allow = (g.allowFrom as string[] | undefined) ?? [];
+    return ok(`${a.channel}: DM policy ${String(route.dm_policy)}, allowFrom ${allow.length ? allow.join(", ") : "empty"}${g.enableInbound ? "" : " (inbound is off: turn it on with polpo_channel_route_set)"}.`,
+      { route, changed });
+  });
+
+  // ── People across channels: presence and linked identities ──
+
+  tool("settings", "polpo_peer_presence", {
+    title: "Who is active on the channels",
+    description: "The people active on the channels in the last minutes (presence: chatting, approving or idle), with their channel and last "
+      + "activity, and which identities are linked across channels (a linked peer shares sessions with the identity it points to). Needs the admin scope (it names people).",
+    inputSchema: { channel: z.enum(["telegram", "whatsapp", "whatsapp-business", "slack", "webhook"]).optional().describe("Only this channel type") },
+    outputSchema: { presence: z.array(looseObject), links: z.array(z.object({ peer_id: z.string(), linked_to: z.string() })) },
+    annotations: READ,
+    scope: "polpo:admin",
+  }, async ({ channel }) => {
+    const [pr, pe] = await Promise.all([apiGet(deps, "/peers/presence"), apiGet(deps, `/peers${qs({ channel })}`)]);
+    if (!pr.ok) return pr.status === 404 ? fail("No channel takes messages yet: turn inbound on for one (polpo_channel_route_set).") : apiError(pr, "Reading presence");
+    const presence = ((pr.data as Array<Record<string, unknown>>) ?? []).filter((p) => !channel || p.channel === channel);
+    const peers = pe.ok && Array.isArray(pe.data) ? pe.data as Array<{ id: string; linkedTo?: string }> : [];
+    const links = peers.filter((p) => p.linkedTo).map((p) => ({ peer_id: p.id, linked_to: String(p.linkedTo) }));
+    return ok([
+      `active: ${presence.map((p) => `${String(p.peerId)}${p.displayName ? ` (${String(p.displayName)})` : ""} ${String(p.activity)} at ${String(p.lastActivityAt)}`).join("; ") || "nobody right now"}`,
+      `linked: ${links.map((l) => `${l.peer_id} → ${l.linked_to}`).join("; ") || "none"}`,
+    ].join("\n"), { presence, links });
+  });
+
+  tool("settings", "polpo_peer_link", {
+    title: "Link a person's identities",
+    description: "Link a peer (polpo_channel_peers, e.g. slack:U0123) to another identity of the same person (e.g. telegram:12345): the linked peer "
+      + "shares that identity's sessions, so a conversation started on one channel continues on the other. linked_to null unlinks it. Needs the admin scope.",
+    inputSchema: {
+      peer_id: z.string().min(1).describe("The peer to link"),
+      linked_to: z.string().min(1).nullable().describe("The identity it shares sessions with; null unlinks"),
+    },
+    outputSchema: { peer_id: z.string(), linked_to: z.string().nullable() },
+    annotations: UPDATE,
+  }, async ({ peer_id, linked_to }) => {
+    const r = await apiSend(deps, "POST", "/peers/link", { peerId: peer_id, linkedTo: linked_to });
+    if (!r.ok) return r.status === 404 ? fail(`${r.error}. List the peers with polpo_channel_peers.`) : apiError(r, `Linking ${peer_id}`);
+    return ok(linked_to ? `Linked ${peer_id} → ${linked_to}: they share sessions now.` : `Unlinked ${peer_id}.`, { peer_id, linked_to });
+  });
+
+  // ── Slack (Socket Mode) ──
+
+  tool("settings", "polpo_slack_status", {
+    title: "Slack connection status",
+    description: "Slack channels' inbound connection (Socket Mode: no public URL needed): inbound on or off, which tokens are in the vault (the bot token "
+      + "xoxb-… and the app-level token xapp-… — only whether they are set, never their values), the connection state (connected, reconnecting, error…), "
+      + "the bot and the workspace, the last event. Missing tokens come with setup_url (the person pastes them in the dashboard) and setup ids for "
+      + "polpo_setup_wait. test: true checks the bot token with Slack now.",
+    inputSchema: {
+      channel: z.string().min(1).optional().describe("One Slack channel (default: all of them)"),
+      test: z.boolean().optional().describe("Check the bot token with Slack (auth.test)"),
+    },
+    outputSchema: { channels: z.array(looseObject), test: looseObject.optional(), setup_url: z.string().optional(), setup_ids: z.array(z.string()).optional(), next_step: z.string().optional() },
+    annotations: READ,
+  }, async ({ channel, test }) => {
+    const r = await apiGet(deps, "/slack");
+    if (!r.ok) return apiError(r, "Reading the Slack channels");
+    let all = ((r.data as { channels?: SlackStatus[] }).channels ?? []);
+    if (channel) {
+      all = all.filter((s) => s.channel === channel);
+      if (!all.length) return fail(`No Slack channel "${channel}". Create one with polpo_channel_save { name: "${channel}", type: "slack" }.`);
+    }
+    if (!all.length) return ok("No Slack channel. Create one with polpo_channel_save (type slack), then the person adds the app's tokens in the dashboard.", { channels: [] });
+    let tested: Record<string, unknown> | undefined;
+    if (test) {
+      const target = all.length === 1 ? all[0]!.channel : channel;
+      if (!target) return fail(`Say which channel to test: ${all.map((s) => s.channel).join(", ")}.`);
+      const t = await apiSend(deps, "POST", `/slack/${enc(target)}/test`);
+      tested = t.ok ? { channel: target, ok: (t.data as { ok: boolean }).ok } : { channel: target, ok: false, error: t.error };
+    }
+    const missing = all.flatMap((s) => (["botToken", "appToken"] as const).filter((k) => !s.secrets[k] && (k === "botToken" || s.inbound)).map((k) => ({ channel: s.channel, k })));
+    const handoff = missing.length ? setupHandoffs(deps, missing.map((m) => ({ target: { kind: "slack" as const, item: m.channel, field: m.k }, what: `${SLACK_WHAT[m.k]} for ${m.channel}` }))) : {};
+    const lines = all.map((s) => `- ${s.channel}: ${s.state}${s.inbound ? ", inbound on" : ", inbound off"}; tokens: bot ${s.secrets.botToken ? "set" : "missing"}, app-level ${s.secrets.appToken ? "set" : "missing"}`
+      + `${s.botName ? `; @${s.botName}` : ""}${s.team ? ` in ${s.team}` : ""}${s.lastEventAt ? `; last event ${s.lastEventAt}` : ""}${s.lastError ? `; last problem: ${s.lastError}` : ""}`);
+    if (tested) lines.push(`test ${String(tested.channel)}: ${tested.ok ? "Slack accepts the bot token" : `failed${tested.error ? `: ${String(tested.error)}` : ""}`}`);
+    if (missing.length) lines.push((handoff as { next_step: string }).next_step);
+    return ok(lines.join("\n"), { channels: all as unknown as Array<Record<string, unknown>>, ...(tested ? { test: tested } : {}), ...handoff });
   });
 
   // ── WhatsApp ──
@@ -309,6 +452,6 @@ export function registerChannelSetupTools(tool: Register, deps: McpDeps): void {
     if (confirm !== true) return fail(`Signing ${p} out stops WhatsApp until it is scanned again: ask the person, then call again with confirm: true.`);
     const r = await apiSend(deps, "POST", "/whatsapp/logout", { profileDir: p });
     if (!r.ok) return apiError(r, `Signing ${p} out`);
-    return ok(`Signed ${p} out of WhatsApp. To sign in again: polpo_whatsapp_login or ${setup}.`, { profile: p, removed: true });
+    return ok(`Signed ${p} out of WhatsApp. To sign in again: polpo_whatsapp_login or ${setup()}.`, { profile: p, removed: true });
   });
 }

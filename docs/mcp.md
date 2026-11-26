@@ -19,9 +19,17 @@ Every tool has a title and honest annotations (`readOnlyHint`, `destructiveHint`
 | `polpo_ask` | Ask Polpo in natural language: it can do anything the instance can. Returns `{ status, reply, session_id, pending? }`; pass `session_id` to continue the conversation. |
 | `polpo_agent_chat` | Talk to one agent, with its tools, memory and skills; same result. |
 | `polpo_answer` | Answer what a turn stopped for (`status: "needs_input"`): Polpo's questions, a mission plan to execute, save as draft, refine or cancel, a WhatsApp message or an email to send, refine or cancel. |
+| `polpo_search` | Search everything at once, like ⌘K in the dashboard: chats (message text too, with who said it), groups, agents, tasks, missions, artifacts, files, data, skills, memory, the company brain… grouped by type, best first, with snippets (`types`, `limit`, `per_type`, `cursor`). See [search.md](search.md). |
+| `polpo_search_ask` | Ask the search in plain words (Italian or English), like Enter in ⌘K: Polpo's model searches, answers in a line or two and returns the results worth opening plus intents (a page to open with its link, a palette command, or a change to hand to Polpo). Nothing is executed (read scope). See [search.md](search.md#ask-polpo). |
 | `polpo_agents_list` | The agents. |
 | `polpo_agent_show` | An agent's card: in Claude and ChatGPT an interactive card (see below), elsewhere text: its engine (Polpo, Claude Code, Codex) and computer, the task at hand with its latest run (engine, model, computer, cost) or why it failed, and the connectors it may use with their accounts. |
 | `polpo_approvals_list`, `polpo_approval_resolve` | Decide on requests that wait for a person. |
+| `polpo_decide` | Typed decisions with probabilities from the decision model (docs/decisions.md): predicate (P(yes)), choice, score, rank on a state (text or JSON), with thresholds → uncertain. Costs money; every call is in the decision log. Without a decision model: an error with the Settings link (or Polpo's own model, `calibrated: false`). Needs `polpo:work`. |
+| `polpo_decisions`, `polpo_decision_resolve` | The decision log (filters, one decision with its state) and missions' decision nodes (`nodes: true`); `polpo_decision_resolve` (work) picks the branch of a node waiting for a person. |
+| `polpo_image_generate`, `polpo_image_edit` | Generate images (or change one, compose several, inside a mask) with the instance's image model through Vercel AI Gateway (docs/media.md). Costs money; every image is kept with its provenance in the media log. Without an image model: an error with the Settings link. Needs `polpo:work`. |
+| `polpo_media_log`, `polpo_media_status` | The media log (filters, one request with its provenance, missions' image nodes with `nodes: true`) and the image model's status (never the key). |
+| `polpo_image_show` | The media card: a request's images (previews inside the card), prompt, model, size, seed, cost and who asked; without `id`, the latest requests. |
+| `polpo_decision_show` | The decision card: each answer with probability bars, confidence and uncertain, the model and the cost; without `id`, the latest decisions. |
 
 ### tasks (on by default)
 
@@ -81,7 +89,7 @@ A failed task carries `failure` on every surface (`GET /tasks/:id`, the slim lis
 
 | Tool | What it does |
 |---|---|
-| `polpo_artifacts_list`, `polpo_artifact_get`, `polpo_artifact_create`, `polpo_artifact_update` | Docs, editable workspaces (slides, sheets, design, motion), html dashboards, drawings and diagrams; update takes `expectedVersion` and is refused when the artifact changed since (see [artifacts.md](artifacts.md)). |
+| `polpo_artifacts_list`, `polpo_artifact_get`, `polpo_artifact_create`, `polpo_artifact_update`, `polpo_artifact_upload_prepare`, `polpo_artifact_upload_finalize` | Docs, editable workspaces (slides, sheets, design, motion), html dashboards, drawings and diagrams. Update is Claude-artifact style (`update` old_str → new_str by default, `rewrite` only when most of it changes, plus `patch` / per-kind `ops`), takes `expectedVersion` and is refused when the artifact changed since; get reads by byte range, outline or part; large contents go by upload (prepare from a URL, a file of the instance or base64 parts, then finalize) — see [artifacts.md](artifacts.md). |
 | `polpo_data_sources_list`, `polpo_data_query` | Structured data: the sources (with the agents that may use them) and rows of a dataset (fields, filters, sort, limit, `offset`; `includeTotal` also counts every matching row as `meta.totalCount`, not for REST sources). |
 | `polpo_files_list`, `polpo_files_search`, `polpo_file_read` | Browse and read the instance's files (the agents' workspace, `.polpo`, volumes): text by line ranges, images and PDFs as they are. |
 | `polpo_file_write`, `polpo_file_manage` | Create a file (text or base64; replacing one needs `overwrite: true`), make folders, rename, delete (`confirm: true`). |
@@ -143,7 +151,9 @@ Group chats of people and agents (the dashboard's groups).
 | `polpo_skill_create`, `polpo_skill_update` | Write a skill (and assign it); change its description, instructions, tools, tags or category. | write / write, idempotent |
 | `polpo_skill_install` | Install skills from a GitHub repository or a path on the server. | write, idempotent, open world |
 | `polpo_skill_assign` | Assign a skill to agents, or unassign it. | write, idempotent |
-| `polpo_skill_delete` | Remove a skill from the pool (`confirm: true`). | destructive |
+| `polpo_skill_delete` | Remove a skill from the pool (`confirm: true`); its history is kept for a grace period, so it can be restored. | destructive |
+| `polpo_skill_versions`, `polpo_skill_version_diff` | A skill's history (every change: number, date, who, how, files, size; the current one marked); what changed between two versions (files added, removed, changed, unified diffs of text files). `polpo_skill_get` says how many versions a skill has. See [skills.md](skills.md#versions). | read-only |
+| `polpo_skill_restore` | Put an older version back, or bring back a deleted skill; the current state is kept as a version first (`confirm: true`). | destructive |
 
 ### automation (on by default)
 
@@ -158,6 +168,13 @@ Group chats of people and agents (the dashboard's groups).
 | `polpo_check_update` | Change the instructions, message, schedule or limits; `confirm: true` approves a proposed check. | write, idempotent |
 | `polpo_check_cancel` | Stop a check for good (`confirm: true`); it stays listed as cancelled. | destructive |
 | `polpo_check_delete` | Delete a check's record (cancelled, ended or still active: it stops first; `confirm: true`). Its reports stay in their chat. | destructive |
+| `polpo_triggers_list`, `polpo_trigger_get` | Triggers: public endpoints (`POST <public URL>/hooks/{id}`) receiving form submissions and webhooks — endpoint, auth (hints only), contract (with `versions` and a diff between two), filter, dedupe, rate limit, mapping, actions and their limits, delivery counts (docs/triggers.md). | read-only |
+| `polpo_trigger_deliveries` | A trigger's deliveries (accepted, rejected, filtered, duplicate, rate_limited) with reasons and the actions' overall status; with `delivery_id`, its payload (secrets redacted), contract errors, mapped values and each action's run (status, attempts, error, what it created: mission, task, chat session, notification). | read-only |
+| `polpo_trigger_create`, `polpo_trigger_update` | Create or change a trigger: contract (content types, sizes, JSON Schema — a change makes a new version), filter, dedupe, rate limit, mapping, retention, `actions` (in order, on accepted deliveries: `playbook`, `mission`, `task`, `agent`, `notify`) and `action_limits`. The generated secret is shown once, to `polpo:admin` only. | write |
+| `polpo_trigger_delete` | Delete a trigger, its deliveries and its HMAC secret (`confirm: true`). | destructive |
+| `polpo_trigger_test` | `send` a test delivery (recorded, `test: true`; its actions run only with `sample.run_actions`), `validate` a sample against the saved or a draft contract / filter / mapping, `infer_schema` from a sample or a delivery, `replay` a delivery as a dry run, `preview_actions` (the actions, or a draft, rendered against a delivery; nothing runs). | write |
+| `polpo_trigger_run_actions` | Re-run a trigger's current actions on a stored accepted delivery (the earlier runs stay on it); refused while they run or when the trigger is disabled. | write, open world |
+| `polpo_trigger_auth` | Needs `polpo:admin`: rotate the generated secret (shown once, overlap for the previous), turn it on / off and allow `?token=`, configure an HMAC signature (its secret through a setup link, `setup_id: trigger:<id>:hmac`, or generated and shown once), the IP allowlist. | write, idempotent |
 
 ### connectors (on by default; changes need `polpo:connectors`)
 
@@ -177,9 +194,10 @@ Group chats of people and agents (the dashboard's groups).
 
 | Tool | What it does | Annotations |
 |---|---|---|
-| `polpo_channels_list` | Notification channels (name and type, never their tokens) and rules, the Telegram bots and the groups, topics and people they reach, WhatsApp profiles. | read-only |
+| `polpo_channels_list` | Notification channels (name and type, never their tokens) and rules, the Telegram bots and the groups, topics and people they reach, WhatsApp profiles, Slack apps and their connection. | read-only |
 | `polpo_channel_test` | Send a test notification on a channel. | write, open world |
-| `polpo_message_send` | Send now on Telegram (with files), WhatsApp (text or a file) or email (with the agent's mail account and attachments), as Polpo or an agent. Without `confirm: true` it shows what it would send. | destructive, open world |
+| `polpo_message_send` | Send now on any channel, as Polpo or an agent: Telegram (with files), WhatsApp (text or a file), email (with the agent's mail account and attachments), Slack (`to` a channel id, `thread_ts` a thread; default the channel's own), WhatsApp Business (`to` a contact: free-form only inside the 24-hour window, never to someone who opted out; without `to`, a notification to the operators), a webhook, browser push, the mobile app (`expo-push`). `name` picks the configured channel when there are several. Without `confirm: true` it shows what it would send. | destructive, open world |
+| `polpo_notifications_list`, `polpo_notifications_stats` | The notification history (newest first; sent or failed with the error; by status, channel or rule) and the counts. | read-only |
 | `polpo_notification_rule_save`, `polpo_notification_rule_delete` | Create or replace a rule (events → channels, severity, template, cooldown); delete one (`confirm: true`). | write, idempotent / destructive |
 
 Channels' setup (secrets through the dashboard hand-off), routes, Telegram invites and pairings and WhatsApp sign-in are in the `settings` toolset, below.
@@ -199,6 +217,19 @@ Computers are persistent machines agents work on (Daytona or E2B; see `docs/comp
 | `polpo_computer_delete` | Delete a computer and its machine (`confirm: true`); refused while it is an agent's default. | destructive |
 
 An agent's computer is set with `polpo_agent_update` (`defaultComputer`, `computers`).
+
+### coding (on by default)
+
+Coding chats: Claude Code or Codex sessions in a git worktree of the Coding app, run through the CLI engine with the person's own CLI account (docs/coding.md). The program edits files and runs commands in the worktree on its own; risky actions wait for the session's owner.
+
+| Tool | What it does | Annotations |
+|---|---|---|
+| `polpo_coding_chats_list` | The sessions (filter by worktree `cwd` or `kind`): status (idle, running, awaiting-approval, error), approvals waiting, the last thing said. | read-only |
+| `polpo_coding_chat_get` | A session's transcript as text: messages, each tool call in one line (edits with +/− lines, commands), approvals waiting with their ids, status, model, tokens. | read-only |
+| `polpo_coding_chat_start` | A new session (`kind` claude / codex) in a worktree (`cwd`), optionally with its first message (`prompt`); `wait: true` waits for the reply (up to 55 s). Without a signed-in CLI account of yours the session says how to sign in. | write, open world |
+| `polpo_coding_chat_send` | A message: a new turn (the program resumes the session's conversation), or a steer while a turn runs; `wait: true` waits for the reply or an approval. Only the session's owner. | write, open world |
+| `polpo_coding_chat_control` | `stop` the running turn (the conversation stays), or `approve` / `deny` a risky action (`approval_id`) — only after the person decided. | write, idempotent |
+| `polpo_coding_chat_show` | The coding card (below). | read-only |
 
 ### Toolsets off by default
 
@@ -227,7 +258,10 @@ Every other section of the dashboard's Configuration page, as direct tools (no `
 | `polpo_members_list`, `polpo_members_invite`, `polpo_members_remove` | Who may sign in (emails; members have no roles); add one (with an emailed sign-in link); remove one (`confirm: true`; never the last). Listing needs `polpo:admin` too. | read-only / write / destructive |
 | `polpo_mcp_access_list`, `polpo_mcp_grant_revoke` | OAuth grants (app, person, scopes, dates) and named MCP keys (never values; keys are set with `polpo_config_update` `mcp.keys`); revoke a grant (`confirm: true`). Listing needs `polpo:admin` too. | read-only / destructive |
 | `polpo_channel_save`, `polpo_channel_remove` | Set up a notification channel: its fields (chat id, recipients, sender, SMTP host and port, WhatsApp profile, push options) and its inbound gateway; the secrets it still needs come back as the hand-off (`setup_url`, `setup_id`, `next_step`). Saved secrets are kept and never returned. Remove one (`confirm: true`). | write, idempotent / destructive |
-| `polpo_channel_routes_list`, `polpo_channel_route_set` | Who answers on each channel: inbound, the dedicated agent (or Polpo), replies through another channel, group replies (mentions or intent), session mode and idle time, per-agent overrides. Changes merge. | read-only / write, idempotent |
+| `polpo_channel_routes_list`, `polpo_channel_route_set` | Who answers on each channel: inbound, the dedicated agent (or Polpo), replies through another channel, group replies (mentions or intent), session mode and idle time, per-agent overrides; the list shows the DM policy, allowFrom and commands too. Changes merge. | read-only / write, idempotent |
+| `polpo_channel_access_set` | Who may write on a channel, one field at a time: the DM policy (pairing, allowlist, open, disabled) and allowFrom (`allow_from` replaces it, `allow_add` / `allow_remove` change it), without replacing the gateway. | write, idempotent |
+| `polpo_peer_presence`, `polpo_peer_link` | Who is active on the channels (presence) and which identities are linked; link a peer to another identity of the same person so they share sessions (`null` unlinks). Admin only, reads too. | read-only / write, idempotent |
+| `polpo_slack_status` | Slack channels' Socket Mode connection (see [slack.md](slack.md)): inbound, which tokens are in the vault (never their values), state, bot and workspace, the last event; missing tokens come back as the hand-off (`setup_id` `slack:<channel>:botToken` / `appToken`); `test: true` checks the bot token. | read-only |
 | `polpo_telegram_verify` | Check a saved channel's bot answers (its token stays on the server). | write, open world |
 | `polpo_channel_invite` | A Telegram invite link (`t.me/<bot>?start=…`) for a channel with inbound on, or an invite's status. | write |
 | `polpo_channel_peers`, `polpo_channel_allowlist`, `polpo_channel_pairing` | Peers, the allowlist and pending pairing codes (admin, it names people); allow or remove a peer (remove: `confirm: true`); approve or reject a pairing. | read-only / destructive / write |
@@ -249,7 +283,7 @@ What each Configuration section maps to:
 | Members | `polpo_members_list` | `polpo_members_invite`, `polpo_members_remove` |
 | Agent | `polpo_config_get`, `polpo_models_list` | `polpo_config_update` (name, model, image model, reasoning) |
 | Providers | `polpo_providers_list`, `polpo_custom_providers_list` | `polpo_custom_provider_save` / `_remove`, `polpo_provider_disconnect`; keys and sign-in: dashboard |
-| Channels | `polpo_channels_list`, `polpo_channel_routes_list`, `polpo_channel_peers` | `polpo_channel_save`, `polpo_channel_remove`, `polpo_channel_test`, `polpo_channel_route_set`, `polpo_telegram_verify`, `polpo_channel_invite`, `polpo_channel_allowlist`, `polpo_channel_pairing`, `polpo_whatsapp_login` / `_wait` / `_logout` |
+| Channels | `polpo_channels_list`, `polpo_channel_routes_list`, `polpo_channel_peers`, `polpo_peer_presence`, `polpo_slack_status`, `polpo_notifications_list`, `polpo_notifications_stats` | `polpo_channel_save`, `polpo_channel_remove`, `polpo_channel_test`, `polpo_channel_route_set`, `polpo_channel_access_set`, `polpo_peer_link`, `polpo_telegram_verify`, `polpo_channel_invite`, `polpo_channel_allowlist`, `polpo_channel_pairing`, `polpo_whatsapp_login` / `_wait` / `_logout`, `polpo_wabiz_contact`, `polpo_wabiz_contact_erase`; Slack tokens: dashboard |
 | Rules | `polpo_channels_list` | `polpo_notification_rule_save`, `polpo_notification_rule_delete` |
 | Policies | `polpo_policies_get` | `polpo_approval_gate_save` / `_delete`, `polpo_policies_update` |
 | Sandbox | `polpo_sandbox_get` | `polpo_sandbox_update`, `polpo_sandbox_provider_test` |
@@ -305,7 +339,7 @@ An instance chooses the toolsets it offers:
 - **`settings.mcp.toolsets`** in `.polpo/polpo.json`, e.g. `{ "settings": { "mcp": { "toolsets": ["default", "admin"] } } }`;
 - **`POLPO_MCP_TOOLSETS`** in the environment (comma-separated; it wins over the settings).
 
-Values: toolset names (`core`, `tasks`, `missions`, `artifacts`, `data`, `files`, `team`, `config`, `rooms`, `chat`, `memory`, `skills`, `automation`, `connectors`, `channels`, `computers`, `settings`, and, off by default, `brain`, `learning`, `watchers`, `vault`, `apps`, `admin`), `default` (the toolsets on by default, about 150 tools for a full-access client (153 today)) or `all`. Without either, the default toolsets are offered.
+Values: toolset names (`core`, `tasks`, `missions`, `artifacts`, `data`, `files`, `team`, `config`, `rooms`, `chat`, `memory`, `skills`, `automation`, `connectors`, `channels`, `computers`, `coding`, `settings`, and, off by default, `brain`, `learning`, `watchers`, `vault`, `apps`, `admin`), `default` (the toolsets on by default, about 180 tools for a full-access client (179 today)) or `all`. Without either, the default toolsets are offered.
 
 For example, the defaults plus the company brain and the vault: `POLPO_MCP_TOOLSETS=default,brain,vault`.
 
@@ -344,14 +378,14 @@ The matrix, generated from the code (`node scripts/generate-mcp-scopes.mjs`; a t
 <!-- scope-matrix:start (generated: node scripts/generate-mcp-scopes.mjs) -->
 | Scope | What it allows | Tools |
 | --- | --- | --- |
-| `polpo:read` | See tasks, missions, artifacts, data, files, agents, rooms, chats, memory, schedules, connectors, computers and settings | `polpo_agents_list`, `polpo_agent_show`, `agent_card_refresh`, `polpo_approvals_list`, `polpo_tasks_list`, `polpo_task_get`, `polpo_task_wait`, `polpo_task_logs`, `polpo_missions_list`, `polpo_mission_get`, `polpo_mission_wait`, `polpo_playbooks_list`, `polpo_task_show`, `polpo_mission_show`, `polpo_artifacts_list`, `polpo_artifact_get`, `polpo_data_sources_list`, `polpo_data_query`, `polpo_data_source_get`, `polpo_data_source_test`, `polpo_data_activity`, `polpo_data_sql`, `polpo_data_views_list`, `polpo_data_view_get`, `polpo_files_list`, `polpo_files_search`, `polpo_file_read`, `polpo_agent_get`, `polpo_teams_list`, `polpo_config_get`, `polpo_branding_get`, `polpo_providers_list`, `polpo_models_list`, `polpo_sandbox_get`, `polpo_policies_get`, `polpo_sync_status`, `polpo_custom_providers_list`, `polpo_channel_routes_list`, `polpo_setup_wait`, `polpo_rooms_list`, `polpo_room_messages`, `polpo_room_wait`, `polpo_chat_sessions_list`, `polpo_chat_messages`, `polpo_memory_get`, `polpo_skills_list`, `polpo_skill_get`, `polpo_schedules_list`, `polpo_checks_list`, `polpo_connectors_list`, `polpo_connector_catalog`, `polpo_channels_list`, `polpo_brain_search`, `polpo_brain_get`, `polpo_learning_get`, `polpo_watchers_list`, `polpo_apps_list`, `polpo_browser_profiles_list`, `polpo_computers_list`, `polpo_computer_get`, `polpo_egress_status`, `polpo_harnesses_get`, `polpo_harness_sessions_list` |
-| `polpo:work` | Ask Polpo and chat with agents; create, change, run and stop tasks, missions, artifacts, data views and rows, rooms, memory, schedules and checks; resolve approvals | `polpo_ask`, `polpo_agent_chat`, `polpo_answer` ⚠, `agent_intention_decide` ⚠, `polpo_approval_resolve` ⚠, `polpo_task_create`, `polpo_task_update`, `polpo_task_retry`, `polpo_task_kill` ⚠, `polpo_task_delete` ⚠, `polpo_task_direct`, `polpo_mission_create`, `polpo_mission_update`, `polpo_mission_run`, `polpo_mission_abort` ⚠, `polpo_mission_delete` ⚠, `polpo_playbook_run`, `polpo_artifact_create`, `polpo_artifact_update`, `polpo_data_mutate` ⚠, `polpo_data_view_save`, `polpo_data_view_delete` ⚠, `polpo_room_create`, `polpo_room_update`, `polpo_room_delete` ⚠, `polpo_room_post`, `polpo_chat_session_update`, `polpo_chat_session_delete` ⚠, `polpo_memory_update` ⚠, `polpo_schedule_create`, `polpo_schedule_update`, `polpo_schedule_delete` ⚠, `polpo_schedule_run`, `polpo_check_create`, `polpo_check_update`, `polpo_check_cancel` ⚠, `polpo_check_delete` ⚠, `polpo_brain_save`, `polpo_brain_delete` ⚠, `polpo_watcher_create`, `polpo_watcher_delete` ⚠, `polpo_app_control` ⚠, `polpo_browser_profile_clear` ⚠, `polpo_harness_session_control` ⚠ |
+| `polpo:read` | See tasks, missions, artifacts, data, files, agents, rooms, chats, memory, schedules, connectors, computers and settings | `polpo_search`, `polpo_search_ask`, `polpo_agents_list`, `polpo_agent_show`, `agent_card_refresh`, `polpo_approvals_list`, `polpo_tasks_list`, `polpo_task_get`, `polpo_task_wait`, `polpo_task_logs`, `polpo_missions_list`, `polpo_mission_get`, `polpo_mission_wait`, `polpo_playbooks_list`, `polpo_task_show`, `polpo_mission_show`, `polpo_artifacts_list`, `polpo_artifact_get`, `polpo_data_sources_list`, `polpo_data_query`, `polpo_data_source_get`, `polpo_data_source_test`, `polpo_data_activity`, `polpo_data_sql`, `polpo_data_views_list`, `polpo_data_view_get`, `polpo_files_list`, `polpo_files_search`, `polpo_file_read`, `polpo_agent_lines`, `polpo_agent_get`, `polpo_agent_versions`, `polpo_agent_version_get`, `polpo_agent_version_diff`, `polpo_agent_deploy_gates`, `polpo_agent_deploys`, `polpo_agent_test`, `polpo_teams_list`, `polpo_agent_suite_list`, `polpo_agent_suite_get`, `polpo_agent_suite_run_get`, `polpo_agent_suite_trend`, `polpo_agent_suite_cassette`, `polpo_target_suites`, `polpo_benchmark_get`, `polpo_benchmark_leaderboard`, `polpo_benchmark_compare`, `polpo_agent_suite_show`, `polpo_benchmark_show`, `polpo_config_get`, `polpo_branding_get`, `polpo_providers_list`, `polpo_models_list`, `polpo_sandbox_get`, `polpo_policies_get`, `polpo_sync_status`, `polpo_custom_providers_list`, `polpo_channel_routes_list`, `polpo_slack_status`, `polpo_setup_wait`, `polpo_rooms_list`, `polpo_room_messages`, `polpo_room_wait`, `polpo_chat_sessions_list`, `polpo_chat_messages`, `polpo_memory_get`, `polpo_skills_list`, `polpo_skill_get`, `polpo_skill_upload_prepare`, `polpo_skill_files`, `polpo_skill_file_read`, `polpo_skill_versions`, `polpo_skill_version_diff`, `polpo_schedules_list`, `polpo_checks_list`, `polpo_triggers_list`, `polpo_trigger_get`, `polpo_trigger_deliveries`, `polpo_trigger_show`, `polpo_decisions`, `polpo_decision_show`, `polpo_media_log`, `polpo_media_status`, `polpo_image_show`, `polpo_coding_chats_list`, `polpo_coding_chat_get`, `polpo_coding_chat_show`, `polpo_connectors_list`, `polpo_connector_catalog`, `polpo_mcp_servers_list`, `polpo_mcp_server_get`, `polpo_mcp_server_templates`, `polpo_mcp_server_logs`, `polpo_channels_list`, `polpo_notifications_list`, `polpo_notifications_stats`, `polpo_brain_search`, `polpo_brain_get`, `polpo_learning_get`, `polpo_watchers_list`, `polpo_apps_list`, `polpo_browser_profiles_list`, `polpo_computers_list`, `polpo_computer_get`, `polpo_egress_status`, `polpo_wabiz_status`, `polpo_wabiz_events`, `polpo_wabiz_templates`, `polpo_wabiz_conversation`, `polpo_harnesses_get`, `polpo_harness_sessions_list` |
+| `polpo:work` | Ask Polpo and chat with agents; create, change, run and stop tasks, missions, artifacts, data views and rows, rooms, memory, schedules and checks; resolve approvals | `polpo_ask`, `polpo_agent_chat`, `polpo_answer` ⚠, `agent_intention_decide` ⚠, `polpo_approval_resolve` ⚠, `polpo_task_create`, `polpo_task_update`, `polpo_task_retry`, `polpo_task_kill` ⚠, `polpo_task_delete` ⚠, `polpo_task_direct`, `polpo_mission_create`, `polpo_mission_update`, `polpo_mission_run`, `polpo_mission_abort` ⚠, `polpo_mission_delete` ⚠, `polpo_playbook_run`, `polpo_artifact_create`, `polpo_artifact_update`, `polpo_artifact_upload_prepare`, `polpo_artifact_upload_finalize`, `polpo_data_mutate` ⚠, `polpo_data_view_save`, `polpo_data_view_delete` ⚠, `polpo_agent_suite_save`, `polpo_agent_suite_delete` ⚠, `polpo_agent_suite_run`, `polpo_agent_suite_baseline`, `polpo_agent_suite_review`, `polpo_agent_suite_record`, `polpo_agent_suite_replay`, `polpo_agent_suite_cassette_edit`, `polpo_agent_suite_generate`, `polpo_target_suite_save`, `polpo_target_suite_run`, `polpo_benchmark_save`, `polpo_benchmark_delete` ⚠, `polpo_benchmark_run`, `polpo_playground_send`, `polpo_room_create`, `polpo_room_update`, `polpo_room_delete` ⚠, `polpo_room_post`, `polpo_chat_session_update`, `polpo_chat_session_delete` ⚠, `polpo_memory_update` ⚠, `polpo_schedule_create`, `polpo_schedule_update`, `polpo_schedule_delete` ⚠, `polpo_schedule_run`, `polpo_check_create`, `polpo_check_update`, `polpo_check_cancel` ⚠, `polpo_check_delete` ⚠, `polpo_trigger_create`, `polpo_trigger_update`, `polpo_trigger_delete` ⚠, `polpo_trigger_test`, `polpo_trigger_run_actions`, `polpo_decide`, `polpo_decision_resolve`, `polpo_image_generate`, `polpo_image_edit`, `polpo_coding_chat_start`, `polpo_coding_chat_send`, `polpo_coding_chat_control`, `polpo_brain_save`, `polpo_brain_delete` ⚠, `polpo_watcher_create`, `polpo_watcher_delete` ⚠, `polpo_app_control` ⚠, `polpo_browser_profile_clear` ⚠, `polpo_harness_session_control` ⚠ |
 | `polpo:files` | Write, move and delete the instance's files | `polpo_file_write` ⚠, `polpo_file_manage` ⚠ |
-| `polpo:messages` | Send messages on Telegram, WhatsApp and email, as Polpo or an agent | `polpo_channel_test`, `polpo_message_send` ⚠ |
+| `polpo:messages` | Send messages on any channel (Telegram, WhatsApp, email, Slack, WhatsApp Business, webhooks, push), as Polpo or an agent | `polpo_channel_test`, `polpo_message_send` ⚠, `polpo_wabiz_send` ⚠, `polpo_wabiz_send_template` ⚠, `polpo_wabiz_approval` ⚠ |
 | `polpo:connectors` | Add, change, connect, disconnect and remove connectors (the services agents use) | `polpo_connector_add`, `polpo_connector_update`, `polpo_connector_test`, `polpo_connector_connect`, `polpo_connector_disconnect` ⚠, `polpo_connector_remove` ⚠ |
 | `polpo:computers` | Create, start, stop, reset and delete computers (they may cost money) | `polpo_computer_webhooks`, `polpo_computer_save`, `polpo_computer_control` ⚠, `polpo_computer_delete` ⚠ |
 | `polpo:vault` | See the names of vault entries (never their values) and delete them | `polpo_vault_list`, `polpo_vault_delete` ⚠ |
-| `polpo:admin` | Change the instance itself: agents and teams, settings and branding, data sources and who may use them, skills, channels and their rules, learning, the read-only REST fallback; includes every scope above | `polpo_data_source_save`, `polpo_data_source_delete` ⚠, `polpo_agent_create`, `polpo_agent_update`, `polpo_agent_delete` ⚠, `polpo_agent_avatar_set`, `polpo_team_save`, `polpo_team_delete` ⚠, `polpo_config_update`, `polpo_branding_update`, `polpo_sandbox_update`, `polpo_sandbox_provider_test`, `polpo_policies_update`, `polpo_approval_gate_save`, `polpo_approval_gate_delete` ⚠, `polpo_members_list`, `polpo_members_invite`, `polpo_members_remove` ⚠, `polpo_mcp_access_list`, `polpo_mcp_grant_revoke` ⚠, `polpo_sync_update`, `polpo_sync_disconnect` ⚠, `polpo_sync_test`, `polpo_sync_run` ⚠, `polpo_custom_provider_save`, `polpo_custom_provider_remove` ⚠, `polpo_provider_disconnect` ⚠, `polpo_channel_save`, `polpo_channel_remove` ⚠, `polpo_channel_route_set`, `polpo_telegram_verify`, `polpo_channel_invite`, `polpo_channel_peers`, `polpo_channel_allowlist` ⚠, `polpo_channel_pairing`, `polpo_whatsapp_login`, `polpo_whatsapp_login_wait`, `polpo_whatsapp_logout` ⚠, `polpo_skill_create`, `polpo_skill_update`, `polpo_skill_install`, `polpo_skill_delete` ⚠, `polpo_skill_assign`, `polpo_notification_rule_save`, `polpo_notification_rule_delete` ⚠, `polpo_learning_review`, `polpo_learning_revert` ⚠, `polpo_harnesses_update`, `polpo_api_search`, `polpo_api_get` |
+| `polpo:admin` | Change the instance itself: agents and teams, settings and branding, data sources and who may use them, skills, channels and their rules, learning, the read-only REST fallback; includes every scope above | `polpo_data_source_save`, `polpo_data_source_delete` ⚠, `polpo_agent_create`, `polpo_agent_update`, `polpo_agent_draft` ⚠, `polpo_agent_publish`, `polpo_agent_deploy` ⚠, `polpo_agent_rollback` ⚠, `polpo_agent_delete` ⚠, `polpo_agent_avatar_set`, `polpo_team_save`, `polpo_team_delete` ⚠, `polpo_playground_promote`, `polpo_config_update`, `polpo_branding_update`, `polpo_sandbox_update`, `polpo_sandbox_provider_test`, `polpo_policies_update`, `polpo_approval_gate_save`, `polpo_approval_gate_delete` ⚠, `polpo_members_list`, `polpo_members_invite`, `polpo_members_remove` ⚠, `polpo_mcp_access_list`, `polpo_mcp_grant_revoke` ⚠, `polpo_sync_update`, `polpo_sync_disconnect` ⚠, `polpo_sync_test`, `polpo_sync_run` ⚠, `polpo_custom_provider_save`, `polpo_custom_provider_remove` ⚠, `polpo_provider_disconnect` ⚠, `polpo_channel_save`, `polpo_channel_remove` ⚠, `polpo_channel_route_set`, `polpo_telegram_verify`, `polpo_channel_invite`, `polpo_channel_peers`, `polpo_channel_allowlist` ⚠, `polpo_channel_pairing`, `polpo_channel_access_set`, `polpo_peer_presence`, `polpo_peer_link`, `polpo_whatsapp_login`, `polpo_whatsapp_login_wait`, `polpo_whatsapp_logout` ⚠, `polpo_skill_create`, `polpo_skill_update`, `polpo_skill_install`, `polpo_skill_delete` ⚠, `polpo_skill_assign`, `polpo_skill_upload_finalize` ⚠, `polpo_skill_restore` ⚠, `polpo_trigger_auth`, `polpo_mcp_server_create`, `polpo_mcp_server_install`, `polpo_mcp_server_generate`, `polpo_mcp_server_update`, `polpo_mcp_server_test`, `polpo_mcp_server_publish`, `polpo_mcp_server_deploy`, `polpo_mcp_server_delete` ⚠, `polpo_notification_rule_save`, `polpo_notification_rule_delete` ⚠, `polpo_learning_review`, `polpo_learning_revert` ⚠, `polpo_wabiz_contact`, `polpo_wabiz_contact_erase` ⚠, `polpo_harnesses_update`, `polpo_api_search`, `polpo_api_get` |
 <!-- scope-matrix:end -->
 
 `polpo_ask` (work) hands a request to Polpo itself, which acts with its own tools and asks for a preview or an approval before risky changes; give a connection `polpo:work` only if you are fine with Polpo acting on its requests.
@@ -403,7 +437,57 @@ The widget's source is in `widgets/agent-card/`; after changing it, run `pnpm ru
 
 Both are one `ui://polpo/work-card.html` resource: one HTML document that loads nothing from elsewhere (the brand marks are inline SVG, Daytona's and E2B's as data URIs). Several cards of the same task or mission in a conversation: the newest stays live, older ones grey out.
 
-The widgets' source is in `widgets/` (`agent-card/`, `work-card/`, `shared/` for the brand marks); after changing it, run `pnpm run build:widgets`.
+## The trigger card (MCP App)
+
+`polpo_trigger_show` renders the triggers (docs/triggers.md). Ask, for example, "is the signup form receiving submissions?" or "why is the Stripe hook refusing deliveries?".
+
+- **Triggers:** each trigger with its endpoint, auth (secret, HMAC, IP allowlist), contract version and content types, delivery counts per status, the last delivery, and a warning when its HMAC secret is not set; a trigger opens.
+- **Trigger:** its definition in words (auth, contract, filter, dedupe, mapping, rate limit), the recent deliveries (filter by status) with the HTTP answer, reasons and contract errors, and the newest accepted delivery's **mapped values** — what an action will receive once the action engine exists. **All triggers** goes back.
+
+One `ui://polpo/trigger-card.html` resource (`polpo:read`); the card calls `polpo_trigger_show` again to refresh or switch view.
+
+## The decision card (MCP App)
+
+`polpo_decision_show` renders decisions (docs/decisions.md); call it with the `id` `polpo_decide` returned to show the answers.
+
+- **Decision:** each answer's headline (yes / no, the option, the score and level, the ranking) with a **probability bar** per outcome (the chosen one marked; a rank's bars are relative to the best), its confidence and threshold and an **Uncertain** chip; the model, cost, latency and caller, and **Uncalibrated** when Polpo's own model answered.
+- **Decisions:** the latest ones (optionally only uncertain), each opening its card.
+
+One `ui://polpo/decision-card.html` resource (`polpo:read`); the card calls `polpo_decision_show` again to refresh or switch view.
+
+## The coding card (MCP App)
+
+`polpo_coding_chat_show` renders a coding chat (docs/coding.md): the session's title, program and model, status, worktree, turns and tokens; the latest messages (the person's, the program's text, one line per tool call with an edit's +/− lines); and each **approval waiting** with its command or file and why it is risky, with **Approve** / **Deny** (they call `polpo_coding_chat_control`, so they need `polpo:work`, and only the session's owner may answer). While a turn runs the card refreshes itself every few seconds.
+
+One `ui://polpo/coding-card.html` resource (`polpo:read`).
+
+## The media card (MCP App)
+
+`polpo_image_show` renders image requests (docs/media.md); call it with the `id` `polpo_image_generate` returned to show the images.
+
+- **Image:** the request's images as previews (512 px webp, carried inside the card as `data:` URLs: the card loads nothing), the prompt, the model (and **Fallback model** when it answered), the cost, latency, size, seed and who asked.
+- **Media:** the latest requests with a preview each, each opening its card.
+
+One `ui://polpo/media-card.html` resource (`polpo:read`); the card calls `polpo_image_show` again to refresh or switch view.
+
+## The agent suite card (MCP App)
+
+`polpo_agent_suite_show` renders an agent's test and eval suites (docs/agent-suites.md). Ask, for example, "how are the shop agent's evals doing?" or "did the draft regress?".
+
+- **Suites:** each suite with its cases and scorers, its last run (passed / total, score, regressions), its baseline and a **Required to deploy** badge when it gates the agent's deploys; the latest **deploy gates** (the version, verifying with its progress, passed, blocked with what failed, an override with its reason); a suite opens to its latest run or its trend.
+- **Run report:** pass rate, overall score, cost and duration with the deltas versus the baseline; the scores per scorer (mean, median, p10, pass rate, delta); each case with its failed assertions and scorers, its change (▼ regressed, ▲ improved) and flakiness; the AI review when there is one. **Explain this run** asks the model (which calls `polpo_agent_suite_review`).
+- **Trend:** the suite's runs as a chart (pass rate and score, the baseline marked, failed runs in red) and the means by version.
+
+One `ui://polpo/suite-card.html` resource; the card calls `polpo_agent_suite_show` again to refresh or switch view.
+
+`polpo_benchmark_show` uses the same resource for **benchmarks** (docs/agent-suites.md → Benchmarks). Ask, for example, "which model is best for the shop agent?" or "why does the draft answer differently on the Italy case?".
+
+- **Benchmark:** progress and spend against the budget cap; the **leaderboard** (variants ranked by the weighted quality, cost and latency, quality ± stddev over repetitions, cost per repetition, p50 / p95, flakiness, the **Pareto front** ◆) and the notes on differences within the noise; the **case × variant matrix** (cases where the variants disagree first). A case opens side by side.
+- **Side by side:** one case for 2–4 variants in columns — tool calls compared with the first column (= same, ~ other arguments, + extra, − missing) and the answer's words added and removed. **Leaderboard** goes back.
+
+Benchmarks and the Playground over MCP: `polpo_benchmark_get`, `polpo_benchmark_leaderboard` (weights), `polpo_benchmark_compare` (`polpo:read`); `polpo_benchmark_save`, `polpo_benchmark_delete`, `polpo_benchmark_run` (a real model returns the **cost estimate** first and runs only with `confirm: true`; `budget_usd`; `cancel`; real tools need `polpo:admin`) and `polpo_playground_send` (one message to 1–4 variants headless; `save_case` saves an exchange as a test case) (`polpo:work`); `polpo_playground_promote` writes a variant's overrides into the agent's draft (`polpo:admin`; never deploys).
+
+The widgets' source is in `widgets/` (`agent-card/`, `work-card/`, `suite-card/`, `shared/` for the brand marks); after changing it, run `pnpm run build:widgets`.
 
 ## Setup
 

@@ -18,7 +18,14 @@ describe("agent card", () => {
     expect(card).toMatchObject({ status: "idle", today: { done: 0, failed: 0, waiting: 0 }, goal: { title: "Help Alessio eat well" }, drive: true });
     expect(card.current).toBeUndefined();
     expect(card.next).toBeUndefined();
-    expect(agentCardText(card)).toBe("Coach Ada (coach) — Health coach: idle.\nToday: 0 done, 0 failed, 0 waiting for a person.\nMain goal: Help Alessio eat well.");
+    expect(agentCardText(card)).toBe("Coach Ada (coach) — Health coach: idle.\nModel: default (Polpo).\nToday: 0 done, 0 failed, 0 waiting for a person.\nMain goal: Help Alessio eat well.");
+  });
+
+  it("shows the version production runs, and an unpublished draft", () => {
+    const card = buildAgentCard(base({ agent: { ...base().agent, versioning: { production: "1.3.0", draft: { hasChanges: true } } } }));
+    expect(card.agent).toMatchObject({ version: "1.3.0", draftChanges: true });
+    expect(agentCardText(card)).toContain("\nVersion 1.3.0 in production (its draft has unpublished changes).\n");
+    expect(buildAgentCard(base()).agent.version).toBeUndefined();
   });
 
   it("counts today in the agent's timezone and shows the task at hand", () => {

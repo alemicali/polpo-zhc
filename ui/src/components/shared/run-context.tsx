@@ -20,10 +20,12 @@ import { BrandIcon } from "@/components/shared/brand-icon";
 import { StatusBadge } from "@/components/computers/status-badge";
 import type { Computer } from "@/lib/computers-api";
 import {
-  agentEngineId, latestRun, AUTH_LABELS, authBrand, computerBrand, computerKindLabel, engineBrand, engineDetail, engineLabel, formatMs, formatUsd, modelLabel,
+  agentEngineId, latestRun, AUTH_LABELS, authBrand, computerBrand, computerKindLabel, engineBrand, engineLabel, formatMs, formatUsd, modelLabel,
   openCodeProviderIcon,
 } from "@/lib/run-context";
 import { ProviderIcon } from "@/components/shared/provider-icon";
+import { EngineMark, RunModelWithEngine } from "@/components/shared/model-with-engine";
+import { runEngineInfo } from "@/lib/engine-mark";
 import { hasRecordedCost, taskCostOf } from "@/lib/task-cost";
 import { formatTokens } from "@/lib/mission-cost";
 import { cn } from "@/lib/utils";
@@ -105,7 +107,7 @@ function Cell({ label, children, className }: { label: string; children: React.R
 
 function RunDetail({ run, computer }: { run: TaskRunContext; computer?: Computer }) {
   const isHarness = run.engine !== "polpo";
-  const detail = engineDetail(run);
+  const model = modelLabel(run.model);
   const usd = run.cost?.harnessUsd ?? run.cost?.modelUsd;
   const costLabel = run.cost?.harnessUsd !== undefined ? `${engineLabel(run.engine)} estimate` : run.cost?.modelUsd !== undefined ? "model cost" : undefined;
   const budgetPct = run.budgetUsd && usd !== undefined ? Math.min(100, (usd / run.budgetUsd) * 100) : undefined;
@@ -115,15 +117,24 @@ function RunDetail({ run, computer }: { run: TaskRunContext; computer?: Computer
   return (
     <div className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-5" data-testid="run-context-detail" data-run={run.runId}>
       <Cell label="Engine">
-        <BrandIcon name={engineBrand(run.engine)} size={18} />
-        <span className="font-medium" data-testid="run-engine">{engineLabel(run.engine)}</span>
-        {detail && <span className="text-muted-foreground" data-testid="run-model" title={run.model}>{detail}</span>}
+        {/* the model, then the engine that ran it (as recorded), then how it authenticated */}
+        {model && <span className="font-medium" data-testid="run-model" title={run.model}>{model}</span>}
+        {model && <span aria-hidden className="text-muted-foreground/70">·</span>}
+        <span className="inline-flex min-w-0 font-medium" data-testid="run-engine">
+          <EngineMark engine={runEngineInfo(run).engine} model={run.model} size={18} />
+        </span>
+        {run.agentVersion && (
+          <Badge variant="outline" className="font-mono text-micro font-normal" title={`${run.agent ?? "The agent"} at version ${run.agentVersion}`} data-testid="run-agent-version">
+            {run.agent ? `${run.agent}@` : "v"}{run.agentVersion}
+          </Badge>
+        )}
         {run.auth && (
           <span className="inline-flex items-center gap-1 text-muted-foreground" data-testid="run-auth"
             title={`${AUTH_LABELS[run.auth.kind] ?? run.auth.kind}${run.auth.provider && run.auth.kind === "api-key" ? ` · ${run.auth.provider}` : ""}${run.auth.region ? ` · ${run.auth.region}` : ""}`}>
             {openCodeProviderIcon(run.engine, run.auth)
               ? <ProviderIcon name={openCodeProviderIcon(run.engine, run.auth)!} size={14} />
               : <BrandIcon name={authBrand(run.auth.kind, run.engine, run.auth.provider)} size={14} />}
+            <span>via {AUTH_LABELS[run.auth.kind] ?? run.auth.kind}</span>
             {run.auth.region && <span className="text-caption">{run.auth.region}</span>}
           </span>
         )}
@@ -302,8 +313,8 @@ export function RunContextCard({ runs, cost: given, computers, className }: { ru
                   >
                     <span className="w-5 shrink-0 tabular-nums text-muted-foreground">{i + 1}</span>
                     <span className="hidden w-28 shrink-0 tabular-nums text-muted-foreground sm:inline" data-testid="run-history-time">{shortTime(r.startedAt)}</span>
-                    <BrandIcon name={engineBrand(r.engine)} size={12} />
-                    <span className="truncate">{engineLabel(r.engine)}{r.model ? ` · ${modelLabel(r.model)}` : ""}</span>
+                    <RunModelWithEngine run={r} pretty compact size={12} className="min-w-0" testId="run-history-model" />
+                    {r.agentVersion && <span className="shrink-0 font-mono text-muted-foreground" data-testid="run-history-agent-version">v{r.agentVersion}</span>}
                     <BrandIcon name={computerBrand(r.computer)} size={12} />
                     <span className="truncate text-muted-foreground">{r.computer.name ?? r.computer.id}</span>
                     {r.continuation && <span className="text-muted-foreground">continuation</span>}

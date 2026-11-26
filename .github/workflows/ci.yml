@@ -156,4 +156,7 @@ jobs:
       - run: pnpm run build
       - run: pnpm run --filter @polpo-ai/sdk build
       - run: pnpm run --filter @polpo-ai/react build
+      # the dashboard bundle is past Node's default ~2 GB heap when Rollup renders the chunks
       - run: pnpm run --filter ui build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096

@@ -1,10 +1,15 @@
 import { normalizeSandboxSettings } from "@polpo-ai/core/sandbox";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { join, extname } from "node:path";
-import { normalizeConnectorTools, unknownComputersProblem, type FileSystem } from "@polpo-ai/core";
+import { agentLinesChart, normalizeConnectorTools, normalizeTalksTo, unknownComputersProblem, type FileSystem } from "@polpo-ai/core";
 import { AddAgentSchema, UpdateAgentSchema, RenameTeamSchema, AddTeamSchema } from "../schemas.js";
 import { redactAgentConfig, redactTeam, sanitizeTranscriptEntry } from "../security.js";
 import { buildETag, contentFingerprint, handleConditional } from "../etag.js";
+import { DEPLOY_GATE_MAX_WAIT_MS, registerAgentVersionRoutes, versionErrorResponse, type AgentVersionDeps } from "./agent-versions.js";
+import { deployGateFailures } from "@polpo-ai/core/agent-suites";
+import { registerAgentTestRoutes, type AgentTestRouteDeps } from "./agent-tests.js";
+import { registerAgentSuiteRoutes, type AgentSuiteRouteDeps } from "./agent-suites.js";
+import { AGENT_FIELD_CLASSIFICATION } from "@polpo-ai/core/agent-versions";
 
 interface IndexedRunLog {
   file: string;
@@ -84,8 +89,50 @@ export function agentRoutes(getDeps: () => {
   fs?: FileSystem;
   /** The instance's computer ids (settings.computers), to check agents' computers and defaultComputer. */
   computerIds?: () => string[];
+  /**
+   * Agent versioning (draft → publish → deploy). Absent: updates are written live as before.
+   */
+  versions?: AgentVersionDeps & {
+    /** Change the draft and, as asked, publish and deploy (see Orchestrator.updateAgentVersioned). */
+    update: (name: string, updates: any, opts: { actor: string; mode: "draft" | "publish" | "deploy"; bump?: "major" | "minor" | "patch"; version?: string; note?: string; gateWaitMs?: number }) => Promise<{
+      agent: any; draftChanged: boolean; published?: any; deployed?: any;
+      /** mode deploy through the deploy gate (required suites): deployed, pending or blocked. */
+      deploy?: { status: "deployed" | "pending" | "blocked"; message: string; gate?: any };
+      /** mode publish: the publish checks started (suites with gate.onPublish). */
+      check?: any;
+    }>;
+    /** settings.agents.versioning.autoDeployApiUpdates (default true). */
+    autoDeploy: () => boolean;
+  };
+  /** Agent tests (POST/GET /agents/:name/tests, …/fix). Absent: the routes answer 409. */
+  tests?: AgentTestRouteDeps;
+  /** Agent suites (/agents/:name/suites…, /agents/:name/suite-runs…). Absent: the routes answer 409. */
+  suites?: AgentSuiteRouteDeps;
 }): OpenAPIHono {
   const app = new OpenAPIHono();
+
+  /** The update mode a PATCH asks for (publish / deploy flags, else the instance setting). */
+  const updateMode = (deps: { versions?: { autoDeploy: () => boolean } }, body: { publish?: boolean; deploy?: boolean }): "draft" | "publish" | "deploy" => {
+    if (body.deploy === true) return "deploy";
+    if (body.publish === true) return "publish";
+    if (body.publish === false) return "draft";
+    return deps.versions?.autoDeploy() === false ? "draft" : "deploy";
+  };
+
+  /** The versioning state shown with an agent (production version, latest, draft). */
+  const versionState = async (deps: { versions?: AgentVersionDeps }, agent: any) => {
+    if (!deps.versions || agent?.volatile) return undefined;
+    try {
+      const st = await deps.versions.versioning().state(agent.name);
+      return {
+        production: st.production, latest: st.latest, pointers: st.pointers, versions: st.versions,
+        draft: { exists: st.draft.exists, hasChanges: st.draft.hasChanges, changedFields: st.draft.changes.map((c) => c.field),
+          ...(st.draft.baseVersion ? { baseVersion: st.draft.baseVersion } : {}), stale: st.draft.stale, ...(st.draft.warning ? { warning: st.draft.warning } : {}),
+          ...(st.draft.updatedAt ? { updatedAt: st.draft.updatedAt, updatedBy: st.draft.updatedBy } : {}),
+          ...(st.draft.suggestedBump ? { suggestedBump: st.draft.suggestedBump, nextVersion: st.draft.nextVersion } : {}) },
+      };
+    } catch { return undefined; }
+  };
 
   /** An error for computers/defaultComputer naming a computer the instance does not have, else null. */
   const badComputers = (deps: { computerIds?: () => string[] }, body: { computers?: string[]; defaultComputer?: string }): string | null => {
@@ -139,6 +186,7 @@ export function agentRoutes(getDeps: () => {
           model: a.model,
           team: a.team,
           reportsTo: a.reportsTo,
+          ...(a.talksTo ? { talksTo: a.talksTo } : {}),
           volatile: a.volatile,
           createdAt: a.createdAt,
           ...(slimIdentity && Object.keys(slimIdentity).length > 0 ? { identity: slimIdentity } : {}),
@@ -204,6 +252,7 @@ export function agentRoutes(getDeps: () => {
         pipeline: body.pipeline,
         identity: body.identity,
         reportsTo: body.reportsTo,
+        ...(body.talksTo ? { talksTo: normalizeTalksTo(body.talksTo) } : {}),
         browserProfile: body.browserProfile,
         browserEgress: body.browserEgress,
         ...(body.computers !== undefined && { computers: body.computers }),
@@ -462,6 +511,13 @@ export function agentRoutes(getDeps: () => {
     return c.json({ ok: true, data: entries });
   });
 
+  // /agents/:name/versions, /diff, /draft, /publish, /deploy, /rollback, /deploys (after the static routes)
+  registerAgentVersionRoutes(app, () => getDeps());
+  // /agents/:name/tests (run, history, one run, fix)
+  registerAgentTestRoutes(app, () => getDeps());
+  // /agents/:name/suites (suites, dataset import, runs) and /agents/:name/suite-runs
+  registerAgentSuiteRoutes(app, () => getDeps());
+
   // PATCH /agents/:name — update agent (registered after static routes to avoid conflicts with /team)
   const updateAgentRoute = createRoute({
     method: "patch",
@@ -497,6 +553,10 @@ export function agentRoutes(getDeps: () => {
     }
 
     const body = c.req.valid("json");
+    // identity changes merge into the draft's identity when the update goes to the draft
+    const identityBase = deps.versions && !existing.volatile && body.identity
+      ? ((await deps.versions.versioning().draftConfig(name).catch(() => undefined))?.config.identity ?? existing.identity)
+      : existing.identity;
     const computersError = badComputers(deps, { computers: body.computers ?? undefined, defaultComputer: body.defaultComputer || undefined });
     if (computersError) return c.json({ ok: false, error: computersError, code: "VALIDATION_ERROR" }, 400);
 
@@ -515,6 +575,8 @@ export function agentRoutes(getDeps: () => {
       ...(body.allowedPaths !== undefined && { allowedPaths: body.allowedPaths }),
       ...(body.allowedTools !== undefined && { allowedTools: body.allowedTools }),
       ...(typeof body.reportsTo === "string" && { reportsTo }),
+      // null: no lines (talks to anyone)
+      ...(body.talksTo !== undefined && { talksTo: body.talksTo ? normalizeTalksTo(body.talksTo) : undefined }),
       ...(body.reasoning !== undefined && { reasoning: body.reasoning }),
       ...(body.sandbox !== undefined && { sandbox: normalizeSandboxSettings(body.sandbox) }),
       ...(body.compaction !== undefined && { compaction: body.compaction ?? undefined }),
@@ -537,19 +599,70 @@ export function agentRoutes(getDeps: () => {
       // "polpo" or null: back to Polpo's own engine
       ...(body.engine !== undefined && { engine: body.engine && body.engine !== "polpo" ? body.engine : undefined }),
       ...(body.emailAllowedDomains !== undefined && { emailAllowedDomains: body.emailAllowedDomains }),
-      ...(body.identity && { identity: { ...(existing.identity ?? {}), ...body.identity } }),
+      ...(body.identity && { identity: { ...(identityBase ?? {}), ...body.identity } }),
       ...(body.team !== undefined && { team: body.team }),
     };
 
+    let versioning: Record<string, unknown> | undefined;
     try {
-      await deps.updateAgent(name, updates);
+      if (deps.versions && !existing.volatile) {
+        // draft → (publish) → (deploy): the flags, else settings.agents.versioning.autoDeployApiUpdates
+        const mode = updateMode(deps, body);
+        const result = await deps.versions.update(name, updates, {
+          actor: deps.versions.actor(c), mode,
+          ...(body.bump ? { bump: body.bump } : {}), ...(body.version ? { version: body.version } : {}), ...(body.note ? { note: body.note } : {}),
+          ...(body.wait ? { gateWaitMs: DEPLOY_GATE_MAX_WAIT_MS } : {}),
+        });
+        const gate = result.deploy?.gate;
+        versioning = {
+          mode, draftChanged: result.draftChanged,
+          ...(result.published ? { published: { version: result.published.version, bump: result.published.bump, changedFields: result.published.changes.map((ch: { field: string }) => ch.field) } } : {}),
+          ...(result.deployed ? { deployed: result.deployed } : {}),
+          // the agent's required suites decide the deploy: pending ("in verifica") or blocked → published, not deployed
+          ...(result.deploy ? { deployStatus: result.deploy.status, deployMessage: result.deploy.message } : {}),
+          ...(gate ? { gate: { id: gate.id, status: gate.status, version: gate.version, progress: gate.progress, failed: deployGateFailures(gate), suites: gate.suites.map((s: any) => ({ suiteId: s.suiteId, suiteName: s.suiteName, status: s.status, runId: s.runId, reasons: s.reasons })) } } : {}),
+          ...(result.deploy && result.deploy.status !== "deployed" && result.published ? { warning: `Published as ${result.published.version} but not deployed: ${result.deploy.message}` } : {}),
+          ...(result.check ? { check: { id: result.check.id, status: result.check.status, version: result.check.version } } : {}),
+        };
+      } else {
+        await deps.updateAgent(name, updates);
+      }
     } catch (err) {
-      if ((err as Error)?.name === "HarnessConfigError") return c.json({ ok: false, error: (err as Error).message, code: "VALIDATION_ERROR" }, 400);
-      throw err;
+      return versionErrorResponse(c, err);
     }
 
     const updated = (await deps.getAgents()).find(a => a.name === name);
-    return c.json({ ok: true, data: updated ? redactAgentConfig(updated) : null }, 200);
+    const state = updated ? await versionState(deps, updated) : undefined;
+    return c.json({ ok: true, data: updated ? { ...redactAgentConfig(updated), ...(state ? { versioning: { ...state, ...versioning } } : {}) } : null }, 200);
+  });
+
+  // GET /agents/lines — the org chart and the communication lines between agents
+  const getLinesRoute = createRoute({
+    method: "get",
+    path: "/lines",
+    tags: ["Agents"],
+    summary: "Org chart and communication lines",
+    description: "Every agent's communication lines (mode, manager, direct reports, extra agents, who it can reach) and the directed edges "
+      + "between agents (from may talk to to). `unrestricted`: agents with no lines set (from before the lines): they talk to anyone. Polpo talks to every agent.",
+    responses: {
+      200: {
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({
+          agents: z.array(z.object({
+            agent: z.string(), mode: z.enum(["org", "list", "anyone", "none"]), explicit: z.boolean(), manager: z.string().optional(),
+            reports: z.array(z.string()), agents: z.array(z.string()), acceptFrom: z.enum(["anyone", "lines"]), reachable: z.array(z.string()),
+          })),
+          edges: z.array(z.object({ from: z.string(), to: z.string(), kind: z.enum(["manager", "report", "extra", "open"]) })),
+          unrestricted: z.array(z.string()),
+        }) }) } },
+        description: "The team's lines",
+      },
+    },
+  });
+
+  app.openapi(getLinesRoute, async (c) => {
+    const deps = getDeps();
+    const agents = (await deps.getAgents()).filter((a) => !a.volatile);
+    return c.json({ ok: true, data: agentLinesChart(agents) }, 200);
   });
 
   // GET /agents/:name — single agent detail (registered after static routes to avoid conflicts)
@@ -558,8 +671,10 @@ export function agentRoutes(getDeps: () => {
     path: "/{name}",
     tags: ["Agents"],
     summary: "Get agent",
+    description: "The agent as production runs it, with `versioning` (production version, latest, draft state). `view=draft`: its draft (working copy) instead, as the dashboard edits it.",
     request: {
       params: z.object({ name: z.string() }),
+      query: z.object({ view: z.enum(["production", "draft"]).optional() }),
     },
     responses: {
       200: {
@@ -576,11 +691,20 @@ export function agentRoutes(getDeps: () => {
   app.openapi(getAgentRoute, async (c) => {
     const deps = getDeps();
     const { name } = c.req.valid("param");
-    const agent = (await deps.getAgents()).find(a => a.name === name);
+    const { view } = c.req.valid("query");
+    let agent = (await deps.getAgents()).find(a => a.name === name);
     if (!agent) {
       return c.json({ ok: false, error: "Agent not found", code: "NOT_FOUND" }, 404);
     }
-    return c.json({ ok: true, data: redactAgentConfig(agent) }, 200);
+    // the production config (or the draft's), with its version, the pointers and the draft's state
+    const versioning = await versionState(deps, agent);
+    if (view === "draft" && versioning && deps.versions) {
+      const { config } = await deps.versions.versioning().draftConfig(name);
+      // the draft's versioned fields over the agent's own (name, createdAt, mission fields)
+      const own = Object.fromEntries(Object.entries(agent).filter(([k]) => AGENT_FIELD_CLASSIFICATION[k as keyof typeof AGENT_FIELD_CLASSIFICATION] !== "versioned"));
+      agent = { ...own, ...config, name };
+    }
+    return c.json({ ok: true, data: { ...redactAgentConfig(agent), ...(versioning ? { versioning: { ...versioning, ...(view === "draft" ? { view: "draft" } : {}) } } : {}) } }, 200);
   });
 
   // ── POST /agents/:name/avatar — upload agent avatar ──
@@ -615,12 +739,18 @@ export function agentRoutes(getDeps: () => {
     const avatarPath = join(avatarsDir, filename);
     const relativePath = `.polpo/avatars/${filename}`;
 
-    const buffer = Buffer.from(await file.arrayBuffer());
-    await fs.writeFile(avatarPath, buffer.toString("base64"));
+    // The image's bytes as they are: a text write would store base64 text, not a picture.
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (!fs.writeFileBuffer) return c.json({ ok: false, error: "This filesystem cannot store binary files" }, 501);
+    await fs.writeFileBuffer(avatarPath, bytes);
 
-    // Update agent identity with avatar path
+    // Update agent identity with avatar path (a versioned change: the same rules as PATCH)
     const identity = { ...(agent.identity ?? {}), avatar: relativePath };
-    await deps.updateAgent(name, { identity });
+    if (deps.versions && !agent.volatile) {
+      await deps.versions.update(name, { identity }, { actor: deps.versions.actor(c), mode: updateMode(deps, {}), note: "Avatar changed" });
+    } else {
+      await deps.updateAgent(name, { identity });
+    }
 
     return c.json({ ok: true, data: { avatar: relativePath } }, 200);
   });
@@ -634,7 +764,11 @@ export function agentRoutes(getDeps: () => {
 
     if (agent.identity?.avatar) {
       const identity = { ...agent.identity, avatar: undefined };
-      await deps.updateAgent(name, { identity });
+      if (deps.versions && !agent.volatile) {
+        await deps.versions.update(name, { identity }, { actor: deps.versions.actor(c), mode: updateMode(deps, {}), note: "Avatar removed" });
+      } else {
+        await deps.updateAgent(name, { identity });
+      }
     }
 
     return c.json({ ok: true }, 200);

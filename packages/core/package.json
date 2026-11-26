@@ -54,9 +54,29 @@
       "types": "./dist/run-store.d.ts",
       "import": "./dist/run-store.js"
     },
+    "./agent-versions": {
+      "types": "./dist/agent-versions.d.ts",
+      "import": "./dist/agent-versions.js"
+    },
+    "./agent-lines": {
+      "types": "./dist/agent-lines.d.ts",
+      "import": "./dist/agent-lines.js"
+    },
+    "./agent-tests": {
+      "types": "./dist/agent-tests.d.ts",
+      "import": "./dist/agent-tests.js"
+    },
+    "./agent-suites": {
+      "types": "./dist/agent-suites.d.ts",
+      "import": "./dist/agent-suites.js"
+    },
     "./run-context": {
       "types": "./dist/run-context.d.ts",
       "import": "./dist/run-context.js"
+    },
+    "./engine-label": {
+      "types": "./dist/engine-label.d.ts",
+      "import": "./dist/engine-label.js"
     },
     "./task-tool-scope": {
       "types": "./dist/task-tool-scope.d.ts",
@@ -278,6 +298,10 @@
       "types": "./dist/progressive-tools.d.ts",
       "import": "./dist/progressive-tools.js"
     },
+    "./whatsapp-business": {
+      "types": "./dist/whatsapp-business.d.ts",
+      "import": "./dist/whatsapp-business.js"
+    },
     "./whatsapp-store": {
       "types": "./dist/whatsapp-store.d.ts",
       "import": "./dist/whatsapp-store.js"
@@ -293,6 +317,18 @@
     "./harnesses": {
       "types": "./dist/harnesses.d.ts",
       "import": "./dist/harnesses.js"
+    },
+    "./decisions": {
+      "types": "./dist/decisions.d.ts",
+      "import": "./dist/decisions.js"
+    },
+    "./media": {
+      "types": "./dist/media.d.ts",
+      "import": "./dist/media.js"
+    },
+    "./gateways": {
+      "types": "./dist/gateways.d.ts",
+      "import": "./dist/gateways.js"
     },
     "./sandbox": {
       "types": "./dist/sandbox.d.ts",

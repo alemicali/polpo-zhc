@@ -28,7 +28,8 @@ import { loadPolpoConfig } from "../core/config.js";
 import { createWorkspace, isRemoteWorkspace, WorkspaceShell } from "../sandbox/manager.js";
 import { RemoteWorkspace } from "../sandbox/remote.js";
 import { WorkspaceFileSystem } from "../sandbox/workspace-fs.js";
-import { loadAgentSkills } from "../llm/skills.js";
+import { loadAgentSkills, type LoadedSkill } from "../llm/skills.js";
+import { readSkillTextFiles } from "../llm/skill-bundle.js";
 import { buildAgentToolset, buildPrompt, collectOutcome, createActivity } from "./engine.js";
 import { brokeredHarnessAuth, resolveHarnessAuth, scrubSecrets, type HarnessBrokering, type ResolvedHarnessAuth } from "../harness/credentials.js";
 import { classifyHarnessError, harnessTurnFailure, type HarnessFailure, type HarnessTurnOutcome } from "../harness/errors.js";
@@ -79,6 +80,24 @@ export interface OpenedMachine {
 }
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "skill";
+
+/**
+ * A loaded skill for an agent harness: its bundled text files travel with it (the harness writes
+ * them next to SKILL.md, so `references/…` and `scripts/…` resolve); binary files cannot, and the
+ * instructions say so.
+ */
+export function harnessSkill(s: LoadedSkill): HarnessSkill {
+  const bundled = s.dir ? readSkillTextFiles(s.dir) : { files: [], skipped: [] };
+  const note = bundled.skipped.length
+    ? `\n\n> Bundled files not available in this runtime (binary or too large): ${bundled.skipped.slice(0, 20).join(", ")}${bundled.skipped.length > 20 ? "…" : ""}.`
+    : "";
+  return {
+    name: slug(s.name),
+    description: (s.description || s.name).slice(0, 1000),
+    content: s.content + note,
+    ...(bundled.files.length ? { files: bundled.files } : {}),
+  };
+}
 
 /**
  * The runtime's file edits as activity (Claude Code Write/Edit/MultiEdit, Codex apply_patch/write_file).
@@ -352,7 +371,7 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
 
       // ── skills and instructions ──
       const skills: HarnessSkill[] = loadAgentSkills(cwd, polpoDir, agentConfig.name, agentConfig.skills)
-        .map((s) => ({ name: slug(s.name), description: (s.description || s.name).slice(0, 1000), content: s.content }));
+        .map((s) => harnessSkill(s));
       const agentsMd = await machine.readFile(join(cwd, "AGENTS.md")).then((b) => (b ? Buffer.from(b).toString("utf8") : undefined), () => undefined);
       const instructions = buildHarnessInstructions({
         agent: agentConfig, cwd, outputDir, agentsMd, connectorNote: toolset.connectorNote, hostTools: hostTools.map((t) => t.name), harness: engine.harness,

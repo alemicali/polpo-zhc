@@ -1,0 +1,17 @@
+/* The coding chat card: on top of the cards' common look (agent-card/style.css); tokens only. */
+.transcript { display: flex; flex-direction: column; gap: 10px; }
+.msg { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.msg-user { align-self: flex-end; max-width: 90%; padding: 8px 10px; border-radius: var(--r-sm); background: var(--fill); }
+.msg-who { font-size: var(--t-xs); color: var(--fg3); }
+.msg-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.tool { display: flex; align-items: baseline; gap: 8px; font-size: var(--t-xs); color: var(--fg2); min-width: 0; }
+.tool .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.tool-error .mono { color: var(--w-danger); }
+.tool-running .mono { color: var(--fg3); }
+.diffstat { flex: none; font-family: var(--font-mono, ui-monospace, monospace); }
+.diffstat .add { color: var(--w-success); }
+.diffstat .del { color: var(--w-danger); }
+.approval { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: var(--bw) solid var(--line2); border-radius: var(--r-sm); background: var(--w-warning-bg); }
+.section-title { font-size: var(--t-xs); font-weight: var(--w-medium); color: var(--fg2); }
+.code { margin: 0; padding: 8px 10px; border-radius: var(--r-sm); background: var(--fill); font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--t-xs); white-space: pre-wrap; overflow-wrap: anywhere; }
+.mono { font-family: var(--font-mono, ui-monospace, monospace); overflow-wrap: anywhere; }

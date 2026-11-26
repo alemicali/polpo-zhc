@@ -175,7 +175,7 @@ test("Make default PATCHes the agent and moves the badge", async () => {
   setup({ name: "sitoinchat", defaultComputer: "nina", computers: ["nina", "lab"] }, [HOST, machine("nina"), machine("lab")]);
   await render();
   await click(button("Make Lab the default"));
-  expect(patches()).toEqual([{ defaultComputer: "lab", computers: ["nina", "lab"] }]);
+  expect(patches()).toEqual([{ defaultComputer: "lab", computers: ["nina", "lab"], publish: false }]);
   expect(card("lab")!.querySelector('[data-testid="computer-default"]')).toBeTruthy();
   expect(card("nina")!.querySelector('[data-testid="computer-default"]')).toBeNull();
   // the computers' agent lists are reloaded from the cached state
@@ -193,7 +193,7 @@ test("the default-computer picker lives here", async () => {
     select.dispatchEvent(new Event("change", { bubbles: true }));
   });
   await click(byText("Save default"));
-  expect(patches()).toEqual([{ defaultComputer: "nina", computers: ["nina"] }]);
+  expect(patches()).toEqual([{ defaultComputer: "nina", computers: ["nina"], publish: false }]);
   expect(card("nina")).toBeTruthy();
 });
 
@@ -207,12 +207,12 @@ test("add an existing computer (made default while the agent is on this server)"
   });
   expect($<HTMLInputElement>('input[aria-label="Make it the default computer"]')!.checked).toBe(true);
   await click(byText("Add"));
-  expect(patches()).toEqual([{ defaultComputer: "other", computers: ["other"] }]);
+  expect(patches()).toEqual([{ defaultComputer: "other", computers: ["other"], publish: false }]);
   expect(card("other")!.querySelector('[data-testid="computer-default"]')).toBeTruthy();
   // now that it has a default, the next one is added without changing it (unchecked by default)
   expect($<HTMLInputElement>('input[aria-label="Make it the default computer"]')!.checked).toBe(false);
   await click(byText("Add"));
-  expect(patches()[1]).toEqual({ defaultComputer: "other", computers: ["other", "box"] });
+  expect(patches()[1]).toEqual({ defaultComputer: "other", computers: ["other", "box"], publish: false });
   expect(card("box")!.querySelector('[data-testid="computer-default"]')).toBeNull();
 });
 
@@ -227,7 +227,7 @@ test("create a new computer for the agent: prefilled, then assigned and made def
   await click(inDialog("Create"));
   const post = server.calls.find((c) => c.method === "POST" && c.path === "/computers")!;
   expect(post.body).toEqual({ id: "sitoinchat", name: "Sito", kind: "daytona", lifecycle: { idleStopMinutes: 15 } });
-  expect(patches()).toEqual([{ defaultComputer: "sitoinchat", computers: ["sitoinchat"] }]);
+  expect(patches()).toEqual([{ defaultComputer: "sitoinchat", computers: ["sitoinchat"], publish: false }]);
   expect($('[role="dialog"]')).toBeNull();
   expect(card("sitoinchat")!.querySelector('[data-testid="computer-default"]')).toBeTruthy();
   expect($('[data-testid="agent-computer-empty"]')).toBeNull();
@@ -237,10 +237,10 @@ test("remove from this agent: removing the default puts it back on this server",
   setup({ name: "sitoinchat", defaultComputer: "nina", computers: ["nina", "lab"] }, [HOST, machine("nina"), machine("lab")]);
   await render();
   await click(button("Remove Lab from this agent"));
-  expect(patches()[0]).toEqual({ defaultComputer: "nina", computers: ["nina"] });
+  expect(patches()[0]).toEqual({ defaultComputer: "nina", computers: ["nina"], publish: false });
   expect(card("lab")).toBeNull();
   await click(button("Remove Nina from this agent"));
-  expect(patches()[1]).toEqual({ defaultComputer: "", computers: [] });
+  expect(patches()[1]).toEqual({ defaultComputer: "", computers: [], publish: false });
   expect($('[data-testid="agent-computer-empty"]')).toBeTruthy();
   expect($('[data-testid="agent-works-on"]')!.textContent).toContain("This server (host)");
 });

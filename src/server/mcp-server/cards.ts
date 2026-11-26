@@ -5,11 +5,10 @@
  */
 import { z } from "zod";
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { buildMissionCard, buildTaskCard, missionCardText, taskCardText, type MissionCard, type TaskCard } from "../mcp-work-card.js";
 import { WORK_CARD_HTML } from "../mcp-widgets.generated.js";
 import { cardAppearance } from "./card-appearance.js";
-import { READ, allowed, enc, fail, looseObject, unwrap, type McpDeps, type McpPrincipal, type ToolScope, type ToolsetName } from "./kit.js";
+import { READ, enc, fail, looseObject, unwrap, type AppRegister, type McpDeps } from "./kit.js";
 
 /** The task and mission cards' UI: one HTML document, served as a ui:// resource. */
 export const WORK_CARD_URI = "ui://polpo/work-card.html";
@@ -82,13 +81,12 @@ const missionCardOutput = z.object({
 const taskResult = (card: TaskCard) => ({ content: [{ type: "text" as const, text: taskCardText(card) }], structuredContent: card as unknown as Record<string, unknown> });
 const missionResult = (card: MissionCard) => ({ content: [{ type: "text" as const, text: missionCardText(card) }], structuredContent: card as unknown as Record<string, unknown> });
 
-export function registerWorkCards(server: McpServer, deps: McpDeps, enabled: ReadonlySet<ToolsetName>, principal: McpPrincipal, catalog?: ToolScope[]): void {
+export function registerWorkCards(app: AppRegister, deps: McpDeps): void {
   // the card refreshes itself through the same tools (visible to the model and to the app)
-  const tasks = allowed(enabled, principal, "tasks", READ, catalog, ["polpo_task_show"]);
-  const missions = allowed(enabled, principal, "missions", READ, catalog, ["polpo_mission_show"]);
-  if (!tasks && !missions) return;
+  const tasks = app.gate("tasks", READ, ["polpo_task_show"]);
+  const missions = app.gate("missions", READ, ["polpo_mission_show"]);
 
-  registerAppResource(server, "Task and mission card", WORK_CARD_URI, {
+  registerAppResource(app.anyOf(tasks, missions), "Task and mission card", WORK_CARD_URI, {
     description: "A task's card (status, why it failed, where and with what each run executed, cost, dependencies, result) "
       + "or a mission's (cost against its budget, cost by agent and engine, its tasks).",
   }, async () => ({
@@ -101,34 +99,30 @@ export function registerWorkCards(server: McpServer, deps: McpDeps, enabled: Rea
     }],
   }));
 
-  if (tasks) {
-    registerAppTool(server, "polpo_task_show", {
-      title: "Show a task",
-      description: "Show one task's card: its status, why it failed (and whether it was retried), where and with what each run executed "
-        + "(engine and model, authentication, computer, egress, cost), its tool scope when it narrows the agent's tools, the tasks it depends on and its result. "
-        + "Use it when the person asks how a task went (polpo_tasks_list for ids; polpo_task_get for the full record).",
-      inputSchema: { id: z.string().min(1).describe("The task's id") },
-      annotations: { title: "Show a task", ...READ },
-      outputSchema: taskCardOutput,
-      _meta: { ui: { resourceUri: WORK_CARD_URI } },
-    }, async ({ id }) => {
-      const r = await loadTaskCard(deps, id);
-      return r.ok ? taskResult(r.card) : fail(r.error);
-    });
-  }
+  registerAppTool(tasks, "polpo_task_show", {
+    title: "Show a task",
+    description: "Show one task's card: its status, why it failed (and whether it was retried), where and with what each run executed "
+      + "(engine and model, authentication, computer, egress, cost), its tool scope when it narrows the agent's tools, the tasks it depends on and its result. "
+      + "Use it when the person asks how a task went (polpo_tasks_list for ids; polpo_task_get for the full record).",
+    inputSchema: { id: z.string().min(1).describe("The task's id") },
+    annotations: { title: "Show a task", ...READ },
+    outputSchema: taskCardOutput,
+    _meta: { ui: { resourceUri: WORK_CARD_URI } },
+  }, async ({ id }) => {
+    const r = await loadTaskCard(deps, id);
+    return r.ok ? taskResult(r.card) : fail(r.error);
+  });
 
-  if (missions) {
-    registerAppTool(server, "polpo_mission_show", {
-      title: "Show a mission",
-      description: "Show one mission's card: its status, what it cost so far against its budget (paused when over), the cost by agent and engine, "
-        + "and its tasks with their latest run and failure. Use it when the person asks how a mission is going (polpo_missions_list for ids).",
-      inputSchema: { id: z.string().min(1).describe("The mission's id") },
-      annotations: { title: "Show a mission", ...READ },
-      outputSchema: missionCardOutput,
-      _meta: { ui: { resourceUri: WORK_CARD_URI } },
-    }, async ({ id }) => {
-      const r = await loadMissionCard(deps, id);
-      return r.ok ? missionResult(r.card) : fail(r.error);
-    });
-  }
+  registerAppTool(missions, "polpo_mission_show", {
+    title: "Show a mission",
+    description: "Show one mission's card: its status, what it cost so far against its budget (paused when over), the cost by agent and engine, "
+      + "and its tasks with their latest run and failure. Use it when the person asks how a mission is going (polpo_missions_list for ids).",
+    inputSchema: { id: z.string().min(1).describe("The mission's id") },
+    annotations: { title: "Show a mission", ...READ },
+    outputSchema: missionCardOutput,
+    _meta: { ui: { resourceUri: WORK_CARD_URI } },
+  }, async ({ id }) => {
+    const r = await loadMissionCard(deps, id);
+    return r.ok ? missionResult(r.card) : fail(r.error);
+  });
 }

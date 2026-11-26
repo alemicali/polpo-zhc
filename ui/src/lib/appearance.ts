@@ -140,7 +140,8 @@ export function setBrowserChoice(field: keyof typeof kit.KEYS, value: string): v
 }
 
 /** The current look as an instance default (what "Save as instance default" sends). */
-export function appearanceAsInstanceDefault(r: ResolvedAppearance = currentAppearance()): Required<InstanceAppearance> {
+/** (The sidebar style is not part of the look: it is set on its own and kept when the look is saved.) */
+export function appearanceAsInstanceDefault(r: ResolvedAppearance = currentAppearance()): Required<Omit<InstanceAppearance, "sidebarStyle">> {
   // the web fonts are settings.appearance.fonts, not part of custom
   const { fonts, ...custom } = r.custom;
   return { theme: r.theme, palette: r.palette, custom, fonts: fonts ?? [] };

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, memo } from "react";
+import { useState, useEffect } from "react";
 import { NavLink } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -8,7 +8,6 @@ import {
   Plug,
   Monitor,
   MessageCircle,
-  Megaphone,
   Brain,
   Sparkles,
   Columns2,
@@ -27,19 +26,27 @@ import {
   BrainCircuit,
   Radio,
   MessagesSquare,
+  Gauge,
+  Columns3,
 } from "lucide-react";
-import { useEvents, usePolpo } from "@polpo-ai/react";
+import { usePolpo } from "@polpo-ai/react";
 import { useProjectInfo } from "@/hooks/use-polpo";
 import { cn } from "@/lib/utils";
 import { BrandMark } from "@/components/shared/brand-mark";
 import { productName, productTagline, useInstanceBranding } from "@/lib/branding";
-import { WhatsNewDot } from "@/components/whats-new/whats-new-dot";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { openWhatsNew } from "@/hooks/use-whats-new-drawer";
+import { useSidebarStyle } from "@/hooks/use-sidebar-style";
+import { PendingBadge } from "./pending-badge";
+import { BetaBadge } from "@/components/shared/beta-badge";
+import { isBetaPath } from "@/lib/beta";
+import { DrillInNav } from "./drill-in-nav";
+import { SidebarStyleBanner } from "./sidebar-style-banner";
+import { WhatsNewStack } from "@/components/whats-new/whats-new-stack";
+import { SidebarSearchButton } from "@/components/search/sidebar-search-button";
 
 type NavItem = { to: string; icon: typeof LayoutDashboard; label: string; external?: boolean };
 type NavSection = { section: string; items: NavItem[] };
@@ -65,6 +72,8 @@ const nav: NavSection[] = [
     section: "Knowledge",
     items: [
       { to: "/agents", icon: Bot, label: "Agents" },
+      { to: "/benchmarks", icon: Gauge, label: "Benchmarks" },
+      { to: "/playground", icon: Columns3, label: "Playground" },
       { to: "/connectors", icon: Plug, label: "Connectors" },
       { to: "/computers", icon: Monitor, label: "Computers" },
       { to: "/agent-talk", icon: MessagesSquare, label: "Agent conversations" },
@@ -89,14 +98,6 @@ const nav: NavSection[] = [
     ],
   },
 ];
-
-/** Pinned at the bottom of the nav, above the connection footer. */
-const WHATS_NEW_ITEM: NavItem = { to: "/changelog", icon: Megaphone, label: "Novità" };
-/** "Novità" opens the What's new drawer over the page instead of leaving it. */
-const openWhatsNewFromNav = (e: React.MouseEvent) => {
-  e.preventDefault();
-  openWhatsNew();
-};
 
 const statusConfig: Record<string, { color: string; pulse: boolean; label: string }> = {
   connected: {
@@ -127,54 +128,6 @@ const statusConfig: Record<string, { color: string; pulse: boolean; label: strin
 };
 
 const STORAGE_KEY = "polpo-sidebar-collapsed";
-
-/** Lightweight pending-approval counter — fetches directly from client to avoid
- *  the useApprovals → useEvents → useSyncExternalStore re-render loop. */
-const APPROVAL_EVENTS = ["approval:requested", "approval:resolved", "approval:rejected", "approval:timeout"];
-
-const PendingBadge = memo(function PendingBadge({ collapsed }: { collapsed: boolean }) {
-  const { client, connectionStatus } = usePolpo();
-  const { events } = useEvents(APPROVAL_EVENTS, 1);
-  const [count, setCount] = useState(0);
-
-  const fetchCount = useCallback(() => {
-    if (!client) return;
-    client.getApprovals("pending")
-      .then((list: unknown[]) => setCount(list.length))
-      .catch(() => {});
-  }, [client]);
-
-  useEffect(() => {
-    if (connectionStatus !== "connected") return;
-    fetchCount();
-    const recover = () => {
-      if (document.visibilityState === "visible") fetchCount();
-    };
-    const id = window.setInterval(recover, 120_000);
-    document.addEventListener("visibilitychange", recover);
-    return () => {
-      window.clearInterval(id);
-      document.removeEventListener("visibilitychange", recover);
-    };
-  }, [connectionStatus, fetchCount]);
-
-  const latestEventId = events.at(-1)?.id;
-  useEffect(() => {
-    if (latestEventId) fetchCount();
-  }, [fetchCount, latestEventId]);
-
-  if (count === 0) return null;
-
-  return collapsed ? (
-    <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-pill bg-warning text-micro font-bold text-warning-foreground px-1">
-      {count}
-    </span>
-  ) : (
-    <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-pill bg-warning text-micro font-bold text-warning-foreground px-1.5">
-      {count}
-    </span>
-  );
-});
 
 // ── Nav item variants ──
 
@@ -214,10 +167,9 @@ function NavItemCollapsed({ to, icon: Icon, label, external }: NavItem) {
     <Tooltip delayDuration={0}>
       <TooltipTrigger asChild>
         <div>
-          <NavLink to={to} className={linkClasses} onClick={to === WHATS_NEW_ITEM.to ? openWhatsNewFromNav : undefined}>
+          <NavLink to={to} className={linkClasses}>
             <Icon className="h-[18px] w-[18px]" />
             {to === "/approvals" && <PendingBadge collapsed />}
-            {to === WHATS_NEW_ITEM.to && <WhatsNewDot className="absolute right-1.5 top-1.5" />}
           </NavLink>
         </div>
       </TooltipTrigger>
@@ -254,11 +206,11 @@ function NavItemExpanded({ to, icon: Icon, label, external }: NavItem) {
     );
 
   return (
-    <NavLink to={to} className={linkClasses} onClick={to === WHATS_NEW_ITEM.to ? openWhatsNewFromNav : undefined}>
+    <NavLink to={to} className={linkClasses}>
       <Icon className="h-[18px] w-[18px] shrink-0" />
       <span className="truncate">{label}</span>
+      {isBetaPath(to) && <BetaBadge className="ml-auto" />}
       {to === "/approvals" && <PendingBadge collapsed={false} />}
-      {to === WHATS_NEW_ITEM.to && <WhatsNewDot className="ml-auto" />}
     </NavLink>
   );
 }
@@ -268,6 +220,7 @@ export function Sidebar() {
   const { info } = useProjectInfo();
   const branding = useInstanceBranding();
   const status = statusConfig[connectionStatus];
+  const sidebarStyle = useSidebarStyle();
 
   const [collapsed, setCollapsed] = useState(() => {
     try {
@@ -325,8 +278,28 @@ export function Sidebar() {
         )}
       </div>
 
+      {/* Search (⌘K) — above Dashboard, in both sidebar styles */}
+      <SidebarSearchButton collapsed={collapsed} />
+
       {/* Navigation — scrolls when the items exceed the viewport height */}
+      {sidebarStyle === "drill-in" ? (
+        <DrillInNav
+          variant="sidebar"
+          collapsed={collapsed}
+          onExpand={() => setCollapsed(false)}
+          className="flex-1 min-h-0"
+          // Settings is pinned at the bottom of the nav: the banner and the Novità cards sit above
+          // it (the cards on the top level only, not inside Work, Team, Settings…)
+          aboveBottom={({ top }) => (
+            <>
+              {!collapsed && <SidebarStyleBanner className="mx-3 mb-2 shrink-0" />}
+              {top && <WhatsNewStack collapsed={collapsed} className={collapsed ? "mx-auto mb-2" : "mx-3 mb-2"} />}
+            </>
+          )}
+        />
+      ) : (
       <nav
+        aria-label="Main navigation"
         className={cn(
           "flex-1 min-h-0 flex flex-col overflow-y-auto overflow-x-hidden overscroll-contain",
           collapsed ? "items-center py-3 gap-1" : "p-3 gap-1"
@@ -353,11 +326,17 @@ export function Sidebar() {
           </div>
         ))}
       </nav>
+      )}
 
-      {/* What's new — pinned near the bottom */}
-      <div className={cn("shrink-0 border-t border-sidebar-border", collapsed ? "flex justify-center py-2" : "px-3 py-2")}>
-        {collapsed ? <NavItemCollapsed {...WHATS_NEW_ITEM} /> : <NavItemExpanded {...WHATS_NEW_ITEM} />}
-      </div>
+      {/* Try the other sidebar (dismissible; the drill-in one shows its banner above Settings) */}
+      {!collapsed && sidebarStyle === "classic" && <SidebarStyleBanner className="mx-3 mb-2 shrink-0" />}
+
+      {/* What's new — the latest entries as a stack of cards (the rail: one icon) */}
+      {sidebarStyle === "classic" && (
+        <div className={cn("shrink-0 border-t border-sidebar-border", collapsed ? "flex justify-center py-2" : "px-3 py-2")}>
+          <WhatsNewStack collapsed={collapsed} />
+        </div>
+      )}
 
       {/* Footer — project + connection */}
       <div

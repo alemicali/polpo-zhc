@@ -106,6 +106,48 @@
       "when": 1795371810680,
       "tag": "0014_task_tool_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1795495276475,
+      "tag": "0015_whatsapp_business",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1795502462782,
+      "tag": "0016_message_search",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1795545701833,
+      "tag": "0017_task_requested_by",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1795549293963,
+      "tag": "0018_mission_owner",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1795554785130,
+      "tag": "0019_agent_versions",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1795678469150,
+      "tag": "0020_work_origin",
+      "breakpoints": true
     }
   ]
 }

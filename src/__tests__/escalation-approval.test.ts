@@ -33,3 +33,20 @@ describe("approvals asked by the system (escalation)", () => {
     expect(transition).toHaveBeenCalledWith("t1", "assigned");
   });
 });
+
+describe("approvals about no task (a hosted MCP server's call)", () => {
+  it("can be rejected: the request is resolved and announced, no task is touched", async () => {
+    const emitter = new TypedEmitter();
+    const transition = vi.fn();
+    const manager = new ApprovalManager({ config: { settings: {} }, emitter, registry: { transition } } as never, new MemoryApprovalStore() as never);
+    const resolved: unknown[] = [];
+    emitter.on("approval:resolved", (p) => resolved.push(p));
+    const req = await manager.requestHumanApproval({ gateId: "mcp-server-call", gateName: "Printful · Create a draft order", payload: { kind: "mcp_server_call" } });
+    expect(await manager.canReject(req.id)).toMatchObject({ allowed: true });
+    const rejected = await manager.reject(req.id, "not now", "person:a@b.c");
+    expect(rejected).toMatchObject({ status: "rejected", note: "not now", resolvedBy: "person:a@b.c" });
+    expect(resolved).toEqual([{ requestId: req.id, status: "rejected", resolvedBy: "person:a@b.c" }]);
+    expect(transition).not.toHaveBeenCalled();
+    expect(await manager.reject(req.id, "again")).toBeNull();
+  });
+});

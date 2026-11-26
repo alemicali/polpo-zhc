@@ -10,7 +10,7 @@ import type { AgentConfig, Task, TaskStatus, DimensionScore, MissionStatus, Miss
 import type { BackgroundWait, TaskDirection, TaskDirectionMode } from "./task-control-store.js";
 
 /** Where a change came from: the UI or an HTTP call, Polpo's own tools, an agent's tools, a messaging channel, a schedule, or the system itself. */
-export type EventSource = "api" | "polpo" | "agent" | "channel" | "schedule" | "system";
+export type EventSource = "api" | "polpo" | "agent" | "channel" | "schedule" | "trigger" | "system";
 
 /** Who caused an event: carried by events about changes (`by` is a person: email or channel contact id). */
 export interface EventOrigin {
@@ -50,6 +50,9 @@ export interface PolpoEventMap {
   "agent:removed": { agentName: string; agents: AgentConfig[]; teams: Team[]; timestamp: string };
   /** An agent reviewed its conversations (learning): what it changed in its memory and own skills. */
   "agent:reflected": { agentName: string; trigger: "first" | "activity" | "daily" | "manual"; messages: number; summary: string; actions: string[]; timestamp: string };
+  "agent:gate": { agentName: string; gateId: string; version: string; status: import("./agent-suite-gates.js").DeployGateStatus; trigger: import("./agent-suite-gates.js").DeployGateTrigger; progress: { done: number; total: number }; summary: string; timestamp: string };
+  /** A benchmark run (agent suites phase 5) started, progressed, finished, was cancelled or stopped by its budget cap. */
+  "benchmark:progress": { benchmarkRunId: string; benchmarkId?: string; name: string; status: import("./agent-suite-bench.js").BenchmarkRunStatus; stopReason?: "budget" | "cancelled" | "error"; progress: { runsDone: number; runsTotal: number; casesDone: number; casesTotal: number }; spentUsd: number; budgetUsd?: number; timestamp: string };
   "agent:learned": { agentName: string; messages: number; changes: { id: string; kind: "memory" | "skill-created" | "skill-updated"; target: string }[]; summary: string; timestamp: string };
   "team:created": { teamName: string; agents: AgentConfig[]; teams: Team[]; timestamp: string };
   "team:updated": { oldName?: string; teamName: string; agents: AgentConfig[]; teams: Team[]; timestamp: string };
@@ -269,6 +272,8 @@ export interface PolpoEventMap {
   "storage:changed": { name: string; action: "created" | "updated" | "deleted" | "mounted" | "unmounted" | "mount-failed"; error?: string } & EventOrigin;
   /** A connector (MCP server) was added, changed, removed, or its connection status changed. */
   "connector:changed": import("./connectors.js").ConnectorChangedEvent & EventOrigin;
+  /** A hosted MCP server changed: created, draft, published, deployed, settings, tests, pending (approval), deleted. */
+  "mcp-server:changed": { id: string; what: string } & EventOrigin;
   /**
    * A computer (persistent machine, settings.computers) was created, changed, deleted, or its
    * machine changed status (creating, running, stopped, paused, hibernated, archived, error…).
@@ -294,6 +299,134 @@ export interface PolpoEventMap {
     outcome: "accepted" | "ignored" | "rejected" | "error";
     eventType?: string;
     computerId?: string;
+  };
+
+  /** A trigger (POST /hooks/{id}) was created, changed, deleted, or its secret rotated / HMAC secret set. */
+  "trigger:changed": {
+    id: string;
+    action: "created" | "updated" | "deleted" | "secret-rotated" | "hmac-secret";
+  } & EventOrigin;
+  /**
+   * A trigger recorded a delivery: accepted, rejected (auth, size, type, contract), filtered,
+   * duplicate or rate_limited; `test` when sent from the dashboard / API / a tool. `mapped`: the
+   * mapping's values (what the actions receive).
+   */
+  "trigger:delivery": {
+    triggerId: string;
+    deliveryId: string;
+    status: "accepted" | "rejected" | "filtered" | "duplicate" | "rate_limited";
+    httpStatus: number;
+    test?: boolean;
+    mapped?: Record<string, unknown>;
+    /** The delivery's actions as a whole when it has some (queued on an accepted delivery; skipped by the loop guard). */
+    actions?: "queued" | "running" | "done" | "failed" | "skipped" | "partial";
+  };
+  /**
+   * A delivery's actions changed: one started, ended (done, failed, skipped) or was re-run. `actions`:
+   * each action's run (status, attempts, times, error, refs to what it created).
+   */
+  "trigger:actions": {
+    triggerId: string;
+    deliveryId: string;
+    status?: "queued" | "running" | "done" | "failed" | "skipped" | "partial";
+    actions: Array<{
+      actionId: string; kind: string; name?: string; status: "queued" | "running" | "done" | "failed" | "skipped"; attempts: number;
+      queuedAt: string; startedAt?: string; endedAt?: string; error?: string; reason?: string; costUsd?: number;
+      refs?: { playbook?: string; missionId?: string; missionName?: string; copyOf?: string; taskId?: string; sessionId?: string; agent?: string; notificationId?: string; channel?: string };
+    }>;
+  };
+
+  /**
+   * A decision was taken (decide(): REST, MCP, Polpo's chat, an agent's decide tool, a mission's
+   * decision node, a suite's decision scorer) and recorded in the decision log — or failed.
+   */
+  "decision:made": {
+    id: string;
+    caller: string;
+    callerId?: string;
+    model: string;
+    calibrated: boolean;
+    uncertain: boolean;
+    costUsd: number;
+    status: "ok" | "error";
+    error?: string;
+  };
+  /**
+   * A coding chat (a Claude Code / Codex session of the Coding app, on a person's own CLI account)
+   * was created, changed status (running, waiting for an approval, idle, error) or was deleted.
+   */
+  "coding:chat": {
+    id: string;
+    action: "created" | "updated" | "deleted";
+    kind: "claude" | "codex";
+    status: "idle" | "running" | "awaiting-approval" | "error";
+    cwd: string;
+    title: string;
+    branch?: string;
+    workspaceId?: string;
+    owner?: string;
+  };
+  /** A mission's decision node is deciding, took a branch, or waits for a person to choose one. */
+  "decision:node": {
+    group: string;
+    missionId?: string;
+    node: string;
+    status: "deciding" | "decided" | "awaiting";
+    branch?: string | null;
+    suggested?: string | null;
+    decidedBy?: string;
+    decisionId?: string;
+    reason?: string;
+    skipped?: number;
+  };
+
+  /**
+   * An image request (generateImage / editImage: REST, MCP, Polpo's chat, an agent's image tools, a
+   * mission's image node) was answered and recorded in the media log — or it failed.
+   */
+  "media:generated": {
+    id: string;
+    kind: "generate" | "edit";
+    caller: string;
+    callerId?: string;
+    model: string;
+    images: number;
+    costUsd: number;
+    status: "ok" | "error";
+    error?: string;
+  };
+  /** A mission's image node is generating, made its image, or failed. */
+  "media:node": {
+    group: string;
+    missionId?: string;
+    node: string;
+    status: "generating" | "done" | "failed";
+    mediaId?: string;
+    error?: string;
+  };
+
+  /**
+   * A message of a WhatsApp Business channel changed status: Meta's status webhooks (sent,
+   * delivered, read, failed), a send queued for approval, approved or rejected, an inbound message.
+   */
+  "channel:message-status": {
+    channel: string;
+    /** The message id (wamid, or the local id of a queued send). */
+    messageId: string;
+    status: string;
+    direction: "in" | "out";
+    /** The contact, masked (39•••••567). */
+    contact?: string;
+    error?: string;
+    pricingCategory?: string;
+  };
+  /** A WhatsApp Business webhook delivery was recorded in the channel's event log, or its processing finished. */
+  "channel:webhook": {
+    channel: string;
+    id: string;
+    action: "recorded" | "updated";
+    outcome: "accepted" | "ignored" | "rejected" | "error";
+    eventType?: string;
   };
 
   // Company brain

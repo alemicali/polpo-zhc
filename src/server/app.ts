@@ -40,6 +40,9 @@ import {
   sessionLeases,
   internalCallHeaders,
   trustedApiCallHeaders,
+  registerAgentSuiteRoutes,
+  type AgentSuiteRouteDeps,
+  benchmarkRoutes,
   isTrustedApiCall,
   TRUSTED_API_CALL_HEADER,
   CHAT_ORIGIN_HEADER,
@@ -76,13 +79,20 @@ import { computerRoutes, egressRoutes, type ComputerRouteDeps } from "./routes/c
 import { harnessRoutes } from "./routes/harnesses.js";
 import { harnessSessionViews } from "../harness/control.js";
 import { forwardToRelay, HARNESS_RELAY_PATH } from "../harness/relay.js";
-import { computerManagerWithEvents } from "../sandbox/computers.js";
+import { computerManagerWithEvents, driverHost } from "../sandbox/computers.js";
+import { cliAccountRoutes } from "./routes/cli-accounts.js";
+import { cliChatRunner } from "../cli-engine/chat.js";
 import { computerWebhooksFor } from "../sandbox/computer-webhooks.js";
 import { computerWebhookAdminRoutes, computerWebhookInboundRoutes } from "./routes/computer-webhooks.js";
+import { waBusinessAdminRoutes, waBusinessWebhookRoutes } from "./routes/whatsapp-business.js";
+import { slackRoutes } from "./routes/slack.js";
 import { computerSandbox } from "../sandbox/manager.js";
 import { whatsappRoutes } from "./routes/whatsapp.js";
 import { emailRoutes } from "./routes/email.js";
 import { codingRoutes } from "./routes/coding.js";
+import { codingChatRoutes } from "./routes/coding-chats.js";
+import { codingChatManagerFor } from "./coding-chats-host.js";
+import type { CliLauncher } from "../cli-engine/process.js";
 import { roomRoutes } from "./routes/rooms.js";
 import { learningRoutes } from "./routes/learning.js";
 import { checkRoutes, telegramRoutes } from "./routes/checks.js";
@@ -91,13 +101,34 @@ import { syncRoutes } from "./routes/sync.js";
 import { browserDashboardRoutes } from "./routes/browser-dashboard.js";
 import { browserProfileRoutes } from "./routes/browser-profiles.js";
 import { connectorRoutes, connectorOAuthCallback } from "./routes/connectors.js";
+import { mcpServerRoutes } from "./routes/mcp-servers.js";
+import { mcpServerServiceFor, setHostedSuiteGate } from "./mcp-servers-runtime.js";
+import { handlePublicMcpRequest, RateLimiter, PUBLIC_MCP_SERVERS_PATH } from "../mcp-servers/public.js";
+import { hostedDeps } from "../mcp-servers/host.js";
+import { queryOrchestratorText } from "../llm/query.js";
+import { effectiveOrchestratorModel, requireOrchestratorModel } from "../llm/orchestrator-model.js";
 import {
   connectorManagerFor, connectorsPromptSection, notePublicOrigin, clientMetadataDocument, connectorDashboardBase, connectorPublicBase,
-  CONNECTOR_CLIENT_METADATA_PATH, CONNECTOR_OAUTH_CALLBACK_PATH,
+  CONNECTOR_CLIENT_METADATA_PATH, CONNECTOR_OAUTH_CALLBACK_PATH, knownPublicOrigin,
 } from "../mcp/runtime.js";
+import { triggerServiceFor, TRIGGER_PUBLIC_PATH } from "../triggers/service.js";
+import { triggerAdminRoutes, triggerInboundRoutes } from "./routes/triggers.js";
+import { createTriggerActionHost } from "./trigger-action-host.js";
+import type { TriggerActionHost } from "../triggers/actions.js";
 import { isMcpToolName, toolResultText } from "../mcp/tools.js";
 import { connectorLabel } from "../mcp/view.js";
 import { AgentTalk } from "./agent-talk.js";
+import { deliverAgentReplyToTask } from "./agent-talk-task.js";
+import { agentTesterFor } from "./agent-tests-host.js";
+import { agentBenchmarksFor, agentDeployGatesFor, agentSuiteRunnerFor } from "./agent-suites-host.js";
+import { DecisionService, decisionServiceFor, registerDecisionService } from "../decisions/service.js";
+import { decideRoutes, decisionRoutes } from "./routes/decisions.js";
+import { MediaService, mediaServiceFor, registerMediaService } from "../media/service.js";
+import { mediaRoutes } from "./routes/media.js";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import {
+  SUITE_PLACEHOLDER_MODEL, applySuiteOverrides, currentSuiteCase, suiteCompleteLLM, suiteStreamLLM, suiteToolExecutor,
+} from "../core/agent-suite-context.js";
 import { orchestratorName } from "../core/orchestrator-name.js";
 import { resolveBrowserEgress } from "../tools/browser-egress.js";
 import { appPreviewRoutes } from "./routes/app-preview.js";
@@ -111,6 +142,9 @@ import { getArtifactStore } from "./artifact-runtime.js";
 import { storageRoutes } from "./routes/storage.js";
 import { getStorageRuntime } from "../storage/runtime.js";
 import { companyBrainRoutes } from "./routes/company-brain.js";
+import { searchRoutes } from "./routes/search.js";
+import { SearchEngine } from "./search/engine.js";
+import { buildSearchSources } from "./search/sources.js";
 import { FileAttachmentStore } from "../stores/file-attachment-store.js";
 import { saveChatUserMessage, resolveChatAttachmentReferences } from "./chat-attachments.js";
 import { transcribeSpeech } from "../tools/audio-tools.js";
@@ -125,6 +159,7 @@ import { isTerminalEnabled, type TerminalWebSocketHandle } from "./terminal.js";
 import type { CodeServerManager } from "./code-server.js";
 import type { SyncScheduler } from "./sync-scheduler.js";
 import { withEventOrigin, currentEventOrigin } from "../core/events.js";
+import type { PolpoEventMap } from "@polpo-ai/core";
 import { POLPO_PACKAGE_VERSION } from "../core/version.js";
 
 export interface AppOptions {
@@ -141,6 +176,8 @@ export interface AppOptions {
   /** Hands the long-lived scheduler to /sync routes so flipping the
    * enabled toggle re-arms the cron without a server restart. */
   syncScheduler?: SyncScheduler;
+  /** Coding chats: starts the CLI program (tests inject fake programs; default: the official one on this server). */
+  codingChatLaunch?: CliLauncher;
 }
 
 /**
@@ -151,6 +188,9 @@ export interface AppOptions {
  * from Hono context.  This lets the cloud data-plane wire stores directly
  * without needing the full Orchestrator class.
  */
+/** Orchestrators whose deleted missions / hosted servers already drop their suites (createApp may run more than once). */
+const suiteCleanupWired = new WeakSet<Orchestrator>();
+
 export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts?: AppOptions): OpenAPIHono {
   const app = new OpenAPIHono();
   const activeWorkDir = () => orchestrator.isInitialized ? orchestrator.getWorkDir() : opts?.workDir;
@@ -207,6 +247,12 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     polpoDir: activePolpoDir(), path: c.req.path.slice(HARNESS_RELAY_PATH.length), request: c.req.raw,
   }));
 
+  // ── WhatsApp Business webhooks (public) ───────────────────────────────
+  // Meta's verify token and signature authenticate; before the global per-IP rate limit (Meta posts
+  // from a few addresses in bursts), with a limit of its own per channel (whatsapp-business-service.ts).
+  const waBusiness = () => (orchestrator?.isInitialized ? orchestrator.getWaBusiness() : undefined);
+  app.route("/api/v1/channels/whatsapp-business/webhooks", waBusinessWebhookRoutes({ service: waBusiness }));
+
   // Rate limit API routes only (not static assets)
   app.use("/api/*", rateLimitMiddleware());
   app.use("/v1/*", rateLimitMiddleware());
@@ -232,6 +278,41 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     ), log);
   };
   app.route("/api/v1/computers/webhooks", computerWebhookInboundRoutes({ webhooks: computerWebhooks }));
+
+  // Triggers: POST /hooks/:id, public (outside /api and the auth gate), authenticated by the
+  // trigger's own secret / HMAC signature / IP allowlist, with its own rate limit and body cap.
+  // The only public path of the feature: behind Tailscale Funnel publish /<instance>/hooks/ (docs/triggers.md).
+  const triggerService = () => {
+    if (!orchestrator?.isInitialized) return undefined;
+    const polpoDir = orchestrator.getPolpoDir();
+    return triggerServiceFor(polpoDir, {
+      polpoDir: () => polpoDir,
+      vault: () => orchestrator.getVaultStore?.(),
+      publicBase: () => knownPublicOrigin(),
+      emit: (kind, payload) => {
+        if (kind === "changed") orchestrator.emit("trigger:changed", payload as PolpoEventMap["trigger:changed"]);
+        else if (kind === "actions") orchestrator.emit("trigger:actions", payload as PolpoEventMap["trigger:actions"]);
+        else orchestrator.emit("trigger:delivery", payload as PolpoEventMap["trigger:delivery"]);
+      },
+      // what actions call: the same internal functions as the other surfaces (no HTTP to ourselves)
+      actionHost: () => (orchestrator?.isInitialized ? triggerActionHost() : undefined),
+      log: (level, message) => orchestrator.emit("log", { level, message }),
+    });
+  };
+  let triggerHost: TriggerActionHost | undefined;
+  const triggerActionHost = (): TriggerActionHost => {
+    triggerHost ??= createTriggerActionHost({
+      orchestrator,
+      completions: completionApp,
+      apiKey: () => opts?.apiKeys?.[0],
+      sessionCost: async (sessionId) => {
+        const store = databaseStoresFor(activePolpoDir())?.tokenUsageStore ?? new FileTokenUsageStore(activePolpoDir());
+        return (await store.list("today")).filter((r) => r.sessionId === sessionId).reduce((sum, r) => sum + (r.cost || 0), 0);
+      },
+    });
+    return triggerHost;
+  };
+  app.route(TRIGGER_PUBLIC_PATH, triggerInboundRoutes({ service: triggerService }));
 
   // Config status + initialize — always available so setup wizard works
   if (opts?.workDir) {
@@ -339,6 +420,20 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         transcribe: async (audio, filename) => (await transcribeSpeech(audio, filename, await speechVaultFor(o, options?.agent)))?.text ?? null,
       }),
     getAgents: () => o.getAgents(),
+    // "writer@draft" (the Tests tab's smoke run): the draft over the live agent's runtime fields
+    // a suite case's variant (agent suites): its per-run overrides on top (nothing is saved)
+    resolveAgent: async (name: string, ref?: string) => {
+      // a suite role played by a model + engine block: its ephemeral agent (this turn only)
+      const roleAgent = currentSuiteCase()?.roleAgent;
+      if (roleAgent && name === roleAgent.name && !ref) return { agent: roleAgent };
+      const overrides = currentSuiteCase()?.overrides;
+      const withOverrides = <T extends { agent: any } | undefined>(r: T): T => (r && overrides ? { ...r, agent: applySuiteOverrides(r.agent, overrides) } : r);
+      if (ref !== "draft") return withOverrides(await o.getAgentVersioning().resolve(name, ref));
+      const live = (await o.getAgents()).find((a) => a.name === name);
+      if (!live) return undefined;
+      const { config } = await o.getAgentVersioning().draftConfig(name);
+      return withOverrides({ agent: { ...live, ...config, name } });
+    },
     getConfig: () => o.getConfig(),
     getMemoryStore: () => o.getMemoryStore(),
     getSessionStore: () => o.getSessionStore(),
@@ -347,15 +442,34 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     connectorNames: () => Object.fromEntries(connectorManagerFor(o).store.list().map((connector) => [connector.id, connectorLabel(connector)])),
     connectorApps: () => Object.fromEntries(connectorManagerFor(o).store.list().flatMap((connector) => (connector.catalogId ? [[connector.id, connector.catalogId]] : []))),
     recordTokenUsage: async (usage) => {
+      // a suite case's scripted turns are not spending
+      if (currentSuiteCase()?.mocksModel) return;
       await (databaseStoresFor(activePolpoDir())?.tokenUsageStore ?? new FileTokenUsageStore(activePolpoDir())).record(usage);
       o.emit("token-usage:recorded", { timestamp: new Date().toISOString() });
     },
     resolveAgentModel: async (agentConfig: any, reasoning?: string) => {
       const { resolveModel, buildStreamOpts } = await import("../llm/pi-client.js");
-      const m = resolveModel(agentConfig.model);
+      let m: any;
+      try {
+        m = resolveModel(agentConfig.model);
+      } catch (err) {
+        // a suite case that scripts the model runs offline: no provider needed
+        if (!currentSuiteCase()?.mocksModel) throw err;
+        m = SUITE_PLACEHOLDER_MODEL;
+      }
       const r = agentConfig.reasoning ?? reasoning;
       return { model: m, streamOpts: buildStreamOpts(undefined, r, m.maxTokens) };
     },
+    // agents on the CLI engine: their chats run the official program with the agent's account
+    cliChat: (agentConfig: any) => cliChatRunner(agentConfig, {
+      polpoDir: o.getPolpoDir(),
+      workDir: () => o.getAgentWorkDir(),
+      settings: () => o.getConfig()?.settings,
+      vaultStore: () => o.getVaultStore(),
+      chatSandbox: (agent) => o.chatSandbox(agent),
+      chatOutputDir: (name) => o.chatOutputDir(name),
+      instanceAuth: () => isInstanceAuthEnabled(),
+    }),
     agentChatContext: async (agentConfig: any) => {
       const drive = o.getDriveManager();
       if (!agentConfig.drive?.enabled || !drive) return undefined;
@@ -386,10 +500,13 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         + connectorsNote;
     },
     resolveAgentTools: async (agentConfig: any, context?: { sessionId: () => string | undefined; origin?: import("@polpo-ai/core").ConversationCheckTarget; chain?: string[] }) => {
+      // a suite role's turn (judge, simulated user, generator, reviewer): text only, no tools
+      const role = currentSuiteCase()?.role;
+      if (role) return { tools: [], executor: async (name: string) => `Error: ${name} is not available: this turn plays a test suite's ${role}, without tools.`, isInteractive: () => false };
       const { createAllTools } = await import("../tools/system-tools.js");
       const { createMemoryTools } = await import("../tools/memory-tools.js");
       const { createDataAgentTools } = await import("../tools/data-tools.js");
-      const { createArtifactAgentTools } = await import("../tools/artifact-tools.js");
+      const { createArtifactAgentTools, workspaceFileReader } = await import("../tools/artifact-tools.js");
       const { createCompanyBrainAgentTools } = await import("../tools/company-brain-tools.js");
       const { createStorageAgentTools } = await import("../tools/storage-tools.js");
       const { resolveAgentVault } = await import("../vault/index.js");
@@ -472,6 +589,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         shell: chatShell,
         fs: chatFs,
         sandboxProvider: chatSandboxProvider,
+        ...(context?.sessionId?.() ? { mediaContext: { sessionId: context.sessionId()! } } : {}),
       });
       const memoryStore = o.getMemoryStore();
       if (memoryStore) tools.push(...createMemoryTools(memoryStore, agentConfig.name));
@@ -493,6 +611,11 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         author: agentConfig.name,
         ...(context?.sessionId?.() ? { sessionId: context.sessionId()! } : {}),
         emit: (payload) => o.emit("artifact:changed", payload),
+        // artifact_from_file: a file of its chat workspace (the Cowork VM's or this machine's), copied out
+        readFile: workspaceFileReader({
+          cwd: o.getAgentWorkDir(), tempDir: join(polpoDir, "tmp"),
+          remote: { readFileBuffer: async (p: string) => chatFs.readFileBuffer ? chatFs.readFileBuffer(p) : Buffer.from(await chatFs.readFile(p)) },
+        }),
       })));
       // Buckets through host-side tools: credentials stay on the host.
       tools.push(...createStorageAgentTools(polpoDir, agentConfig.name, agentConfig.allowedTools, {
@@ -502,6 +625,10 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         emitFileChanged: (payload) => o.emit("file:changed", payload),
         fs: chatFs,
       }));
+      // decide: typed judgments from the decision model (allowedTools "decide")
+      const { createDecisionTools } = await import("../tools/decision-tools.js");
+      if (agentConfig.allowedTools?.includes("decide")) decisions(); // the service for this .polpo directory
+      tools.push(...createDecisionTools(polpoDir, agentConfig.name, agentConfig.allowedTools));
       // Connectors granted to this agent (mcp__<connector>__<tool>), filtered by allowedTools. A
       // connector that cannot connect is skipped (and logged): it never breaks the chat.
       try {
@@ -571,13 +698,21 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
           } : {}),
         })).filter((tool) => !existingToolNames.has(tool.name)));
       }
+      // WhatsApp Business (wabiz_*): only when allowedTools names them (never through whatsapp_*), host-side
+      if (agentConfig.allowedTools?.some((t: string) => t.toLowerCase().startsWith("wabiz"))) {
+        const { createWabizTools } = await import("../tools/wabiz-tools.js");
+        tools.push(...createWabizTools({ service: () => o.getWaBusiness(), sender: agentConfig.name }, agentConfig.allowedTools)
+          .filter((tool) => !existingToolNames.has(tool.name)));
+      }
       // Talking to other agents in the middle of the chat (nobody waits: answers arrive live)
       if (agentTalk && !existingToolNames.has("ask_agent")) {
         const { createAgentTalkTools } = await import("../tools/agent-talk-tools.js");
         const talk = agentTalk;
+        // only the agents its communication lines reach are named (the server refuses the others)
+        const reach = await talk.lines(agentConfig.name).catch(() => undefined);
         tools.push(...createAgentTalkTools(talk, () => ({
           agent: agentConfig.name, chain: context?.chain ?? [], sessionId: context?.sessionId?.(), origin: context?.origin,
-        })).filter((tool) => !existingToolNames.has(tool.name)));
+        }), { reach }).filter((tool) => !existingToolNames.has(tool.name)));
       }
       // Opt-in `render_widget` per agente, via allowedTools (es.
       // `["read","write","render_widget"]` in polpo.json). NON è nei
@@ -633,9 +768,11 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       // Whatever the agent's tools change is attributed to the agent
       const attributed = (name: string, args: Record<string, unknown>) =>
         withEventOrigin({ source: "agent", by: agentConfig.name }, () => executor(name, args));
-      return { tools, executor: attributed, isInteractive };
+      // agent suites: a case's tool mocks answer before anything runs (no side effect)
+      return { tools, executor: suiteToolExecutor(attributed), isInteractive };
     },
-    streamLLM: streamSimpleWithAuth as any,
+    // agent suites: scripted turns (model mock), observed real turns and budgets
+    streamLLM: suiteStreamLLM(streamSimpleWithAuth as any),
     // A tool call whose arguments do not match the tool's schema is returned to the model instead of run.
     // Only a validation failure counts: if the validator itself fails, the call goes through as before.
     validateToolArguments: (tool: any, call: any) => {
@@ -646,7 +783,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         return call.arguments;
       }
     },
-    completeLLM: completeSimpleWithAuth as any,
+    completeLLM: suiteCompleteLLM(completeSimpleWithAuth as any),
     resolveSummaryModel: (conversation: any, configured: string | undefined, promptTokens: number) =>
       resolveSummaryModel(conversation, configured, promptTokens),
     // only Telegram turns carry an origin (see ChannelGateway.checkTarget)
@@ -658,7 +795,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       const state = await (async () => { try { return await o.getStore()?.getState() ?? null; } catch { return null; } })();
       let systemPrompt = await buildChatSystemPrompt(o, state);
       const settings = o.getConfig()?.settings;
-      const modelSpec = resolveModelSpec(settings?.orchestratorModel);
+      const modelSpec = resolveModelSpec(effectiveOrchestratorModel(settings?.orchestratorModel) ?? settings?.orchestratorModel);
       const m = resolveModel(modelSpec);
       // Connectors granted to Polpo (access.polpo): their tools are appended to Polpo's static ones
       const connectorManager = connectorManagerFor(o);
@@ -678,11 +815,13 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
           return `Error: ${err instanceof Error ? err.message : String(err)}`;
         }
       };
+      // a suite role's turn played by Polpo (judge, simulated user, generator, reviewer): text only, no tools
+      const role = currentSuiteCase()?.role;
       return {
         systemPrompt,
         model: m,
         streamOpts: buildStreamOpts(undefined, settings?.reasoning, m.maxTokens),
-        tools: [...ALL_ORCHESTRATOR_TOOLS, ...connectorTools.tools],
+        tools: role ? [] : [...ALL_ORCHESTRATOR_TOOLS, ...connectorTools.tools],
         executor: (name: string, args: Record<string, unknown>, context) =>
           withEventOrigin({ source: "polpo" }, () => runTool(name, args, context)),
         isInteractive,
@@ -693,7 +832,10 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   app.use("/v1/chat/completions", (c, next) => {
     // Polpo's connector_add needs the OAuth redirect URI as people reach this instance
     if (!currentEventOrigin()) notePublicOrigin(publicOrigin(c));
-    return currentEventOrigin() ? next() : withEventOrigin({ source: "api" }, () => next());
+    if (currentEventOrigin()) return next();
+    // the signed-in member chatting (instance sign-in): what Polpo's tools create is theirs (requestedBy, mission owner)
+    const email = c.get("polpoUserEmail" as never) as string | undefined;
+    return withEventOrigin({ source: "api", ...(email ? { by: email } : {}) }, () => next());
   });
   app.route("/v1/chat/completions", completionApp);
 
@@ -903,6 +1045,24 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       dashboardUrl: process.env.POLPO_DASHBOARD_URL?.trim() || process.env.POLPO_UI_PUBLIC_URL?.trim() || undefined,
       api: inProcessApi,
     }));
+  });
+
+  // ── Hosted MCP servers: the public endpoint ───────────────────────────
+  // POLPO_PUBLIC_URL/mcp/servers/<id>: only servers marked public answer (others 404), with the
+  // instance's credentials, rate limited per IP and globally; destructive / approval tools are not
+  // offered unless a tool allows it. No API key: it is public on purpose (see docs/custom-mcp-servers.md).
+  const publicMcpLimiter = new RateLimiter();
+  app.all(`${PUBLIC_MCP_SERVERS_PATH}/:id`, async (c) => {
+    if (!orchestrator?.isInitialized) return c.json({ error: "Polpo is not initialized" }, 503);
+    mcpServerServiceFor(orchestrator); // approvals wired
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the node server's socket
+    const socketIp = (c.env as any)?.incoming?.socket?.remoteAddress as string | undefined;
+    const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || socketIp || "unknown";
+    return handlePublicMcpRequest(c.req.raw, {
+      serverId: c.req.param("id"), ip, limiter: publicMcpLimiter,
+      deps: hostedDeps(orchestrator.getPolpoDir(), orchestrator.getVaultStore()),
+      log: (line) => console.log(`[polpo/mcp-servers] ${line}`),
+    });
   });
 
   // ── Connectors: the OAuth callback ────────────────────────────────────
@@ -1135,7 +1295,12 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       return messages.filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string" && m.content.trim())
         .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
     },
-    agents: async () => (await o.getAgents()).map((a) => ({ name: a.name, ...(a.role ? { role: a.role } : {}) })),
+    agents: async () => (await o.getAgents()).map((a) => ({
+      name: a.name, ...(a.role ? { role: a.role } : {}),
+      ...(a.reportsTo ? { reportsTo: a.reportsTo } : {}), ...(a.talksTo ? { talksTo: a.talksTo } : {}),
+    })),
+    // a task run's later reply: into the run while it works (a follow-up), else on the task
+    toTask: async (task, reply) => { await deliverAgentReplyToTask(o, task, reply); },
     orchestratorName: () => orchestratorName(o.getConfig()?.settings),
     // The answer joins the conversation now: into the running answer, else as the next turn
     // (streamed, so an open chat shows it live), whatever auto-send says.
@@ -1342,10 +1507,42 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     getMissionCostSummaries: (missions: any[]) => o.getMissionCostSummaries(missions),
   })));
 
+  /** Who makes a request (versions of skills and agents, deploys): a person, Polpo's chat, an agent, or an MCP client. */
+  const requestAuthor = (c: { req: { header: (name: string) => string | undefined }; get: (key: never) => unknown }): string => {
+    if (isTrustedApiCall(c.req.header(TRUSTED_API_CALL_HEADER))) {
+      const origin = currentEventOrigin();
+      if (origin?.source === "polpo") return "polpo";
+      if (origin?.source === "agent" && origin.by) return origin.by;
+      return `mcp:${origin?.by ?? "client"}`;
+    }
+    const email = c.get("polpoUserEmail" as never) as string | undefined;
+    return email ? `person:${email}` : "person:dashboard";
+  };
+
+  /**
+   * An admin may override a deploy gate and let a gate run real tools: instance members have no
+   * roles (every member configures the instance) and an API key is the owner's; an MCP client got
+   * here only with polpo:admin (the MCP layer checks), Polpo's chat is admin; an agent never is.
+   */
+  const requestIsAdmin = (c: { req: { header: (name: string) => string | undefined } }): boolean => {
+    if (isTrustedApiCall(c.req.header(TRUSTED_API_CALL_HEADER))) {
+      const origin = currentEventOrigin();
+      if (origin?.source === "agent") return false;
+      // an MCP client's call carries the scopes it acted under
+      return !origin?.scopes || origin.scopes.includes("polpo:admin") || origin.scopes.includes("polpo");
+    }
+    return true;
+  };
+
   authed.route("/agents", agentRoutes(() => ({
     getAgents: () => o.getAgents(),
     addAgent: (agent: any, teamName?: string) => o.addAgent(agent, teamName),
-    removeAgent: (name: string) => o.removeAgent(name),
+    removeAgent: async (name: string) => {
+      const removed = await o.removeAgent(name);
+      if (removed) await agentTester().forget(name).catch(() => undefined);
+      if (removed) await agentSuites().forget(name).catch(() => undefined);
+      return removed;
+    },
     updateAgent: (name: string, updates: any) => o.updateAgent(name, updates),
     getTeams: () => o.getTeams(),
     getTeam: (name?: string) => o.getTeam(name),
@@ -1357,7 +1554,250 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     polpoDir: o.getPolpoDir(),
     computerIds: () => (o.getConfig()?.settings?.computers ?? []).map((c) => c.id),
     fs: new NodeFileSystem(),
+    versions: {
+      versioning: () => o.getAgentVersioning(),
+      update: (name, updates, opts) => o.updateAgentVersioned(name, updates, opts),
+      // through the deploy gate: the agent's required suites run first (docs/agent-suites.md, "CI gate")
+      deploy: (name, version, req) => o.requestAgentDeploy(name, version, req),
+      rollback: (name, opts) => o.rollbackAgentVersion(name, opts),
+      autoDeploy: () => o.autoDeployApiUpdates(),
+      actor: (c) => requestAuthor(c),
+      isAdmin: (c) => requestIsAdmin(c),
+      gates: {
+        list: (name, opts) => deployGates().list(name, opts),
+        get: (name, id) => deployGates().get(name, id),
+        cancel: (name, id, actor) => deployGates().cancel(name, id, actor),
+        override: (name, id, req) => deployGates().override(name, id, req),
+        versionStatuses: (name) => deployGates().versionStatuses(name),
+        pending: (name) => deployGates().pending(name),
+        attach: (name, entries) => deployGates().attach(name, entries),
+        published: (name, version, actor) => deployGates().published(name, version, actor),
+        wait: (name, id, ms) => deployGates().wait(name, id, ms),
+        outcome: (gate) => deployGates().outcome(gate),
+        required: async (name) => (await deployGates().requiredSuites(name)).map((s) => ({
+          id: s.id, name: s.name, onPublish: s.gate?.onPublish === true, allowRealTools: s.gate?.allowRealTools === true,
+        })),
+      },
+      // publish / discard do not write the live agent: refresh live clients (deploys already do)
+      changed: (name, what) => { if (what !== "deployed") void o.notifyAgentChanged(name); },
+    },
+    // the Tests tab: check everything the agent has at its disposal (docs/agent-tests.md)
+    tests: {
+      run: (name, req, opts) => agentTester().run(name, req, opts),
+      history: (name, limit) => agentTester().history(name, limit),
+      get: (name, id) => agentTester().get(name, id),
+      fix: (name, action) => agentTester().fix(name, action),
+      actor: (c) => requestAuthor(c),
+      member: (c) => c.get("polpoUserEmail" as never) as string | undefined,
+    },
+    // the Suites tab: tests and evals with mocks, run against a version (docs/agent-suites.md)
+    suites: {
+      list: (name) => agentSuites().listSuites(name),
+      get: (name, id) => agentSuites().getSuite(name, id),
+      save: (name, input, opts) => agentSuites().saveSuite(name, input, opts),
+      remove: (name, id) => agentSuites().deleteSuite(name, id),
+      importDataset: (name, id, req, opts) => agentSuites().importDataset(name, id, req, opts),
+      startRun: (name, id, req, opts) => agentSuites().startRun(name, id, req, opts),
+      listRuns: (name, opts) => agentSuites().listRuns(name, opts),
+      getRun: (name, runId) => agentSuites().getRun(name, runId),
+      cancelRun: (name, runId) => agentSuites().cancelRun(name, runId),
+      // evals: baselines, comparisons, trends, "explain this run"
+      setBaseline: (name, id, runId) => agentSuites().setBaseline(name, id, runId),
+      getBaseline: (name, id) => agentSuites().getBaseline(name, id),
+      compareRuns: (name, runId, opts) => agentSuites().compareRuns(name, runId, opts),
+      trend: (name, id, opts) => agentSuites().trend(name, id, opts),
+      reviewRun: (name, runId, opts) => agentSuites().reviewRun(name, runId, opts),
+      toYaml: (value) => stringifyYaml(value, { lineWidth: 0 }),
+      fromYaml: (text) => parseYaml(text),
+      actor: (c) => requestAuthor(c),
+      isAdmin: (c) => requestIsAdmin(c),
+      ...suitePhase4Deps(),
+    },
   })));
+  // phase 4 (docs/agent-suites.md): cassettes (record / replay), recordings from chats and tasks, generation
+  function suitePhase4Deps(): Partial<AgentSuiteRouteDeps> {
+    return {
+      listCassettes: (name) => agentSuites().listCassettes(name),
+      getCassette: (name, id) => agentSuites().getCassette(name, id),
+      caseCassette: (name, suiteId, caseId) => agentSuites().caseCassette(name, suiteId, caseId),
+      editCassette: (name, id, edits, opts) => agentSuites().editCassette(name, id, edits, opts),
+      deleteCassette: (name, id) => agentSuites().deleteCassette(name, id),
+      recordCase: (name, suiteId, caseId, req, opts) => agentSuites().recordCase(name, suiteId, caseId, req, opts),
+      caseFromRecording: (name, suiteId, req, opts) => agentSuites().caseFromRecording(name, suiteId, req, opts),
+      generateCases: (name, req) => agentSuites().generateCases(name, req),
+      acceptCases: (name, suiteId, req, opts) => agentSuites().acceptCases(name, suiteId, req, opts),
+      generateDatasetRows: (name, suiteId, req) => agentSuites().generateDatasetRows(name, suiteId, req),
+    };
+  }
+  const suiteRouteDeps = (): AgentSuiteRouteDeps => ({
+    list: (name) => agentSuites().listSuites(name),
+    get: (name, id) => agentSuites().getSuite(name, id),
+    save: (name, input, opts) => agentSuites().saveSuite(name, input, opts),
+    remove: (name, id) => agentSuites().deleteSuite(name, id),
+    importDataset: (name, id, req, opts) => agentSuites().importDataset(name, id, req, opts),
+    startRun: (name, id, req, opts) => agentSuites().startRun(name, id, req, opts),
+    listRuns: (name, opts) => agentSuites().listRuns(name, opts),
+    getRun: (name, runId) => agentSuites().getRun(name, runId),
+    cancelRun: (name, runId) => agentSuites().cancelRun(name, runId),
+    setBaseline: (name, id, runId) => agentSuites().setBaseline(name, id, runId),
+    getBaseline: (name, id) => agentSuites().getBaseline(name, id),
+    compareRuns: (name, runId, opts) => agentSuites().compareRuns(name, runId, opts),
+    trend: (name, id, opts) => agentSuites().trend(name, id, opts),
+    reviewRun: (name, runId, opts) => agentSuites().reviewRun(name, runId, opts),
+    toYaml: (value) => stringifyYaml(value, { lineWidth: 0 }),
+    fromYaml: (text) => parseYaml(text),
+    actor: (c) => requestAuthor(c),
+    isAdmin: (c) => requestIsAdmin(c),
+    ...suitePhase4Deps(),
+  });
+  // suites of other targets: a hosted MCP server's saved tests, a mission run in test mode
+  const hostedSuiteApp = new OpenAPIHono();
+  registerAgentSuiteRoutes(hostedSuiteApp, () => ({ suites: suiteRouteDeps(), getAgents: () => o.getAgents() }), {
+    owner: (id) => `mcp-server:${id}`, exists: async (id) => mcpServerServiceFor(o).store.exists(id), tag: "MCP server suites", noun: "hosted server",
+  });
+  authed.route("/mcp-servers", hostedSuiteApp);
+  const missionSuiteApp = new OpenAPIHono();
+  registerAgentSuiteRoutes(missionSuiteApp, () => ({ suites: suiteRouteDeps(), getAgents: () => o.getAgents() }), {
+    owner: (id) => `mission:${id}`, exists: async (id) => !!(await o.getMission(id).catch(() => undefined)), tag: "Mission suites", noun: "mission",
+  });
+  authed.route("/missions", missionSuiteApp);
+  const agentSuites = () => agentSuiteRunnerFor({
+    orchestrator: o, completions: (req) => completionApp.request(req),
+    api: (path) => app.request(`/api/v1${path}`, { headers: trustedApiCallHeaders() }),
+  });
+  // Decisions (docs/decisions.md): decide() — typed judgments with probabilities from a decision model
+  // through the shared gateway resolver, the uncalibrated fallback through Polpo's chat (a role turn
+  // of the chat pipeline, no tools), the decision log, missions' decision nodes, the agents' tool.
+  const decisions = (): DecisionService => {
+    const polpoDir = activePolpoDir();
+    let s = decisionServiceFor(polpoDir);
+    if (!s) {
+      s = new DecisionService({
+        polpoDir: () => polpoDir,
+        settings: () => o.getConfig()?.settings,
+        vault: () => o.getVaultStore?.(),
+        chatTurn: (prompt, check) => agentSuites().playRole("decider", undefined, prompt, { check }),
+        recordUsage: async (u) => {
+          await (databaseStoresFor(polpoDir)?.tokenUsageStore ?? new FileTokenUsageStore(polpoDir)).record({
+            timestamp: new Date().toISOString(), source: "decision", provider: u.provider, model: u.model,
+            inputTokens: u.inputTokens, outputTokens: u.outputTokens, cacheReadTokens: 0, cacheWriteTokens: 0,
+            totalTokens: u.inputTokens + u.outputTokens, cost: u.cost,
+          });
+          o.emit("token-usage:recorded", { timestamp: new Date().toISOString() });
+        },
+        emit: (payload) => o.emit("decision:made", payload),
+      });
+      registerDecisionService(polpoDir, s);
+    }
+    return s;
+  };
+  decisions();
+  o.setMissionDecider(async (req) => {
+    const r = await decisions().decide(
+      { state: req.state, questions: req.questions, ...(req.model ? { model: req.model } : {}) },
+      { kind: "mission", ...(req.caller.id ? { id: req.caller.id } : {}), label: req.caller.label },
+    );
+    return { id: r.id, answers: r.answers, calibrated: r.calibrated, model: r.model };
+  });
+  const decisionDeps = {
+    service: () => (o.isInitialized ? decisions() : undefined),
+    nodes: () => (o.isInitialized ? { list: () => o.getDecisionNodes(), resolve: (g: string, n: string, b: string | null, by: string) => o.resolveDecisionNode(g, n, b, by) } : undefined),
+  };
+  // each decide() is a model call: a rate limit like Ask
+  authed.use("/decide", rateLimitMiddleware(60, 60_000));
+  authed.route("/decide", decideRoutes(decisionDeps));
+  authed.route("/decisions", decisionRoutes(decisionDeps));
+  // Media (docs/media.md): generateImage / editImage through the shared gateway resolver, every image
+  // an asset with its provenance in the media log, missions' image nodes, the agents' image tools;
+  // image analysis is a chat turn with the image attached (a role turn of the chat pipeline, no tools).
+  const media = (): MediaService => {
+    const polpoDir = activePolpoDir();
+    let s = mediaServiceFor(polpoDir);
+    if (!s) {
+      s = new MediaService({
+        polpoDir: () => polpoDir,
+        workDir: () => o.getWorkDir(),
+        settings: () => o.getConfig()?.settings,
+        vault: () => o.getVaultStore?.(),
+        visionTurn: (req) => agentSuites().playRole("viewer", req.model ? { model: req.model } : req.agent ? { agent: req.agent } : undefined, req.prompt, {
+          images: [`data:${req.image.mimeType};base64,${req.image.data}`],
+        }),
+        recordUsage: async (u) => {
+          await (databaseStoresFor(polpoDir)?.tokenUsageStore ?? new FileTokenUsageStore(polpoDir)).record({
+            timestamp: new Date().toISOString(), source: "image", provider: u.provider, model: u.model,
+            inputTokens: u.inputTokens, outputTokens: u.outputTokens, cacheReadTokens: 0, cacheWriteTokens: 0,
+            totalTokens: u.inputTokens + u.outputTokens, cost: u.cost,
+          });
+          o.emit("token-usage:recorded", { timestamp: new Date().toISOString() });
+        },
+        emit: (payload) => o.emit("media:generated", payload),
+      });
+      registerMediaService(polpoDir, s);
+    }
+    return s;
+  };
+  media();
+  o.setMissionImager(async (req) => {
+    const r = await media().generateImage(
+      { prompt: req.prompt, ...(req.size ? { size: req.size } : {}), ...(req.n ? { n: req.n } : {}), ...(req.model ? { model: req.model } : {}) },
+      { kind: "mission", ...(req.caller.id ? { id: req.caller.id } : {}), label: req.caller.label, ...(req.caller.missionId ? { missionId: req.caller.missionId } : {}) },
+    );
+    return { id: r.id, files: r.images.map((i) => i.file), urls: r.images.map((i) => i.url), model: r.model };
+  });
+  // each image request is a (paid) model call: a rate limit like decide
+  const mediaLimit = rateLimitMiddleware(30, 60_000);
+  for (const path of ["/media/images", "/media/images/edits"]) authed.use(path, (c, next) => (c.req.method === "POST" ? mediaLimit(c, next) : next()));
+  authed.route("/media", mediaRoutes({
+    service: () => (o.isInitialized ? media() : undefined),
+    nodes: () => (o.isInitialized ? o.getImageNodes() : []),
+  }));
+  // phase 5 (docs/agent-suites.md): benchmarks (suites × variants × repetitions, compared) and the Playground
+  const benchmarks = () => agentBenchmarksFor({
+    orchestrator: o, completions: (req) => completionApp.request(req),
+    api: (path) => app.request(`/api/v1${path}`, { headers: trustedApiCallHeaders() }),
+  });
+  authed.route("/", benchmarkRoutes(() => {
+    const b = benchmarks();
+    return {
+      list: () => b.list(), get: (id) => b.get(id), save: (input, opts) => b.save(input, opts), remove: (id) => b.remove(id),
+      estimate: async (req) => b.estimate((await b.specOf(req)).spec),
+      start: (req, opts) => b.start(req, opts),
+      listRuns: (opts) => b.listRuns(opts), report: (id, w) => b.report(id, w), cancel: (id) => b.cancel(id),
+      compare: (id, key, opts) => b.compareCase(id, key, opts),
+      sessions: (actor) => b.listSessions(actor), createSession: (panes, opts) => b.createSession(panes, opts), getSession: (id) => b.getSession(id),
+      updateSession: (id, panes) => b.updateSession(id, panes), deleteSession: (id) => b.deleteSession(id), resetSession: (id, paneId) => b.resetSession(id, paneId),
+      send: (id, req, onEvent, signal) => b.send(id, req, onEvent, signal), sendOnce: (panes, req, opts) => b.sendOnce(panes, req, opts),
+      caseFromExchange: (id, req, opts) => b.caseFromExchange(id, req, opts), promote: (req, opts) => b.promote(req, opts),
+      actor: (c) => requestAuthor(c), isAdmin: (c) => requestIsAdmin(c),
+    };
+  }));
+  // a hosted server's deploys go through its required suite (the saved tests' gate)
+  setHostedSuiteGate(o, (id, version, opts) => agentSuites().hostedGate(id, version, opts), (id, ref, opts) => agentSuites().hostedCheck(id, ref, opts));
+  // a deleted mission or hosted server takes its suite runs and cassettes along (a server's saved tests go with it)
+  if (!suiteCleanupWired.has(o)) {
+    suiteCleanupWired.add(o);
+    o.on("mission:deleted", ({ missionId }) => { void agentSuites().forget(`mission:${missionId}`).catch(() => undefined); });
+    o.on("mcp-server:changed", ({ id, what }) => { if (what === "deleted") void agentSuites().forget(`mcp-server:${id}`).catch(() => undefined); });
+  }
+  const deployGates = () => agentDeployGatesFor({ orchestrator: o, completions: (req) => completionApp.request(req) });
+  // every deploy (dashboard, REST, MCP, Polpo's chat, API updates that auto-deploy) goes through the required suites
+  o.setAgentDeployGate({
+    applies: (name) => deployGates().applies(name),
+    request: (name, version, req) => deployGates().request(name, version, req),
+    published: (name, version, actor) => deployGates().published(name, version, actor),
+    rollingBack: (name, actor) => deployGates().rollingBack(name, actor),
+  });
+  const agentTester = () => agentTesterFor({
+    orchestrator: o,
+    computerManager: () => computerDeps.manager(),
+    onComputer: async (id, command, timeoutMs) => {
+      const computer = (o.getConfig()?.settings?.computers ?? []).find((x) => x.id === id);
+      if (!computer) return undefined;
+      return computerDeps.manager().whenRunning(computer, (d) => driverHost(d).exec(command, { timeoutMs }));
+    },
+    completions: (req) => completionApp.request(req),
+    instanceAuth: () => isInstanceAuthEnabled(),
+  });
 
   authed.route("/events", eventRoutes(sseBridge));
 
@@ -1400,6 +1840,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     workDir: o.getWorkDir(),
     getAgents: () => o.getAgents(),
     emit: (event, data) => o.emit(event, data),
+    // who changes a skill, recorded in its versions: a person, Polpo's chat, an agent, or an MCP client
+    author: (c) => requestAuthor(c),
   })));
 
   authed.route("/notifications", notificationRoutes(() => ({
@@ -1454,6 +1896,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     return {
       peerStore: o.getPeerStore(),
       getGateway: (channel?: string) => o.getChannelGateway(channel),
+      getChannelType: (channel?: string) => (channel ? channels[channel]?.type : undefined),
       getConfiguredTelegramTokens: () => Object.values(channels)
         .filter((ch) => ch?.type === "telegram" && ch.botToken)
         .map((ch) => String(ch.botToken).trim()),
@@ -1507,9 +1950,43 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       return isTrustedApiCall(c.req.header(TRUSTED_API_CALL_HEADER)) ? `person:${currentEventOrigin()?.by ?? "mcp"}` : "person:dashboard";
     },
     emit: (payload) => orchestrator.emit("artifact:changed", payload),
+    // uploads from a file of the instance ({ path }): the same folders the Files page reads
+    fileRoots: () => [...new Set([o.getWorkDir(), o.getPolpoDir(), o.getAgentWorkDir()])],
   })));
   authed.route("/storage", storageRoutes(activeStorage, () => orchestrator.getAgentWorkDir()));
   authed.route("/brain", companyBrainRoutes(activeCompanyBrain));
+  // Global search (⌘K, polpo_search): every area, read as the dashboard reads it (src/server/search)
+  const searchSources = buildSearchSources({
+    api: async (path) => {
+      const res = await inProcessApi("GET", `/api/v1${path}`).catch(() => undefined);
+      const body = res?.body as { ok?: boolean; data?: unknown } | undefined;
+      return res && res.status < 400 && body?.ok ? body.data : undefined;
+    },
+    sessions: () => o.getSessionStore() ?? undefined,
+    rooms: () => o.getRoomStore() ?? undefined,
+    tasks: () => o.getStore().getAllTasks(),
+    missions: () => o.getAllMissions(),
+    artifacts: () => getArtifactStore(activePolpoDir()),
+    files: () => ({ roots: [o.getAgentWorkDir()], base: o.getWorkDir() }),
+    recentEvents: () => sseBridge.recentEvents?.() ?? [],
+  });
+  const searchEngine = new SearchEngine(() => searchSources);
+  // Ask Polpo from ⌘K (POST /search/ask): the orchestrator's model, a tighter rate limit (each call is an LLM call)
+  authed.use("/search/ask", rateLimitMiddleware(20, 60_000));
+  authed.route("/search", searchRoutes(() => (o.isInitialized ? searchEngine : undefined), () => ({
+    model: async () => {
+      const { orchestratorAskModel } = await import("./search/ask-llm.js");
+      return orchestratorAskModel(effectiveOrchestratorModel(o.getConfig()?.settings?.orchestratorModel));
+    },
+    recordUsage: async (usage) => {
+      await (databaseStoresFor(activePolpoDir())?.tokenUsageStore ?? new FileTokenUsageStore(activePolpoDir())).record({
+        timestamp: new Date().toISOString(), source: "search_ask", provider: usage.provider, model: usage.model,
+        inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheReadTokens: usage.cacheReadTokens,
+        cacheWriteTokens: usage.cacheWriteTokens, totalTokens: usage.totalTokens, cost: usage.cost,
+      });
+      o.emit("token-usage:recorded", { timestamp: new Date().toISOString() });
+    },
+  })));
 
   authed.route("/vault", vaultRoutes(() => ({
     vaultStore: o.getVaultStore(),
@@ -1549,6 +2026,15 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     // what the provider must reach: POLPO_PUBLIC_URL when set, even when the dashboard calls the API on another port
     redirectUri: (c) => `${connectorPublicBase(publicOrigin(c))}${CONNECTOR_OAUTH_CALLBACK_PATH}`,
   }));
+  // Hosted MCP servers: build, test, publish, deploy; each becomes a connector (docs/custom-mcp-servers.md)
+  authed.route("/mcp-servers", mcpServerRoutes({
+    service: () => mcpServerServiceFor(o),
+    llm: () => async (prompt) => (await queryOrchestratorText(prompt, requireOrchestratorModel(o.getConfig()?.settings?.orchestratorModel))).text,
+    actor: (c) => requestAuthor(c),
+    publicBase: (c) => connectorPublicBase(publicOrigin(c)),
+    urlPolicy: () => ({ allowPrivateNetwork: false }),
+    isAdmin: (c) => requestIsAdmin(c),
+  }));
   const computerDeps: ComputerRouteDeps = {
     computers: () => o.getConfig()?.settings?.computers ?? [],
     settings: () => o.getConfig()?.settings,
@@ -1570,6 +2056,31 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   };
   authed.route("/computers", computerRoutes(computerDeps));
   authed.route("/computer-webhooks", computerWebhookAdminRoutes({ webhooks: computerWebhooks }));
+  // Triggers: definitions, secrets (rotation, the HMAC secret in the vault), deliveries, test tools (no actions yet)
+  authed.route("/triggers", triggerAdminRoutes({ service: triggerService }));
+  // WhatsApp Business channels: status, secrets (vault, write-only), events, contacts, sends, templates, approvals
+  authed.route("/whatsapp-business", waBusinessAdminRoutes({ service: waBusiness }));
+  // Slack channels (Socket Mode inbound): status, tokens (vault, write-only), test
+  authed.route("/slack", slackRoutes({ service: () => (orchestrator?.isInitialized ? orchestrator.getSlack() : undefined) }));
+  // the CLI engine's accounts (personal Claude Code / Codex sign-ins: config directories, never tokens)
+  authed.route("/harnesses/cli", cliAccountRoutes({
+    settings: () => o.getConfig()?.settings,
+    agents: () => o.getAgents(),
+    save: async (cli) => {
+      const { savePolpoSettingsKey } = await import("../core/config.js");
+      const harnesses = { enabled: [], ...((o.getConfig()?.settings?.harnesses ?? {}) as Record<string, unknown>) } as Record<string, unknown>;
+      if (cli) harnesses.cli = cli; else delete harnesses.cli;
+      savePolpoSettingsKey(o.getPolpoDir(), "harnesses", harnesses);
+      await o.reloadConfig();
+    },
+    onComputer: async (id, command, timeoutMs) => {
+      const computer = (o.getConfig()?.settings?.computers ?? []).find((x) => x.id === id);
+      if (!computer) return undefined;
+      return computerDeps.manager().whenRunning(computer, (d) => driverHost(d).exec(command, { timeoutMs }));
+    },
+    member: (c) => c.get("polpoUserEmail" as never) as string | undefined,
+    instanceAuth: () => isInstanceAuthEnabled(),
+  }));
   // agent harnesses (Claude Code, Codex, OpenCode): settings overview and their sessions (status, stop, reset)
   authed.route("/harnesses", harnessRoutes({
     polpoDir: () => o.getPolpoDir(),
@@ -1622,6 +2133,12 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   // an `email_send` preview. Re-uses the same SMTP code path as the
   // email_send agent tool (sendEmail() in src/tools/email-tools.ts).
   authed.route("/email", emailRoutes(() => ({ orchestrator: o })));
+
+  // Coding chats: Claude Code / Codex sessions in a worktree on the person's own CLI account, as a chat
+  authed.route("/coding/chats", codingChatRoutes({
+    manager: () => (o.isInitialized ? codingChatManagerFor(o, { launch: opts?.codingChatLaunch }) : undefined),
+    member: (c) => c.get("polpoUserEmail" as never) as string | undefined,
+  }));
 
   authed.route("/coding", codingRoutes(() => ({
     codingSessionStore: o.getCodingSessionStore(),

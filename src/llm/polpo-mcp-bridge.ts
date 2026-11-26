@@ -17,7 +17,9 @@ import type { ApiResponse, McpDeps, Register, ToolExtra, ToolSpec } from "../ser
 import { registerHarnessTools } from "../server/mcp-server/harnesses.js";
 import { registerSetupTools } from "../server/mcp-server/setup.js";
 import { registerComputerTools } from "../server/mcp-server/computers.js";
+import { registerWaBusinessTools } from "../server/mcp-server/whatsapp-business.js";
 import { registerConnectorTools } from "../server/mcp-server/connectors.js";
+import { registerMcpServerTools } from "../server/mcp-server/mcp-servers.js";
 import { registerChannelTools } from "../server/mcp-server/channels.js";
 import { registerChannelSetupTools } from "../server/mcp-server/channel-setup.js";
 import { registerSettingsTools } from "../server/mcp-server/settings.js";
@@ -25,11 +27,19 @@ import { registerConfigTools } from "../server/mcp-server/config.js";
 import { registerRoomTools } from "../server/mcp-server/rooms.js";
 import { registerChatTools } from "../server/mcp-server/chat.js";
 import { registerAutomationTools } from "../server/mcp-server/automation.js";
+import { registerTriggerTools } from "../server/mcp-server/triggers.js";
+import { registerDecisionTools } from "../server/mcp-server/decisions.js";
+import { registerMediaTools } from "../server/mcp-server/media.js";
+import { registerCodingTools } from "../server/mcp-server/coding.js";
 import { registerMissionTools } from "../server/mcp-server/missions.js";
 import { registerDataTools } from "../server/mcp-server/data.js";
 import { registerBrainTools } from "../server/mcp-server/knowledge.js";
+import { registerSearchTools } from "../server/mcp-server/search.js";
 import { registerSkillTools } from "../server/mcp-server/skills.js";
 import { registerTeamTools } from "../server/mcp-server/team.js";
+import { registerAgentSuiteTools } from "../server/mcp-server/agent-suites.js";
+import { registerBenchmarkTools } from "../server/mcp-server/benchmarks.js";
+import { registerArtifactTools } from "../server/mcp-server/core-tools.js";
 import { knownPublicOrigin } from "../mcp/runtime.js";
 
 /** One MCP tool Polpo runs as its own: its Polpo name and the deferred group it belongs to (none: always on). */
@@ -45,12 +55,26 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_setup_wait", name: "setup_wait" },
   // Team
   { mcp: "polpo_agent_get", name: "agent_get" },
+  { mcp: "polpo_agent_lines", name: "agent_lines", group: "learning" },
   // Connectors: adding one never takes a secret in chat (token / OAuth app → setup link)
   { mcp: "polpo_connector_add", name: "connector_add" },
   { mcp: "polpo_connector_catalog", name: "connector_catalog", group: "connectors" },
   { mcp: "polpo_connector_update", name: "connector_update", group: "connectors" },
   { mcp: "polpo_connector_test", name: "connector_test", group: "connectors" },
   { mcp: "polpo_connector_disconnect", name: "connector_disconnect", group: "connectors" },
+  // Hosted MCP servers: Polpo builds and serves its own ("create a connector for Printful")
+  { mcp: "polpo_mcp_servers_list", name: "mcp_servers_list", group: "hosted-servers" },
+  { mcp: "polpo_mcp_server_get", name: "mcp_server_get", group: "hosted-servers" },
+  { mcp: "polpo_mcp_server_create", name: "mcp_server_create", group: "hosted-servers" },
+  { mcp: "polpo_mcp_server_templates", name: "mcp_server_templates", group: "hosted-servers" },
+  { mcp: "polpo_mcp_server_install", name: "mcp_server_install", group: "hosted-servers" },
+  { mcp: "polpo_mcp_server_generate", name: "mcp_server_generate", group: "hosted-servers" },
+  { mcp: "polpo_mcp_server_update", name: "mcp_server_update", group: "hosted-servers" },
+  { mcp: "polpo_mcp_server_test", name: "mcp_server_test", group: "hosted-servers" },
+  { mcp: "polpo_mcp_server_publish", name: "mcp_server_publish", group: "hosted-servers" },
+  { mcp: "polpo_mcp_server_deploy", name: "mcp_server_deploy", group: "hosted-servers" },
+  { mcp: "polpo_mcp_server_logs", name: "mcp_server_logs", group: "hosted-servers" },
+  { mcp: "polpo_mcp_server_delete", name: "mcp_server_delete", group: "hosted-servers" },
   // Agent harnesses (Claude Code, Codex, OpenCode)
   { mcp: "polpo_harnesses_get", name: "harnesses_get", group: "harnesses" },
   { mcp: "polpo_harnesses_update", name: "harnesses_update", group: "harnesses" },
@@ -104,9 +128,25 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_channel_peers", name: "channel_peers", group: "channels" },
   { mcp: "polpo_channel_allowlist", name: "channel_allowlist", group: "channels" },
   { mcp: "polpo_channel_pairing", name: "channel_pairing", group: "channels" },
+  { mcp: "polpo_channel_access_set", name: "channel_access_set", group: "channels" },
+  { mcp: "polpo_peer_presence", name: "channel_peer_presence", group: "channels" },
+  { mcp: "polpo_peer_link", name: "channel_peer_link", group: "channels" },
+  { mcp: "polpo_slack_status", name: "channel_slack_status", group: "channels" },
+  { mcp: "polpo_notifications_list", name: "channel_notifications_list", group: "channels" },
+  { mcp: "polpo_notifications_stats", name: "channel_notifications_stats", group: "channels" },
   { mcp: "polpo_whatsapp_login", name: "channel_whatsapp_login", group: "channels" },
   { mcp: "polpo_whatsapp_login_wait", name: "channel_whatsapp_login_wait", group: "channels" },
   { mcp: "polpo_whatsapp_logout", name: "channel_whatsapp_logout", group: "channels" },
+  // WhatsApp Business (Meta Cloud API): status, events, templates, conversations, sends, approvals
+  { mcp: "polpo_wabiz_status", name: "wabiz_status", group: "whatsapp-business" },
+  { mcp: "polpo_wabiz_events", name: "wabiz_events", group: "whatsapp-business" },
+  { mcp: "polpo_wabiz_templates", name: "wabiz_templates", group: "whatsapp-business" },
+  { mcp: "polpo_wabiz_conversation", name: "wabiz_conversation", group: "whatsapp-business" },
+  { mcp: "polpo_wabiz_send", name: "wabiz_send", group: "whatsapp-business" },
+  { mcp: "polpo_wabiz_send_template", name: "wabiz_send_template", group: "whatsapp-business" },
+  { mcp: "polpo_wabiz_approval", name: "wabiz_approval", group: "whatsapp-business" },
+  { mcp: "polpo_wabiz_contact", name: "wabiz_contact", group: "whatsapp-business" },
+  { mcp: "polpo_wabiz_contact_erase", name: "wabiz_contact_erase", group: "whatsapp-business" },
   // Rooms (group chats of people and agents)
   { mcp: "polpo_rooms_list", name: "rooms_list", group: "rooms" },
   { mcp: "polpo_room_create", name: "room_create", group: "rooms" },
@@ -115,6 +155,8 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_room_messages", name: "room_messages", group: "rooms" },
   { mcp: "polpo_room_post", name: "room_post", group: "rooms" },
   { mcp: "polpo_room_wait", name: "room_wait", group: "rooms" },
+  // Global search (chats' messages, tasks, agents, files… everything, as ⌘K)
+  { mcp: "polpo_search", name: "search", group: "chats" },
   // Chat sessions
   { mcp: "polpo_chat_sessions_list", name: "chat_sessions_list", group: "chats" },
   { mcp: "polpo_chat_messages", name: "chat_messages", group: "chats" },
@@ -124,11 +166,90 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_schedule_run", name: "schedule_run", group: "automation" },
   { mcp: "polpo_check_update", name: "check_update", group: "automation" },
   { mcp: "polpo_check_delete", name: "check_delete", group: "automation" },
+  // Triggers: public endpoints (POST /hooks/{id}) for forms and webhooks — definitions with their actions, deliveries and action runs, re-runs, test tools, secrets
+  { mcp: "polpo_triggers_list", name: "triggers_list", group: "triggers" },
+  { mcp: "polpo_trigger_get", name: "trigger_get", group: "triggers" },
+  { mcp: "polpo_trigger_deliveries", name: "trigger_deliveries", group: "triggers" },
+  { mcp: "polpo_trigger_create", name: "trigger_create", group: "triggers" },
+  { mcp: "polpo_trigger_update", name: "trigger_update", group: "triggers" },
+  { mcp: "polpo_trigger_delete", name: "trigger_delete", group: "triggers" },
+  { mcp: "polpo_trigger_test", name: "trigger_test", group: "triggers" },
+  { mcp: "polpo_trigger_run_actions", name: "trigger_run_actions", group: "triggers" },
+  { mcp: "polpo_trigger_auth", name: "trigger_auth", group: "triggers" },
+  // Decisions: typed judgments with probabilities from the decision model (decide), the log, mission nodes waiting for a person
+  { mcp: "polpo_decide", name: "decide", group: "decisions" },
+  { mcp: "polpo_decisions", name: "decisions", group: "decisions" },
+  { mcp: "polpo_decision_resolve", name: "decision_resolve", group: "decisions" },
+  // Media: image generation and editing (the media primitive), the media log, the status
+  { mcp: "polpo_image_generate", name: "image_generate", group: "media" },
+  { mcp: "polpo_image_edit", name: "image_edit", group: "media" },
+  { mcp: "polpo_media_log", name: "media_log", group: "media" },
+  { mcp: "polpo_media_status", name: "media_status", group: "media" },
+  // Coding chats: Claude Code / Codex sessions in a worktree on the person's own CLI account
+  { mcp: "polpo_coding_chats_list", name: "coding_chats_list", group: "coding" },
+  { mcp: "polpo_coding_chat_get", name: "coding_chat_get", group: "coding" },
+  { mcp: "polpo_coding_chat_start", name: "coding_chat_start", group: "coding" },
+  { mcp: "polpo_coding_chat_send", name: "coding_chat_send", group: "coding" },
+  { mcp: "polpo_coding_chat_control", name: "coding_chat_control", group: "coding" },
   // Missions, data, brain, skills
   { mcp: "polpo_mission_wait", name: "mission_wait", group: "mission-editing" },
   { mcp: "polpo_data_activity", name: "data_activity", group: "data" },
   { mcp: "polpo_brain_delete", name: "brain_delete", group: "brain" },
   { mcp: "polpo_skill_update", name: "skill_update", group: "skills" },
+  // Skill bundles (.skill / .zip: from a chat attachment or any file of the instance, a URL, base64) and a skill's files
+  { mcp: "polpo_skill_upload_prepare", name: "skill_upload_prepare", group: "skills" },
+  { mcp: "polpo_skill_upload_finalize", name: "skill_upload_finalize", group: "skills" },
+  { mcp: "polpo_skill_files", name: "skill_files", group: "skills" },
+  { mcp: "polpo_skill_file_read", name: "skill_file_read", group: "skills" },
+  // Skill versions: history, diff, restore
+  { mcp: "polpo_skill_versions", name: "skill_versions", group: "skills" },
+  { mcp: "polpo_skill_version_diff", name: "skill_version_diff", group: "skills" },
+  { mcp: "polpo_skill_restore", name: "skill_restore", group: "skills" },
+  // Agent versions: draft → publish → deploy (production), rollback, history
+  { mcp: "polpo_agent_versions", name: "agent_versions", group: "agent-versions" },
+  { mcp: "polpo_agent_version_get", name: "agent_version_get", group: "agent-versions" },
+  { mcp: "polpo_agent_version_diff", name: "agent_version_diff", group: "agent-versions" },
+  { mcp: "polpo_agent_draft", name: "agent_draft", group: "agent-versions" },
+  { mcp: "polpo_agent_publish", name: "agent_publish", group: "agent-versions" },
+  { mcp: "polpo_agent_deploy", name: "agent_deploy", group: "agent-versions" },
+  { mcp: "polpo_agent_rollback", name: "agent_rollback", group: "agent-versions" },
+  { mcp: "polpo_agent_deploys", name: "agent_deploys", group: "agent-versions" },
+  // deploy gates: the required suites verifying a deploy (in verifica, passed, blocked, override)
+  { mcp: "polpo_agent_deploy_gates", name: "agent_deploy_gates", group: "agent-versions" },
+  // Agent tests: check everything an agent has at its disposal, apply the one-click fixes
+  { mcp: "polpo_agent_test", name: "agent_test", group: "agent-versions" },
+  // Agent suites: tests and evals with mocks, run against a version, read the reports
+  { mcp: "polpo_agent_suite_list", name: "agent_suite_list", group: "agent-versions" },
+  { mcp: "polpo_agent_suite_get", name: "agent_suite_get", group: "agent-versions" },
+  { mcp: "polpo_agent_suite_save", name: "agent_suite_save", group: "agent-versions" },
+  { mcp: "polpo_agent_suite_delete", name: "agent_suite_delete", group: "agent-versions" },
+  { mcp: "polpo_agent_suite_run", name: "agent_suite_run", group: "agent-versions" },
+  { mcp: "polpo_agent_suite_run_get", name: "agent_suite_run_get", group: "agent-versions" },
+  // evals: trends, baselines, "explain this run"
+  { mcp: "polpo_agent_suite_trend", name: "agent_suite_trend", group: "agent-versions" },
+  { mcp: "polpo_agent_suite_baseline", name: "agent_suite_baseline", group: "agent-versions" },
+  { mcp: "polpo_agent_suite_review", name: "agent_suite_review", group: "agent-versions" },
+  // phase 4: cassettes (record / replay), AI case generation, suites of hosted servers and missions
+  { mcp: "polpo_agent_suite_record", name: "agent_suite_record", group: "agent-versions" },
+  { mcp: "polpo_agent_suite_replay", name: "agent_suite_replay", group: "agent-versions" },
+  { mcp: "polpo_agent_suite_cassette", name: "agent_suite_cassette", group: "agent-versions" },
+  { mcp: "polpo_agent_suite_cassette_edit", name: "agent_suite_cassette_edit", group: "agent-versions" },
+  { mcp: "polpo_agent_suite_generate", name: "agent_suite_generate", group: "agent-versions" },
+  { mcp: "polpo_target_suites", name: "target_suites", group: "agent-versions" },
+  { mcp: "polpo_target_suite_save", name: "target_suite_save", group: "agent-versions" },
+  { mcp: "polpo_target_suite_run", name: "target_suite_run", group: "agent-versions" },
+  // phase 5: benchmarks (suites × variants × repetitions: leaderboard, matrix, side by side) and the Playground
+  { mcp: "polpo_benchmark_save", name: "benchmark_save", group: "agent-versions" },
+  { mcp: "polpo_benchmark_delete", name: "benchmark_delete", group: "agent-versions" },
+  { mcp: "polpo_benchmark_run", name: "benchmark_run", group: "agent-versions" },
+  { mcp: "polpo_benchmark_get", name: "benchmark_get", group: "agent-versions" },
+  { mcp: "polpo_benchmark_leaderboard", name: "benchmark_leaderboard", group: "agent-versions" },
+  { mcp: "polpo_benchmark_compare", name: "benchmark_compare", group: "agent-versions" },
+  { mcp: "polpo_playground_send", name: "playground_send", group: "agent-versions" },
+  { mcp: "polpo_playground_promote", name: "playground_promote", group: "agent-versions" },
+  // Large artifact contents: upload from a public URL, a file of the instance or base64 parts, then create or replace
+  { mcp: "polpo_artifact_upload_prepare", name: "artifact_upload_prepare", group: "artifact-uploads" },
+  { mcp: "polpo_artifact_upload_finalize", name: "artifact_upload_finalize", group: "artifact-uploads" },
 ];
 
 /** MCP tools Polpo already covers with a tool of its own (or a parameter of one). */
@@ -156,6 +277,18 @@ export const MCP_EQUIVALENTS: Record<string, string> = {
   polpo_mission_get: "get_mission",
   // the mission card (an MCP App): get_mission has the same (cost against the budget, tasks)
   polpo_mission_show: "get_mission",
+  // the agent suite card (an MCP App): agent_suite_list, agent_suite_run_get and agent_suite_trend have the same
+  polpo_agent_suite_show: "agent_suite_run_get",
+  // the benchmark card (an MCP App): benchmark_get and benchmark_compare have the same (leaderboard, matrix, side by side)
+  polpo_benchmark_show: "benchmark_get",
+  // the trigger card (an MCP App): trigger_get and trigger_deliveries have the same
+  polpo_trigger_show: "trigger_get",
+  // the decision card (an MCP App): decide and decisions answer with the same (answers, probabilities)
+  polpo_decision_show: "decisions",
+  // the media card (an MCP App): image_generate and media_log answer with the same (the images, their provenance)
+  polpo_image_show: "media_log",
+  // the coding chat card (an MCP App): coding_chat_get has the same transcript as text
+  polpo_coding_chat_show: "coding_chat_get",
   polpo_mission_create: "create_mission",
   polpo_mission_update: "update_mission",
   polpo_mission_run: "execute_mission",
@@ -239,6 +372,7 @@ export const MCP_EQUIVALENTS: Record<string, string> = {
 export const MCP_EXCEPTIONS: Record<string, string> = {
   polpo_ask: "asks Polpo itself: in chat the person is already talking to Polpo",
   polpo_answer: "answers Polpo's own questions and previews: in chat the person answers directly",
+  polpo_search_ask: "asks Polpo's model to search and pick results, as Enter in ⌘K: in chat Polpo is already that model and has the search tool itself",
   polpo_api_search: "the read-only REST fallback for MCP clients without a specific tool; Polpo has a specific tool for every area",
   polpo_api_get: "the read-only REST fallback for MCP clients without a specific tool; Polpo has a specific tool for every area",
   agent_card_refresh: "refreshes the agent card widget (an MCP App) in the client; Polpo reads the same with agent_get and get_agent_drive",
@@ -300,9 +434,10 @@ function capture(): Map<string, Captured> {
     if (wanted.has(name)) out.set(name, { spec: spec as unknown as ToolSpec<z.ZodRawShape>, handler: handler as unknown as Captured["handler"] });
   };
   for (const register of [
-    registerSetupTools, registerTeamTools, registerConnectorTools, registerHarnessTools, registerComputerTools, registerConfigTools,
-    registerSettingsTools, registerChannelTools, registerChannelSetupTools, registerRoomTools, registerChatTools, registerAutomationTools,
-    registerMissionTools, registerDataTools, registerBrainTools, registerSkillTools,
+    registerSetupTools, registerTeamTools, registerAgentSuiteTools, registerBenchmarkTools, registerConnectorTools, registerMcpServerTools, registerHarnessTools, registerComputerTools, registerConfigTools,
+    registerSettingsTools, registerChannelTools, registerChannelSetupTools, registerRoomTools, registerChatTools, registerAutomationTools, registerTriggerTools, registerDecisionTools, registerMediaTools,
+    registerMissionTools, registerDataTools, registerBrainTools, registerSkillTools, registerWaBusinessTools, registerSearchTools, registerCodingTools,
+    registerArtifactTools,
   ]) register(tool, deps);
   captured = out;
   return out;

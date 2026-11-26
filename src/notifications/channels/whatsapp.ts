@@ -62,7 +62,7 @@ function phoneToJid(phone: string): string {
 }
 
 /** Convert markdown-like formatting to WhatsApp formatting. */
-function markdownToWhatsApp(text: string): string {
+export function markdownToWhatsApp(text: string): string {
   // WhatsApp supports: *bold*, _italic_, ~strikethrough~, ```monospace```
   // Convert **bold** → *bold*
   let wa = text.replace(/\*\*(.+?)\*\*/g, "*$1*");

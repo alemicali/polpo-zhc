@@ -1,0 +1,1 @@
+ALTER TABLE `missions` ADD `owner` text;

@@ -8,7 +8,7 @@ import { isIP } from "node:net";
 import { z } from "zod";
 import {
   APPEARANCE_CASES, APPEARANCE_PALETTES, APPEARANCE_THEMES, APPEARANCE_TOKENS, APPEARANCE_TOKEN_NAMES, EGRESS_PROXY_NAME, EGRESS_PROXY_URL, parseAppearanceSettings,
-  APPEARANCE_NUMBER_RANGES, APPEARANCE_FONT_HOSTS, APPEARANCE_BUNDLED_FONTS, APPEARANCE_PRELOADED_FONTS, APPEARANCE_MAX_WEB_FONTS, unloadedFontFamilies,
+  APPEARANCE_NUMBER_RANGES, APPEARANCE_FONT_HOSTS, APPEARANCE_BUNDLED_FONTS, APPEARANCE_PRELOADED_FONTS, APPEARANCE_MAX_WEB_FONTS, unloadedFontFamilies, SIDEBAR_STYLES,
   type AppearanceSettings,
 } from "@polpo-ai/core";
 import { isPrivateAddress } from "../oauth.js";
@@ -40,13 +40,30 @@ const defaultResolve: ResolveHost = async (hostname) => (await lookup(hostname, 
  * (checked again at every redirect), at most MAX_LOGO_BYTES, and a real PNG, JPEG, WebP or GIF.
  */
 export async function fetchPublicImage(deps: McpDeps, url: string): Promise<{ ok: true; bytes: Uint8Array; type: string } | { ok: false; error: string }> {
+  const got = await fetchPublicBytes(deps, url, { maxBytes: MAX_LOGO_BYTES, accept: LOGO_TYPES.join(", "), urlLabel: "logo", sizeLabel: "image" });
+  if (!got.ok) return got;
+  const type = sniffImage(got.bytes);
+  if (!type) return { ok: false, error: "The URL does not point to a PNG, JPEG, WebP or GIF image" };
+  return { ok: true, bytes: got.bytes, type };
+}
+
+/**
+ * Fetch a file from a public URL: https only, never an address inside the server's network
+ * (checked again at every redirect), at most `maxBytes` whatever the headers say.
+ */
+export async function fetchPublicBytes(
+  deps: McpDeps, url: string,
+  opts: { maxBytes: number; accept?: string; urlLabel?: string; sizeLabel?: string },
+): Promise<{ ok: true; bytes: Uint8Array } | { ok: false; error: string }> {
+  const MAX_LOGO_BYTES = opts.maxBytes;
+  const urlLabel = opts.urlLabel ?? "file", sizeLabel = opts.sizeLabel ?? "file";
   const doFetch = deps.fetch ?? fetch;
   const resolve = deps.resolveHost ?? defaultResolve;
   let current = url;
   for (let hop = 0; hop < 4; hop++) {
     let u: URL;
     try { u = new URL(current); } catch { return { ok: false, error: `${current} is not a valid URL` }; }
-    if (u.protocol !== "https:" && !(deps.allowPrivateFetch && u.protocol === "http:")) return { ok: false, error: "The logo URL must be https" };
+    if (u.protocol !== "https:" && !(deps.allowPrivateFetch && u.protocol === "http:")) return { ok: false, error: `The ${urlLabel} URL must be https` };
     if (!deps.allowPrivateFetch) {
       const host = u.hostname.replace(/^\[|\]$/g, "");
       const addresses = isIP(host) ? [host] : await resolve(host).catch(() => [] as string[]);
@@ -55,7 +72,7 @@ export async function fetchPublicImage(deps: McpDeps, url: string): Promise<{ ok
     }
     let res: Response;
     try {
-      res = await doFetch(u, { redirect: "manual", signal: AbortSignal.timeout(10_000), headers: { accept: LOGO_TYPES.join(", ") } });
+      res = await doFetch(u, { redirect: "manual", signal: AbortSignal.timeout(10_000), headers: { accept: opts.accept ?? "*/*" } });
     } catch (err) {
       return { ok: false, error: `Could not fetch ${u.host}: ${err instanceof Error ? err.message : String(err)}` };
     }
@@ -65,7 +82,7 @@ export async function fetchPublicImage(deps: McpDeps, url: string): Promise<{ ok
     }
     if (!res.ok || !res.body) return { ok: false, error: `${u.host} answered HTTP ${res.status}` };
     const declared = Number(res.headers.get("content-length") ?? "0");
-    if (declared > MAX_LOGO_BYTES) return { ok: false, error: `The image is ${Math.round(declared / 1024)} KB: the limit is ${MAX_LOGO_BYTES / 1024 / 1024} MB` };
+    if (declared > MAX_LOGO_BYTES) return { ok: false, error: `The ${sizeLabel} is ${Math.round(declared / 1024)} KB: the limit is ${MAX_LOGO_BYTES / 1024 / 1024} MB` };
     // read at most the limit, whatever the headers say
     const reader = res.body.getReader();
     const chunks: Uint8Array[] = [];
@@ -74,15 +91,13 @@ export async function fetchPublicImage(deps: McpDeps, url: string): Promise<{ ok
       const { done, value } = await reader.read();
       if (done) break;
       size += value.byteLength;
-      if (size > MAX_LOGO_BYTES) { void reader.cancel(); return { ok: false, error: `The image is larger than ${MAX_LOGO_BYTES / 1024 / 1024} MB` }; }
+      if (size > MAX_LOGO_BYTES) { void reader.cancel(); return { ok: false, error: `The ${sizeLabel} is larger than ${MAX_LOGO_BYTES / 1024 / 1024} MB` }; }
       chunks.push(value);
     }
     const bytes = new Uint8Array(size);
     let at = 0;
     for (const c of chunks) { bytes.set(c, at); at += c.byteLength; }
-    const type = sniffImage(bytes);
-    if (!type) return { ok: false, error: "The URL does not point to a PNG, JPEG, WebP or GIF image" };
-    return { ok: true, bytes, type };
+    return { ok: true, bytes };
   }
   return { ok: false, error: "Too many redirects" };
 }
@@ -101,7 +116,7 @@ type Settings = Record<string, unknown> & {
 
 /** The settings people choose, without secrets or internals. */
 function publicSettings(s: Settings): Record<string, unknown> {
-  const keys = ["orchestratorName", "orchestratorModel", "imageModel", "reasoning", ...GENERAL_KEYS, "storage", "compaction", "dependencyResults", "mcp", "connectors", "egressProxies", "tailscale",
+  const keys = ["orchestratorName", "orchestratorModel", "imageModel", "reasoning", ...GENERAL_KEYS, "storage", "compaction", "dependencyResults", "agents", "mcp", "connectors", "egressProxies", "tailscale",
     "escalationPolicy", "sla", "appearance"];
   return Object.fromEntries(keys.filter((k) => s[k] !== undefined).map((k) => [k, k === "egressProxies" ? maskProxies(s[k]) : s[k]]));
 }
@@ -197,6 +212,7 @@ const appearanceOutput = z.object({
   palette: z.enum(APPEARANCE_PALETTES).optional(),
   custom: z.object({ enabled: z.boolean(), derive: z.boolean().optional(), light: tokenMapOutput.optional(), dark: tokenMapOutput.optional() }).passthrough().optional(),
   fonts: z.array(webFontShape.passthrough()).optional(),
+  sidebarStyle: z.enum(SIDEBAR_STYLES).optional(),
 }).passthrough();
 
 /** Where the dashboard's fonts come from: what a font stack can name without adding a web font. */
@@ -262,11 +278,11 @@ async function appearanceNow(deps: McpDeps): Promise<AppearanceSettings> {
 type TokensPatch = { enabled?: boolean; derive?: boolean; light?: Record<string, unknown>; dark?: Record<string, unknown>; replace?: boolean };
 
 /** The appearance after a change: theme and palette set or removed (null), tokens merged (null removes one) or replaced. */
-export function mergeAppearance(before: AppearanceSettings, change: { theme?: string | null; palette?: string | null; tokens?: TokensPatch; fonts?: unknown[] | null }): Record<string, unknown> {
+export function mergeAppearance(before: AppearanceSettings, change: { theme?: string | null; palette?: string | null; sidebarStyle?: string | null; tokens?: TokensPatch; fonts?: unknown[] | null }): Record<string, unknown> {
   const out = JSON.parse(JSON.stringify(before ?? {})) as Record<string, unknown> & { custom?: Record<string, unknown> };
   if (change.fonts === null || (Array.isArray(change.fonts) && change.fonts.length === 0)) delete out.fonts;
   else if (change.fonts !== undefined) out.fonts = change.fonts;
-  for (const key of ["theme", "palette"] as const) {
+  for (const key of ["theme", "palette", "sidebarStyle"] as const) {
     if (change[key] === null) delete out[key];
     else if (change[key] !== undefined) out[key] = change[key];
   }
@@ -300,6 +316,7 @@ export function appearanceChanges(before: AppearanceSettings, after: AppearanceS
     const out: Record<string, unknown> = {};
     if (a.theme !== undefined) out.theme = a.theme;
     if (a.palette !== undefined) out.palette = a.palette;
+    if (a.sidebarStyle !== undefined) out.sidebarStyle = a.sidebarStyle;
     if (a.custom) {
       out["custom.enabled"] = a.custom.enabled;
       out["custom.derive"] = a.custom.derive !== false;
@@ -322,6 +339,7 @@ function describeAppearance(a: AppearanceSettings): string {
     parts.push(`custom tokens ${a.custom.enabled ? "on" : "off"}${a.custom.derive === false ? " (no derive)" : ""} (light: ${names(a.custom.light)}; dark: ${names(a.custom.dark)})`);
   }
   if (a.fonts?.length) parts.push(`web fonts ${a.fonts.map((f) => `${f.family} (${f.source === "google" ? `Google${f.weights ? ` ${f.weights}` : ""}` : f.url})`).join(", ")}`);
+  if (a.sidebarStyle) parts.push(`${a.sidebarStyle} sidebar`);
   return parts.join(" · ") || "the built-in default (dark, tide)";
 }
 
@@ -383,7 +401,14 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
       orchestrator_name: z.string().trim().max(ORCHESTRATOR_NAME_MAX_LENGTH).regex(/^[^\r\n]*$/, "a single line").nullable().optional()
         .describe("The orchestrator's display name in chats, groups, channels and its own prompt (1–40 characters); null or '' restores the default, Polpo"),
       orchestrator_model: modelSpec.optional().describe("Polpo's model: provider:model, or { primary, fallbacks }"),
-      image_model: z.string().nullable().optional().describe("The model for images (provider:model), or null for the default"),
+      image_model: z.string().nullable().optional().describe("The image generation model (the media primitive): gateway:provider/model, e.g. vercel-ai-gateway:openai/gpt-image-2; null removes it"),
+      media: z.object({
+        fallbackModel: z.string().optional().describe("Tried once when the image model fails: gateway:provider/model"),
+        credentialRef: z.object({ owner: z.string(), service: z.string() }).optional().describe("The vault entry with the gateway's key (default: the gateway's env var)"),
+        credentialField: z.string().optional(),
+        maxImages: z.number().int().min(1).max(10).optional(),
+        retention: z.number().int().min(1).max(20_000).optional(), retentionDays: z.number().int().min(0).max(3650).optional(),
+      }).strict().nullable().optional().describe("Media: the image fallback model, the gateway key's vault entry, limits and the media log's retention; null: the defaults"),
       reasoning: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional().describe("How much Polpo reasons before answering"),
       egress_proxies: z.record(z.string().regex(EGRESS_PROXY_NAME, "letters, digits, - and _"), z.string().regex(EGRESS_PROXY_URL, "a proxy URL like socks5://100.101.55.7:1080"))
         .nullable().optional().describe("Named proxies for agents' browsers, e.g. { home: 'socks5://100.101.55.7:1080' }: replaces them all; null removes them"),
@@ -413,14 +438,18 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
       connectors: z.object({
         allowPrivateNetwork: z.boolean().optional(), toolTimeoutMs: z.number().int().min(1000).max(3_600_000).optional(),
       }).strict().nullable().optional().describe("Connectors on private addresses and their default tool timeout; null: the defaults"),
+      auto_deploy_agent_updates: z.boolean().optional()
+        .describe("Agent versions: true (default) — an API/MCP agent update without publish/deploy flags is published and deployed to production at once (the old immediate effect); false — it only changes the agent's draft"),
     },
     outputSchema: { changed: z.array(z.string()), settings: settingsView },
     annotations: UPDATE,
-  }, async ({ orchestrator_name, orchestrator_model, image_model, reasoning, egress_proxies, allow_unlisted, general, compaction, dependency_results, tailscale, mcp, connectors }) => {
+  }, async ({ orchestrator_name, orchestrator_model, image_model, media, reasoning, egress_proxies, allow_unlisted, general, compaction, dependency_results, tailscale, mcp, connectors, auto_deploy_agent_updates }) => {
     const body: Record<string, unknown> = {};
+    if (auto_deploy_agent_updates !== undefined) body.agents = { versioning: { autoDeployApiUpdates: auto_deploy_agent_updates } };
     if (orchestrator_name !== undefined) body.orchestratorName = orchestrator_name || null;
     if (orchestrator_model !== undefined) body.orchestratorModel = orchestrator_model;
     if (image_model !== undefined) body.imageModel = image_model;
+    if (media !== undefined) body.media = media;
     if (reasoning !== undefined) body.reasoning = reasoning;
     if (egress_proxies !== undefined) body.egressProxies = egress_proxies;
     for (const [k, v] of Object.entries(general ?? {})) if (v !== undefined) body[k] = v;
@@ -449,7 +478,7 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
       };
     }
     if (Object.keys(body).length === 0) {
-      return fail("Nothing to change: give orchestrator_name, orchestrator_model, image_model, reasoning, egress_proxies, general, compaction, dependency_results, tailscale, mcp or connectors.");
+      return fail("Nothing to change: give orchestrator_name, orchestrator_model, image_model, media, reasoning, egress_proxies, general, compaction, dependency_results, tailscale, mcp, connectors or auto_deploy_agent_updates.");
     }
     const missing = await missingVaultRefs(deps, refs);
     if (missing.length) {
@@ -459,7 +488,6 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
     if (!allow_unlisted) {
       const specs = [
         ...(typeof orchestrator_model === "string" ? [orchestrator_model] : orchestrator_model ? [orchestrator_model.primary, ...(orchestrator_model.fallbacks ?? [])] : []),
-        ...(image_model ? [image_model] : []),
       ];
       const unknown = await unknownModels(deps, specs);
       if (unknown.length) return fail(`Not in the model catalog: ${unknown.join(", ")}. Find the right provider:model with polpo_models_list, or pass allow_unlisted: true for a gateway's own model.`);
@@ -481,7 +509,8 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
     title: "Get the branding and appearance",
     description: "The instance's branding and default look everyone sees in the dashboard: product name, tagline, logo and dark-mode logo, "
       + "how the logo is framed (logoFrame: box, the default tile, or none, bare); "
-      + "the default theme (light, dark, system), palette and custom design tokens per mode (colours, fonts, radius, shadows), and the web fonts it loads. "
+      + "the default theme (light, dark, system), palette and custom design tokens per mode (colours, fonts, radius, shadows), the web fonts it loads, "
+      + "and the default navigation sidebar (appearance.sidebarStyle: drill-in, the default when unset, or classic). "
       + "font_sources says which families a font stack can name as they are: bundled (self-hosted, e.g. Inter Tight), preloaded (declared by the dashboard), "
       + "or any other one once added as a web font (polpo_branding_update fonts) from web_font_hosts. "
       + "A person may still customize their own browser.",
@@ -512,7 +541,7 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
   tool("config", "polpo_branding_update", {
     title: "Update the branding and appearance",
     description: "Change what everyone sees in the dashboard: the product name, the tagline, the logo, the dark-mode logo, how the logo is framed, and the default look "
-      + "(theme, palette, custom design tokens per mode). Only the fields given change; an empty string restores a default name or tagline. "
+      + "(theme, palette, custom design tokens per mode, the navigation sidebar style). Only the fields given change; an empty string restores a default name or tagline. "
       + "A logo comes from a public https URL (fetched by the server), a file of the instance, or base64 data; PNG, JPEG, WebP or GIF up to 4 MB; "
       + "null removes it. Tokens: colours (#rrggbb, oklch(…), hsl(…), rgb(…)), fonts (a CSS font stack, e.g. \"Inter Tight\", sans-serif), radius (0–24 px; radiusCard for cards and tiles, radiusControl for buttons, inputs, selects: 0–32 px, default from radius), shadows (shadowCard on cards, shadowRaised on popovers, menus, tooltips, shadowDialog on dialogs and sheets: default shadowRaised); "
       + "the primary button: buttonPrimaryBg (a solid fill, default primary) or buttonGradient { from, to, angle } (a linear gradient), buttonPrimaryForeground (its text, derived readable), shadowButtonPrimary (its box-shadow, e.g. a glow 0 0 20px oklch(0.6 0.2 290 / 40%); default none; on hover the shadowGlowStrong glow in the primary adds to it); hover is derived; "
@@ -530,6 +559,7 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
       + "surfaceBlur and overlayBlur (0–24 px backdrop blur of glassy bars and the dialog scrim), glowBlur (0–96 px, the soft halos); "
       + "nothing in the dashboard is fixed: every colour, size, weight, corner, shadow and blur is one of these tokens; "
       + "a token set to null goes back to the palette's; with derive on (default) the dashboard fills the rest (text on primary, ring, sidebar…). "
+      + "sidebar_style: the navigation sidebar everyone gets by default, drill-in (the default when unset: Work, Team, Content, Tools, Settings open their pages as a second level inside the sidebar, with a Back row) or classic (every page in one list); each person may still pick their own in Configuration → Appearance. "
       + "The result lists what changed. Needs the admin scope.",
     inputSchema: {
       product_name: z.string().max(80).optional().describe("The product name in the navigation ('' for the default)"),
@@ -540,6 +570,7 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
       logo_frame: z.enum(["box", "none"]).nullable().optional().describe("How the logo is shown: box (in a tile, the default) or none (bare, same height, no background); null: the default"),
       theme: z.enum(APPEARANCE_THEMES).nullable().optional().describe("The default theme; null: the built-in default (dark)"),
       palette: z.enum(APPEARANCE_PALETTES).nullable().optional().describe("The default palette; null: the built-in default (tide)"),
+      sidebar_style: z.enum(SIDEBAR_STYLES).nullable().optional().describe("The default navigation sidebar: drill-in or classic; null: the built-in default (drill-in)"),
       tokens: z.object({
         enabled: z.boolean().optional().describe("Apply the custom tokens (default: true when tokens are given)"),
         derive: z.boolean().optional().describe("Fill the tokens not given from those given (default true)"),
@@ -549,21 +580,21 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
       }).strict().optional().describe("Custom design tokens per mode"),
       fonts: z.array(webFontShape.strict()).max(APPEARANCE_MAX_WEB_FONTS).nullable().optional()
         .describe("The web fonts to load (replaces the list; [] or null: none). E.g. [{ family: \"Manrope\", source: \"google\", weights: \"400;600;700\" }]"),
-      reset_appearance: z.boolean().optional().describe("true: drop the instance's default look (theme, palette, tokens and web fonts) before applying the rest"),
+      reset_appearance: z.boolean().optional().describe("true: drop the instance's default look (theme, palette, tokens, web fonts and sidebar style) before applying the rest"),
     },
     outputSchema: { changed: z.array(z.string()), branding: z.object({ ...brandingOutput }), appearance: appearanceOutput, unloaded_fonts: z.array(z.string()).optional() },
     annotations: UPDATE,
-  }, async ({ product_name, tagline, logo, logo_dark, remove_logo, logo_frame, theme, palette, tokens, fonts, reset_appearance }) => {
-    const touchesAppearance = theme !== undefined || palette !== undefined || tokens !== undefined || fonts !== undefined || reset_appearance === true;
+  }, async ({ product_name, tagline, logo, logo_dark, remove_logo, logo_frame, theme, palette, sidebar_style, tokens, fonts, reset_appearance }) => {
+    const touchesAppearance = theme !== undefined || palette !== undefined || sidebar_style !== undefined || tokens !== undefined || fonts !== undefined || reset_appearance === true;
     if (product_name === undefined && tagline === undefined && logo === undefined && logo_dark === undefined && !remove_logo && logo_frame === undefined && !touchesAppearance) {
-      return fail("Nothing to change: give product_name, tagline, logo, logo_dark, logo_frame, theme, palette, tokens, fonts or reset_appearance.");
+      return fail("Nothing to change: give product_name, tagline, logo, logo_dark, logo_frame, theme, palette, sidebar_style, tokens, fonts or reset_appearance.");
     }
     if (logo && remove_logo) return fail("Give either logo or remove_logo, not both.");
     // the appearance first (pure validation): if it is not valid, nothing changes
     let nextAppearance: AppearanceSettings | null | undefined;
     const before = touchesAppearance ? await appearanceNow(deps) : {};
     if (touchesAppearance) {
-      const merged = mergeAppearance(reset_appearance ? {} : before, { theme, palette, tokens, fonts });
+      const merged = mergeAppearance(reset_appearance ? {} : before, { theme, palette, sidebarStyle: sidebar_style, tokens, fonts });
       try {
         nextAppearance = parseAppearanceSettings(merged);
       } catch (err) {

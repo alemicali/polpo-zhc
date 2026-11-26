@@ -123,6 +123,7 @@ export class Scheduler {
     }
     const entry = this.fromState(state);
     entry.recurring = mission.status === "recurring";
+    if (mission.owner) entry.owner = mission.owner;
     this.schedules.set(entry.id, entry);
     this.stamps.set(mission.id, state.updatedAt);
     // paused, nothing next, or the previous run still going (a late run, not a missed one)
@@ -218,6 +219,8 @@ export class Scheduler {
       ...(prev?.lastError ? { lastError: prev.lastError } : {}),
       ...(prev?.missedRuns ? { missedRuns: prev.missedRuns } : {}),
       ...(prev?.lastMissedAt ? { lastMissedAt: prev.lastMissedAt } : {}),
+      // the mission's owner owns its schedule: the runs' tasks are that member's work
+      ...(mission.owner ? { owner: mission.owner } : {}),
       createdAt: prev?.createdAt ?? new Date().toISOString(),
     };
 
@@ -361,6 +364,7 @@ export class Scheduler {
       if (mission.status !== "scheduled" && mission.status !== "recurring") continue;
       const created = this.fromState(state);
       created.recurring = mission.status === "recurring";
+      if (mission.owner) created.owner = mission.owner;
       this.schedules.set(created.id, created);
       this.stamps.set(state.missionId, state.updatedAt);
     }

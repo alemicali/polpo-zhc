@@ -23,11 +23,13 @@ export { tokenUsageSqlite, contextCheckpointsSqlite } from "./usage.js";
 export { appsSqlite, dataSourcesSqlite, dataViewsSqlite, dataActivitySqlite, storageEntriesSqlite } from "./registries.js";
 export { conversationChecksSqlite } from "./conversation-checks.js";
 export { schedulesSqlite, leasesSqlite, taskWatchersSqlite } from "./scheduling.js";
+export { wabizContactsSqlite, wabizMessagesSqlite, wabizProcessedSqlite } from "./whatsapp-business.js";
 export { artifactsSqlite } from "./artifacts.js";
 export { brainItemsSqlite } from "./company-brain.js";
 export { whatsappMessagesSqlite, whatsappContactsSqlite } from "./whatsapp.js";
 export { chatQueueItemsSqlite, chatQueueSettingsSqlite } from "./chat-queue.js";
 export { roomsSqlite, roomMessagesSqlite } from "./rooms.js";
+export { agentVersionsSqlite, agentDraftsSqlite, agentPointersSqlite, agentDeploysSqlite } from "./agent-versions.js";
 
 // PostgreSQL schemas
 export {
@@ -54,8 +56,10 @@ export { tokenUsagePg, contextCheckpointsPg } from "./usage.js";
 export { appsPg, dataSourcesPg, dataViewsPg, dataActivityPg, storageEntriesPg } from "./registries.js";
 export { conversationChecksPg } from "./conversation-checks.js";
 export { schedulesPg, leasesPg, taskWatchersPg } from "./scheduling.js";
+export { wabizContactsPg, wabizMessagesPg, wabizProcessedPg } from "./whatsapp-business.js";
 export { artifactsPg } from "./artifacts.js";
 export { brainItemsPg } from "./company-brain.js";
 export { whatsappMessagesPg, whatsappContactsPg } from "./whatsapp.js";
 export { chatQueueItemsPg, chatQueueSettingsPg } from "./chat-queue.js";
 export { roomsPg, roomMessagesPg } from "./rooms.js";
+export { agentVersionsPg, agentDraftsPg, agentPointersPg, agentDeploysPg } from "./agent-versions.js";

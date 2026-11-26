@@ -62,6 +62,7 @@ import {
 } from "./schema/registries.js";
 import { brainItemsPg, brainItemsSqlite } from "./schema/company-brain.js";
 import { conversationChecksPg, conversationChecksSqlite } from "./schema/conversation-checks.js";
+import { wabizContactsPg, wabizContactsSqlite, wabizMessagesPg, wabizMessagesSqlite, wabizProcessedPg, wabizProcessedSqlite } from "./schema/whatsapp-business.js";
 import { schedulesPg, schedulesSqlite, leasesPg, leasesSqlite, taskWatchersPg, taskWatchersSqlite } from "./schema/scheduling.js";
 import { artifactsPg, artifactsSqlite } from "./schema/artifacts.js";
 import {
@@ -71,6 +72,10 @@ import {
   chatQueueItemsPg, chatQueueItemsSqlite, chatQueueSettingsPg, chatQueueSettingsSqlite,
 } from "./schema/chat-queue.js";
 import { roomsPg, roomsSqlite, roomMessagesPg, roomMessagesSqlite } from "./schema/rooms.js";
+import {
+  agentVersionsPg, agentVersionsSqlite, agentDraftsPg, agentDraftsSqlite,
+  agentPointersPg, agentPointersSqlite, agentDeploysPg, agentDeploysSqlite,
+} from "./schema/agent-versions.js";
 
 // ── Store classes ─────────────────────────────────────────────────────
 
@@ -107,8 +112,10 @@ import { DrizzleScheduleStore, DrizzleLeaseStore, DrizzleTaskWatcherStore } from
 import { DrizzleArtifactStore } from "./stores/artifact-store.js";
 import { DrizzleCompanyBrainStore } from "./stores/company-brain-store.js";
 import { DrizzleWhatsAppStore } from "./stores/whatsapp-store.js";
+import { DrizzleWaBusinessStore } from "./stores/whatsapp-business-store.js";
 import { DrizzleChatQueueStore } from "./stores/chat-queue-store.js";
 import { DrizzleRoomStore } from "./stores/room-store.js";
+import { DrizzleAgentVersionStore } from "./stores/agent-version-store.js";
 
 // ── Store bundle type ─────────────────────────────────────────────────
 
@@ -127,6 +134,7 @@ import type { DelayStore } from "@polpo-ai/core/delay-store";
 import type { ConfigStore } from "@polpo-ai/core/config-store";
 import type { TeamStore } from "@polpo-ai/core/team-store";
 import type { AgentStore } from "@polpo-ai/core/agent-store";
+import type { AgentVersionStore } from "@polpo-ai/core/agent-versions";
 import type { VaultStore } from "@polpo-ai/core/vault-store";
 import type { PlaybookStore } from "@polpo-ai/core/playbook-store";
 import type { AttachmentStore } from "@polpo-ai/core/attachment-store";
@@ -155,6 +163,7 @@ export interface DrizzleStores {
   configStore: ConfigStore;
   teamStore: TeamStore;
   agentStore: AgentStore;
+  agentVersionStore: AgentVersionStore;
   vaultStore: VaultStore;
   playbookStore: PlaybookStore;
   attachmentStore: AttachmentStore;
@@ -175,6 +184,7 @@ export interface DrizzleStores {
   leaseStore: DrizzleLeaseStore;
   taskWatcherStore: DrizzleTaskWatcherStore;
   artifactStore: DrizzleArtifactStore & ArtifactStore;
+  waBusinessStore: DrizzleWaBusinessStore;
 }
 
 // ── PostgreSQL factory ────────────────────────────────────────────────
@@ -205,6 +215,7 @@ export function createPgStores(db: any): DrizzleStores {
     configStore: new DrizzleConfigStore(db, metadataPg, "pg"),
     teamStore: new DrizzleTeamStore(db, teamsPg, agentsPg, "pg"),
     agentStore: new DrizzleAgentStore(db, agentsPg, "pg"),
+    agentVersionStore: new DrizzleAgentVersionStore(db, { versions: agentVersionsPg, drafts: agentDraftsPg, pointers: agentPointersPg, deploys: agentDeploysPg }, "pg"),
     vaultStore: new DrizzleVaultStore(db, vaultPg),
     playbookStore: new DrizzlePlaybookStore(db, playbooksPg, "pg"),
     attachmentStore: new DrizzleAttachmentStore(db, attachmentsPg, "pg"),
@@ -225,6 +236,7 @@ export function createPgStores(db: any): DrizzleStores {
     leaseStore: new DrizzleLeaseStore(db, leasesPg),
     taskWatcherStore: new DrizzleTaskWatcherStore(db, taskWatchersPg, "pg"),
     artifactStore: new DrizzleArtifactStore(db, artifactsPg, "pg"),
+    waBusinessStore: new DrizzleWaBusinessStore(db, { contacts: wabizContactsPg, messages: wabizMessagesPg, processed: wabizProcessedPg }, "pg"),
   };
 }
 
@@ -256,6 +268,7 @@ export function createSqliteStores(db: any): DrizzleStores {
     configStore: new DrizzleConfigStore(db, metadataSqlite, "sqlite"),
     teamStore: new DrizzleTeamStore(db, teamsSqlite, agentsSqlite, "sqlite"),
     agentStore: new DrizzleAgentStore(db, agentsSqlite, "sqlite"),
+    agentVersionStore: new DrizzleAgentVersionStore(db, { versions: agentVersionsSqlite, drafts: agentDraftsSqlite, pointers: agentPointersSqlite, deploys: agentDeploysSqlite }, "sqlite"),
     vaultStore: new DrizzleVaultStore(db, vaultSqlite),
     playbookStore: new DrizzlePlaybookStore(db, playbooksSqlite, "sqlite"),
     attachmentStore: new DrizzleAttachmentStore(db, attachmentsSqlite, "sqlite"),
@@ -276,6 +289,7 @@ export function createSqliteStores(db: any): DrizzleStores {
     leaseStore: new DrizzleLeaseStore(db, leasesSqlite),
     taskWatcherStore: new DrizzleTaskWatcherStore(db, taskWatchersSqlite, "sqlite"),
     artifactStore: new DrizzleArtifactStore(db, artifactsSqlite, "sqlite"),
+    waBusinessStore: new DrizzleWaBusinessStore(db, { contacts: wabizContactsSqlite, messages: wabizMessagesSqlite, processed: wabizProcessedSqlite }, "sqlite"),
   };
 }
 
@@ -326,7 +340,14 @@ export const pgSchema = {
   chatQueueItems: chatQueueItemsPg,
   chatQueueSettings: chatQueueSettingsPg,
   rooms: roomsPg,
+  agentVersions: agentVersionsPg,
+  agentDrafts: agentDraftsPg,
+  agentPointers: agentPointersPg,
+  agentDeploys: agentDeploysPg,
   roomMessages: roomMessagesPg,
+  wabizContacts: wabizContactsPg,
+  wabizMessages: wabizMessagesPg,
+  wabizProcessed: wabizProcessedPg,
 };
 
 export const sqliteSchema = {
@@ -374,5 +395,12 @@ export const sqliteSchema = {
   chatQueueItems: chatQueueItemsSqlite,
   chatQueueSettings: chatQueueSettingsSqlite,
   rooms: roomsSqlite,
+  agentVersions: agentVersionsSqlite,
+  agentDrafts: agentDraftsSqlite,
+  agentPointers: agentPointersSqlite,
+  agentDeploys: agentDeploysSqlite,
   roomMessages: roomMessagesSqlite,
+  wabizContacts: wabizContactsSqlite,
+  wabizMessages: wabizMessagesSqlite,
+  wabizProcessed: wabizProcessedSqlite,
 };

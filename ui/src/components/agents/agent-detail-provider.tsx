@@ -35,7 +35,8 @@ export function AgentDetailProvider({ children }: { children: React.ReactNode })
   const { name } = useParams<{ name: string }>();
   const agentName = name ?? "";
 
-  const { agent, isLoading, error, refetch: refetchAgent } = useAgent(agentName);
+  // the draft (working copy): the dashboard edits it; production runs the deployed version
+  const { agent, isLoading, error, refetch: refetchAgent } = useAgent(agentName, { view: "draft" });
   const { agents, teams, refetch: refetchAgents } = useAgents();
   const { processes, refetch: refetchProcesses } = useProcesses();
   const { skills: allSkills, refetch: refetchSkills } = useSkills();

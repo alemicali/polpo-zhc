@@ -11,6 +11,10 @@ import { getPolpoDir } from "../core/constants.js";
 import type { Orchestrator } from "../core/orchestrator.js";
 import { AUTH_COOKIE_NAME, isInstanceAuthEnabled, validateSession } from "./auth/instance-auth.js";
 import { getEffectiveAllowedRoots } from "./coding-config-store.js";
+import { CLI_CONFIG_ENV, CLI_INSTANCE_OWNER, CLI_LOGIN_COMMANDS, HOST_COMPUTER_ID, cliSettingsOf, type CliAccount } from "@polpo-ai/core";
+import { cliHostEnv, expandHome } from "../cli-engine/process.js";
+import { cliLoginCommand, remoteAccountPrefix } from "../cli-engine/accounts.js";
+import type { RemotePty } from "../sandbox/remote-adapters.js";
 
 type NodePtyModule = typeof import("node-pty");
 type UpgradeServer = {
@@ -21,13 +25,59 @@ type UpgradeServer = {
 export interface TerminalWebSocketOptions {
   apiKeys?: string[];
   workDir?: string;
+  /**
+   * A terminal on a remote computer running `command` (a CLI account's sign-in there): default,
+   * the computer's machine (started when it is not running) through its provider's PTY.
+   */
+  openRemotePty?: (computerId: string, command: string, size: { cols: number; rows: number }) => Promise<RemotePty>;
+}
+
+/** What a terminal session drives: node-pty here, a provider PTY on a remote computer. */
+type TerminalShell = Pick<IPty, "pid" | "write" | "resize" | "kill" | "onData" | "onExit">;
+
+/** A remote PTY as a terminal shell (output decoded as UTF-8 text, as node-pty gives it). */
+export function remotePtyShell(pty: RemotePty): TerminalShell {
+  const dataListeners = new Set<(d: string) => void>();
+  const exitListeners = new Set<(e: { exitCode: number; signal?: number }) => void>();
+  const dec = new TextDecoder();
+  void (async () => {
+    try {
+      for await (const chunk of pty.output) {
+        const text = dec.decode(chunk, { stream: true });
+        if (text) for (const l of dataListeners) l(text);
+      }
+    } catch { /* the connection ended */ }
+  })();
+  void pty.wait().then((r) => { for (const l of exitListeners) l({ exitCode: r.exitCode }); });
+  const disposable = <T>(set: Set<T>, l: T) => { set.add(l); return { dispose: () => { set.delete(l); } }; };
+  return {
+    pid: 0,
+    write: (data: string) => { void pty.write(data).catch(() => undefined); },
+    resize: (cols: number, rows: number) => { void pty.resize(cols, rows).catch(() => undefined); },
+    kill: () => { void pty.kill(); },
+    onData: ((l: (d: string) => void) => disposable(dataListeners, l)) as IPty["onData"],
+    onExit: ((l: (e: { exitCode: number; signal?: number }) => void) => disposable(exitListeners, l)) as IPty["onExit"],
+  };
+}
+
+/** The computer's machine (started when needed) and a PTY on it. */
+async function defaultOpenRemotePty(orchestrator: Orchestrator, computerId: string, command: string, size: { cols: number; rows: number }): Promise<RemotePty> {
+  const { computerManager } = await import("../sandbox/computers.js");
+  const { computerSandbox } = await import("../sandbox/manager.js");
+  const computer = (orchestrator.getConfig()?.settings?.computers ?? []).find((c) => c.id === computerId);
+  if (!computer) throw new Error(`Unknown computer "${computerId}"`);
+  const sandbox = computerSandbox(computer, orchestrator.getConfig()?.settings);
+  if ("error" in sandbox) throw new Error(sandbox.error);
+  const driver = await computerManager(orchestrator.getPolpoDir()).attach(computer, sandbox);
+  if (!driver.pty) throw new Error(`Computer "${computerId}" (${computer.kind}) has no terminal API here: sign in with the command from a shell on it`);
+  return driver.pty(command, size);
 }
 
 export interface TerminalSessionSnapshot {
   id: string;
   pid: number;
   cwd: string;
-  agentKind: "terminal" | "claude" | "codex";
+  agentKind: "terminal" | "claude" | "codex" | "cli-login";
   agentCommand?: string;
   startedAt: string;
   clients: number;
@@ -42,11 +92,11 @@ export interface TerminalWebSocketHandle {
 type RuntimeTerminalSession = {
   id: string;
   revision: number;
-  shell: IPty;
+  shell: TerminalShell;
   clients: Set<WebSocket>;
   buffer: string;
   cwd: string;
-  agentKind: "terminal" | "claude" | "codex";
+  agentKind: "terminal" | "claude" | "codex" | "cli-login";
   agentCommand?: string;
   startedAt: string;
 };
@@ -92,24 +142,29 @@ export function attachTerminalWebSocket(
 
   server.on("upgrade", onUpgrade);
 
-  wss.on("connection", async (ws: WebSocket, _req: IncomingMessage, query: Record<string, string | string[] | undefined>) => {
+  wss.on("connection", async (ws: WebSocket, req: IncomingMessage, query: Record<string, string | string[] | undefined>) => {
     try {
-      const pty = await loadNodePty();
       const agentWorkDir = orchestrator.getAgentWorkDir();
-      const cwd = resolveTerminalCwd(agentWorkDir, firstValue(query.cwd), orchestrator.getPolpoDir());
       const shellPath = process.env.POLPO_TERMINAL_SHELL || process.env.SHELL || "/bin/bash";
       const cols = clampNumber(firstValue(query.cols), 20, 240, 100);
       const rows = clampNumber(firstValue(query.rows), 8, 80, 30);
       const agentKind = parseAgentKind(firstValue(query.agent));
       const agentSessionId = firstValue(query.agent_session_id) ?? "";
-      const agentCommandOverride = firstValue(query.agent_command);
-      const sessionId = normalizeSessionId(firstValue(query.session_id));
+      const agentCommandOverride = agentKind === "cli-login" ? undefined : firstValue(query.agent_command);
+      // a CLI account's sign-in: the official login command with that account's directory only
+      const login = agentKind === "cli-login"
+        ? cliLoginInvocation(orchestrator, firstValue(query.cli_account), terminalMember(req, activePolpoDir(orchestrator, opts)))
+        : undefined;
+      const cwd = login ? login.cwd : resolveTerminalCwd(agentWorkDir, firstValue(query.cwd), orchestrator.getPolpoDir());
+      const sessionId = login ? `cli-login-${login.account.id}` : normalizeSessionId(firstValue(query.session_id));
       const revision = clampNumber(firstValue(query.revision), 0, Number.MAX_SAFE_INTEGER, 0);
-      const { command, args } = buildAgentInvocation(agentKind, shellPath, {
-        override: agentCommandOverride,
-        sessionId: agentSessionId,
-        cwd,
-      });
+      const { command, args } = login
+        ? { command: "bash", args: ["-lc", login.command ?? ""] }
+        : buildAgentInvocation(agentKind, shellPath, {
+          override: agentCommandOverride,
+          sessionId: agentSessionId,
+          cwd,
+        });
 
       let session = sessions.get(sessionId);
       if (session && session.revision !== revision) {
@@ -118,7 +173,10 @@ export function attachTerminalWebSocket(
         session = undefined;
       }
       if (!session) {
-        const shell = pty.spawn(command, args, {
+        // a remote computer's account: the sign-in runs in a terminal on that computer
+        const shell: TerminalShell = login?.remote
+          ? remotePtyShell(await (opts.openRemotePty ?? ((id, cmd, size) => defaultOpenRemotePty(orchestrator, id, cmd, size)))(login.remote.computer, login.remote.command, { cols, rows }))
+          : (await loadNodePty()).spawn(command, args, {
           // xterm-256color is universally available in terminfo databases;
           // xterm-ghostty requires shipping ghostty's terminfo on the host
           // and trips up `less`, `vim`, and friends with "unknown terminal".
@@ -126,7 +184,8 @@ export function attachTerminalWebSocket(
           cols,
           rows,
           cwd,
-          env: {
+          // the sign-in gets the CLI's minimal environment (none of the server's credentials)
+          env: login ? { ...login.env, TERM: "xterm-256color", COLORTERM: "truecolor" } : {
             ...process.env,
             TERM: "xterm-256color",
             COLORTERM: "truecolor",
@@ -356,11 +415,49 @@ function safeCompare(a: string, b: string): boolean {
   return timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
-type AgentKind = "terminal" | "claude" | "codex";
+type AgentKind = "terminal" | "claude" | "codex" | "cli-login";
 
 function parseAgentKind(value: string | undefined): AgentKind {
-  if (value === "claude" || value === "codex") return value;
+  if (value === "claude" || value === "codex" || value === "cli-login") return value;
   return "terminal";
+}
+
+/** The signed-in member of a terminal request (instance sign-in cookie), if any. */
+function terminalMember(req: IncomingMessage, polpoDir: string): string | undefined {
+  if (!isInstanceAuthEnabled()) return undefined;
+  const token = parseCookie(req.headers.cookie ?? "")[AUTH_COOKIE_NAME];
+  return validateSession(polpoDir, token)?.email?.toLowerCase();
+}
+
+/**
+ * The sign-in terminal of a CLI account on this server: `claude auth login` / `codex login
+ * --device-auth` with the account's config directory and the CLI's minimal environment. Only the
+ * account's owner may open it (anyone for an "instance" account, or without member sign-in):
+ * the person signing in is the person whose plan runs the work.
+ */
+export function cliLoginInvocation(
+  orchestrator: Pick<Orchestrator, "getConfig">,
+  accountId: string | undefined,
+  member: string | undefined,
+  base: NodeJS.ProcessEnv = process.env,
+): { account: CliAccount; command?: string; cwd: string; env: Record<string, string>; remote?: { computer: string; command: string } } {
+  const account = cliSettingsOf(orchestrator.getConfig()?.settings)?.accounts.find((a) => a.id === accountId);
+  if (!account) throw new Error(`Unknown CLI account "${accountId ?? ""}"`);
+  if (isInstanceAuthEnabled() && account.owner !== CLI_INSTANCE_OWNER && member !== account.owner) {
+    throw new Error(`Only ${account.owner} can sign in account "${account.id}": it is their personal sign-in`);
+  }
+  if (account.computer !== HOST_COMPUTER_ID) {
+    // on its computer: the login command with the account's directory, in a terminal there; the
+    // sign-in is written to that machine's disk (kept by hibernation and pause, lost on a reset)
+    return {
+      account, cwd: process.cwd(), env: {},
+      remote: { computer: account.computer, command: `${remoteAccountPrefix(account)}cd "$${CLI_CONFIG_ENV[account.cli]}" && ${CLI_LOGIN_COMMANDS[account.cli]}` },
+    };
+  }
+  const env = cliHostEnv(account.cli, account, base);
+  const cwd = expandHome(account.configDir, env.HOME!);
+  mkdirSync(cwd, { recursive: true, mode: 0o700 });
+  return { account, command: cliLoginCommand(account), cwd, env };
 }
 
 /**

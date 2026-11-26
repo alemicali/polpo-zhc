@@ -50,7 +50,13 @@ export interface HarnessHostTool {
   execute(input: unknown, opts: { toolCallId: string; abortSignal?: AbortSignal }): Promise<unknown>;
 }
 
-export interface HarnessSkill { name: string; description: string; content: string }
+export interface HarnessSkill {
+  name: string;
+  description: string;
+  content: string;
+  /** Bundled text files (skill-relative POSIX paths): the runtime writes them next to SKILL.md. */
+  files?: Array<{ path: string; content: string }>;
+}
 
 /** Explicit authentication: what the runtime gets, never looked up from this server's env or files. */
 export interface HarnessAuth {

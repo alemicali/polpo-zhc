@@ -425,3 +425,192 @@ sessions that are live and sessions updated in the last 10 minutes.
   agent's model). Codex has no budget limit and no Polpo-side cost (OpenAI does not report one in the
   stream). E2B and Daytona v0 computers are refused. Interactive approvals for `allow-edits` /
   `allow-reads` (a person answering in the dashboard) come later.
+
+## CLI engine: the official Claude Code / Codex program on a personal plan
+
+Besides the harnesses above (API keys, Bedrock, Vertex, gateways), an agent can run its tasks and
+its chats through the **official, unmodified `claude` or `codex` program** signed in with **a
+person's own plan** (Claude Pro/Max, ChatGPT Plus/Pro). This is the CLI engine:
+`agent.engine: { type: "cli", cli: "claude" | "codex", account?, model?, permissionMode?, effort?, maxBudgetUsd?, args? }`
+(`effort`: low…max, Claude Code `--effort`, Codex `model_reasoning_effort`, max → xhigh;
+`maxBudgetUsd`: Claude Code `--max-budget-usd`, a bound on the CLI's own estimate).
+
+### Parity with the harness engine
+
+| | Harness engine (AI SDK) | CLI engine |
+| --- | --- | --- |
+| Polpo's tools (connectors with their accounts, register_outcome, artifacts, memory, data, messages, vault-granted tools, the task's tool scope, allowedTools) | host tools over the bridge | the same host tools (toHarnessHostTools over buildAgentToolset) as the run's MCP server: `--mcp-config` (Claude), `-c mcp_servers.polpo.*` (Codex) |
+| Many tools: first request or tool search | `ENABLE_TOOL_SEARCH` false up to 40 tools, auto above | the same |
+| Repository / account MCP servers | not loaded (`strictMcpConfig`) | not loaded (`--strict-mcp-config`) |
+| Approvals | tasks: side-effect tools run; the runtime's own requests are denied | tasks: the same; chats: email/WhatsApp sends become the chat's preview (the person sends them) |
+| Where | Daytona v2 computer (this server with `allowHost`) | this server, or a Daytona v2 / E2B computer |
+| Remote transport | the bridge process (provider process API) | the provider's process API with **stdin** (Daytona v2 `stdin: "open"`, E2B `stdin: true`) |
+| Chats | no (tasks only) | yes: streamed, steering, stop, one CLI conversation per chat session |
+| Sessions view, stop, reset | `polpo_harness_sessions_list` / `_control` | the same (records with `engine: "cli"`, `cli`, `account`) |
+| Continuations | resume the runtime's conversation | `--resume` / `thread/resume` |
+| Cost | gateway, runtime estimate or tokens only | tokens, `costSource: "subscription"`, cost 0 |
+| Failure classification | non-retryable auth/config errors | not signed in, usage limit, not installed: not retried |
+| Effort / budget | `effort`, `maxBudgetUsd` | `effort`, `maxBudgetUsd` (Claude) |
+| Run context (engine, model, computer, VM, session) | yes | yes (`claude-cli` / `codex-cli`, auth `subscription`) |
+| Credential | an API key / gateway / cloud in the vault, brokered | the person's own sign-in in the account's directory, never read by Polpo |
+
+### Why it is allowed, and what it does not do
+
+- Anthropic's [Claude Code legal and compliance page](https://code.claude.com/docs/en/legal-and-compliance)
+  lets a platform host **the unmodified Claude Code binary** when **each end user signs in with their
+  own credentials** (their own Claude subscription included) **through Anthropic's own sign-in flow**.
+  A platform must not collect, store or intermediate claude.ai credentials or tokens, nor route
+  requests on behalf of other users. That is why the API-key harness above still refuses a Claude
+  subscription (the Agent SDK with an OAuth token is not allowed), and why the CLI engine works as
+  follows:
+  - Polpo runs the official program as installed on the computer; it never patches, wraps or
+    proxies its model traffic, and it never sees a token.
+  - The person signs in themselves, in a terminal on the computer (`claude auth login`), completing
+    Anthropic's sign-in in their own browser. Polpo only streams that terminal.
+  - Polpo never reads, copies or backs up the credential files: the account's directory is not in
+    the vault, not in Polpo's state, and excluded from Cloud sync (`.polpo-cli/**`).
+  - **A personal sign-in runs only the work of the person who signed in** (see the policy guard).
+- OpenAI lets Codex CLI users [sign in with ChatGPT](https://developers.openai.com/codex/auth);
+  the same owner rule applies by default. An instance may opt in to sharing a Codex account
+  (owner `"instance"`) with `settings.harnesses.cli.allowInstanceCodex: true`; the dashboard warns
+  that a shared ChatGPT plan must be allowed by OpenAI's terms for that plan.
+- T3 Code ([github.com/pingdotgg/t3code](https://github.com/pingdotgg/t3code)) uses the same
+  approach: the user signs in with `claude auth login` / `codex login` on the machine, one config
+  directory per account (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`).
+
+### Accounts
+
+An account is **a CLI config directory on one computer** — no secret is ever stored:
+
+```jsonc
+"settings": {
+  "harnesses": {
+    "enabled": [],
+    "cli": {
+      "accounts": [
+        { "id": "ada-claude", "cli": "claude", "computer": "host",
+          "configDir": "~/.polpo-cli/claude/ada-claude", "owner": "ada@example.com", "label": "Ada's Max" },
+        { "id": "team-codex", "cli": "codex", "computer": "host",
+          "configDir": "~/.polpo-cli/codex/team-codex", "owner": "instance" }
+      ],
+      "allowInstanceCodex": false
+    }
+  }
+}
+```
+
+- `configDir` defaults to `~/.polpo-cli/<cli>/<id>` (`~` is that computer's home). Claude Code runs
+  with `CLAUDE_CONFIG_DIR=<configDir>`, Codex with `CODEX_HOME=<configDir>`; `HOME` stays the
+  computer's, so the official installers' locations (`~/.local/bin`) work.
+- `owner` is the member who signs in (their email), or `"instance"`. The dashboard sets it to you
+  when you add an account; nobody can create an account owned by someone else.
+- Fields other than `id`, `cli`, `computer`, `configDir`, `owner`, `label` are refused (a token in
+  the settings is an error).
+
+**Settings → Harnesses → CLI accounts**: add an account (CLI, computer, label), see its installed
+version and who is signed in (`claude auth status` JSON, `codex login status`), **Sign in** (a
+terminal on this server running `claude auth login` or `codex login --device-auth` with the account's
+directory and a minimal environment — none of the server's keys), **Sign out** (`claude auth logout`,
+`codex logout`), **Install** when the program is missing (the official `npm install -g
+@anthropic-ai/claude-code` / `npm install -g @openai/codex`, an explicit action), **Remove** (refused
+while agents use it; the sign-in stays in its directory until you sign out). Only the owner can sign
+in, sign out or remove a personal account. **On a remote computer** (Daytona v2, E2B) the same
+**Sign in** opens the terminal on that computer: the provider's PTY (Daytona `sandbox.pty`, E2B
+`pty`), streamed to the dashboard like the local one, running the login with the account's
+directory; the computer is started when it is not running. Status, sign-out and install run there
+too. The sign-in is written to that computer's disk: a Daytona v2 hibernation snapshot and an E2B
+pause keep it; **a reset or a delete of the computer signs the account out** (sign in again), and an
+ephemeral sandbox (no computer) cannot hold a sign-in.
+
+REST (`/api/v1/harnesses/cli`): `GET /accounts` (with status; `?status=0` skips the checks),
+`POST /accounts`, `PATCH /accounts/:id`, `DELETE /accounts/:id`, `GET /accounts/:id/status`,
+`POST /accounts/:id/logout`, `GET /accounts/:id/login` (the terminal to open, on this server or on the account's computer),
+`POST /install`, `PATCH /settings { allowInstanceCodex }`. The sign-in terminal is
+`/ws/terminal?agent=cli-login&cli_account=<id>`. MCP: `polpo_harnesses_get` lists the accounts with
+their status; `polpo_harnesses_update { cli: { add_account, remove_account, sign_out, install,
+allow_instance_codex } }`; agents get the engine with `polpo_agent_create` / `polpo_agent_update`
+(`engine: { type: "cli", … }`). Polpo's chat has the same through its harness tools.
+
+### Policy guard
+
+Before a run starts (and before the program is launched) Polpo checks the account against the work:
+
+| The work | Account owned by a member | `"instance"` (Claude) | `"instance"` (Codex) |
+| --- | --- | --- | --- |
+| A task the owner created (dashboard, the API with their session, Polpo's chat or Polpo's MCP connector on their behalf) | runs | runs only without member sign-in (a personal install) | runs only with `allowInstanceCodex` |
+| The tasks of a mission the owner started | runs | as above | with `allowInstanceCodex` |
+| The runs of a schedule the owner owns (they created the mission or set its schedule) | runs | as above | with `allowInstanceCodex` |
+| A chat with the agent by the owner | runs | as above | with `allowInstanceCodex` |
+| Work of another member (their task, mission run, schedule, chat) | refused | refused when members sign in | with `allowInstanceCodex` |
+| No known author (an API key, another agent's tools, a hook, an ownerless schedule) | refused | as above | with `allowInstanceCodex` |
+| Channel customers, or an instance serving customers (a WhatsApp Business channel with audience `customers`) | refused | refused | refused (customers); allowed for an instance account with `allowInstanceCodex` on a customer-serving instance |
+
+The refusal says why (Anthropic's terms, with the link) and what to use instead: an Anthropic API
+key, Amazon Bedrock or Google Vertex AI (the Claude Code harness), or an OpenAI API key (Codex).
+Who work is for is recorded: `Task.requestedBy` is the signed-in member who created the task (the
+dashboard, the API, Polpo's chat or MCP connector acting for them), the member who started a
+mission's run, or a schedule's owner; `Mission.owner` (shown as a schedule's `owner`) is the member
+who created the mission or set its schedule. Channel turns and agents' own tools carry no member.
+
+### How a run works
+
+- **Claude Code**: `claude -p --input-format stream-json --output-format stream-json --verbose
+  --replay-user-messages --permission-mode <mode> --append-system-prompt <Polpo's instructions>
+  [--model m] [--resume <session>] [--max-turns n] [args…]` in the task's working directory. Each
+  task prompt, follow-up and direction is a stream-json user message on stdin; the program echoes
+  the messages it reads (`--replay-user-messages`), so a direction sent during a turn is known to
+  be read. Output events (`system/init`, `assistant` text / thinking / `tool_use`, `user`
+  `tool_result`, `result` with `usage` and `total_cost_usd`) become the run's transcript and activity.
+  Permission modes: allow-all → `bypassPermissions`, allow-edits → `acceptEdits`, allow-reads →
+  `default` (print mode cannot ask: what needs permission is denied).
+- **Codex**: `codex app-server` (JSON-RPC over stdio, one object per line): `initialize`,
+  `thread/start { cwd, model, approvalPolicy: "never", sandbox, developerInstructions }` (or
+  `thread/resume` for a continuation), `turn/start`, `turn/steer` for a direction during a turn,
+  `turn/interrupt`; notifications `item/started` / `item/completed` (agent messages, reasoning,
+  commands, file changes, MCP and web tools), `thread/tokenUsage/updated`, `turn/completed`, `error`.
+  Sandbox: allow-all → `danger-full-access`, allow-edits → `workspace-write`, allow-reads → `read-only`.
+  An approval request is declined (the run is unattended).
+- **Polpo's tools**: the run's MCP server (streamable HTTP, stateless, a per-run 256-bit token):
+  on this server `http://127.0.0.1:<port>/mcp` with `Authorization: Bearer <token>`; for a remote
+  computer `<POLPO_PUBLIC_URL>/api/v1/harness-relay/<token>/mcp`, the model relay's public route,
+  piped to the run's unix socket (so `POLPO_PUBLIC_URL` must be set and that path exposed). Claude
+  Code: `--mcp-config` + `--strict-mcp-config` + `--allowedTools=mcp__polpo` (its tools are named
+  `mcp__polpo__<tool>`); Codex: `codex -c mcp_servers.polpo.url=… -c
+  mcp_servers.polpo.bearer_token_env_var="POLPO_MCP_TOKEN" -c mcp_servers.polpo.tool_timeout_sec=900
+  app-server` (the token only in the environment). The token is revoked when the run (or the chat
+  turn) ends. The transcript names them by their Polpo name, marked as Polpo's tools.
+- **Where**: this server (a child process in its own process group, killed with everything it
+  started on kill or timeout), or a Daytona v2 / E2B computer: the provider's process API with the
+  program's stdin open (`stdin: "open"` / `stdin: true`), the same transport as the harness bridge;
+  a provider without process input falls back to an inbox file read through `tail -f`. The account
+  must be on the agent's computer.
+- **Cost**: tokens are recorded (usage store, run context) with `costSource: "subscription"` and cost
+  0 — the plan pays. Claude Code's own `total_cost_usd` estimate is in the transcript, not billed.
+- **Errors**: "not signed in" (or an expired sign-in) and "usage limit reached" fail the run without
+  retries, saying how to sign in again or when to try again; a missing program says to install it.
+- **Continuations** resume the CLI's conversation (`--resume <session>`, `thread/resume`): the
+  conversation id is kept in the run's harness session record (`.polpo/harness-sessions.json`, key
+  `cli:task:<id>`; ids only).
+- **Sessions**: every CLI run and chat is a harness session record (`engine: "cli"`, `cli`,
+  `account`, state, turns, tokens): `GET /harnesses/sessions`, `polpo_harness_sessions_list`; stop
+  ends a live run's program (a task run in a runner process: kill the task), reset forgets the
+  conversation (the next run starts a new one).
+
+### Chats
+
+An agent on the CLI engine answers its chats with the same program and account: each chat turn
+starts the program, resumes the chat's own CLI conversation (one per chat session, key
+`cli:chat:<agent>:<session>`; the first turn gets the chat so far as context), streams text,
+reasoning and tool calls into the chat, and ends. A message typed while it works (a steer) reaches
+it at once; Stop ends the turn (the conversation stays). Polpo's tools are there as in tasks; a
+message to a person (`email_send`, `whatsapp_send`) becomes the chat's preview card and the person
+sends, changes or cancels it. The account answers only its owner's chats (the signed-in member);
+channel turns (WhatsApp, Telegram…) are refused. The CLI handles its own context (no manual
+compaction). Tokens go to the usage store as `agent_chat`, cost 0.
+
+### Coding chats
+
+The Coding app's Claude Code and Codex sessions run on the CLI engine too, in a worktree, with the
+account of the person who opens them (the same policy guard), as a chat with in-chat approvals of
+risky actions (Claude Code's `--permission-prompt-tool` answered by a Polpo MCP tool; Codex's
+`approvalPolicy: "on-request"` requests): see [coding.md](coding.md).

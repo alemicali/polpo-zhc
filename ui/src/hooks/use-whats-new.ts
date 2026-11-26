@@ -129,3 +129,9 @@ export function useChangelogUnreadSnapshot(active: boolean, entries: ChangelogEn
 export function useHasUnseenChangelog(entries: ChangelogEntry[] = CHANGELOG): boolean {
   return useUnseenChangelog(entries).length > 0;
 }
+
+/** The sidebar's What's new cards: unread entries first, then the most recent, `size` at most. */
+export function whatsNewStackEntries(entries: ChangelogEntry[], seen: ReadonlySet<string>, size = 5): ChangelogEntry[] {
+  const sorted = sortChangelogByOnline(entries, changelogPublishedAtMap());
+  return [...sorted.filter((e) => !seen.has(e.id)), ...sorted.filter((e) => seen.has(e.id))].slice(0, size);
+}

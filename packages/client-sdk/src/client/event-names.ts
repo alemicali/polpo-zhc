@@ -16,7 +16,7 @@ export const POLPO_EVENT_NAMES = [
   "quality:threshold:failed", "checkpoint:reached", "checkpoint:resumed", "schedule:triggered",
   "schedule:created", "schedule:completed", "schedule:expired", "notification:sent",
   "notification:failed", "watcher:created", "watcher:fired", "watcher:removed", "action:triggered",
-  "task:direction", "task:retry:blocked", "agent:created", "agent:updated", "agent:removed", "agent:learned", "agent:reflected",
+  "task:direction", "task:retry:blocked", "agent:created", "agent:updated", "agent:removed", "agent:learned", "agent:reflected", "agent:gate", "benchmark:progress",
   "team:created", "team:updated", "team:removed", "assessment:check:started",
   "assessment:check:complete", "approval:rejected", "delay:started", "delay:expired",
   "chat:turn-started", "chat:queue-updated", "agent:message", "room:created", "room:updated", "room:deleted",
@@ -34,7 +34,7 @@ export const POLPO_EVENT_NAMES = [
   "sandbox:suspended",
   "sandbox:volume",
   "sandbox:resumed", "sandbox:override-denied", "sandbox:network-denied",
-  "sandbox:failed", "sandbox:destroyed", "storage:changed", "connector:changed", "computer:changed", "computer:webhook", "log",
+  "sandbox:failed", "sandbox:destroyed", "storage:changed", "connector:changed", "mcp-server:changed", "computer:changed", "computer:webhook", "trigger:changed", "trigger:delivery", "trigger:actions", "decision:made", "decision:node", "media:generated", "media:node", "coding:chat", "channel:message-status", "channel:webhook", "log",
 ] as const;
 
 export type PolpoEventName = typeof POLPO_EVENT_NAMES[number];

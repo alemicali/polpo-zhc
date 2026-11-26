@@ -45,6 +45,7 @@ import type {
   MissionQualityGate,
   RetryPolicy,
   ScopedNotificationRules,
+  WorkOrigin,
   ApprovalRequest,
   ApprovalStatus,
 } from "./types.js";
@@ -80,13 +81,13 @@ export interface AssessmentOrchestratorPort {
  */
 export interface MissionExecutorPort {
   readonly ready: Promise<void>;
-  saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules; budgetUsd?: number }): Promise<Mission>;
+  saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules; budgetUsd?: number; owner?: string; origin?: WorkOrigin }): Promise<Mission>;
   getMission(missionId: string): Promise<Mission | undefined>;
   getMissionByName(name: string): Promise<Mission | undefined>;
   getAllMissions(): Promise<Mission[]>;
   updateMission(missionId: string, updates: Partial<Omit<Mission, "id">>): Promise<Mission>;
   deleteMission(missionId: string): Promise<boolean>;
-  executeMission(missionId: string): Promise<{ tasks: Task[]; group: string }>;
+  executeMission(missionId: string, opts?: { requestedBy?: string; origin?: WorkOrigin }): Promise<{ tasks: Task[]; group: string }>;
   resumeMission(missionId: string, opts?: { retryFailed?: boolean }): Promise<{ retried: number; pending: number }>;
   getResumableMissions(): Promise<Mission[]>;
   cleanupCompletedGroups(tasks: Task[]): Promise<void>;
@@ -99,7 +100,13 @@ export interface MissionExecutorPort {
   getActiveCheckpoints(): Array<{ group: string; checkpointName: string; checkpoint: MissionCheckpoint; reachedAt: string }>;
   releaseGroupFlow(group: string): Promise<void>;
   getActiveDelays(): Array<{ group: string; delayName: string; delay: MissionDelay; startedAt: string; expiresAt: string }>;
-  resumeCheckpoint(group: string, checkpointName: string): Promise<boolean>;
+  resumeCheckpoint(group: string, checkpointName: string, resolvedBy?: string): Promise<boolean>;
+  /** Decision nodes (optional: an executor without them holds no task). */
+  getBlockingDecision?(group: string, taskTitle: string, taskId: string, allTasks: Task[], missionData?: string): Promise<{ decision: import("./types.js").MissionDecision } | undefined>;
+  hasPendingDecisions?(): boolean;
+  /** Image nodes (optional: an executor without them holds no task). */
+  getBlockingImage?(group: string, taskTitle: string, taskId: string, allTasks: Task[], missionData?: string): Promise<{ image: import("./media.js").MissionImage } | undefined>;
+  hasPendingImages?(): boolean;
   // Atomic mission data operations
   addMissionTask(missionId: string, task: { title: string; description: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown; sideEffects?: boolean; toolScope?: import("./task-tool-scope.js").TaskToolScope | null }): Promise<Mission>;
   updateMissionTask(missionId: string, taskTitle: string, updates: { title?: string; description?: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown; sideEffects?: boolean; toolScope?: import("./task-tool-scope.js").TaskToolScope | null }): Promise<Mission>;
@@ -417,6 +424,18 @@ export class OrchestratorEngine {
             if (blockingDelay) isReady = false; // Blocked by delay
           }
         }
+
+        // Check decision nodes — a branch task waits for its decision (started once the after tasks finished)
+        if (isReady) {
+          const blockingDecision = await this.missionExec.getBlockingDecision?.(task.group, task.title, task.id, tasksOfGroup(task.group), mission?.data);
+          if (blockingDecision) isReady = false;
+        }
+
+        // Check image nodes — a task receiving an image waits for it (generated once the after tasks finished)
+        if (isReady) {
+          const blockingImage = await this.missionExec.getBlockingImage?.(task.group, task.title, task.id, tasksOfGroup(task.group), mission?.data);
+          if (blockingImage) isReady = false;
+        }
       }
       if (isReady) {
         isReady = task.dependsOn.every(depId => {
@@ -431,7 +450,7 @@ export class OrchestratorEngine {
     // Check for deadlock: no tasks ready, none running, but some pending
     // Don't consider it a deadlock if tasks are awaiting approval, blocked by checkpoints, or waiting on delays
     const hasActiveCheckpoints = this.missionExec.getActiveCheckpoints().length > 0;
-    const hasActiveDelays = this.missionExec.getActiveDelays().length > 0;
+    const hasActiveDelays = this.missionExec.getActiveDelays().length > 0 || !!this.missionExec.hasPendingDecisions?.() || !!this.missionExec.hasPendingImages?.();
     if (ready.length === 0 && inProgress.length === 0 && pending.length > 0 && awaitingApproval.length === 0 && !hasActiveCheckpoints && !hasActiveDelays && !waitingOnPausedMission) {
       if (this.deadlockResolver) {
         // Async resolution already in progress — wait for next tick
@@ -573,6 +592,9 @@ export class OrchestratorEngine {
     dependsOn?: string[]; group?: string; maxDuration?: number; retryPolicy?: RetryPolicy;
     notifications?: ScopedNotificationRules; sideEffects?: boolean; draft?: boolean; maxRetries?: number;
     toolScope?: import("./task-tool-scope.js").TaskToolScope;
+    requestedBy?: string;
+    agentVersion?: string;
+    origin?: WorkOrigin;
   }): Promise<Task> { return this.taskMgr.addTask(opts); }
 
   async updateTaskDescription(taskId: string, description: string): Promise<void> { return this.taskMgr.updateTaskDescription(taskId, description); }
@@ -654,7 +676,7 @@ export class OrchestratorEngine {
 
   // ── Mission Management (delegates to MissionExecutor) ───────────────
 
-  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules; budgetUsd?: number }): Promise<Mission> { return this.missionExec.saveMission(opts); }
+  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules; budgetUsd?: number; owner?: string; origin?: WorkOrigin }): Promise<Mission> { return this.missionExec.saveMission(opts); }
   async getMission(missionId: string): Promise<Mission | undefined> { return this.missionExec.getMission(missionId); }
   async getMissionByName(name: string): Promise<Mission | undefined> { return this.missionExec.getMissionByName(name); }
   async getAllMissions(): Promise<Mission[]> { return this.missionExec.getAllMissions(); }
@@ -800,7 +822,7 @@ export class OrchestratorEngine {
     }
     return mission;
   }
-  async executeMission(missionId: string): Promise<{ tasks: Task[]; group: string }> { return this.missionExec.executeMission(missionId); }
+  async executeMission(missionId: string, opts?: { requestedBy?: string; origin?: WorkOrigin }): Promise<{ tasks: Task[]; group: string }> { return this.missionExec.executeMission(missionId, opts); }
 
   // ── Checkpoints ────────────────────────────────────────────────────
 

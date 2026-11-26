@@ -61,7 +61,9 @@ export interface Connector {
   account?: string;
   kind: "mcp";
   description?: string;
-  transport: { type: "http" | "sse" | "stdio"; url?: string; command?: string; args?: string[]; env?: Record<string, string>; headers?: Record<string, string> };
+  transport: { type: "http" | "sse" | "stdio" | "hosted"; url?: string; command?: string; args?: string[]; env?: Record<string, string>; headers?: Record<string, string>; serverId?: string };
+  /** Hosted servers: the version in production ("Hosted by Polpo · v1.2.0"). */
+  hostedVersion?: string;
   auth: { type: ConnectorAuthType; headerNames?: string[]; oauth?: ConnectorOAuthSettings };
   access: ConnectorAccess;
   enabled: boolean;
@@ -260,7 +262,7 @@ export function iconSourceLabel(asset: ConnectorIconAsset | undefined): string {
 
 /** Save an agent's per-connector tool selection (null: every tool of every granted connector). */
 export function saveAgentConnectorTools(agent: string, connectorTools: AgentConnectorTools | null): Promise<{ connectorTools?: AgentConnectorTools } | null> {
-  return request(`/${encodeURIComponent(agent)}`, json("PATCH", { connectorTools }), "/api/v1/agents");
+  return request(`/${encodeURIComponent(agent)}`, json("PATCH", { connectorTools, publish: false }), "/api/v1/agents");
 }
 
 // ── Catalog search ───────────────────────────────────────────────────────────

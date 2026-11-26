@@ -42,8 +42,8 @@ describe("computeTaskCost", () => {
     const text = describeTaskCost(cost, { perRun: true });
     expect(text).toMatch(/^cost: \$0\.79 in all · 3 runs · latest \$0\.25 · 3,500 tokens/);
     expect(text).toMatch(/by engine: Claude Code \$0\.75 \(2\), Polpo \$0\.04 \(1\)/);
-    expect(text).toMatch(/1\. r\d+ \[failed\] Claude Code claude-haiku-4-5 · \$0\.50 · 1,000 tokens · 60 s/);
-    expect(text).toMatch(/3\. r\d+ \[completed\] continuation Claude Code · \$0\.25/);
+    expect(text).toMatch(/1\. r\d+ \[failed\] claude-haiku-4-5 \(Claude Code · Harness\) · \$0\.50 · 1,000 tokens · 60 s/);
+    expect(text).toMatch(/3\. r\d+ \[completed\] continuation Claude Code · Harness · \$0\.25/);
   });
 
   it("a run starting (no cost yet) and a task never run", () => {

@@ -18,12 +18,14 @@ import { FileRunStore } from "../stores/file-run-store.js";
 import { FileTaskControlStore } from "../stores/file-task-control-store.js";
 import { spawnEngine } from "../adapters/engine.js";
 import { spawnHarnessEngine } from "../adapters/harness-engine.js";
-import { agentHarness } from "@polpo-ai/core";
+import { spawnCliEngine } from "../adapters/cli-engine.js";
+import { agentCliEngine, agentHarness } from "@polpo-ai/core";
 import { scopedAgentForRun } from "./task-tool-scope.js";
 import type { RunStore, RunRecord } from "./run-store.js";
 import type { LogStore } from "./log-store.js";
 import type { RunnerConfig, TaskResult } from "./types.js";
 import { notifyRunComplete, notifyNetworkDenied, notifySandboxEvent } from "./notification.js";
+import { socketAgentTalk } from "./agent-talk-bridge.js";
 import { sanitizeTranscriptEntry } from "../server/security.js";
 import { EncryptedVaultStore } from "../vault/encrypted-store.js";
 import { registerRunnerProviders } from "./runner-providers.js";
@@ -361,6 +363,14 @@ async function main(): Promise<void> {
           })
         : undefined,
       runId: config.runId,
+      // talking to other agents: through the orchestrator, within the agent's communication lines
+      ...(config.notifySocket && config.agentLines ? {
+        agentTalk: {
+          reach: config.agentLines,
+          talk: socketAgentTalk(config.notifySocket, config.runId),
+          task: { id: config.taskId, runId: config.runId },
+        },
+      } : {}),
       vaultStore,
       whatsappStore: waStore,
       whatsappSendMessage: waSendMessage,
@@ -373,7 +383,9 @@ async function main(): Promise<void> {
     // The task's tool scope narrows the agent's tools for this run: Polpo's engine, progressive
     // tools_search / tools_load and harness host tools all resolve from this config
     const runAgent = scopedAgentForRun(config);
-    handle = agentHarness(runAgent)
+    handle = agentCliEngine(runAgent)
+      ? spawnCliEngine(runAgent, config.task, config.cwd, spawnCtx)
+      : agentHarness(runAgent)
       ? spawnHarnessEngine(runAgent, config.task, config.cwd, spawnCtx)
       : spawnEngine(runAgent, config.task, config.cwd, spawnCtx);
     // Wire transcript persistence — every agent message gets written to the run log

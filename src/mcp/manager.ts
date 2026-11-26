@@ -18,6 +18,9 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { auth, UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { createHostedMcpServer } from "../mcp-servers/runtime.js";
+import { hostedDeps } from "../mcp-servers/host.js";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import {
   connectorGrants, connectorToolSelected, DEFAULT_CONNECTOR_TOOL_TIMEOUT_MS,
@@ -149,7 +152,7 @@ export class ConnectorManager {
   }
 
   private signature(connector: ConnectorConfig): string {
-    return JSON.stringify([connector.transport, connector.auth, connector.enabled]);
+    return JSON.stringify([connector.transport, connector.auth, connector.enabled, connector.hostedVersion]);
   }
 
   /** Record the connection state; announce it when it changed. */
@@ -214,6 +217,18 @@ export class ConnectorManager {
 
   private async openTransports(connector: ConnectorConfig): Promise<{ transports: Array<() => Transport>; provider?: VaultOAuthProvider }> {
     const t = connector.transport;
+    if (t.type === "hosted") {
+      // a custom server Polpo hosts: served in process (no network), the deployed version
+      const server = createHostedMcpServer({ serverId: t.serverId ?? "", source: "private" }, hostedDeps(this.options.polpoDir, this.options.vaultStore));
+      if (!server) throw new ConnectorError("This hosted server has no deployed version yet: publish and deploy it first", "error");
+      return {
+        transports: [() => {
+          const [client, serverSide] = InMemoryTransport.createLinkedPair();
+          void server.connect(serverSide).catch(() => undefined);
+          return client;
+        }],
+      };
+    }
     const secrets = await this.secrets.get(connector.id);
     if (t.type === "stdio") {
       const env = Object.fromEntries(Object.entries(t.env ?? {}).map(([k, v]) => [k, resolveSecretRefs(v, secrets)]));

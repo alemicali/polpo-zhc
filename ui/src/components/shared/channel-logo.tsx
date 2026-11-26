@@ -9,7 +9,7 @@
 
 import type { LucideIcon } from "lucide-react";
 import { Icon } from "@iconify/react";
-import { Link2, Bell, Mail, MessageSquare } from "lucide-react";
+import { Link2, Bell, Mail, MessageSquare, Smartphone } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ensureLogosPack } from "@/lib/iconify-bootstrap";
 
@@ -18,21 +18,25 @@ const LOGO_BY_TYPE: Record<string, string | null> = {
   telegram: "logos:telegram",
   slack: "logos:slack-icon",
   whatsapp: "logos:whatsapp-icon",
+  "whatsapp-business": "logos:whatsapp-icon",
   // Email defaults to a generic envelope (provider-specific brand is decided
   // at the provider field, not at the channel level)
   email: "logos:google-gmail",
   // Webhook + push: no real brand — keep lucide
   webhook: null,
   push: null,
+  "expo-push": null,
 };
 
 const FALLBACK_BY_TYPE: Record<string, LucideIcon> = {
   webhook: Link2,
   push: Bell,
+  "expo-push": Smartphone,
   email: Mail,
   telegram: MessageSquare,
   slack: MessageSquare,
   whatsapp: MessageSquare,
+  "whatsapp-business": MessageSquare,
 };
 
 export function ChannelLogo({

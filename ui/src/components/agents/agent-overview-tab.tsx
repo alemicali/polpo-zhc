@@ -1,11 +1,10 @@
 /**
- * AgentOverviewTab — bio, role, personality, tone, responsibilities.
+ * AgentOverviewTab — bio, role, personality, tone, communication lines, responsibilities.
  * Reads data from AgentDetailContext.
  */
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Shield,
   Heart,
@@ -17,13 +16,14 @@ import { SectionHeader } from "@/components/shared/section-header";
 import { cn } from "@/lib/utils";
 import { useAgentDetail } from "./agent-detail-context";
 import { responsibilityPriorityColors } from "@/lib/agent-meta";
+import { AgentCommunicationSection } from "./agent-communication-section";
 
 export function AgentOverviewTab() {
   const { state: { agent } } = useAgentDetail();
   const identity = agent.identity;
 
   return (
-    <ScrollArea className="h-full">
+    <div>
       <div className="space-y-6 pr-4 pb-bottom-nav lg:pb-4">
 
         {/* Bio */}
@@ -83,6 +83,9 @@ export function AgentOverviewTab() {
           </Card>
         </div>
 
+        {/* Org chart and communication lines */}
+        <AgentCommunicationSection />
+
         {/* Responsibilities */}
         <div>
           <SectionHeader title="Responsibilities" icon={ListChecks} count={identity?.responsibilities?.length} />
@@ -125,6 +128,6 @@ export function AgentOverviewTab() {
         </div>
 
       </div>
-    </ScrollArea>
+    </div>
   );
 }

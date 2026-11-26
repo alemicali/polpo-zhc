@@ -13,6 +13,9 @@ import { WebhookChannel } from "./channels/webhook.js";
 import { WhatsAppChannel } from "./channels/whatsapp.js";
 import { PushChannel } from "./channels/push.js";
 import { ExpoPushChannel } from "./channels/expo-push.js";
+import { WaBusinessChannel } from "./channels/whatsapp-business.js";
+import { waBusinessServiceFor } from "./whatsapp-business-service.js";
+import { slackPosterFor } from "./slack-service.js";
 import { expoTokenStoreFor } from "../stores/notification-device-stores.js";
 
 export type { NotificationChannel, Notification, OutcomeAttachment } from "./types.js";
@@ -95,7 +98,7 @@ export class NotificationRouter {
     // Create channel instances
     for (const [id, channelConfig] of Object.entries(config.channels)) {
       try {
-        const channel = this.createChannel(channelConfig);
+        const channel = this.createChannel(channelConfig, id);
         this.channels.set(id, channel);
         this.channelConfigs.set(id, channelConfig);
       } catch (err) {
@@ -613,6 +616,12 @@ export class NotificationRouter {
     body: string;
     severity?: "info" | "warning" | "critical";
     delayMs?: number;
+    /** Fail (throw) when the channel refuses the message, instead of only recording the failure (immediate sends). */
+    throwOnError?: boolean;
+    /** The name the notification log shows for it (default "Direct Send"), e.g. the trigger that sent it. */
+    ruleName?: string;
+    /** Where on the channel, for channels that can target one: a chat (Slack channel id, Telegram chat) and a thread (Slack). */
+    target?: { chatId?: string; threadTs?: string };
   }): Promise<{ id: string; scheduledAt: string; firesAt: string }> {
     const ch = this.channels.get(opts.channel);
     if (!ch) throw new Error(`Channel "${opts.channel}" not found`);
@@ -629,7 +638,11 @@ export class NotificationRouter {
         body: opts.body,
         severity: opts.severity ?? "info",
         sourceEvent: "direct:send",
-        sourceData: { delayMs: opts.delayMs ?? 0 },
+        sourceData: {
+          delayMs: opts.delayMs ?? 0,
+          ...(opts.target?.chatId ? { chatId: opts.target.chatId } : {}),
+          ...(opts.target?.threadTs ? { threadTs: opts.target.threadTs } : {}),
+        },
         ruleId: "direct",
         timestamp: new Date().toISOString(),
       };
@@ -647,7 +660,7 @@ export class NotificationRouter {
             id: notification.id,
             timestamp: notification.timestamp,
             ruleId: "direct",
-            ruleName: "Direct Send",
+            ruleName: opts.ruleName ?? "Direct Send",
             channel: opts.channel,
             channelType: ch.type,
             status: "sent",
@@ -671,7 +684,7 @@ export class NotificationRouter {
             id: notification.id,
             timestamp: notification.timestamp,
             ruleId: "direct",
-            ruleName: "Direct Send",
+            ruleName: opts.ruleName ?? "Direct Send",
             channel: opts.channel,
             channelType: ch.type,
             status: "failed",
@@ -684,6 +697,7 @@ export class NotificationRouter {
           };
           this.store.append(record);
         }
+        if (opts.throwOnError && !(opts.delayMs && opts.delayMs > 0)) throw err;
       }
     };
 
@@ -723,10 +737,13 @@ export class NotificationRouter {
   /**
    * Create a channel instance from config.
    */
-  private createChannel(config: NotificationChannelConfig): NotificationChannel {
+  private createChannel(config: NotificationChannelConfig, id = "default"): NotificationChannel {
     switch (config.type) {
-      case "slack":
-        return new SlackChannel(config);
+      case "slack": {
+        // the Slack app's bot token (vault), through the instance's Slack service
+        const polpoDir = this.polpoDir;
+        return new SlackChannel(config, polpoDir ? () => slackPosterFor(polpoDir, id) : undefined);
+      }
       case "telegram":
         return new TelegramChannel(config);
       case "email":
@@ -736,6 +753,9 @@ export class NotificationRouter {
         return new WhatsAppChannel(config, this.polpoDir);
       case "webhook":
         return new WebhookChannel(config);
+      case "whatsapp-business":
+        // the instance's WhatsApp Business service applies the window, opt-out and caps
+        return new WaBusinessChannel(id, () => waBusinessServiceFor(this.polpoDir));
       case "push":
         if (!this.polpoDir) throw new Error("Push channel requires polpoDir (pass it via init())");
         return new PushChannel(config, this.polpoDir);

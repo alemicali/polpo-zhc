@@ -109,6 +109,8 @@ function normalizeTerminal(value: unknown, workspaceIds: Set<string>): CodingTer
     ...(typeof record.branch === "string" && record.branch ? { branch: record.branch } : {}),
     ...(typeof record.workspaceLabel === "string" && record.workspaceLabel ? { workspaceLabel: record.workspaceLabel } : {}),
     ...(record.tabHidden === true ? { tabHidden: true } : {}),
+    ...(typeof record.chatId === "string" && record.chatId ? { chatId: record.chatId } : {}),
+    ...(typeof record.convertedToChatId === "string" && record.convertedToChatId ? { convertedToChatId: record.convertedToChatId } : {}),
   };
 }
 

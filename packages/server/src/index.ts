@@ -11,7 +11,7 @@
 // Route factories
 export { taskRoutes } from "./routes/tasks.js";
 export { missionRoutes } from "./routes/missions.js";
-export { playbookRoutes, withFlowControlDependencies } from "./routes/playbooks.js";
+export { playbookRoutes, withFlowControlDependencies, runPlaybook, PlaybookRunError, type PlaybookRunDeps } from "./routes/playbooks.js";
 export { approvalRoutes } from "./routes/approvals.js";
 export { chatRoutes } from "./routes/chat.js";
 export { vaultRoutes } from "./routes/vault.js";
@@ -21,11 +21,14 @@ export { scheduleRoutes } from "./routes/schedules.js";
 export { watcherRoutes } from "./routes/watchers.js";
 export { stateRoutes } from "./routes/state.js";
 export { healthRoutes } from "./routes/health.js";
-export { completionRoutes, CHAT_ORIGIN_HEADER, AGENT_CHAIN_HEADER, EMPTY_REPLY_NUDGE, STEP_LIMIT_NUDGE, type CompletionRouteDeps, type TokenUsageRecord } from "./routes/completions.js";
+export { completionRoutes, CHAT_ORIGIN_HEADER, AGENT_CHAIN_HEADER, TURN_TOOLS_HEADER, TURN_MAX_STEPS_HEADER, turnToolAllowlist, EMPTY_REPLY_NUDGE, STEP_LIMIT_NUDGE, type CompletionRouteDeps, type TokenUsageRecord } from "./routes/completions.js";
 export { checkToolCalls, invalidArgumentsResult, type ToolArgumentsValidator } from "./tool-arguments.js";
 export { carryContextCheckpoint, checkpointText, contextCheckpointProjection, type CarryContextCheckpointResult, type CheckpointSession, inspectContextCheckpoint, loadContextCheckpoint, saveContextCheckpoint, type ContextCheckpoint, type ContextCheckpointInspection, type ContextCheckpointStore } from "./context-checkpoint.js";
 export { createSessionCompaction, type SessionCompaction, type SessionCompactorOptions } from "./session-compactor.js";
 export { agentRoutes } from "./routes/agents.js";
+export { AgentTestError, type AgentTestRouteDeps } from "./routes/agent-tests.js";
+export { registerAgentSuiteRoutes, type AgentSuiteRouteDeps, type SuiteRouteTarget } from "./routes/agent-suites.js";
+export { benchmarkRoutes, type BenchmarkRouteDeps, type PlaygroundRouteEvent } from "./routes/benchmarks.js";
 export { eventRoutes, type EventBridge, type EventClient } from "./routes/events.js";
 export { configRoutes } from "./routes/config.js";
 export { fileRoutes, type FileRouteDeps } from "./routes/files.js";

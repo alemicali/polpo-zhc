@@ -33,6 +33,7 @@ export type { TaskStore } from "./task-store.js";
 export type { RunStore, RunRecord, RunStatus } from "./run-store.js";
 // Where and with what a task run executed (engine, computer, egress, session, cost)
 export * from "./run-context.js";
+export * from "./engine-label.js";
 export * from "./mission-cost.js";
 export * from "./task-cost.js";
 export * from "./error-action.js";
@@ -43,7 +44,7 @@ export type { ConfigStore } from "./config-store.js";
 export type { MemoryStore } from "./memory-store.js";
 export { agentMemoryScope } from "./memory-store.js";
 export type { LogStore, LogEntry, LogPruneResult, SessionInfo } from "./log-store.js";
-export type { CreateSessionOptions, SessionStore, Session, Message, MessageSegment, MessageRole, ToolCallInfo, ToolCallState, ForkSessionOptions, ForkSessionResult, ChatQueueItem, ChatQueueState, ChatQueueStore } from "./session-store.js";
+export type { CreateSessionOptions, SessionStore, Session, Message, MessageSegment, MessageRole, ToolCallInfo, ToolCallState, ForkSessionOptions, ForkSessionResult, ChatQueueItem, ChatQueueState, ChatQueueStore, MessageSearchQuery, MessageSearchHit } from "./session-store.js";
 export type { Room, RoomKind, RoomReplyMode, RoomSettings, RoomMessage, RoomAuthorKind, NewRoomMessage, RoomStore } from "./room-store.js";
 export type { CodingSessionStore, CodingSessionState, CodingWorkspace, CodingTerminal, CodingCodeServerSession } from "./coding-session-store.js";
 export type { ApprovalStore } from "./approval-store.js";
@@ -51,6 +52,10 @@ export type { NotificationStore, NotificationRecord, NotificationStatus } from "
 export type { PeerStore } from "./peer-store.js";
 export type { TeamStore } from "./team-store.js";
 export type { AgentStore } from "./agent-store.js";
+export * from "./agent-versions.js";
+export * from "./agent-lines.js";
+export * from "./agent-tests.js";
+export * from "./agent-suites.js";
 export type { VaultStore } from "./vault-store.js";
 export { isReservedVaultOwner, RESERVED_VAULT_OWNER_PREFIX } from "./vault-store.js";
 export type { PlaybookStore } from "./playbook-store.js";
@@ -70,7 +75,7 @@ export type { AgentPromptOptions } from "./agent-prompt.js";
 // ── Skills Reader (async, FileSystem-based) ────────────────────────────
 export {
   discoverSkills, loadAgentSkills, listSkillsWithAssignments,
-  buildSkillPrompt, parseSkillFrontmatter, extractSkillBody,
+  buildSkillPrompt, skillFilesSection, parseSkillFrontmatter, extractSkillBody,
   sanitizeFrontmatterValue, buildSkillFrontmatter,
 } from "./skills-reader.js";
 export type { SkillInfo, LoadedSkill, SkillWithAssignment, SkillIndex, SkillIndexEntry } from "./skills-reader.js";
@@ -189,6 +194,7 @@ export { TaskWatcherManager } from "./task-watcher.js";
 export { QualityController } from "./quality-controller.js";
 export { SLAMonitor } from "./sla-monitor.js";
 export { Scheduler } from "./scheduler.js";
+export * from "./whatsapp-business.js";
 export { InMemoryScheduleStore, InMemoryLeaseStore, InMemoryTaskWatcherStore, scheduleRunKey } from "./schedule-store.js";
 export type { ScheduleState, ScheduleStore, ScheduleCatchUp, ScheduleOutcome, LeaseStore, TaskWatcherStore } from "./schedule-store.js";
 
@@ -248,6 +254,13 @@ export type {
 export * from "./computers.js";
 // Agent harnesses: official agent runtimes (Claude Code, Codex, OpenCode) as an agent's engine
 export * from "./harnesses.js";
+// Gateways (one resolver: name → base URL, key from the vault or env, allowed hosts) and decisions (typed judgments with probabilities)
+export * from "./gateways.js";
+export * from "./decisions.js";
+// Media: image generation and editing through the gateway resolver, the media log, image nodes
+export * from "./media.js";
+// The CLI engine: the official Claude Code / Codex programs signed in with a person's own account
+export * from "./cli-engine.js";
 export { computerSelection } from "./sandbox.js";
 // open Polpo's sandbox ports and runtime policy (copied as is from lumea-labs/polpo)
 export { resolveRuntimeSandboxOptions } from "./runtime-sandbox.js";
@@ -277,12 +290,14 @@ export type { VaultRef } from "./vault-ref.js";
 
 // Artifacts: documents, dashboards, designs, diagrams
 export {
-  ARTIFACT_TYPES, ARTIFACT_KINDS, MAX_ARTIFACT_BYTES, MAX_ARTIFACT_VERSIONS,
-  isArtifactType, artifactContentProblem, summarizeArtifact, matchesArtifactFilter,
-  applyArtifactPatch, buildArtifact, applyArtifactEdits,
+  ARTIFACT_TYPES, ARTIFACT_KINDS, MAX_ARTIFACT_BYTES, MAX_ARTIFACT_VERSIONS, DEFAULT_ARTIFACT_LIMITS, ARTIFACT_VIEWER_BYTES,
+  isArtifactType, artifactContentProblem, artifactSizeProblem, summarizeArtifact, matchesArtifactFilter,
+  applyArtifactPatch, buildArtifact, applyArtifactEdits, artifactLimits, setArtifactLimits, artifactSize,
+  artifactVersionUsage, pruneArtifactVersions, formatArtifactBytes, utf8Bytes,
 } from "./artifacts.js";
 export type {
   Artifact, ArtifactType, ArtifactVersion, ArtifactSummary, NewArtifact, ArtifactPatch, ArtifactFilter, ArtifactStore,
+  ArtifactBlobRef, ArtifactLimits, ArtifactSettings, ArtifactVersionUsage,
 } from "./artifacts.js";
 
 // Connectors: external tools over MCP (Linear, Notion, Google Workspace, custom servers)
@@ -302,9 +317,9 @@ export {
   parseAppearanceSettings, parseAppearanceTokens, sanitizeAppearanceSettings, parseAppearanceToken, isEmptyAppearance,
   APPEARANCE_NUMBER_RANGES, APPEARANCE_GRADIENT_ANGLE, APPEARANCE_FONT_HOSTS, APPEARANCE_MAX_WEB_FONTS, APPEARANCE_FONT_FAMILY, APPEARANCE_BUNDLED_FONTS,
   APPEARANCE_PRELOADED_FONTS, normalizeFontWeights, normalizeFontUrl, webFontHref, parseWebFont, parseWebFonts, unloadedFontFamilies, parseAppearanceGradient,
-  AGENT_COLOR_COUNT, AGENT_COLOR_TOKEN, agentColorIndexFromName, agentColorIndex, WIDGET_TOKEN_NAMES, widgetAppearance,
+  AGENT_COLOR_COUNT, AGENT_COLOR_TOKEN, agentColorIndexFromName, agentColorIndex, WIDGET_TOKEN_NAMES, widgetAppearance, SIDEBAR_STYLES,
 } from "./appearance.js";
 export type {
   AppearanceTheme, AppearancePalette, AppearanceColors, AppearanceCustom, AppearanceSettings, AppearanceTokens, AppearanceTokenName,
-  AppearanceTokenGroup, AppearanceTokenKind, AppearanceWebFont, AppearanceGradient,
+  AppearanceTokenGroup, AppearanceTokenKind, AppearanceWebFont, AppearanceGradient, SidebarStyle,
 } from "./appearance.js";

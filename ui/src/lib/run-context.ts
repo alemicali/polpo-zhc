@@ -4,11 +4,16 @@
 import type { TaskRunContext, TaskRunEngine, TaskRunSummary } from "@polpo-ai/react";
 import type { BrandName } from "@/lib/brand-icons";
 
-export const ENGINE_LABELS: Record<TaskRunEngine, string> = { polpo: "Polpo", "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode" };
+export const ENGINE_LABELS: Record<TaskRunEngine, string> = {
+  polpo: "Polpo", "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode", "claude-cli": "Claude Code (CLI)", "codex-cli": "Codex (CLI)",
+};
 
 const HARNESS_ENGINES = new Set<string>(["claude-code", "codex", "opencode"]);
 
 export function engineBrand(engine: string | undefined): BrandName {
+  // the CLI engine wears the program's mark
+  if (engine === "claude-cli") return "claude-code";
+  if (engine === "codex-cli") return "codex";
   return engine && HARNESS_ENGINES.has(engine) ? (engine as BrandName) : "polpo";
 }
 
@@ -20,15 +25,18 @@ export function engineLabel(engine: string | undefined): string {
 export function agentEngineId(engine: unknown): TaskRunEngine {
   if (typeof engine === "string" && HARNESS_ENGINES.has(engine)) return engine as TaskRunEngine;
   if (engine && typeof engine === "object") {
+    const e = engine as { type?: unknown; cli?: unknown };
+    if (e.type === "cli") return e.cli === "codex" ? "codex-cli" : "claude-cli";
     const h = (engine as { harness?: unknown }).harness;
     if (typeof h === "string" && HARNESS_ENGINES.has(h)) return h as TaskRunEngine;
   }
   return "polpo";
 }
 
-export const AUTH_LABELS: Record<string, string> = { bedrock: "Bedrock", vertex: "Vertex AI", "api-key": "API key", "ai-gateway": "Vercel AI Gateway", gateway: "model gateway" };
+export const AUTH_LABELS: Record<string, string> = { bedrock: "Bedrock", vertex: "Vertex AI", "api-key": "API key", "ai-gateway": "Vercel AI Gateway", gateway: "model gateway", subscription: "personal plan" };
 
 export function authBrand(kind: string | undefined, engine?: string, provider?: string): BrandName {
+  if (kind === "subscription") return engine === "codex-cli" ? "openai" : "anthropic";
   if (kind === "bedrock") return "bedrock";
   if (kind === "vertex") return "vertex";
   if (kind === "api-key") {

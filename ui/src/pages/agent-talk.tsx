@@ -148,12 +148,13 @@ function ExchangeCard({
       <div className="flex flex-wrap items-center gap-2">
         <PairLabel from={exchange.from} to={exchange.to} avatar={avatar} />
         <Badge variant="secondary" className="text-micro">
-          {exchange.kind === "handoff" ? "Handoff" : "Question"}
+          {exchange.kind === "handoff" ? "Handoff" : exchange.kind === "escalation" ? "Escalation" : "Question"}
         </Badge>
         <StatusBadge exchange={exchange} />
       </div>
       <div className="mt-1 text-caption text-muted-foreground">
         <span title={fullDate(exchange.startedAt)}>{ago(exchange.startedAt)}</span>
+        {exchange.fromTaskId && <span data-testid="exchange-from-task"> · while working task {exchange.fromTaskId}</span>}
         {duration && exchange.status !== "working" && (
           <span title={fullDate(exchange.answeredAt)}> · {exchange.status === "failed" ? "failed" : "answered"} after {duration}</span>
         )}

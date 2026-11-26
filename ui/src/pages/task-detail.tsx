@@ -1,5 +1,6 @@
 import { useMemo, useState, memo } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams, Link } from "react-router-dom";
+import { OriginLink } from "@/components/triggers/origin-link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -54,6 +55,8 @@ import {
   Bell,
   Send,
   History,
+  ListTree,
+  MessagesSquare,
 } from "lucide-react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import {
@@ -73,14 +76,20 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useTask, useTasks, useProcesses, useTaskActivity, useTaskDirections, useAssessmentProgress, useAgents, useMissions } from "@polpo-ai/react";
-import type { TaskStatus, DimensionScore, CheckResult, ReviewerResult, EvalDimension, AssessmentResult, AssessmentTrigger, AgentProcess, RunActivityEntry, Task, TaskDirection } from "@polpo-ai/react";
+import type { TaskStatus, DimensionScore, CheckResult, ReviewerResult, EvalDimension, AssessmentResult, AssessmentTrigger, AgentConfig, AgentProcess, RunActivityEntry, Task, TaskDirection, UseTaskDirectionsReturn } from "@polpo-ai/react";
 import { useAsyncAction, useConfig } from "@/hooks/use-polpo";
 import { AppliedRulesPanel } from "@/components/shared/applied-rules-panel";
 import type { AnyRule, ScopedRules } from "@/lib/applied-rules";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { RunContextCard, TaskCostBadge } from "@/components/shared/run-context";
+import { AgentModelWithEngine, RunModelWithEngine } from "@/components/shared/model-with-engine";
 import { taskCostOf } from "@/lib/task-cost";
 import { TaskToolScopeCard } from "@/components/tasks/task-tool-scope";
+import { TaskChatView } from "@/components/tasks/task-chat-view";
+import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { groupActivityRuns, type ActivityRunGroup } from "@/lib/task-transcript";
+import { parseExecutionView, parseTaskTab, readExecutionView, writeExecutionView, type TaskDetailTab, type TaskExecutionView } from "@/lib/task-execution-view";
+import { sendTaskDirection, taskSteering } from "@/hooks/use-task-steering";
 import { useComputers } from "@/hooks/use-computers";
 import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
@@ -501,30 +510,6 @@ function ActivityEntry({ entry }: { entry: RunActivityEntry }) {
 
 type ActivityFilter = "all" | "conversation" | "tools" | "lifecycle";
 
-interface ActivityRunGroup {
-  header?: RunActivityEntry;
-  entries: RunActivityEntry[];
-  attempt: number;
-}
-
-function groupActivityRuns(entries: RunActivityEntry[]): ActivityRunGroup[] {
-  const groups: Array<Omit<ActivityRunGroup, "attempt">> = [];
-  let current: Omit<ActivityRunGroup, "attempt"> | undefined;
-
-  for (const entry of entries) {
-    if (entry._run) {
-      if (current && (current.header || current.entries.length > 0)) groups.push(current);
-      current = { header: entry, entries: [] };
-      continue;
-    }
-    if (!current) current = { entries: [] };
-    current.entries.push(entry);
-  }
-  if (current && (current.header || current.entries.length > 0)) groups.push(current);
-
-  return groups.map((group, index) => ({ ...group, attempt: index + 1 }));
-}
-
 function activityMatchesFilter(entry: RunActivityEntry, filter: ActivityFilter): boolean {
   if (entry.event === "activity") return false;
   if (filter === "all") return true;
@@ -580,11 +565,11 @@ function ActivityRunHeader({
   );
 }
 
-function ActivityPanel({ taskId, isActive }: { taskId: string; isActive?: boolean }) {
+type TaskActivity = ReturnType<typeof useTaskActivity>;
+
+function ActivityPanel({ activity, isActive }: { activity: TaskActivity; isActive?: boolean }) {
   const [filter, setFilter] = useState<ActivityFilter>("all");
-  const { entries, isLoading, error, refetch } = useTaskActivity(taskId, {
-    pollIntervalMs: isActive ? 1000 : 0,
-  });
+  const { entries, isLoading, error, refetch } = activity;
   const [handleActivityRefresh, isActivityRefreshing] = useAsyncAction(async () => {
     await refetch();
   });
@@ -752,37 +737,24 @@ const directionStatusStyle: Record<TaskDirection["status"], string> = {
   failed: "bg-destructive",
 };
 
-function TaskDirectionComposer({ task, process }: { task: Task; process?: AgentProcess }) {
+function TaskDirectionComposer({ task, process, taskDirections }: { task: Task; process?: AgentProcess; taskDirections: UseTaskDirectionsReturn }) {
   const [message, setMessage] = useState("");
   const [confirmSideEffects, setConfirmSideEffects] = useState(false);
-  const isLive = !!process && (task.status === "assigned" || task.status === "in_progress");
-  const isStopping = !!process && (task.status === "failed" || task.status === "done");
-  const isAvailable = task.status !== "draft" && task.status !== "awaiting_approval" && task.status !== "review";
-  const { directions, isSending, sendDirection } = useTaskDirections(isAvailable ? task.id : null, {
-    pollIntervalMs: isAvailable ? 1_000 : 0,
-  });
+  const steering = taskSteering(task, process);
+  const { isLive, isStopping, isAvailable, needsConfirmation, actionLabel } = steering;
+  const { directions, isSending, sendDirection } = taskDirections;
 
   if (!isAvailable) return null;
 
-  const needsConfirmation = !isLive && !!task.sideEffects;
   const canSend = message.trim().length > 0
     && !isSending
     && !isStopping
     && (!needsConfirmation || confirmSideEffects);
-  const actionLabel = isLive
-    ? "Send direction"
-    : task.status === "pending"
-      ? "Add direction"
-      : "Continue task";
 
   const submit = async () => {
     if (!canSend) return;
     try {
-      const result = await sendDirection({
-        message: message.trim(),
-        mode: "auto",
-        confirmSideEffects: needsConfirmation ? confirmSideEffects : undefined,
-      });
+      const result = await sendTaskDirection(steering, sendDirection, message, confirmSideEffects);
       setMessage("");
       setConfirmSideEffects(false);
       toast.success(result.action === "continue" ? "Continuation queued" : "Direction queued");
@@ -860,6 +832,7 @@ function TaskDirectionComposer({ task, process }: { task: Task; process?: AgentP
 export function TaskDetailPage() {
   const { taskId } = useParams<{ taskId: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { task, isLoading, error, updateTask, retryTask, killTask, reassessTask, queueTask } = useTask(taskId ?? "");
   const { tasks: allTasks } = useTasks();
   const { processes } = useProcesses();
@@ -933,56 +906,37 @@ export function TaskDetailPage() {
   const isReviewing = task.status === "review" || isAssessing;
   const showAssessmentTab = (!!assessment && hasExplorationData) || isReviewing;
 
+  // ?tab= deep links (older links: detail, activity); the assessment tab only while it exists
+  const requestedTab = parseTaskTab(searchParams.get("tab"));
+  const activeTab: TaskDetailTab = requestedTab === "assessment" && !showAssessmentTab
+    ? "details"
+    : requestedTab ?? (showAssessmentTab ? "assessment" : "details");
+  const setTab = (value: string) => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set("tab", value);
+      if (value !== "execution") next.delete("view");
+      return next;
+    }, { replace: true });
+  };
+
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-4">
-      {/* Back + title bar */}
-      <div className="flex items-start justify-between gap-2 shrink-0">
-        <div className="flex min-w-0 flex-1 items-start gap-2 sm:items-center sm:gap-3">
-          <Button variant="ghost" size="sm" onClick={() => navigate("/tasks")} className="shrink-0">
+      {/* Slim header: back, title, status, the actions. Everything else is in Details. */}
+      <div className="flex items-start justify-between gap-2 shrink-0" data-testid="task-header">
+        <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
+          <Button variant="ghost" size="sm" onClick={() => navigate("/tasks")} className="shrink-0" aria-label="Back to tasks">
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", cfg.bg)}>
             <StatusIcon className={cn("h-4 w-4", cfg.color, task.status === "in_progress" && "animate-spin")} />
           </div>
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="font-heading w-full truncate text-h3 sm:w-auto sm:text-h2">{task.title}</h1>
-              <Badge variant="outline" className={cn("text-xs shrink-0 border-border/40", cfg.color)}>{cfg.label}</Badge>
-              <TaskCostBadge cost={totalCost} size="md" />
-              {phase && (
-                <Badge variant="outline" className={cn("text-xs gap-1 shrink-0", phase.color)}>
-                  <phase.icon className="h-3 w-3" />
-                  {phase.label}
-                </Badge>
-              )}
-            </div>
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground sm:mt-0.5">
-              <CopyableId id={task.id} label="Task ID" />
-              <Link to={`/agents/${task.assignTo}`} className="flex items-center gap-1.5 hover:text-foreground transition-colors">
-                <AgentAvatar avatar={identity?.avatar} name={task.assignTo} size="xs" />
-                {identity?.displayName && (
-                  <span className="font-medium text-foreground/80">{identity.displayName}</span>
-                )}
-                <span className={identity?.displayName ? "text-muted-foreground" : ""}>
-                  {identity?.displayName ? `@${task.assignTo}` : task.assignTo}
-                </span>
-              </Link>
-              {task.group && (
-                <Link to={`/missions`} className="hidden items-center gap-1 hover:text-foreground transition-colors md:flex">
-                  <Target className="h-3 w-3" /> {task.group}
-                </Link>
-              )}
-              {task.sessionId && (
-                <span className="hidden items-center gap-1 font-mono text-micro lg:flex">
-                  session: {task.sessionId.slice(0, 8)}
-                </span>
-              )}
-              <span className="hidden xl:inline">Created {format(new Date(task.createdAt), "MMM d, HH:mm")}</span>
-              <span className="hidden xl:inline">Updated {formatDistanceToNow(new Date(task.updatedAt), { addSuffix: true })}</span>
-            </div>
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h1 className="font-heading min-w-0 truncate text-h3 sm:text-h2">{task.title}</h1>
+            <Badge variant="outline" className={cn("text-xs shrink-0 border-border/40", cfg.color)} data-testid="task-status-badge">{cfg.label}</Badge>
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
           {task.status === "draft" && (
             <Button variant="outline" size="sm" disabled={!!actionPending} onClick={() => handleAction(queueTask, "Queued")}>
               {actionPending === "Queued" ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Zap className="h-3.5 w-3.5 mr-1.5" />} Queue
@@ -1027,28 +981,12 @@ export function TaskDetailPage() {
         </div>
       </div>
 
-      {/* Where and with what it runs: engine, computer, egress, session, cost (and earlier runs) */}
-      <RunContextCard runs={task.runs} cost={totalCost} computers={computers} />
-
-      {/* Tools for this task: inherit from the agent (default) or a narrower scope */}
-      <TaskToolScopeCard
-        scope={task.toolScope}
-        stale={task.toolScopeStale}
-        agent={agentConfig}
-        onSave={(toolScope) => updateTask({ toolScope })}
-      />
-
-      {/* Live activity for running tasks */}
-      {process && <LiveActivityStrip process={process} />}
-
-      <TaskDirectionComposer task={task} process={process} />
-
-      {/* Content — tabs: Assessment (conditional) | Detail | Activity */}
-      <Tabs defaultValue={showAssessmentTab ? "assessment" : "detail"} className="flex flex-col flex-1 min-h-0">
-        <TabsList className="shrink-0 w-fit">
+      {/* Content — tabs: Assessment (conditional) | Details | Execution | Rules */}
+      <Tabs value={activeTab} onValueChange={setTab} className="flex flex-col flex-1 min-h-0">
+        <TabsList className="shrink-0 w-fit max-w-full overflow-x-auto">
           {showAssessmentTab && <TabsTrigger value="assessment"><Scale className="h-3 w-3" /> Assessment</TabsTrigger>}
-          <TabsTrigger value="detail"><FileText className="h-3 w-3" /> Detail</TabsTrigger>
-          <TabsTrigger value="activity"><Activity className="h-3 w-3" /> Execution</TabsTrigger>
+          <TabsTrigger value="details"><FileText className="h-3 w-3" /> Details</TabsTrigger>
+          <TabsTrigger value="execution"><Activity className="h-3 w-3" /> Execution</TabsTrigger>
           <TabsTrigger value="rules"><Bell className="h-3 w-3" /> Rules</TabsTrigger>
         </TabsList>
 
@@ -1521,12 +1459,28 @@ export function TaskDetailPage() {
           </TabsContent>
         )}
 
-        <TabsContent value="detail" className="mt-4 flex-1 min-h-0">
+        <TabsContent value="details" className="mt-4 flex-1 min-h-0" data-testid="task-details-tab">
           <ScrollArea className="h-full">
             <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 pr-4 pb-6">
 
-              {/* ── Left column (3/5): output, description ── */}
+              {/* ── Left column (3/5): failure, output, description ── */}
               <div className="lg:col-span-3 space-y-4">
+
+              {/* ── Why it failed (and whether it was retried) ── */}
+              {task.status === "failed" && (task.failure || task.result?.retryable === false) && (
+                <Card className="py-0 gap-0 border-l-2 border-l-destructive" data-testid="task-failure">
+                  <CardContent className="pt-3 pb-3 space-y-1">
+                    <p className="text-label text-destructive flex items-center gap-1.5">
+                      <AlertCircle className="h-3 w-3" /> Failure
+                      {task.failure?.kind && <Badge variant="outline" className="text-micro ml-1">{task.failure.kind.replace(/_/g, " ")}</Badge>}
+                    </p>
+                    {task.failure?.reason && <p className="text-sm break-words">{task.failure.reason}</p>}
+                    {(task.failure?.retryable === false || task.result?.retryable === false) && (
+                      <p className="text-xs text-muted-foreground" data-testid="task-not-retried">Not retried: the error is not retryable (a re-run would fail the same way)</p>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
 
               {/* Assessment compact summary (when not in dedicated tab) */}
               {assessment && !showAssessmentTab && (
@@ -1652,8 +1606,105 @@ export function TaskDetailPage() {
 
               </div>{/* end left column */}
 
-              {/* ── Right column (2/5): details, expectations, outcomes ── */}
+              {/* ── Right column (2/5): overview, runs, tools, expectations, outcomes, details ── */}
               <div className="lg:col-span-2 space-y-4">
+
+              {/* ── Overview: status & timing, agent, mission, cost, ids ── */}
+              <Card className="py-0 gap-0" data-testid="task-overview">
+                <CardContent className="pt-4 pb-4">
+                  <p className="text-label text-muted-foreground mb-3">Overview</p>
+                  <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
+                    <dt className="text-xs text-muted-foreground">Status</dt>
+                    <dd className="flex flex-wrap items-center gap-1.5">
+                      <Badge variant="outline" className={cn("text-xs border-border/40", cfg.color)}>{cfg.label}</Badge>
+                      {phase && (
+                        <Badge variant="outline" className={cn("text-xs gap-1", phase.color)} data-testid="task-phase">
+                          <phase.icon className="h-3 w-3" />
+                          {phase.label}
+                        </Badge>
+                      )}
+                    </dd>
+                    <dt className="text-xs text-muted-foreground">Agent</dt>
+                    <dd>
+                      <Link to={`/agents/${task.assignTo}`} className="inline-flex min-w-0 items-center gap-1.5 hover:text-foreground transition-colors" data-testid="task-agent">
+                        <AgentAvatar avatar={identity?.avatar} name={task.assignTo} size="xs" />
+                        {identity?.displayName && <span className="font-medium">{identity.displayName}</span>}
+                        <span className="truncate text-muted-foreground">{identity?.displayName ? `@${task.assignTo}` : task.assignTo}</span>
+                      </Link>
+                    </dd>
+                    {task.origin && (
+                      <>
+                        <dt className="text-xs text-muted-foreground">Started by</dt>
+                        <dd className="min-w-0"><OriginLink origin={task.origin} /></dd>
+                      </>
+                    )}
+                    {/* what ran last (as recorded), else what its agent is set to */}
+                    {(task.runs?.length || agentConfig) && (
+                      <>
+                        <dt className="text-xs text-muted-foreground">Model</dt>
+                        <dd className="flex min-w-0">
+                          {task.runs?.length
+                            ? <RunModelWithEngine run={task.runs[task.runs.length - 1]!} mono size={13} testId="task-model" />
+                            : <AgentModelWithEngine agent={agentConfig} fallback="default" mono size={13} testId="task-model" />}
+                        </dd>
+                      </>
+                    )}
+                    {task.group && (
+                      <>
+                        <dt className="text-xs text-muted-foreground">Mission</dt>
+                        <dd>
+                          <Link to={task.missionId ? `/missions/${task.missionId}` : "/missions"} className="inline-flex items-center gap-1 hover:text-foreground transition-colors break-all" data-testid="task-mission">
+                            <Target className="h-3 w-3 shrink-0" /> {task.group}
+                          </Link>
+                        </dd>
+                      </>
+                    )}
+                    <dt className="text-xs text-muted-foreground">Cost</dt>
+                    <dd data-testid="task-cost">{totalCost ? <TaskCostBadge cost={totalCost} /> : <span className="text-muted-foreground">—</span>}</dd>
+                    <dt className="text-xs text-muted-foreground">Created</dt>
+                    <dd>{format(new Date(task.createdAt), "MMM d, yyyy HH:mm")}</dd>
+                    <dt className="text-xs text-muted-foreground">Updated</dt>
+                    <dd>{formatDistanceToNow(new Date(task.updatedAt), { addSuffix: true })}</dd>
+                    {task.deadline && (
+                      <>
+                        <dt className="text-xs text-muted-foreground">Deadline</dt>
+                        <dd>{format(new Date(task.deadline), "MMM d, yyyy HH:mm")}</dd>
+                      </>
+                    )}
+                    {task.priority != null && task.priority !== 1 && (
+                      <>
+                        <dt className="text-xs text-muted-foreground">Priority</dt>
+                        <dd>{task.priority}</dd>
+                      </>
+                    )}
+                    {task.sideEffects && (
+                      <>
+                        <dt className="text-xs text-muted-foreground">Side effects</dt>
+                        <dd className="text-warning">External actions: not retried automatically</dd>
+                      </>
+                    )}
+                    <dt className="text-xs text-muted-foreground">Task ID</dt>
+                    <dd><CopyableId id={task.id} label="Task ID" /></dd>
+                    {task.sessionId && (
+                      <>
+                        <dt className="text-xs text-muted-foreground">Session</dt>
+                        <dd className="font-mono text-micro break-all">{task.sessionId}</dd>
+                      </>
+                    )}
+                  </dl>
+                </CardContent>
+              </Card>
+
+              {/* Where and with what it runs: engine, model, computer, egress, session, cost (and earlier runs) */}
+              <RunContextCard runs={task.runs} cost={totalCost} computers={computers} />
+
+              {/* Tools for this task: inherit from the agent (default) or a narrower scope */}
+              <TaskToolScopeCard
+                scope={task.toolScope}
+                stale={task.toolScopeStale}
+                agent={agentConfig}
+                onSave={(toolScope) => updateTask({ toolScope })}
+              />
 
               {/* ── Expectations ── */}
               {task.expectations.length > 0 && (
@@ -2012,11 +2063,6 @@ export function TaskDetailPage() {
                     <div>
                       <span className="text-xs text-muted-foreground block mb-0.5">Retries</span>
                       <span>{task.retries} / {task.maxRetries}</span>
-                      {task.status === "failed" && task.result?.retryable === false && (
-                        <span className="text-xs text-muted-foreground block mt-0.5" data-testid="task-not-retried">
-                          Not retried: the error is not retryable (a re-run would fail the same way)
-                        </span>
-                      )}
                     </div>
                     {task.maxDuration != null && task.maxDuration > 0 && (
                       <div>
@@ -2117,9 +2163,9 @@ export function TaskDetailPage() {
           </ScrollArea>
         </TabsContent>
 
-        {/* Activity tab — needs explicit height so ScrollArea inside can scroll */}
-        <TabsContent value="activity" className="mt-4 flex-1 min-h-0 overflow-hidden flex flex-col">
-          <ActivityPanel taskId={task.id} isActive={task.status === "in_progress" || task.status === "assigned"} />
+        {/* Execution tab — the run as a log or as a chat, and where to steer / continue it */}
+        <TabsContent value="execution" className="mt-4 flex-1 min-h-0 overflow-hidden flex flex-col" data-testid="task-execution-tab">
+          <TaskExecutionTab task={task} process={process} agent={agentConfig} />
         </TabsContent>
 
         {/* Rules tab — applied notification rules for this task */}
@@ -2138,6 +2184,65 @@ export function TaskDetailPage() {
 
       {/* File preview dialog */}
       <FilePreviewDialog preview={previewState} onClose={closePreview} />
+    </div>
+  );
+}
+
+/**
+ * Execution: the run as the event Log or as a Chat (the choice kept per person; ?view= wins), the
+ * live activity of a running task, and the controls to steer or continue it (only here).
+ */
+function TaskExecutionTab({ task, process, agent }: { task: Task; process?: AgentProcess; agent?: AgentConfig }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [savedView, setSavedView] = useState<TaskExecutionView>(readExecutionView);
+  const view = parseExecutionView(searchParams.get("view")) ?? savedView;
+  const setView = (next: TaskExecutionView) => {
+    setSavedView(next);
+    writeExecutionView(next);
+    setSearchParams((current) => {
+      const params = new URLSearchParams(current);
+      params.set("tab", "execution");
+      params.set("view", next);
+      return params;
+    }, { replace: true });
+  };
+
+  const isActive = task.status === "in_progress" || task.status === "assigned";
+  const activity = useTaskActivity(task.id, { pollIntervalMs: isActive ? 1000 : 0 });
+  const steeringAvailable = taskSteering(task, process).isAvailable;
+  const taskDirections = useTaskDirections(steeringAvailable || view === "chat" ? task.id : null, {
+    pollIntervalMs: steeringAvailable ? 1_000 : 0,
+  });
+
+  return (
+    <div className="flex flex-col flex-1 min-h-0 gap-3">
+      <div className="flex shrink-0 flex-wrap items-center gap-3">
+        <SegmentedControl size="sm" aria-label="Execution view" value={view} onValueChange={setView}>
+          <ToggleGroupItem value="log" data-testid="execution-view-log">
+            <ListTree className="h-4 w-4" /> Log
+          </ToggleGroupItem>
+          <ToggleGroupItem value="chat" data-testid="execution-view-chat">
+            <MessagesSquare className="h-4 w-4" /> Chat
+          </ToggleGroupItem>
+        </SegmentedControl>
+        {/* Live activity for running tasks */}
+        {process && <div className="min-w-0 flex-1"><LiveActivityStrip process={process} /></div>}
+      </div>
+      {view === "chat" ? (
+        <TaskChatView
+          task={task}
+          process={process}
+          agent={agent}
+          entries={activity.entries}
+          isLoading={activity.isLoading}
+          directions={taskDirections}
+        />
+      ) : (
+        <>
+          <TaskDirectionComposer task={task} process={process} taskDirections={taskDirections} />
+          <ActivityPanel activity={activity} isActive={isActive} />
+        </>
+      )}
     </div>
   );
 }

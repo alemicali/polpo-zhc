@@ -5,8 +5,10 @@ import { tmpdir } from "node:os";
 import Database from "better-sqlite3";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import {
-  applyArtifactEdits, applyArtifactPatch, artifactContentProblem, buildArtifact, MAX_ARTIFACT_VERSIONS,
+  applyArtifactEdits, applyArtifactPatch, artifactContentProblem, buildArtifact, MAX_ARTIFACT_VERSIONS, setArtifactLimits,
 } from "@polpo-ai/core/artifacts";
+import { ArtifactBlobs } from "../artifacts/blobs.js";
+import { LargeArtifactStore } from "../artifacts/store.js";
 import { DataRuntime } from "../server/data-runtime.js";
 import { FileArtifactStore } from "../stores/file-artifact-store.js";
 import { artifactRoutes } from "../server/routes/artifacts.js";
@@ -15,6 +17,7 @@ import { createArtifactAgentTools, executeArtifactTool } from "../tools/artifact
 
 const roots: string[] = [];
 afterEach(async () => {
+  setArtifactLimits(undefined);
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -32,7 +35,7 @@ async function fixture() {
     name: "Sales", slug: "sales", kind: "sqlite", environment: "development", config: { location: dbPath }, tags: [],
     grants: [{ id: "g1", agent: "analyst", capabilities: ["read"], datasets: ["orders"], excludedFields: ["secret"] }],
   });
-  const store = new FileArtifactStore(polpoDir);
+  const store = new LargeArtifactStore(new FileArtifactStore(polpoDir), new ArtifactBlobs(polpoDir, { gcGraceMs: 0 }));
   const emitted: unknown[] = [];
   const app = new OpenAPIHono();
   app.route("/artifacts", artifactRoutes(() => ({ store, data, author: () => "person:ada@example.com", emit: (p) => emitted.push(p) })));
@@ -53,7 +56,9 @@ describe("artifact model", () => {
     expect(artifactContentProblem("svg", "<div/>")).toMatch(/<svg>/);
     expect(artifactContentProblem("svg", '<svg viewBox="0 0 1 1"></svg>')).toBeUndefined();
     expect(artifactContentProblem("view", "{")).toMatch(/valid JSON/);
-    expect(artifactContentProblem("html", "x".repeat(1_000_001))).toMatch(/over 1000 KB/);
+    setArtifactLimits({ maxBytes: 1000 });
+    expect(artifactContentProblem("html", "x".repeat(1001))).toMatch(/over 1000 B/);
+    setArtifactLimits(undefined);
     expect(() => buildArtifact("a1", { title: "x", type: "pdf" as never, content: "x", createdBy: "polpo" })).toThrow(/Unknown artifact type/);
   });
 
@@ -61,14 +66,14 @@ describe("artifact model", () => {
     let a = buildArtifact("a1", { title: "Report", type: "doc", content: "v1", createdBy: "analyst" }, "2026-10-25T10:00:00Z");
     a = applyArtifactPatch(a, { content: "v2", author: "polpo", note: "added totals" }, "2026-10-25T11:00:00Z");
     expect(a).toMatchObject({ content: "v2", version: 2, author: "polpo", note: "added totals" });
-    expect(a.versions).toEqual([{ version: 1, content: "v1", author: "analyst", at: "2026-10-25T10:00:00Z" }]);
+    expect(a.versions).toEqual([{ version: 1, content: "v1", size: 2, author: "analyst", at: "2026-10-25T10:00:00Z" }]);
     a = applyArtifactPatch(a, { content: "v3", author: "person:ada" });
     expect(a.versions[0]).toMatchObject({ version: 2, content: "v2", author: "polpo", note: "added totals" });
     // only the title: no new version
     expect(applyArtifactPatch(a, { title: "Q4 report" })).toMatchObject({ title: "Q4 report", version: 3 });
-    for (let i = 4; i < 40; i++) a = applyArtifactPatch(a, { content: `v${i}` });
+    for (let i = 4; i < MAX_ARTIFACT_VERSIONS + 10; i++) a = applyArtifactPatch(a, { content: `v${i}` });
     expect(a.versions).toHaveLength(MAX_ARTIFACT_VERSIONS);
-    expect(a.versions[0]!.version).toBe(38);
+    expect(a.versions[0]!.version).toBe(MAX_ARTIFACT_VERSIONS + 8);
   });
 
   it("applies find/replace edits that each match once", () => {
@@ -194,7 +199,7 @@ describe("artifact tools", () => {
     expect(updated).toMatch(/now v2/);
     expect((await store.get(id))!.content).toBe("# Plan\n\n- step one\n- step two");
     expect(await executeArtifactTool("artifact_get", { id, version: 1 }, polpo)).toContain("--- content of v1 ---\n# Plan\n\n- step one");
-    await expect(executeArtifactTool("artifact_update", { id, content: "x", edits: [{ find: "a", replace: "b" }] }, polpo)).rejects.toThrow(/either content or edits/);
+    await expect(executeArtifactTool("artifact_update", { id, content: "x", edits: [{ find: "a", replace: "b" }] }, polpo)).rejects.toThrow(/one kind of change per call/);
 
     await expect(executeArtifactTool("artifact_update", { id, expectedVersion: 1, content: "outdated draft" }, polpo)).rejects.toThrow();
     expect((await store.get(id))?.version).toBe(2);
@@ -221,7 +226,7 @@ describe("artifact tools", () => {
     const { store } = await fixture();
     const ctx = () => ({ store, author: "analyst" });
     expect(createArtifactAgentTools(["read", "data_*"], ctx)).toEqual([]);
-    expect(createArtifactAgentTools(["artifact_*"], ctx).map((t) => t.name)).toEqual(["artifact_create", "artifact_update", "artifact_get", "artifact_list", "artifact_delete"]);
+    expect(createArtifactAgentTools(["artifact_*"], ctx).map((t) => t.name)).toEqual(["artifact_create", "artifact_update", "artifact_from_file", "artifact_get", "artifact_list", "artifact_delete"]);
     const [create] = createArtifactAgentTools(["artifact_create"], ctx);
     const result = await create!.execute("t1", { title: "Chart", type: "svg", content: '<svg viewBox="0 0 10 10"><rect width="5" height="5"/></svg>' });
     expect(result.details).toEqual({ artifactId: expect.stringMatching(/^art_/) });
@@ -251,8 +256,10 @@ it("duplicating records who made the copy, refuses a malformed version, and a to
   const copy = await call("POST", `/${original.id}/duplicate`, {});
   expect(copy.body.data).toMatchObject({ createdBy: "analyst", author: "person:ada@example.com", note: `Duplicated from ${original.id} v1 by person:ada@example.com` });
   expect((await call("POST", `/${original.id}/duplicate`, { version: "1" })).status).toBe(400);
-  const huge = await call("PATCH", `/${original.id}`, { content: "x".repeat(4_100_000) });
+  setArtifactLimits({ maxBytes: 1_000_000 });
+  const huge = await call("PATCH", `/${original.id}`, { content: "x".repeat(1_100_000) });
   expect(huge.status).toBe(413);
+  expect(huge.body.error).toMatch(/over 977 KB.*polpo_artifact_upload_prepare/);
 });
 
 it("a new kind must still fit the current content", async () => {

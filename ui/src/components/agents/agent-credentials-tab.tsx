@@ -11,7 +11,6 @@
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import {
   Dialog,
@@ -1180,7 +1179,7 @@ export function AgentCredentialsTab() {
   );
 
   return (
-    <ScrollArea className="h-full">
+    <div>
       <div className="space-y-6 pr-4 pb-bottom-nav lg:pb-4">
         <div>
           <div className="flex items-center justify-between gap-2 mb-3">
@@ -1259,6 +1258,6 @@ export function AgentCredentialsTab() {
         loading={deleting}
         onConfirm={handleDelete}
       />
-    </ScrollArea>
+    </div>
   );
 }

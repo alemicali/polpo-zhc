@@ -52,7 +52,10 @@ export const TaskToolScopeSchema = z.object({
 export const CreateTaskSchema = z.object({
   title: z.string().min(1),
   description: z.string().min(1),
+  /** The agent's name; "name@1.2.0" pins the task to that published version. */
   assignTo: z.string().min(1),
+  /** A published version of the agent to run (e.g. "1.2.0"); absent: the one deployed to production. */
+  agentVersion: z.string().regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/, "a version: major.minor.patch").optional(),
   /** Create task as draft (won't be picked up by orchestrator until moved to pending). Default: false. */
   draft: z.boolean().optional(),
   expectations: z.array(z.any()).optional(),
@@ -254,11 +257,48 @@ export const UpdateSettingsSchema = z.object({
     perTaskChars: z.number().int().min(240).max(200_000).optional(),
     totalChars: z.number().int().min(480).max(1_000_000).optional(),
   }).strict().nullable().optional(),
+  /** Agent configuration management: versioning (null removes it: defaults). */
+  agents: z.object({
+    versioning: z.object({
+      /** API/MCP updates without publish/deploy flags also publish and deploy to production (default true). */
+      autoDeployApiUpdates: z.boolean().optional(),
+    }).strict().optional(),
+  }).strict().nullable().optional(),
   orchestratorModel: z.union([z.string(), ModelConfigSchema]).optional(),
   /** The orchestrator's display name (default "Polpo"); null or "" restores the default. */
   orchestratorName: z.string().trim().max(40, "at most 40 characters")
     .regex(/^[^\r\n]*$/, "a single line").nullable().optional(),
+  /** The image generation model (the media primitive): "gateway:provider/model", e.g. "vercel-ai-gateway:openai/gpt-image-2"; null removes it. */
   imageModel: z.string().nullable().optional(),
+  /** Media: the image fallback model, the gateway key's vault entry, limits and the media log's retention; null removes it. */
+  media: z.object({
+    fallbackModel: z.string().min(1).optional(),
+    credentialRef: z.object({ owner: z.string(), service: z.string() }).optional(), credentialField: z.string().optional(),
+    maxImages: z.number().int().min(1).max(10).optional(),
+    retention: z.number().int().min(1).max(20_000).optional(),
+    retentionDays: z.number().int().min(0).max(3650).optional(),
+  }).strict().nullable().optional(),
+  /**
+   * The decision model for decide(): "vercel-ai-gateway:typesafe-ai/jev", or { gateway, model, fallback?: model | { model,
+   * confidenceBelow }, credentialRef?: { owner, service } (the gateway's key in the vault; else its env var), credentialField?,
+   * zeroDataRetention? }; null removes it.
+   */
+  decisionModel: z.union([
+    z.string().min(1),
+    z.object({
+      gateway: z.string().optional(), model: z.string().min(1),
+      fallback: z.union([z.string(), z.object({ model: z.string().min(1), confidenceBelow: z.number().min(0).max(1).optional() })]).optional(),
+      credentialRef: z.object({ owner: z.string(), service: z.string() }).optional(), credentialField: z.string().optional(),
+      zeroDataRetention: z.boolean().optional(),
+    }).strict(),
+  ]).nullable().optional(),
+  /** Decisions: without a decision model "error" (default) or "orchestrator" (Polpo's model, uncalibrated); the log's retention; null removes it. */
+  decisions: z.object({
+    unconfigured: z.enum(["error", "orchestrator"]).optional(),
+    retention: z.number().int().min(1).max(20_000).optional(),
+    retentionDays: z.number().int().min(0).max(3650).optional(),
+    storeInputs: z.enum(["capped", "hash"]).optional(),
+  }).strict().nullable().optional(),
   reasoning: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
   branding: z.object({
     productName: z.string().trim().max(80).optional(),
@@ -270,7 +310,7 @@ export const UpdateSettingsSchema = z.object({
     logoFrame: z.enum(["box", "none", ""]).optional(),
   }).optional(),
   /**
-   * The dashboard's default look for everyone: { theme, palette, custom: { enabled, light, dark } }
+   * The dashboard's default look for everyone: { theme, palette, custom: { enabled, light, dark }, fonts, sidebarStyle }
    * (validated by parseAppearanceSettings); replaces it, null removes it.
    */
   appearance: z.record(z.string(), z.unknown()).nullable().optional(),
@@ -294,7 +334,8 @@ export const UpdateSettingsSchema = z.object({
    * model } }. gateway: ai-gateway → { baseUrl?, credentialRef }; gateway → { format: "anthropic" | "openai-responses" | "openai-chat"
    * (OpenCode), baseUrl, credentialRef?, authScheme: "x-api-key" | "bearer" | "none", headers?: [{ name, credentialRef?,
    * field?, prefix?, value? }], models?: { main, haiku?, sonnet?, opus? }, nonClaude? }.
-   * Credentials are vault references only (a Claude subscription and OpenCode logins are refused). Replaces it; null removes it.
+   * Credentials are vault references only (a Claude subscription and OpenCode logins are refused). cli?: { accounts: [{ id, cli: "claude" | "codex",
+   * computer?, configDir?, owner, label? }], allowInstanceCodex? } (the CLI engine: config directories, never tokens). Replaces it; null removes it.
    */
   harnesses: z.record(z.string(), z.unknown()).nullable().optional(),
 
@@ -534,6 +575,15 @@ export const AgentEngineSchema = z.union([
     /** This agent's own credential (cost separation): a vault reference that replaces the harness's API key or gateway key. */
     credentialRef: z.object({ owner: z.string().min(1), service: z.string().min(1) }).optional(),
   }),
+  /** The CLI engine: the official Claude Code / Codex program signed in with a person's own plan (settings.harnesses.cli.accounts). */
+  z.object({
+    type: z.literal("cli"),
+    cli: z.enum(["claude", "codex"]),
+    account: z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/).optional(),
+    model: z.string().max(200).optional(),
+    permissionMode: z.enum(["allow-all", "allow-edits", "allow-reads"]).optional(),
+    args: z.array(z.string().min(1).max(300)).max(20).optional(),
+  }),
 ]);
 
 /** Per-connector tool selection: { <connector id>: "*" (all tools, the default) | [raw MCP tool names] }. */
@@ -541,6 +591,13 @@ export const AgentConnectorToolsSchema = z.record(
   z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/, "a connector id"),
   z.union([z.literal("*"), z.array(z.string().trim().min(1).max(200)).max(1000)]),
 );
+
+/** Communication lines: who the agent may talk to (ask_agent, message_agent, rooms). See @polpo-ai/core agent-lines. */
+export const AgentTalksToSchema = z.object({
+  mode: z.enum(["org", "list", "anyone", "none"]).openapi({ description: "org: its manager, its direct reports and the extra agents; list: only the listed agents; anyone: every agent; none: no agent (Polpo always talks to it)" }),
+  agents: z.array(z.string().min(1)).optional().openapi({ description: "Extra agents (org) or the only agents (list)" }),
+  acceptFrom: z.enum(["anyone", "lines"]).optional().openapi({ description: "lines: refuse senders outside its own lines (default anyone)" }),
+}).strict().openapi("AgentTalksTo");
 
 export const AddAgentSchema = z.object({
   name: z.string().min(1).refine((n) => !n.trim().startsWith("$"), { message: 'Agent names starting with "$" are reserved' }),
@@ -557,6 +614,8 @@ export const AddAgentSchema = z.object({
   // Identity & hierarchy (vault credentials managed via encrypted store)
   identity: AgentIdentitySchema.optional(),
   reportsTo: z.string().optional(),
+  /** Communication lines; omitted: { mode: "org" } for a new agent. */
+  talksTo: AgentTalksToSchema.optional(),
   // Extended tool categories (browser, email, vault, image, video, audio, excel, pdf, docx, search — HTTP is always-on core)
   browserProfile: z.string().optional(),
   browserEgress: z.string().optional(),
@@ -595,6 +654,8 @@ export const UpdateAgentSchema = z.object({
   maxConcurrency: z.number().int().positive().optional(),
   identity: AgentIdentitySchema.optional(),
   reportsTo: z.string().optional(),
+  /** Communication lines; null removes them (the agent talks to anyone, as agents from before the lines). */
+  talksTo: AgentTalksToSchema.nullable().optional(),
   reasoning: z.string().optional(),
   /** Where this agent's tools run (normalized server-side; see packages/core/src/sandbox.ts). */
   sandbox: z.any().optional(),
@@ -629,6 +690,19 @@ export const UpdateAgentSchema = z.object({
   engine: AgentEngineSchema.nullable().optional(),
   emailAllowedDomains: z.array(z.string()).optional(),
   team: z.string().optional(),
+  // ── Versioning (see docs/agent-versions.mdx) ──
+  /** false: only the draft changes. true: the draft is also published as a new version. Absent: settings.agents.versioning.autoDeployApiUpdates decides (default: publish and deploy). */
+  publish: z.boolean().optional(),
+  /** true: publish and deploy the new version to production in the same call. */
+  deploy: z.boolean().optional(),
+  /** The semver bump of the published version (default: the suggested one). */
+  bump: z.enum(["major", "minor", "patch"]).optional(),
+  /** An explicit version number for the published version (above the latest), e.g. "2.0.0". */
+  version: z.string().regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/, "a version: major.minor.patch").optional(),
+  /** Release note of the published version (and the deploy). */
+  note: z.string().max(2000).optional(),
+  /** A deploy through the agent's required suites (deploy gate): wait for them (default: the response says the deploy is pending). */
+  wait: z.boolean().optional(),
 });
 
 export const RenameTeamSchema = z.object({
@@ -661,6 +735,28 @@ const ChannelGatewaySchema = z.object({
   }).strict().optional(),
   groupReplies: z.enum(["mentions", "intent"]).optional(),
   intentThreshold: z.number().min(0).max(1).optional(),
+  commands: z.enum(["all", "operators", "none"]).optional(),
+}).strict();
+
+const VaultRefSchema = z.object({ owner: z.string().min(1), service: z.string().min(1) }).strict();
+
+/** WhatsApp Business settings (see @polpo-ai/core/whatsapp-business: defaults and rules). */
+const WaBusinessSettingsSchema = z.object({
+  audience: z.enum(["customers", "operators"]).optional(),
+  operators: z.array(z.string().min(1)).optional(),
+  markRead: z.boolean().optional(),
+  typing: z.boolean().optional(),
+  outsideWindow: z.enum(["template", "fail"]).optional(),
+  notificationTemplate: z.object({
+    name: z.string().min(1), language: z.string().min(1), bodyParams: z.array(z.string()).optional(),
+  }).strict().optional(),
+  allowedCategories: z.array(z.enum(["UTILITY", "MARKETING", "AUTHENTICATION"])).optional(),
+  approveTemplates: z.boolean().optional(),
+  limits: z.object({
+    businessInitiatedPerDay: z.number().int().min(0).optional(),
+    perAgentPerDay: z.record(z.string(), z.number().int().min(0)).optional(),
+  }).strict().optional(),
+  retentionDays: z.number().int().min(1).max(3650).optional(),
 }).strict();
 
 /** A value masked by GET /config ("••••1234"); the server restores the stored secret on save. */
@@ -669,7 +765,7 @@ const orMasked = <T extends z.ZodTypeAny>(schema: T, allowMasked: boolean) =>
   allowMasked ? z.union([schema, MaskedSecret]) : schema;
 
 const channelConfigSchema = (allowMasked: boolean) => z.object({
-  type: z.enum(["slack", "email", "telegram", "whatsapp", "webhook", "push"]),
+  type: z.enum(["slack", "email", "telegram", "whatsapp", "whatsapp-business", "webhook", "push", "expo-push"]),
   // Slack
   webhookUrl: orMasked(z.string().url(), allowMasked).optional(),
   // Email
@@ -695,6 +791,16 @@ const channelConfigSchema = (allowMasked: boolean) => z.object({
   vapidSubject: z.string().optional(),
   ttl: z.number().int().min(0).optional(),
   urgency: z.enum(["very-low", "low", "normal", "high"]).optional(),
+  // WhatsApp Business (Meta Cloud API): ids, and the secrets only as vault references ($channels)
+  phoneNumberId: z.string().regex(/^\d{5,30}$/).optional(),
+  wabaId: z.string().regex(/^\d{5,30}$/).optional(),
+  graphApiVersion: z.string().regex(/^v\d{1,3}\.\d{1,2}$/).optional(),
+  accessTokenRef: VaultRefSchema.optional(),
+  appSecretRef: VaultRefSchema.optional(),
+  verifyTokenRef: VaultRefSchema.optional(),
+  business: WaBusinessSettingsSchema.optional(),
+  // Slack inbound (Socket Mode): the tokens are in the vault ($channels), never here
+  slack: z.object({ channelMessages: z.enum(["mentions", "all"]).optional() }).strict().optional(),
   // Gateway
   gateway: ChannelGatewaySchema.optional(),
 });
@@ -716,6 +822,12 @@ export const SendNotificationSchema = z.object({
   body: z.string().min(1),
   severity: z.enum(["info", "warning", "critical"]).optional(),
   delayMs: z.number().int().min(0).optional(),
+  /** Channels that can target a chat: the chat (a Slack channel id, C…/D…/G…). Default: the channel's own. */
+  to: z.string().min(1).max(200).optional(),
+  /** Slack: post in this thread (the parent message's ts, e.g. "1712345678.123456"). */
+  threadTs: z.string().regex(/^\d{1,10}\.\d{6}$/, "a Slack message ts like 1712345678.123456").optional(),
+  /** Answer 400 when the channel refuses the message (immediate sends), instead of recording the failure only. */
+  throwOnError: z.boolean().optional(),
 });
 
 // ── Approval schemas ──────────────────────────────────────────────────

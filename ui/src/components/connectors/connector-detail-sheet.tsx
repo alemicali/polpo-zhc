@@ -4,7 +4,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, Check, ExternalLink, KeyRound, Image as ImageIcon, Link2, Loader2, Pencil, Plug, RefreshCw, RotateCw, Terminal, Trash2, Undo2, Unplug, UserPlus, Users, Wrench, X } from "lucide-react";
+import { AlertTriangle, Check, ExternalLink, KeyRound, Image as ImageIcon, Link2, Loader2, Pencil, Plug, RefreshCw, RotateCw, Server, Terminal, Trash2, Undo2, Unplug, UserPlus, Users, Wrench, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -18,6 +18,7 @@ import {
 import { cn } from "@/lib/utils";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { ConnectorIcon } from "./connector-icon";
+import { bundledHostedIconSrc } from "@/lib/hosted-server-icons";
 import { FixItLink, StateBadge, Switch } from "./connector-bits";
 import { productName, useInstanceBranding } from "@/lib/branding";
 
@@ -283,7 +284,7 @@ export function ConnectorIconEditor({ connector, onChanged, disabled }: { connec
 }
 
 export function ConnectorDetailSheet({
-  connector, entry, agents, open, onOpenChange, onChanged, onRemoved, onReconnect, onSetupApp, accountCount = 0, onAddAccount,
+  connector, entry, agents, open, onOpenChange, onChanged, onRemoved, onReconnect, onSetupApp, accountCount = 0, onAddAccount, onOpenHostedServer,
 }: {
   connector: Connector | null;
   entry?: CatalogEntry;
@@ -300,6 +301,8 @@ export function ConnectorDetailSheet({
   accountCount?: number;
   /** Connect another account of the same catalog app. */
   onAddAccount?: () => void;
+  /** A hosted connector: open its server (tools, settings, test, versions, logs). */
+  onOpenHostedServer?: (serverId: string) => void;
 }) {
   const product = productName(useInstanceBranding());
   const [busy, setBusy] = useState<string | null>(null);
@@ -307,6 +310,7 @@ export function ConnectorDetailSheet({
   if (!connector) return null;
   const state = connectorState(connector);
   const oauth = connector.auth.type === "oauth";
+  const hostedServerId = connector.transport.type === "hosted" ? connector.transport.serverId : undefined;
 
   const act = async (what: string, fn: () => Promise<void>) => {
     setBusy(what);
@@ -330,6 +334,7 @@ export function ConnectorDetailSheet({
 
   const endpoint = connector.transport.type === "stdio"
     ? [connector.transport.command, ...(connector.transport.args ?? [])].join(" ")
+    : connector.transport.type === "hosted" ? `Hosted by ${product}${connector.hostedVersion ? ` · v${connector.hostedVersion}` : ""}`
     : connector.transport.url;
 
   return (
@@ -383,7 +388,7 @@ export function ConnectorDetailSheet({
               {connector.transport.type === "stdio" && <Terminal className="h-3 w-3 shrink-0" />} {endpoint}
             </p>
           )}
-          {!connector.catalogId && <ConnectorIconEditor connector={connector} onChanged={onChanged} disabled={!!busy} />}
+          {!connector.catalogId && !bundledHostedIconSrc(connector.iconUrl) && <ConnectorIconEditor connector={connector} onChanged={onChanged} disabled={!!busy} />}
           {connector.lastError && state !== "connected" && (
             <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm" role="alert">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
@@ -400,6 +405,11 @@ export function ConnectorDetailSheet({
           )}
 
           <div className="flex flex-wrap gap-2">
+            {hostedServerId && onOpenHostedServer && (
+              <Button size="sm" onClick={() => onOpenHostedServer(hostedServerId)} data-testid="open-hosted-server">
+                <Server className="h-4 w-4" /> Tools, versions &amp; logs
+              </Button>
+            )}
             {oauth && (
               <Button size="sm" variant={state === "connected" ? "outline" : "default"} onClick={() => onReconnect(connector)} disabled={!!busy || !connector.enabled}>
                 <RotateCw className="h-4 w-4" /> {connector.secrets.oauth.authorized ? "Reconnect" : "Sign in"}

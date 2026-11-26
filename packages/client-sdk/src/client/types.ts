@@ -95,6 +95,8 @@ export interface Task {
   title: string;
   description: string;
   assignTo: string;
+  /** A published version of the assignee the task is pinned to (absent: production). */
+  agentVersion?: string;
   group?: string;
   /** The mission the task belongs to (missions created before names were unique can share a group). */
   missionId?: string;
@@ -131,6 +133,10 @@ export interface Task {
   failure?: TaskFailure;
   /** Optional narrowing of the run's tools; absent: everything the agent has. */
   toolScope?: TaskToolScope;
+  /** The member (email) who started it, when known: a CLI engine on a personal sign-in runs only its owner's tasks. */
+  requestedBy?: string;
+  /** What started it, when not a person: a trigger's delivery (open it from the task). */
+  origin?: WorkOrigin;
   /** GET /tasks/:id: what of the tool scope the agent no longer has (connector removed, access revoked…). */
   toolScopeStale?: string[];
   /**
@@ -167,8 +173,36 @@ export interface TaskToolScope {
   allowedTools?: string[];
 }
 
-/** The engine a run used: Polpo's own, or an agent harness. */
-export type TaskRunEngine = "polpo" | "claude-code" | "codex" | "opencode";
+/**
+ * An agent's CLI engine (agent.engine { type: "cli" }): the official Claude Code / Codex program,
+ * signed in with a person's own plan through a CLI account (a config directory, never a token).
+ */
+export interface AgentCliEngine {
+  type: "cli";
+  cli: "claude" | "codex";
+  account?: string;
+  model?: string;
+  permissionMode?: "allow-all" | "allow-edits" | "allow-reads";
+  args?: string[];
+}
+
+/** A CLI account (settings.harnesses.cli.accounts; GET /harnesses/cli/accounts adds report, agents, manageable). */
+export interface CliAccount {
+  id: string;
+  cli: "claude" | "codex";
+  /** "host" or a computer id. */
+  computer: string;
+  configDir: string;
+  /** The member who signed in, or "instance". */
+  owner: string;
+  label?: string;
+  report?: { installed: boolean; version?: string; status?: { signedIn: boolean; who?: string; method?: string; plan?: string; detail?: string }; error?: string };
+  agents?: string[];
+  manageable?: boolean;
+}
+
+/** The engine a run used: Polpo's own, an agent harness, or a CLI on a personal plan (claude-cli, codex-cli). */
+export type TaskRunEngine = "polpo" | "claude-code" | "codex" | "opencode" | "claude-cli" | "codex-cli";
 
 /** Where and with what a task run executed (no secrets). */
 export interface TaskRunContext {
@@ -180,10 +214,12 @@ export interface TaskRunContext {
   continuation?: boolean;
   /** The agent that ran it. */
   agent?: string;
+  /** The agent's published version the run used. */
+  agentVersion?: string;
   engine: TaskRunEngine;
   model?: string;
   /** The harness authentication kind (never the credential); provider: OpenCode's model provider (anthropic, openai, amazon-bedrock, vercel, polpo-gateway…). */
-  auth?: { kind: "api-key" | "bedrock" | "vertex" | "ai-gateway" | "gateway"; region?: string; provider?: string };
+  auth?: { kind: "api-key" | "bedrock" | "vertex" | "ai-gateway" | "gateway" | "subscription"; region?: string; provider?: string };
   permissionMode?: string;
   effort?: string;
   computer: {
@@ -203,7 +239,7 @@ export interface TaskRunContext {
     modelUsd?: number;
     tokens?: number;
     /** Where harnessUsd comes from (gateway, the runtime's estimate, tokens only). */
-    costSource?: "gateway" | "runtime" | "runtime-estimate" | "tokens-only";
+    costSource?: "gateway" | "runtime" | "runtime-estimate" | "tokens-only" | "subscription";
   };
   budgetUsd?: number;
   durationMs?: number;
@@ -416,6 +452,8 @@ export interface AgentConfig {
   name: string;
   /** ISO timestamp of when this agent was created / added to the team. */
   createdAt?: string;
+  /** GET/PATCH /agents/{name}: the production version, the latest and the draft's state. */
+  versioning?: AgentVersioningSummary;
   role?: string;
   model?: string;
   allowedTools?: string[];
@@ -429,6 +467,8 @@ export interface AgentConfig {
   // NOTE: Vault credentials are stored in encrypted .polpo/vault.enc — not on AgentConfig.
   /** Agent this one reports to — org chart hierarchy for escalation */
   reportsTo?: string;
+  /** Communication lines: who it may talk to. Missing: anyone (an agent from before the lines). */
+  talksTo?: AgentTalksTo;
   systemPrompt?: string;
   skills?: string[];
   /** Suggested starter prompts shown when opening a new chat with this agent. */
@@ -599,6 +639,10 @@ export interface Mission {
   budgetUsd?: number;
   /** Why the orchestrator paused it on its own: "budget". */
   pauseReason?: "budget";
+  /** The member (email) who created it or set its schedule: its scheduled runs are their work (tasks' requestedBy). */
+  owner?: string;
+  /** What started it, when not a person: a trigger's delivery (its tasks carry it too). */
+  origin?: WorkOrigin;
   /** What it cost so far: full on GET /missions/:id, compact (MissionCostSummary) in lists. */
   cost?: MissionCost | MissionCostSummary;
   createdAt: string;
@@ -663,6 +707,7 @@ export interface MissionSlim {
   qualityThreshold?: number;
   budgetUsd?: number;
   pauseReason?: "budget";
+  owner?: string;
   cost?: MissionCostSummary;
   createdAt: string;
   updatedAt: string;
@@ -760,7 +805,7 @@ export interface MissionReport {
 // === Notifications ===
 
 export type NotificationSeverity = "info" | "warning" | "critical";
-export type NotificationChannelType = "slack" | "email" | "telegram" | "whatsapp" | "webhook" | "push";
+export type NotificationChannelType = "slack" | "email" | "telegram" | "whatsapp" | "whatsapp-business" | "webhook" | "push" | "expo-push";
 export type NotificationStatus = "sent" | "failed";
 
 export type DmPolicy = "pairing" | "allowlist" | "open" | "disabled";
@@ -783,6 +828,28 @@ export interface ChannelGatewayConfig {
   groupReplies?: "mentions" | "intent";
   /** groupReplies "intent": how sure the classifier must be (0–1). Default 0.7. */
   intentThreshold?: number;
+  /** Who may use slash commands: all (default), operators, none. */
+  commands?: "all" | "operators" | "none";
+}
+
+/** WhatsApp Business settings (defaults in brackets). */
+export interface WaBusinessSettings {
+  /** customers [default]: answered only by gateway.agent; operators: the team. */
+  audience?: "customers" | "operators";
+  /** Operators' wa_ids (phone numbers with country code, digits). */
+  operators?: string[];
+  markRead?: boolean;
+  typing?: boolean;
+  /** A notification outside the 24-hour window: the template, or fail [default]. */
+  outsideWindow?: "template" | "fail";
+  notificationTemplate?: { name: string; language: string; bodyParams?: string[] };
+  /** [UTILITY] */
+  allowedCategories?: Array<"UTILITY" | "MARKETING" | "AUTHENTICATION">;
+  /** [true] */
+  approveTemplates?: boolean;
+  limits?: { businessInitiatedPerDay?: number; perAgentPerDay?: Record<string, number> };
+  /** [90] */
+  retentionDays?: number;
 }
 
 export interface NotificationChannelConfig {
@@ -806,6 +873,17 @@ export interface NotificationChannelConfig {
   host?: string;
   port?: number;
   from?: string;
+  /** WhatsApp Business: the phone number's id and the WhatsApp Business Account id (Meta). */
+  phoneNumberId?: string;
+  wabaId?: string;
+  graphApiVersion?: string;
+  /** WhatsApp Business: vault references of the secrets (owner "$channels"), set from the dashboard. */
+  accessTokenRef?: { owner: string; service: string };
+  appSecretRef?: { owner: string; service: string };
+  verifyTokenRef?: { owner: string; service: string };
+  business?: WaBusinessSettings;
+  /** Slack inbound (Socket Mode): the tokens are in the vault, set with setSlackSecrets. */
+  slack?: { channelMessages?: "mentions" | "all" };
   gateway?: ChannelGatewayConfig;
 }
 
@@ -858,6 +936,56 @@ export interface SendNotificationRequest {
   body: string;
   severity?: NotificationSeverity;
   delayMs?: number;
+  /** Channels that can target a chat (Slack): the chat, e.g. a Slack channel id C0123. Default: the channel's own. */
+  to?: string;
+  /** Slack: post in this thread (the parent message's ts). */
+  threadTs?: string;
+  /** Fail (400) when the channel refuses the message, instead of only recording the failure. */
+  throwOnError?: boolean;
+}
+
+// === Slack (Socket Mode) ===
+
+export type SlackSecretKind = "botToken" | "appToken";
+export type SlackConnectionState = "not-configured" | "stopped" | "connecting" | "connected" | "reconnecting" | "error";
+
+/** A Slack channel's inbound connection (never a token's value). */
+export interface SlackStatus {
+  channel: string;
+  inbound: boolean;
+  /** Which tokens are in the vault. */
+  secrets: Record<SlackSecretKind, boolean>;
+  state: SlackConnectionState;
+  team?: string;
+  botUserId?: string;
+  botName?: string;
+  connectedAt?: string;
+  lastEventAt?: string;
+  lastError?: string;
+  /** Messages handled since the connection started. */
+  received: number;
+}
+
+// === Peers (people on the channels) ===
+
+export interface ChannelPeer {
+  /** "channel:externalId", e.g. slack:U0123. */
+  id: string;
+  channel: string;
+  externalId: string;
+  displayName?: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  /** Shares sessions with this identity. */
+  linkedTo?: string;
+}
+
+export interface PeerPresence {
+  peerId: string;
+  displayName?: string;
+  channel: string;
+  lastActivityAt: string;
+  activity: "idle" | "chatting" | "approving";
 }
 
 export interface SendNotificationResult {
@@ -899,6 +1027,8 @@ export interface ScheduleEntry {
   lastRunAt?: string;
   nextRunAt?: string;
   deadlineOffsetMs?: number;
+  /** The member (email) who owns it (the mission's owner): its runs' tasks are that member's work. */
+  owner?: string;
   /** A run missed while the server was down: "once" runs it at startup (at most one interval late), "none" skips it. */
   catchUp?: "none" | "once";
   /** How the last run went: started (running), completed, failed, skipped, missed (server down), expired. */
@@ -1049,7 +1179,16 @@ export interface AppearanceConfig {
   palette?: "tide" | "lovable" | "chatgpt" | "claude" | "brutal" | "editorial" | "redline" | "cyber" | "mono";
   custom?: { enabled: boolean; derive?: boolean; light?: AppearanceTokens; dark?: AppearanceTokens };
   fonts?: AppearanceWebFont[];
+  /**
+   * The navigation sidebar everyone gets by default: "drill-in" (the default when unset: top-level
+   * entries open their pages as a second level in the sidebar) or "classic" (every page in one list).
+   * A person may still choose their own in the dashboard.
+   */
+  sidebarStyle?: SidebarStyle;
 }
+
+/** The dashboard's navigation sidebar style (settings.appearance.sidebarStyle). */
+export type SidebarStyle = "classic" | "drill-in";
 
 export interface PolpoSettings {
   maxRetries: number;
@@ -1073,6 +1212,12 @@ export interface PolpoSettings {
   /** The orchestrator's display name (default "Polpo"). */
   orchestratorName?: string;
   imageModel?: string;
+  /** Decision model for decide(): "vercel-ai-gateway:typesafe-ai/jev" or the object form. */
+  decisionModel?: import("./decision-types.js").DecisionModelSetting;
+  /** Decisions: the policy without a decision model, the log's retention. */
+  decisions?: import("./decision-types.js").DecisionSettings;
+  /** Media: the image fallback model, the gateway key's vault entry, limits, the log's retention (imageModel is the model). */
+  media?: import("./media-types.js").MediaSettings;
   modelAllowlist?: Record<string, ModelAllowlistEntry>;
   /** Global reasoning / deep thinking level. */
   reasoning?: ReasoningLevel;
@@ -1166,6 +1311,8 @@ export type ErrorCode =
   | "AUTH_REQUIRED"
   | "FORBIDDEN"
   | "CONFLICT"
+  /** A deploy the agent's required suites blocked (details: { status, gate, entry }). */
+  | "GATE_BLOCKED"
   | "INTERNAL_ERROR";
 
 export interface ApiResponse<T> {
@@ -1366,6 +1513,38 @@ export interface UpdateMissionNotificationsRequest {
   notifications: ScopedNotificationRules | null;
 }
 
+/** Communication lines between agents (ask_agent, message_agent, rooms). Polpo always talks to every agent. */
+export type AgentLinesMode = "org" | "list" | "anyone" | "none";
+
+export interface AgentTalksTo {
+  /** org: its manager, direct reports and the extra agents; list: only the listed agents; anyone; none. */
+  mode: AgentLinesMode;
+  /** Extra agents (org) or the only agents (list). */
+  agents?: string[];
+  /** lines: refuse senders outside its own lines (default anyone). */
+  acceptFrom?: "anyone" | "lines";
+}
+
+/** One agent's resolved lines (GET /agents/lines). */
+export interface AgentLines {
+  agent: string;
+  mode: AgentLinesMode;
+  /** false: no lines set (an agent from before the lines: it talks to anyone). */
+  explicit: boolean;
+  manager?: string;
+  reports: string[];
+  agents: string[];
+  acceptFrom: "anyone" | "lines";
+  reachable: string[];
+}
+
+/** The team's org chart and communication lines (GET /agents/lines). */
+export interface AgentLinesChart {
+  agents: AgentLines[];
+  edges: Array<{ from: string; to: string; kind: "manager" | "report" | "extra" | "open" }>;
+  unrestricted: string[];
+}
+
 export interface AddAgentRequest {
   name: string;
   role?: string;
@@ -1386,6 +1565,8 @@ export interface AddAgentRequest {
   // NOTE: Vault credentials managed via encrypted store, not in API body.
   /** Org chart: who this agent reports to. */
   reportsTo?: string;
+  /** Communication lines (omitted: { mode: "org" } for a new agent). */
+  talksTo?: AgentTalksTo;
   runtime?: string;
   loops?: Record<string, LoopConfig>;
   pipeline?: Pipeline;
@@ -1406,6 +1587,8 @@ export interface UpdateAgentRequest {
   maxConcurrency?: number;
   identity?: AgentIdentity;
   reportsTo?: string;
+  /** Communication lines; null removes them (the agent talks to anyone). */
+  talksTo?: AgentTalksTo | null;
   reasoning?: string;
   runtime?: string;
   loops?: Record<string, LoopConfig>;
@@ -1420,6 +1603,198 @@ export interface UpdateAgentRequest {
   emailAllowedDomains?: string[];
   /** Move agent to a different team. */
   team?: string;
+  /**
+   * Versioning: false keeps the change in the draft; true publishes it as a new version. Absent:
+   * the instance setting decides (settings.agents.versioning.autoDeployApiUpdates, default: publish and deploy).
+   */
+  publish?: boolean;
+  /** Publish and deploy the new version to production in the same call. */
+  deploy?: boolean;
+  bump?: AgentVersionBump;
+  /** An explicit version number for the published version (above the latest). */
+  version?: string;
+  /** Release note of the published version. */
+  note?: string;
+}
+
+// ── Agent versions ──
+
+export type AgentVersionBump = "major" | "minor" | "patch";
+
+export interface AgentFieldChange {
+  field: string;
+  kind: "added" | "removed" | "changed";
+  before?: unknown;
+  after?: unknown;
+  /** Long text fields (system prompt): a unified line diff. */
+  textDiff?: string;
+}
+
+/** A published, immutable snapshot of an agent's configuration. */
+export interface AgentVersion {
+  agent: string;
+  version: string;
+  /** The versioned configuration (GET …/versions/{version}; absent in lists). */
+  config?: Partial<AgentConfig>;
+  author: string;
+  createdAt: string;
+  note?: string;
+  bump: AgentVersionBump | "custom" | "initial";
+  previous?: string;
+  changes: AgentFieldChange[];
+  changedFields?: string[];
+  /** Skill versions pinned at publish time (skill → version number). */
+  skillVersions?: Record<string, number>;
+  /** Lists: the version's latest deploy gate (✓ passed, ✗ blocked / failed, in verifica, override). */
+  gate?: import("./agent-suite-types.js").AgentVersionGateStatus;
+}
+
+export interface AgentVersionState {
+  agent: string;
+  production?: string;
+  pointers: Record<string, string>;
+  latest?: string;
+  versions: number;
+  draft: {
+    exists: boolean;
+    hasChanges: boolean;
+    /** The version the draft is based on (production's when it started). */
+    baseVersion?: string;
+    /** Production moved away from the draft's base: rebase or discard before publishing. */
+    stale: boolean;
+    warning?: string;
+    updatedAt?: string;
+    updatedBy?: string;
+    changes: AgentFieldChange[];
+    suggestedBump?: AgentVersionBump;
+    nextVersion?: string;
+  };
+  /** Deploy gates: the suites that gate deploys, the deploy being verified now. */
+  gate?: { requiredSuites: Array<{ id: string; name: string; onPublish: boolean; allowRealTools: boolean }>; pending?: import("./agent-suite-types.js").AgentDeployGate };
+}
+
+/** The versioning summary returned with an agent (GET/PATCH /agents/{name}). */
+export interface AgentVersioningSummary {
+  production?: string;
+  latest?: string;
+  pointers: Record<string, string>;
+  versions: number;
+  draft: { exists: boolean; hasChanges: boolean; changedFields: string[]; baseVersion?: string; stale?: boolean; warning?: string; updatedAt?: string; updatedBy?: string; suggestedBump?: AgentVersionBump; nextVersion?: string };
+  /** PATCH only: what the update did. */
+  mode?: "draft" | "publish" | "deploy";
+  draftChanged?: boolean;
+  published?: { version: string; bump: string; changedFields: string[] };
+  deployed?: AgentDeployEntry;
+  /** A deploy through the required suites: deployed, pending ("in verifica") or blocked (published, not deployed). */
+  deployStatus?: "deployed" | "pending" | "blocked";
+  deployMessage?: string;
+  gate?: { id: string; status: string; version: string; progress: { done: number; total: number }; failed: string[]; suites: Array<{ suiteId: string; suiteName: string; status: string; runId?: string; reasons: string[] }> };
+  /** Set when the deploy was not made: "Published as 1.3.0 but not deployed: …". */
+  warning?: string;
+  /** mode publish: the publish checks started. */
+  check?: { id: string; status: string; version: string };
+}
+
+export interface AgentVersionList {
+  state: AgentVersionState;
+  /** Newest first, without their config. */
+  versions: AgentVersion[];
+}
+
+export interface AgentVersionDiff {
+  agent: string;
+  from?: string;
+  to: string;
+  changes: AgentFieldChange[];
+  /** git-style unified diff of the configuration (YAML, keys sorted, text as blocks). */
+  unified: string;
+  suggestedBump?: AgentVersionBump;
+}
+
+export interface AgentDeployEntry {
+  id: string;
+  agent: string;
+  pointer: string;
+  from?: string;
+  to: string;
+  /** blocked: the required suites stopped the deploy (production did not move). */
+  action: "deploy" | "rollback" | "initial" | "blocked";
+  actor: string;
+  note?: string;
+  at: string;
+  diff?: AgentVersionDiff;
+  /** The deploy gate that verified it (or blocked it, or was overridden). */
+  gate?: import("./agent-suite-types.js").AgentDeployGateRef;
+}
+
+/**
+ * A deploy request's outcome: deployed (the history entry, with its gate), or pending (the required
+ * suites are running: production moves when they pass). A blocked deploy throws a PolpoApiError
+ * with code GATE_BLOCKED (details: { status, gate, entry }).
+ */
+export type AgentDeployOutcome =
+  | (AgentDeployEntry & { status: "deployed"; gate?: import("./agent-suite-types.js").AgentDeployGate | import("./agent-suite-types.js").AgentDeployGateRef; message?: string })
+  | { status: "pending"; gate: import("./agent-suite-types.js").AgentDeployGate; message?: string };
+
+export interface AgentPublishResult {
+  version: AgentVersion;
+  deploy?: AgentDeployEntry;
+  /** deploy: true through the required suites. */
+  deployStatus?: "deployed" | "pending" | "blocked";
+  message?: string;
+  gate?: import("./agent-suite-types.js").AgentDeployGate;
+  /** Without deploy: the publish checks started (suites with gate.onPublish). */
+  check?: import("./agent-suite-types.js").AgentDeployGate;
+}
+
+// ── Agent tests ──
+
+export type AgentTestCheckId = "engine" | "tools" | "connectors" | "vault" | "skills" | "computer" | "channels" | "versioning" | "smoke";
+/** pass ✓, warn ⚠, fail ✗; skip: nothing to check. */
+export type AgentTestStatus = "pass" | "warn" | "fail" | "skip";
+/** A one-click fix (POST /agents/{name}/tests/fix). */
+export type AgentTestFixAction = { type: "grant-connector-access"; connector: string };
+
+export interface AgentTestItem {
+  label: string;
+  status: AgentTestStatus;
+  detail?: string;
+  /** A link to the setting (href, a dashboard path) or a one-click action. */
+  fix?: { label: string; href?: string; action?: AgentTestFixAction };
+}
+
+export interface AgentTestCheckResult {
+  id: AgentTestCheckId;
+  title: string;
+  status: AgentTestStatus;
+  summary: string;
+  items: AgentTestItem[];
+  durationMs: number;
+  /** engine: model, latencyMs, engine; computer: status, canStart; smoke: ref, tools, latencyMs. */
+  data?: Record<string, unknown>;
+}
+
+export interface AgentTestRun {
+  id: string;
+  agent: string;
+  /** production, draft or a published version. */
+  target: string;
+  version?: string;
+  startedAt: string;
+  finishedAt: string;
+  status: AgentTestStatus;
+  checks: AgentTestCheckResult[];
+  actor?: string;
+}
+
+export interface AgentTestRunRequest {
+  /** Default: every check but smoke. */
+  checks?: AgentTestCheckId[];
+  /** production (default), draft, or a version like 1.2.0. */
+  target?: string;
+  /** Start a stopped remote computer to test it (it may cost). */
+  startComputer?: boolean;
+  smokePrompt?: string;
 }
 
 export interface UpdateSettingsRequest {
@@ -1431,6 +1806,12 @@ export interface UpdateSettingsRequest {
   /** The orchestrator's display name (default "Polpo"); in an update, null or "" restores the default. */
   orchestratorName?: string | null;
   imageModel?: string | null;
+  /** The decision model for decide(); null removes it. */
+  decisionModel?: import("./decision-types.js").DecisionModelSetting | null;
+  /** Decisions settings; null removes them. */
+  decisions?: import("./decision-types.js").DecisionSettings | null;
+  /** Media settings; null removes them. */
+  media?: import("./media-types.js").MediaSettings | null;
   reasoning?: ReasoningLevel;
   branding?: BrandingConfig;
   /** The dashboard's default look; null removes it. */
@@ -1603,6 +1984,156 @@ export interface SkillIndexEntry {
 
 /** The full skills index: maps skill names to their index metadata. */
 export type SkillIndex = Record<string, SkillIndexEntry>;
+
+/** Which skill pool: the agents' skills or Polpo's (the orchestrator's) own. */
+export type SkillPool = "agent" | "orchestrator";
+
+/** A file of a skill folder (relative POSIX path) with its size in bytes. */
+export interface SkillFileEntry {
+  path: string;
+  size: number;
+}
+
+/** The files of an installed skill (GET /skills/:name/files). */
+export interface SkillFileList {
+  name: string;
+  source: SkillInfo["source"];
+  files: SkillFileEntry[];
+  /** More files exist than listed (the list stops at 2000). */
+  truncated: boolean;
+  totalBytes: number;
+}
+
+/** How a skill version came to be. "external": found on disk (the skill before versioning, or files changed outside Polpo). */
+export type SkillVersionSource = "create" | "upload" | "git" | "local" | "edit" | "restore" | "external";
+
+/** One version of a skill: a copy of the whole folder at that time. */
+export interface SkillVersion {
+  version: number;
+  createdAt: string;
+  /** "person:<email>", an agent's name, "polpo", "mcp:<client>", "cli" or "unknown". */
+  author: string;
+  source: SkillVersionSource;
+  files: number;
+  totalBytes: number;
+  /** SKILL.md's frontmatter at that time. */
+  name?: string;
+  description?: string;
+  /** The version a restore brought back. */
+  restoredFrom?: number;
+  hash: string;
+}
+
+/** A skill's history (GET /skills/:name/versions), newest first. */
+export interface SkillVersionList {
+  name: string;
+  pool: SkillPool;
+  scope: "project" | "global";
+  versions: SkillVersion[];
+  /** The current state's version (absent for a deleted skill). */
+  current?: number;
+  /** The skill was deleted: its history is kept until the grace period ends. */
+  deletedAt?: string;
+  deletedBy?: string;
+  retention: { maxVersions: number; maxBytes: number; deletedDays: number };
+}
+
+/** The files of one version (GET /skills/:name/versions/:n/files). */
+export interface SkillVersionFiles {
+  name: string;
+  version: SkillVersion;
+  files: SkillFileEntry[];
+  totalBytes: number;
+  truncated: boolean;
+}
+
+/** One file that differs between two versions. */
+export interface SkillFileDiff {
+  path: string;
+  status: "added" | "removed" | "changed";
+  sizeA?: number;
+  sizeB?: number;
+  binary?: boolean;
+  /** Unified diff from a to b (text files). */
+  diff?: string;
+  additions?: number;
+  deletions?: number;
+  /** No diff: the file is too large, or the diff was cut. */
+  truncated?: boolean;
+}
+
+/** The diff of two versions (GET /skills/:name/versions/:a/diff/:b). */
+export interface SkillVersionDiff {
+  skill: string;
+  a: SkillVersion;
+  b: SkillVersion;
+  files: SkillFileDiff[];
+  unchanged: number;
+  summary: { added: number; removed: number; changed: number };
+}
+
+/** A restore (POST /skills/:name/versions/:n/restore): the new version it recorded. */
+export interface SkillRestoreResult {
+  name: string;
+  restoredFrom: number;
+  version: SkillVersion;
+}
+
+/** A skill found in an uploaded .skill / .zip archive. */
+export interface SkillBundleSkill {
+  /** Frontmatter name (or the folder name when missing). */
+  name: string;
+  /** Its folder in the archive ("" when SKILL.md is at the root). */
+  folder: string;
+  description: string;
+  license?: string;
+  compatibility?: string;
+  allowedTools?: string[];
+  metadata?: Record<string, unknown>;
+  files: SkillFileEntry[];
+  totalBytes: number;
+  /** Block the install (a rename fixes name errors). */
+  errors: string[];
+  /** Deviations from the Agent Skills spec that do not block it. */
+  warnings: string[];
+  /** Whether the name is taken in each pool and scope. */
+  exists: Record<SkillPool, { project: boolean; global: boolean }>;
+}
+
+/** The preview of an uploaded archive (POST /skills/upload?dryRun=1). */
+export interface SkillBundlePreview {
+  /** Install it with installSkillBundle within 30 minutes. */
+  uploadId: string;
+  archiveName?: string;
+  skills: SkillBundleSkill[];
+  /** Junk dropped (__MACOSX, .DS_Store…). */
+  ignored: string[];
+  warnings: string[];
+  limits: { maxArchiveBytes: number; maxTotalBytes: number; maxFiles: number; maxFileBytes: number; maxPathLength: number };
+}
+
+/** How to install a skill bundle. */
+export interface SkillBundleInstallOptions {
+  pool?: SkillPool;
+  /** The global pool (~/.polpo) instead of this project's. */
+  global?: boolean;
+  /** When a skill with the same name exists (default "fail"). */
+  onConflict?: "fail" | "replace" | "skip";
+  /** Only these skills of the archive. */
+  skills?: string[];
+  /** Archive name → name to install as. */
+  renames?: Record<string, string>;
+  /** Agents to assign the installed skills to (agent pool). */
+  assignTo?: string[];
+}
+
+export interface SkillBundleInstallResult {
+  installed: Array<{ name: string; from: string; path: string; replaced: boolean; files: number }>;
+  skipped: Array<{ name: string; reason: string }>;
+  errors: Array<{ name: string; error: string }>;
+  assigned: Array<{ skill: string; agent: string }>;
+  assignErrors?: string[];
+}
 
 // === Chat Session types ===
 
@@ -1980,6 +2511,126 @@ export interface MemberPreferencesResponse {
   preferences: MemberPreferences;
 }
 
+// === Global search (GET /search) ===
+
+/** What the global search finds. */
+export type SearchType =
+  | "chat" | "room" | "agent" | "task" | "mission" | "schedule" | "playbook" | "approval" | "artifact" | "file"
+  | "data" | "connector" | "skill" | "memory" | "brain" | "computer" | "app" | "channel" | "member" | "event";
+
+/** A matched range [start, end) in a shown string. */
+export type SearchRange = [number, number];
+
+export interface SearchResult {
+  type: SearchType;
+  id: string;
+  title: string;
+  /** Matched ranges in the title. */
+  titleHighlights?: SearchRange[];
+  subtitle?: string;
+  /** The matching passage (secrets masked) and its matched ranges. */
+  snippet?: { text: string; highlights: SearchRange[] };
+  /** Dashboard route that opens the item. */
+  url: string;
+  updatedAt?: string;
+  score: number;
+  /** Type details: agent, status, messageId, author, role, columns, path… */
+  meta?: Record<string, unknown>;
+}
+
+export interface SearchGroup {
+  type: SearchType;
+  label: string;
+  /** Matches of this type (the group holds the best of them). */
+  total: number;
+  items: SearchResult[];
+}
+
+export interface SearchResponse {
+  query: string;
+  /** Milliseconds the search took on the server. */
+  took: number;
+  /** Types that did not answer in time (search again for them). */
+  partial: SearchType[];
+  groups: SearchGroup[];
+  items: SearchResult[];
+  nextCursor: string | null;
+}
+
+export interface SearchOptions {
+  /** Only these types (default: all). */
+  types?: SearchType[];
+  /** Results per page (default 40, max 100). */
+  limit?: number;
+  /** Results per type when several types are searched (default 6). */
+  perType?: number;
+  cursor?: string | null;
+  /** Abort a stale query (the person kept typing). */
+  signal?: AbortSignal;
+}
+
+// === Ask the search (POST /search/ask) ===
+
+/** A dashboard page the assistant may open. */
+export interface SearchAskPage {
+  id?: string;
+  label: string;
+  to: string;
+  section?: string;
+}
+
+/** A palette command the assistant may run (view-only) or suggest (confirm: it changes data). */
+export interface SearchAskCommand {
+  id: string;
+  label: string;
+  hint?: string;
+  argument?: boolean;
+  confirm?: boolean;
+}
+
+/**
+ * What to do after an answer. auto: true ones (navigation, view-only commands) the dashboard runs at
+ * once; the others are buttons the person clicks (never run by the server).
+ */
+export type SearchAskIntent =
+  | { kind: "navigate"; route: string; label: string; auto: boolean }
+  | { kind: "open"; route: string; label: string; key: string; auto: boolean }
+  | { kind: "command"; id: string; label: string; argument?: string; auto: boolean }
+  | { kind: "handoff"; label: string; message: string; auto: false };
+
+export interface SearchAskResult {
+  answer: string;
+  items: SearchResult[];
+  intents: SearchAskIntent[];
+  /** Answered without the model (an obvious "go to X"). */
+  fastPath: boolean;
+  rounds: number;
+  usage?: {
+    provider?: string; model?: string;
+    inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; totalTokens: number; cost: number;
+  };
+}
+
+export type SearchAskEvent =
+  | { type: "status"; text: string }
+  | { type: "delta"; text: string }
+  | { type: "results"; items: SearchResult[] }
+  | { type: "intent"; intent: SearchAskIntent }
+  | { type: "done"; result: SearchAskResult }
+  | { type: "error"; error: string; code?: string };
+
+export interface SearchAskOptions {
+  /** The page the person is on. */
+  route?: string;
+  /** The dashboard's pages (default: the server's list). */
+  pages?: SearchAskPage[];
+  /** The palette's commands the assistant may run or suggest. */
+  commands?: SearchAskCommand[];
+  /** Stream the answer: every event as it comes (text deltas, results, intents). */
+  onEvent?: (event: SearchAskEvent) => void;
+  signal?: AbortSignal;
+}
+
 // === Vault Preview (interactive credential review before saving) ===
 
 export interface VaultPreviewPayload {
@@ -2137,8 +2788,11 @@ export interface Connector {
   account?: string;
   kind: "mcp";
   description?: string;
-  transport: { type: "http" | "sse" | "stdio"; url?: string; command?: string };
+  /** "hosted": a custom MCP server Polpo hosts itself (see McpHostedServer). */
+  transport: { type: "http" | "sse" | "stdio" | "hosted"; url?: string; command?: string; serverId?: string };
   auth: { type: "none" | "bearer" | "headers" | "oauth"; headerNames?: string[]; oauth?: { app?: string; scopes?: string[] } };
+  /** Hosted servers: the version in production ("Hosted by Polpo · v1.2.0"). */
+  hostedVersion?: string;
   /** Who may use it: agent names or "*", and Polpo itself. */
   access: { agents: string[] | "*"; polpo: boolean };
   enabled: boolean;
@@ -2250,4 +2904,706 @@ export interface ComputerWebhookEventPage {
   nextCursor?: string;
   total: number;
   counts: Record<ComputerWebhookOutcome, number>;
+}
+
+// ── Triggers (POST /hooks/{id}: forms and webhooks, with actions) ────
+
+export type TriggerContentType = "json" | "form" | "multipart" | "text";
+export type TriggerDeliveryStatus = "accepted" | "rejected" | "filtered" | "duplicate" | "rate_limited";
+export type TriggerFilterOp = "equals" | "not_equals" | "contains" | "in" | "gte" | "lte" | "exists" | "not_exists";
+
+export interface TriggerHmacConfig {
+  header: string;
+  algorithm: "sha256" | "sha1";
+  encoding: "hex" | "base64";
+  prefix?: string;
+  timestampHeader?: string;
+  toleranceSeconds?: number;
+  /** {body} (default) or e.g. {timestamp}.{body} */
+  signedPayload?: string;
+}
+
+export interface TriggerContract {
+  contentTypes: TriggerContentType[];
+  maxBodyBytes: number;
+  maxFileBytes?: number;
+  schema?: Record<string, unknown>;
+}
+
+export interface TriggerFilter {
+  mode?: "all" | "any";
+  conditions: Array<{ path: string; op: TriggerFilterOp; value?: unknown }>;
+}
+
+export interface Trigger {
+  id: string;
+  name: string;
+  description?: string;
+  enabled: boolean;
+  owner?: string;
+  createdAt: string;
+  updatedAt: string;
+  auth: { secret: boolean; allowQueryToken?: boolean; hmac?: TriggerHmacConfig; ipAllowlist?: string[] };
+  /** Generated secrets still valid: hints only, never the value. */
+  secrets: Array<{ id: string; hint: string; createdAt: string; expiresAt?: string }>;
+  hmacSecret?: { secretSet: boolean; previousUntil?: string };
+  contract: TriggerContract;
+  contractVersion: number;
+  filter?: TriggerFilter;
+  dedupe?: { key: string; ttlSeconds: number };
+  rateLimitPerMinute: number;
+  mapping?: Record<string, string>;
+  retention: number;
+  /** What runs on an accepted delivery, in order. */
+  actions?: TriggerAction[];
+  actionLimits?: TriggerActionLimits;
+  /** POLPO_PUBLIC_URL + /hooks/{id} (the path when the public URL is unknown). */
+  endpoint: string;
+  path: string;
+  stats: { counts: Record<TriggerDeliveryStatus, number>; total: number; lastDeliveryAt?: string; lastStatus?: TriggerDeliveryStatus };
+}
+
+/** create / update. null clears an optional part. */
+export interface TriggerInput {
+  id?: string;
+  name?: string;
+  description?: string | null;
+  enabled?: boolean;
+  owner?: string | null;
+  auth?: { secret?: boolean; allowQueryToken?: boolean; hmac?: Partial<TriggerHmacConfig> | null; ipAllowlist?: string[] };
+  contract?: Partial<Omit<TriggerContract, "schema">> & { schema?: Record<string, unknown> | null };
+  contractNote?: string;
+  filter?: TriggerFilter | null;
+  dedupe?: { key: string; ttlSeconds?: number } | null;
+  rateLimitPerMinute?: number;
+  mapping?: Record<string, string> | null;
+  retention?: number;
+  /** Replaces the actions (in order; ids keep runs and {{steps.<id>}} stable); null or [] removes them. */
+  actions?: TriggerActionInput[] | null;
+  actionLimits?: TriggerActionLimits | null;
+}
+
+export type TriggerActionKind = "playbook" | "mission" | "task" | "agent" | "notify";
+export type TriggerActionStatus = "queued" | "running" | "done" | "failed" | "skipped";
+/** A delivery's actions as a whole (partial: some done, some failed). */
+export type TriggerActionsStatus = TriggerActionStatus | "partial";
+
+interface TriggerActionBase {
+  /** Stable within the trigger; later actions read its outputs as {{steps.<id>.…}}. */
+  id: string;
+  kind: TriggerActionKind;
+  enabled: boolean;
+  name?: string;
+  /** Retries after a failure (default 2; 0 for agent). */
+  retries?: number;
+  /** When this action fails, still run the later ones (default false: they are skipped). */
+  continueOnError?: boolean;
+}
+/** Run a playbook; params are templates over body / headers / query / mapped / trigger / delivery / steps. */
+export interface TriggerPlaybookAction extends TriggerActionBase { kind: "playbook"; playbook: string; params?: Record<string, string>; waitSeconds?: number }
+/** Start a mission (id or name); variables run a copy with {{name}} replaced. */
+export interface TriggerMissionAction extends TriggerActionBase { kind: "mission"; mission: string; variables?: Record<string, string>; waitSeconds?: number }
+export interface TriggerTaskAction extends TriggerActionBase { kind: "task"; title: string; description: string; assignTo: string; waitSeconds?: number }
+export interface TriggerDeliverTo { channel: string; chatId: string; threadId?: number; name?: string }
+/** One turn of an agent (absent: Polpo). Instructions use only {{trigger.*}} / {{delivery.*}}: the payload follows as data. */
+export interface TriggerAgentAction extends TriggerActionBase {
+  kind: "agent"; agent?: string; instructions: string; data?: "mapped" | "body" | "both"; allowedTools?: string[]; maxSteps?: number; deliverTo?: TriggerDeliverTo;
+}
+export interface TriggerNotifyAction extends TriggerActionBase { kind: "notify"; channel: string; title?: string; body: string; severity?: "info" | "warning" | "critical" }
+export type TriggerAction = TriggerPlaybookAction | TriggerMissionAction | TriggerTaskAction | TriggerAgentAction | TriggerNotifyAction;
+/** An action as create / update take it (id and enabled optional). */
+export type TriggerActionInput = TriggerAction extends infer A ? A extends TriggerAction ? Omit<A, "id" | "enabled"> & { id?: string; enabled?: boolean } : never : never;
+
+export interface TriggerActionLimits {
+  /** Deliveries whose actions run at once (default 2). */
+  concurrency?: number;
+  /** Actions started a minute (default 30) and a day (default 1000). */
+  perMinute?: number;
+  perDay?: number;
+  /** What the agent actions may spend a day (USD). */
+  agentDailyCostUsd?: number;
+}
+
+/** What an action created. */
+export interface TriggerActionRefs {
+  playbook?: string; missionId?: string; missionName?: string; copyOf?: string; taskId?: string; sessionId?: string; agent?: string; notificationId?: string; channel?: string;
+}
+
+export interface TriggerActionRun {
+  actionId: string;
+  kind: TriggerActionKind;
+  name?: string;
+  status: TriggerActionStatus;
+  attempts: number;
+  queuedAt: string;
+  startedAt?: string;
+  endedAt?: string;
+  error?: string;
+  /** Why it was skipped. */
+  reason?: string;
+  refs?: TriggerActionRefs;
+  costUsd?: number;
+  /** On a delivery (not in lists): what later actions read as {{steps.<id>.…}}. */
+  outputs?: Record<string, unknown>;
+}
+
+/** Where a task, mission or chat session came from: a trigger's delivery. */
+export interface WorkOrigin {
+  kind: "trigger";
+  triggerId: string;
+  deliveryId: string;
+  triggerName?: string;
+  actionId?: string;
+  depth?: number;
+}
+
+/** The actions rendered against a delivery (nothing runs). */
+export interface TriggerActionPreview {
+  deliveryId?: string;
+  note?: string;
+  actions: Array<{ actionId: string; kind: TriggerActionKind; rendered: Record<string, unknown>; error?: string }>;
+}
+
+export interface TriggerDeliverySummary {
+  id: string;
+  triggerId: string;
+  receivedAt: string;
+  status: TriggerDeliveryStatus;
+  httpStatus: number;
+  reasons: string[];
+  errors?: string[];
+  test?: boolean;
+  ip?: string;
+  auth?: { secret?: "header" | "bearer" | "query"; secretId?: string; hmac?: "current" | "previous" };
+  contentType?: string;
+  kind?: TriggerContentType;
+  bytes: number;
+  bodyTruncated?: boolean;
+  mappingErrors?: string[];
+  contractVersion: number;
+  dedupeHash?: string;
+  duplicateOf?: string;
+  count?: number;
+  /** Each action's run (without outputs in lists). */
+  actions?: TriggerActionRun[];
+  actionsStatus?: TriggerActionsStatus;
+  /** The member the actions ran for (the trigger's owner). */
+  actionsRequestedBy?: string;
+  /** It arrived while another trigger's actions ran. */
+  origin?: WorkOrigin;
+}
+
+export interface TriggerDelivery extends TriggerDeliverySummary {
+  headers: Record<string, string>;
+  query: Record<string, string | string[]>;
+  body?: unknown;
+  files?: Array<{ field: string; filename: string; contentType: string; size: number; sha256: string }>;
+  mapped?: Record<string, unknown>;
+  /** Earlier runs (re-runs), newest first. */
+  previousActions?: Array<{ endedAt?: string; status?: TriggerActionsStatus; runs: TriggerActionRun[] }>;
+}
+
+export interface TriggerDeliveryPage {
+  deliveries: TriggerDeliverySummary[];
+  nextCursor?: string;
+  total: number;
+  counts: Record<TriggerDeliveryStatus, number>;
+}
+
+export interface TriggerSample {
+  body: unknown;
+  contentType?: TriggerContentType;
+  headers?: Record<string, string>;
+  query?: Record<string, string | string[]>;
+  /** A test delivery: also run the trigger's actions (default: a test runs nothing). */
+  runActions?: boolean;
+}
+
+export interface TriggerDraft {
+  contract?: TriggerInput["contract"];
+  filter?: TriggerFilter | null;
+  dedupe?: TriggerInput["dedupe"];
+  mapping?: Record<string, string> | null;
+}
+
+export interface TriggerDryRun {
+  status: TriggerDeliveryStatus;
+  reasons: string[];
+  errors: string[];
+  filterMatched: boolean;
+  dedupeKey?: string;
+  duplicateOf?: string;
+  mapped?: Record<string, unknown>;
+  mappingErrors?: string[];
+  contractVersion: number;
+  replayOf?: string;
+}
+
+export interface TriggerContractRevision {
+  version: number;
+  contract: TriggerContract;
+  createdAt: string;
+  by?: string;
+  note?: string;
+}
+
+// ── WhatsApp Business (Meta Cloud API) ─────────────────────────────────
+
+export type WaBizOutcome = "accepted" | "ignored" | "rejected" | "error";
+export type WaBizSecretKind = "accessToken" | "appSecret" | "verifyToken";
+
+/** A WhatsApp Business channel's status (never a secret's value). */
+export interface WaBusinessStatus {
+  channel: string;
+  phoneNumberId?: string;
+  wabaId?: string;
+  graphApiVersion: string;
+  audience: "customers" | "operators";
+  agent?: string;
+  inbound: boolean;
+  secrets: Record<WaBizSecretKind, boolean>;
+  state: "receiving" | "configured" | "not-configured";
+  missing: string[];
+  callbackUrl?: string;
+  funnelCommand: string;
+  note: string;
+  lastEventAt?: string;
+  lastError?: string;
+  counts: Record<WaBizOutcome, number>;
+  inbox: number;
+  pendingApprovals: number;
+  sentToday: number;
+  limits: { businessInitiatedPerDay: number; perAgentPerDay: Record<string, number> };
+  phone?: { displayPhoneNumber?: string; verifiedName?: string; qualityRating?: string; messagingLimitTier?: string; checkedAt: string };
+  templates?: { count: number; approved: number; syncedAt: string };
+}
+
+export interface WaBusinessEventSummary {
+  id: string;
+  channel: string;
+  receivedAt: string;
+  outcome: WaBizOutcome;
+  reason?: string;
+  httpStatus: number;
+  signature: "valid" | "invalid" | "missing" | "not-checked";
+  eventType?: string;
+  phoneNumberId?: string;
+  messages?: number;
+  statuses?: number;
+  action?: string;
+  processingMs: number;
+  bytes: number;
+}
+
+export interface WaBusinessEvent extends WaBusinessEventSummary {
+  /** Types, lengths and masked contacts: never message text. */
+  items?: Array<{ kind: "message" | "status"; wamid?: string; type?: string; length?: number; status?: string; contact?: string; error?: string }>;
+}
+
+export interface WaBusinessEventPage {
+  channel: string;
+  events: WaBusinessEventSummary[];
+  nextCursor?: string;
+  total: number;
+  counts: Record<WaBizOutcome, number>;
+}
+
+export interface WaBusinessContact {
+  channel: string;
+  waId: string;
+  userId?: string;
+  name?: string;
+  lastInboundAt?: string;
+  optIn: { at: string; source: string } | null;
+  optOut: { at: string; keyword: string } | null;
+  window?: { open: boolean; closesAt?: string };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WaBusinessMessage {
+  id: string;
+  channel: string;
+  waId: string;
+  direction: "in" | "out";
+  type: string;
+  initiated?: "reply" | "business";
+  sentBy?: string;
+  template?: { name: string; language: string; category?: string };
+  text?: string;
+  status: string;
+  statuses: Array<{ status: string; at: string; error?: string }>;
+  pricing?: { category?: string; type?: string; billable?: boolean; model?: string };
+  error?: { code?: number; title?: string; detail?: string };
+  pending?: { template: string; language: string; params: string[]; requestedBy: string; requestedAt: string; reason?: string };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WaBusinessConversation {
+  contact: WaBusinessContact & { masked?: string };
+  window: { open: boolean; closesAt?: string };
+  optedOut: boolean;
+  messages: WaBusinessMessage[];
+}
+
+export interface WaBusinessTemplate {
+  id?: string;
+  name: string;
+  language: string;
+  status: string;
+  category: string;
+  parameterFormat?: "POSITIONAL" | "NAMED";
+  components: Array<{ type: string; format?: string; text?: string }>;
+}
+
+export type WaBusinessSendResult =
+  | { status: "sent"; ids: string[] }
+  | { status: "pending_approval"; id: string; note: string };
+
+
+// ── Hosted MCP servers ─────────────────────────────────────────────────
+
+/** A vault reference: an entry (owner + service) and one credential field. Never a value. */
+export interface McpSecretRef { owner: string; service: string; key: string }
+
+export type McpServerAuth =
+  | { type: "none" }
+  | { type: "bearer"; secret: string }
+  | { type: "header"; header: string; secret: string; prefix?: string }
+  | { type: "query"; param: string; secret: string }
+  | { type: "basic"; usernameSecret: string; passwordSecret: string }
+  | { type: "oauth2_client_credentials"; tokenUrl: string; clientIdSecret: string; clientSecretSecret: string; scopes?: string[] };
+
+export interface McpServerTool {
+  name: string;
+  title?: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+  annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; idempotentHint?: boolean; openWorldHint?: boolean };
+  requiresApproval?: boolean;
+  publicCallable?: boolean;
+  kind: "http" | "code";
+  http?: {
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; url: string; headers?: Record<string, string>; query?: Record<string, string>; body?: unknown;
+    bodyType?: "json" | "form";
+    response?: {
+      pick?: string; fields?: string[]; maxChars?: number;
+      filters?: Array<{ path: string; input?: string; value?: string | number | boolean; match?: "equals" | "contains" | "in" | "gte" | "lte" }>;
+      page?: { offsetInput?: string; limitInput?: string; defaultLimit?: number; maxLimit?: number };
+      aggregates?: Record<string, { path: string; op: "count" | "unique" | "min" | "max" | "sum" | "value" }>;
+    };
+    pagination?: { style: "offset" | "cursor" | "page"; param?: string; sizeParam?: string; nextPath?: string; totalPath?: string };
+    errors?: Array<{ status?: number | "4xx" | "5xx"; match?: string; message: string }>; retries?: number;
+  };
+  code?: { source: string };
+  uiResource?: string;
+  /** The server's scoped defaults this tool gets (spec.scopes). */
+  scopes?: string[];
+}
+
+/** A non-secret setting a hosted server declares (`{{settings.key}}` in its tools). */
+export interface McpServerSettingField {
+  key: string; label: string; type: "string" | "number" | "enum" | "boolean";
+  help?: string; required?: boolean; default?: string | number | boolean; options?: string[]; pattern?: string; min?: number; max?: number;
+}
+
+export interface McpServerSpec {
+  name: string;
+  description?: string;
+  icon?: string;
+  baseUrl?: string;
+  allowedDomains: string[];
+  secrets: Record<string, McpSecretRef>;
+  auth: McpServerAuth;
+  headers?: Record<string, string>;
+  query?: Record<string, string>;
+  scopes?: Record<string, { description?: string; headers?: Record<string, string>; query?: Record<string, string> }>;
+  settingsSchema?: McpServerSettingField[];
+  limits?: Partial<Record<"timeoutMs" | "maxResponseBytes" | "maxResultChars" | "retries" | "memoryMb" | "concurrency" | "idleMs" | "depsMaxMb", number>>;
+  dependencies?: Record<string, string>;
+  tools: McpServerTool[];
+  resources?: Array<{ uri: string; name: string; description?: string; mimeType: string; text: string }>;
+}
+
+export interface McpServerSummary {
+  id: string;
+  name: string;
+  description?: string;
+  icon?: string;
+  visibility: "private" | "public";
+  disabled?: boolean;
+  onTestFailure?: "warn" | "block";
+  rateLimits?: { perIpPerMinute: number; globalPerMinute: number };
+  connectorId?: string;
+  template?: string;
+  /** The template revision production was published from. */
+  templateRevision?: number;
+  /** Values of the spec's settingsSchema. */
+  settings?: Record<string, string | number | boolean>;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+  toolCount: number;
+  production?: string;
+  latest?: string;
+  versionCount: number;
+  draftChanged: boolean;
+  pendingApprovals: number;
+  /** Public servers: POLPO_PUBLIC_URL/mcp/servers/<id>. */
+  publicUrl?: string;
+}
+
+export interface McpServerTestCase { id: string; name?: string; tool: string; input: Record<string, unknown>; expect?: "ok" | "error"; contains?: string }
+
+export interface McpHostedServer extends McpServerSummary {
+  draft: { spec: McpServerSpec; baseVersion?: string; updatedAt: string; updatedBy: string; problems: string[]; stale?: boolean } | null;
+  productionSpec?: McpServerSpec;
+  /** Which declared secrets are set in the vault (never their values). */
+  secrets: Record<string, boolean>;
+  tests: McpServerTestCase[];
+  rateLimits: { perIpPerMinute: number; globalPerMinute: number };
+  /** The settings the deployed (else draft) spec declares and what tools see (defaults applied). */
+  settingsSchema: McpServerSettingField[];
+  effectiveSettings: Record<string, string | number | boolean>;
+  /** Made from a ready-made template: its revisions and the vendor's instructions per secret. */
+  templateInfo?: {
+    id: string; name: string; latestRevision: number; installedRevision?: number; docs: string;
+    secrets: Record<string, McpServerTemplateSecret>; maturity: { testedWithLiveApi: boolean; note?: string };
+  };
+}
+
+/** A credential a template needs, with the vendor's instructions (never a value). */
+export interface McpServerTemplateSecret { label: string; howTo: string; url?: string; scopes?: string[]; recommendation?: string }
+
+export type McpServerTemplateStatus = "available" | "draft" | "installed" | "update_available";
+
+/** A ready-made hosted connector and where it stands on this instance. */
+export interface McpServerTemplateInfo {
+  id: string; name: string; vendor: string; category: string; description: string; icon?: string; docs: string; setup: string;
+  revision: number; changelog: Array<{ revision: number; note: string }>; maturity: { testedWithLiveApi: boolean; note?: string };
+  secrets: Array<McpServerTemplateSecret & { name: string; vault: McpSecretRef }>;
+  settings: McpServerSettingField[];
+  toolCount: number; testCount: number;
+  tools: Array<{ name: string; title?: string; description: string; readOnly: boolean; requiresApproval: boolean; destructive: boolean }>;
+  readOnlyTools: string[]; approvalTools: string[];
+  status: McpServerTemplateStatus;
+  installs: Array<{ serverId: string; production?: string; revision?: number; status: McpServerTemplateStatus; connectorId?: string }>;
+}
+
+export interface McpServerInstallRequest {
+  id?: string;
+  settings?: Record<string, string | number | boolean | null>;
+  /** Secret values, saved straight to the vault (never returned). */
+  secrets?: Record<string, string>;
+  /** Who the connector grants ("*": all agents). Default none. */
+  agents?: string[] | "*";
+  publish?: boolean;
+  force?: boolean;
+}
+
+export interface McpServerInstallResult {
+  id: string; template: string; revision: number;
+  status: "installed" | "needs_secrets" | "tests_failed" | "draft" | "upgrade_draft" | "up_to_date";
+  missingSecrets?: string[];
+  tests?: { passed: number; failed: number; skipped: number; results: McpToolTestResult[] };
+  version?: string; deployed?: McpServerDeploy; diff?: McpServerDiff; connectorId?: string;
+  access?: { agents: string[] | "*"; polpo: boolean };
+  settings: Record<string, string | number | boolean>;
+}
+
+export interface McpServerVersionInfo {
+  version: string; createdAt: string; author: string; note?: string; bump?: "major" | "minor" | "patch";
+  changes: Array<{ field: string; kind: "added" | "removed" | "changed" }>; toolCount: number; production: boolean;
+  build?: { depsBytes?: number; builtAt: string }; tests?: { passed: number; failed: number; skipped: number };
+}
+
+export interface McpServerDeploy {
+  id: string; from?: string; to: string; action: "deploy" | "rollback" | "initial"; actor: string; note?: string; at: string;
+  /** The deploy gate (the server's saved tests marked required): passed (with the suite run), or an admin's override with a reason. */
+  gate?: { decision: "pass" | "override"; runId?: string; reason?: string; by?: string };
+}
+
+/** A publish whose deploy the required suite blocked: the version is published, not deployed. */
+export interface McpServerDeployBlocked { reason: string; runId?: string; failures: string[] }
+
+export interface McpServerDiff {
+  server: string; from?: string; to: string; changes: Array<{ field: string; kind: "added" | "removed" | "changed" }>; unified: string; suggestedBump?: "major" | "minor" | "patch";
+}
+
+export interface McpToolTestResult {
+  tool: string; ok: boolean; text: string; structured?: unknown; error?: string; status?: number; ms: number; attempts?: number;
+  request?: { method: string; url: string; headers: Record<string, string>; body?: string };
+  response?: string; skipped?: string; testId?: string; passed?: boolean;
+  pendingApproval?: { id: string; approvalId?: string };
+}
+
+export interface McpServerCallLog {
+  at: string; tool: string; source: "private" | "public" | "test" | "approval"; version?: string; ok: boolean; ms: number; status?: number; error?: string; ip?: string; approvalId?: string;
+}
+
+export interface McpPendingCall {
+  id: string; serverId: string; tool: string; input: Record<string, unknown>; version?: string; requestedAt: string; requestedBy?: string;
+  status: "pending" | "approved" | "rejected" | "done" | "failed"; approvalId?: string; resolvedAt?: string; resolvedBy?: string;
+  result?: { ok: boolean; text: string; error?: string };
+}
+
+export interface McpServerGenerateRequest { mode: "api" | "description"; url?: string; text?: string; goal?: string; name?: string; vaultOwner?: string; create?: boolean; id?: string }
+export interface McpServerGenerateResult {
+  id?: string; spec: McpServerSpec; problems: string[]; notes: string[]; source: { kind: "openapi" | "docs" | "description"; endpoints?: number; title?: string };
+}
+
+// ── Artifacts ────────────────────────────────────────────────────────
+
+export type ArtifactType = "doc" | "html" | "svg" | "mermaid" | "view";
+
+/** How much the versions of an artifact take, against the limits (settings.artifacts.versions). */
+export interface ArtifactVersionUsage {
+  count: number;
+  bytes: number;
+  currentBytes: number;
+  maxCount: number;
+  maxBytes: number;
+}
+
+export interface ArtifactVersionInfo {
+  version: number;
+  /** Empty when the version is large: read it with getArtifactVersion or artifactContentUrl. */
+  content: string;
+  blob?: { sha256: string; size: number };
+  size?: number;
+  author?: string;
+  note?: string;
+  at: string;
+}
+
+export interface ArtifactSummary {
+  id: string;
+  title: string;
+  type: ArtifactType;
+  kind?: string;
+  description?: string;
+  version: number;
+  author?: string;
+  note?: string;
+  createdBy: string;
+  sessionId?: string;
+  taskId?: string;
+  missionId?: string;
+  sources?: string[];
+  refreshSeconds?: number;
+  pinned?: boolean;
+  tags?: string[];
+  /** Bytes of the current content. */
+  size: number;
+  blob?: { sha256: string; size: number };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Artifact extends ArtifactSummary {
+  /** The content; empty with contentOmitted when it is over the viewer limit (read it as a file or by part). */
+  content: string;
+  contentOmitted?: boolean;
+  /** The beginning of a large content. */
+  excerpt?: string;
+  versions: ArtifactVersionInfo[];
+  usage?: ArtifactVersionUsage;
+  /** After a partial change: what it did ("1 update", "set_cells"…). */
+  change?: string;
+}
+
+/** A change to an artifact's content (one kind per call): Claude-artifact style update / rewrite, plus append, prepend, JSON Patch and per-kind ops. */
+export interface ArtifactChange {
+  command?: "update" | "rewrite" | "append" | "prepend";
+  old_str?: string;
+  new_str?: string;
+  replace_all?: boolean;
+  updates?: Array<{ old_str: string; new_str: string; replace_all?: boolean }>;
+  content?: string;
+  text?: string;
+  append?: string;
+  prepend?: string;
+  patch?: Array<{ op: "add" | "remove" | "replace" | "move" | "copy" | "test"; path: string; from?: string; value?: unknown }>;
+  ops?: Array<{ op: string; [key: string]: unknown }>;
+}
+
+export interface ArtifactUpdateInput extends ArtifactChange {
+  expectedVersion?: number;
+  title?: string;
+  description?: string;
+  kind?: string;
+  pinned?: boolean;
+  sources?: string[];
+  refreshSeconds?: number | null;
+  tags?: string[];
+  note?: string;
+}
+
+export interface ArtifactCreateInput {
+  title: string;
+  type: Exclude<ArtifactType, "view">;
+  content: string;
+  kind?: string;
+  description?: string;
+  sources?: string[];
+  refreshSeconds?: number;
+  pinned?: boolean;
+  tags?: string[];
+}
+
+/** A byte range (offset/limit), the outline, or one part (tab, slide(s), sheet + range, board, page, scene). */
+export interface ArtifactReadOptions {
+  version?: number;
+  offset?: number;
+  limit?: number;
+  outline?: boolean;
+  tab?: string | number;
+  slide?: string | number;
+  slides?: string;
+  sheet?: string | number;
+  range?: string;
+  board?: string | number;
+  page?: string | number;
+  scene?: string | number;
+}
+
+export interface ArtifactRead {
+  id: string;
+  version: number;
+  text: string;
+  size: number;
+  start?: number;
+  end?: number;
+  more?: boolean;
+  outline?: string;
+}
+
+export interface ArtifactUploadOptions {
+  title?: string;
+  type?: Exclude<ArtifactType, "view">;
+  kind?: string;
+  description?: string;
+  /** The file's name (helps detect the type). */
+  filename?: string;
+  note?: string;
+}
+
+/** An upload in progress (POST /artifacts/uploads). */
+export interface ArtifactUploadPart {
+  uploadId: string;
+  size: number;
+  complete: boolean;
+  filename?: string;
+}
+
+export interface ArtifactStorageUsage {
+  bytes: number;
+  maxBytes: number;
+  /** Over 80% of maxBytes. */
+  warning: boolean;
+  limits: { maxBytes: number; inlineBytes: number; maxEditBytes: number; maxTotalBytes: number; versions: { maxCount: number; maxTotalBytes: number } };
+  /** Contents over this are not sent whole with the artifact. */
+  viewerBytes: number;
 }

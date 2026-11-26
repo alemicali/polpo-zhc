@@ -14,6 +14,7 @@ import type { ApprovalStore } from "./approval-store.js";
 import type { NotificationStore } from "./notification-store.js";
 import type { CheckpointStore } from "./checkpoint-store.js";
 import type { DelayStore } from "./delay-store.js";
+import type { DecisionNodeStore } from "./decisions.js";
 import type { PeerStore } from "./peer-store.js";
 import type { ConfigStore } from "./config-store.js";
 import type { TeamStore } from "./team-store.js";
@@ -64,6 +65,8 @@ export interface OrchestratorContext {
   readonly sessionStore: SessionStore;
   readonly teamStore: TeamStore;
   readonly agentStore: AgentStore;
+  /** Agent versions (drafts, published versions, the production pointer): resolves pinned versions. */
+  readonly agentVersions?: import("./agent-versions.js").AgentVersioning;
   readonly hooks: HookRegistry;
   config: PolpoConfig;
   readonly workDir: string;
@@ -112,6 +115,10 @@ export interface OrchestratorContext {
   readonly checkpointStore?: CheckpointStore;
   /** Delay persistence store (when storage is "postgres", injected by shell). */
   readonly delayStore?: DelayStore;
+  /** Mission decision node persistence (file in the shell; in memory when absent). */
+  readonly decisionNodeStore?: DecisionNodeStore;
+  /** Mission image node persistence (file in the shell; in memory when absent). */
+  readonly imageNodeStore?: import("./media.js").ImageNodeStore;
   /** Peer identity store (when storage is "postgres", injected by shell). */
   readonly peerStore?: PeerStore;
   /** Config persistence store (when storage is "postgres", injected by shell). */

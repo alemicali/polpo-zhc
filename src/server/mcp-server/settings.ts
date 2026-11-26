@@ -24,7 +24,7 @@ export const GATE_HOOKS = [
   "task:create", "task:spawn", "task:transition", "task:complete", "task:fail", "task:retry", "mission:execute", "mission:complete",
   "assessment:run", "assessment:complete", "quality:gate", "quality:sla", "schedule:trigger", "orchestrator:tick", "orchestrator:shutdown",
 ] as const;
-export const CHANNEL_TYPES = ["slack", "email", "telegram", "whatsapp", "webhook", "push"] as const;
+export const CHANNEL_TYPES = ["slack", "email", "telegram", "whatsapp", "whatsapp-business", "webhook", "push", "expo-push"] as const;
 
 /** A channel's secret fields: never accepted or returned here (capability URLs included). */
 const CHANNEL_SECRET_FIELDS = ["botToken", "apiKey", "webhookUrl", "url", "headers", "inboundSecret", "vapidPrivateKey"];
@@ -102,7 +102,7 @@ const e2bInput = z.object({
 }).strict();
 
 function registerSandboxTools(tool: Register, deps: McpDeps): void {
-  const setup = dashboardLink(deps, "/config?section=sandbox");
+  const setup = () => dashboardLink(deps, "/config?section=sandbox");
 
   tool("settings", "polpo_sandbox_get", {
     title: "Get the sandbox settings",
@@ -122,8 +122,8 @@ function registerSandboxTools(tool: Register, deps: McpDeps): void {
       `default: ${String(settings?.provider ?? "local")} · allowed: ${(settings?.allowedProviders as string[] | undefined)?.join(", ") ?? "any"} · network: ${JSON.stringify(settings?.network ?? "default")}`,
       `this machine can run: ${(d.available ?? []).join(", ")}`,
       `settings: ${JSON.stringify(settings ?? {})}`,
-      `To set a provider's API key: ${setup}`,
-    ].join("\n"), { settings, available: d.available ?? [], ...(p.ok ? { providers: p.data } : {}), setup_url: setup });
+      `To set a provider's API key: ${setup()}`,
+    ].join("\n"), { settings, available: d.available ?? [], ...(p.ok ? { providers: p.data } : {}), setup_url: setup() });
   });
 
   tool("settings", "polpo_sandbox_update", {
@@ -208,7 +208,7 @@ function registerSandboxTools(tool: Register, deps: McpDeps): void {
       changed.length ? `Changed ${changed.join(", ")}.` : "Nothing changed (the values were the same).",
       ...(ignored.length ? [`Not accepted (invalid, left as before): ${ignored.join(", ")}.`] : []),
       ...(missingKey.length ? [`${missingKey.join(", ")} has no API key yet. ${setupHandoff(deps, { kind: "sandbox", item: missingKey[0], field: "credential" }, `${missingKey[0]} API key (a vault entry)`).next_step}`] : []),
-    ].join(" "), { changed, settings, ignored, ...(missingKey.length ? setupHandoff(deps, { kind: "sandbox", item: missingKey[0], field: "credential" }, `${missingKey[0]} API key (a vault entry)`) : { setup_url: setup }) });
+    ].join(" "), { changed, settings, ignored, ...(missingKey.length ? setupHandoff(deps, { kind: "sandbox", item: missingKey[0], field: "credential" }, `${missingKey[0]} API key (a vault entry)`) : { setup_url: setup() }) });
   });
 
   tool("settings", "polpo_sandbox_provider_test", {
@@ -348,7 +348,7 @@ function registerPolicyTools(tool: Register, deps: McpDeps): void {
 // ── Members ──────────────────────────────────────────────────────────
 
 function registerMemberTools(tool: Register, deps: McpDeps): void {
-  const setup = dashboardLink(deps, "/config?section=members");
+  const setup = () => dashboardLink(deps, "/config?section=members");
 
   tool("settings", "polpo_members_list", {
     title: "List members",
@@ -364,7 +364,7 @@ function registerMemberTools(tool: Register, deps: McpDeps): void {
     const d = r.data as { enabled?: boolean; members?: Array<{ email: string }> };
     const members = d.members ?? [];
     return ok(`${d.enabled ? "Sign-in is on" : "Sign-in is off (anyone who reaches the dashboard can use it)"}. Members: ${members.map((m) => m.email).join(", ") || "none"}.`,
-      { enabled: !!d.enabled, members, setup_url: setup });
+      { enabled: !!d.enabled, members, setup_url: setup() });
   });
 
   tool("settings", "polpo_members_invite", {
@@ -468,7 +468,7 @@ function syncView(c: SyncConfig): Record<string, unknown> {
 }
 
 function registerSyncTools(tool: Register, deps: McpDeps): void {
-  const setup = dashboardLink(deps, "/config?section=sync");
+  const setup = () => dashboardLink(deps, "/config?section=sync");
 
   tool("settings", "polpo_sync_status", {
     title: "Get the cloud sync status",
@@ -482,7 +482,7 @@ function registerSyncTools(tool: Register, deps: McpDeps): void {
     if (!c.ok) return apiError(c, "Reading the sync settings");
     const sync = syncView(c.data as SyncConfig);
     const runs = h.ok && Array.isArray(h.data) ? h.data.slice(0, history ?? 5) : [];
-    const handoff = sync.configured ? { setup_url: setup } : setupHandoff(deps, { kind: "sync", item: "r2", field: "secretAccessKey" }, "R2 endpoint, bucket and keys");
+    const handoff = sync.configured ? { setup_url: setup() } : setupHandoff(deps, { kind: "sync", item: "r2", field: "secretAccessKey" }, "R2 endpoint, bucket and keys");
     return ok([
       sync.configured ? `R2: ${JSON.stringify(sync.r2)}` : `Not set up. ${(handoff as { next_step: string }).next_step}`,
       `schedule: ${sync.schedule ? JSON.stringify(sync.schedule) : "none"} · excludes: ${(sync.excludes as string[]).join(", ") || "none"}`,
@@ -525,7 +525,7 @@ function registerSyncTools(tool: Register, deps: McpDeps): void {
     const now = await apiGet(deps, "/sync/config");
     const after = syncView((now.ok ? now.data : r.data) as SyncConfig);
     const changed = changedKeys(before, after).filter((k) => k !== "next_run_at");
-    return ok(changed.length ? `Changed ${changed.join(", ")}.` : "Nothing changed (the values were the same).", { changed, sync: after, setup_url: setup });
+    return ok(changed.length ? `Changed ${changed.join(", ")}.` : "Nothing changed (the values were the same).", { changed, sync: after, setup_url: setup() });
   });
 
   tool("settings", "polpo_sync_disconnect", {
@@ -549,7 +549,7 @@ function registerSyncTools(tool: Register, deps: McpDeps): void {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, async () => {
     const r = await apiSend(deps, "POST", "/sync/test");
-    if (!r.ok) return ok(`The test failed: ${r.error}. Check the settings at ${setup}.`, { ok: false, error: r.error });
+    if (!r.ok) return ok(`The test failed: ${r.error}. Check the settings at ${setup()}.`, { ok: false, error: r.error });
     return ok("R2 answered: cloud sync works.", { ok: true });
   });
 
@@ -609,7 +609,7 @@ const customProviderInput = z.object({
 }).passthrough();
 
 function registerProviderTools(tool: Register, deps: McpDeps): void {
-  const setup = dashboardLink(deps, "/config?section=providers");
+  const setup = () => dashboardLink(deps, "/config?section=providers");
   const view = (p: Record<string, unknown>) => {
     // never the key or its hint
     const { keyHint: _h, apiKey: _k, secrets: _s, ...rest } = p;
@@ -627,8 +627,8 @@ function registerProviderTools(tool: Register, deps: McpDeps): void {
     const r = await apiGet(deps, "/providers/custom");
     if (!r.ok) return apiError(r, "Listing custom providers");
     const items = ((r.data as Array<Record<string, unknown>>) ?? []).map(view);
-    return ok(`${items.map((p) => `- ${String(p.id)}: ${String(p.baseUrl)} (${String(p.api)}), ${Array.isArray(p.models) ? p.models.length : 0} models, ${p.configured ? "ready" : "no key"}`).join("\n") || "No custom providers."}\nKeys: ${setup}`,
-      { items, setup_url: setup });
+    return ok(`${items.map((p) => `- ${String(p.id)}: ${String(p.baseUrl)} (${String(p.api)}), ${Array.isArray(p.models) ? p.models.length : 0} models, ${p.configured ? "ready" : "no key"}`).join("\n") || "No custom providers."}\nKeys: ${setup()}`,
+      { items, setup_url: setup() });
   });
 
   tool("settings", "polpo_custom_provider_save", {
@@ -644,7 +644,7 @@ function registerProviderTools(tool: Register, deps: McpDeps): void {
     annotations: UPDATE,
   }, async ({ id, provider }) => {
     const secretish = Object.keys(provider).filter((k) => isSecretKey(k) || k === "secrets");
-    if (secretish.length) return fail(`${secretish.join(", ")} cannot be sent through this connector: the person enters keys at ${setup}.`);
+    if (secretish.length) return fail(`${secretish.join(", ")} cannot be sent through this connector: the person enters keys at ${setup()}.`);
     const cur = await apiGet(deps, `/providers/custom/${enc(id)}`);
     const exists = cur.ok;
     if (!exists && cur.status !== 404) return apiError(cur, `Reading provider ${id}`);
@@ -664,7 +664,7 @@ function registerProviderTools(tool: Register, deps: McpDeps): void {
     const p = saved.ok ? view(saved.data as Record<string, unknown>) : { id };
     const warnings = ((r.data as { warnings?: string[] } | null)?.warnings) ?? [];
     const needsKey = saved.ok ? !(saved.data as { configured?: boolean }).configured : false;
-    const handoff = needsKey ? setupHandoff(deps, { kind: "custom-provider", item: id, field: "apiKey" }, `API key for ${id}`) : { setup_url: setup };
+    const handoff = needsKey ? setupHandoff(deps, { kind: "custom-provider", item: id, field: "apiKey" }, `API key for ${id}`) : { setup_url: setup() };
     return ok(`${exists ? "Updated" : "Created"} provider ${id}.${warnings.length ? ` ${warnings.join(" ")}` : ""}${needsKey ? ` It has no key yet. ${(handoff as { next_step: string }).next_step}` : ""}`,
       { id, created: !exists, provider: p, warnings, needs_key: needsKey, ...handoff });
   });
@@ -712,22 +712,37 @@ const gatewayInput = z.object({
   replyTo: z.object({ channel: z.string().min(1), chatId: z.string().optional(), echoInbound: z.boolean().optional() }).strict().optional(),
   groupReplies: z.enum(["mentions", "intent"]).optional(),
   intentThreshold: z.number().min(0).max(1).optional(),
+  commands: z.enum(["all", "operators", "none"]).optional().describe("Who may use slash commands (WhatsApp Business facing customers: operators only)"),
+}).strict();
+
+/** WhatsApp Business settings (no secrets: those are entered in the dashboard and kept in the vault). */
+const businessInput = z.object({
+  audience: z.enum(["customers", "operators"]).optional().describe("customers (default): anyone may write, answered only by gateway.agent; operators: the team"),
+  operators: z.array(z.string().min(1)).optional().describe("Operators' phone numbers (wa_id): commands and notifications"),
+  markRead: z.boolean().optional(), typing: z.boolean().optional(),
+  outsideWindow: z.enum(["template", "fail"]).optional().describe("A notification for someone outside the 24-hour window: the notification template, or fail (default)"),
+  notificationTemplate: z.object({ name: z.string().min(1), language: z.string().min(1), bodyParams: z.array(z.string()).optional() }).strict().optional(),
+  allowedCategories: z.array(z.enum(["UTILITY", "MARKETING", "AUTHENTICATION"])).optional().describe("Template categories agents may send (default UTILITY)"),
+  approveTemplates: z.boolean().optional().describe("Templates from agents and Polpo wait for an operator's approval (default true)"),
+  limits: z.object({ businessInitiatedPerDay: z.number().int().min(0).optional(), perAgentPerDay: z.record(z.string(), z.number().int().min(0)).optional() }).strict().optional(),
+  retentionDays: z.number().int().min(1).max(3650).optional(),
 }).strict();
 
 function registerChannelConfigTools(tool: Register, deps: McpDeps): void {
-  const setup = dashboardLink(deps, "/config?section=channels");
+  const setup = () => dashboardLink(deps, "/config?section=channels");
 
   tool("settings", "polpo_channel_save", {
     title: "Save a notification channel",
-    description: "Create or change a notification channel's setup (Telegram, Slack, email, WhatsApp, webhook, push): its fields "
-      + "(chat id, recipients, sender, SMTP host and port, WhatsApp profile, push options), the inbound gateway (who may write, which agent "
+    description: "Create or change a notification channel's setup (Telegram, Slack, email, WhatsApp, WhatsApp Business (Meta Cloud API), webhook, push, "
+      + "expo-push (the mobile app: no fields, devices register themselves)): its fields (chat id, recipients, sender, SMTP host and port, WhatsApp profile, "
+      + "push options, Slack's channel id and channel-message mode), the inbound gateway (who may write, which agent "
       + "answers, sessions). Only the fields given change. Secrets (bot token, API key, webhook URL, secret headers) never pass through "
       + "MCP — what is typed into an MCP client stays in its conversation history: the result lists the ones still missing with setup_url, "
       + "the dashboard link that opens this channel, and the steps for the person. Saved secrets are kept and never returned. Needs the admin scope.",
     inputSchema: {
       name: z.string().min(1).max(80).regex(/^[A-Za-z0-9_.-]+$/, "letters, digits, '.', '_' and '-'").describe("The channel's name (an existing one to change it)"),
       type: z.enum(CHANNEL_TYPES).optional().describe("Needed for a new channel"),
-      chat_id: z.string().min(1).optional().describe("Telegram / WhatsApp: the chat"),
+      chat_id: z.string().min(1).optional().describe("Telegram / WhatsApp: the chat; Slack: the channel id (C…) notifications are posted to with the bot token"),
       to: z.array(z.string().email()).optional().describe("Email: recipients"),
       from: z.string().min(1).optional().describe("Email: sender"),
       provider: z.enum(["resend", "smtp"]).optional().describe("Email: how it is sent"),
@@ -738,6 +753,13 @@ function registerChannelConfigTools(tool: Register, deps: McpDeps): void {
       vapid_public_key: z.string().min(1).optional().describe("Push: the public key"),
       ttl: z.number().int().min(0).optional().describe("Push: seconds a notification is kept"),
       urgency: z.enum(["very-low", "low", "normal", "high"]).optional().describe("Push: delivery urgency"),
+      phone_number_id: z.string().regex(/^\d{5,30}$/).optional().describe("WhatsApp Business: the phone number's id (Meta)"),
+      waba_id: z.string().regex(/^\d{5,30}$/).optional().describe("WhatsApp Business: the WhatsApp Business Account id"),
+      graph_api_version: z.string().regex(/^v\d{1,3}\.\d{1,2}$/).optional().describe("WhatsApp Business: Graph API version (default v23.0)"),
+      business: businessInput.optional().describe("WhatsApp Business: audience, operators, window and template rules, caps, retention (replaces the current ones)"),
+      slack: z.object({
+        channelMessages: z.enum(["mentions", "all"]).optional().describe("In Slack channels: answer mentions, its threads and /polpo (default), or every message of an enabled channel"),
+      }).strict().optional().describe("Slack inbound (Socket Mode; its two tokens are entered in the dashboard)"),
       gateway: gatewayInput.nullable().optional().describe("Inbound messages: replaces the gateway settings; null turns them off"),
     },
     outputSchema: { channel: looseObject, created: z.boolean(), needs_secrets: z.array(z.string()), setup_url: z.string() },
@@ -750,6 +772,7 @@ function registerChannelConfigTools(tool: Register, deps: McpDeps): void {
     const fields: Record<string, unknown> = {
       type: a.type, chatId: a.chat_id, to: a.to, from: a.from, provider: a.provider, host: a.host, port: a.port, profileDir: a.profile_dir,
       vapidSubject: a.vapid_subject, vapidPublicKey: a.vapid_public_key, ttl: a.ttl, urgency: a.urgency,
+      phoneNumberId: a.phone_number_id, wabaId: a.waba_id, graphApiVersion: a.graph_api_version, business: a.business, slack: a.slack,
     };
     // the stored channel as GET /config gives it (secrets masked: the server restores them)
     const next: Record<string, unknown> = { ...(current ?? {}) };
@@ -767,6 +790,32 @@ function registerChannelConfigTools(tool: Register, deps: McpDeps): void {
         : "Nothing was saved. Fix the field named in the error.");
     }
     const saved = ((r.data as { settings?: Settings })?.settings?.notifications?.channels?.[a.name] ?? next) as Record<string, unknown>;
+    if (saved.type === "whatsapp-business") {
+      // its secrets live in the vault ($channels): whether each is set comes from the channel's status
+      const st = await apiGet(deps, `/whatsapp-business/${enc(a.name)}/status`);
+      const secrets = (st.ok ? (st.data as { secrets?: Record<string, boolean> }).secrets : undefined) ?? { accessToken: false, appSecret: false, verifyToken: false };
+      const absent = Object.entries(secrets).filter(([, set]) => !set).map(([k]) => k);
+      const handoff = absent.length
+        ? setupHandoffs(deps, absent.map((k) => ({ target: { kind: "wabiz" as const, item: a.name, field: k }, what: k })))
+        : { setup_url: dashboardLink(deps, `/config?section=channels&channel=${enc(a.name)}`) };
+      return ok(`${current ? "Updated" : "Created"} WhatsApp Business channel ${a.name}.`
+        + `${absent.length ? ` It still needs ${absent.join(", ")} (secrets never pass through MCP). ${(handoff as { next_step: string }).next_step}` : " Check it with polpo_wabiz_status { test: true }."}`,
+      { channel: channelView(a.name, saved), created: !current, needs_secrets: absent, ...handoff });
+    }
+    if (saved.type === "slack") {
+      // the app's tokens live in the vault ($channels); inbound needs both, notifications a webhook URL or the bot token
+      const st = await apiGet(deps, `/slack/${enc(a.name)}/status`);
+      const secrets = (st.ok ? (st.data as { secrets?: Record<string, boolean> }).secrets : undefined) ?? { botToken: false, appToken: false };
+      const inbound = (saved.gateway as { enableInbound?: boolean } | undefined)?.enableInbound === true;
+      const absent = (inbound ? ["botToken", "appToken"] : saved.webhookUrl || saved.apiKey ? [] : ["botToken"]).filter((k) => !secrets[k]);
+      const what: Record<string, string> = { botToken: "bot token (xoxb-…)", appToken: "app-level token (xapp-…, connections:write)" };
+      const handoff = absent.length
+        ? setupHandoffs(deps, absent.map((k) => ({ target: { kind: "slack" as const, item: a.name, field: k }, what: what[k] ?? k })))
+        : { setup_url: dashboardLink(deps, `/config?section=channels&channel=${enc(a.name)}`) };
+      return ok(`${current ? "Updated" : "Created"} Slack channel ${a.name}.`
+        + `${absent.length ? ` It still needs the ${absent.map((k) => what[k]).join(" and ")} (secrets never pass through MCP; the person can paste a webhook URL instead for notifications only). ${(handoff as { next_step: string }).next_step}` : " Check it with polpo_slack_status { test: true }."}`,
+      { channel: channelView(a.name, saved), created: !current, needs_secrets: absent, ...handoff });
+    }
     const missing = (CHANNEL_REQUIRED_SECRETS[String(saved.type)] ?? []).filter((oneOf) => !oneOf.some((k) => saved[k]));
     const needs = missing.map((oneOf) => oneOf.join(" or "));
     const handoff = missing.length

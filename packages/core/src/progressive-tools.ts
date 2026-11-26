@@ -71,6 +71,7 @@ export const AGENT_TOOL_GROUPS: ToolGroupRule[] = [
   { id: "media", label: "Images, video and audio", prefixes: ["image_", "video_", "audio_"] },
   { id: "documents", label: "Excel, PDF and Word files", prefixes: ["excel_", "pdf_", "docx_"] },
   { id: "whatsapp", label: "WhatsApp", prefixes: ["whatsapp_"] },
+  { id: "whatsapp-business", label: "WhatsApp Business (Meta Cloud API): channel status, webhook events, templates, a contact's conversation and 24-hour window, opt-in / opt-out and erasure (GDPR), sends, approving queued templates", prefixes: ["wabiz_"] },
   { id: "phone", label: "Phone calls", prefixes: ["phone_"] },
   { id: "ink", label: "Ink Hub (skills and packages)", prefixes: ["ink_"] },
   { id: "data", label: "Data sources and views", prefixes: ["data_"] },
@@ -99,10 +100,12 @@ export const POLPO_TOOL_GROUPS: ToolGroupRule[] = [
     id: "skills", label: "Skills and playbooks",
     names: ["list_orchestrator_skills", "create_orchestrator_skill", "update_orchestrator_skill", "remove_orchestrator_skill",
       "install_orchestrator_skill", "list_agent_skills", "create_agent_skill", "install_agent_skill", "remove_agent_skill",
-      "search_skills", "get_skill", "tag_skill", "skill_update", "list_playbooks", "get_playbook", "create_playbook", "instantiate_playbook",
+      "search_skills", "get_skill", "tag_skill", "skill_update",
+      "skill_upload_prepare", "skill_upload_finalize", "skill_files", "skill_file_read", "skill_versions", "skill_version_diff", "skill_restore", "list_playbooks", "get_playbook", "create_playbook", "instantiate_playbook",
       "run_playbook", "delete_playbook"],
   },
   { id: "ink", label: "Ink Hub (skills and packages)", prefixes: ["ink_"] },
+  { id: "artifact-uploads", label: "Large artifact contents: upload from a public URL, a file of the instance or base64 parts, then create an artifact or replace one's content (a file in the workspace: artifact_from_file)", names: ["artifact_upload_prepare", "artifact_upload_finalize"] },
   { id: "phone", label: "Phone calls", prefixes: ["phone_"] },
   { id: "whatsapp", label: "WhatsApp", prefixes: ["whatsapp_"] },
   {
@@ -122,7 +125,11 @@ export const POLPO_TOOL_GROUPS: ToolGroupRule[] = [
     names: ["connector_catalog", "connector_update", "connector_test", "connector_disconnect"],
   },
   {
-    id: "channels", label: "Channels end to end: Telegram, WhatsApp, Slack, email… setup (secrets via setup link), test, routes, Telegram verify, invites, pairing, peers, allowlist, WhatsApp QR sign-in",
+    id: "hosted-servers", label: "Hosted MCP servers Polpo builds and serves (each becomes a connector): create from a template (Printful) or draft from an API / a description, test, publish, deploy, roll back, visibility, logs",
+    prefixes: ["mcp_server"],
+  },
+  {
+    id: "channels", label: "Channels end to end: Telegram, WhatsApp, Slack, email… setup (secrets via setup link), test, routes, who may write (DM policy, allowFrom), Telegram verify, invites, pairing, peers, allowlist, presence and linked identities, Slack connection status, notification history and counts, WhatsApp QR sign-in",
     prefixes: ["channel_"], names: ["channels_list"],
   },
   {
@@ -138,13 +145,38 @@ export const POLPO_TOOL_GROUPS: ToolGroupRule[] = [
     id: "access", label: "Members (invite, remove) and MCP access (who is connected to Polpo's MCP server, revoke)",
     names: ["members_list", "members_invite", "members_remove", "mcp_access_list", "mcp_grant_revoke"],
   },
+  { id: "whatsapp-business", label: "WhatsApp Business (official number, Meta Cloud API): status, webhook events, templates, a contact's conversation and 24-hour window, opt-in / opt-out and erasure (GDPR), sends, approving queued templates", prefixes: ["wabiz_"] },
   { id: "sync", label: "Cloud sync (R2 backup of the instance): status, settings, test, run, disconnect", prefixes: ["sync_"] },
   { id: "rooms", label: "Rooms: group chats of people and agents (list, create, change, delete, read, post, wait for replies)", prefixes: ["room_"], names: ["rooms_list"] },
-  { id: "chats", label: "Chat sessions: list, read, rename, star, delete", prefixes: ["chat_"] },
+  { id: "chats", label: "Search everything (chat messages, tasks, missions, agents, artifacts, files, data, skills, memory… as ⌘K) and chat sessions: list, read, rename, star, delete", prefixes: ["chat_"], names: ["search"] },
   { id: "automation", label: "Automation extras: run a schedule now, change or delete a recurring check", names: ["schedule_run", "check_update", "check_delete"] },
   {
-    id: "learning", label: "Agent learning and drive",
-    names: ["get_agent_learning", "review_agent_learning", "revert_agent_learning", "get_agent_drive", "reflect_agent"],
+    id: "triggers", label: "Triggers: public endpoints (POST /hooks/{id}) receiving form submissions and webhooks, with actions on each accepted delivery (run a playbook, start a mission, create a task, an agent turn, a notification) — create, change, delete, deliveries and their action runs, re-run actions, test / validate / infer a schema / replay / preview actions, secrets, HMAC and IP allowlist",
+    prefixes: ["trigger_"], names: ["triggers_list"],
+  },
+  {
+    id: "decisions", label: "Decisions: typed judgments with probabilities from the decision model (yes/no, choice, score, rank), the decision log, mission decision nodes waiting for a person",
+    prefixes: ["decision_"], names: ["decide", "decisions"],
+  },
+  {
+    id: "media", label: "Media: generate and edit images with the instance's image model (kept with their prompt, model and cost), the media log, the image model's status",
+    prefixes: ["image_"], names: ["media_log", "media_status"],
+  },
+  {
+    id: "coding", label: "Coding chats: Claude Code or Codex sessions in a git worktree of the Coding app, on the person's own CLI account (start one in a worktree and ask it to do something, send messages, read the transcript, stop, approve or deny risky actions the person decided on)",
+    prefixes: ["coding_chat"],
+  },
+  {
+    id: "learning", label: "Agent learning and drive; the org chart and the agents' communication lines (who may talk to whom)",
+    names: ["get_agent_learning", "review_agent_learning", "revert_agent_learning", "get_agent_drive", "reflect_agent", "agent_lines"],
+  },
+  {
+    id: "agent-versions", label: "Agent versions, tests and suites: list and read versions, diff two, rebase or discard the draft, publish it, deploy to production, roll back, deploy history; test an agent (engine, tools, connectors, vault, skills, computer, channels, smoke run) and fix what fails; agent suites (test and eval cases with tool and model mocks, datasets, assertions, scorers — exact, numeric, similarity, LLM judge…): list, read, save, delete, run against a version (with repetitions), read run reports, scores and traces, mark a baseline and see regressions, trends over versions, explain a run (AI review); record a case live or from a real chat or task into a cassette and replay it offline, edit cassettes; generate cases with AI (reviewed before saving); suites of hosted MCP servers (their saved tests, HTTP mocked) and missions (every agent mocked); benchmarks (suites × variants × repetitions with a cost estimate and a budget cap: leaderboard, Pareto front, case × variant matrix, one case side by side) and the Playground (compare variants on a message, save an exchange as a test case, promote a variant to the draft)",
+    names: ["agent_versions", "agent_version_get", "agent_version_diff", "agent_draft", "agent_publish", "agent_deploy", "agent_deploy_gates", "agent_rollback", "agent_deploys", "agent_test",
+      "agent_suite_list", "agent_suite_get", "agent_suite_save", "agent_suite_delete", "agent_suite_run", "agent_suite_run_get",
+      "agent_suite_trend", "agent_suite_baseline", "agent_suite_review",
+      "agent_suite_record", "agent_suite_replay", "agent_suite_cassette", "agent_suite_cassette_edit", "agent_suite_generate", "target_suites", "target_suite_save", "target_suite_run",
+      "benchmark_save", "benchmark_delete", "benchmark_run", "benchmark_get", "benchmark_leaderboard", "benchmark_compare", "playground_send", "playground_promote"],
   },
 ];
 
