@@ -4,25 +4,39 @@
  * Reads data from AgentDetailContext.
  */
 
+import { useId } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Globe, Linkedin, Mail } from "lucide-react";
 import { SectionHeader } from "@/components/shared/section-header";
 import { SOCIAL_VECTORS, type SocialIconName } from "@/generated/social-icons";
 import { socialLink, type SocialKind } from "@/lib/social-links";
+import { cn } from "@/lib/utils";
 import { useAgentDetail } from "./agent-detail-context";
 
 function SocialMark({ kind }: { kind: SocialKind }) {
   const vector = SOCIAL_VECTORS[kind as SocialIconName];
+  const gradientId = `social-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   if (vector) {
+    // the official colour (a gradient for Instagram); near-black marks take the text colour for dark mode
+    const fill = vector.gradient ? `url(#${gradientId})` : vector.mono ? undefined : vector.hex;
     return (
-      <svg viewBox="0 0 24 24" className="size-3 shrink-0 fill-current" role="img" aria-label={vector.title} data-social={kind}>
-        <path d={vector.path} />
+      <svg viewBox="0 0 24 24" className={cn("size-3.5 shrink-0", vector.mono && "fill-current")} role="img" aria-label={vector.title} data-social={kind}>
+        {vector.gradient && (
+          <defs>
+            <linearGradient id={gradientId} x1="0" y1="1" x2="1" y2="0">
+              {vector.gradient.map((stop, i) => (
+                <stop key={stop} offset={i / (vector.gradient!.length - 1)} stopColor={stop} />
+              ))}
+            </linearGradient>
+          </defs>
+        )}
+        <path d={vector.path} fill={fill} />
       </svg>
     );
   }
   const Icon = kind === "linkedin" ? Linkedin : kind === "email" ? Mail : Globe;
-  return <Icon className="size-3 shrink-0" aria-hidden data-social={kind} />;
+  return <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden data-social={kind} />;
 }
 
 export function AgentSocialsCard() {
