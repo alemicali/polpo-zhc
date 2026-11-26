@@ -32,6 +32,20 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-26-agent-socials-links",
+    date: "2026-11-26",
+    kind: "improved",
+    title: "Profilo degli agenti: bio in evidenza e social cliccabili",
+    summary: "La bio di un agente sta sotto il nome, come su LinkedIn e X, e ogni account social ha la sua icona e si apre con un clic.",
+    body: [
+      "Nella pagina di un agente la **bio** ora sta nella scheda del profilo, subito sotto il nome e prima di titolo e azienda, come su LinkedIn e X.",
+      "",
+      "La scheda **Social** mostra l'icona di Instagram, Facebook, X, TikTok, YouTube, GitHub, WhatsApp, Telegram e delle altre piattaforme più usate, e il nome dell'account.",
+      "",
+      "Un clic apre il profilo in una nuova scheda: va bene sia l'indirizzo completo sia il solo nome utente (per esempio `@nina.ferraro_`), da cui Polpo ricava il link. I valori che non sono un indirizzo web restano come testo.",
+    ].join("\n"),
+  },
+  {
     id: "2026-11-26-agent-send-notification",
     date: "2026-11-26",
     kind: "new",

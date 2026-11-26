@@ -147,8 +147,10 @@ test("the left column scrolls vertically only and long social URLs are truncated
   expect(cls(sidebar)).not.toContain("overflow-auto");
 
   const handles = [...sidebar.querySelectorAll('[data-testid="agent-social-handle"]')] as HTMLElement[];
-  const linkedin = handles.find((h) => h.textContent === LONG_URL)!;
+  // a URL is shown without its scheme and opens the profile
+  const linkedin = handles.find((h) => h.textContent === LONG_URL.replace("https://www.", "").replace(/\/$/, ""))!;
   expect(linkedin).toBeDefined();
+  expect(linkedin.closest("a")?.getAttribute("href")).toBe(LONG_URL);
   expect(cls(linkedin)).toEqual(expect.arrayContaining(["truncate", "min-w-0"]));
   const badge = linkedin.closest('[data-slot="badge"]')!;
   expect(badge.getAttribute("title")).toBe(`linkedin: ${LONG_URL}`);
