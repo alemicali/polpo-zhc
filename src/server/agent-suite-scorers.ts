@@ -24,10 +24,14 @@ export function suiteJudge(configured: () => string | ModelConfig | undefined): 
     const spec = resolveModelSpec(model ?? requireOrchestratorModel(configured()));
     if (!spec) throw new Error("No model for the LLM judge: set the suite's judge model or Polpo's model (Settings → Orchestrator)");
     const m = resolveModel(spec);
-    const res = await completeSimpleWithAuth(m, {
-      systemPrompt: JUDGE_SYSTEM,
-      messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
-    }, { temperature: 0, maxTokens: Math.min(m.maxTokens || 4096, 4096) } as never);
+    const context = { systemPrompt: JUDGE_SYSTEM, messages: [{ role: "user" as const, content: prompt, timestamp: Date.now() }] };
+    const maxTokens = Math.min(m.maxTokens || 4096, 4096);
+    // Reasoning models (Codex, o-series…) reject `temperature`: ask without it, and retry without it
+    // when a provider refuses it anyway.
+    let res = await completeSimpleWithAuth(m, context, (m.reasoning ? { maxTokens } : { temperature: 0, maxTokens }) as never);
+    if (res.stopReason === "error" && /temperature/i.test(res.errorMessage ?? "")) {
+      res = await completeSimpleWithAuth(m, context, { maxTokens } as never);
+    }
     if (res.stopReason === "error" || res.stopReason === "aborted") throw new Error(res.errorMessage ?? "the judge's model failed");
     const text = res.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n").trim();
     let costUsd: number | undefined;

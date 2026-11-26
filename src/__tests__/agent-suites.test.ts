@@ -284,6 +284,26 @@ describe("runner", () => {
     expect(ok.notes.join(" ")).toContain("CLI engine");
   });
 
+  it("the CLI engine's tool calls are traced once (the reply's ids differ from the tool server's)", async () => {
+    const cli = agent({ engine: { type: "cli", cli: "claude" } } as Partial<AgentConfig>);
+    const runner = new AgentSuiteRunner(deps({
+      resolveAgent: async () => cli,
+      turn: async (_ref, _m, h) => {
+        const result = await h.toolCall("mcp__printful__get_shipping_rates", { recipient: { country_code: "DE" }, items: [{ variant_id: 4012 }] }, async () => "real");
+        return { text: "Standard 4.49 EUR", toolCalls: [
+          { id: "toolu_01", name: "mcp__printful__get_shipping_rates", arguments: { items: [{ variant_id: 4012 }], recipient: { country_code: "DE" } }, result, state: "done" },
+          { id: "toolu_02", name: "Bash", arguments: { command: "ls" }, result: "a", state: "done" },
+        ] } as never;
+      },
+    }));
+    await runner.saveSuite("shop", { name: "D", defaultMode: "tools", mocks: { tools: [{ tool: "mcp__printful__get_shipping_rates", response: { rate: "4.49" } }] },
+      cases: [{ name: "a", input: { message: "x" }, assertions: [{ type: "tool_called", tool: "mcp__printful__get_shipping_rates", times: 1 }] }] });
+    const run = await runner.run("shop", "d", {}, { allowRealTools: true });
+    const calls = run.results[0].trace!.toolCalls;
+    expect(calls.map((c) => [c.name, c.mocked])).toEqual([["mcp__printful__get_shipping_rates", "mock"], ["Bash", false]]);
+    expect(run.results[0].status).toBe("passed");
+  });
+
   it("an errored turn errors the case; an exhausted script with onExhausted error too", async () => {
     const runner = new AgentSuiteRunner(deps({ turn: async (_ref, _m, h) => { h.nextScriptedTurn(); h.nextScriptedTurn(); return { text: "", toolCalls: [] }; } }));
     await runner.saveSuite("shop", { name: "E", cases: [{ name: "a", input: { message: "x" }, mocks: { model: { turns: [{ text: "x" }], onExhausted: "error" } } }] });

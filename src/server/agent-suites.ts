@@ -302,8 +302,19 @@ async function pool<T, R>(items: T[], size: number, fn: (item: T, i: number) => 
 /** The calls of a turn that never reached the executor (invalid arguments, a send stopped for a person's yes), and the interactive stop. */
 function absorbReply(recorder: CaseRecorder, reply: SuiteTurnResult | undefined, opts: { agent?: string; firstTurn?: number } = {}): void {
   const seen = new Set(recorder.toolCalls.map((c) => c.id));
+  // Engines whose calls reach the recorder under another id (the CLI engine: Polpo's MCP tool server
+  // never sees the program's tool_use id) are matched by name and arguments, each recorded call once.
+  const byShape = new Map<string, number>();
+  for (const c of recorder.toolCalls) {
+    if (opts.agent && c.agent && c.agent !== opts.agent) continue;
+    const key = `${c.name}\u0000${stableJson(c.args)}`;
+    byShape.set(key, (byShape.get(key) ?? 0) + 1);
+  }
   for (const c of reply?.toolCalls ?? []) {
     if (seen.has(c.id)) continue;
+    const key = `${c.name}\u0000${stableJson(c.arguments ?? {})}`;
+    const left = byShape.get(key) ?? 0;
+    if (left > 0) { byShape.set(key, left - 1); continue; }
     const interactive = c.state === "interrupted";
     if (interactive) recorder.approvals.push({ tool: c.name, kind: "interactive" });
     const turnIdx = Math.max(opts.firstTurn ?? 0, recorder.turns.findIndex((t) => t.toolCalls.some((x) => x.id === c.id)));
@@ -315,6 +326,13 @@ function absorbReply(recorder: CaseRecorder, reply: SuiteTurnResult | undefined,
   if (reply?.finishReason && INTERACTIVE_REASONS.has(reply.finishReason) && !recorder.approvals.some((a) => a.kind === "interactive")) {
     recorder.approvals.push({ tool: reply.finishReason.replace(/_preview$/, "_send"), kind: "interactive", detail: reply.finishReason });
   }
+}
+
+/** JSON with sorted keys, to compare arguments regardless of key order. */
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.keys(value as object).sort().map((k) => `${JSON.stringify(k)}:${stableJson((value as Record<string, unknown>)[k])}`).join(",")}}`;
+  return JSON.stringify(value ?? null);
 }
 
 const usageOf = (turns: SuiteTraceTurn[]) => turns.reduce((u, t) => ({
