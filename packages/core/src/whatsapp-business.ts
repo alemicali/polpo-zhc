@@ -77,6 +77,34 @@ export interface WaBusinessSettings {
   };
   /** Contacts' messages are kept this many days. Default 90. */
   retentionDays?: number;
+  /** Inbound media (images, documents, audio, voice notes, video, stickers): downloaded and kept with the message. */
+  media?: {
+    /** Download inbound media (default true); off: the message keeps only its type, size and caption. */
+    download?: boolean;
+    /** The largest inbound file kept, in bytes (default 16 MB; Meta's own limits per type apply too). */
+    maxBytes?: number;
+  };
+  /** The Commerce catalog connected to the WhatsApp Business Account (product and multi-product messages). */
+  catalogId?: string;
+  /**
+   * Payments inside WhatsApp (order_details messages): only where Meta offers them — India (a
+   * payment configuration: payment gateway or UPI) and Brazil (Pix, boleto, payment links).
+   */
+  payments?: {
+    market: "IN" | "BR";
+    /** India: the payment configuration's name (WhatsApp Manager → Payment configurations). */
+    configurationName?: string;
+  };
+  /** Marketing templates go out through the Marketing Messages API (POST /{phone}/marketing_messages); the account must be onboarded to it. */
+  marketingMessagesApi?: boolean;
+  /** The Meta app's id: needed to upload the business profile photo (Resumable Upload API). */
+  appId?: string;
+  /**
+   * One Meta app shared by several instances: deliveries for another phone number of the app are
+   * forwarded (raw body and signature, unchanged) to the instance that owns it: phone_number_id →
+   * that instance's webhook URL (https). Per-number callback overrides at Meta make it unneeded.
+   */
+  sharedApp?: { routes?: Record<string, string> };
 }
 
 export interface ResolvedWaBusinessSettings {
@@ -90,6 +118,12 @@ export interface ResolvedWaBusinessSettings {
   approveTemplates: boolean;
   limits: { businessInitiatedPerDay: number; perAgentPerDay: Record<string, number> };
   retentionDays: number;
+  media: { download: boolean; maxBytes: number };
+  catalogId?: string;
+  payments?: { market: "IN" | "BR"; configurationName?: string };
+  marketingMessagesApi: boolean;
+  appId?: string;
+  sharedRoutes: Record<string, string>;
 }
 
 export function resolveWaBusinessSettings(b: WaBusinessSettings | undefined): ResolvedWaBusinessSettings {
@@ -107,7 +141,53 @@ export function resolveWaBusinessSettings(b: WaBusinessSettings | undefined): Re
       perAgentPerDay: b?.limits?.perAgentPerDay ?? {},
     },
     retentionDays: b?.retentionDays ?? 90,
+    media: { download: b?.media?.download !== false, maxBytes: b?.media?.maxBytes ?? WABIZ_DEFAULT_MEDIA_MAX },
+    ...(b?.catalogId ? { catalogId: String(b.catalogId) } : {}),
+    ...(b?.payments?.market === "IN" || b?.payments?.market === "BR" ? { payments: b.payments } : {}),
+    marketingMessagesApi: b?.marketingMessagesApi === true,
+    ...(b?.appId ? { appId: String(b.appId) } : {}),
+    sharedRoutes: { ...(b?.sharedApp?.routes ?? {}) },
   };
+}
+
+// ── Media ────────────────────────────────────────────────────────────
+
+/** The largest inbound file kept by default (Meta's own limit for audio and video). */
+export const WABIZ_DEFAULT_MEDIA_MAX = 16 * 1024 * 1024;
+
+export type WaBizMediaKind = "image" | "audio" | "video" | "document" | "sticker";
+export const WABIZ_MEDIA_KINDS: readonly WaBizMediaKind[] = ["image", "audio", "video", "document", "sticker"];
+
+/** Meta's supported types and size limits per media kind (Cloud API, media reference). */
+export const WABIZ_MEDIA_LIMITS: Record<WaBizMediaKind, { maxBytes: number; mimeTypes: readonly string[] }> = {
+  image: { maxBytes: 5 * 1024 * 1024, mimeTypes: ["image/jpeg", "image/png", "image/webp"] },
+  audio: { maxBytes: 16 * 1024 * 1024, mimeTypes: ["audio/aac", "audio/amr", "audio/mpeg", "audio/mp4", "audio/ogg"] },
+  video: { maxBytes: 16 * 1024 * 1024, mimeTypes: ["video/mp4", "video/3gpp"] },
+  // any type (PDF, Office documents, text…) up to 100 MB
+  document: { maxBytes: 100 * 1024 * 1024, mimeTypes: [] },
+  // animated stickers up to 500 KB (static ones up to 100 KB)
+  sticker: { maxBytes: 500 * 1024, mimeTypes: ["image/webp"] },
+};
+
+const sizeLabel = (bytes: number) => (bytes >= 1024 * 1024 ? `${Math.round(bytes / 1024 / 1024)} MB` : `${Math.round(bytes / 1024)} KB`);
+
+/** Why a file cannot be sent as this kind (Meta's types and limits), or undefined. */
+export function mediaProblem(kind: WaBizMediaKind, mimeType: string, bytes: number): string | undefined {
+  const l = WABIZ_MEDIA_LIMITS[kind];
+  if (!l) return `Unknown media kind ${kind}`;
+  const mime = String(mimeType ?? "").split(";")[0]!.trim().toLowerCase();
+  if (l.mimeTypes.length && !l.mimeTypes.includes(mime)) return `A WhatsApp ${kind} must be ${l.mimeTypes.join(", ")} (got ${mime || "an unknown type"})`;
+  if (bytes > l.maxBytes) return `A WhatsApp ${kind} can be at most ${sizeLabel(l.maxBytes)} (this one is ${sizeLabel(bytes)})`;
+  return undefined;
+}
+
+/** The kind a file goes out as, from its type (images, audio, video; anything else as a document). */
+export function mediaKindFor(mimeType: string): WaBizMediaKind {
+  const m = String(mimeType ?? "").split(";")[0]!.trim().toLowerCase();
+  if (WABIZ_MEDIA_LIMITS.image.mimeTypes.includes(m)) return "image";
+  if (WABIZ_MEDIA_LIMITS.audio.mimeTypes.includes(m)) return "audio";
+  if (WABIZ_MEDIA_LIMITS.video.mimeTypes.includes(m)) return "video";
+  return "document";
 }
 
 /** A phone number as Meta's wa_id: digits only ("+39 333-123" → "39333123"); anything else (a BSUID) kept as is. */
@@ -164,6 +244,106 @@ export function optInKeyword(text: string): string | undefined {
   return (WABIZ_OPT_IN_KEYWORDS as readonly string[]).find((k) => k === t);
 }
 
+// ── Outbound messages ────────────────────────────────────────────────
+
+/** A header of an interactive message (buttons, CTA URL, flow; lists take text only). */
+export type WaBizInteractiveHeader =
+  | { type: "text"; text: string }
+  | { type: "image" | "video" | "document"; link?: string; mediaId?: string; filename?: string };
+
+/** A contact card shared in a message. */
+export interface WaBizSharedContact {
+  /** The full name as shown. */
+  name: string;
+  firstName?: string;
+  lastName?: string;
+  phones?: Array<{ phone: string; type?: string; waId?: string }>;
+  emails?: Array<{ email: string; type?: string }>;
+  company?: string;
+  title?: string;
+  urls?: Array<{ url: string; type?: string }>;
+}
+
+/** A line of an order (order_details): amounts in the currency's units (12.5 = 12.50). */
+export interface WaBizOrderItem {
+  retailerId?: string;
+  name: string;
+  amount: number;
+  quantity: number;
+  saleAmount?: number;
+}
+
+/**
+ * Everything a business can send inside the 24-hour window, besides templates (Cloud API
+ * messages endpoint). `replyTo` quotes a message (context.message_id). Media go by Meta media id,
+ * by a public link, or (service level) a file that is uploaded first.
+ */
+export type WaBizOutbound = { replyTo?: string } & (
+  | { type: "text"; text: string; previewUrl?: boolean }
+  | { type: "media"; kind: WaBizMediaKind; link?: string; mediaId?: string; caption?: string; filename?: string }
+  | { type: "location"; latitude: number; longitude: number; name?: string; address?: string }
+  | { type: "contacts"; contacts: WaBizSharedContact[] }
+  | { type: "reaction"; messageId: string; emoji: string }
+  | { type: "buttons"; body: string; header?: WaBizInteractiveHeader; footer?: string; buttons: Array<{ id: string; title: string }> }
+  | { type: "list"; body: string; header?: string; footer?: string; button: string; sections: Array<{ title?: string; rows: Array<{ id: string; title: string; description?: string }> }> }
+  | { type: "cta_url"; body: string; header?: WaBizInteractiveHeader; footer?: string; displayText: string; url: string }
+  | { type: "location_request"; body: string }
+  | {
+    type: "flow"; body: string; header?: WaBizInteractiveHeader; footer?: string; flowId?: string; flowName?: string; cta: string;
+    flowToken?: string; mode?: "published" | "draft"; action?: "navigate" | "data_exchange"; screen?: string; data?: Record<string, unknown>;
+  }
+  | { type: "product"; catalogId?: string; productRetailerId: string; body?: string; footer?: string }
+  | { type: "product_list"; catalogId?: string; header: string; body: string; footer?: string; sections: Array<{ title: string; productRetailerIds: string[] }> }
+  | { type: "catalog"; body: string; footer?: string; thumbnailProductRetailerId?: string }
+  | { type: "voice_call"; body: string; displayText?: string; ttlMinutes?: number; payload?: string }
+  | { type: "call_permission_request"; body?: string }
+  | { type: "address"; body: string; country: "IN"; values?: Record<string, string>; savedAddresses?: Array<Record<string, unknown>>; validationErrors?: Record<string, string> }
+  | {
+    type: "order_details"; body: string; header?: WaBizInteractiveHeader; footer?: string; referenceId: string;
+    goods?: "digital-goods" | "physical-goods"; items: WaBizOrderItem[]; tax?: number; shipping?: number; discount?: number;
+    catalogId?: string; expiresAt?: string; expirationText?: string;
+    /** Meta's payment_settings as given (Brazil: pix_dynamic_code, boleto, payment_link; India: payment_gateway). */
+    paymentSettings?: Array<Record<string, unknown>>;
+  }
+  | { type: "order_status"; body: string; referenceId: string; status: "pending" | "processing" | "partially-shipped" | "shipped" | "completed" | "canceled"; description?: string; payment?: { status: string; timestamp?: number } }
+);
+
+export type WaBizOutboundType = WaBizOutbound["type"];
+
+/** The interactive types the 24-hour window governs like text (every outbound type does). */
+export const WABIZ_OUTBOUND_TYPES: readonly WaBizOutboundType[] = [
+  "text", "media", "location", "contacts", "reaction", "buttons", "list", "cta_url", "location_request", "flow", "product",
+  "product_list", "catalog", "voice_call", "call_permission_request", "address", "order_details", "order_status",
+];
+
+/**
+ * A template's parameters for every component: the header (text, media or location), the body
+ * (positional in order, or named), the buttons by their index in the template (quick reply payload,
+ * the URL's variable suffix, a coupon code, a flow token), the cards of a carousel, the one-time
+ * code of an authentication template.
+ */
+export interface WaBizTemplateInput {
+  header?:
+    | { type: "text"; text: string }
+    | { type: "image" | "video" | "document"; link?: string; mediaId?: string; filename?: string }
+    | { type: "location"; latitude: number; longitude: number; name?: string; address?: string };
+  body?: string[] | Record<string, string>;
+  buttons?: Array<{
+    index: number; payload?: string; text?: string; couponCode?: string; flowToken?: string; flowActionData?: Record<string, unknown>;
+    /** Catalog and multi-product buttons: Meta's action object (thumbnail_product_retailer_id, sections). */
+    action?: Record<string, unknown>;
+  }>;
+  /** Limited-time offer templates: when the offer ends (ISO time). */
+  offerExpiresAt?: string;
+  carousel?: Array<{
+    header?: { type: "image" | "video"; link?: string; mediaId?: string };
+    body?: string[] | Record<string, string>;
+    buttons?: Array<{ index: number; payload?: string; text?: string }>;
+  }>;
+  /** Authentication templates: the one-time code (body and copy-code / one-tap button). */
+  otp?: string;
+}
+
 // ── Store ────────────────────────────────────────────────────────────
 
 export interface WaBizContact {
@@ -178,8 +358,46 @@ export interface WaBizContact {
   lastInboundWamid?: string;
   optIn: { at: string; source: string } | null;
   optOut: { at: string; keyword: string } | null;
+  /** The contact stopped (or resumed) marketing messages from WhatsApp itself (user_preferences webhook). */
+  marketing?: { value: "stop" | "resume"; at: string };
+  /** Blocked by the business (block_users): it can no longer write to the number. */
+  blocked?: { at: string; by: string } | null;
+  /** The contact's answer to a call permission request (Calling API). */
+  callPermission?: { response: "accept" | "reject"; permanent?: boolean; expiresAt?: string; at: string };
   createdAt: string;
   updatedAt: string;
+}
+
+/** A message's media: what Meta described, and the file kept locally (inbound) or sent. */
+export interface WaBizMedia {
+  kind: WaBizMediaKind;
+  /** Meta's media id (inbound: valid 7 days; uploaded: 30 days). */
+  mediaId?: string;
+  /** Sent by link instead of an upload. */
+  link?: string;
+  mimeType?: string;
+  sha256?: string;
+  size?: number;
+  filename?: string;
+  caption?: string;
+  /** A voice note (audio recorded in WhatsApp). */
+  voice?: boolean;
+  /** An animated sticker. */
+  animated?: boolean;
+  /** The file kept with the message (under .polpo/whatsapp-business/media/), when it was downloaded. */
+  stored?: string;
+  /** Why it was not downloaded (too large, a type not accepted, Meta refused). */
+  skipped?: string;
+}
+
+/** What a message quoted, and how it was forwarded (inbound context). */
+export interface WaBizContext {
+  /** The quoted message (wamid). */
+  id?: string;
+  forwarded?: boolean;
+  frequentlyForwarded?: boolean;
+  /** "Message business" on a product: the product asked about. */
+  referredProduct?: { catalogId?: string; productRetailerId?: string };
 }
 
 export type WaBizMessageStatus =
@@ -208,7 +426,28 @@ export interface WaBizMessage {
   pricing?: { category?: string; type?: string; billable?: boolean; model?: string };
   error?: { code?: number; title?: string; detail?: string };
   /** A queued template waiting for approval: everything needed to send it. */
-  pending?: { template: string; language: string; params: string[]; requestedBy: string; requestedAt: string; reason?: string };
+  pending?: {
+    template: string; language: string; params: string[]; requestedBy: string; requestedAt: string; reason?: string;
+    /** Every component's parameters (header, named body parameters, buttons, carousel cards). */
+    components?: WaBizTemplateInput;
+  };
+  /** Image, audio, voice note, video, document or sticker. */
+  media?: WaBizMedia;
+  /**
+   * The structured content of the other types: a location, shared contacts, an interactive message
+   * sent (buttons, list, CTA, flow, products, order details…) or a reply to one (button, list,
+   * flow completion, address, call permission), an order, a template's components.
+   */
+  content?: Record<string, unknown>;
+  context?: WaBizContext;
+  /** Reactions on this message (the contact's and the business's; the latest per side). */
+  reactions?: Array<{ emoji: string; by: "contact" | "business"; at: string }>;
+  /** The contact edited it (Coexistence numbers): the text is the edited one. */
+  edited?: { at: string };
+  /** The contact deleted it for everyone (Coexistence numbers): its text and media are dropped. */
+  revoked?: { at: string };
+  /** Ads that click to WhatsApp: where the conversation came from. */
+  referral?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }
@@ -403,6 +642,21 @@ export function validateWaBusinessChannel(name: string, c: Record<string, unknow
   }
   if (b.retentionDays !== undefined && (!Number.isInteger(b.retentionDays) || b.retentionDays < 1 || b.retentionDays > 3650)) {
     errors.push("business.retentionDays: 1–3650");
+  }
+  if (b.media?.maxBytes !== undefined && (!Number.isInteger(b.media.maxBytes) || b.media.maxBytes < 1024 || b.media.maxBytes > 100 * 1024 * 1024)) {
+    errors.push("business.media.maxBytes: 1 KB – 100 MB");
+  }
+  if (b.catalogId !== undefined && !ID.test(s(b.catalogId))) errors.push("business.catalogId: the catalog's id (digits)");
+  if (b.appId !== undefined && !ID.test(s(b.appId))) errors.push("business.appId: the Meta app's id (digits)");
+  if (b.payments !== undefined && b.payments.market !== "IN" && b.payments.market !== "BR") {
+    errors.push("business.payments.market: IN (India) or BR (Brazil) — payments are not available elsewhere");
+  }
+  for (const [phone, url] of Object.entries(b.sharedApp?.routes ?? {})) {
+    if (!ID.test(phone)) errors.push(`business.sharedApp.routes: "${phone}" is not a phone number id (digits)`);
+    if (phone === s(c.phoneNumberId)) errors.push(`business.sharedApp.routes.${phone}: that is this channel's own number`);
+    let ok = false;
+    try { ok = new URL(String(url)).protocol === "https:"; } catch { ok = false; }
+    if (!ok) errors.push(`business.sharedApp.routes.${phone}: the owning instance's webhook URL (https)`);
   }
   const g = (c.gateway ?? {}) as { agent?: unknown; enableInbound?: unknown };
   const audience = b.audience ?? "customers";
