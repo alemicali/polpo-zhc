@@ -1435,8 +1435,23 @@ export interface NotificationChannelConfig {
   verifyTokenRef?: import("./vault-ref.js").VaultRefLike;
   /** WhatsApp Business: who it talks to, limits and policies (see whatsapp-business.ts). */
   business?: import("./whatsapp-business.js").WaBusinessSettings;
+  /**
+   * Slack inbound (Socket Mode): the bot token (xoxb-) and the app-level token (xapp-) live in the
+   * vault (owner "$channels", set from the dashboard), never here. `chatId` is the default Slack
+   * channel id notifications are posted to with the bot token.
+   */
+  slack?: SlackChannelSettings;
   /** Channel gateway config — enables inbound message routing for this channel. */
   gateway?: ChannelGatewayConfig;
+}
+
+/** Slack inbound settings (no secrets: the tokens are in the vault). */
+export interface SlackChannelSettings {
+  /**
+   * In Slack channels: "mentions" (default) answers messages that mention the bot, replies in its
+   * threads and /polpo; "all" answers every message of an enabled channel.
+   */
+  channelMessages?: "mentions" | "all";
 }
 
 export type NotificationSeverity = "info" | "warning" | "critical";

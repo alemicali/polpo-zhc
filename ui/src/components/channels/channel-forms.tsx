@@ -7,8 +7,8 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Bell, Copy, Loader2, LogIn, Monitor, RefreshCw, ToggleRight, Trash2, X } from "lucide-react";
-import type { NotificationChannelConfig, NotificationChannelType } from "@polpo-ai/react";
+import { Bell, Copy, Link2, Loader2, LogIn, Monitor, RefreshCw, ToggleRight, Trash2, X } from "lucide-react";
+import { usePeers, useSlackStatus, type NotificationChannelConfig, type NotificationChannelType } from "@polpo-ai/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,7 +25,7 @@ import {
   disablePushNotifications, enablePushNotifications, getCurrentPushState, getPushSupportState, type PushSubscriptionState,
 } from "@/lib/push-notifications";
 import { cn } from "@/lib/utils";
-import { channelLabel } from "./channel-catalog";
+import { channelHasGroups, channelLabel } from "./channel-catalog";
 import { channelApi, isMaskedSecret } from "./channel-api";
 
 const api = channelApi;
@@ -136,6 +136,20 @@ function TelegramFacts({ name, ch }: { name: string; ch: NotificationChannelConf
   );
 }
 
+/** Socket Mode, the bot and the workspace, where notifications go, what it answers in channels. */
+function SlackFacts({ name, ch }: { name: string; ch: NotificationChannelConfig }) {
+  const { status } = useSlackStatus(name, 0);
+  return (
+    <>
+      <Fact label="Socket Mode" value={status ? `${status.state}${status.botName ? ` · @${status.botName}` : ""}${status.team ? ` · ${status.team}` : ""}` : "—"} />
+      <Fact label="Tokens" value={status ? `bot ${status.secrets.botToken ? "stored" : "not set"} · app-level ${status.secrets.appToken ? "stored" : "not set"}` : "—"} />
+      <Fact label="Channel ID" value={ch.chatId || "—"} mono />
+      <Fact label="Webhook" value={ch.webhookUrl ? "configured" : "not set"} />
+      {ch.gateway?.enableInbound && <Fact label="In channels" value={ch.slack?.channelMessages === "all" ? "every message (enabled channels)" : "mentions, its threads and /polpo"} />}
+    </>
+  );
+}
+
 /** The overview of a saved channel: what it is, where it sends, who answers. */
 export function ChannelFacts({ name, ch }: { name: string; ch: NotificationChannelConfig }) {
   const gateway = ch.gateway;
@@ -153,8 +167,7 @@ export function ChannelFacts({ name, ch }: { name: string; ch: NotificationChann
       {ch.type === "telegram" && <TelegramFacts name={name} ch={ch} />}
       {(ch.type === "telegram" || ch.type === "whatsapp") && <Fact label="Chat" value={ch.chatId || "—"} mono />}
       {ch.type === "whatsapp" && <Fact label="Profile" value={ch.profileDir || "default"} mono />}
-      {ch.type === "slack" && <Fact label="Webhook" value={ch.webhookUrl ? "configured" : "not set"} />}
-      {ch.type === "slack" && <Fact label="Files" value={ch.apiKey ? "uploads on" : "off"} />}
+      {ch.type === "slack" && <SlackFacts name={name} ch={ch} />}
       {ch.type === "email" && <Fact label="Provider" value={ch.provider ?? "resend"} />}
       {ch.type === "email" && <Fact label="Credentials" value={ch.apiKey ? "API key set" : ch.host ? "SMTP configured" : "none"} />}
       {ch.type === "email" && ch.from && <Fact label="From" value={ch.from} mono />}
@@ -178,9 +191,66 @@ export function ChannelFacts({ name, ch }: { name: string; ch: NotificationChann
   );
 }
 
-/** Who may talk to a two-way Telegram / WhatsApp channel: pairing requests, invites, allowlist. */
-export function ChannelAccess({ type }: { type: "telegram" | "whatsapp" }) {
-  return <ChannelAccessPanel api={api} channel={type} />;
+/** Who may talk to a two-way channel: pairing requests, invites, allowlist; who is active, linked identities. */
+export function ChannelAccess({ type }: { type: "telegram" | "whatsapp" | "slack" }) {
+  return (
+    <>
+      <ChannelAccessPanel api={api} channel={type} />
+      <PeerLinks channel={type} />
+    </>
+  );
+}
+
+/**
+ * The people of this channel: who is active now (presence), and which other identity of the same
+ * person each one shares sessions with (a conversation started on Telegram continues on Slack).
+ */
+export function PeerLinks({ channel }: { channel: string }) {
+  const { peers: all, presence, unavailable, link } = usePeers();
+  const [busy, setBusy] = useState<string | null>(null);
+  if (unavailable) return null;
+  const people = all.filter((p) => p.channel === channel && !p.id.includes(":group:"));
+  if (people.length === 0) return null;
+  const others = (id: string) => all.filter((p) => p.id !== id && !p.id.includes(":group:"));
+  const change = async (peerId: string, linkedTo: string | null) => {
+    setBusy(peerId);
+    try {
+      await link(peerId, linkedTo);
+      toast.success(linkedTo ? `${peerId} now shares sessions with ${linkedTo}` : `${peerId} unlinked`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <div className="mt-1.5 space-y-1.5 border-t border-border/20 pt-1.5" data-testid="peer-links">
+      <span className="flex items-center gap-1.5 text-caption font-medium"><Link2 className="h-3 w-3 text-muted-foreground" /> People and linked identities</span>
+      {people.map((p) => {
+        const active = presence[p.id];
+        return (
+          <div key={p.id} className="flex flex-wrap items-center gap-2 text-caption" data-testid={`peer-${p.id}`}>
+            <span className={cn("h-1.5 w-1.5 shrink-0 rounded-pill", active ? "bg-success" : "bg-muted-foreground/40")} aria-hidden />
+            <span className="min-w-0 truncate">{p.displayName ?? p.externalId}</span>
+            <span className="text-micro text-muted-foreground">{active ? `active · ${active.activity}` : `seen ${new Date(p.lastSeenAt).toLocaleDateString()}`}</span>
+            <div className="ml-auto w-48">
+              <Select value={p.linkedTo ?? "__none__"} disabled={busy === p.id} onValueChange={(v) => void change(p.id, v === "__none__" ? null : v)}>
+                <SelectTrigger className="h-7 w-full text-xs" aria-label={`Link ${p.id}`}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__" className="text-xs">Not linked</SelectItem>
+                  {others(p.id).map((o) => (
+                    <SelectItem key={o.id} value={o.id} className="text-xs">Same person as {o.displayName ?? o.externalId} ({channelLabel(o.channel)})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 /** Random secret for inbound webhooks (64 hex chars). */
@@ -280,16 +350,22 @@ export function ChannelSetupSteps({ type }: { type: string }) {
         <>Enable inbound only for a dedicated or trusted number. This uses WhatsApp Web connectivity.</>,
       ];
       case "slack": return [
-        <>In Slack, create an app with an <b>Incoming Webhook</b> for the channel to post to.</>,
-        <>Paste the webhook URL below; add a bot token (xoxb-…) to upload files too. Save, then Send test.</>,
+        <>At <a href="https://api.slack.com/apps" target="_blank" rel="noreferrer" className="text-primary hover:underline">api.slack.com/apps</a> create an app, turn on <b>Socket Mode</b> and create an app-level token with <code>connections:write</code>.</>,
+        <>Add the bot scopes (<code>app_mentions:read</code>, <code>channels:history</code>, <code>groups:history</code>, <code>im:history</code>, <code>chat:write</code>, <code>files:read</code>, <code>files:write</code>, <code>users:read</code>), subscribe to the bot events and install the app.</>,
+        <>Save the channel, then paste the bot token and the app-level token under Slack app: they go to the vault. Turn inbound on under Routing. Guide: docs/slack.md.</>,
+        <>Notifications only? An Incoming Webhook URL is enough, or the bot token with a channel ID.</>,
       ];
       case "email": return [
         <>Choose the provider: Resend or SendGrid with an API key, or your SMTP server.</>,
         <>Set the sender (a verified address) and the recipients. Save, then Send test.</>,
       ];
       case "webhook": return [
-        <>Outbound: set a URL and {product} POSTs every notification there as JSON.</>,
-        <>Inbound: turn on the gateway under Routing to get an endpoint and a secret for Shortcuts or scripts.</>,
+        <>Set a URL and {product} POSTs every notification there as JSON.</>,
+        <>Add headers (an Authorization token, for example) if the endpoint needs them. Save, then Send test.</>,
+      ];
+      case "expo-push": return [
+        <>Sign in to this instance from the Polpo mobile app: each phone registers itself.</>,
+        <>Rules that send here reach every registered phone. Save, then Send test.</>,
       ];
       case "push": return [
         <>Save the channel, then <b>Enable</b> push in this browser below (HTTPS or localhost).</>,
@@ -597,13 +673,25 @@ export function DeliveryFields({ config, onChange, gatewayRunning, channelName, 
 
       {config.type === "slack" && (
         <>
-          <Field label="Webhook URL" hint="Slack Incoming Webhook URL">
-            <Input data-setup-field="webhookUrl" className="h-8 text-xs font-mono" placeholder="https://hooks.slack.com/services/..." value={config.webhookUrl ?? ""} onChange={(e) => set({ webhookUrl: e.target.value })} />
+          <Field label="Channel ID" hint="Where notifications are posted with the app's bot token (Slack: channel details → Channel ID, e.g. C0123ABC). Invite the app to it.">
+            <Input className="h-8 text-xs font-mono" placeholder="C0123ABC" value={config.chatId ?? ""} onChange={(e) => set({ chatId: e.target.value.trim() || undefined })} />
           </Field>
-          <Field label="API Key" hint="Optional - enables file uploads">
-            <Input data-setup-field="apiKey" className="h-8 text-xs font-mono" placeholder="xoxb-..." value={config.apiKey ?? ""} onChange={(e) => set({ apiKey: e.target.value || undefined })} />
+          <Field label="Webhook URL" hint="Optional: an Incoming Webhook, for notifications without the bot token.">
+            <Input data-setup-field="webhookUrl" className="h-8 text-xs font-mono" placeholder="https://hooks.slack.com/services/..." value={config.webhookUrl ?? ""} onChange={(e) => set({ webhookUrl: e.target.value || undefined })} />
           </Field>
+          {(config.apiKey || !config.gateway?.enableInbound) && (
+            <Field label="API Key (legacy)" hint="Optional: a bot token kept in the configuration for file uploads next to the webhook. Prefer the bot token under Slack app (stored in the vault).">
+              <Input data-setup-field="apiKey" className="h-8 text-xs font-mono" placeholder="xoxb-..." value={config.apiKey ?? ""} onChange={(e) => set({ apiKey: e.target.value || undefined })} />
+            </Field>
+          )}
+          {!(channelName && isSavedChannel) && (
+            <p className="text-caption text-muted-foreground">Save the channel, then paste the Slack app's bot token and app-level token under Slack app: they go to the vault and are never shown again.</p>
+          )}
         </>
+      )}
+
+      {config.type === "expo-push" && (
+        <p className="text-caption text-muted-foreground">Nothing to set here: phones register themselves when the mobile app signs in to this instance.</p>
       )}
 
       {config.type === "email" && (
@@ -714,6 +802,8 @@ export function InboundGatewayForm({ config, onChange, channelName, otherChannel
   const enabled = gateway.enableInbound === true;
   const isWebhook = config.type === "webhook";
   const isWaBusiness = config.type === "whatsapp-business";
+  const isSlack = config.type === "slack";
+  const groups = channelHasGroups(config.type);
   const forCustomers = isWaBusiness && (config.business?.audience ?? "customers") === "customers";
   // A webhook is authenticated by its secret, and a business number is meant for anyone: both default to open.
   const defaultPolicy: GatewayPolicy = isWebhook || isWaBusiness ? "open" : "pairing";
@@ -778,11 +868,13 @@ export function InboundGatewayForm({ config, onChange, channelName, otherChannel
               />
             </Field>
           </div>
-          {(config.type === "telegram" || isWebhook || isWaBusiness) && (
+          {(config.type === "telegram" || isWebhook || isWaBusiness || isSlack) && (
             <Field label={forCustomers ? "Agent that answers customers (required)" : "Dedicated agent"} hint={forCustomers
               ? "Customers talk only with this agent, never with Polpo, and cannot use commands. Give it few tools: what customers write is untrusted."
               : isWebhook
               ? "Send every message to one agent, without /agent. Leave on Polpo to talk to the orchestrator and switch with /agent."
+              : isSlack
+              ? "Give an agent its own Slack app: every message goes to it, without /polpo agent. Leave on Polpo to talk to the orchestrator."
               : "Give an important agent its own bot: every message goes to it, without /agent. Leave on Polpo for the main bot."}>
               <Select value={gateway.agent ?? "__polpo__"} onValueChange={(v) => updateGateway({ agent: v === "__polpo__" ? undefined : v })}>
                 <SelectTrigger className="h-8 text-xs w-full">
@@ -837,6 +929,60 @@ export function InboundGatewayForm({ config, onChange, channelName, otherChannel
               </Field>
             </div>
           )}
+          {isSlack && (
+            <Field label="In Slack channels" hint="Where the app is invited and enabled (/polpo enable): answer mentions, replies in its threads and /polpo, or every message.">
+              <Select value={config.slack?.channelMessages ?? "mentions"} onValueChange={(v) => onChange({ ...config, slack: { ...config.slack, channelMessages: v as "mentions" | "all" } })}>
+                <SelectTrigger className="h-8 text-xs w-full" aria-label="In Slack channels">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="mentions" className="text-xs">Mentions, its threads and /polpo</SelectItem>
+                  <SelectItem value="all" className="text-xs">Every message</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
+          {groups && (
+            <div className="grid grid-cols-2 gap-2" data-testid="group-replies">
+              <Field label="Group replies" hint={`Mentions and replies only, or also the messages a classifier judges are for ${gateway.agent ?? product} (needs TYPESAFE_API_KEY).`}>
+                <Select value={gateway.groupReplies ?? "mentions"} onValueChange={(v) => updateGateway({ groupReplies: v as GatewayConfig["groupReplies"] })}>
+                  <SelectTrigger className="h-8 text-xs w-full" aria-label="Group replies">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="mentions" className="text-xs">Mentions</SelectItem>
+                    <SelectItem value="intent" className="text-xs">Mentions and intent</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+              {gateway.groupReplies === "intent" && (
+                <Field label="Intent threshold" hint="How sure the classifier must be (0–1) before joining in. Default 0.7.">
+                  <Input
+                    className="h-8 text-xs font-mono" type="number" min={0} max={1} step={0.05} placeholder="0.7" aria-label="Intent threshold"
+                    value={gateway.intentThreshold ?? ""}
+                    onChange={(e) => {
+                      const n = e.target.value === "" ? undefined : Number(e.target.value);
+                      updateGateway({ intentThreshold: n === undefined || Number.isNaN(n) ? undefined : Math.min(1, Math.max(0, n)) });
+                    }}
+                  />
+                </Field>
+              )}
+            </div>
+          )}
+          {!forCustomers && (
+            <Field label="Commands" hint={`Who may use commands (/help, /new, /agent, /pair…${isSlack ? " — on Slack through /polpo" : ""}). With none every message is chat.`}>
+              <Select value={gateway.commands ?? "all"} onValueChange={(v) => updateGateway({ commands: v as GatewayConfig["commands"] })}>
+                <SelectTrigger className="h-8 text-xs w-full" aria-label="Commands">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" className="text-xs">Everyone allowed to write</SelectItem>
+                  <SelectItem value="operators" className="text-xs">Operators only (paired or in Allow From)</SelectItem>
+                  <SelectItem value="none" className="text-xs">Nobody</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
           <Field label="Conversation" hint="How chats from this channel relate to the web chat.">
             <Select value={gateway.sessionMode ?? "per-peer"} onValueChange={(v) => updateGateway({ sessionMode: v as GatewayConfig["sessionMode"] })}>
               <SelectTrigger className="h-8 text-xs w-full">
@@ -868,7 +1014,7 @@ export function InboundGatewayForm({ config, onChange, channelName, otherChannel
           >
             <Input
               className="h-8 text-xs font-mono"
-              placeholder={config.type === "whatsapp" ? "+393331234567, 393331234567" : isWebhook ? "my-iphone, office-script" : "123456789, -1001234567890"}
+              placeholder={config.type === "whatsapp" ? "+393331234567, 393331234567" : isWebhook ? "my-iphone, office-script" : isSlack ? "U0123ABC, U0456DEF" : "123456789, -1001234567890"}
               value={(gateway.allowFrom ?? []).join(", ")}
               onChange={(e) => {
                 const allowFrom = splitList(e.target.value);

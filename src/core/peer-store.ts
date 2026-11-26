@@ -229,10 +229,11 @@ export class FilePeerStore implements PeerStore {
 
   // ── Identity Linking ───────────────────────────────────────────
 
-  async linkPeers(peerId: string, linkedTo: string): Promise<void> {
+  async linkPeers(peerId: string, linkedTo: string | null): Promise<void> {
     const peer = this.peers.get(peerId);
     if (peer) {
-      peer.linkedTo = linkedTo;
+      if (linkedTo) peer.linkedTo = linkedTo;
+      else delete peer.linkedTo;
       this.savePeers();
     }
   }

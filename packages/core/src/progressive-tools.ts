@@ -71,7 +71,7 @@ export const AGENT_TOOL_GROUPS: ToolGroupRule[] = [
   { id: "media", label: "Images, video and audio", prefixes: ["image_", "video_", "audio_"] },
   { id: "documents", label: "Excel, PDF and Word files", prefixes: ["excel_", "pdf_", "docx_"] },
   { id: "whatsapp", label: "WhatsApp", prefixes: ["whatsapp_"] },
-  { id: "whatsapp-business", label: "WhatsApp Business (Meta Cloud API): channel status, webhook events, templates, a contact's conversation and 24-hour window, sends, approving queued templates", prefixes: ["wabiz_"] },
+  { id: "whatsapp-business", label: "WhatsApp Business (Meta Cloud API): channel status, webhook events, templates, a contact's conversation and 24-hour window, opt-in / opt-out and erasure (GDPR), sends, approving queued templates", prefixes: ["wabiz_"] },
   { id: "phone", label: "Phone calls", prefixes: ["phone_"] },
   { id: "ink", label: "Ink Hub (skills and packages)", prefixes: ["ink_"] },
   { id: "data", label: "Data sources and views", prefixes: ["data_"] },
@@ -129,7 +129,7 @@ export const POLPO_TOOL_GROUPS: ToolGroupRule[] = [
     prefixes: ["mcp_server"],
   },
   {
-    id: "channels", label: "Channels end to end: Telegram, WhatsApp, Slack, email… setup (secrets via setup link), test, routes, Telegram verify, invites, pairing, peers, allowlist, WhatsApp QR sign-in",
+    id: "channels", label: "Channels end to end: Telegram, WhatsApp, Slack, email… setup (secrets via setup link), test, routes, who may write (DM policy, allowFrom), Telegram verify, invites, pairing, peers, allowlist, presence and linked identities, Slack connection status, notification history and counts, WhatsApp QR sign-in",
     prefixes: ["channel_"], names: ["channels_list"],
   },
   {
@@ -145,7 +145,7 @@ export const POLPO_TOOL_GROUPS: ToolGroupRule[] = [
     id: "access", label: "Members (invite, remove) and MCP access (who is connected to Polpo's MCP server, revoke)",
     names: ["members_list", "members_invite", "members_remove", "mcp_access_list", "mcp_grant_revoke"],
   },
-  { id: "whatsapp-business", label: "WhatsApp Business (official number, Meta Cloud API): status, webhook events, templates, a contact's conversation and 24-hour window, sends, approving queued templates", prefixes: ["wabiz_"] },
+  { id: "whatsapp-business", label: "WhatsApp Business (official number, Meta Cloud API): status, webhook events, templates, a contact's conversation and 24-hour window, opt-in / opt-out and erasure (GDPR), sends, approving queued templates", prefixes: ["wabiz_"] },
   { id: "sync", label: "Cloud sync (R2 backup of the instance): status, settings, test, run, disconnect", prefixes: ["sync_"] },
   { id: "rooms", label: "Rooms: group chats of people and agents (list, create, change, delete, read, post, wait for replies)", prefixes: ["room_"], names: ["rooms_list"] },
   { id: "chats", label: "Search everything (chat messages, tasks, missions, agents, artifacts, files, data, skills, memory… as ⌘K) and chat sessions: list, read, rename, star, delete", prefixes: ["chat_"], names: ["search"] },

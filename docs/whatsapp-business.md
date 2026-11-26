@@ -144,10 +144,16 @@ one by one): `wabiz_send` (inside the window), `wabiz_send_template`, `wabiz_tem
   `test` (quality rating and messaging tier when Graph returns them). See `docs/openapi.json`.
 - MCP: `polpo_wabiz_status`, `polpo_wabiz_events`, `polpo_wabiz_templates`,
   `polpo_wabiz_conversation`, `polpo_wabiz_send`, `polpo_wabiz_send_template`,
-  `polpo_wabiz_approval` (sends need `confirm: true` and the `polpo:messages` scope). Polpo's chat
-  has them as `wabiz_*`.
-- SDK: `client.getWaBusinessStatus()`, `sendWaBusinessTemplate()`…; React:
-  `useWaBusinessStatus`, `useWaTemplates`, `useWaConversation`.
+  `polpo_wabiz_approval` (sends need `confirm: true` and the `polpo:messages` scope),
+  `polpo_wabiz_contact` (record an opt-in or an opt-out) and `polpo_wabiz_contact_erase` (erase a
+  contact and its messages, `confirm: true`; both need `polpo:admin`). `polpo_message_send`
+  `{ channel: "whatsapp-business", to }` sends free-form text inside the window. Polpo's chat has
+  them as `wabiz_*`.
+- Dashboard: the channel's sheet lists the **Contacts** (window, opt-in, opt-out) with *Record
+  opt-in* / *Opt out* and *Erase* (after a confirmation).
+- SDK: `client.getWaBusinessStatus()`, `sendWaBusinessTemplate()`, `setWaBusinessOptIn()`,
+  `deleteWaBusinessContact()`…; React: `useWaBusinessStatus`, `useWaTemplates`,
+  `useWaConversation`, `useWaContacts`.
 
 ## Costs
 

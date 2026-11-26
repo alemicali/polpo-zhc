@@ -106,6 +106,7 @@ import { WhatsAppBridge, WhatsAppChannel } from "../notifications/channels/whats
 import { WhatsAppGatewayAdapter } from "../notifications/whatsapp-gateway-adapter.js";
 import { WaBusinessService, registerWaBusinessService } from "../notifications/whatsapp-business-service.js";
 import { WaBusinessGatewayAdapter } from "../notifications/whatsapp-business-gateway-adapter.js";
+import { SlackService, registerSlackService, type SlackClientFactory } from "../notifications/slack-service.js";
 import { FileWaBusinessStore } from "../stores/file-whatsapp-business-store.js";
 import { resolveWaBusinessSettings, type WaBusinessStore } from "@polpo-ai/core/whatsapp-business";
 import { WhatsAppStore } from "../stores/whatsapp-store.js";
@@ -245,6 +246,11 @@ export class Orchestrator extends TypedEmitter {
   /** WhatsApp Business (Meta Cloud API) channels: webhook, inbox, sends, templates, approvals. */
   private waBusiness?: WaBusinessService;
   private waBusinessStore?: WaBusinessStore;
+  /** Slack apps over Socket Mode (inbound), and the bot token for posting. */
+  private slack?: SlackService;
+  private slackClients?: SlackClientFactory;
+  /** Inbound Slack channels' gateways by channel name. */
+  private slackGateways = new Map<string, ChannelGateway>();
   private peerStore?: PeerStore;
   private teamStore!: TeamStore;
   private agentVersionStore!: AgentVersionStore;
@@ -288,7 +294,7 @@ export class Orchestrator extends TypedEmitter {
   /** Primary gateway, or the gateway of a specific channel by name. */
   getChannelGateway(channelName?: string): ChannelGateway | undefined {
     return channelName
-      ? this.channelGateways.get(channelName) ?? this.webhookGateways.get(channelName)?.gateway
+      ? this.channelGateways.get(channelName) ?? this.webhookGateways.get(channelName)?.gateway ?? this.slackGateways.get(channelName)
       : this.channelGateway;
   }
   /** Inbound adapter of a webhook channel with gateway.enableInbound. */
@@ -627,6 +633,10 @@ export class Orchestrator extends TypedEmitter {
   getWhatsAppStore(): WhatsAppMessageStore | undefined { return this.whatsappStore; }
   /** The WhatsApp Business service (undefined before init). */
   getWaBusiness(): WaBusinessService | undefined { return this.waBusiness; }
+  /** The Slack service (undefined before init). */
+  getSlack(): SlackService | undefined { return this.slack; }
+  /** Replace the Slack clients (tests: mocked socket and web clients). Before init. */
+  setSlackClients(factory: SlackClientFactory | undefined): void { this.slackClients = factory; }
   getWhatsAppBridge(): WhatsAppBridge | undefined { return this.whatsappBridge; }
 
   /** Re-point the orchestrator at a different project directory (before init). */
@@ -1209,6 +1219,7 @@ export class Orchestrator extends TypedEmitter {
 
     this.startWebhookGateways();
     this.startWaBusiness();
+    this.startSlack();
 
     // Initialize escalation manager if configured
     if (this.config.settings.escalationPolicy) {
@@ -2434,6 +2445,10 @@ export class Orchestrator extends TypedEmitter {
     this.waBusiness?.dispose();
     registerWaBusinessService(this.polpoDir, undefined);
     this.waBusiness = undefined;
+    await this.slack?.dispose();
+    registerSlackService(this.polpoDir, undefined);
+    this.slack = undefined;
+    this.slackGateways.clear();
     this.notificationServer?.close();
     this.approvalMgr?.dispose();
     this.notificationRouter?.dispose();
@@ -2583,6 +2598,7 @@ export class Orchestrator extends TypedEmitter {
 
     this.startWebhookGateways();
     this.startWaBusiness();
+    this.startSlack();
 
     // Escalation manager
     if (this.config.settings.escalationPolicy) {
@@ -2901,6 +2917,15 @@ export class Orchestrator extends TypedEmitter {
       return;
     }
 
+    if (config.type === "slack" && this.slack) {
+      const chatId = target.chatId || config.chatId;
+      if (!chatId) throw new Error(`No Slack channel for "${target.channel}": set replyTo.chatId or the channel's chat ID`);
+      if (event.kind === "echo") await this.slack.post(target.channel, chatId, `_↪ ${event.from} · ${event.via}_\n${event.text}`);
+      else if (event.kind === "partial") await this.slack.post(target.channel, chatId, event.text);
+      else await this.slack.post(target.channel, chatId, event.reply.text, { buttons: event.reply.buttons, files: event.reply.files });
+      return;
+    }
+
     if (event.kind !== "reply") return;
     const channel = this.notificationRouter?.getChannel(target.channel);
     if (!channel) throw new Error(`Channel "${target.channel}" is not running`);
@@ -3021,6 +3046,50 @@ export class Orchestrator extends TypedEmitter {
       this.emit("log", { level: "info", message: `WhatsApp Business channel "${key}" ready (${customers ? `customers → ${channelConfig.gateway.agent}` : "operators"})` });
     }
     void service.drain();
+  }
+
+  // ── Slack (Socket Mode) ──
+
+  /**
+   * The instance's Slack service (created once, reading the configuration live) and a gateway per
+   * Slack channel with gateway.enableInbound: the service keeps one Socket Mode connection per app
+   * (both tokens in the vault) and only reconnects when a token changed. Called at start and on
+   * every reload.
+   */
+  private startSlack(): void {
+    if (!this.slack) {
+      this.slack = new SlackService({
+        channels: () => this.config.settings.notifications?.channels ?? {},
+        vault: () => this.vaultStore,
+        log: (level, message) => this.emit("log", { level, message: `[slack] ${message}` }),
+        ...(this.slackClients ? { clients: this.slackClients } : {}),
+      });
+      registerSlackService(this.polpoDir, this.slack);
+    }
+    const service = this.slack;
+    service.clearGateways();
+    this.slackGateways.clear();
+    const channels = this.config.settings.notifications?.channels ?? {};
+    for (const [key, channelConfig] of Object.entries(channels)) {
+      if (channelConfig?.type !== "slack" || !channelConfig.gateway?.enableInbound) continue;
+      this.peerStore = this.peerStore ?? this.drizzleStores?.peerStore ?? new FilePeerStore(this.polpoDir);
+      const gateway = new ChannelGateway({
+        orchestrator: this,
+        peerStore: this.peerStore!,
+        sessionStore: this.sessionStore,
+        channelConfig: { ...channelConfig, gateway: { dmPolicy: "pairing", ...channelConfig.gateway } },
+        approvalResolver: this.createApprovalResolver(),
+        key,
+        roomStore: this.getRoomStore(),
+      });
+      gateway.setIntentArbiter(this.getGroupIntent());
+      gateway.setReplyRouter((target, event) => this.routeChannelReply(target, event));
+      service.setGateway(key, gateway);
+      this.slackGateways.set(key, gateway);
+      const target = channelConfig.gateway.agent ? `agent: ${channelConfig.gateway.agent}` : "orchestrator";
+      this.emit("log", { level: "info", message: `Slack channel gateway "${key}" ready (dmPolicy: ${channelConfig.gateway.dmPolicy ?? "pairing"}, ${target})` });
+    }
+    void service.sync();
   }
 
   // ── WhatsApp Bridge ──
