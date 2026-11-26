@@ -1,7 +1,7 @@
 import { normalizeSandboxSettings } from "@polpo-ai/core/sandbox";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { join, extname } from "node:path";
-import { agentLinesChart, normalizeConnectorTools, normalizeTalksTo, unknownComputersProblem, type FileSystem } from "@polpo-ai/core";
+import { agentLinesChart, agentNotifyChannelWarnings, normalizeAgentNotifyChannels, normalizeConnectorTools, normalizeTalksTo, unknownComputersProblem, type FileSystem } from "@polpo-ai/core";
 import { AddAgentSchema, UpdateAgentSchema, RenameTeamSchema, AddTeamSchema } from "../schemas.js";
 import { redactAgentConfig, redactTeam, sanitizeTranscriptEntry } from "../security.js";
 import { buildETag, contentFingerprint, handleConditional } from "../etag.js";
@@ -89,6 +89,8 @@ export function agentRoutes(getDeps: () => {
   fs?: FileSystem;
   /** The instance's computer ids (settings.computers), to check agents' computers and defaultComputer. */
   computerIds?: () => string[];
+  /** The configured notification channels' names: notifyChannels naming another one gets a warning (not an error). */
+  notificationChannelIds?: () => string[];
   /**
    * Agent versioning (draft → publish → deploy). Absent: updates are written live as before.
    */
@@ -133,6 +135,10 @@ export function agentRoutes(getDeps: () => {
       };
     } catch { return undefined; }
   };
+
+  /** notifyChannels naming channels that are not configured (yet): warnings, the field is kept. */
+  const notifyWarnings = (deps: { notificationChannelIds?: () => string[] }, value: unknown): string[] =>
+    deps.notificationChannelIds ? agentNotifyChannelWarnings(normalizeAgentNotifyChannels(value), deps.notificationChannelIds()) : [];
 
   /** An error for computers/defaultComputer naming a computer the instance does not have, else null. */
   const badComputers = (deps: { computerIds?: () => string[] }, body: { computers?: string[]; defaultComputer?: string }): string | null => {
@@ -220,7 +226,7 @@ export function agentRoutes(getDeps: () => {
     },
     responses: {
       201: {
-        content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ added: z.boolean() }) }) } },
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ added: z.boolean(), warnings: z.array(z.string()).optional().openapi({ description: "e.g. notifyChannels naming a channel that is not configured (yet)" }) }) }) } },
         description: "Agent added",
       },
       400: {
@@ -261,6 +267,8 @@ export function agentRoutes(getDeps: () => {
         ...(body.voiceReplies !== undefined && { voiceReplies: body.voiceReplies }),
         ...(body.progressiveTools !== undefined && { progressiveTools: body.progressiveTools }),
         ...(normalizeConnectorTools(body.connectorTools) ? { connectorTools: normalizeConnectorTools(body.connectorTools) } : {}),
+        ...(normalizeAgentNotifyChannels(body.notifyChannels) ? { notifyChannels: normalizeAgentNotifyChannels(body.notifyChannels) } : {}),
+        ...(body.notifyRateLimit !== undefined && { notifyRateLimit: body.notifyRateLimit }),
         ...(body.learning !== undefined && { learning: body.learning }),
         ...(body.drive !== undefined && { drive: body.drive }),
       }, teamName);
@@ -270,7 +278,8 @@ export function agentRoutes(getDeps: () => {
       throw err;
     }
 
-    return c.json({ ok: true, data: { added: true } }, 201);
+    const warnings = notifyWarnings(deps, body.notifyChannels);
+    return c.json({ ok: true, data: { added: true, ...(warnings.length ? { warnings } : {}) } }, 201);
   });
 
   // DELETE /agents/:name — remove agent
@@ -599,6 +608,9 @@ export function agentRoutes(getDeps: () => {
       // "polpo" or null: back to Polpo's own engine
       ...(body.engine !== undefined && { engine: body.engine && body.engine !== "polpo" ? body.engine : undefined }),
       ...(body.emailAllowedDomains !== undefined && { emailAllowedDomains: body.emailAllowedDomains }),
+      // null or []: no channel (no send_notification)
+      ...(body.notifyChannels !== undefined && { notifyChannels: normalizeAgentNotifyChannels(body.notifyChannels) }),
+      ...(body.notifyRateLimit !== undefined && { notifyRateLimit: body.notifyRateLimit ?? undefined }),
       ...(body.identity && { identity: { ...(identityBase ?? {}), ...body.identity } }),
       ...(body.team !== undefined && { team: body.team }),
     };
@@ -633,7 +645,8 @@ export function agentRoutes(getDeps: () => {
 
     const updated = (await deps.getAgents()).find(a => a.name === name);
     const state = updated ? await versionState(deps, updated) : undefined;
-    return c.json({ ok: true, data: updated ? { ...redactAgentConfig(updated), ...(state ? { versioning: { ...state, ...versioning } } : {}) } : null }, 200);
+    const warnings = body.notifyChannels !== undefined ? notifyWarnings(deps, body.notifyChannels) : [];
+    return c.json({ ok: true, data: updated ? { ...redactAgentConfig(updated), ...(state ? { versioning: { ...state, ...versioning } } : {}), ...(warnings.length ? { warnings } : {}) } : null }, 200);
   });
 
   // GET /agents/lines — the org chart and the communication lines between agents

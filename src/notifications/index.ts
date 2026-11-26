@@ -5,6 +5,7 @@ import type { TypedEmitter, PolpoEvent, PolpoEventMap } from "../core/events.js"
 import type { NotificationsConfig, NotificationRule, NotificationChannelConfig, NotificationCondition, TaskOutcome, OutcomeType, ScopedNotificationRules, NotificationAction } from "../core/types.js";
 import type { NotificationChannel, Notification, OutcomeAttachment } from "./types.js";
 import type { NotificationStore, NotificationRecord } from "../core/notification-store.js";
+import type { NotificationOrigin } from "@polpo-ai/core";
 import { defaultTitle, defaultBody, applyTemplate } from "./templates.js";
 import { SlackChannel } from "./channels/slack.js";
 import { TelegramChannel } from "./channels/telegram.js";
@@ -622,6 +623,8 @@ export class NotificationRouter {
     ruleName?: string;
     /** Where on the channel, for channels that can target one: a chat (Slack channel id, Telegram chat) and a thread (Slack). */
     target?: { chatId?: string; threadTs?: string };
+    /** Who sends it (an agent's send_notification), kept on the history record. */
+    origin?: NotificationOrigin;
   }): Promise<{ id: string; scheduledAt: string; firesAt: string }> {
     const ch = this.channels.get(opts.channel);
     if (!ch) throw new Error(`Channel "${opts.channel}" not found`);
@@ -642,6 +645,7 @@ export class NotificationRouter {
           delayMs: opts.delayMs ?? 0,
           ...(opts.target?.chatId ? { chatId: opts.target.chatId } : {}),
           ...(opts.target?.threadTs ? { threadTs: opts.target.threadTs } : {}),
+          ...(opts.origin ? { origin: opts.origin } : {}),
         },
         ruleId: "direct",
         timestamp: new Date().toISOString(),
@@ -669,6 +673,7 @@ export class NotificationRouter {
             severity: notification.severity,
             sourceEvent: "direct:send",
             attachmentCount: 0,
+            ...(opts.origin ? { origin: opts.origin } : {}),
           };
           this.store.append(record);
         }
@@ -693,6 +698,7 @@ export class NotificationRouter {
             severity: notification.severity,
             sourceEvent: "direct:send",
             attachmentCount: 0,
+            ...(opts.origin ? { origin: opts.origin } : {}),
             error: msg,
           };
           this.store.append(record);

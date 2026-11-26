@@ -59,6 +59,12 @@ export interface SpawnContext {
   runId?: string;
   /** Talking to other agents from this task run (ask_agent, message_agent, escalate), within its lines. */
   agentTalk?: import("./agent-talk-bridge.js").TaskAgentTalk;
+  /**
+   * send_notification: how this run posts to a notification channel. Task runs: over the
+   * notification socket (the server sends as the run's agent); unset in the server process, where
+   * the instance's sender is used directly.
+   */
+  agentNotify?: import("../tools/notify-tools.js").AgentNotifyAccess;
   /** Instance compaction settings; the agent's own settings apply on top. */
   compaction?: import("@polpo-ai/core").CompactionSettings;
   /** Absolute path to the .polpo directory. Used for skill loading, logs, etc. */

@@ -643,6 +643,17 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       const { createDecisionTools } = await import("../tools/decision-tools.js");
       if (agentConfig.allowedTools?.includes("decide")) decisions(); // the service for this .polpo directory
       tools.push(...createDecisionTools(polpoDir, agentConfig.name, agentConfig.allowedTools));
+      // send_notification: post to the channels its owner allows (allowedTools + notifyChannels), as the agent
+      {
+        const notifier = o.getAgentNotifier();
+        if (notifier) {
+          const { createAgentNotifyTools } = await import("../tools/notify-tools.js");
+          const sessionId = () => context?.sessionId?.();
+          tools.push(...createAgentNotifyTools(agentConfig, {
+            send: (req) => notifier.send(agentConfig, req, sessionId() ? { sessionId: sessionId()! } : {}),
+          }));
+        }
+      }
       // Connectors granted to this agent (mcp__<connector>__<tool>), filtered by allowedTools. A
       // connector that cannot connect is skipped (and logged): it never breaks the chat.
       try {
@@ -1581,6 +1592,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     runStore: o.getRunStore(),
     polpoDir: o.getPolpoDir(),
     computerIds: () => (o.getConfig()?.settings?.computers ?? []).map((c) => c.id),
+    notificationChannelIds: () => Object.keys(o.getConfig()?.settings?.notifications?.channels ?? {}),
     fs: new NodeFileSystem(),
     versions: {
       versioning: () => o.getAgentVersioning(),

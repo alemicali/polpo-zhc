@@ -26,6 +26,7 @@ import type { LogStore } from "./log-store.js";
 import type { RunnerConfig, TaskResult } from "./types.js";
 import { notifyRunComplete, notifyNetworkDenied, notifySandboxEvent } from "./notification.js";
 import { socketAgentTalk } from "./agent-talk-bridge.js";
+import { socketAgentNotify } from "./agent-notify-bridge.js";
 import { sanitizeTranscriptEntry } from "../server/security.js";
 import { EncryptedVaultStore } from "../vault/encrypted-store.js";
 import { registerRunnerProviders } from "./runner-providers.js";
@@ -371,6 +372,8 @@ async function main(): Promise<void> {
           task: { id: config.taskId, runId: config.runId },
         },
       } : {}),
+      // send_notification: the orchestrator sends as this run's agent (allowlist, rate limit, origin)
+      ...(config.notifySocket ? { agentNotify: socketAgentNotify(config.notifySocket, config.runId) } : {}),
       vaultStore,
       whatsappStore: waStore,
       whatsappSendMessage: waSendMessage,

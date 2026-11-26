@@ -61,6 +61,8 @@ import { getArtifactStore } from "../server/artifact-runtime.js";
 import { createStorageAgentTools } from "../tools/storage-tools.js";
 import { createCompanyBrainAgentTools } from "../tools/company-brain-tools.js";
 import { createDecisionTools } from "../tools/decision-tools.js";
+import { createAgentNotifyTools } from "../tools/notify-tools.js";
+import { agentNotifierFor } from "../notifications/agent-notify.js";
 import { createTaskResultTools, wantsTaskResultTools } from "../tools/task-result-tools.js";
 import { createAgentTalkTools } from "../tools/agent-talk-tools.js";
 import { databaseStoresFor } from "../core/storage.js";
@@ -1025,6 +1027,8 @@ export async function buildAgentToolset(o: {
   log?: (line: string) => void;
   /** The task of this run: with dependencies or a mission, it gets task_result / dependency_results. */
   task?: Task;
+  /** Without a task (a chat): where send_notification records it came from. */
+  notifyOrigin?: { sessionId?: string };
 }): Promise<AgentToolset> {
   const { agentConfig, cwd, ctx, effectiveAllowedPaths, outputDir, remoteFs, shell, browserProfileDir } = o;
   const sandboxProvider = o.sandboxProvider as any;
@@ -1090,6 +1094,17 @@ export async function buildAgentToolset(o: {
       const taskPolpoDir = ctx.polpoDir;
       allTools.push(...createTaskResultTools(o.task!, () => taskStoreFor(taskPolpoDir).getAllTasks()));
     }
+  }
+  // send_notification: post to the notification channels the owner allows (allowedTools +
+  // notifyChannels). A task run asks the server over the socket; in the server process (CLI chats,
+  // agent tests) the instance's sender is used directly. Every engine: a harness or a CLI gets it as
+  // a host tool.
+  {
+    const taken = new Set(allTools.map((tool) => tool.name));
+    const local = agentNotifierFor(ctx?.polpoDir);
+    const origin = o.task ? { taskId: o.task.id, ...(o.task.missionId ? { missionId: o.task.missionId } : {}) } : (o.notifyOrigin ?? {});
+    const access = ctx?.agentNotify ?? (local ? { send: (req: Parameters<typeof local.send>[1]) => local.send(agentConfig, req, origin) } : undefined);
+    allTools.push(...createAgentNotifyTools(agentConfig, access).filter((tool) => !taken.has(tool.name)));
   }
   // Talking to other agents while working the task (every engine: these become host tools for a
   // harness or a CLI), within the agent's communication lines: ask_agent and escalate wait for the

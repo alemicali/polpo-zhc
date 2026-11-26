@@ -134,6 +134,8 @@ export async function defaultOpenCliRemote(o: { agent: AgentConfig; cwd: string;
 export async function cliRunHostTools(o: {
   agent: AgentConfig; task?: Task; cwd: string; ctx: SpawnContext; workspace?: import("@polpo-ai/core/sandbox").Workspace; interactive: boolean;
   log: (line: string) => void; onOutcome?: (toolName: string, details: Record<string, unknown>) => void;
+  /** A chat: its session, recorded on what send_notification sends. */
+  notifyOrigin?: { sessionId?: string };
 }): Promise<{ tools: HarnessHostTool[]; connectorNote?: string; cleanup: () => Promise<void> }> {
   const { WorkspaceShell, isRemoteWorkspace } = await import("../sandbox/manager.js");
   const { WorkspaceFileSystem } = await import("../sandbox/workspace-fs.js");
@@ -148,6 +150,7 @@ export async function cliRunHostTools(o: {
     hasExtendedTools: (o.agent.allowedTools ?? []).some((t) => /^(browser|email|image|video|audio|excel|pdf|docx|search|whatsapp|phone)_/i.test(t)),
     log: o.log,
     ...(o.task ? { task: o.task } : {}),
+    ...(o.notifyOrigin ? { notifyOrigin: o.notifyOrigin } : {}),
   });
   // as the harness: of the task result tools only task_result (dependencies' results are in the prompt)
   const tools = toHarnessHostTools(toolset.tools.filter((t) => t.name !== DEPENDENCY_RESULTS_TOOL), {

@@ -587,6 +587,21 @@ export const AgentEngineSchema = z.union([
 ]);
 
 /** Per-connector tool selection: { <connector id>: "*" (all tools, the default) | [raw MCP tool names] }. */
+/**
+ * Notification channels an agent may post to with send_notification (it also needs
+ * send_notification in allowedTools): "*" = every configured channel's default target, or per
+ * channel the targets it may pick with `to` ("*" = any; none = the default only).
+ */
+export const AgentNotifyChannelsSchema = z.union([
+  z.literal("*"),
+  z.array(z.object({
+    channel: z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/, "a channel name")
+      .openapi({ description: "A configured channel's name (settings.notifications.channels)", example: "slack" }),
+    targets: z.array(z.string().trim().min(1).max(320)).max(100).optional()
+      .openapi({ description: "Targets it may pick (`to`): Slack channel ids, Telegram chat ids, email addresses, or \"*\" for any. Absent: the channel's default target only.", example: ["C0LEADBF"] }),
+  }).strict()).max(50),
+]).openapi("AgentNotifyChannels", { description: "Channels (and targets) the agent may post to with send_notification" });
+
 export const AgentConnectorToolsSchema = z.record(
   z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/, "a connector id"),
   z.union([z.literal("*"), z.array(z.string().trim().min(1).max(200)).max(1000)]),
@@ -631,6 +646,10 @@ export const AddAgentSchema = z.object({
   progressiveTools: z.enum(["auto", "always", "never"]).optional(),
   /** Which tools of each granted connector it gets: "*" or a missing key = all, a list = only those. */
   connectorTools: AgentConnectorToolsSchema.optional(),
+  /** Notification channels it may post to with send_notification (also needs send_notification in allowedTools). */
+  notifyChannels: AgentNotifyChannelsSchema.optional(),
+  /** send_notification messages per minute (default 5). */
+  notifyRateLimit: z.number().int().min(1).max(60).optional(),
   voiceReplies: z.enum(["off", "voice", "always"]).optional(),
   learning: z.object({
     enabled: z.boolean().optional(),
@@ -689,6 +708,10 @@ export const UpdateAgentSchema = z.object({
   /** Engine: "polpo" (default) or an official harness running in its computer ({ harness: "claude-code" | "codex" | "opencode", model?, permissionMode?, effort?, maxBudgetUsd? }); null clears it. */
   engine: AgentEngineSchema.nullable().optional(),
   emailAllowedDomains: z.array(z.string()).optional(),
+  /** Notification channels it may post to with send_notification (also needs send_notification in allowedTools); null or [] clears it (no tool). */
+  notifyChannels: AgentNotifyChannelsSchema.nullable().optional(),
+  /** send_notification messages per minute (default 5); null resets it. */
+  notifyRateLimit: z.number().int().min(1).max(60).nullable().optional(),
   team: z.string().optional(),
   // ── Versioning (see docs/agent-versions.mdx) ──
   /** false: only the draft changes. true: the draft is also published as a new version. Absent: settings.agents.versioning.autoDeployApiUpdates decides (default: publish and deploy). */
