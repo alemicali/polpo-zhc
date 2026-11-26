@@ -21,6 +21,7 @@ import { useCodingSettings } from "./coding-settings";
 import { useGitInfo } from "./use-git-info";
 import { NewWorkspacePopover } from "./workspace-controls";
 import { codingActions, useCodingState } from "./use-coding-state";
+import { canOpenAsChat } from "./chat-parts";
 import type { CodingTerminal, CodingWorkspace, PendingWorkspace } from "./types";
 
 /** A project is bound to a folder: its name is the folder's. */
@@ -313,23 +314,39 @@ function WorkspaceRow({
             const status = t.chatId ? chatStatus.get(t.chatId) : undefined;
             return (
               <li key={t.id}>
-                <button
-                  type="button"
-                  onClick={() => onSelectSession(t.id)}
-                  aria-current={t.id === activeId ? "true" : undefined}
-                  data-testid="coding-session-row"
-                  className={cn(
-                    "flex w-full items-center gap-1.5 rounded-xs px-1.5 py-1 text-left text-caption transition-colors",
-                    t.id === activeId ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
-                    t.tabHidden && "opacity-60",
-                  )}
-                >
-                  <SessionIcon terminal={t} />
-                  <span className="min-w-0 flex-1 truncate">{t.label || "Session"}</span>
-                  {status && STATUS_DOT[status] && (
-                    <span className={cn("h-1.5 w-1.5 shrink-0 rounded-pill", STATUS_DOT[status])} title={STATUS_TEXT[status]} aria-label={STATUS_TEXT[status]} />
-                  )}
-                </button>
+                <ContextMenu>
+                  <ContextMenuTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => onSelectSession(t.id)}
+                      aria-current={t.id === activeId ? "true" : undefined}
+                      data-testid="coding-session-row"
+                      className={cn(
+                        "flex w-full items-center gap-1.5 rounded-xs px-1.5 py-1 text-left text-caption transition-colors",
+                        t.id === activeId ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                        t.tabHidden && "opacity-60",
+                      )}
+                    >
+                      <SessionIcon terminal={t} />
+                      <span className="min-w-0 flex-1 truncate">{t.label || "Session"}</span>
+                      {status && STATUS_DOT[status] && (
+                        <span className={cn("h-1.5 w-1.5 shrink-0 rounded-pill", STATUS_DOT[status])} title={STATUS_TEXT[status]} aria-label={STATUS_TEXT[status]} />
+                      )}
+                    </button>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent>
+                    {canOpenAsChat(t) ? (
+                      <ContextMenuItem onClick={() => {
+                        void codingActions.openTerminalAsChat(t.id).catch((err: unknown) => toast.error(err instanceof Error ? err.message : "Could not open the session as a chat"));
+                      }}>
+                        <MessageSquare className="h-3.5 w-3.5" /> {t.convertedToChatId ? "Go to chat" : "Open as chat"}
+                      </ContextMenuItem>
+                    ) : null}
+                    <ContextMenuItem onClick={() => codingActions.closeTerminal(t.id)} variant="destructive">
+                      <Archive className="h-3.5 w-3.5" /> End session
+                    </ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
               </li>
             );
           })}

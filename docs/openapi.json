@@ -4025,6 +4025,37 @@
               "other"
             ]
           },
+          "continuedFrom": {
+            "type": "object",
+            "properties": {
+              "terminalId": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "resumeSessionId": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "resumed",
+                  "new"
+                ]
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "terminalId",
+              "status",
+              "note"
+            ],
+            "description": "Opened from a terminal session (Open as chat): what it continues, and whether the conversation was resumed"
+          },
           "usage": {
             "type": "object",
             "properties": {
@@ -4153,6 +4184,37 @@
               "interrupted",
               "other"
             ]
+          },
+          "continuedFrom": {
+            "type": "object",
+            "properties": {
+              "terminalId": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "resumeSessionId": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "resumed",
+                  "new"
+                ]
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "terminalId",
+              "status",
+              "note"
+            ],
+            "description": "Opened from a terminal session (Open as chat): what it continues, and whether the conversation was resumed"
           },
           "usage": {
             "type": "object",
@@ -4523,6 +4585,29 @@
             "type": "string",
             "maxLength": 100000,
             "description": "The first message: the turn starts at once"
+          },
+          "fromTerminal": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 200
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "description": "Open as chat: the Coding app's terminal session this chat continues (it stays open)"
+          },
+          "resumeSessionId": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "The program's conversation to resume (Claude Code: the terminal's --session-id). When your CLI account cannot read it, a new conversation starts and continuedFrom says so"
           }
         },
         "required": [
@@ -48582,7 +48667,7 @@
           "Coding"
         ],
         "summary": "Start a coding chat",
-        "description": "A new Claude Code or Codex session in a worktree (the program's working directory), on your own CLI account. With prompt the first turn starts at once. Without an account to run it the session is created with status error and errorKind no-account (lastError says how to sign in).",
+        "description": "A new Claude Code or Codex session in a worktree (the program's working directory), on your own CLI account. With prompt the first turn starts at once. With fromTerminal (and resumeSessionId) it continues a terminal session of the Coding app (Open as chat). Without an account to run it the session is created with status error and errorKind no-account (lastError says how to sign in).",
         "requestBody": {
           "required": true,
           "content": {

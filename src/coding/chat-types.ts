@@ -98,8 +98,26 @@ export interface CodingChatSession {
   usage: CodingChatUsage;
   costUsd: number;
   turns: number;
+  /** Opened from a terminal session of the Coding app ("Open as chat"): what it continues. */
+  continuedFrom?: CodingChatContinuation;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * A chat continuing a terminal session: the program's conversation is resumed when its id is known
+ * (Claude Code: the terminal's --session-id) and the opener's account can read it; otherwise the
+ * chat starts a new conversation in the same worktree, and the note says why.
+ */
+export interface CodingChatContinuation {
+  terminalId: string;
+  label?: string;
+  /** The program's conversation the chat resumes (Claude Code's session id). */
+  resumeSessionId?: string;
+  /** pending: not tried yet; resumed: the first turn continued it; new: a new conversation started. */
+  status: "pending" | "resumed" | "new";
+  /** What the chat shows first ("Continued from terminal session …"). */
+  note: string;
 }
 
 /** A session without its transcript (lists). */

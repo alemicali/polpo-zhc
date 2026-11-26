@@ -8,6 +8,11 @@ export function isChatSession(t: CodingTerminal): boolean {
   return !!t.chatId || (!!t.agentKind && t.agentKind !== "terminal" && !t.agentSessionId && !t.agentCommand);
 }
 
+/** A Claude Code / Codex terminal session (the older kind) that "Open as chat" can continue as a coding chat (not the PR one-shot command). */
+export function canOpenAsChat(t: CodingTerminal): boolean {
+  return !isChatSession(t) && (t.agentKind === "claude" || t.agentKind === "codex") && !t.agentCommand;
+}
+
 const TOOL_STATE: Record<string, ToolCallInfo["state"]> = { running: "calling", completed: "completed", error: "error", interrupted: "interrupted" };
 
 export type ChatPart = { kind: "segments"; segments: MessageSegment[] } | { kind: "approval"; approvalId: string };

@@ -49,6 +49,19 @@ export const CHANGELOG: ChangelogEntry[] = [
     cta: { label: "Apri gli agenti", to: "/agents" },
   },
   {
+    id: "2026-11-26-coding-open-as-chat",
+    date: "2026-11-26",
+    kind: "improved",
+    title: "Coding: apri come chat le vecchie sessioni terminale",
+    summary: "Una sessione Claude Code o Codex aperta nel terminale ora si può continuare come chat, nello stesso worktree e con il tuo account: Claude Code riprende la stessa conversazione.",
+    body: [
+      "- **Apri come chat**: nell'intestazione della sessione terminale o nel menu della sessione nella barra laterale. La chat si apre nello stesso worktree e la sessione terminale resta (con **Vai alla chat**).",
+      "- **Claude Code riprende la stessa conversazione** quando il tuo account CLI può leggerla; se il terminale usava un altro accesso (quello del server), la chat ne inizia una nuova e te lo dice. **Codex** non tiene un id che Polpo possa riprendere: nuova conversazione nello stesso worktree, detto nella chat.",
+      "- La chat si apre con «Continuata dalla sessione terminale …». Anche via API, MCP e nella chat con Polpo.",
+    ].join("\n"),
+    cta: { label: "Apri Coding", to: "/coding" },
+  },
+  {
     id: "2026-11-26-coding-cli-chat",
     date: "2026-11-26",
     kind: "new",

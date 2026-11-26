@@ -403,6 +403,41 @@ export const codingActions = {
     codingActions.addTerminal(pending.projectId, { agentKind: kind, cwdOverride: pending.cwd, branch: pending.branch, workspaceLabel: pending.label });
     set((cur) => ({ pendingWorkspaces: cur.pendingWorkspaces.filter((p) => p.key !== pending.key), activePendingKey: null }));
   },
+  /**
+   * "Open as chat": a Claude Code / Codex terminal session continues as a coding chat in the same
+   * worktree, resuming the same conversation when its id is known (Claude Code's --session-id).
+   * The terminal stays (marked converted); the view moves to the chat. Already converted: its chat.
+   */
+  async openTerminalAsChat(terminalId: string): Promise<void> {
+    const s = init();
+    const t = s.terminals.find((x) => x.id === terminalId);
+    if (!t || !t.agentKind || t.agentKind === "terminal") throw new Error("Only Claude Code and Codex terminal sessions can be opened as a chat");
+    const existing = t.convertedToChatId ? s.terminals.find((x) => x.chatId === t.convertedToChatId) : undefined;
+    if (existing) { codingActions.unhideTerminalTab(existing.id); return; }
+    const kind = t.agentKind;
+    const res = await apiFetch(apiUrl("/api/v1/coding/chats"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        kind, cwd: sessionCwd(s, t), workspaceId: t.workspaceId,
+        ...(t.branch ? { branch: t.branch } : {}),
+        title: `${t.label || "Session"} (chat)`,
+        fromTerminal: { id: t.id, ...(t.label ? { label: t.label } : {}) },
+        // Claude Code's terminal ran with --session-id <agentSessionId>: the chat resumes it
+        ...(kind === "claude" && t.agentSessionId ? { resumeSessionId: t.agentSessionId } : {}),
+      }),
+    });
+    const body = await res.json().catch(() => null);
+    if (!res.ok || !body?.ok) throw new Error(body?.error || `Could not open the session as a chat (${res.status})`);
+    const chatId = body.data.id as string;
+    codingActions.addTerminal(t.workspaceId, {
+      agentKind: kind, chatId, label: `${t.label || "Session"} (chat)`,
+      ...(t.cwdOverride ? { cwdOverride: t.cwdOverride } : {}),
+      ...(t.branch ? { branch: t.branch } : {}),
+      ...(t.workspaceLabel ? { workspaceLabel: t.workspaceLabel } : {}),
+    });
+    set((cur) => ({ terminals: cur.terminals.map((x) => (x.id === terminalId ? { ...x, convertedToChatId: chatId } : x)) }));
+  },
   /** Open a coding chat by its id (a link: /coding?chat=…): its session, or a new tab for it. */
   async openChat(chatId: string): Promise<void> {
     const s = init();

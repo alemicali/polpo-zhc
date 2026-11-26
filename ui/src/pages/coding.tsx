@@ -16,6 +16,7 @@ import {
   GitPullRequest as GitPullRequestIcon,
   Laptop,
   ListTree,
+  MessageSquare,
   Loader2,
   PanelRight,
   RefreshCcw,
@@ -34,7 +35,7 @@ import { RightPanel } from "./coding/right-panel";
 import { SessionTabs } from "./coding/session-tabs";
 import { TerminalSession } from "./coding/terminal-session";
 import { CodingChatPane } from "./coding/coding-chat";
-import { isChatSession } from "./coding/chat-parts";
+import { canOpenAsChat, isChatSession } from "./coding/chat-parts";
 import { EmptyWorkspaceQuickStart } from "./coding/empty-quickstart";
 import { useCodingSettings } from "./coding/coding-settings";
 import { useLocalState } from "./coding/use-local-state";
@@ -270,6 +271,9 @@ export function CodingPage() {
                   onRename={renameTerminal}
                   onAddTerminal={addTerminal}
                 />
+                {activeTerminal && canOpenAsChat(activeTerminal) && (
+                  <OpenAsChatBar terminal={activeTerminal} chats={terminals} />
+                )}
                 <div className="relative min-h-0 flex-1">
                   {terminals.map((terminal) => {
                     const ws = workspaces.find((w) => w.id === terminal.workspaceId);
@@ -329,6 +333,34 @@ export function CodingPage() {
   );
 }
 
+
+/** The header of an older Claude Code / Codex terminal session: continue it as a coding chat. */
+function OpenAsChatBar({ terminal, chats }: { terminal: CodingTerminal; chats: CodingTerminal[] }) {
+  const [busy, setBusy] = useState(false);
+  const program = terminal.agentKind === "codex" ? "Codex" : "Claude Code";
+  const converted = terminal.convertedToChatId ? chats.find((t) => t.chatId === terminal.convertedToChatId) : undefined;
+  const open = async () => {
+    setBusy(true);
+    try {
+      await codingActions.openTerminalAsChat(terminal.id);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not open the session as a chat");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border/60 px-3 text-caption text-muted-foreground" data-testid="coding-terminal-header">
+      <span className="min-w-0 flex-1 truncate">
+        {program} in a terminal{converted ? ` · continued as the chat “${converted.label}”` : ""}
+      </span>
+      <Button variant="outline" size="sm" className="h-7 gap-1.5 px-2 text-xs" disabled={busy} onClick={() => void open()}>
+        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" /> : <MessageSquare className="h-3.5 w-3.5" />}
+        {converted ? "Go to chat" : "Open as chat"}
+      </Button>
+    </div>
+  );
+}
 
 function EndpointBadge() {
   const local = isLocalEndpoint();
