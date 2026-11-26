@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { rmSync, existsSync } from "node:fs";
 import { Orchestrator, buildRetryPrompt } from "../core/orchestrator.js";
 import { executeOrchestratorTool } from "../llm/orchestrator-tools.js";
@@ -320,6 +320,26 @@ describe("Orchestrator", () => {
       expect(got).toContain("claude-sonnet-4-5 (Claude Code · Harness) via Bedrock · on computer gpu (daytona v2)");
       const list = await executeOrchestratorTool("list_tasks", { status: "failed" }, orchestrator);
       expect(list).toContain(`— failed (model_access): ${stderr} (not retried)`);
+    });
+
+    it("get_task, list_tasks and get_mission say a task a decision left out was not reached, never done", async () => {
+      // the test store has no missions: the mission is read through the orchestrator
+      const mission = { id: "m-ticket", name: "ticket", status: "completed", data: "{}", createdAt: "", updatedAt: "" } as const;
+      vi.spyOn(orchestrator, "getMission").mockResolvedValue(mission as never);
+      vi.spyOn(orchestrator, "getMissionCost").mockRejectedValue(new Error("no cost"));
+      const ran = await orchestrator.addTask({ title: "Reply", description: "x", assignTo: "agent-1" });
+      const left = await orchestrator.addTask({ title: "Refund", description: "x", assignTo: "agent-1" });
+      const skipped = { reason: "decision" as const, node: "route", branch: "support", answer: "decision: support (0.81)", confidence: 0.81 };
+      await store.updateTask(ran.id, { status: "done", missionId: mission.id, result: { exitCode: 0, stdout: "answered", stderr: "", duration: 1 } });
+      await store.updateTask(left.id, { status: "done", missionId: mission.id, result: { exitCode: 0, stdout: 'Skipped: the decision "route" took the branch "support" (decision: support (0.81))', stderr: "", duration: 0, skipped } });
+      const got = await executeOrchestratorTool("get_task", { id: left.id }, orchestrator);
+      expect(got).toContain('Not reached: the decision "route" chose "support" (answer: decision: support (0.81))');
+      const list = await executeOrchestratorTool("list_tasks", { status: "done" }, orchestrator);
+      expect(list).toMatch(new RegExp(`\\[${left.id}\\] NOT REACHED +Refund`));
+      expect(list).toMatch(new RegExp(`\\[${ran.id}\\] DONE +Reply`));
+      const m = await executeOrchestratorTool("get_mission", { id: mission.id }, orchestrator);
+      expect(m).toContain("Tasks: 1 done, 0 failed, 0 running, 0 waiting, 1 not reached (of 2)");
+      expect(m).toContain('Refund — Not reached: the decision "route" chose "support"');
     });
 
     it("creates a team and moves an agent through hot orchestrator tools", async () => {

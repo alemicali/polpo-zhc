@@ -60,7 +60,8 @@ import {
 import type { Task, TaskStatus, AgentProcess, AgentConfig } from "@polpo-ai/react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
-import { taskStatusStyles, taskPhaseStyles } from "@/lib/status-tokens";
+import { taskStatusStyles, taskPhaseStyles, taskNotReachedStyle } from "@/lib/status-tokens";
+import { displayTaskStatus, isNotReached, notReachedOf, notReachedTooltip, taskDisplayStyle } from "@/lib/task-not-reached";
 import { MultiSelectFilter } from "@/components/shared/multi-select-filter";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { TaskCostBadge, TaskEngineBadge } from "@/components/shared/run-context";
@@ -107,7 +108,9 @@ const TaskRow = memo(function TaskRow({
 }) {
   const { retry, kill, queue, click } = useTaskActions();
   const { fields, agentConfigMap } = useCardSettings();
-  const cfg = statusConfig[task.status];
+  // a task a decision left out shows "Not reached" (muted, dashed), never done
+  const cfg = taskDisplayStyle(task);
+  const skip = notReachedOf(task);
   const Icon = cfg.icon;
   const assessment = task.result?.assessment;
   const phase = task.phase && task.phase !== "execution" ? phaseConfig[task.phase] : null;
@@ -128,7 +131,9 @@ const TaskRow = memo(function TaskRow({
         "hover:shadow-raised hover:border-primary/25",
         "bg-card shadow-card",
         isBlocked ? "border-warning/40 bg-warning/[0.03]" : "border-border",
+        skip && "border-dashed opacity-60 shadow-none",
       )}
+      data-not-reached={skip ? "true" : undefined}
       onClick={() => click(task.id)}
     >
       {/* Status icon */}
@@ -136,7 +141,7 @@ const TaskRow = memo(function TaskRow({
         <TooltipTrigger asChild>
           <Icon className={cn("h-4 w-4 shrink-0", cfg.color, task.status === "in_progress" && "animate-spin")} />
         </TooltipTrigger>
-        <TooltipContent side="left" className="text-xs">{cfg.label}</TooltipContent>
+        <TooltipContent side="left" className="text-xs">{skip ? `${cfg.label}: ${notReachedTooltip(skip)}` : cfg.label}</TooltipContent>
       </Tooltip>
 
       {/* Title — takes remaining space */}
@@ -291,8 +296,10 @@ const statusKanbanColumns: { key: string; label: string; filter: (t: Task) => bo
   { key: "queued", label: "Queued", filter: (t) => t.status === "pending" || t.status === "assigned" },
   { key: "in_progress", label: "Running", filter: (t) => t.status === "in_progress" },
   { key: "review", label: "Review", filter: (t) => t.status === "review" },
-  { key: "done", label: "Done", filter: (t) => t.status === "done" },
+  { key: "done", label: "Done", filter: (t) => t.status === "done" && !isNotReached(t) },
   { key: "failed", label: "Failed", filter: (t) => t.status === "failed" },
+  // closed without running: a decision node took another branch
+  { key: "not_reached", label: "Not reached", filter: (t) => isNotReached(t) },
 ];
 
 // ── Column-by modes for Kanban ──
@@ -317,7 +324,8 @@ function buildDynamicColumns(
 ): DynamicColumn[] {
   switch (mode) {
     case "status":
-      return statusKanbanColumns;
+      // the "Not reached" column only when a decision left tasks out
+      return tasks.some(isNotReached) ? statusKanbanColumns : statusKanbanColumns.filter((c) => c.key !== "not_reached");
     case "mission": {
       const groups = new Set<string>();
       let hasUngrouped = false;
@@ -358,7 +366,7 @@ function buildDynamicColumns(
       return cols.length > 0 ? cols : [{ key: "agent:__all__", label: "All tasks", filter: () => true }];
     }
     default:
-      return statusKanbanColumns;
+      return statusKanbanColumns.filter((c) => c.key !== "not_reached" || tasks.some(isNotReached));
   }
 }
 
@@ -391,7 +399,9 @@ const TaskCard = memo(function TaskCard({
   const { retry, kill, queue, click } = useTaskActions();
   const { fields, agentConfigMap } = useCardSettings();
   const compact = size === "compact";
-  const cfg = statusConfig[task.status];
+  // a task a decision left out shows "Not reached" (muted, dashed), never done
+  const cfg = taskDisplayStyle(task);
+  const skip = notReachedOf(task);
   const Icon = cfg.icon;
   const assessment = task.result?.assessment;
   const phase = task.phase && task.phase !== "execution" ? phaseConfig[task.phase] : null;
@@ -426,8 +436,10 @@ const TaskCard = memo(function TaskCard({
         isBlocked
           ? "border-warning/40 bg-warning/[0.03]"
           : "border-border",
+        skip && "border-dashed opacity-60 shadow-none",
         compact ? "p-2" : "p-2.5",
       )}
+      data-not-reached={skip ? "true" : undefined}
       onClick={() => click(task.id)}
     >
       <div className="flex gap-2 w-full min-w-0">
@@ -466,7 +478,7 @@ const TaskCard = memo(function TaskCard({
               <TooltipTrigger asChild>
                 <Icon className={cn("h-3.5 w-3.5 shrink-0 mt-0.5", cfg.color, task.status === "in_progress" && "animate-spin")} />
               </TooltipTrigger>
-              <TooltipContent side="left" className="text-xs">{cfg.label}</TooltipContent>
+              <TooltipContent side="left" className="text-xs">{skip ? `${cfg.label}: ${notReachedTooltip(skip)}` : cfg.label}</TooltipContent>
             </Tooltip>
             <p
               className={cn("font-medium leading-snug", compact ? "text-xs" : "text-sm")}
@@ -640,7 +652,7 @@ function groupTasksBy(
     let key: string;
     switch (mode) {
       case "status":
-        key = task.status;
+        key = displayTaskStatus(task);
         break;
       case "mission":
         key = task.group || "__ungrouped__";
@@ -669,7 +681,7 @@ function getGroupLabel(mode: GroupByKey, key: string): string {
     }
   }
   if (mode === "status") {
-    return statusConfig[key as TaskStatus]?.label ?? key;
+    return key === "not_reached" ? taskNotReachedStyle.label : statusConfig[key as TaskStatus]?.label ?? key;
   }
   return key;
 }
@@ -694,7 +706,7 @@ function GroupBlock({
   const [open, setOpen] = useState(false);
 
   const running = tasks.filter(t => t.status === "in_progress").length;
-  const done = tasks.filter(t => t.status === "done").length;
+  const done = tasks.filter(t => t.status === "done" && !isNotReached(t)).length;
   const failed = tasks.filter(t => t.status === "failed").length;
 
   return (
@@ -781,9 +793,11 @@ function KanbanColumn({
 
   // Status dot color — resolve from statusConfig when column-by is status
   const statusKey = col.key === "queued" ? "pending" : col.key;
-  const colCfg = columnBy === "status" && statusKey in statusConfig
-    ? statusConfig[statusKey as TaskStatus]
-    : null;
+  const colCfg = columnBy === "status" && statusKey === "not_reached"
+    ? taskNotReachedStyle
+    : columnBy === "status" && statusKey in statusConfig
+      ? statusConfig[statusKey as TaskStatus]
+      : null;
 
   // Effective groupBy: skip if same dimension as columns (redundant)
   const effectiveGroupBy = groupBy === columnBy ? "none" : groupBy;
@@ -944,6 +958,9 @@ function ListView({
   const filtered = useMemo(
     () => tasks.filter((t) => {
       if (tab === "pending") return t.status === "pending" || t.status === "assigned";
+      // done: what ran; not reached: what a decision left out (done without running)
+      if (tab === "not_reached") return isNotReached(t);
+      if (tab === "done") return t.status === "done" && !isNotReached(t);
       if (tab !== "all" && t.status !== tab) return false;
       return true;
     }),
@@ -954,12 +971,12 @@ function ListView({
   // Note: counts reflect the LOADED page, not the global total — with
   // cursor pagination we don't know the total until we've fetched it.
   const counts = useMemo(() => {
-    const c = { all: tasks.length, pending: 0, in_progress: 0, review: 0, done: 0, failed: 0 };
+    const c = { all: tasks.length, pending: 0, in_progress: 0, review: 0, done: 0, failed: 0, not_reached: 0 };
     for (const t of tasks) {
       if (t.status === "pending" || t.status === "assigned") c.pending++;
       else if (t.status === "in_progress") c.in_progress++;
       else if (t.status === "review") c.review++;
-      else if (t.status === "done") c.done++;
+      else if (t.status === "done") { if (isNotReached(t)) c.not_reached++; else c.done++; }
       else if (t.status === "failed") c.failed++;
     }
     return c;
@@ -972,6 +989,7 @@ function ListView({
     { value: "done", label: "Done", count: counts.done },
     { value: "failed", label: "Failed", count: counts.failed },
     { value: "pending", label: "Queued", count: counts.pending },
+    ...(counts.not_reached > 0 ? [{ value: "not_reached", label: "Not reached", count: counts.not_reached }] : []),
   ];
 
   // Pre-build a Map for O(1) process lookups in itemContent — re-rendered

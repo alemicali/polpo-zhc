@@ -53,6 +53,8 @@ export function defaultTitle(ctx: TemplateContext): string {
     case "task:created":
       return `${emoji} Task Created: ${str(field(data, "task"), "title")}`;
     case "task:transition":
+      // a decision node closed it without running: not "done"
+      if (bool(data, "skipped")) return `${emoji} Task not reached: ${str(field(data, "task"), "title")}`;
       return `${emoji} Task ${str(data, "from")} → ${str(data, "to")}`;
     case "task:retry":
       return `${emoji} Task Retry (${num(data, "attempt")}/${num(data, "maxRetries")})`;

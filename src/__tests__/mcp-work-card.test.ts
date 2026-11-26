@@ -149,6 +149,23 @@ describe("the task and mission cards", () => {
     expect(missionCardText(mission)).toContain("· tools restricted");
   });
 
+  it("tasks a decision left out: Not reached on the mission and task cards, counted apart from done (marker and legacy text)", () => {
+    const skipped = { ...TASKS[0], id: "t9", title: "Refund", runs: [], result: { exitCode: 0, stdout: 'Skipped: the decision "route" took the branch "support" (decision: support (0.81))', stderr: "", duration: 0, skipped: { reason: "decision", node: "route", branch: "support", answer: "decision: support (0.81)", confidence: 0.81 } } };
+    const legacy = { ...TASKS[0], id: "t8", title: "Escalate", runs: [], result: { exitCode: 0, stdout: 'Skipped: the decision "route" took no branch (no answer)', stderr: "", duration: 0 } };
+    const mission = buildMissionCard({ mission: MISSION as never, tasks: [TASKS[0], skipped, legacy] as never, now: new Date(), key });
+    expect(mission.counts).toEqual({ done: 1, not_reached: 2 });
+    expect(mission.tasks[1]!.notReached).toMatchObject({ node: "route", branch: "support" });
+    expect(mission.tasks[2]!.notReached).toMatchObject({ node: "route", branch: null });
+    expect(mission.tasks[0]!.notReached).toBeUndefined();
+    const text = missionCardText(mission);
+    expect(text).toContain("Tasks: 1 done, 2 not reached");
+    expect(text).toContain('- t9 [not reached] Refund');
+    expect(text).toContain('Not reached: the decision "route" chose "support"');
+    const card = buildTaskCard({ task: skipped as never, tasks: [], now: new Date(), key });
+    expect(taskCardText(card)).toMatch(/^t9 \[not reached\] Refund/);
+    expect(taskCardText(card)).toContain("closed without running");
+  });
+
   it("a mission card: cost against the budget (over), by engine with marks, tasks with their latest run and failure", () => {
     const card = buildMissionCard({ mission: MISSION as never, tasks: TASKS as never, now: new Date(), key });
     expect(card.cost).toMatchObject({ usd: 0.62, budgetUsd: 0.5, overBudget: true, budgetUsed: 1.24 });

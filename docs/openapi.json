@@ -8277,10 +8277,10 @@
                   ]
                 }
               ],
-              "description": "Alias for `summary=true`. Returns the slim projection (id, title, status, phase, assignTo, group, missionId, dependsOn, retries, timestamps, optional slim assessment, descriptionPreview, lastRun, cost (every run's total), failure, toolScope)."
+              "description": "Alias for `summary=true`. Returns the slim projection (id, title, status, phase, assignTo, group, missionId, dependsOn, retries, timestamps, optional slim assessment, descriptionPreview, lastRun, cost (every run's total), failure, notReached (a decision node left it out: done without running), toolScope)."
             },
             "required": false,
-            "description": "Alias for `summary=true`. Returns the slim projection (id, title, status, phase, assignTo, group, missionId, dependsOn, retries, timestamps, optional slim assessment, descriptionPreview, lastRun, cost (every run's total), failure, toolScope).",
+            "description": "Alias for `summary=true`. Returns the slim projection (id, title, status, phase, assignTo, group, missionId, dependsOn, retries, timestamps, optional slim assessment, descriptionPreview, lastRun, cost (every run's total), failure, notReached (a decision node left it out: done without running), toolScope).",
             "name": "slim",
             "in": "query"
           },
@@ -8779,7 +8779,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Task details. `runs`: where and with what each run executed (engine polpo / claude-code / codex / opencode, model, auth kind, computer, sandbox, egress, harness session, cost, budget, status, duration), newest last. `result.stderr` of a failed task is its labelled reason (a harness error says what to change); `result.retryable: false`: it was not retried automatically (model not enabled for the account, credentials refused). `failure` sums it up: `{ reason, retryable, kind }` (kind: model_access, auth, budget, killed, assessment, error). `cost`: what every run of the task cost in all (first run, retries, continuations, directions): `{ usd, harnessUsd, modelUsd, tokens, runs, lastRunUsd, byEngine, perRun, partial, recoveredUsd? }` — `partial: true` when older runs were dropped (a task keeps its latest 20) and could not be recovered from the usage records.",
+            "description": "Task details. `runs`: where and with what each run executed (engine polpo / claude-code / codex / opencode, model, auth kind, computer, sandbox, egress, harness session, cost, budget, status, duration), newest last. `result.stderr` of a failed task is its labelled reason (a harness error says what to change); `result.retryable: false`: it was not retried automatically (model not enabled for the account, credentials refused). `failure` sums it up: `{ reason, retryable, kind }` (kind: model_access, auth, budget, killed, assessment, error). `cost`: what every run of the task cost in all (first run, retries, continuations, directions): `{ usd, harnessUsd, modelUsd, tokens, runs, lastRunUsd, byEngine, perRun, partial, recoveredUsd? }` — `partial: true` when older runs were dropped (a task keeps its latest 20) and could not be recovered from the usage records. `notReached`: a mission decision node took another branch, so the task was closed (status `done`) without running: `{ reason: \"decision\", node, branch, answer?, confidence?, decidedBy?, at? }` (also in `result.skipped`; tasks skipped before that field existed are recognised from their result text).",
             "content": {
               "application/json": {
                 "schema": {

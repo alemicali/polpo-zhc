@@ -257,6 +257,7 @@ export * from "./harnesses.js";
 // Gateways (one resolver: name → base URL, key from the vault or env, allowed hosts) and decisions (typed judgments with probabilities)
 export * from "./gateways.js";
 export * from "./decisions.js";
+export * from "./task-skip.js";
 // Media: image generation and editing through the gateway resolver, the media log, image nodes
 export * from "./media.js";
 // The CLI engine: the official Claude Code / Codex programs signed in with a person's own account

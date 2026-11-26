@@ -25,6 +25,7 @@ import type {
 } from "@polpo-ai/react";
 import { taskStatusOrder } from "@/lib/agent-meta";
 import { toolCategories } from "@/lib/agent-meta";
+import { isNotReached } from "@/lib/task-not-reached";
 import { useAsyncAction } from "@/hooks/use-polpo";
 import { AgentDetailContext } from "./agent-detail-context";
 import type { AgentDetailContextValue, TaskStats } from "./agent-detail-context";
@@ -78,7 +79,8 @@ export function AgentDetailProvider({ children }: { children: React.ReactNode })
 
   // Task stats
   const taskStats = useMemo<TaskStats>(() => {
-    const done = agentTasks.filter((t: Task) => t.status === "done").length;
+    // a task a decision left out (done without running) is not work the agent did
+    const done = agentTasks.filter((t: Task) => t.status === "done" && !isNotReached(t)).length;
     const failed = agentTasks.filter((t: Task) => t.status === "failed").length;
     const active = agentTasks.filter((t: Task) => t.status === "in_progress" || t.status === "review" || t.status === "assigned").length;
     const pending = agentTasks.filter((t: Task) => t.status === "pending" || t.status === "awaiting_approval" || t.status === "draft").length;

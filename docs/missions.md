@@ -189,8 +189,11 @@ task (see above).
 
 A decision node lets the decision model pick a branch: after its `afterTasks`, a typed decision
 (yes/no, a choice, a score, a rank) on their results runs one branch's tasks and skips the others;
-an uncertain answer pauses the mission for a person (a checkpoint `Decision: <name>`). See
-docs/decisions.md → "Decision nodes in missions and playbooks".
+an uncertain answer pauses the mission for a person (a checkpoint `Decision: <name>`). The skipped
+tasks are **not reached**: closed (status `done`, so joins and completion work) without running,
+with `result.skipped` saying which decision chose which branch. Every surface shows them as "Not
+reached" and leaves them out of the done counts (`n not reached`). See docs/decisions.md →
+"Decision nodes in missions and playbooks".
 
 ```json
 { "name": "route", "afterTasks": ["Triage"], "question": { "type": "predicate", "instructions": "Is it a refund request?" },

@@ -105,6 +105,11 @@ export {
   selectEvents,
   selectAssessmentProgress,
   selectAssessmentChecks,
+  taskSkip,
+  taskSkipText,
+  taskSkipLabel,
+  isTaskNotReached,
+  countTaskOutcomes,
 } from "@polpo-ai/sdk";
 
 // Re-export all types from client SDK
@@ -389,7 +394,7 @@ export type {
   TriggerActionKind, TriggerActionStatus, TriggerActionsStatus, TriggerAction, TriggerActionInput, TriggerPlaybookAction, TriggerMissionAction,
   TriggerTaskAction, TriggerAgentAction, TriggerNotifyAction, TriggerDeliverTo, TriggerActionLimits, TriggerActionRefs, TriggerActionRun, TriggerActionPreview, WorkOrigin,
   DecisionQuestionType, DecisionQuestion, DecisionFallbackModel, DecisionModelSetting, DecisionSettings, DecideRequest, DecisionAnswer, DecisionUsage, DecideResult,
-  DecisionCallerKind, DecisionLogSummary, DecisionLogEntry, DecisionLogPage, DecisionStatus, DecisionNodeState, MissionDecision,
+  DecisionCallerKind, DecisionLogSummary, DecisionLogEntry, DecisionLogPage, DecisionStatus, DecisionNodeState, MissionDecision, TaskSkip,
   AgentTalksTo, AgentLinesMode, AgentLines, AgentLinesChart,
   ImageInput, GenerateImageRequest, EditImageRequest, MediaAsset, MediaImage, MediaResult, MediaCallerKind, MediaCaller, MediaLogEntry, MediaLogPage,
   MediaStatus, MediaSettings, ImageNodeState, MissionImage,

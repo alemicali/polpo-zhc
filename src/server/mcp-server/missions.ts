@@ -9,7 +9,8 @@ import {
   limitParam, looseObject, ok, page, pageOutput, progress, short, sleep,
   type McpDeps, type Register,
 } from "./kit.js";
-import { taskLine, taskSummary, toolScopeFromArgs, toolScopeInput, unknownAgents } from "./tasks.js";
+import { notReachedOf, taskLine, taskSummary, toolScopeFromArgs, toolScopeInput, unknownAgents } from "./tasks.js";
+import type { TaskSkip } from "@polpo-ai/core/task-skip";
 import { describeMissionCost, type MissionCost, type MissionCostSummary } from "@polpo-ai/core/mission-cost";
 
 export const MISSION_STATUSES = ["draft", "scheduled", "recurring", "active", "paused", "completed", "failed", "cancelled"] as const;
@@ -49,7 +50,7 @@ function costTag(spent: number | undefined, budget: number | undefined): string 
 
 const budgetParam = () => z.number().positive().max(1_000_000).optional()
   .describe("Spending limit in USD for the whole mission (all its tasks' runs, retries included): when reached, no new task starts and the mission pauses until it is raised or cleared");
-type TaskRow = { id: string; title: string; status: string; assignTo?: string; group?: string; missionId?: string; updatedAt?: string };
+type TaskRow = { id: string; title: string; status: string; assignTo?: string; group?: string; missionId?: string; updatedAt?: string; notReached?: TaskSkip; result?: unknown };
 
 /**
  * The latest run of a scheduled or recurring mission: its run number and its tasks (a run's task
@@ -154,13 +155,17 @@ async function missionTasks(deps: McpDeps, missionId: string): Promise<TaskRow[]
   return (r.data as TaskRow[]).filter((t) => t.missionId === missionId);
 }
 
+/** Tasks per status; the ones a decision node left out (done without running) count as not_reached, not done. */
 function counts(tasks: TaskRow[]): Record<string, number> {
   const out: Record<string, number> = {};
-  for (const t of tasks) out[t.status] = (out[t.status] ?? 0) + 1;
+  for (const t of tasks) {
+    const k = notReachedOf(t) ? "not_reached" : t.status;
+    out[k] = (out[k] ?? 0) + 1;
+  }
   return out;
 }
 
-const countText = (c: Record<string, number>) => Object.entries(c).map(([k, v]) => `${v} ${k}`).join(", ") || "no tasks yet";
+const countText = (c: Record<string, number>) => Object.entries(c).map(([k, v]) => `${v} ${k === "not_reached" ? "not reached" : k}`).join(", ") || "no tasks yet";
 
 function planOf(m: Mission): Record<string, unknown> | undefined {
   if (!m.data) return undefined;
@@ -403,7 +408,7 @@ export function registerMissionTools(tool: Register, deps: McpDeps): void {
       if (!m.ok) return m.status === 404 ? notFound(id) : apiError(m, `Reading mission ${id}`);
       const tasks = await missionTasks(deps, id);
       const c = counts(tasks);
-      const done = c.done ?? 0;
+      const done = (c.done ?? 0) + (c.not_reached ?? 0); // finished: ran, or left out by a decision
       const waited = Math.round((Date.now() - started) / 100) / 10;
       const state = `${m.mission.status} ${JSON.stringify(c)}`;
       if (state !== last) { await progress(extra, done, tasks.length || undefined, `${m.mission.name}: ${m.mission.status}, ${countText(c)}`); last = state; }

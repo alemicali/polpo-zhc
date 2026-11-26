@@ -45,6 +45,7 @@ import { agentEffectiveModel, agentEngineIdOf, modelWithEngineText } from "@polp
 import { computeTaskCost, describeTaskCost, usdText } from "@polpo-ai/core/task-cost";
 import { describeTaskRun } from "@polpo-ai/core/run-context";
 import { describeTaskFailure, taskFailure } from "@polpo-ai/core/task-failure";
+import { countTaskOutcomes, taskSkip, taskSkipLabel } from "@polpo-ai/core/task-skip";
 import { parseSince } from "@polpo-ai/core/iso-duration";
 import { resolveDependencies } from "@polpo-ai/core";
 import { createCliStores } from "../cli/stores.js";
@@ -3809,11 +3810,13 @@ async function execListTasks(polpo: Orchestrator, args: Record<string, unknown>)
   const lines = shown.map(t => {
     const failure = taskFailure(t);
     const cost = t.runs?.length ? computeTaskCost(t) : undefined;
-    return `[${t.id}] ${t.status.toUpperCase().padEnd(11)} ${t.title} → ${t.assignTo}${t.group ? ` (${t.group})` : ""}`
+    const skip = taskSkip(t);
+    return `[${t.id}] ${(skip ? "NOT REACHED" : t.status.toUpperCase()).padEnd(11)} ${t.title} → ${t.assignTo}${t.group ? ` (${t.group})` : ""}`
       + ` · created ${t.createdAt} · updated ${t.updatedAt}`
       + (t.toolScope ? " · tools restricted" : "")
       + (cost && cost.usd > 0 ? ` · ${usdText(cost.usd)}${cost.partial ? "+" : ""}${cost.runs > 1 ? ` over ${cost.runs} runs` : ""}` : "")
-      + (failure ? ` — failed (${failure.kind}): ${failure.reason.slice(0, 300)}${failure.retryable ? "" : " (not retried)"}` : "");
+      + (failure ? ` — failed (${failure.kind}): ${failure.reason.slice(0, 300)}${failure.retryable ? "" : " (not retried)"}` : "")
+      + (skip ? ` — ${taskSkipLabel(skip)} (closed without running: not work done)` : "");
   });
   return `${tasks.length} task(s)${window.length ? ` ${window.join(", ")}` : ""}${shown.length < tasks.length ? `, newest ${shown.length} shown` : ""} (now ${new Date(now).toISOString()}):\n${lines.join("\n")}`;
 }
@@ -3830,9 +3833,11 @@ async function execGetTask(polpo: Orchestrator, args: Record<string, unknown>): 
   const summary: string[] = [];
   const failure = taskFailure(task);
   if (failure) summary.push(`Failed: ${describeTaskFailure(failure)}`);
+  const skip = taskSkip(task);
+  if (skip) summary.push(`${taskSkipLabel(skip)}${skip.answer ? ` (answer: ${skip.answer})` : ""}: it was closed (status done) without running. Say it was not reached, never that it was done.`);
   if (task.dependsOn?.length) {
     const { tasks: deps, missing } = resolveDependencies(task, await store.getAllTasks());
-    summary.push(`Depends on: ${[...deps.map((d) => `${d.title} [${d.status}] (${d.id})`), ...missing.map((m) => `${m} [missing]`)].join(", ")}`);
+    summary.push(`Depends on: ${[...deps.map((d) => `${d.title} [${taskSkip(d) ? "not reached" : d.status}] (${d.id})`), ...missing.map((m) => `${m} [missing]`)].join(", ")}`);
   }
   if (task.toolScope) {
     let connectors: Parameters<typeof describeTaskToolScope>[1] = [];
@@ -3872,7 +3877,15 @@ async function execGetMission(polpo: Orchestrator, args: Record<string, unknown>
   }
   if (!mission) return "Mission not found.";
   const cost = await polpo.getMissionCost(mission.id).catch(() => undefined);
-  return `${JSON.stringify(cost ? { ...mission, cost } : mission, null, 2)}${cost ? `\n\n${describeMissionCost(cost)}` : ""}`;
+  // its tasks' progress: a task a decision node left out is "not reached", never done
+  const own = (await polpo.getStore().getAllTasks()).filter((t) => t.missionId === mission.id);
+  const tally = countTaskOutcomes(own);
+  const notReached = own.map((t) => ({ t, s: taskSkip(t) })).filter((x) => x.s);
+  const progress = own.length
+    ? `Tasks: ${tally.done} done, ${tally.failed} failed, ${tally.active} running, ${tally.total - tally.done - tally.failed - tally.active - tally.notReached} waiting${tally.notReached ? `, ${tally.notReached} not reached` : ""} (of ${tally.total})`
+      + (notReached.length ? `\nNot reached (a decision took another branch; closed without running): ${notReached.map((x) => `${x.t.title} — ${taskSkipLabel(x.s!)}`).join("; ")}` : "")
+    : "";
+  return `${JSON.stringify(cost ? { ...mission, cost } : mission, null, 2)}${cost ? `\n\n${describeMissionCost(cost)}` : ""}${progress ? `\n\n${progress}` : ""}`;
 }
 
 async function execListAgents(polpo: Orchestrator): Promise<string> {

@@ -38,6 +38,7 @@ import { useTasks, useMissions, useProcesses, useAgents } from "@polpo-ai/react"
 import type { Task, AgentProcess, PolpoStats } from "@polpo-ai/react";
 import { cn } from "@/lib/utils";
 import { taskStatusStyles, taskPhaseStyles } from "@/lib/status-tokens";
+import { isNotReached } from "@/lib/task-not-reached";
 import { Eyebrow } from "@/components/shared/eyebrow";
 import { StatValue, type StatTone } from "@/components/shared/stat-value";
 import { useTokenUsage, type TokenUsageRange } from "@/hooks/use-token-usage";
@@ -230,7 +231,9 @@ const progressChartConfig = {
   queued: { label: "Queued", color: STATUS_COLORS.queued },
 } satisfies ChartConfig;
 
-const TaskProgress = memo(function TaskProgress({ tasks, range, now }: { tasks: Task[]; range: TokenUsageRange; now: number }) {
+const TaskProgress = memo(function TaskProgress({ tasks: allTasks, range, now }: { tasks: Task[]; range: TokenUsageRange; now: number }) {
+  // tasks a decision left out (done without running) are neither done nor work to do
+  const tasks = useMemo(() => allTasks.filter((t) => !isNotReached(t)), [allTasks]);
   const total = tasks.length;
   // Single-pass count reduction instead of 4 separate .filter() calls
   const counts = useMemo(() => {
@@ -399,6 +402,7 @@ const VitalSignsStrip = memo(function VitalSignsStrip({ tasks, range, now }: { t
     let firstPass = 0;
 
     for (const t of tasks) {
+      if (isNotReached(t)) continue; // a decision left it out: it did not run
       const ts = new Date(t.updatedAt).getTime();
       if (t.status === "done") {
         completed++;
@@ -731,6 +735,7 @@ export function DashboardPage() {
     const nextStats: PolpoStats = { pending: 0, queued: 0, running: 0, done: 0, failed: 0 };
     for (const mission of filteredMissions) if (mission.status === "active") active++;
     for (const task of filteredTasks) {
+      if (isNotReached(task)) continue; // a decision left it out: not done, not to do
       if (task.status === "done") { done++; nextStats.done++; }
       else if (task.status === "failed") { failed++; nextStats.failed++; }
       else if (task.status === "in_progress" || task.status === "review") nextStats.running++;

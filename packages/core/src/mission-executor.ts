@@ -18,6 +18,7 @@ import {
 } from "./decisions.js";
 import { MissionImageNodes } from "./mission-images.js";
 import type { ImageNodeState, MissionImage, MissionImager } from "./media.js";
+import { taskSkip, taskSkipText, type TaskSkip } from "./task-skip.js";
 
 // ── In-memory fallback stores (no Node.js deps) ─────────────────────────
 
@@ -651,12 +652,19 @@ export class MissionExecutor {
       }
     }
     const answerText = next.answer ? describeDecisionAnswer(next.answer) : "no answer";
-    const why = `Skipped: the decision "${d.name}" took ${next.branch ? `the branch "${next.branch}"` : "no branch"} (${answerText})`;
+    // the marker every surface reads (taskSkip): status stays done so joins and completion work as before
+    const skip: TaskSkip = {
+      reason: "decision", node: d.name, branch: next.branch ?? null,
+      ...(next.answer ? { answer: answerText } : {}),
+      ...(typeof next.answer?.confidence === "number" ? { confidence: next.answer.confidence } : {}),
+      decidedBy, at: next.decidedAt,
+    };
+    const why = taskSkipText(skip);
     for (const t of groupTasks.filter((x) => skipped.has(x.id))) {
       const from = t.status;
-      await this.ctx.registry.updateTask(t.id, { result: { exitCode: 0, stdout: why, stderr: "", duration: 0 } });
+      await this.ctx.registry.updateTask(t.id, { result: { exitCode: 0, stdout: why, stderr: "", duration: 0, skipped: skip } });
       const done = await this.ctx.registry.unsafeSetStatus(t.id, "done", `skipped by decision "${d.name}"`);
-      this.ctx.emitter.emit("task:transition", { taskId: t.id, from, to: "done", task: done, reason: `skipped by decision "${d.name}"` });
+      this.ctx.emitter.emit("task:transition", { taskId: t.id, from, to: "done", task: done, reason: `skipped by decision "${d.name}"`, skipped: true });
     }
     const ranking = next.answer?.ranking?.length ? `\n${next.answer.ranking.map((r, i) => `${i + 1}. ${r.label} (score ${r.score.toFixed(2)})`).join("\n")}` : "";
     const note = `\n\n## Decision "${d.name}"\n${d.question.instructions}\nAnswer: ${answerText}${ranking}${decidedBy !== "model" ? `\nBranch "${next.branch ?? "none"}" chosen by ${decidedBy}${next.reason ? ` (${next.reason})` : ""}.` : ""}`;
@@ -1576,8 +1584,10 @@ export class MissionExecutor {
         filesCreated,
         filesEdited,
         outcomes: t.outcomes,
+        ...(taskSkip(t) ? { notReached: true } : {}),
       };
     });
+    const notReached = taskReports.filter((r) => r.notReached).length;
 
     const avgScore = scores.length > 0
       ? scores.reduce((a, b) => a + b, 0) / scores.length
@@ -1593,6 +1603,7 @@ export class MissionExecutor {
       filesEdited: [...allFilesEdited],
       outcomes: allOutcomes.length > 0 ? allOutcomes : undefined,
       avgScore,
+      ...(notReached ? { notReached } : {}),
     };
   }
 }
