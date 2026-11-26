@@ -42,6 +42,10 @@ export interface CliConversationOptions {
   inbox: string;
   log: (line: string) => void;
   maxTurns?: number;
+  /** More environment for the program (documented CLI settings only, e.g. MCP_TOOL_TIMEOUT). */
+  env?: Record<string, string>;
+  /** Codex asks a person before leaving its sandbox (coding chats): see CodexSessionOptions.onApproval. */
+  codexApproval?: (method: string, params: Record<string, unknown>) => Promise<"accept" | "decline">;
 }
 
 export interface CliConversation {
@@ -92,6 +96,7 @@ export async function openCliConversation(o: CliConversationOptions): Promise<Cl
     const extraEnv: Record<string, string> = {
       ...(toolServer && engine.cli === "codex" ? { [CLI_TOOL_TOKEN_ENV]: toolServer.token } : {}),
       ...(engine.cli === "claude" ? { ENABLE_TOOL_SEARCH: claudeCodeToolSearch(toolNames.length) } : {}),
+      ...(o.env ?? {}),
     };
     const launch: CliLauncher = o.launch ?? (async (l) => {
       if (o.machine) {
@@ -105,7 +110,7 @@ export async function openCliConversation(o: CliConversationOptions): Promise<Cl
     try {
       session = engine.cli === "claude"
         ? claudeSession(proc)
-        : await codexSession(proc, { cwd: o.cwd, model: engine.model, permissionMode: engine.permissionMode, instructions, ...(o.resume ? { resumeThreadId: o.resume } : {}) });
+        : await codexSession(proc, { cwd: o.cwd, model: engine.model, permissionMode: engine.permissionMode, instructions, ...(o.resume ? { resumeThreadId: o.resume } : {}), ...(o.codexApproval ? { onApproval: o.codexApproval } : {}) });
     } catch (err) {
       await proc.kill().catch(() => undefined);
       throw err;

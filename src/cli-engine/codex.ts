@@ -51,6 +51,11 @@ export class CodexRpc {
   private listeners = new Set<(method: string, params: Json) => void>();
   readonly done: Promise<void>;
   private closed = false;
+  /**
+   * Answers the server's approval requests (`…/requestApproval`): set by a session that asks a
+   * person (coding chats); without it every request is declined (unattended runs).
+   */
+  approvals?: (method: string, params: Json) => Promise<"accept" | "decline">;
 
   constructor(private proc: CliProcess) {
     this.done = (async () => {
@@ -73,6 +78,15 @@ export class CodexRpc {
     const id = m.id;
     if (typeof m.method === "string") {
       if (id !== undefined && id !== null) {
+        if (/requestApproval$/.test(m.method) && this.approvals) {
+          // a person answers (a coding chat): accept or decline when they do
+          const method = m.method;
+          void this.approvals(method, (m.params ?? {}) as Json)
+            .catch(() => "decline" as const)
+            .then((decision) => this.proc.send(JSON.stringify({ id, result: { decision } })))
+            .catch(() => undefined);
+          return;
+        }
         // a request from the server (an approval…): declined, Polpo's runs are unattended
         const decline = /requestApproval$/.test(m.method) ? { result: { decision: "decline" } } : { error: { code: -32601, message: "Polpo runs this agent unattended: not available" } };
         void this.proc.send(JSON.stringify({ id, ...decline })).catch(() => undefined);
@@ -135,7 +149,7 @@ export function codexToolCall(item: Json): { name: string; input: unknown } | un
     case "commandExecution": return { name: "shell", input: { command: item.command, cwd: item.cwd } };
     case "fileChange": {
       const changes = Array.isArray(item.changes) ? (item.changes as Json[]) : [];
-      return { name: "apply_patch", input: { path: changes[0]?.path, changes: changes.map((c) => ({ path: c.path, kind: typeof c.kind === "object" ? (c.kind as Json).type : c.kind })) } };
+      return { name: "apply_patch", input: { path: changes[0]?.path, changes: changes.map((c) => ({ path: c.path, kind: typeof c.kind === "object" ? (c.kind as Json).type : c.kind, ...(typeof c.diff === "string" ? { diff: c.diff } : {}) })) } };
     }
     case "mcpToolCall": return { name: `${String(item.server ?? "mcp")}.${String(item.tool ?? "tool")}`, input: item.arguments ?? {} };
     case "dynamicToolCall": return { name: String(item.tool ?? "tool"), input: item.arguments ?? {} };
@@ -156,6 +170,9 @@ function toolOutput(item: Json): { output: unknown; isError: boolean } {
 export function codexItemEvents(method: string, params: Json): CliEvent[] {
   const item = (params.item ?? {}) as Json;
   const id = String(item.id ?? "");
+  if (method === "item/agentMessage/delta") {
+    return typeof params.delta === "string" && params.delta ? [{ type: "text-delta", text: params.delta }] : [];
+  }
   if (method === "item/started") {
     const call = codexToolCall(item);
     return call ? [{ type: "tool-call", id, name: call.name, input: call.input }] : [];
@@ -184,11 +201,18 @@ export interface CodexSessionOptions {
   resumeThreadId?: string;
   clientVersion?: string;
   closeGraceMs?: number;
+  /**
+   * A person answers the program's approval requests (coding chats): the thread runs with
+   * approvalPolicy "on-request" (Codex asks before leaving its sandbox: network, files outside the
+   * workspace) and each request is answered by this. Without it: "never", nothing is asked.
+   */
+  onApproval?: (method: string, params: Record<string, unknown>) => Promise<"accept" | "decline">;
 }
 
 /** Start the app server's conversation: initialize, then a new or resumed thread. */
 export async function codexSession(proc: CliProcess, o: CodexSessionOptions): Promise<CliSession> {
   const rpc = new CodexRpc(proc);
+  if (o.onApproval) rpc.approvals = o.onApproval;
   await rpc.request("initialize", { clientInfo: { name: "polpo", title: "Polpo", version: o.clientVersion ?? "0" } });
   await rpc.notify("initialized");
   let threadId: string;
@@ -196,7 +220,7 @@ export async function codexSession(proc: CliProcess, o: CodexSessionOptions): Pr
   const threadParams = {
     cwd: o.cwd,
     ...(o.model ? { model: o.model } : {}),
-    approvalPolicy: "never",
+    approvalPolicy: o.onApproval ? "on-request" : "never",
     sandbox: CODEX_SANDBOX_MODES[o.permissionMode ?? "allow-all"],
     ...(o.instructions ? { developerInstructions: o.instructions } : {}),
   };
