@@ -3,6 +3,10 @@ FROM node:22-bookworm AS builder
 
 RUN corepack enable && corepack prepare pnpm@10.29.3 --activate
 
+# The desktop app's Electron binary is never needed in the server image: skip its download
+# (a GitHub 504 on it failed the v0.8.0 release build).
+ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
+
 WORKDIR /app
 
 # Dependencies first. Copy every workspace manifest so workspace:* references and
@@ -93,7 +97,7 @@ COPY packages/server/package.json packages/server/
 COPY packages/vault-crypto/package.json packages/vault-crypto/
 COPY ui/package.json ui/
 COPY website/package.json website/
-RUN pnpm install --frozen-lockfile --prod
+RUN ELECTRON_SKIP_BINARY_DOWNLOAD=1 pnpm install --frozen-lockfile --prod
 
 # Compiled output (root + workspace packages required by runtime imports).
 COPY --from=builder /app/dist/ dist/
