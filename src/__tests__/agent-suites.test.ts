@@ -142,6 +142,21 @@ describe("model", () => {
     expect(argsMatch({ items: [{ id: 1 }] }, { items: [{ id: 1, q: 2 }], x: 1 }, "partial")).toBe(true);
     expect(argsMatch({ n: 5 }, { n: "5" }, "exact")).toBe(true);
     expect(validateJsonSchema({ type: "object", properties: { n: { type: "integer", minimum: 1 } }, additionalProperties: false }, { n: 0, x: 1 })).toEqual(["$.n: must be ≥ 1", "$.x: not allowed"]);
+    // format: known formats are checked, unknown ones ignored
+    const fmt = (format: string, v: string) => validateJsonSchema({ type: "string", format }, v);
+    expect(fmt("email", "anna@example.com")).toEqual([]);
+    expect(fmt("email", "nope")).toEqual(["$: must be a valid email"]);
+    expect(fmt("date", "2026-02-28")).toEqual([]);
+    expect(fmt("date", "2026-02-30")).toEqual(["$: must be a valid date"]);
+    expect(fmt("date-time", "2026-11-26T10:00:00Z")).toEqual([]);
+    expect(fmt("date-time", "2026-11-26 25:00")).toHaveLength(1);
+    expect(fmt("uri", "https://polpo.sh/x")).toEqual([]);
+    expect(fmt("url", "ftp://x")).toHaveLength(1);
+    expect(fmt("uuid", "123e4567-e89b-12d3-a456-426614174000")).toEqual([]);
+    expect(fmt("ipv4", "256.1.1.1")).toHaveLength(1);
+    expect(fmt("ipv6", "::1")).toEqual([]);
+    expect(fmt("hostname", "-bad.example")).toHaveLength(1);
+    expect(fmt("phone-whatever", "x")).toEqual([]);
   });
 
   it("imports CSV (quotes, separators, coercion) and JSON datasets", () => {
