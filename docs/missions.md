@@ -207,3 +207,20 @@ agent with that agent's own mocks (scripted model, tool mocks) — and checks th
 mission's checkpoints, delays or quality gates, and runs the tasks one after another. REST
 `/api/v1/missions/{id}/suites…`, MCP `polpo_target_suites` / `polpo_target_suite_save` /
 `polpo_target_suite_run`, CLI `polpo test --mission <id>`.
+
+# Image nodes
+
+An image node generates an image from earlier tasks' results and gives it to later tasks: after its
+`afterTasks`, the prompt (`{{tasks.<title>}}` is a task's result) goes to the instance's image model;
+the `forTasks` wait and get the image's files in their description. See docs/media.md → "Image nodes
+in missions and playbooks".
+
+```json
+{
+  "tasks": [
+    { "title": "Write", "description": "Write the post" },
+    { "title": "Send", "description": "Send the post and its image on Telegram", "dependsOn": ["Write"] }
+  ],
+  "images": [{ "name": "cover", "afterTasks": ["Write"], "prompt": "A cover for: {{tasks.Write}}", "forTasks": ["Send"] }]
+}
+```

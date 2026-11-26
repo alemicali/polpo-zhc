@@ -26,6 +26,9 @@ Every tool has a title and honest annotations (`readOnlyHint`, `destructiveHint`
 | `polpo_approvals_list`, `polpo_approval_resolve` | Decide on requests that wait for a person. |
 | `polpo_decide` | Typed decisions with probabilities from the decision model (docs/decisions.md): predicate (P(yes)), choice, score, rank on a state (text or JSON), with thresholds → uncertain. Costs money; every call is in the decision log. Without a decision model: an error with the Settings link (or Polpo's own model, `calibrated: false`). Needs `polpo:work`. |
 | `polpo_decisions`, `polpo_decision_resolve` | The decision log (filters, one decision with its state) and missions' decision nodes (`nodes: true`); `polpo_decision_resolve` (work) picks the branch of a node waiting for a person. |
+| `polpo_image_generate`, `polpo_image_edit` | Generate images (or change one, compose several, inside a mask) with the instance's image model through Vercel AI Gateway (docs/media.md). Costs money; every image is kept with its provenance in the media log. Without an image model: an error with the Settings link. Needs `polpo:work`. |
+| `polpo_media_log`, `polpo_media_status` | The media log (filters, one request with its provenance, missions' image nodes with `nodes: true`) and the image model's status (never the key). |
+| `polpo_image_show` | The media card: a request's images (previews inside the card), prompt, model, size, seed, cost and who asked; without `id`, the latest requests. |
 | `polpo_decision_show` | The decision card: each answer with probability bars, confidence and uncertain, the model and the cost; without `id`, the latest decisions. |
 
 ### tasks (on by default)
@@ -438,6 +441,15 @@ One `ui://polpo/trigger-card.html` resource (`polpo:read`); the card calls `polp
 - **Decisions:** the latest ones (optionally only uncertain), each opening its card.
 
 One `ui://polpo/decision-card.html` resource (`polpo:read`); the card calls `polpo_decision_show` again to refresh or switch view.
+
+## The media card (MCP App)
+
+`polpo_image_show` renders image requests (docs/media.md); call it with the `id` `polpo_image_generate` returned to show the images.
+
+- **Image:** the request's images as previews (512 px webp, carried inside the card as `data:` URLs: the card loads nothing), the prompt, the model (and **Fallback model** when it answered), the cost, latency, size, seed and who asked.
+- **Media:** the latest requests with a preview each, each opening its card.
+
+One `ui://polpo/media-card.html` resource (`polpo:read`); the card calls `polpo_image_show` again to refresh or switch view.
 
 ## The agent suite card (MCP App)
 
