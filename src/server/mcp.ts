@@ -5,16 +5,18 @@
  * its toolsets (settings.mcp.toolsets or POLPO_MCP_TOOLSETS; a connector URL may narrow them with
  * ?toolsets=), and the caller's scopes decide which tools it gets.
  *
- * Streamable HTTP at /mcp, stateless (a server per request, no sessions): every tool calls the
+ * Streamable HTTP at /mcp, stateless (a server per request, no sessions; the tool catalog is declared
+ * once per process and bound to each request, see mcp-server/catalog.ts): every tool calls the
  * instance's own REST API in process, so it follows the same rules as the dashboard, and what it
  * does is recorded as the authenticated principal (deps.principal.actor).
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import {
-  ALL_SCOPES, DEFAULT_SCOPES, FULL_ACCESS, SCOPES, TOOLSETS, TOOLSET_NAMES, hasScope, normalizeScopes, registrar, resolveToolsets,
+  ALL_SCOPES, DEFAULT_SCOPES, FULL_ACCESS, SCOPES, TOOLSETS, TOOLSET_NAMES, hasScope, normalizeScopes, resolveToolsets,
   type McpDeps, type McpPrincipal, type PolpoScope, type ToolScope, type ToolsetName,
 } from "./mcp-server/kit.js";
+import { bindCatalog, declareCatalog, type Catalog, type Declare } from "./mcp-server/catalog.js";
 import { registerConversationTools } from "./mcp-server/conversation.js";
 import { registerAgentTools, registerApprovalTools, registerArtifactTools, registerFileTools } from "./mcp-server/core-tools.js";
 import { registerDataTools } from "./mcp-server/data.js";
@@ -69,27 +71,22 @@ const INSTRUCTIONS = "Polpo orchestrates a team of AI agents (tasks, missions, a
   + "Secrets (tokens, API keys) never pass through here: when a tool returns setup_url and setup_id, show the person the link "
   + "(next_step says what to paste), call polpo_setup_wait with the setup_id right away, then verify with the area's test tool and continue.";
 
-/** The MCP server for one request (stateless). `catalog` collects every tool of the enabled toolsets with its scope. */
-export function createPolpoMcpServer(deps: McpDeps, catalog?: ToolScope[]): McpServer {
-  const server = new McpServer({ name: "polpo", title: "Polpo", version: deps.version }, { instructions: INSTRUCTIONS });
-  const principal = deps.principal ?? FULL_ACCESS;
-  const enabled = new Set<ToolsetName>(deps.toolsets ? resolveToolsets(deps.toolsets) : resolveToolsets());
-  const tool = registrar(server, enabled, principal, catalog);
-
+/** Every module's tools, app cards and resources, in the order they are listed. */
+const declareAll: Declare = (tool, app, deps) => {
   registerConversationTools(tool, deps);
   registerSearchTools(tool, deps);
-  registerAgentTools(tool, deps, server, enabled, principal, catalog);
+  registerAgentTools(tool, deps, app);
   registerApprovalTools(tool, deps);
   registerTaskTools(tool, deps);
   registerMissionTools(tool, deps);
-  registerWorkCards(server, deps, enabled, principal, catalog);
+  registerWorkCards(app, deps);
   registerArtifactTools(tool, deps);
   registerDataTools(tool, deps);
   registerFileTools(tool, deps);
   registerTeamTools(tool, deps);
   registerAgentSuiteTools(tool, deps);
   registerBenchmarkTools(tool, deps);
-  registerSuiteCards(server, deps, enabled, principal, catalog);
+  registerSuiteCards(app, deps);
   registerConfigTools(tool, deps);
   registerSettingsTools(tool, deps);
   registerChannelSetupTools(tool, deps);
@@ -100,13 +97,13 @@ export function createPolpoMcpServer(deps: McpDeps, catalog?: ToolScope[]): McpS
   registerSkillTools(tool, deps);
   registerAutomationTools(tool, deps);
   registerTriggerTools(tool, deps);
-  registerTriggerCards(server, deps, enabled, principal, catalog);
+  registerTriggerCards(app, deps);
   registerDecisionTools(tool, deps);
-  registerDecisionCards(server, deps, enabled, principal, catalog);
+  registerDecisionCards(app, deps);
   registerMediaTools(tool, deps);
-  registerMediaCards(server, deps, enabled, principal, catalog);
+  registerMediaCards(app, deps);
   registerCodingTools(tool, deps);
-  registerCodingCard(server, deps, enabled, principal, catalog);
+  registerCodingCard(app, deps);
   registerConnectorTools(tool, deps);
   registerMcpServerTools(tool, deps);
   registerChannelTools(tool, deps);
@@ -119,6 +116,20 @@ export function createPolpoMcpServer(deps: McpDeps, catalog?: ToolScope[]): McpS
   registerWaBusinessTools(tool, deps);
   registerHarnessTools(tool, deps);
   registerAdminTools(tool, deps);
+};
+
+let declared: Catalog | undefined;
+/** The tool catalog, declared on first use and kept for the process (see mcp-server/catalog.ts). */
+export function mcpCatalog(): Catalog {
+  return (declared ??= declareCatalog(declareAll));
+}
+
+/** The MCP server for one request (stateless). `catalog` collects every tool of the enabled toolsets with its scope. */
+export function createPolpoMcpServer(deps: McpDeps, catalog?: ToolScope[]): McpServer {
+  const server = new McpServer({ name: "polpo", title: "Polpo", version: deps.version }, { instructions: INSTRUCTIONS });
+  const principal = deps.principal ?? FULL_ACCESS;
+  const enabled = new Set<ToolsetName>(deps.toolsets ? resolveToolsets(deps.toolsets) : resolveToolsets());
+  bindCatalog(server, mcpCatalog(), deps, enabled, principal, catalog);
   return server;
 }
 

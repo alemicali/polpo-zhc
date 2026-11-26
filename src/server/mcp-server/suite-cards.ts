@@ -6,11 +6,10 @@
  */
 import { z } from "zod";
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { buildBenchmarkCard, buildCompareCard, buildSuiteListCard, buildSuiteRunCard, buildSuiteTrendCard, suiteCardText, type SuiteCard } from "../mcp-suite-card.js";
 import { SUITE_CARD_HTML } from "../mcp-widgets.generated.js";
 import { cardAppearance } from "./card-appearance.js";
-import { READ, allowed, dashboardLink, enc, fail, looseObject, unwrap, type McpDeps, type McpPrincipal, type ToolScope, type ToolsetName } from "./kit.js";
+import { READ, dashboardLink, enc, fail, looseObject, unwrap, type AppRegister, type McpDeps } from "./kit.js";
 
 /** The suite card's UI: one HTML document, served as a ui:// resource. */
 export const SUITE_CARD_URI = "ui://polpo/suite-card.html";
@@ -101,10 +100,10 @@ const output = z.object({
   columns: z.array(looseObject).optional().describe("compare view: one column per variant (tool calls and the answer diffed)"),
 }).passthrough();
 
-export function registerSuiteCards(server: McpServer, deps: McpDeps, enabled: ReadonlySet<ToolsetName>, principal: McpPrincipal, catalog?: ToolScope[]): void {
-  if (!allowed(enabled, principal, "team", READ, catalog, ["polpo_agent_suite_show", "polpo_benchmark_show"])) return;
+export function registerSuiteCards(app: AppRegister, deps: McpDeps): void {
+  const card = app.gate("team", READ, ["polpo_agent_suite_show", "polpo_benchmark_show"]);
 
-  registerAppResource(server, "Agent suite card", SUITE_CARD_URI, {
+  registerAppResource(card, "Agent suite card", SUITE_CARD_URI, {
     description: "An agent's test and eval suites, a run's report (cases, assertions, scores, deltas versus the baseline, the AI review) or a suite's trend chart.",
   }, async () => ({
     contents: [{
@@ -115,7 +114,7 @@ export function registerSuiteCards(server: McpServer, deps: McpDeps, enabled: Re
     }],
   }));
 
-  registerAppTool(server, "polpo_agent_suite_show", {
+  registerAppTool(card, "polpo_agent_suite_show", {
     title: "Show agent suites",
     description: "Show an agent's suites as a card: the suites with their last run (pass rate, score, regressions), which ones gate its deploys (required) and the latest deploy gates (in verifica, passed, blocked, override); with run (or view run and suite: its latest run), the run's report — "
       + "each case's status, failed assertions and scorers, scores per scorer (mean, median, p10), deltas and regressions versus the baseline, flaky cases, the AI review; "
@@ -134,7 +133,7 @@ export function registerSuiteCards(server: McpServer, deps: McpDeps, enabled: Re
     return r.ok ? { content: [{ type: "text" as const, text: suiteCardText(r.card) }], structuredContent: r.card as unknown as Record<string, unknown> } : fail(r.error);
   });
 
-  registerAppTool(server, "polpo_benchmark_show", {
+  registerAppTool(card, "polpo_benchmark_show", {
     title: "Show a benchmark",
     description: "Show a benchmark run as a card: its progress and spend, the leaderboard (variants ranked by quality, cost and latency, the Pareto front, notes when differences are within noise) and the case × variant matrix; "
       + "with case (a matrix key) — or view compare — that case side by side for 2–4 variants: their tool calls and answers with the differences highlighted. Use it when the person asks which variant (model, version, instructions) is better.",

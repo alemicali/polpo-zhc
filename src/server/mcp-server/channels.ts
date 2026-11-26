@@ -26,7 +26,7 @@ const ROUTER_CHANNELS = ["slack", "whatsapp-business", "webhook", "push", "expo-
 const ruleItem = z.object({ id: z.string(), name: z.string().optional(), events: z.array(z.string()), channels: z.array(z.string()), severity: z.string().optional() });
 
 export function registerChannelTools(tool: Register, deps: McpDeps): void {
-  const setupUrl = dashboardLink(deps, "/config?section=channels");
+  const setupUrl = () => dashboardLink(deps, "/config?section=channels");
 
   tool("channels", "polpo_channels_list", {
     title: "List channels",
@@ -65,9 +65,9 @@ export function registerChannelTools(tool: Register, deps: McpDeps): void {
       ...(telegram.chats.length ? ["Telegram chats:", ...telegram.chats.slice(0, 50).map((c) => `- ${c.id} (${c.kind}) ${c.name}`)] : []),
       `WhatsApp: ${whatsapp.map((w) => `${w.profile} (${w.status})`).join(", ") || "not set up"}`,
       ...(slack.length ? [`Slack: ${slack.map((s) => `${s.channel} (${s.inbound ? s.state : "notifications only"})`).join(", ")}`] : []),
-      `To set up a channel: polpo_channel_save (its tokens and keys: ${setupUrl})`,
+      `To set up a channel: polpo_channel_save (its tokens and keys: ${setupUrl()})`,
     ].join("\n");
-    return ok(text, { channels, rules, telegram, whatsapp, slack, setup_url: setupUrl });
+    return ok(text, { channels, rules, telegram, whatsapp, slack, setup_url: setupUrl() });
   });
 
   tool("channels", "polpo_channel_test", {
@@ -79,7 +79,7 @@ export function registerChannelTools(tool: Register, deps: McpDeps): void {
     scope: "polpo:messages",
   }, async ({ name }) => {
     const r = await apiSend(deps, "POST", `/config/channels/${enc(name)}/test`);
-    if (!r.ok) return r.status === 404 ? fail(`There is no channel "${name}" running. List them with polpo_channels_list; set one up with polpo_channel_save (its secrets: ${setupUrl}).`) : apiError(r, `Testing channel ${name}`);
+    if (!r.ok) return r.status === 404 ? fail(`There is no channel "${name}" running. List them with polpo_channels_list; set one up with polpo_channel_save (its secrets: ${setupUrl()}).`) : apiError(r, `Testing channel ${name}`);
     const d = r.data as { success?: boolean; error?: string };
     // the link opens this channel's sheet (?channel=)
     const channelUrl = dashboardLink(deps, `/config?section=channels&channel=${enc(name)}`);
@@ -142,7 +142,7 @@ export function registerChannelTools(tool: Register, deps: McpDeps): void {
         if (c.type !== channel) return fail(`${name} is a ${String(c.type)} channel, not ${channel}.`);
         channelName = name;
       } else if (ofType.length === 1) channelName = ofType[0];
-      else return fail(ofType.length ? `Say which ${channel} channel (name): ${ofType.join(", ")}.` : `There is no ${channel} channel: set one up with polpo_channel_save (its secrets: ${setupUrl}).`);
+      else return fail(ofType.length ? `Say which ${channel} channel (name): ${ofType.join(", ")}.` : `There is no ${channel} channel: set one up with polpo_channel_save (its secrets: ${setupUrl()}).`);
     }
 
     if (confirm !== true) {
@@ -175,7 +175,7 @@ export function registerChannelTools(tool: Register, deps: McpDeps): void {
       });
     }
     if (!r.ok) {
-      if (r.status === 503) return fail(`${channel} is not set up on this instance: the person sets it up in the dashboard (${setupUrl}).`);
+      if (r.status === 503) return fail(`${channel} is not set up on this instance: the person sets it up in the dashboard (${setupUrl()}).`);
       return apiError(r, `Sending on ${channelName ?? channel}`, "Nothing was sent. Check the recipient (polpo_channels_list), the channel's setup (polpo_channel_test) and the files' paths.");
     }
     const d = r.data as { id?: string; to?: unknown; bot?: string; ids?: string[] };

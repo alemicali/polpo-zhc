@@ -6,11 +6,10 @@
  */
 import { z } from "zod";
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { buildTriggerDetailCard, buildTriggerListCard, triggerCardText, type TriggerCard, type TriggerShape } from "../mcp-trigger-card.js";
 import { TRIGGER_CARD_HTML } from "../mcp-widgets.generated.js";
 import { cardAppearance } from "./card-appearance.js";
-import { READ, allowed, dashboardLink, enc, fail, looseObject, unwrap, type McpDeps, type McpPrincipal, type ToolScope, type ToolsetName } from "./kit.js";
+import { READ, dashboardLink, enc, fail, looseObject, unwrap, type AppRegister, type McpDeps } from "./kit.js";
 
 export const TRIGGER_CARD_URI = "ui://polpo/trigger-card.html";
 let seq = 0;
@@ -52,10 +51,10 @@ const output = z.object({
   lastMapped: looseObject.optional().describe("trigger view: the newest accepted delivery's mapped values — what the actions receive"),
 }).passthrough();
 
-export function registerTriggerCards(server: McpServer, deps: McpDeps, enabled: ReadonlySet<ToolsetName>, principal: McpPrincipal, catalog?: ToolScope[]): void {
-  if (!allowed(enabled, principal, "automation", READ, catalog, ["polpo_trigger_show"])) return;
+export function registerTriggerCards(app: AppRegister, deps: McpDeps): void {
+  const card = app.gate("automation", READ, ["polpo_trigger_show"]);
 
-  registerAppResource(server, "Trigger card", TRIGGER_CARD_URI, {
+  registerAppResource(card, "Trigger card", TRIGGER_CARD_URI, {
     description: "The triggers (public endpoints receiving forms and webhooks) or one trigger with its recent deliveries.",
   }, async () => ({
     contents: [{
@@ -66,7 +65,7 @@ export function registerTriggerCards(server: McpServer, deps: McpDeps, enabled: 
     }],
   }));
 
-  registerAppTool(server, "polpo_trigger_show", {
+  registerAppTool(card, "polpo_trigger_show", {
     title: "Show triggers",
     description: "Show triggers as a card: every trigger with its endpoint, auth, contract version, delivery counts, actions and last delivery; with id, that trigger "
       + "with its actions, its recent deliveries (status, HTTP answer, reasons, contract errors, each action's run: done / failed / skipped and what it created) "

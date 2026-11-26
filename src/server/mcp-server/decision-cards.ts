@@ -5,11 +5,10 @@
  */
 import { z } from "zod";
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { buildDecisionDetailCard, buildDecisionListCard, decisionCardText, type DecisionCard, type DecisionShape } from "../mcp-decision-card.js";
 import { DECISION_CARD_HTML } from "../mcp-widgets.generated.js";
 import { cardAppearance } from "./card-appearance.js";
-import { READ, allowed, dashboardLink, enc, fail, looseObject, unwrap, type McpDeps, type McpPrincipal, type ToolScope, type ToolsetName } from "./kit.js";
+import { READ, dashboardLink, enc, fail, looseObject, unwrap, type AppRegister, type McpDeps } from "./kit.js";
 
 export const DECISION_CARD_URI = "ui://polpo/decision-card.html";
 let seq = 0;
@@ -43,10 +42,10 @@ const output = z.object({
   total: z.number().optional(),
 }).passthrough();
 
-export function registerDecisionCards(server: McpServer, deps: McpDeps, enabled: ReadonlySet<ToolsetName>, principal: McpPrincipal, catalog?: ToolScope[]): void {
-  if (!allowed(enabled, principal, "core", READ, catalog, ["polpo_decision_show"])) return;
+export function registerDecisionCards(app: AppRegister, deps: McpDeps): void {
+  const card = app.gate("core", READ, ["polpo_decision_show"]);
 
-  registerAppResource(server, "Decision card", DECISION_CARD_URI, {
+  registerAppResource(card, "Decision card", DECISION_CARD_URI, {
     description: "A decision's answers with probability bars, or the latest decisions.",
   }, async () => ({
     contents: [{
@@ -57,7 +56,7 @@ export function registerDecisionCards(server: McpServer, deps: McpDeps, enabled:
     }],
   }));
 
-  registerAppTool(server, "polpo_decision_show", {
+  registerAppTool(card, "polpo_decision_show", {
     title: "Show decisions",
     description: "Show a decision as a card: each answer with probability bars (yes / no, every option, every level, the ranked items), its confidence and whether it is uncertain, "
       + "the model, the cost and whether it is calibrated; without id, the latest decisions. Use it right after polpo_decide (pass its id) or when the person asks what was decided.",

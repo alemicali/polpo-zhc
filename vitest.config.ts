@@ -1,7 +1,8 @@
 import { defineConfig } from "vitest/config";
 
-// On CI runners (4 vCPU) every worker builds the full MCP server many times (≈ 150–250 ms of zod
-// schema construction and GC each): with the default cpus−1 forks they starve each other, the
+// On CI runners (4 vCPU) every worker used to build the full MCP server many times (≈ 150–250 ms of
+// zod schema construction and GC each; now the tool catalog is declared once per process, see
+// src/server/mcp-server/catalog.ts): with the default cpus−1 forks they starved each other, the
 // long multi-call tests cross the 5 s default, and a worker can stall long enough that its
 // "onTaskUpdate" RPC to the main process times out (60 s) after every test has passed. Fewer
 // forks and a CI-sized timeout keep the job reliable; locally nothing changes.

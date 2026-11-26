@@ -6,11 +6,10 @@
  */
 import { z } from "zod";
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { buildMediaDetailCard, buildMediaListCard, mediaCardItem, mediaCardText, type MediaCard, type MediaEntryShape, type MediaPreviews } from "../mcp-media-card.js";
 import { MEDIA_CARD_HTML } from "../mcp-widgets.generated.js";
 import { cardAppearance } from "./card-appearance.js";
-import { READ, allowed, dashboardLink, enc, fail, looseObject, unwrap, type McpDeps, type McpPrincipal, type ToolScope, type ToolsetName } from "./kit.js";
+import { READ, dashboardLink, enc, fail, looseObject, unwrap, type AppRegister, type McpDeps } from "./kit.js";
 
 export const MEDIA_CARD_URI = "ui://polpo/media-card.html";
 let seq = 0;
@@ -61,10 +60,10 @@ const output = z.object({
   total: z.number().optional(),
 }).passthrough();
 
-export function registerMediaCards(server: McpServer, deps: McpDeps, enabled: ReadonlySet<ToolsetName>, principal: McpPrincipal, catalog?: ToolScope[]): void {
-  if (!allowed(enabled, principal, "core", READ, catalog, ["polpo_image_show"])) return;
+export function registerMediaCards(app: AppRegister, deps: McpDeps): void {
+  const card = app.gate("core", READ, ["polpo_image_show"]);
 
-  registerAppResource(server, "Media card", MEDIA_CARD_URI, {
+  registerAppResource(card, "Media card", MEDIA_CARD_URI, {
     description: "Generated images with their prompt, model and cost, or the latest image requests.",
   }, async () => ({
     contents: [{
@@ -75,7 +74,7 @@ export function registerMediaCards(server: McpServer, deps: McpDeps, enabled: Re
     }],
   }));
 
-  registerAppTool(server, "polpo_image_show", {
+  registerAppTool(card, "polpo_image_show", {
     title: "Show images",
     description: "Show generated images as a card: the request's images with their prompt, model, size, seed, cost and who asked; without id, the latest image requests. "
       + "Use it right after polpo_image_generate or polpo_image_edit (pass its id) or when the person asks to see images.",

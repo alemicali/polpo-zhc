@@ -75,7 +75,7 @@ const loginText = (s: WaSession) => s.status === "qr"
       : `The WhatsApp login ${s.status}${s.error ? `: ${s.error}` : ""}. Start a new one with polpo_whatsapp_login.`;
 
 export function registerChannelSetupTools(tool: Register, deps: McpDeps): void {
-  const setup = dashboardLink(deps, "/config?section=channels");
+  const setup = () => dashboardLink(deps, "/config?section=channels");
 
   // ── Routes: who answers on each channel ──
 
@@ -452,6 +452,6 @@ export function registerChannelSetupTools(tool: Register, deps: McpDeps): void {
     if (confirm !== true) return fail(`Signing ${p} out stops WhatsApp until it is scanned again: ask the person, then call again with confirm: true.`);
     const r = await apiSend(deps, "POST", "/whatsapp/logout", { profileDir: p });
     if (!r.ok) return apiError(r, `Signing ${p} out`);
-    return ok(`Signed ${p} out of WhatsApp. To sign in again: polpo_whatsapp_login or ${setup}.`, { profile: p, removed: true });
+    return ok(`Signed ${p} out of WhatsApp. To sign in again: polpo_whatsapp_login or ${setup()}.`, { profile: p, removed: true });
   });
 }
