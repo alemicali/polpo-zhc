@@ -1019,8 +1019,11 @@ export interface PolpoSettings {
   orchestratorName?: string;
   /** Polpo's voice replies in chats (Telegram); default "off". Polpo can change it (set_voice_replies). */
   voiceReplies?: VoiceReplyMode;
-  /** Image-capable model for tasks that need vision (falls back to orchestratorModel). */
+  /** Image generation model for the media primitive (generateImage / editImage, the image_generate tool,
+   *  image nodes): "gateway:provider/model", e.g. "vercel-ai-gateway:openai/gpt-image-2" (see media.ts). */
   imageModel?: string;
+  /** Media: the image fallback model, the gateway key (vault entry), limits and the media log's retention. */
+  media?: import("./media.js").MediaSettings;
   /** Decision model for decide() (typed decisions with probabilities): "vercel-ai-gateway:typesafe-ai/jev",
    *  or { gateway, model, fallback?, credentialRef?, credentialField?, zeroDataRetention? } (see decisions.ts). */
   decisionModel?: import("./decisions.js").DecisionModelSetting;

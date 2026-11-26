@@ -117,6 +117,8 @@ export interface OrchestratorContext {
   readonly delayStore?: DelayStore;
   /** Mission decision node persistence (file in the shell; in memory when absent). */
   readonly decisionNodeStore?: DecisionNodeStore;
+  /** Mission image node persistence (file in the shell; in memory when absent). */
+  readonly imageNodeStore?: import("./media.js").ImageNodeStore;
   /** Peer identity store (when storage is "postgres", injected by shell). */
   readonly peerStore?: PeerStore;
   /** Config persistence store (when storage is "postgres", injected by shell). */

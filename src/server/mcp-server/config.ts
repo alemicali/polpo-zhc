@@ -401,7 +401,14 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
       orchestrator_name: z.string().trim().max(ORCHESTRATOR_NAME_MAX_LENGTH).regex(/^[^\r\n]*$/, "a single line").nullable().optional()
         .describe("The orchestrator's display name in chats, groups, channels and its own prompt (1–40 characters); null or '' restores the default, Polpo"),
       orchestrator_model: modelSpec.optional().describe("Polpo's model: provider:model, or { primary, fallbacks }"),
-      image_model: z.string().nullable().optional().describe("The model for images (provider:model), or null for the default"),
+      image_model: z.string().nullable().optional().describe("The image generation model (the media primitive): gateway:provider/model, e.g. vercel-ai-gateway:openai/gpt-image-2; null removes it"),
+      media: z.object({
+        fallbackModel: z.string().optional().describe("Tried once when the image model fails: gateway:provider/model"),
+        credentialRef: z.object({ owner: z.string(), service: z.string() }).optional().describe("The vault entry with the gateway's key (default: the gateway's env var)"),
+        credentialField: z.string().optional(),
+        maxImages: z.number().int().min(1).max(10).optional(),
+        retention: z.number().int().min(1).max(20_000).optional(), retentionDays: z.number().int().min(0).max(3650).optional(),
+      }).strict().nullable().optional().describe("Media: the image fallback model, the gateway key's vault entry, limits and the media log's retention; null: the defaults"),
       reasoning: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional().describe("How much Polpo reasons before answering"),
       egress_proxies: z.record(z.string().regex(EGRESS_PROXY_NAME, "letters, digits, - and _"), z.string().regex(EGRESS_PROXY_URL, "a proxy URL like socks5://100.101.55.7:1080"))
         .nullable().optional().describe("Named proxies for agents' browsers, e.g. { home: 'socks5://100.101.55.7:1080' }: replaces them all; null removes them"),
@@ -436,12 +443,13 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
     },
     outputSchema: { changed: z.array(z.string()), settings: settingsView },
     annotations: UPDATE,
-  }, async ({ orchestrator_name, orchestrator_model, image_model, reasoning, egress_proxies, allow_unlisted, general, compaction, dependency_results, tailscale, mcp, connectors, auto_deploy_agent_updates }) => {
+  }, async ({ orchestrator_name, orchestrator_model, image_model, media, reasoning, egress_proxies, allow_unlisted, general, compaction, dependency_results, tailscale, mcp, connectors, auto_deploy_agent_updates }) => {
     const body: Record<string, unknown> = {};
     if (auto_deploy_agent_updates !== undefined) body.agents = { versioning: { autoDeployApiUpdates: auto_deploy_agent_updates } };
     if (orchestrator_name !== undefined) body.orchestratorName = orchestrator_name || null;
     if (orchestrator_model !== undefined) body.orchestratorModel = orchestrator_model;
     if (image_model !== undefined) body.imageModel = image_model;
+    if (media !== undefined) body.media = media;
     if (reasoning !== undefined) body.reasoning = reasoning;
     if (egress_proxies !== undefined) body.egressProxies = egress_proxies;
     for (const [k, v] of Object.entries(general ?? {})) if (v !== undefined) body[k] = v;
@@ -470,7 +478,7 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
       };
     }
     if (Object.keys(body).length === 0) {
-      return fail("Nothing to change: give orchestrator_name, orchestrator_model, image_model, reasoning, egress_proxies, general, compaction, dependency_results, tailscale, mcp, connectors or auto_deploy_agent_updates.");
+      return fail("Nothing to change: give orchestrator_name, orchestrator_model, image_model, media, reasoning, egress_proxies, general, compaction, dependency_results, tailscale, mcp, connectors or auto_deploy_agent_updates.");
     }
     const missing = await missingVaultRefs(deps, refs);
     if (missing.length) {
@@ -480,7 +488,6 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
     if (!allow_unlisted) {
       const specs = [
         ...(typeof orchestrator_model === "string" ? [orchestrator_model] : orchestrator_model ? [orchestrator_model.primary, ...(orchestrator_model.fallbacks ?? [])] : []),
-        ...(image_model ? [image_model] : []),
       ];
       const unknown = await unknownModels(deps, specs);
       if (unknown.length) return fail(`Not in the model catalog: ${unknown.join(", ")}. Find the right provider:model with polpo_models_list, or pass allow_unlisted: true for a gateway's own model.`);

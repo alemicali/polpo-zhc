@@ -16,6 +16,8 @@ import {
   decisionCheckpointName, decisionNodeBranch, decisionNodeItems, decisionNodeQuestion, decisionNodeTasks, describeDecisionAnswer, renderDecisionNodeState,
   type DecisionAnswer, type DecisionNodeState, type DecisionNodeStore, type MissionDecider,
 } from "./decisions.js";
+import { MissionImageNodes } from "./mission-images.js";
+import type { ImageNodeState, MissionImage, MissionImager } from "./media.js";
 
 // ── In-memory fallback stores (no Node.js deps) ─────────────────────────
 
@@ -124,6 +126,8 @@ export class MissionExecutor {
   private nodeState: Record<string, DecisionNodeState> = {};
   /** Takes a node's decision (the decision service); absent: nodes fail over to onUncertain. */
   private decider?: MissionDecider;
+  /** Mission image nodes (media.ts MissionImage): their tasks wait for the generated image. */
+  private images: MissionImageNodes;
   /** Track the pre-execution status for scheduled/recurring missions (by group name).
    *  When a mission completes/fails, this determines whether to return to scheduled/recurring. */
   private scheduledOrigin = new Map<string, "scheduled" | "recurring">();
@@ -136,6 +140,7 @@ export class MissionExecutor {
     this.cpStore = ctx.checkpointStore ?? new InMemoryCheckpointStore();
     this.delayStore = ctx.delayStore ?? new InMemoryDelayStore();
     this.nodeStore = ctx.decisionNodeStore ?? new InMemoryDecisionNodeStore();
+    this.images = new MissionImageNodes(ctx);
 
     // Rebuild cleanedGroups from persisted task state — groups where ALL tasks
     // are already terminal don't need to be re-processed after a server restart.
@@ -152,6 +157,7 @@ export class MissionExecutor {
     this.delayState = await this.delayStore.load();
     // a decision cut short by a restart is taken again
     this.nodeState = Object.fromEntries(Object.entries(await this.nodeStore.load()).filter(([, s]) => s.status !== "deciding"));
+    await this.images.ready;
     await this.rebuildCleanedGroups();
   }
 
@@ -326,6 +332,7 @@ export class MissionExecutor {
     this.cpState = await this.cpStore.removeGroup(this.cpState, group);
     this.delayState = await this.delayStore.removeGroup(this.delayState, group);
     await this.dropDecisionNodes(group);
+    await this.images.drop(group);
   }
 
   /** Get all active (unresumed) checkpoints across all mission groups. */
@@ -473,6 +480,28 @@ export class MissionExecutor {
     }
 
     return undefined;
+  }
+
+  // ─── Image nodes ─────────────────────────────────────
+
+  /** Set who generates image nodes' images (the media service, wired by the server). */
+  setImager(imager: MissionImager | undefined): void {
+    this.images.setImager(imager);
+  }
+
+  /** Is a task waiting for an image node? (started once its after tasks have finished) */
+  async getBlockingImage(group: string, taskTitle: string, taskId: string, tasks: Task[], missionData?: string): Promise<{ image: MissionImage } | undefined> {
+    return this.images.blocking(group, taskTitle, taskId, tasks, missionData);
+  }
+
+  /** Images being generated: the engine does not call that a deadlock. */
+  hasPendingImages(): boolean {
+    return this.images.hasPending();
+  }
+
+  /** Every image node's state, newest first. */
+  listImageNodes(): ImageNodeState[] {
+    return this.images.list();
   }
 
   // ─── Decision nodes ──────────────────────────────────
@@ -1022,6 +1051,8 @@ export class MissionExecutor {
     if (doc.decisions && doc.decisions.length > 0) {
       this.decisionsByGroup.set(group, doc.decisions as MissionDecision[]);
     }
+    // Image nodes: a new run generates again
+    await this.images.startRun(group, (doc as { images?: MissionImage[] }).images);
 
     // Track scheduled origin so we know where to return after completion
     if (scheduledStatus) {

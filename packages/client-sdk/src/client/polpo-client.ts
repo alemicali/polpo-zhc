@@ -6,6 +6,7 @@ import type {
   BenchmarkVariantStats, BenchmarkWeights, PlaygroundExchange, PlaygroundPane, PlaygroundPaneInput, PlaygroundSession, PlaygroundStreamEvent, SuiteVariantOverrides,
 } from "./agent-suite-types.js";
 import type { DecideRequest, DecideResult, DecisionCallerKind, DecisionLogEntry, DecisionLogPage, DecisionNodeState, DecisionStatus } from "./decision-types.js";
+import type { EditImageRequest, GenerateImageRequest, ImageNodeState, MediaCallerKind, MediaLogEntry, MediaLogPage, MediaResult, MediaStatus } from "./media-types.js";
 import type {
   Connector,
   ConnectorTool,
@@ -861,6 +862,55 @@ export class PolpoClient {
   /** Choose the branch of a decision node waiting for a person (null: none of its tasks run); the mission resumes. */
   resolveDecisionNode(group: string, node: string, branch: string | null): Promise<DecisionNodeState> {
     return this.post("/decisions/nodes/resolve", { group, node, branch });
+  }
+
+  // ── Media (image generation and editing: the media primitive) ──
+
+  /** Generate images with the image model (settings.imageModel). Throws 409 when no image model is configured. */
+  generateImage(req: GenerateImageRequest): Promise<MediaResult> {
+    return this.post("/media/images", req);
+  }
+
+  /** Change an image (or compose several) with a prompt, optionally inside a mask. */
+  editImage(req: EditImageRequest): Promise<MediaResult> {
+    return this.post("/media/images/edits", req);
+  }
+
+  /** The media log (every image request with its provenance and images), newest first. */
+  getMediaLog(o: { limit?: number; cursor?: string; caller?: MediaCallerKind; callerId?: string; status?: "ok" | "error"; kind?: "generate" | "edit" } = {}): Promise<MediaLogPage> {
+    const q = new URLSearchParams();
+    if (o.limit) q.set("limit", String(o.limit));
+    if (o.cursor) q.set("cursor", o.cursor);
+    if (o.caller) q.set("caller", o.caller);
+    if (o.callerId) q.set("callerId", o.callerId);
+    if (o.status) q.set("status", o.status);
+    if (o.kind) q.set("kind", o.kind);
+    const qs = q.toString();
+    return this.get(`/media/images${qs ? `?${qs}` : ""}`);
+  }
+
+  /** One image request with its provenance and images. */
+  getMediaEntry(id: string): Promise<MediaLogEntry> {
+    return this.get(`/media/images/${encodeURIComponent(id)}`);
+  }
+
+  /** The image model, its gateway, the fallback and where the key comes from (never the key). */
+  getMediaStatus(): Promise<MediaStatus> {
+    return this.get("/media/status");
+  }
+
+  /** Missions' image nodes: generating, done or failed. */
+  getImageNodes(): Promise<ImageNodeState[]> {
+    return this.get("/media/nodes");
+  }
+
+  /** The URL of an image of the media log (thumb: its 512 px preview; download: as an attachment). */
+  mediaImageUrl(id: string, index: number, opts: { thumb?: boolean; download?: boolean } = {}): string {
+    const q = new URLSearchParams();
+    if (opts.thumb) q.set("thumb", "1");
+    if (opts.download) q.set("download", "1");
+    const qs = q.toString();
+    return this.apiUrl(`/media/images/${encodeURIComponent(id)}/${index}${qs ? `?${qs}` : ""}`);
   }
 
   // ── Triggers (POST /hooks/{id}: forms and webhooks, with actions on accepted deliveries) ──

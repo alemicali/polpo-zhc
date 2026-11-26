@@ -103,6 +103,7 @@ import { SandboxSettingsSection } from "@/components/sandbox/sandbox-settings";
 import { McpAccessSection } from "@/components/config/mcp-access-section";
 import { HarnessesSection } from "@/components/config/harnesses-section";
 import { DecisionsSection } from "@/components/config/decisions-section";
+import { MediaSection } from "@/components/config/media-section";
 import { ComputerWebhooksSection } from "@/components/config/computer-webhooks-section";
 import { SectionHeader } from "@/components/shared/section-header";
 import { ChannelsSection } from "@/components/channels/channels-section";
@@ -865,8 +866,8 @@ function AgentTab({ settings, primaryModel, fallbackModels, authStatus, onUpdate
 
   // Model picker dialogs
   const [orchestratorPickerOpen, setOrchestratorPickerOpen] = useState(false);
-  const [imagePickerOpen, setImagePickerOpen] = useState(false);
-  const [modelSaving, setModelSaving] = useState<"orchestrator" | "image" | null>(null);
+  const [modelSaving, setModelSaving] = useState<"orchestrator" | null>(null);
+  const [, setSearchParams] = useSearchParams();
 
   // Active providers (have credentials) — derived from auth status
   const authProviders = objectOrEmpty<ProviderAuthInfo>(authStatus?.providers);
@@ -900,25 +901,6 @@ function AgentTab({ settings, primaryModel, fallbackModels, authStatus, onUpdate
     }
   };
 
-  const handleImageModelSelect = async (spec: string) => {
-    setModelSaving("image");
-    try {
-      await onUpdateSettings({ imageModel: spec });
-      setImagePickerOpen(false);
-    } finally {
-      setModelSaving(null);
-    }
-  };
-
-  const handleImageModelClear = async () => {
-    setModelSaving("image");
-    try {
-      await onUpdateSettings({ imageModel: null });
-    } finally {
-      setModelSaving(null);
-    }
-  };
-
   // Format model display value
   const orchestratorDisplay = primaryModel ? (
     <span className="flex items-center gap-1.5">
@@ -928,12 +910,8 @@ function AgentTab({ settings, primaryModel, fallbackModels, authStatus, onUpdate
     </span>
   ) : undefined;
 
-  const imageDisplay = settings.imageModel ? (
-    <span className="flex items-center gap-1.5">
-      <span>{parseModelSpec(settings.imageModel).model}</span>
-      <Badge variant="outline" className="text-micro h-4 font-normal">{providerLabel(parseModelSpec(settings.imageModel).provider)}</Badge>
-    </span>
-  ) : undefined;
+  // the image generation model is set in Settings → Media (a gateway model, not a chat model)
+  const imageDisplay = settings.imageModel ? <span className="font-mono" data-testid="image-model">{settings.imageModel}</span> : undefined;
 
   return (
     <div className="space-y-6">
@@ -999,12 +977,10 @@ function AgentTab({ settings, primaryModel, fallbackModels, authStatus, onUpdate
           <SettingRow
             icon={Monitor}
             label="Image Model"
-            description="Vision tasks — falls back to orchestrator model"
+            description="Image generation (the media primitive) — set it in Settings → Media"
             value={imageDisplay}
             placeholder="Not set"
-            onClick={() => setImagePickerOpen(true)}
-            onClear={settings.imageModel ? handleImageModelClear : undefined}
-            saving={modelSaving === "image"}
+            onClick={() => setSearchParams({ section: "media" })}
           />
 
           {/* Reasoning */}
@@ -1125,33 +1101,6 @@ function AgentTab({ settings, primaryModel, fallbackModels, authStatus, onUpdate
         </DialogContent>
       </Dialog>
 
-      {/* ── Image Model Picker Dialog ── */}
-      <Dialog open={imagePickerOpen} onOpenChange={setImagePickerOpen}>
-        <DialogContent className="sm:max-w-lg p-0 gap-0 overflow-hidden">
-          <DialogHeader className="px-6 pt-6 pb-0">
-            <DialogTitle className="text-base">Image Model</DialogTitle>
-            <DialogDescription className="text-xs">
-              Choose the model for vision tasks. Falls back to the orchestrator model if not set.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="px-6 py-5">
-            <ModelPicker
-              configuredProviders={configuredProviders}
-              providerSources={providerSources}
-              value={settings.imageModel ?? null}
-              onSelect={handleImageModelSelect}
-              apiFetch={api}
-              heading={null}
-              maxHeight="320px"
-            />
-            {modelSaving === "image" && (
-              <div className="flex items-center gap-2 mt-3 text-xs text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving...
-              </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
@@ -1801,6 +1750,7 @@ export function ConfigPage() {
         {/* ═══ HARNESSES ═══ */}
         {activeSection === "harnesses" && <HarnessesSection />}
         {activeSection === "decisions" && <DecisionsSection />}
+        {activeSection === "media" && <MediaSection />}
         {activeSection === "computers" && <ComputerWebhooksSection />}
 
         {/* ═══ MCP ACCESS ═══ */}

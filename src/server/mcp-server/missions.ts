@@ -116,6 +116,17 @@ const planShape = {
     onUncertain: z.union([z.literal("human"), z.object({ branch: z.string() })]).optional().describe("\"human\" (default: the mission pauses for a person to choose) or { branch }"),
   }).passthrough()).optional()
     .describe("Decision nodes: a typed decision (the decision model) on the after tasks' results picks the branch that runs; the others are skipped"),
+  images: z.array(z.object({
+    name: z.string().min(1).describe("Its name"),
+    afterTasks: z.array(z.string().min(1)).min(1).describe("Titles of the tasks whose results the prompt reads"),
+    prompt: z.string().min(1).describe("The image prompt: a template with {{tasks.<title>}} (that task's result)"),
+    forTasks: z.array(z.string().min(1)).min(1).describe("Titles of the tasks that wait for the image and get its files in their description"),
+    size: z.string().optional().describe("WIDTHxHEIGHT"),
+    n: z.number().int().min(1).max(10).optional(),
+    model: z.string().optional().describe("Another image model, gateway:provider/model"),
+    onError: z.enum(["continue", "fail"]).optional().describe("continue (default: the tasks go on, told it failed) or fail"),
+  }).passthrough()).optional()
+    .describe("Image nodes: an image generated (the instance's image model) from the after tasks' results, given to the forTasks"),
 };
 
 /** Validate a plan as the executor will; an error says which task or checkpoint to fix. */
@@ -217,7 +228,7 @@ export function registerMissionTools(tool: Register, deps: McpDeps): void {
 
   tool("missions", "polpo_mission_create", {
     title: "Create a mission",
-    description: "Create a mission from a structured plan: tasks (with assignTo and dependsOn by title), and optional checkpoints, delays, quality gates and decision nodes. "
+    description: "Create a mission from a structured plan: tasks (with assignTo and dependsOn by title), and optional checkpoints, delays, quality gates, decision nodes and image nodes. "
       + "The plan is validated as the executor will; an error says what to fix. It is saved as a draft: run it with polpo_mission_run "
       + "(or run: true here). To have Polpo draft the plan from a goal, use polpo_ask instead.",
     inputSchema: {
@@ -247,7 +258,7 @@ export function registerMissionTools(tool: Register, deps: McpDeps): void {
 
   tool("missions", "polpo_mission_update", {
     title: "Update a mission",
-    description: "Rename a mission, set or clear its budget, or replace parts of its plan: tasks, checkpoints, delays, quality gates or decision nodes (each one given replaces that list: "
+    description: "Rename a mission, set or clear its budget, or replace parts of its plan: tasks, checkpoints, delays, quality gates, decision nodes or image nodes (each one given replaces that list: "
       + "read the plan with polpo_mission_get, change it, send it back). The plan cannot change while it runs (abort it first); the budget can, "
       + "and raising or clearing it lets a mission paused by its budget go on. The new plan is validated; the result lists what changed.",
     inputSchema: {
@@ -258,15 +269,16 @@ export function registerMissionTools(tool: Register, deps: McpDeps): void {
       delays: planShape.delays,
       qualityGates: planShape.qualityGates,
       decisions: planShape.decisions,
+      images: planShape.images,
       budget_usd: z.number().positive().max(1_000_000).nullable().optional()
         .describe("Spending limit in USD for the whole mission; null clears it. Raising or clearing it lets a mission paused by its budget go on"),
     },
     outputSchema: { mission: looseObject, changed: z.array(z.string()) },
     annotations: UPDATE,
-  }, async ({ id, name, tasks, checkpoints, delays, qualityGates, decisions, budget_usd }) => {
+  }, async ({ id, name, tasks, checkpoints, delays, qualityGates, decisions, images, budget_usd }) => {
     const m = await loadMission(deps, id);
     if (!m.ok) return m.status === 404 ? notFound(id) : apiError(m, `Reading mission ${id}`);
-    const planChange = tasks !== undefined || checkpoints !== undefined || delays !== undefined || qualityGates !== undefined || decisions !== undefined;
+    const planChange = tasks !== undefined || checkpoints !== undefined || delays !== undefined || qualityGates !== undefined || decisions !== undefined || images !== undefined;
     if (planChange && !EDITABLE.includes(m.mission.status)) return fail(`Mission ${id} is ${m.mission.status}: its plan cannot change now. Abort it first (polpo_mission_abort) if the person wants to change it.`);
     const body: Record<string, unknown> = {};
     const changed: string[] = [];
@@ -274,12 +286,12 @@ export function registerMissionTools(tool: Register, deps: McpDeps): void {
     if (budget_usd !== undefined && (budget_usd ?? undefined) !== m.mission.budgetUsd) { body.budgetUsd = budget_usd; changed.push("budget"); }
     if (planChange) {
       const current = planOf(m.mission) ?? {};
-      const next = { ...current, ...(tasks ? { tasks } : {}), ...(checkpoints ? { checkpoints } : {}), ...(delays ? { delays } : {}), ...(qualityGates ? { qualityGates } : {}), ...(decisions ? { decisions } : {}) };
+      const next = { ...current, ...(tasks ? { tasks } : {}), ...(checkpoints ? { checkpoints } : {}), ...(delays ? { delays } : {}), ...(qualityGates ? { qualityGates } : {}), ...(decisions ? { decisions } : {}), ...(images ? { images } : {}) };
       const valid = validatePlan(next);
       if (!valid.ok) return fail(valid.error);
       const missing = await unknownAgents(deps, ((next.tasks as Array<{ assignTo?: string }>) ?? []).map((t) => t.assignTo));
       if (missing) return fail(missing);
-      if (valid.data !== JSON.stringify(current)) { body.data = valid.data; changed.push(...["tasks", "checkpoints", "delays", "qualityGates", "decisions"].filter((k) => JSON.stringify((next as Record<string, unknown>)[k]) !== JSON.stringify(current[k]))); }
+      if (valid.data !== JSON.stringify(current)) { body.data = valid.data; changed.push(...["tasks", "checkpoints", "delays", "qualityGates", "decisions", "images"].filter((k) => JSON.stringify((next as Record<string, unknown>)[k]) !== JSON.stringify(current[k]))); }
     }
     let mission = m.mission;
     if (Object.keys(body).length) {

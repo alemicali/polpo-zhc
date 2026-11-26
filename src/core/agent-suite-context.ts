@@ -34,7 +34,7 @@ export interface SuiteCaseHooks {
    * A suite role's turn (the judge, the simulated user, the generator, the reviewer), not a case:
    * the chat gets no tools (Polpo's or the agent's), only the role's prompt.
    */
-  readonly role?: SuiteRoleName | "decider";
+  readonly role?: SuiteRoleName | "decider" | "viewer";
   /** A role played by a model + engine block: the ephemeral agent the chat resolves by this name. */
   readonly roleAgent?: { name: string } & Record<string, unknown>;
   /** Why the next model call must not happen (a budget is spent), or undefined. */
