@@ -26,6 +26,9 @@ import { unifiedLineDiff } from "./agent-versions.js";
 import type { SuiteBaselineComparison, SuiteRunAggregates, SuiteRunReview } from "./agent-suite-evals.js";
 import { DEPLOY_GATE_LIMITS, type AgentDeployGate } from "./agent-suite-gates.js";
 import type { SuiteCassetteRecord } from "./agent-suite-replay.js";
+// types only: harnesses.js imports computers.js, which must not load before sandbox.js (an import cycle)
+import type { AgentHarnessEngine } from "./harnesses.js";
+import type { AgentCliEngine } from "./cli-engine.js";
 
 // ── Modes ────────────────────────────────────────────────────────────
 
@@ -146,7 +149,9 @@ export interface SimulatedUser {
   stop?: SimulatedUserStop;
   /** stop: scorer — the id of one of the case's scorers (checked after each agent reply). */
   stopScorer?: string;
-  /** The simulator's model (default the suite's simulatorModel, else Polpo's model). */
+  /** Who plays this case's user (default the suite's simulator, else Polpo): an agent, or a model + engine block. */
+  simulator?: SuiteRole;
+  /** @deprecated read as `simulator: { model }` (kept for suites saved before roles). */
   model?: string;
   /** Scripted user: these turns, in order, after the case's message (no simulator call). */
   script?: string[];
@@ -342,7 +347,7 @@ export type SuiteScorer = ScorerBase & (
   | { type: "cost"; maxUsd: number }
   | { type: "latency"; maxMs: number }
   /** An LLM judge (G-Eval): the rubric and weighted criteria scored 1–5 with reasoning; `expected` is an optional reference answer. */
-  | { type: "llm_judge"; rubric: string; criteria?: JudgeCriterion[]; expected?: string; model?: string }
+  | { type: "llm_judge"; rubric: string; criteria?: JudgeCriterion[]; expected?: string; judge?: SuiteRole; /** @deprecated read as `judge: { model }`. */ model?: string }
   /** A JS function body run in the sandboxed code worker: receives { reply, toolCalls, trace, row, input, expected } and returns a number 0..1, a boolean, or { score, reason }. */
   | { type: "custom"; code: string; expected?: unknown; timeoutMs?: number }
 );
@@ -351,9 +356,33 @@ export const SUITE_SCORER_TYPES: readonly SuiteScorerType[] = [
   "exact", "numeric", "contains_all", "contains_any", "regex", "similarity", "json_schema", "tool_trajectory", "cost", "latency", "llm_judge", "custom",
 ];
 
+// ── Roles ────────────────────────────────────────────────────────────
+
+/** The LLM roles of a suite: the judge of llm_judge scorers, the simulated user, the case generator, the run reviewer. */
+export type SuiteRoleName = "judge" | "simulator" | "generator" | "reviewer";
+export const SUITE_ROLE_NAMES: readonly SuiteRoleName[] = ["judge", "simulator", "generator", "reviewer"];
+
+/**
+ * Who plays one of a suite's LLM roles: an existing agent by name (`judge-bot`, `judge-bot@1.2.0`,
+ * `judge-bot@draft`), or the block an agent uses for its model and engine (`model`, `reasoning`,
+ * `engine`: Polpo's, a harness, a CLI account), run as an ephemeral agent. Neither: Polpo itself.
+ * Every role turn is a chat turn through the chat completions pipeline (the agent's or Polpo's
+ * engine, provider auth, fallbacks, cost tracking), without tools; its chat is deleted afterwards.
+ */
+export interface SuiteRole {
+  agent?: string;
+  model?: string;
+  reasoning?: string;
+  engine?: AgentHarnessEngine | AgentCliEngine;
+}
+
 /** Eval settings of a suite (phase 2). */
 export interface SuiteEvalSettings {
-  /** The LLM judge's model (default: the orchestrator's effective model). */
+  /** Who judges llm_judge scorers (default Polpo); a scorer's own `judge` wins. */
+  judge?: SuiteRole;
+  /** Who writes "Explain this run" (default Polpo). */
+  reviewer?: SuiteRole;
+  /** @deprecated read as `judge: { model }` (kept for suites saved before roles). */
   judgeModel?: string;
   /** Run every case this many times (1–10): mean, stddev and a flakiness flag per case. */
   repetitions?: number;
@@ -457,7 +486,11 @@ export interface AgentSuite {
   evals?: SuiteEvalSettings;
   /** A deploy gate: required before production, thresholds, run on publish. */
   gate?: SuiteGate;
-  /** The simulated users' model (default Polpo's model, Settings → Orchestrator). */
+  /** Who plays the simulated users (default Polpo): an agent, or a model + engine block. A case's own wins. */
+  simulator?: SuiteRole;
+  /** Who proposes cases and dataset rows for this suite (default Polpo). */
+  generator?: SuiteRole;
+  /** @deprecated read as `simulator: { model }` (kept for suites saved before roles). */
   simulatorModel?: string;
   tags?: string[];
   /** Bumped on every save (a save with an older revision is refused). */
@@ -956,6 +989,97 @@ const strList = (v: unknown, where: string): string[] | undefined => {
   if (!Array.isArray(v) || v.some((x) => typeof x !== "string")) throw new AgentSuiteError(`${where} must be a list of strings`);
   return v as string[];
 };
+// ── Roles: parsing and reading ──
+
+const AGENT_REF_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}(@[A-Za-z0-9][A-Za-z0-9.+_-]{0,63})?$/;
+const ROLE_KEYS = new Set(["agent", "model", "reasoning", "engine"]);
+
+/**
+ * A role from raw input: `{ agent }` (an existing agent, optionally `@version` / `@draft`) or a
+ * model + engine block `{ model?, reasoning?, engine? }`; a string is a model. The old `judgeModel`
+ * / `simulatorModel` / `model` fields come in as `legacyModel` (a model block). Empty: undefined (Polpo).
+ */
+export function parseSuiteRole(v: unknown, where: string, legacyModel?: string): SuiteRole | undefined {
+  if (v === undefined || v === null || v === "") return legacyModel ? { model: legacyModel } : undefined;
+  if (typeof v === "string") return { model: str(v, where, { max: 200 })! };
+  if (!isObj(v)) throw new AgentSuiteError(`${where} must be { agent } or { model?, reasoning?, engine? }`);
+  const extra = Object.keys(v).filter((k) => !ROLE_KEYS.has(k));
+  if (extra.length) throw new AgentSuiteError(`${where}: unknown field(s) ${extra.join(", ")} (agent, or model, reasoning, engine)`);
+  const agent = str(v.agent, `${where}.agent`, { optional: true, max: 170 })?.trim() || undefined;
+  if (agent !== undefined && !AGENT_REF_RE.test(agent)) throw new AgentSuiteError(`${where}.agent must be an agent's name, optionally with @version or @draft`);
+  const model = str(v.model, `${where}.model`, { optional: true, max: 200 })?.trim() || undefined;
+  const reasoning = str(v.reasoning, `${where}.reasoning`, { optional: true, max: 20 })?.trim() || undefined;
+  // the shape here; the engine's own fields are checked by the server (parseAgentEngine, as agent.engine)
+  let engine: SuiteRole["engine"];
+  const e = v.engine;
+  if (e !== undefined && e !== null && e !== "" && e !== "polpo") {
+    if (typeof e === "string") engine = { harness: e } as AgentHarnessEngine;
+    else if (isObj(e) && (typeof e.harness === "string" || e.type === "cli")) engine = e as unknown as SuiteRole["engine"];
+    else throw new AgentSuiteError(`${where}.engine must be "polpo", { harness, ... } or { type: "cli", cli, ... } (as an agent's engine)`);
+  }
+  if (agent && (model || reasoning || engine)) throw new AgentSuiteError(`${where}: name an agent, or give a model and engine block, not both`);
+  const out = compact({ agent, model, reasoning, engine });
+  return Object.keys(out).length ? out : legacyModel ? { model: legacyModel } : undefined;
+}
+
+/** Every role a suite sets (suite, cases' simulated users, judge scorers), with where it is: to check or rewrite them. */
+export function suiteRoles(suite: AgentSuite): Array<{ role: SuiteRole; where: string; set: (role: SuiteRole) => void }> {
+  const out: Array<{ role: SuiteRole; where: string; set: (role: SuiteRole) => void }> = [];
+  const ev = suite.evals;
+  if (ev?.judge) out.push({ role: ev.judge, where: "evals.judge", set: (r) => { ev.judge = r; } });
+  if (ev?.reviewer) out.push({ role: ev.reviewer, where: "evals.reviewer", set: (r) => { ev.reviewer = r; } });
+  if (suite.simulator) out.push({ role: suite.simulator, where: "simulator", set: (r) => { suite.simulator = r; } });
+  if (suite.generator) out.push({ role: suite.generator, where: "generator", set: (r) => { suite.generator = r; } });
+  const scorers = (list: SuiteScorer[] | undefined, where: string) => list?.forEach((s, i) => {
+    if (s.type === "llm_judge" && s.judge) out.push({ role: s.judge, where: `${where}[${i}].judge`, set: (r) => { s.judge = r; } });
+  });
+  scorers(suite.scorers, "scorers");
+  suite.cases.forEach((c, i) => {
+    scorers(c.scorers, `cases[${i}].scorers`);
+    const sim = c.mocks?.simulatedUser;
+    if (sim?.simulator) out.push({ role: sim.simulator, where: `cases[${i}].mocks.simulatedUser.simulator`, set: (r) => { sim.simulator = r; } });
+  });
+  return out;
+}
+
+/** A suite's role (the old *Model fields read as a model block); undefined: Polpo. */
+export function suiteRoleFor(suite: Partial<Pick<AgentSuite, "evals" | "simulator" | "generator" | "simulatorModel">> | undefined, role: SuiteRoleName): SuiteRole | undefined {
+  if (!suite) return undefined;
+  switch (role) {
+    case "judge": return suite.evals?.judge ?? (suite.evals?.judgeModel ? { model: suite.evals.judgeModel } : undefined);
+    case "reviewer": return suite.evals?.reviewer;
+    case "simulator": return suite.simulator ?? (suite.simulatorModel ? { model: suite.simulatorModel } : undefined);
+    case "generator": return suite.generator;
+  }
+}
+
+/** An llm_judge scorer's own judge (its old `model` read as a model block). */
+export function scorerJudgeRole(s: SuiteScorer): SuiteRole | undefined {
+  if (s.type !== "llm_judge") return undefined;
+  return s.judge ?? (s.model ? { model: s.model } : undefined);
+}
+
+/** A simulated user's own simulator (its old `model` read as a model block). */
+export function simulatedUserRole(sim: SimulatedUser | undefined): SuiteRole | undefined {
+  return sim?.simulator ?? (sim?.model ? { model: sim.model } : undefined);
+}
+
+/** Does this role run as an ephemeral agent (a model + engine block)? */
+export function isRoleBlock(role: SuiteRole | undefined): boolean {
+  return !!role && !role.agent && !!(role.model || role.reasoning || role.engine);
+}
+
+/** Who plays a role, in words: "Polpo", "agent judge-bot@1.2.0", "anthropic:… · Claude Code (CLI)". */
+export function describeSuiteRole(role: SuiteRole | undefined): string {
+  if (!role || (!role.agent && !isRoleBlock(role))) return "Polpo";
+  if (role.agent) return `agent ${role.agent}`;
+  const e = role.engine as { harness?: string; type?: string; cli?: string; model?: string } | undefined;
+  const engine = !e ? "" : e.type === "cli" ? `${e.cli === "codex" ? "Codex" : "Claude Code"} (CLI)` : e.harness ?? "";
+  const model = role.model ?? e?.model;
+  return [model, engine].filter(Boolean).join(" · ") || "Polpo's engine";
+}
+
+
 function parseScoreThresholds(v: unknown): Record<string, number> | undefined {
   if (v === undefined || v === null) return undefined;
   if (!isObj(v)) throw new AgentSuiteError("gate.scoreThresholds must be an object: { scorerId: minimum mean score }");
@@ -1102,7 +1226,7 @@ function parseSimulatedUser(v: unknown, where: string): SimulatedUser | undefine
     persona, goal, constraints: constraints?.length ? constraints : undefined,
     maxTurns: num(v.maxTurns, `${where}.maxTurns`, { min: 1, max: 20, int: true }),
     stop: stop as SimulatedUserStop | undefined, stopScorer,
-    model: str(v.model, `${where}.model`, { optional: true, max: 200 }),
+    simulator: parseSuiteRole(v.simulator, `${where}.simulator`, str(v.model, `${where}.model`, { optional: true, max: 200 })),
     script: script?.length ? script : undefined,
   });
 }
@@ -1275,7 +1399,7 @@ function parseScorer(v: unknown, where: string, ids: Set<string>): SuiteScorer {
           return compact({ name: str(c.name, `${w}.name`, { max: 80 })!, description: str(c.description, `${w}.description`, { max: 2000 })!, weight: num(c.weight, `${w}.weight`, { min: 0, max: 100 }) });
         });
       }
-      return compact({ ...base, type, rubric: str(v.rubric, `${where}.rubric`, { max: 10_000 })!, criteria, expected: str(v.expected, `${where}.expected`, { optional: true, max: 50_000 }), model: str(v.model, `${where}.model`, { optional: true, max: 200 }) });
+      return compact({ ...base, type, rubric: str(v.rubric, `${where}.rubric`, { max: 10_000 })!, criteria, expected: str(v.expected, `${where}.expected`, { optional: true, max: 50_000 }), judge: parseSuiteRole(v.judge, `${where}.judge`, str(v.model, `${where}.model`, { optional: true, max: 200 })) });
     }
     case "custom":
       return compact({ ...base, type, code: str(v.code, `${where}.code`, { max: 20_000 })!, expected: v.expected, timeoutMs: num(v.timeoutMs, `${where}.timeoutMs`, { min: 100, max: 30_000, int: true }) });
@@ -1296,7 +1420,8 @@ function parseEvals(v: unknown, where: string): SuiteEvalSettings | undefined {
   const baseline = v.baseline;
   if (baseline !== undefined && !["previous", "production", "none"].includes(baseline as string)) throw new AgentSuiteError(`${where}.baseline must be previous, production or none`);
   return compact({
-    judgeModel: str(v.judgeModel, `${where}.judgeModel`, { optional: true, max: 200 }),
+    judge: parseSuiteRole(v.judge, `${where}.judge`, str(v.judgeModel, `${where}.judgeModel`, { optional: true, max: 200 })),
+    reviewer: parseSuiteRole(v.reviewer, `${where}.reviewer`),
     repetitions: num(v.repetitions, `${where}.repetitions`, { min: 1, max: SUITE_LIMITS.maxRepetitions, int: true }),
     regressionTolerance: num(v.regressionTolerance, `${where}.regressionTolerance`, { min: 0, max: 1 }),
     flakyStddev: num(v.flakyStddev, `${where}.flakyStddev`, { min: 0, max: 1 }),
@@ -1448,7 +1573,8 @@ export function parseAgentSuite(input: unknown, agent: string, existing?: AgentS
     scorers: parseScorers(input.scorers, "scorers"),
     evals: parseEvals(input.evals, "evals"),
     gate,
-    simulatorModel: str(input.simulatorModel, "simulatorModel", { optional: true, max: 200 }),
+    simulator: parseSuiteRole(input.simulator, "simulator", str(input.simulatorModel, "simulatorModel", { optional: true, max: 200 })),
+    generator: parseSuiteRole(input.generator, "generator"),
     tags: strList(input.tags, "tags"),
     revision: (existing?.revision ?? 0) + 1,
     createdAt: existing?.createdAt ?? now,

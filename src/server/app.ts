@@ -372,6 +372,9 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     // "writer@draft" (the Tests tab's smoke run): the draft over the live agent's runtime fields
     // a suite case's variant (agent suites): its per-run overrides on top (nothing is saved)
     resolveAgent: async (name: string, ref?: string) => {
+      // a suite role played by a model + engine block: its ephemeral agent (this turn only)
+      const roleAgent = currentSuiteCase()?.roleAgent;
+      if (roleAgent && name === roleAgent.name && !ref) return { agent: roleAgent };
       const overrides = currentSuiteCase()?.overrides;
       const withOverrides = <T extends { agent: any } | undefined>(r: T): T => (r && overrides ? { ...r, agent: applySuiteOverrides(r.agent, overrides) } : r);
       if (ref !== "draft") return withOverrides(await o.getAgentVersioning().resolve(name, ref));
@@ -446,6 +449,9 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         + connectorsNote;
     },
     resolveAgentTools: async (agentConfig: any, context?: { sessionId: () => string | undefined; origin?: import("@polpo-ai/core").ConversationCheckTarget; chain?: string[] }) => {
+      // a suite role's turn (judge, simulated user, generator, reviewer): text only, no tools
+      const role = currentSuiteCase()?.role;
+      if (role) return { tools: [], executor: async (name: string) => `Error: ${name} is not available: this turn plays a test suite's ${role}, without tools.`, isInteractive: () => false };
       const { createAllTools } = await import("../tools/system-tools.js");
       const { createMemoryTools } = await import("../tools/memory-tools.js");
       const { createDataAgentTools } = await import("../tools/data-tools.js");
@@ -751,11 +757,13 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
           return `Error: ${err instanceof Error ? err.message : String(err)}`;
         }
       };
+      // a suite role's turn played by Polpo (judge, simulated user, generator, reviewer): text only, no tools
+      const role = currentSuiteCase()?.role;
       return {
         systemPrompt,
         model: m,
         streamOpts: buildStreamOpts(undefined, settings?.reasoning, m.maxTokens),
-        tools: [...ALL_ORCHESTRATOR_TOOLS, ...connectorTools.tools],
+        tools: role ? [] : [...ALL_ORCHESTRATOR_TOOLS, ...connectorTools.tools],
         executor: (name: string, args: Record<string, unknown>, context) =>
           withEventOrigin({ source: "polpo" }, () => runTool(name, args, context)),
         isInteractive,

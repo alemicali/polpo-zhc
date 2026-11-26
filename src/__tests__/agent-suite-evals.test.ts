@@ -9,11 +9,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
-  InMemoryAgentSuiteStore, caseOverallScore, compareSuiteRuns, evaluateScorer, extractNumber, judgePrompt, parseAgentSuite, parseJudgeResponse,
+  InMemoryAgentSuiteStore, caseOverallScore, compareSuiteRuns, describeSuiteRole, evaluateScorer, scorerJudgeRole, suiteRoleFor, extractNumber, judgePrompt, parseAgentSuite, parseJudgeResponse,
   pickSuiteBaseline, planSuiteCases, readCustomScore, readPath, scoreSuiteCase, suiteRunAggregates, suiteRunReviewPrompt, suiteTrend, textSimilarity,
   type AgentConfig, type SuiteCaseResult, type SuiteRun, type SuiteScorer, type SuiteTrace,
 } from "@polpo-ai/core";
 import { AgentSuiteRunner, type AgentSuiteDeps } from "../server/agent-suites.js";
+import type { SuiteCaseHooks } from "../core/agent-suite-context.js";
 import { customScorerModule } from "../server/agent-suite-scorers.js";
 
 function trace(over: Partial<SuiteTrace> = {}): SuiteTrace {
@@ -138,15 +139,21 @@ describe("the LLM judge (G-Eval) with a mocked model", () => {
       text: '```json\n{"criteria":[{"name":"correctness","reasoning":"4,99 EUR is right","score":5},{"name":"tone","reasoning":"curt","score":1}],"summary":"Right price, curt."}\n```',
       model: "anthropic:judge", costUsd: 0.001,
     }));
-    const r = await score(judgeScorer, trace(), { judge, judgeModel: "anthropic:suite-judge" });
-    expect(judge).toHaveBeenCalledWith(expect.objectContaining({ model: "anthropic:suite-judge" }));
+    const r = await score(judgeScorer, trace(), { judge, judgeRole: { model: "anthropic:suite-judge" } });
+    expect(judge).toHaveBeenCalledWith(expect.objectContaining({ role: { model: "anthropic:suite-judge" } }));
     expect(r.score).toBe(0.75);
     expect(r.passed).toBe(true);
     expect(r.reason).toBe("Right price, curt.");
     expect(r.judge).toMatchObject({ model: "anthropic:judge", costUsd: 0.001, criteria: [{ name: "correctness", score: 5, weight: 3, reasoning: "4,99 EUR is right" }, { name: "tone", score: 1 }] });
-    // the scorer's own model wins over the suite's
-    await score({ ...judgeScorer, model: "openai:own" } as SuiteScorer, trace(), { judge, judgeModel: "anthropic:suite-judge" });
-    expect(judge).toHaveBeenLastCalledWith(expect.objectContaining({ model: "openai:own" }));
+    // the scorer's own judge wins over the suite's (its old `model` field is a model block)
+    await score({ ...judgeScorer, model: "openai:own" } as SuiteScorer, trace(), { judge, judgeRole: { model: "anthropic:suite-judge" } });
+    expect(judge).toHaveBeenLastCalledWith(expect.objectContaining({ role: { model: "openai:own" } }));
+    await score({ ...judgeScorer, judge: { agent: "judge-bot@1.2.0" } } as SuiteScorer, trace(), { judge, judgeRole: { model: "anthropic:suite-judge" } });
+    expect(judge).toHaveBeenLastCalledWith(expect.objectContaining({ role: { agent: "judge-bot@1.2.0" } }));
+    // the host gets a check: readable answers pass it, others say why
+    const check = (judge.mock.calls.at(-1)![0] as { check: (t: string) => string | undefined }).check;
+    expect(check('{"criteria":[{"name":"correctness","score":5},{"name":"tone","score":4}]}')).toBeUndefined();
+    expect(check("fine")).toContain("did not answer with JSON");
   });
 
   it("a low score fails; an unreadable answer or no judge is an error (the case errors)", async () => {
@@ -155,6 +162,8 @@ describe("the LLM judge (G-Eval) with a mocked model", () => {
     expect(low.score).toBeCloseTo((3 * 0.25 + 0.5) / 4, 4);
     const garbled = await score(judgeScorer, trace(), { judge: async () => ({ text: "I think it is fine" }) });
     expect(garbled.error).toContain("did not answer with JSON");
+    // the raw answer is in the error
+    expect(garbled.error).toContain("The judge answered: I think it is fine");
     const partial = await score(judgeScorer, trace(), { judge: async () => ({ text: '{"criteria":[{"name":"tone","score":4}]}' }) });
     expect(partial.error).toContain('did not score "correctness"');
     expect((await score(judgeScorer)).error).toContain("No LLM judge");
@@ -199,7 +208,8 @@ describe("validation, defaults and dataset expected values", () => {
     }, "a");
     expect(s.cases[0].scorers!.map((x) => x.id)).toEqual(["exact", "exact-2", "numeric", "contains-all", "llm-judge", "tool-trajectory", "json-schema", "custom"]);
     expect(s.cases[0].scorers![3]).toMatchObject({ values: ["one"] });
-    expect(s.evals).toEqual({ judgeModel: "anthropic:x", repetitions: 3, regressionTolerance: 0.1, baseline: "production" });
+    // the old judgeModel is read as a model block
+    expect(s.evals).toEqual({ judge: { model: "anthropic:x" }, repetitions: 3, regressionTolerance: 0.1, baseline: "production" });
     const bad = (scorers: unknown[]) => () => parseAgentSuite({ name: "x", cases: [{ name: "c", input: { message: "m" }, scorers }] }, "a");
     expect(bad([{ type: "nope" }])).toThrow(/scorers\[0\]\.type must be one of/);
     expect(bad([{ type: "exact" }])).toThrow(/expected is required/);
@@ -229,7 +239,7 @@ describe("validation, defaults and dataset expected values", () => {
     const section = doc.slice(doc.indexOf("## Evals: scorers, baselines, trends"));
     const raw = parseYaml(/```yaml\n([\s\S]*?)```/.exec(section)![1]!) as Record<string, unknown>;
     const s = parseAgentSuite({ name: "Evals", ...raw, datasets: [{ id: "rates", name: "Rates", rows: [{ country: "IT", expected: 4.99 }] }] }, "shop");
-    expect(s.evals).toEqual({ judgeModel: "anthropic:claude-sonnet-5-5", repetitions: 3, regressionTolerance: 0.05, baseline: "previous" });
+    expect(s.evals).toEqual({ judge: { agent: "judge-bot" }, reviewer: { model: "anthropic:claude-sonnet-5-5" }, repetitions: 3, regressionTolerance: 0.05, baseline: "previous" });
     const [p] = planSuiteCases(s, { repetitions: 1 });
     expect(p.case.scorers!.map((x) => x.id)).toEqual(["cost", "price", "country", "judge"]);
     expect(p.case.scorers![1]).toMatchObject({ expected: 4.99 });
@@ -360,20 +370,32 @@ describe("trends and the review prompt", () => {
 
 // ── The runner: scorers, repetitions, baselines and the review (fake chat turn, in-memory store) ──
 
-function runnerWith(reply: (msg: string, attempt: number) => string, extra: Partial<AgentSuiteDeps> = {}) {
+/** A role turn's answer in these tests: what the role (judge, reviewer…) says, with the model and cost the pipeline reports. */
+type RoleAnswer = (kind: string, ref: string, messages: Array<{ role: string; content: string }>, hooks: SuiteCaseHooks) => { text: string; model?: string; costUsd?: number };
+const politeJudge: RoleAnswer = (kind) => (kind === "judge" ? { text: '{"score": 5, "reasoning": "polite"}', model: "judge-model" } : { text: "" });
+
+function runnerWith(reply: (msg: string, attempt: number) => string, extra: Partial<AgentSuiteDeps> & { roles?: RoleAnswer; roleCalls?: Array<{ kind: string; ref: string; messages: Array<{ role: string; content: string }>; hooks: SuiteCaseHooks }> } = {}) {
   const store = new InMemoryAgentSuiteStore();
   const agent: AgentConfig = { name: "shop", role: "Shop", systemPrompt: "Quote shipping." } as AgentConfig;
   let n = 0;
+  const { roles = politeJudge, roleCalls, ...rest } = extra;
   const deps: AgentSuiteDeps = {
     store,
     agents: async () => [agent],
     resolveAgent: async () => agent,
-    turn: async (_ref, messages) => {
+    turn: async (ref, messages, hooks) => {
+      // a suite role's turn (the same pipeline as the cases): the fake pipeline reports its model turn
+      if (hooks.role) {
+        roleCalls?.push({ kind: hooks.role, ref, messages, hooks });
+        const r = roles(hooks.role, ref, messages, hooks);
+        hooks.recordTurn({ text: r.text, toolCalls: [], mocked: false, ...(r.model ? { model: r.model } : {}), usage: { inputTokens: 10, outputTokens: 10, costUsd: r.costUsd ?? 0 }, durationMs: 1 });
+        return { text: r.text, toolCalls: [] };
+      }
       n++;
       const msg = messages[messages.length - 1].content;
       return { text: reply(msg, n), toolCalls: [] };
     },
-    ...extra,
+    ...rest,
   };
   return { runner: new AgentSuiteRunner(deps), store };
 }
@@ -388,10 +410,8 @@ describe("the runner with evals", () => {
       scorers: [{ id: "price", type: "numeric", expected: "{{row.expected}}", tolerance: 0.01 }, { id: "judge", type: "llm_judge", rubric: "polite" }],
     }],
   };
-  const judge = async () => ({ text: '{"score": 5, "reasoning": "polite"}', model: "m" });
-
   it("scores each row against its expected value; a failing scorer fails the case; aggregates and a baseline comparison are stored", async () => {
-    const { runner } = runnerWith((m) => (m.includes("IT") ? "It costs 4.99 EUR" : "It costs 9.99 EUR"), { judge });
+    const { runner } = runnerWith((m) => (m.includes("IT") ? "It costs 4.99 EUR" : "It costs 9.99 EUR"));
     await runner.saveSuite("shop", suite);
     const run = await runner.run("shop", "quotes");
     expect(run.results.map((r) => [r.key, r.status, r.score])).toEqual([["quote#1", "passed", 1], ["quote#2", "failed", expect.any(Number)]]);
@@ -406,17 +426,72 @@ describe("the runner with evals", () => {
     expect(again.baseline).toMatchObject({ runId: run.id, source: "previous", regressions: 0, improvements: 0 });
   });
 
-  it("no judge on the server: the judge scorer errors the case, with a note", async () => {
-    const { runner } = runnerWith(() => "It costs 4.99 EUR");
+  it("the judge is a chat turn through the pipeline: Polpo by default (no agent), without tools", async () => {
+    const roleCalls: NonNullable<Parameters<typeof runnerWith>[1]>["roleCalls"] = [];
+    const { runner } = runnerWith((m) => (m.includes("IT") ? "It costs 4.99 EUR" : "It costs 5.49 EUR"), { roleCalls, roles: () => ({ text: '{"score": 5, "reasoning": "polite"}', model: "polpo-model", costUsd: 0.001 }) });
     await runner.saveSuite("shop", suite);
     const run = await runner.run("shop", "quotes");
-    expect(run.status).toBe("errored");
-    expect(run.results[0].error).toContain("Scorer judge: No LLM judge");
-    expect(run.notes).toContain("No LLM judge on this server: llm_judge scorers error.");
+    expect(run.status).toBe("passed");
+    expect(roleCalls).toHaveLength(2);
+    // Polpo's own chat: no agent ref, no ephemeral agent; the prompt is the user message (every engine reads it)
+    expect(roleCalls[0]).toMatchObject({ kind: "judge", ref: "" });
+    expect(roleCalls[0].hooks.roleAgent).toBeUndefined();
+    expect(roleCalls[0].messages).toHaveLength(1);
+    expect(roleCalls[0].messages[0]).toMatchObject({ role: "user" });
+    expect(roleCalls[0].messages[0].content).toContain("Answer with JSON only");
+    expect(roleCalls[0].messages[0].content).toContain("It costs 4.99 EUR");
+    // no tools: any tool call is refused
+    expect(await roleCalls[0].hooks.toolCall("bash", {}, async () => "ran")).toMatch(/^Error: bash is not available/);
+    expect(run.results[0].scores!.find((x) => x.id === "judge")!.judge).toMatchObject({ model: "Polpo (polpo-model)", costUsd: 0.001 });
+  });
+
+  it("the judge played by an agent (agent@version), or by a model + engine block as an ephemeral agent; a scorer's own judge wins", async () => {
+    const roleCalls: NonNullable<Parameters<typeof runnerWith>[1]>["roleCalls"] = [];
+    const { runner } = runnerWith(() => "It costs 4.99 EUR", { roleCalls, roles: () => ({ text: '{"score": 4, "reasoning": "ok"}', model: "gpt-x" }) });
+    const cli = { type: "cli", cli: "codex", model: "gpt-x" };
+    await runner.saveSuite("shop", { ...suite, evals: { judge: { agent: "judge-bot@1.2.0" } } });
+    await runner.run("shop", "quotes");
+    expect(roleCalls.map((c) => c.ref)).toEqual(["judge-bot@1.2.0", "judge-bot@1.2.0"]);
+    expect(roleCalls[0].hooks.roleAgent).toBeUndefined();
+    roleCalls.length = 0;
+    const s = await runner.saveSuite("shop", { ...suite, id: "block", evals: { judge: { model: "openai:gpt-x", reasoning: "high", engine: cli } } });
+    expect(s.evals).toEqual({ judge: { model: "openai:gpt-x", reasoning: "high", engine: { type: "cli", cli: "codex", model: "gpt-x" } } });
+    const run = await runner.run("shop", "block");
+    // the block runs as an ephemeral agent the chat resolves by name, with no tools
+    expect(roleCalls[0].ref).toBe("polpo-suite-judge");
+    expect(roleCalls[0].hooks.roleAgent).toMatchObject({ name: "polpo-suite-judge", model: "openai:gpt-x", reasoning: "high", engine: { type: "cli", cli: "codex" }, allowedTools: [] });
+    expect(run.results[0].scores!.find((x) => x.id === "judge")!.judge!.model).toBe("openai:gpt-x");
+    // a scorer's own judge (here its old `model` field) wins over the suite's
+    roleCalls.length = 0;
+    await runner.saveSuite("shop", { ...suite, id: "own", evals: { judge: { agent: "judge-bot" } }, cases: [{ ...suite.cases[0], scorers: [{ id: "judge", type: "llm_judge", rubric: "polite", model: "anthropic:own" }] }] });
+    await runner.run("shop", "own");
+    expect(roleCalls[0].hooks.roleAgent).toMatchObject({ model: "anthropic:own" });
+  });
+
+  it("an unreadable judge answer gets one corrective turn in the same conversation; still unreadable: the scorer errors with the raw text", async () => {
+    const roleCalls: NonNullable<Parameters<typeof runnerWith>[1]>["roleCalls"] = [];
+    let answers = ["Looks polite to me.", '{"score": 5, "reasoning": "polite"}'];
+    const { runner } = runnerWith(() => "It costs 4.99 EUR", { roleCalls, roles: () => ({ text: answers.shift() ?? "still prose" }) });
+    await runner.saveSuite("shop", { ...suite, datasets: [{ name: "rates", rows: [{ country: "IT", expected: 4.99 }] }] });
+    const ok = await runner.run("shop", "quotes");
+    expect(ok.status).toBe("passed");
+    expect(roleCalls).toHaveLength(2);
+    const repair = roleCalls[1].messages;
+    expect(repair.map((m) => m.role)).toEqual(["user", "assistant", "user"]);
+    expect(repair[1].content).toBe("Looks polite to me.");
+    expect(repair[2].content).toContain("Answer again with the JSON only");
+    // two unreadable answers: the scorer errors, the raw text in the error
+    answers = [];
+    roleCalls.length = 0;
+    const bad = await runner.run("shop", "quotes");
+    expect(roleCalls).toHaveLength(2);
+    expect(bad.status).toBe("errored");
+    expect(bad.results[0].error).toContain("did not answer with JSON");
+    expect(bad.results[0].error).toContain("The judge answered: still prose");
   });
 
   it("repetitions: every case N times, flaky cases flagged; bad repetitions refused", async () => {
-    const { runner } = runnerWith((m, n) => (m.includes("IT") && n % 2 === 0 ? "It costs 7 EUR" : m.includes("IT") ? "4.99" : "5.49"), { judge });
+    const { runner } = runnerWith((m, n) => (m.includes("IT") && n % 2 === 0 ? "It costs 7 EUR" : m.includes("IT") ? "4.99" : "5.49"));
     await runner.saveSuite("shop", suite);
     const run = await runner.run("shop", "quotes", { repetitions: 2 });
     expect(run.repetitions).toBe(2);
@@ -429,15 +504,18 @@ describe("the runner with evals", () => {
 
   it("a marked baseline: deltas against it, kept, cleared; trend and the stored AI review", async () => {
     let good = true;
-    const review = vi.fn(async (prompt: string) => ({ text: `## Summary\n${prompt.includes("regressed") ? "It regressed." : "Fine."}`, model: "anthropic:polpo", costUsd: 0.01 }));
-    const { runner, store } = runnerWith((m) => (good || m.includes("DE") ? (m.includes("IT") ? "4.99" : "5.49") : "9.99"), { judge, review });
+    const review = vi.fn((prompt: string) => ({ text: `## Summary\n${prompt.includes("regressed") ? "It regressed." : "Fine."}`, model: "polpo-model", costUsd: 0.01 }));
+    const roles: RoleAnswer = (kind, _ref, messages) => (kind === "reviewer" ? review(messages[messages.length - 1].content) : politeJudge(kind, _ref, messages, undefined as never));
+    const { runner, store } = runnerWith((m) => (good || m.includes("DE") ? (m.includes("IT") ? "4.99" : "5.49") : "9.99"), { roles });
     await runner.saveSuite("shop", suite);
     const first = await runner.run("shop", "quotes");
     await expect(runner.setBaseline("shop", "quotes", "sr-nope")).rejects.toThrow(/no suite run/);
     await runner.setBaseline("shop", "quotes", first.id);
     expect((await runner.getBaseline("shop", "quotes"))!.id).toBe(first.id);
     good = false;
+    await new Promise((r) => setTimeout(r, 5)); // distinct start times (the trend is ordered by them)
     const second = await runner.run("shop", "quotes");
+    await new Promise((r) => setTimeout(r, 5));
     const third = await runner.run("shop", "quotes");
     // compared with the marked run, not the previous one
     expect(third.baseline).toMatchObject({ runId: first.id, source: "marked", regressions: 1 });
@@ -456,7 +534,7 @@ describe("the runner with evals", () => {
     expect(trend.points.map((p) => p.passRate)).toEqual([1, 0.5, 0.5]);
 
     const reviewed = await runner.reviewRun("shop", third.id, { actor: "ada", language: "Italian" });
-    expect(reviewed.review).toMatchObject({ text: "## Summary\nIt regressed.", model: "anthropic:polpo", by: "ada", costUsd: 0.01 });
+    expect(reviewed.review).toMatchObject({ text: "## Summary\nIt regressed.", model: "Polpo (polpo-model)", by: "ada", costUsd: 0.01 });
     expect(review.mock.calls[0][0]).toContain("Quote shipping.");
     expect(review.mock.calls[0][0]).toContain("Answer in Italian");
     expect((await store.getRun("shop", third.id))!.review!.text).toContain("It regressed.");
@@ -474,5 +552,57 @@ describe("the runner with evals", () => {
   it("scoreSuiteCase runs every scorer in order", async () => {
     const out = await scoreSuiteCase([{ type: "regex", pattern: "EUR" }, { type: "cost", maxUsd: 1 }], { trace: trace() });
     expect(out.map((x) => [x.id, x.passed])).toEqual([["regex", true], ["cost-2", true]]);
+  });
+});
+
+// ── Roles: who plays the judge, the simulated user, the generator, the reviewer ──
+
+describe("suite roles", () => {
+  it("parse: an agent (with a version), a model + engine block, a string as a model; the old *Model fields as a model block; refused shapes", () => {
+    const s = parseAgentSuite({
+      name: "r", simulatorModel: "anthropic:old-sim", generator: { agent: "writer@draft" },
+      evals: { judgeModel: "anthropic:old-judge", reviewer: "openai:gpt-x" },
+      cases: [{ name: "c", input: { message: "m" }, mocks: { simulatedUser: { goal: "g", model: "anthropic:case-sim" } },
+        scorers: [{ type: "llm_judge", rubric: "r", judge: { model: "openai:gpt-x", engine: { type: "cli", cli: "codex" } } }, { type: "llm_judge", rubric: "r2", model: "anthropic:own" }] }],
+    }, "shop");
+    expect(s.evals).toEqual({ judge: { model: "anthropic:old-judge" }, reviewer: { model: "openai:gpt-x" } });
+    expect(s.simulator).toEqual({ model: "anthropic:old-sim" });
+    expect(s.generator).toEqual({ agent: "writer@draft" });
+    expect(s.cases[0].mocks!.simulatedUser!.simulator).toEqual({ model: "anthropic:case-sim" });
+    expect(s.cases[0].scorers![0]).toMatchObject({ judge: { model: "openai:gpt-x", engine: { type: "cli", cli: "codex" } } });
+    expect(s.cases[0].scorers![1]).toMatchObject({ judge: { model: "anthropic:own" } });
+    expect(suiteRoleFor(s, "judge")).toEqual({ model: "anthropic:old-judge" });
+    // a stored suite from before roles is read the same way
+    expect(suiteRoleFor({ evals: { judgeModel: "x:y" }, simulatorModel: "x:z" } as never, "judge")).toEqual({ model: "x:y" });
+    expect(suiteRoleFor({ simulatorModel: "x:z" } as never, "simulator")).toEqual({ model: "x:z" });
+    expect(scorerJudgeRole({ type: "llm_judge", rubric: "r", model: "a:b" } as SuiteScorer)).toEqual({ model: "a:b" });
+    expect(describeSuiteRole(undefined)).toBe("Polpo");
+    expect(describeSuiteRole({ agent: "judge-bot@1.2.0" })).toBe("agent judge-bot@1.2.0");
+    expect(describeSuiteRole({ model: "openai:gpt-x", engine: { type: "cli", cli: "codex" } as never })).toBe("openai:gpt-x · Codex (CLI)");
+    expect(() => parseAgentSuite({ name: "x", generator: { agent: "a", model: "b:c" } }, "shop")).toThrow("not both");
+    expect(() => parseAgentSuite({ name: "x", generator: { agent: "no spaces allowed" } }, "shop")).toThrow("agent's name");
+    expect(() => parseAgentSuite({ name: "x", evals: { judge: { temperature: 0 } } }, "shop")).toThrow("unknown field(s) temperature");
+    expect(() => parseAgentSuite({ name: "x", simulator: { engine: 42 } }, "shop")).toThrow("as an agent's engine");
+  });
+
+  it("the server checks a role's engine as an agent's (and normalizes it)", async () => {
+    const { runner } = runnerWith(() => "x");
+    const saved = await runner.saveSuite("shop", { name: "E", generator: { engine: "claude-code" }, cases: [] });
+    expect(saved.generator).toEqual({ engine: { harness: "claude-code" } });
+    await expect(runner.saveSuite("shop", { name: "F", evals: { judge: { engine: { harness: "nope" } } }, cases: [] })).rejects.toThrow(/evals\.judge\.engine\.harness must be one of/);
+  });
+
+  it("suites code never calls a model directly: every role goes through the chat turn pipeline", () => {
+    const files = [
+      "src/server/agent-suites.ts", "src/server/agent-suites-host.ts", "src/server/agent-suite-scorers.ts", "src/server/agent-benchmarks.ts",
+      "src/server/agent-deploy-gates.ts", "src/server/mcp-suite-card.ts",
+      ...["agent-suites.ts", "agent-suite-evals.ts", "agent-suite-generate.ts", "agent-suite-bench.ts", "agent-suite-gates.ts", "agent-suite-replay.ts", "agent-suite-targets.ts"].map((f) => `packages/core/src/${f}`),
+    ];
+    for (const f of files) {
+      const src = readFileSync(join(process.cwd(), f), "utf-8");
+      for (const direct of ["completeSimpleWithAuth", "streamSimpleWithAuth", "queryOrchestratorText", "queryText(", "completeSimple(", "streamSimple(", "llm/query.js", "temperature:"]) {
+        expect(src.includes(direct), `${f} uses ${direct}`).toBe(false);
+      }
+    }
   });
 });

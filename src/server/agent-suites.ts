@@ -13,6 +13,12 @@
  *                    redacted; replaying cases answer their tools (and model turns) from it
  *   simulated users  multi-turn cases: after each reply a model (or a script) writes the next user turn
  *   generation       proposed cases and dataset rows (never saved by themselves)
+ *
+ * Roles (the LLM judge, the simulated user, the case generator, "explain this run"): each is played
+ * by an agent (`{ agent: "judge-bot@1.2.0" }`), a model + engine block run as an ephemeral agent,
+ * or Polpo itself, and every role turn is a chat turn through the same `turn` (the chat completions
+ * pipeline: engines, provider auth, cooldowns, fallbacks, cost tracking), without tools. Nothing
+ * here calls a model directly.
  *   targets          a hosted MCP server's saved tests (tool calls with HTTP mocks) and missions
  *                    (their tasks in dependency order, each agent with its own mocks)
  *
@@ -29,6 +35,7 @@ import {
   cassetteScript, caseGenerationPrompt, compareSuiteRuns, datasetRowsPrompt, dependencyOrder, editCassette, evaluateAssertion, findHttpMock, findToolMock,
   httpMockResponse, matchCassetteCall, missionTaskMessage, modeMocksModel, modeMocksTools, parseAgentSuite, parseCsvDataset, parseGeneratedCases,
   parseGeneratedRows, parseJsonDataset, parseSimulatedUserReply, parseSuiteCase, parseSuiteOwner, pickSuiteBaseline, planSuiteCases, planUsesRealTools,
+  isRoleBlock, parseAgentEngine, parseSuiteRole, simulatedUserRole, suiteRoleFor, suiteRoles, type SuiteRole, type SuiteRoleName,
   recordedCase, redactCassetteSecrets, scoreSuiteCase, simulatedUserPrompt, suiteRunAggregates, suiteRunReviewPrompt, suiteRunStats, suiteRunStatus, suiteSlug,
   suiteTargetFor, suiteTrend, toolMockResult, traceFromChat, traceFromTaskActivity,
   type ActivityEntryLike, type AgentConfig, type AgentGenerationInfo, type AgentSuite, type AgentSuiteStore, type CaseGenerationRequest,
@@ -67,8 +74,8 @@ export interface HostedToolCallResult {
   skipped?: string;
 }
 
-/** A model completion (the simulated user, case generation). */
-export type SuiteCompletion = (req: { prompt: string; model?: string }) => Promise<{ text: string; model?: string; costUsd?: number }>;
+/** What a suite role's turn answered: its text, who played it (and the model), what it cost. */
+export interface SuiteRoleReply { text: string; model?: string; costUsd?: number }
 
 export interface AgentSuiteDeps {
   store: AgentSuiteStore;
@@ -84,19 +91,8 @@ export interface AgentSuiteDeps {
   turn: (agentRef: string, messages: Array<{ role: string; content: string }>, hooks: SuiteCaseHooks, opts?: { onText?: (delta: string) => void }) => Promise<SuiteTurnResult>;
   /** Runs at once on this instance (default 2). */
   maxRunningRuns?: number;
-  /**
-   * The LLM judge of llm_judge scorers: one completion at temperature 0 (`model`: the scorer's or
-   * the suite's judge model; undefined: the orchestrator's effective model). Absent: judges error.
-   */
-  judge?: ScorerDeps["judge"];
   /** Runs a custom scorer's code in the sandboxed code worker. Absent: custom scorers error. */
   customScorer?: ScorerDeps["custom"];
-  /** "Explain this run": one completion with the orchestrator's effective model. */
-  review?: (prompt: string) => Promise<{ text: string; model?: string; costUsd?: number }>;
-  /** The simulated user's model (`model`: the case's, else the suite's simulatorModel; undefined: Polpo's model). */
-  simulate?: SuiteCompletion;
-  /** Case and dataset generation: one completion with Polpo's model. */
-  generate?: SuiteCompletion;
   /** The vault's secret values: redacted from every recording. */
   secrets?: () => Promise<string[]>;
   /** What the case generator knows about an agent (its tools with descriptions, skills, connectors). */
@@ -299,11 +295,74 @@ async function pool<T, R>(items: T[], size: number, fn: (item: T, i: number) => 
   return out;
 }
 
+/** A role given with a request (generate, review): checked like a saved suite's, its engine as an agent's. */
+function requestRole(raw: unknown, where: string): SuiteRole | undefined {
+  const role = parseSuiteRole(raw, where);
+  if (!role?.engine) return role;
+  let engine: SuiteRole["engine"];
+  try { engine = parseAgentEngine(role.engine, `${where}.engine`); } catch (err) { throw new AgentSuiteError(errorText(err)); }
+  const { engine: _old, ...rest } = role;
+  return engine ? { ...rest, engine } : rest;
+}
+
+/** The ephemeral agent a role's model + engine block runs as: `polpo-suite-judge`… (never saved). */
+const ROLE_AGENT_PREFIX = "polpo-suite-";
+/** A role turn's longest wait (generation writes many cases). */
+const ROLE_TURN_TIMEOUT_MS = 300_000;
+const ROLE_TITLES: Record<SuiteRoleName, string> = {
+  judge: "Test suite judge", simulator: "Test suite simulated user", generator: "Test case generator", reviewer: "Test run reviewer",
+};
+/** What every role turn starts with (also the ephemeral agent's instructions). */
+const ROLE_INSTRUCTIONS: Record<SuiteRoleName, string> = {
+  judge: "You are the strict, impartial judge of a test suite: you score an AI agent's answer. You have no tools. Answer with JSON only.",
+  simulator: "You play the user in a test conversation with an AI agent. You have no tools. Follow the instructions below exactly.",
+  generator: "You write test cases for an AI agent. You have no tools. Follow the instructions below and answer in exactly the format they ask for.",
+  reviewer: "You review a test suite's run of an AI agent. You have no tools. Follow the instructions below.",
+};
+
+function describeEngineOnly(block: SuiteRole): string | undefined {
+  const e = block.engine as { type?: string; cli?: string; harness?: string; model?: string } | undefined;
+  if (!e) return undefined;
+  return e.model ?? (e.type === "cli" ? `${e.cli} CLI` : e.harness);
+}
+
+/** The hooks of a role turn: no script, no tools, no budget; its model and cost are noted. */
+class RoleTurnHooks implements SuiteCaseHooks {
+  readonly mocksModel = false;
+  model?: string;
+  costUsd = 0;
+  turns = 0;
+  error?: string;
+  constructor(readonly role: SuiteRoleName, readonly roleAgent?: { name: string } & Record<string, unknown>) {}
+  budgetExceeded(): string | undefined { return undefined; }
+  nextScriptedTurn(): ScriptedTurn | undefined { return undefined; }
+  recordTurn(turn: Omit<SuiteTraceTurn, "index">): void {
+    this.turns++;
+    this.costUsd += turn.usage?.costUsd ?? 0;
+    if (turn.model) this.model = turn.model;
+    if (turn.error) this.error = turn.error;
+  }
+  async toolCall(name: string): Promise<string> {
+    return `Error: ${name} is not available: this turn plays a test suite's ${this.role}, without tools.`;
+  }
+}
+
 /** The calls of a turn that never reached the executor (invalid arguments, a send stopped for a person's yes), and the interactive stop. */
 function absorbReply(recorder: CaseRecorder, reply: SuiteTurnResult | undefined, opts: { agent?: string; firstTurn?: number } = {}): void {
   const seen = new Set(recorder.toolCalls.map((c) => c.id));
+  // Engines whose calls reach the recorder under another id (the CLI engine: Polpo's MCP tool server
+  // never sees the program's tool_use id) are matched by name and arguments, each recorded call once.
+  const byShape = new Map<string, number>();
+  for (const c of recorder.toolCalls) {
+    if (opts.agent && c.agent && c.agent !== opts.agent) continue;
+    const key = `${c.name}\u0000${stableJson(c.args)}`;
+    byShape.set(key, (byShape.get(key) ?? 0) + 1);
+  }
   for (const c of reply?.toolCalls ?? []) {
     if (seen.has(c.id)) continue;
+    const key = `${c.name}\u0000${stableJson(c.arguments ?? {})}`;
+    const left = byShape.get(key) ?? 0;
+    if (left > 0) { byShape.set(key, left - 1); continue; }
     const interactive = c.state === "interrupted";
     if (interactive) recorder.approvals.push({ tool: c.name, kind: "interactive" });
     const turnIdx = Math.max(opts.firstTurn ?? 0, recorder.turns.findIndex((t) => t.toolCalls.some((x) => x.id === c.id)));
@@ -315,6 +374,13 @@ function absorbReply(recorder: CaseRecorder, reply: SuiteTurnResult | undefined,
   if (reply?.finishReason && INTERACTIVE_REASONS.has(reply.finishReason) && !recorder.approvals.some((a) => a.kind === "interactive")) {
     recorder.approvals.push({ tool: reply.finishReason.replace(/_preview$/, "_send"), kind: "interactive", detail: reply.finishReason });
   }
+}
+
+/** JSON with sorted keys, to compare arguments regardless of key order. */
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.keys(value as object).sort().map((k) => `${JSON.stringify(k)}:${stableJson((value as Record<string, unknown>)[k])}`).join(",")}}`;
+  return JSON.stringify(value ?? null);
 }
 
 const usageOf = (turns: SuiteTraceTurn[]) => turns.reduce((u, t) => ({
@@ -401,6 +467,14 @@ export class AgentSuiteRunner {
     }
     const target = suiteTargetFor(agent);
     const suite = parseAgentSuite({ ...raw, ...(hosted ? { id: existing!.id, name: raw.name ?? existing!.name } : {}), target }, agent, existing);
+    // a role's engine is checked as an agent's engine is (harness, CLI account, permission mode…)
+    for (const r of suiteRoles(suite)) {
+      if (!r.role.engine) continue;
+      let engine: SuiteRole["engine"];
+      try { engine = parseAgentEngine(r.role.engine, `${r.where}.engine`); } catch (err) { throw new AgentSuiteError(errorText(err)); }
+      const { engine: _old, ...rest } = r.role;
+      r.set(engine ? { ...rest, engine } : rest);
+    }
     // a deploy gate that may run real tools (side effects at every deploy): an admin decides
     if (suite.gate?.allowRealTools && !existing?.gate?.allowRealTools && opts.admin !== true) {
       throw new AgentSuiteError("gate.allowRealTools lets every deploy run this suite's real tools (side effects possible): only an admin can turn it on", "FORBIDDEN");
@@ -618,7 +692,6 @@ export class AgentSuiteRunner {
       ...(req.record ? { record: true } : {}),
       notes: [...notes],
     };
-    if (planned.some((p) => p.case.scorers?.some((x) => x.type === "llm_judge")) && !this.deps.judge) run.notes.push("No LLM judge on this server: llm_judge scorers error.");
     if (req.record) run.notes.push("Recording: the cases ran live (real model, real tools); each one's exchange is saved as its cassette (secrets redacted) and the case replays it from now on.");
     await this.deps.store.saveRun(run);
     const cassettes = await this.cassettesFor(agent, planned, run);
@@ -742,11 +815,48 @@ export class AgentSuiteRunner {
     };
   }
 
-  private scorerDeps(suite: AgentSuite): ScorerDeps & { judgeModel?: string } {
+  private scorerDeps(suite: AgentSuite): ScorerDeps {
+    const judgeRole = suiteRoleFor(suite, "judge");
     return {
-      ...(this.deps.judge ? { judge: this.deps.judge } : {}), ...(this.deps.customScorer ? { custom: this.deps.customScorer } : {}),
-      ...(suite.evals?.judgeModel ? { judgeModel: suite.evals.judgeModel } : {}),
+      judge: ({ role, prompt, check }) => this.playRole("judge", role, prompt, check ? { check } : {}),
+      ...(judgeRole ? { judgeRole } : {}),
+      ...(this.deps.customScorer ? { custom: this.deps.customScorer } : {}),
     };
+  }
+
+  // ── roles: the judge, the simulated user, the generator, the reviewer ──
+
+  /**
+   * One role turn: the role's agent (`agent@version`), its model + engine block as an ephemeral
+   * agent, or Polpo (no agent), through `turn` (the chat completions pipeline) without tools. With
+   * `check`, an answer it cannot read gets one corrective follow-up turn in the same conversation.
+   */
+  async playRole(kind: SuiteRoleName, role: SuiteRole | undefined, prompt: string, opts: { check?: (text: string) => string | undefined } = {}): Promise<SuiteRoleReply> {
+    const block = isRoleBlock(role) ? role! : undefined;
+    const roleAgent = block ? {
+      name: `${ROLE_AGENT_PREFIX}${kind}`, role: ROLE_TITLES[kind], systemPrompt: ROLE_INSTRUCTIONS[kind], allowedTools: [] as string[],
+      ...(block.model ? { model: block.model } : {}), ...(block.reasoning ? { reasoning: block.reasoning } : {}), ...(block.engine ? { engine: block.engine } : {}),
+    } : undefined;
+    const agentRef = role?.agent ?? roleAgent?.name ?? "";
+    const hooks = new RoleTurnHooks(kind, roleAgent);
+    let messages: Array<{ role: string; content: string }> = [{ role: "user", content: `${ROLE_INSTRUCTIONS[kind]}\n\n${prompt}` }];
+    let text = await this.roleTurnOnce(agentRef, messages, hooks);
+    const problem = opts.check?.(text);
+    if (problem) {
+      messages = [...messages, { role: "assistant", content: text }, { role: "user", content: `Your answer could not be read (${problem}). Answer again with the JSON only, in exactly the shape asked above: no other text.` }];
+      text = await this.roleTurnOnce(agentRef, messages, hooks);
+    }
+    const used = hooks.model;
+    const model = block ? block.model ?? used ?? describeEngineOnly(block) : role?.agent ? `${role.agent}${used ? ` (${used})` : ""}` : used ? `Polpo (${used})` : "Polpo";
+    return { text, ...(model ? { model } : {}), ...(hooks.turns ? { costUsd: Math.round(hooks.costUsd * 1e6) / 1e6 } : {}) };
+  }
+
+  private async roleTurnOnce(agentRef: string, messages: Array<{ role: string; content: string }>, hooks: RoleTurnHooks): Promise<string> {
+    hooks.error = undefined;
+    const reply = await within(ROLE_TURN_TIMEOUT_MS, this.deps.turn(agentRef, messages, hooks), `The suite's ${hooks.role}`);
+    const text = reply.text.trim();
+    if (!text && hooks.error) throw new Error(hooks.error);
+    return text;
   }
 
   /** An agent case: one chat turn, or a conversation with a simulated / scripted user. */
@@ -821,8 +931,8 @@ export class AgentSuiteRunner {
   ): Promise<NonNullable<SuiteTrace["simulator"]>> {
     const scripted = !!sim.script?.length;
     const maxTurns = scripted ? sim.script!.length : Math.min(SIMULATED_USER_LIMITS.maxTurns, sim.maxTurns ?? SIMULATED_USER_LIMITS.defaultTurns);
-    const model = sim.model ?? suite.simulatorModel;
-    const out: NonNullable<SuiteTrace["simulator"]> = { ...(scripted ? {} : model ? { model } : {}), calls: 0, costUsd: 0, stoppedBy: scripted ? "script" : "max_turns" };
+    const role = simulatedUserRole(sim) ?? suiteRoleFor(suite, "simulator");
+    const out: NonNullable<SuiteTrace["simulator"]> = { calls: 0, costUsd: 0, stoppedBy: scripted ? "script" : "max_turns" };
     let messages = [...first];
     let last = replies[replies.length - 1] ?? "";
     for (let i = 0; i < maxTurns; i++) {
@@ -840,8 +950,7 @@ export class AgentSuiteRunner {
       let next: string | undefined;
       if (scripted) next = sim.script![i];
       else {
-        if (!this.deps.simulate) throw new Error("No simulated user on this server (no model to play the user): use a script instead");
-        const res = await this.deps.simulate({ prompt: simulatedUserPrompt(sim, transcript, { turn: i + 2, maxTurns: maxTurns + 1 }), ...(model ? { model } : {}) });
+        const res = await this.playRole("simulator", role, simulatedUserPrompt(sim, transcript, { turn: i + 2, maxTurns: maxTurns + 1 }));
         out.calls++;
         out.costUsd = Math.round((out.costUsd + (res.costUsd ?? 0)) * 1e6) / 1e6;
         if (res.model) out.model = res.model;
@@ -1151,7 +1260,6 @@ export class AgentSuiteRunner {
    * chats): validated, returned for review. Nothing is saved: a person accepts them (acceptCases).
    */
   async generateCases(owner: string, req: CaseGenerationRequest & { suiteId?: string; sessionIds?: string[] } = {}): Promise<{ proposals: GeneratedCaseProposal[]; model?: string; costUsd?: number }> {
-    if (!this.deps.generate) throw new AgentSuiteError("Case generation is not available on this server (no model)", "CONFLICT");
     const o = parseSuiteOwner(owner);
     if (o.kind !== "agent") throw new AgentSuiteError("Case generation is for agent suites");
     const config = (await this.deps.agents()).find((a) => a.name === owner);
@@ -1168,7 +1276,8 @@ export class AgentSuiteRunner {
     }
     const prompt = caseGenerationPrompt(info, { ...req, ...(samples.length ? { samples } : {}) });
     let res: { text: string; model?: string; costUsd?: number };
-    try { res = await this.deps.generate({ prompt }); } catch (err) { throw new AgentSuiteError(`The generation failed: ${errorText(err)}`, "CONFLICT"); }
+    const generator = requestRole(req.generator, "generator") ?? suiteRoleFor(suite, "generator");
+    try { res = await this.playRole("generator", generator, prompt); } catch (err) { throw new AgentSuiteError(`The generation failed: ${errorText(err)}`, "CONFLICT"); }
     const proposals = parseGeneratedCases(res.text, { takenIds: suite?.cases.map((c) => c.id) ?? [], takenDatasets: suite?.datasets.map((d) => d.id) ?? [], ...(res.model ? { model: res.model } : {}) });
     return { proposals, ...(res.model ? { model: res.model } : {}), ...(res.costUsd !== undefined ? { costUsd: res.costUsd } : {}) };
   }
@@ -1192,14 +1301,14 @@ export class AgentSuiteRunner {
   }
 
   /** Proposed dataset rows for a case (its dataset's columns kept); nothing is saved. */
-  async generateDatasetRows(owner: string, suiteId: string, req: { caseId: string; count?: number; brief?: string }): Promise<{ datasetId?: string; columns: string[]; rows: Array<Record<string, unknown>>; model?: string; costUsd?: number }> {
-    if (!this.deps.generate) throw new AgentSuiteError("Generation is not available on this server (no model)", "CONFLICT");
+  async generateDatasetRows(owner: string, suiteId: string, req: { caseId: string; count?: number; brief?: string; generator?: SuiteRole }): Promise<{ datasetId?: string; columns: string[]; rows: Array<Record<string, unknown>>; model?: string; costUsd?: number }> {
     const suite = await this.getSuite(owner, suiteId);
     const c = suite.cases.find((x) => x.id === req.caseId);
     if (!c) throw new AgentSuiteError(`${suite.name} has no case "${req.caseId}"`, "NOT_FOUND");
     const ds = c.dataset ? suite.datasets.find((d) => d.id === c.dataset) : undefined;
     let res: { text: string; model?: string; costUsd?: number };
-    try { res = await this.deps.generate({ prompt: datasetRowsPrompt(c, ds, { ...(req.count ? { count: req.count } : {}), ...(req.brief ? { brief: req.brief } : {}), agent: owner }) }); } catch (err) { throw new AgentSuiteError(`The generation failed: ${errorText(err)}`, "CONFLICT"); }
+    const generator = requestRole(req.generator, "generator") ?? suiteRoleFor(suite, "generator");
+    try { res = await this.playRole("generator", generator, datasetRowsPrompt(c, ds, { ...(req.count ? { count: req.count } : {}), ...(req.brief ? { brief: req.brief } : {}), agent: owner })); } catch (err) { throw new AgentSuiteError(`The generation failed: ${errorText(err)}`, "CONFLICT"); }
     const out = parseGeneratedRows(res.text, ds?.columns);
     return { ...(ds ? { datasetId: ds.id } : {}), ...out, ...(res.model ? { model: res.model } : {}), ...(res.costUsd !== undefined ? { costUsd: res.costUsd } : {}) };
   }
@@ -1271,8 +1380,7 @@ export class AgentSuiteRunner {
   }
 
   /** "Explain this run": an AI review of the failures and regressions with suggested fixes, stored on the run. */
-  async reviewRun(agent: string, runId: string, opts: { actor?: string; language?: string } = {}): Promise<SuiteRun> {
-    if (!this.deps.review) throw new AgentSuiteError("AI reviews are not available on this server", "CONFLICT");
+  async reviewRun(agent: string, runId: string, opts: { actor?: string; language?: string; reviewer?: SuiteRole } = {}): Promise<SuiteRun> {
     const run = await this.getRun(agent, runId);
     if (run.status === "running" || run.status === "queued") throw new AgentSuiteError("The run is still going: review it when it has finished");
     const isAgent = parseSuiteOwner(agent).kind === "agent";
@@ -1287,7 +1395,8 @@ export class AgentSuiteRunner {
       ...(typeof info?.model === "string" ? { model: info.model } : {}),
     }, opts.language ? { language: opts.language } : {});
     let res: { text: string; model?: string; costUsd?: number };
-    try { res = await this.deps.review(prompt); } catch (err) { throw new AgentSuiteError(`The review failed: ${errorText(err)}`, "CONFLICT"); }
+    const reviewer = requestRole(opts.reviewer, "reviewer") ?? suiteRoleFor(await this.getSuite(agent, run.suiteId).catch(() => undefined), "reviewer");
+    try { res = await this.playRole("reviewer", reviewer, prompt); } catch (err) { throw new AgentSuiteError(`The review failed: ${errorText(err)}`, "CONFLICT"); }
     const latest = await this.getRun(agent, runId);
     latest.review = {
       text: res.text.trim(), at: new Date().toISOString(),

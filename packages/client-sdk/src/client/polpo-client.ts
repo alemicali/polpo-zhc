@@ -1,7 +1,7 @@
 import { PolpoApiError } from "./errors.js";
 import type {
   AgentDeployGate, AgentSuite, AgentSuiteInput, CaseGenerationRequest, GeneratedCaseProposal, SuiteBaselineComparison, SuiteCase, SuiteCassette, SuiteCassetteEdit,
-  SuiteCassetteSummary, SuiteDataset, SuiteRun, SuiteRunRequest, SuiteDatasetImport, SuiteTargetKind, SuiteTrend,
+  SuiteCassetteSummary, SuiteDataset, SuiteRole, SuiteRun, SuiteRunRequest, SuiteDatasetImport, SuiteTargetKind, SuiteTrend,
   BenchmarkCaseComparison, BenchmarkDefinition, BenchmarkEstimate, BenchmarkInput, BenchmarkLeaderboard, BenchmarkMatrix, BenchmarkReport, BenchmarkRun,
   BenchmarkVariantStats, BenchmarkWeights, PlaygroundExchange, PlaygroundPane, PlaygroundPaneInput, PlaygroundSession, PlaygroundStreamEvent, SuiteVariantOverrides,
 } from "./agent-suite-types.js";
@@ -1115,8 +1115,8 @@ export class PolpoClient {
     return this.get<SuiteBaselineComparison | null>(`/agents/${encodeURIComponent(name)}/suite-runs/${encodeURIComponent(runId)}/compare${s ? `?${s}` : ""}`);
   }
 
-  /** "Explain this run": an AI review (Polpo's model) stored on the run. */
-  reviewAgentSuiteRun(name: string, runId: string, opts: { language?: string } = {}): Promise<SuiteRun> {
+  /** "Explain this run": an AI review (the suite's reviewer, or `reviewer`; default Polpo) stored on the run. */
+  reviewAgentSuiteRun(name: string, runId: string, opts: { language?: string; reviewer?: SuiteRole } = {}): Promise<SuiteRun> {
     return this.post<SuiteRun>(`/agents/${encodeURIComponent(name)}/suite-runs/${encodeURIComponent(runId)}/review`, opts);
   }
 
@@ -1167,7 +1167,7 @@ export class PolpoClient {
   }
 
   /** AI-proposed dataset rows for a case (not saved). */
-  generateAgentSuiteDatasetRows(name: string, suiteId: string, req: { caseId: string; count?: number; brief?: string }): Promise<{ datasetId?: string; columns: string[]; rows: Array<Record<string, unknown>>; model?: string; costUsd?: number }> {
+  generateAgentSuiteDatasetRows(name: string, suiteId: string, req: { caseId: string; count?: number; brief?: string; generator?: SuiteRole }): Promise<{ datasetId?: string; columns: string[]; rows: Array<Record<string, unknown>>; model?: string; costUsd?: number }> {
     return this.post(`/agents/${encodeURIComponent(name)}/suites/${encodeURIComponent(suiteId)}/datasets/generate`, req);
   }
 

@@ -12,7 +12,7 @@
  * Pure (prompts and parsers): the host calls the model (src/server/agent-suites.ts).
  */
 import { parseJsonLoose } from "./agent-suite-evals.js";
-import { AgentSuiteError, parseSuiteCase, type SimulatedUser, type SuiteCase, type SuiteDataset, type SuiteTranscriptMessage } from "./agent-suites.js";
+import { AgentSuiteError, parseSuiteCase, type SimulatedUser, type SuiteCase, type SuiteDataset, type SuiteRole, type SuiteTranscriptMessage } from "./agent-suites.js";
 
 // ── Simulated user ───────────────────────────────────────────────────
 
@@ -77,6 +77,8 @@ export interface CaseGenerationRequest {
   include?: Array<"happy" | "edge" | "adversarial">;
   /** contract (default): offline cases with scripted model turns and tool mocks; tools: the real model with mocked tools. */
   style?: "contract" | "tools";
+  /** Who writes them (default the suite's generator, else Polpo): an agent, or a model + engine block. */
+  generator?: SuiteRole;
 }
 
 export const CASE_GENERATION_LIMITS = { maxCount: 20, defaultCount: 6, maxRows: 50, defaultRows: 10 } as const;

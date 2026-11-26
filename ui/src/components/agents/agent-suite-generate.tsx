@@ -1,5 +1,5 @@
 /**
- * "Generate cases" (docs/agent-suites.md, "AI case generation"): Polpo's model proposes cases from
+ * "Generate cases" (docs/agent-suites.md, "AI case generation"): the suite's generator (Polpo, an agent, or a model and engine) proposes cases from
  * the agent's instructions, tools, skills and connectors (and a brief) — happy paths, edge cases and
  * adversarial / prompt-injection ones — or dataset rows for a case. Nothing is saved until the
  * person ticks the proposals to keep and adds them. Also: a case from a real chat or task run
@@ -8,7 +8,7 @@
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Loader2, MessagesSquare, Sparkles, Table2 } from "lucide-react";
-import type { AgentSuite, GeneratedCaseProposal, UseAgentSuitesReturn } from "@polpo-ai/react";
+import type { AgentSuite, GeneratedCaseProposal, SuiteRole, UseAgentSuitesReturn } from "@polpo-ai/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -17,6 +17,8 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { SuiteRolePicker } from "./suite-role-picker";
+import { describeRole } from "@/lib/suite-roles";
 
 type Mode = "cases" | "rows" | "record";
 const KINDS = [["happy", "Happy paths"], ["edge", "Edge cases"], ["adversarial", "Adversarial / prompt injection"]] as const;
@@ -44,6 +46,8 @@ export function AgentSuiteGenerateDialog({ open, onOpenChange, suites, initialMo
   const [source, setSource] = useState<"session" | "task">("session");
   const [sourceId, setSourceId] = useState("");
   const [caseName, setCaseName] = useState("");
+  /** Who writes them this time (default the suite's generator, else Polpo). */
+  const [generator, setGenerator] = useState<SuiteRole | undefined>(undefined);
   const suite: AgentSuite | undefined = useMemo(() => list.find((s) => s.id === suiteId), [list, suiteId]);
 
   const act = async (fn: () => Promise<void>) => {
@@ -54,7 +58,7 @@ export function AgentSuiteGenerateDialog({ open, onOpenChange, suites, initialMo
     const sessionIds = samples.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean).slice(0, 5);
     const out = await suites.generate({
       ...(suiteId ? { suiteId } : {}), count, ...(brief.trim() ? { brief: brief.trim() } : {}), ...(sessionIds.length ? { sessionIds } : {}),
-      include: [...include] as Array<"happy" | "edge" | "adversarial">, style,
+      include: [...include] as Array<"happy" | "edge" | "adversarial">, style, ...(generator ? { generator } : {}),
     });
     setProposals(out.proposals);
     setPicked(new Set());
@@ -67,7 +71,7 @@ export function AgentSuiteGenerateDialog({ open, onOpenChange, suites, initialMo
     setProposals(null);
     onOpenChange(false);
   });
-  const generateRows = () => act(async () => { setRows(await suites.generateRows(suiteId, { caseId: rowsCase, count })); });
+  const generateRows = () => act(async () => { setRows(await suites.generateRows(suiteId, { caseId: rowsCase, count, ...(generator ? { generator } : {}) })); });
   const addRows = () => act(async () => {
     if (!rows?.datasetId) return;
     await suites.importDataset(suiteId, { format: "json", id: rows.datasetId, mode: "append", text: JSON.stringify(rows.rows) });
@@ -86,7 +90,7 @@ export function AgentSuiteGenerateDialog({ open, onOpenChange, suites, initialMo
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl" data-testid="suite-generate-dialog">
         <DialogHeader>
           <DialogTitle>Add cases</DialogTitle>
-          <DialogDescription>Proposals from Polpo's model are never saved by themselves: tick the ones to keep. A real chat or task becomes a case that replays it.</DialogDescription>
+          <DialogDescription>Proposals from the generator (Polpo, an agent, or a model and engine) are never saved by themselves: tick the ones to keep. A real chat or task becomes a case that replays it.</DialogDescription>
         </DialogHeader>
         <div className="flex flex-wrap gap-2">
           {([["cases", "Generate cases", Sparkles], ["rows", "Dataset rows", Table2], ["record", "From a chat or task", MessagesSquare]] as const).map(([m, label, Icon]) => (
@@ -102,12 +106,16 @@ export function AgentSuiteGenerateDialog({ open, onOpenChange, suites, initialMo
             <SelectContent>{list.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
           </Select>
         </div>
+        {mode !== "record" && (
+          <SuiteRolePicker label="Who writes them" value={generator} onChange={setGenerator} testId="suite-generate-generator"
+            inheritLabel={`The suite's generator (${describeRole(suite?.generator)})`} />
+        )}
 
         {mode === "cases" && (
           <div className="space-y-3">
             <Textarea value={brief} onChange={(e) => setBrief(e.target.value)} rows={2} placeholder="What to focus on (optional): e.g. refunds over 100 EUR, Italian customers" aria-label="Brief" />
             <Input value={samples} onChange={(e) => setSamples(e.target.value)} placeholder="Sample chats to draw from (optional): up to 5 chat session ids, comma separated" className="h-8 text-caption" aria-label="Sample chats" data-testid="suite-generate-samples" />
-            <p className="text-caption text-muted-foreground">Polpo reads the agent's instructions, tools, skills and connectors. Adversarial cases try prompt injection, off-scope requests and unsafe actions.</p>
+            <p className="text-caption text-muted-foreground">The generator reads the agent's instructions, tools, skills and connectors. Adversarial cases try prompt injection, off-scope requests and unsafe actions.</p>
             <div className="flex flex-wrap items-center gap-3">
               <label className="flex items-center gap-1.5 text-xs">Cases <Input type="number" min={1} max={20} value={count} onChange={(e) => setCount(Math.max(1, Math.min(20, Number(e.target.value) || 1)))} className="h-7 w-16" aria-label="How many cases" /></label>
               {KINDS.map(([k, label]) => (

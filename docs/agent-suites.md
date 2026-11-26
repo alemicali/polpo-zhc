@@ -180,9 +180,9 @@ suite with two models and compare.
 
 | Surface | How |
 |---|---|
-| Dashboard | Agent page → **Suites**: suites with their last run (score, regressions), **New suite**, the editor (Cases — input, mode, dataset, scripted turns, tool mocks, scorers, assertions —, **Evals** — judge model, repetitions, regression tolerance, baseline policy, default scorers —, Datasets with CSV / JSON import, JSON, YAML), **Run** on production / draft / a version in each case's mode or one for all (real tools after a confirmation), runs (score, ▼ regressions, ★ baseline), the run report (scores per scorer with deltas, the comparison with the baseline, each case's scores and the judge's reasoning, assertions with diffs, chat-style traces, **Mark as baseline**, **Explain this run**, Cancel), the **trend** chart per suite (pass rate and score over runs, by version) |
-| REST | `GET/POST /api/v1/agents/{name}/suites`, `GET/PUT/DELETE …/suites/{id}` (`?format=yaml`, `{ yaml, revision }`), `POST …/suites/{id}/datasets/import`, `POST …/suites/{id}/runs`, `GET /api/v1/agents/{name}/suite-runs` (`?suite=`, `?benchmark=`, `?full=true`), `GET …/suite-runs/{runId}`, `POST …/suite-runs/{runId}/cancel`; evals: `GET …/suites/{id}/trend`, `GET/PUT/DELETE …/suites/{id}/baseline`, `GET …/suite-runs/{runId}/compare` (`?baseline=`, `?tolerance=`), `POST …/suite-runs/{runId}/review` (OpenAPI tag "Agent suites") |
-| MCP | `polpo_agent_suite_list`, `polpo_agent_suite_get` (JSON or YAML) and `polpo_agent_suite_run_get` (reports, one case's trace) need `polpo:read`; `polpo_agent_suite_save` (JSON, YAML, dataset imports), `polpo_agent_suite_delete` and `polpo_agent_suite_run` (waits up to 55 s; `cancel`; `repetitions`, `baseline`, `tolerance`) need `polpo:work`; a run with real tools needs `polpo:admin`. Evals: `polpo_agent_suite_trend` (`polpo:read`), `polpo_agent_suite_baseline` (show, mark, clear, compare) and `polpo_agent_suite_review` (explain a run) (`polpo:work`); reports list scores per scorer, flaky cases and the regressions. **Suite card** (an MCP App): `polpo_agent_suite_show` (`polpo:read`) shows the suites, a run's report (scores, deltas, regressed cases, the review; "Explain this run" asks the model) or a suite's trend chart, inline or full screen |
+| Dashboard | Agent page → **Suites**: suites with their last run (score, regressions), **New suite**, the editor (Cases — input, mode, dataset, scripted turns, tool mocks, scorers, assertions —, **Evals** — who plays the judge, the simulated user, the generator and the reviewer, repetitions, regression tolerance, baseline policy, default scorers —, Datasets with CSV / JSON import, JSON, YAML), **Run** on production / draft / a version in each case's mode or one for all (real tools after a confirmation), runs (score, ▼ regressions, ★ baseline), the run report (scores per scorer with deltas, the comparison with the baseline, each case's scores and the judge's reasoning, assertions with diffs, chat-style traces, **Mark as baseline**, **Explain this run**, Cancel), the **trend** chart per suite (pass rate and score over runs, by version) |
+| REST | `GET/POST /api/v1/agents/{name}/suites`, `GET/PUT/DELETE …/suites/{id}` (`?format=yaml`, `{ yaml, revision }`), `POST …/suites/{id}/datasets/import`, `POST …/suites/{id}/runs`, `GET /api/v1/agents/{name}/suite-runs` (`?suite=`, `?benchmark=`, `?full=true`), `GET …/suite-runs/{runId}`, `POST …/suite-runs/{runId}/cancel`; evals: `GET …/suites/{id}/trend`, `GET/PUT/DELETE …/suites/{id}/baseline`, `GET …/suite-runs/{runId}/compare` (`?baseline=`, `?tolerance=`), `POST …/suite-runs/{runId}/review` (`reviewer?`), roles (`SuiteRole`) on suites and `generator` on generation (OpenAPI tag "Agent suites") |
+| MCP | `polpo_agent_suite_list`, `polpo_agent_suite_get` (JSON or YAML) and `polpo_agent_suite_run_get` (reports, one case's trace) need `polpo:read`; `polpo_agent_suite_save` (JSON, YAML, dataset imports), `polpo_agent_suite_delete` and `polpo_agent_suite_run` (waits up to 55 s; `cancel`; `repetitions`, `baseline`, `tolerance`) need `polpo:work`; a run with real tools needs `polpo:admin`. Evals: `polpo_agent_suite_trend` (`polpo:read`), `polpo_agent_suite_baseline` (show, mark, clear, compare) and `polpo_agent_suite_review` (explain a run) (`polpo:work`); reports list scores per scorer, flaky cases and the regressions. **Suite card** (an MCP App): `polpo_agent_suite_show` (`polpo:read`) shows the suites, a run's report (scores, deltas, regressed cases, the review; "Explain this run" asks the suite's reviewer; the suites view says who plays the roles) or a suite's trend chart, inline or full screen; `polpo_agent_suite_save` takes the roles, `polpo_agent_suite_review` a `reviewer`, `polpo_agent_suite_generate` a `generator` |
 | Polpo's chat | `agent_suite_list`, `agent_suite_get`, `agent_suite_save`, `agent_suite_delete`, `agent_suite_run`, `agent_suite_run_get`, `agent_suite_trend`, `agent_suite_baseline`, `agent_suite_review` (group "agent-versions": "write a test for the shop agent's shipping quotes", "run the shop suites on the draft", "add an LLM judge for politeness", "did the draft regress?", "explain the last run") |
 | SDK | `getAgentSuites`, `getAgentSuite`, `getAgentSuiteYaml`, `createAgentSuite`, `saveAgentSuite`, `deleteAgentSuite`, `importAgentSuiteDataset`, `runAgentSuite`, `getAgentSuiteRuns`, `getAgentSuiteRun`, `cancelAgentSuiteRun`, `getAgentSuiteTrend`, `getAgentSuiteBaseline`, `setAgentSuiteBaseline`, `compareAgentSuiteRun`, `reviewAgentSuiteRun`; React `useAgentSuites(name)` → `{ suites, runs, save, remove, importDataset, run, cancel, yaml, setBaseline, review }`, `useAgentSuiteRun(name, runId)` (polls while running), `useAgentSuiteTrend(name, suiteId)` |
 
@@ -253,14 +253,15 @@ an order on its own. Save the same as JSON through REST or `polpo_agent_suite_sa
 
 A case with **scorers** is an eval: each scorer gives a **score 0..1**, passes or fails against its
 **threshold**, and says **why**. A case passes when its assertions pass and every scorer passes; a
-scorer that cannot run (no judge model, no sandbox, bad code) **errors** the case. The case's
+scorer that cannot run (the judge's turn failed or stayed unreadable, no sandbox, bad code) **errors** the case. The case's
 **score** is the weighted mean of its scorers (`weight`, default 1).
 
 ```yaml
 scorers:                      # suite defaults: every case gets them (a case scorer with the same id replaces one)
   - { type: cost, maxUsd: 0.02 }
 evals:
-  judgeModel: anthropic:claude-sonnet-5-5   # default: Polpo's model (Settings → Orchestrator)
+  judge: { agent: judge-bot }               # an agent (judge-bot@1.2.0), or a model + engine block; default: Polpo
+  reviewer: { model: anthropic:claude-sonnet-5-5 }   # "Explain this run": a model block (Polpo's engine)
   repetitions: 3                            # run every case 3 times
   regressionTolerance: 0.05
   baseline: previous                        # previous (default) | production | none
@@ -291,7 +292,7 @@ cases:
 | `json_schema` | `schema` | 1 when the value (by default the reply's JSON: the whole reply, a ```json block or the outermost `{…}`) is valid; the problems otherwise |
 | `tool_trajectory` | `expected` (tool names or globs), `order?` (`in_order` default, `exact`, `any`) | in order: longest common subsequence / expected (extra calls allowed); exact: 1 for the same sequence, else LCS / the longer; any: the share of expected tools called |
 | `cost` / `latency` | `maxUsd` / `maxMs` | 1 within the target, then target / actual |
-| `llm_judge` | `rubric`, `criteria?` (`name`, `description`, `weight`), `expected?` (a reference answer), `model?` | **G-Eval**: the judge reasons on each criterion then scores it 1–5; the score is the weighted mean mapped to 0..1. Temperature 0; the model is the scorer's, else the suite's `evals.judgeModel`, else Polpo's effective model. The reasoning per criterion, the summary, the model and the judge's cost are kept on the result |
+| `llm_judge` | `rubric`, `criteria?` (`name`, `description`, `weight`), `expected?` (a reference answer), `judge?` (a [role](#roles-who-plays-the-judge-the-simulated-user-the-generator-the-reviewer)) | **G-Eval**: the judge reasons on each criterion then scores it 1–5 as JSON; the score is the weighted mean mapped to 0..1. The judge is the scorer's `judge`, else the suite's `evals.judge`, else Polpo — a chat turn without tools (see Roles). An unreadable answer gets one corrective follow-up turn; still unreadable, the scorer errors with the raw answer. The reasoning per criterion, the summary, who judged (and its model) and the judge's cost are kept on the result |
 | `custom` | `code`, `expected?`, `timeoutMs?` (default 5 s, max 30 s) | the body of an async JS function with `reply`, `toolCalls` (`name`, `args`, `result`, `isError`), `turns`, `costUsd`, `durationMs`, `message`, `row`, `expected`; it returns a number 0..1, a boolean or `{ score, reason }` (an expression without `return` is returned). It runs in the **sandboxed code worker** hosted MCP servers use (bubblewrap: no network, no instance files, no secrets, 128 MB); without bubblewrap (macOS, Windows) the scorer errors |
 
 Every scorer has `id` (made from its type when missing: `exact`, `exact-2`…; aggregates, baselines
@@ -341,12 +342,51 @@ it as a chart; the MCP suite card too.
 
 ### Explain this run (AI review)
 
-`POST …/suite-runs/{runId}/review { language? }` asks Polpo's model (the orchestrator's effective
-model) to explain a finished run: a summary, what failed or regressed and why (the failed
+`POST …/suite-runs/{runId}/review { language?, reviewer? }` asks the suite's reviewer
+(`evals.reviewer`, or `reviewer` in the request; default Polpo — see Roles) to explain a finished run: a summary, what failed or regressed and why (the failed
 assertions and scorers with their reasons, the judge's reasoning, the trace, the deltas), and
 **suggested fixes** — instruction edits quoting the text, tool changes, or the test itself when its
 expectation or mock is wrong. The agent's instructions and tools (of the version the run used, with
 its overrides) are part of the prompt. The review is stored on the run (`run.review`, Markdown).
+
+### Roles: who plays the judge, the simulated user, the generator, the reviewer
+
+A suite's LLM work is done by four **roles**: the **judge** of `llm_judge` scorers, the
+**simulator** (the simulated user of multi-turn cases), the **generator** (proposed cases and
+dataset rows) and the **reviewer** ("Explain this run"). Each is played by:
+
+| Role value | Who plays it |
+|---|---|
+| nothing (default) | **Polpo**: its own chat, with the orchestrator's effective model (`settings.orchestratorModel`, its fallbacks) |
+| `{ agent: "judge-bot" }`, `"judge-bot@1.2.0"`, `"judge-bot@draft"` | that **agent** (production, a published version or the draft): its model, engine, instructions and memory |
+| `{ model?, reasoning?, engine? }` | a **model + engine block**, the same block an agent uses (`engine`: Polpo's, a harness `{ harness, … }`, or the official CLI `{ type: "cli", cli: "claude" \| "codex", account?, model? }` with a person's own login), run as an ephemeral agent |
+
+**Every role turn is a chat turn through the chat completions pipeline** — the one the cases use
+(`turn`), so engines, provider auth, cooldowns, fallbacks, cost tracking (token usage) and the
+CLI's terms guard come from the same tested code. Suites code never calls a model directly and sets
+no `temperature` or provider option. A role turn has **no tools** (neither Polpo's nor the agent's;
+on the CLI engine the program keeps its own built-in tools under its permission mode), its chat is
+deleted afterwards, and its prompt is the user message (every engine reads it).
+
+Where they are set: `evals.judge`, `evals.reviewer`, `simulator` and `generator` on the suite; a
+scorer's own `llm_judge.judge` and a case's `simulatedUser.simulator` win over the suite's; the
+generate and review requests take a `generator` / `reviewer` for that call. A block's `engine` is
+checked as an agent's engine is. Suites saved before roles keep working: `evals.judgeModel`,
+`simulatorModel`, a scorer's `model` and a simulated user's `model` are read as a model block
+(`{ model }`), and a save writes the new fields.
+
+```yaml
+evals:
+  judge: { agent: judge-bot@1.2.0 }
+  reviewer: { model: anthropic:claude-sonnet-5-5, engine: { type: cli, cli: claude } }
+simulator: { model: openai:gpt-5-mini, reasoning: low }
+generator: { agent: qa-writer }
+```
+
+The dashboard's **Evals** view picks each role (Polpo, an agent and its version, or the shared model
+field with the engine badge and the agent page's engine picker); an LLM judge scorer and a
+multi-turn case pick their own; **Add cases** picks who writes them. The result shows who played the
+role: `Polpo (model)`, `judge-bot (model)`, or the block's model.
 
 ## CI gate: required suites before production
 
@@ -493,9 +533,10 @@ next one, until it stops.
   cannot be), `scorer` (when the case's scorer `stopScorer` passes, checked after each reply), or
   `max_turns` (every turn runs; the simulator keeps talking). A conversation also stops when the
   agent waits for a person (an approval, `ask_user`) or a budget is spent.
-- **Model**: `simulatedUser.model`, else the suite's `simulatorModel` (editor → Evals), else
-  Polpo's effective orchestrator model (`settings.orchestratorModel`, else a connected provider's).
-  The simulator's calls are counted apart (not in the agent's cost).
+- **Who plays the user**: `simulatedUser.simulator`, else the suite's `simulator` (editor → Evals),
+  else Polpo — a [role](#roles-who-plays-the-judge-the-simulated-user-the-generator-the-reviewer):
+  an agent or a model + engine block, a chat turn without tools. The simulator's calls are counted
+  apart (not in the agent's cost).
 - **Scripted user**: `script: ["and to Germany?", "thanks"]` plays these user turns in order, no
   simulator model: fully offline with a scripted model and tool mocks.
 - The **transcript** is in the trace (`trace.transcript`: each message, simulated or scripted, the
@@ -507,7 +548,8 @@ next one, until it stops.
 ## Generate cases with AI
 
 **Add cases → Generate cases** (REST `POST /agents/{name}/suites/generate-cases`, MCP
-`polpo_agent_suite_generate`, Polpo's `agent_suite_generate`): Polpo's model reads the agent's
+`polpo_agent_suite_generate`, Polpo's `agent_suite_generate`): the generator (the request's
+`generator`, else the suite's, else Polpo; a [role](#roles-who-plays-the-judge-the-simulated-user-the-generator-the-reviewer)) reads the agent's
 instructions, tools, skills and connectors, an optional **brief** ("refunds over 100 EUR") and up to
 five **sample chats** (`sessionIds`, secrets redacted) and proposes `count` cases (1–20, default
 6): **happy paths**, **edge cases** and **adversarial** ones (prompt injection, off-scope requests,
@@ -518,11 +560,12 @@ Each proposal comes back **validated** with its category and rationale (an inval
 cases, datasets?, revision? }`, MCP `accept`). Generated cases are marked `source.kind:
 "generated"`.
 
-**Dataset rows** (`POST …/suites/{id}/datasets/generate { caseId, count?, brief? }`, the dialog's
+**Dataset rows** (`POST …/suites/{id}/datasets/generate { caseId, count?, brief?, generator? }`, the dialog's
 **Dataset rows**, MCP `rows_for_case`): rows proposed for a case's dataset (its columns kept, edge
 and adversarial values included), shown for review and added only when accepted.
 
-Generation costs tokens of Polpo's model; without a model it answers `409`.
+Generation costs tokens of the generator's model; when its turn fails (no model, a refused
+request) it answers `409` with the reason.
 
 ## Suites for hosted servers and missions
 
@@ -673,7 +716,7 @@ the best fit for every pull request. This repository's own CI does not run it.
 
 | Surface | How |
 |---|---|
-| Dashboard | Agent page → **Suites**: rows count the cases replaying a cassette and the multi-turn ones; **Add cases** (Generate cases — brief, sample chats, how many, happy / edge / adversarial, offline or real model — with a review list where each proposal is ticked before **Add**; Dataset rows for a case; From a chat or task); the case editor's **Multi-turn** block (persona, goal, constraints, script, max turns, stop condition, simulator model) and the cassette's matching and unmatched policy; **Evals** view: the suite's simulated user model. The run report draws a multi-turn case as a **conversation** (simulated / scripted turns, why it stopped), a mission's **tasks**, a hosted server's **HTTP requests**, the cassette replayed or recorded, and opens the **cassette viewer** (Record / Re-record after a confirmation, each call's arguments with secrets redacted, edit its response, delete it, Mark as mock, delete the cassette). Hosted server → **Suite** tab (the saved tests as the suite: run, report, edit as JSON, **Required to deploy**); its Versions: a blocked deploy with what failed, **Deploy anyway…** (reason), the gate in the deploy history. Mission page → **Suites** tab |
+| Dashboard | Agent page → **Suites**: rows count the cases replaying a cassette and the multi-turn ones; **Add cases** (Generate cases — brief, sample chats, how many, happy / edge / adversarial, offline or real model — with a review list where each proposal is ticked before **Add**; Dataset rows for a case; From a chat or task); the case editor's **Multi-turn** block (persona, goal, constraints, script, max turns, stop condition, who plays the user) and the cassette's matching and unmatched policy; **Evals** view: who plays the suite's simulated user and generator. The run report draws a multi-turn case as a **conversation** (simulated / scripted turns, why it stopped), a mission's **tasks**, a hosted server's **HTTP requests**, the cassette replayed or recorded, and opens the **cassette viewer** (Record / Re-record after a confirmation, each call's arguments with secrets redacted, edit its response, delete it, Mark as mock, delete the cassette). Hosted server → **Suite** tab (the saved tests as the suite: run, report, edit as JSON, **Required to deploy**); its Versions: a blocked deploy with what failed, **Deploy anyway…** (reason), the gate in the deploy history. Mission page → **Suites** tab |
 | REST | Cassettes: `GET …/agents/{name}/cassettes`, `GET/PATCH/DELETE …/cassettes/{id}`, `GET …/suites/{id}/cases/{caseId}/cassette`, `POST …/suites/{id}/cases/{caseId}/record`, runs with `record: true`; `POST …/suites/{id}/cases/from-recording`; generation: `POST …/agents/{name}/suites/generate-cases`, `POST …/suites/{id}/cases` (accept), `POST …/suites/{id}/datasets/generate`; other targets: `/mcp-servers/{id}/suites…`, `/missions/{id}/suites…`, `…/suite-runs…`; hosted publish / deploy: `override`, `deployBlocked`, `409 GATE_BLOCKED` |
 | MCP | `polpo_agent_suite_cassette` (list, or one cassette's calls) and `polpo_target_suites` (a hosted server's or a mission's suites and runs) need `polpo:read`; `polpo_agent_suite_record` (live: `polpo:admin`; `from_session` / `from_task`: `polpo:work`), `polpo_agent_suite_replay`, `polpo_agent_suite_cassette_edit`, `polpo_agent_suite_generate` (propose, `accept`, `rows_for_case`), `polpo_target_suite_save` and `polpo_target_suite_run` need `polpo:work` (real tools or HTTP: `polpo:admin`). The **suite card** (`polpo_agent_suite_show`) draws transcripts, the replayed cassette and a mission's tasks. `polpo_mcp_server_publish` / `polpo_mcp_server_deploy` take `override_reason` and say when the suite blocked a deploy |
 | Polpo's chat | `agent_suite_record`, `agent_suite_replay`, `agent_suite_cassette`, `agent_suite_cassette_edit`, `agent_suite_generate`, `target_suites`, `target_suite_save`, `target_suite_run` (group "agent-versions": "record the rates case", "turn my last chat with shop into a test", "propose adversarial cases for the shop agent", "test the stock-api server's tools", "run the blog mission's suite") |

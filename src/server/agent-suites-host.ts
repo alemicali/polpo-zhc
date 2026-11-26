@@ -1,8 +1,9 @@
 /**
  * Agent suites wired to the running instance: suites and runs under .polpo/agent-suites/, each case
  * a chat turn through the in-process chat completions pipeline (the agent's real path) inside the
- * case's hooks, its chat deleted afterwards. Phase 4: the simulated user's and the case generator's
- * model, the vault's values redacted from recordings, chats and task runs recorded as cases, and
+ * case's hooks, its chat deleted afterwards. The suite's roles (judge, simulated user, generator,
+ * reviewer) run through that same `turn` (see AgentSuiteRunner.playRole): no model is called here.
+ * Phase 4: the vault's values redacted from recordings, chats and task runs recorded as cases, and
  * the targets other than an agent (hosted MCP servers' saved tests, missions).
  */
 import { trustedApiCallHeaders } from "@polpo-ai/server";
@@ -11,17 +12,17 @@ import {
   hostedServerStorage, hostedServerSuite, type ActivityEntryLike, type AgentGenerationInfo, type ChatMessageLike, type MissionTaskLike,
 } from "@polpo-ai/core";
 import type { Orchestrator } from "../core/orchestrator.js";
-import { AgentSuiteRunner, runAsSuiteCase, type AgentSuiteDeps, type SessionToolCall, type SuiteCompletion, type SuiteTurnResult } from "./agent-suites.js";
+import { AgentSuiteRunner, runAsSuiteCase, type AgentSuiteDeps, type SessionToolCall, type SuiteTurnResult } from "./agent-suites.js";
 import { FileAgentSuiteStore } from "../stores/file-agent-suite-store.js";
 import { FileBenchmarkStore } from "../stores/file-benchmark-store.js";
 import { AgentBenchmarks } from "./agent-benchmarks.js";
-import { sandboxedCustomScorer, suiteJudge, suiteReviewer } from "./agent-suite-scorers.js";
+import { sandboxedCustomScorer } from "./agent-suite-scorers.js";
 import { AgentDeployGates } from "./agent-deploy-gates.js";
 import { deployGateSummary } from "@polpo-ai/core";
 import { mcpServerServiceFor } from "./mcp-servers-runtime.js";
 import { connectorManagerFor } from "../mcp/runtime.js";
 import type { McpServerTestCase } from "../mcp-servers/types.js";
-import type { ModelConfig } from "../core/types.js";
+import { isRoleBlock, type SuiteRole } from "@polpo-ai/core";
 
 export interface AgentSuiteHostOptions {
   orchestrator: Orchestrator;
@@ -64,10 +65,20 @@ export function agentBenchmarksFor(opts: AgentSuiteHostOptions): AgentBenchmarks
     agents: () => o.getAgents(),
     resolveAgent: deps.resolveAgent,
     price: priceOf,
-    judgePrice: async () => {
-      const m = o.getConfig()?.settings?.orchestratorModel;
-      const spec = typeof m === "string" ? m : (m as { primary?: string } | undefined)?.primary;
-      return (await priceOf(spec))?.price;
+    // the judge's model: its agent's, its block's, else Polpo's
+    judgePrice: async (role?: SuiteRole) => {
+      let spec: string | undefined;
+      if (role?.agent) {
+        const at = role.agent.lastIndexOf("@");
+        const agent = await deps.resolveAgent(at > 0 ? role.agent.slice(0, at) : role.agent, at > 0 ? role.agent.slice(at + 1) : undefined).catch(() => undefined);
+        spec = typeof agent?.model === "string" ? agent.model : undefined;
+      } else if (isRoleBlock(role)) {
+        spec = role!.model;
+      } else {
+        const m = o.getConfig()?.settings?.orchestratorModel;
+        spec = typeof m === "string" ? m : (m as { primary?: string } | undefined)?.primary;
+      }
+      return spec ? (await priceOf(spec))?.price : undefined;
     },
     emit: (e) => o.emit("benchmark:progress", e),
     writeDraft: async (agent, fields, w) => {
@@ -105,14 +116,6 @@ export function agentDeployGatesFor(opts: AgentSuiteHostOptions): AgentDeployGat
   return gates;
 }
 
-/** One completion with `model` (temperature 0), else with Polpo's effective model: the simulated user, the case generator. */
-function suiteCompletion(configured: () => string | ModelConfig | undefined): SuiteCompletion {
-  const judge = suiteJudge(configured);
-  const reviewer = suiteReviewer(configured);
-  // a given model: one completion (the judge's path, temperature 0); else Polpo's model
-  return async ({ prompt, model }) => (model ? judge({ model, prompt }) : reviewer(prompt));
-}
-
 /** The vault's values (every owner), and secret-looking environment values: redacted from recordings. */
 async function vaultSecrets(o: Orchestrator): Promise<string[]> {
   const out = new Set<string>();
@@ -132,7 +135,6 @@ async function vaultSecrets(o: Orchestrator): Promise<string[]> {
 
 export function agentSuiteDeps(opts: AgentSuiteHostOptions): AgentSuiteDeps {
   const o = opts.orchestrator;
-  const orchestratorModel = () => o.getConfig()?.settings?.orchestratorModel;
   const api = async <T>(path: string): Promise<T | undefined> => {
     if (!opts.api) return undefined;
     const res = await opts.api(path);
@@ -143,13 +145,9 @@ export function agentSuiteDeps(opts: AgentSuiteHostOptions): AgentSuiteDeps {
   const hosted = () => mcpServerServiceFor(o);
   return {
     store: new FileAgentSuiteStore(o.getPolpoDir()),
-    // evals: the LLM judge, "explain this run", custom scorers in the sandbox
-    judge: suiteJudge(orchestratorModel),
-    review: suiteReviewer(orchestratorModel),
+    // evals: custom scorers in the sandbox (the judge and the other roles are chat turns: `turn`)
     customScorer: sandboxedCustomScorer(),
-    // phase 4: the simulated user, case generation, recordings
-    simulate: suiteCompletion(orchestratorModel),
-    generate: suiteCompletion(orchestratorModel),
+    // phase 4: recordings
     secrets: () => vaultSecrets(o),
     agentInfo: async (agent: AgentConfig): Promise<AgentGenerationInfo> => {
       const connectors = connectorManagerFor(o).store.list()
@@ -230,7 +228,8 @@ export function agentSuiteDeps(opts: AgentSuiteHostOptions): AgentSuiteDeps {
       const res = await opts.completions(new Request("http://localhost/", {
         method: "POST",
         headers: { "content-type": "application/json", "x-session-id": "new", ...trustedApiCallHeaders() },
-        body: JSON.stringify({ agent: agentRef, stream, messages }),
+        // no agent: Polpo's own chat (a suite role played by Polpo)
+        body: JSON.stringify({ ...(agentRef ? { agent: agentRef } : {}), stream, messages }),
       }));
       // the Playground streams the reply: OpenAI chunks (data: {...}) ending with [DONE]
       const body = stream && res.ok && res.body ? await readCompletionStream(res.body, turnOpts!.onText!) : await res.json().catch(() => ({})) as {

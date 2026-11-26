@@ -24,7 +24,7 @@ import {
   type BenchmarkWeights, type ModelPrice, type PlaygroundExchange, type PlaygroundPane, type PlaygroundSession, type SuiteCase, type SuiteMocks,
   type SuiteRun, type SuiteTraceToolCall, type SuiteTraceTurn, type SuiteVariantOverrides,
 } from "@polpo-ai/core/agent-suites";
-import type { AgentConfig } from "@polpo-ai/core";
+import { suiteRoleFor, type AgentConfig, type SuiteRole } from "@polpo-ai/core";
 import type { AgentSuiteRunner } from "./agent-suites.js";
 import type { BenchmarkStore } from "../stores/file-benchmark-store.js";
 
@@ -48,8 +48,8 @@ export interface AgentBenchmarkDeps {
   resolveAgent: (name: string, ref?: string) => Promise<AgentConfig | undefined>;
   /** A model's price per million tokens and its id (undefined spec: the default model); undefined when unknown. */
   price?: (spec: string | undefined) => Promise<{ model: string; price: ModelPrice } | undefined>;
-  /** The LLM judges' model price (the orchestrator's effective model). */
-  judgePrice?: () => Promise<ModelPrice | undefined>;
+  /** The price of the model a suite's judge plays on (its agent's, its model block's, else Polpo's). */
+  judgePrice?: (role?: SuiteRole) => Promise<ModelPrice | undefined>;
   /** benchmark:progress (live clients). */
   emit?: (e: BenchmarkProgressEvent) => void;
   /** Write fields into the agent's draft (never deployed): "Promote variant". */
@@ -152,9 +152,10 @@ export class AgentBenchmarks {
   async estimate(spec: BenchmarkSpec): Promise<BenchmarkEstimate> {
     const cells: BenchmarkEstimateCell[] = [];
     const notes: string[] = [];
-    const judgePrice = await this.deps.judgePrice?.().catch(() => undefined);
+    let judgeUnpriced = false;
     for (const ref of spec.suites) {
       const suite = await this.runner.getSuite(ref.agent, ref.suite);
+      const judgePrice = await this.deps.judgePrice?.(suiteRoleFor(suite, "judge")).catch(() => undefined);
       const caseIds = this.caseIdsFor(suite, ref);
       const history = await this.runner.listRuns(ref.agent, { suiteId: suite.id, limit: 40 });
       for (const v of spec.variants) {
@@ -163,6 +164,7 @@ export class AgentBenchmarks {
           ...(spec.mode ? { mode: spec.mode } : {}), ...(caseIds?.length ? { caseIds } : {}),
         }, { allowRealTools: true });
         const judges = pf.planned.reduce((a, p) => a + (p.case.scorers?.filter((x) => x.type === "llm_judge").length ?? 0), 0);
+        if (judges && !judgePrice) judgeUnpriced = true;
         const judgeCost = judges && judgePrice ? heuristicCaseCostUsd({ promptChars: 0, turns: 1, price: { input: 0, output: 0 }, judges, judgePrice }) : 0;
         const priced = pf.realModelCases ? await this.deps.price?.(typeof pf.config?.model === "string" ? pf.config.model : undefined).catch(() => undefined) : undefined;
         let basis: BenchmarkEstimateCell["basis"] = pf.realModelCases ? "unknown" : "offline";
@@ -192,7 +194,7 @@ export class AgentBenchmarks {
         });
       }
     }
-    if (cells.some((c) => c.judgeCalls > 0) && !judgePrice) notes.push("LLM judges score some cases; their model's price is unknown and left out.");
+    if (judgeUnpriced) notes.push("LLM judges score some cases; their model's price is unknown and left out.");
     return summarizeBenchmarkEstimate(cells, spec.repetitions, notes);
   }
 

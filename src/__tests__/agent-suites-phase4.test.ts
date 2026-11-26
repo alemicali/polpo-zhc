@@ -53,6 +53,20 @@ function pipeline(opts: { realModel?: (messages: Array<{ role: string; content: 
   };
 }
 
+/**
+ * The same stand-in pipeline for a suite role's turn (the simulated user, the generator): `answer`
+ * says what the role answers (the pipeline reports its model turn); case turns go to `cases`.
+ */
+type RoleTurn = (kind: string, prompt: string, ref: string, hooks: SuiteCaseHooks) => { text: string; model?: string; costUsd?: number };
+function withRoles(cases: AgentSuiteDeps["turn"], answer: RoleTurn): AgentSuiteDeps["turn"] {
+  return async (ref, messages, hooks, o) => {
+    if (!hooks.role) return cases(ref, messages, hooks, o);
+    const r = answer(hooks.role, messages[messages.length - 1]!.content, ref, hooks);
+    hooks.recordTurn({ text: r.text, toolCalls: [], mocked: false, ...(r.model ? { model: r.model } : {}), usage: { inputTokens: 1, outputTokens: 1, costUsd: r.costUsd ?? 0 }, durationMs: 0 });
+    return { text: r.text, toolCalls: [] };
+  };
+}
+
 const agent = (over: Partial<AgentConfig> = {}): AgentConfig => ({ name: "shop", role: "Shop agent", ...over } as AgentConfig);
 const deps = (over: Partial<AgentSuiteDeps> = {}): AgentSuiteDeps => ({
   store: new InMemoryAgentSuiteStore(),
@@ -255,11 +269,11 @@ describe("simulated and scripted users", () => {
   const agentTurn = pipeline({ realModel: (messages) => ({ text: `reply to: ${messages[messages.length - 1]!.content}` }) });
 
   it("a model plays the user until it says the goal is reached; assertions read the whole conversation", async () => {
-    const prompts: Array<{ prompt: string; model?: string }> = [];
+    const prompts: Array<{ prompt: string; ref: string; roleAgent?: unknown; kind: string }> = [];
     const answers = ['{"done": false, "message": "My order is 123"}', '{"done": true, "goalReached": true, "reason": "refund confirmed"}'];
     const runner = new AgentSuiteRunner(deps({
-      turn: agentTurn,
-      simulate: async (req) => { prompts.push(req); return { text: answers.shift()!, model: "sim-model", costUsd: 0.002 }; },
+      // the simulated user is a chat turn through the same pipeline (its role's hooks: no tools)
+      turn: withRoles(agentTurn, (kind, prompt, ref, hooks) => { prompts.push({ kind, prompt, ref, roleAgent: hooks.roleAgent }); return { text: answers.shift()!, model: "sim-model", costUsd: 0.002 }; }),
     }));
     await runner.saveSuite("shop", { name: "Sim", simulatorModel: "anthropic:sim", cases: [{
       name: "refund", mode: "tools", input: { message: "I want a refund" },
@@ -273,13 +287,24 @@ describe("simulated and scripted users", () => {
       ["user", "I want a refund"], ["assistant", "reply to: I want a refund"], ["user", "My order is 123"], ["assistant", "reply to: My order is 123"],
     ]);
     expect(r.trace.transcript![2].simulated).toBe(true);
-    expect(r.trace.simulator).toMatchObject({ model: "sim-model", calls: 2, costUsd: 0.004, stoppedBy: "goal", goalReached: true });
+    // the old simulatorModel is a model block: an ephemeral agent with that model
+    expect(r.trace.simulator).toMatchObject({ model: "anthropic:sim", calls: 2, costUsd: 0.004, stoppedBy: "goal", goalReached: true });
     expect(r.trace.finalText).toBe("reply to: My order is 123");
-    expect(prompts[0].model).toBe("anthropic:sim");
+    expect(prompts[0]).toMatchObject({ kind: "simulator", ref: "polpo-suite-simulator", roleAgent: { name: "polpo-suite-simulator", model: "anthropic:sim", allowedTools: [] } });
     expect(prompts[0].prompt).toContain("An annoyed customer");
     expect(prompts[0].prompt).toContain("never shouts");
     // the simulator's cost is not the agent's
     expect(r.costUsd).toBe(0);
+    // a case's own simulator (an agent) wins over the suite's
+    prompts.length = 0;
+    answers.push('{"done": true, "goalReached": true}');
+    await runner.saveSuite("shop", { name: "Sim2", simulator: { model: "anthropic:sim" }, cases: [{
+      name: "refund", mode: "tools", input: { message: "I want a refund" },
+      mocks: { simulatedUser: { persona: "p", goal: "g", simulator: { agent: "checker@draft" } } },
+    }] });
+    const two = await runner.run("shop", "sim2", {}, { allowRealTools: true });
+    expect(prompts[0]).toMatchObject({ ref: "checker@draft", roleAgent: undefined });
+    expect(two.results[0].trace.simulator!.model).toBe("checker@draft (sim-model)");
   });
 
   it("a scripted user plays fixed turns (no simulator); a scorer can stop the conversation", async () => {
@@ -298,8 +323,8 @@ describe("simulated and scripted users", () => {
     expect(run.results[1].status).toBe("passed");
   });
 
-  it("works with tool mocks and a scripted model (offline); without a simulator a model-played user errors", async () => {
-    const runner = new AgentSuiteRunner(deps());
+  it("works with tool mocks and a scripted model (offline); a simulator whose turn fails errors the case", async () => {
+    const runner = new AgentSuiteRunner(deps({ turn: withRoles(pipeline(), () => { throw new Error("The model provider refused the request"); }) }));
     await runner.saveSuite("shop", { name: "Off", cases: [
       { name: "offline", input: { message: "rates?" }, mocks: {
         simulatedUser: { script: ["and to DE?"] },
@@ -310,7 +335,7 @@ describe("simulated and scripted users", () => {
     ] });
     const run = await runner.run("shop", "off");
     expect(run.results[0].status).toBe("passed");
-    expect(run.results[1]).toMatchObject({ status: "errored", error: expect.stringContaining("No simulated user") });
+    expect(run.results[1]).toMatchObject({ status: "errored", error: expect.stringContaining("The model provider refused the request") });
   });
 
   it("parses the simulator's answers leniently", () => {
@@ -345,16 +370,23 @@ describe("AI case generation (reviewed, never saved by itself)", () => {
 
   it("proposes validated cases with their rationale; nothing is saved until accepted", async () => {
     const prompts: string[] = [];
+    const refs: string[] = [];
     const runner = new AgentSuiteRunner(deps({
-      generate: async ({ prompt }) => { prompts.push(prompt); return { text: answer, model: "gen-model", costUsd: 0.01 }; },
+      // the generator is a chat turn of the suite's generator (here an agent)
+      turn: withRoles(pipeline(), (kind, prompt, ref) => { expect(kind).toBe("generator"); prompts.push(prompt); refs.push(ref); return { text: answer, model: "gen-model", costUsd: 0.01 }; }),
       agentInfo: async (a) => ({ name: a.name, instructions: "Quote shipping with Printful", tools: [{ name: "mcp__printful__shipping_rates", description: "Rates" }] }),
       sessionMessages: async () => ({ title: "Sample", messages: [{ role: "user", content: `rates please ${SECRET}` }] }),
       secrets: async () => [SECRET],
     }));
-    await runner.saveSuite("shop", { name: "Gen", cases: [{ name: "Quote Italy", input: { message: "x" } }] });
+    await runner.saveSuite("shop", { name: "Gen", generator: { agent: "writer" }, cases: [{ name: "Quote Italy", input: { message: "x" } }] });
     const before = await runner.getSuite("shop", "gen");
     const out = await runner.generateCases("shop", { suiteId: "gen", count: 3, brief: "shipping", sessionIds: ["s1"] });
-    expect(out).toMatchObject({ model: "gen-model", costUsd: 0.01 });
+    expect(out).toMatchObject({ model: "writer (gen-model)", costUsd: 0.01 });
+    expect(refs).toEqual(["writer"]);
+    // a request's own generator wins; none at all: Polpo (no agent)
+    await runner.generateCases("shop", { suiteId: "gen", generator: { agent: "checker" } });
+    await runner.generateCases("shop", {});
+    expect(refs.slice(1)).toEqual(["checker", ""]);
     expect(prompts[0]).toContain("Quote shipping with Printful");
     expect(prompts[0]).toContain("mcp__printful__shipping_rates: Rates");
     expect(prompts[0]).toContain("prompt injection");
@@ -373,13 +405,13 @@ describe("AI case generation (reviewed, never saved by itself)", () => {
     expect((await runner.run("shop", "gen", { caseIds: ["quote-italy-2"] })).results.map((r) => r.status)).toEqual(["passed", "passed"]);
   });
 
-  it("proposes dataset rows for a case (not saved); no model: a clear error", async () => {
-    const runner = new AgentSuiteRunner(deps({ generate: async () => ({ text: '{"rows":[{"country":"FR","x":1},{"country":"ES"}]}' }) }));
+  it("proposes dataset rows for a case (not saved); a failed generation: a clear error", async () => {
+    const runner = new AgentSuiteRunner(deps({ turn: withRoles(pipeline(), () => ({ text: '{"rows":[{"country":"FR","x":1},{"country":"ES"}]}' })) }));
     await runner.saveSuite("shop", { name: "D", datasets: [{ name: "C", rows: [{ country: "IT" }] }], cases: [{ name: "q", dataset: "c", input: { message: "to {{row.country}}" } }] });
     expect(await runner.generateDatasetRows("shop", "d", { caseId: "q", count: 2 })).toMatchObject({ datasetId: "c", columns: ["country"], rows: [{ country: "FR" }, { country: "ES" }] });
-    const none = new AgentSuiteRunner(deps());
+    const none = new AgentSuiteRunner(deps({ turn: withRoles(pipeline(), () => { throw new Error("No model is configured"); }) }));
     await none.saveSuite("shop", { name: "D", cases: [{ name: "q", input: { message: "x" } }] });
-    await expect(none.generateCases("shop", {})).rejects.toMatchObject({ code: "CONFLICT" });
+    await expect(none.generateCases("shop", {})).rejects.toMatchObject({ code: "CONFLICT", message: expect.stringContaining("No model is configured") });
     expect(() => parseGeneratedCases("no json here")).toThrow("no cases");
   });
 });

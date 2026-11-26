@@ -63,7 +63,8 @@ describe("the agent suite card (MCP App)", () => {
     const root = document.createElement("div");
     const list = buildSuiteListCard({
       agent: "shop", key,
-      suites: [{ id: "quotes", name: "Quotes", cases: [{ scorers: [{}] }], datasets: [], defaultMode: "all", scorers: [{}] }, { id: "new", name: "New", cases: [], datasets: [], defaultMode: "all" }],
+      suites: [{ id: "quotes", name: "Quotes", cases: [{ scorers: [{}] }], datasets: [], defaultMode: "all", scorers: [{}], evals: { judge: { agent: "judge-bot@1.2.0" } }, simulatorModel: "openai:gpt-5-mini" },
+        { id: "new", name: "New", cases: [], datasets: [], defaultMode: "all" }],
       runs: [
         { id: "sr-2", suiteId: "quotes", status: "failed", startedAt: "2026-11-25T10:00:00.000Z", target: "draft", stats: { passed: 1, total: 2, skipped: 0 } as never, aggregates: { score: 0.63 }, baseline: { regressions: 1 } },
         { id: "sr-1", suiteId: "quotes", status: "passed", startedAt: "2026-11-24T10:00:00.000Z", target: "production", stats: { passed: 2, total: 2, skipped: 0 } as never, isBaseline: true },
@@ -77,6 +78,11 @@ describe("the agent suite card (MCP App)", () => {
     expect(q.textContent).toContain("1 regression");
     expect(q.textContent).toContain("Baseline");
     expect(root.querySelector('[data-suite="new"]')!.textContent).toContain("never run");
+    // who plays the roles (the old simulatorModel as a model block); a suite with none set says nothing
+    expect(list.suites[0]!.roles).toEqual({ judge: "agent judge-bot@1.2.0", simulator: "openai:gpt-5-mini", generator: "Polpo", reviewer: "Polpo" });
+    expect(q.querySelector("[data-roles]")!.textContent).toBe("Roles: judge agent judge-bot@1.2.0 · simulated user openai:gpt-5-mini · generator Polpo · reviewer Polpo");
+    expect(root.querySelector('[data-suite="new"] [data-roles]')).toBeNull();
+    expect(suiteCardText(list)).toContain("roles: judge agent judge-bot@1.2.0, simulator openai:gpt-5-mini");
     [...q.querySelectorAll("button")].find((b) => b.textContent === "Latest run")!.click();
     expect(onShow).toHaveBeenCalledWith({ run: "sr-2", suite: "quotes", view: "run" });
 

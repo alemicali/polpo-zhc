@@ -64,6 +64,9 @@ export interface SimulatedUser {
   maxTurns?: number;
   stop?: "goal" | "scorer" | "max_turns";
   stopScorer?: string;
+  /** Who plays this case's user (default the suite's simulator, else Polpo). */
+  simulator?: SuiteRole;
+  /** @deprecated read as `simulator: { model }`. */
   model?: string;
   /** Scripted user: these turns, in order (no simulator). */
   script?: string[];
@@ -130,6 +133,8 @@ export interface CaseGenerationRequest {
   sessionIds?: string[];
   include?: Array<"happy" | "edge" | "adversarial">;
   style?: "contract" | "tools";
+  /** Who writes them (default the suite's generator, else Polpo). */
+  generator?: SuiteRole;
 }
 
 /** A generated case awaiting review (never saved by itself). */
@@ -201,13 +206,35 @@ export type SuiteScorer = {
   | { type: "tool_trajectory"; expected: string[]; order?: "exact" | "in_order" | "any" }
   | { type: "cost"; maxUsd: number }
   | { type: "latency"; maxMs: number }
-  | { type: "llm_judge"; rubric: string; criteria?: JudgeCriterion[]; expected?: string; model?: string }
+  | { type: "llm_judge"; rubric: string; criteria?: JudgeCriterion[]; expected?: string; judge?: SuiteRole; /** @deprecated read as `judge: { model }`. */ model?: string }
   | { type: "custom"; code: string; expected?: unknown; timeoutMs?: number }
 );
 export type SuiteScorerType = SuiteScorer["type"];
 
+/** The LLM roles of a suite. */
+export type SuiteRoleName = "judge" | "simulator" | "generator" | "reviewer";
+
+/**
+ * Who plays a suite's LLM role (the judge, the simulated user, the case generator, the reviewer):
+ * an existing agent (`{ agent: "judge-bot" }`, `"judge-bot@1.2.0"`, `"judge-bot@draft"`), or the
+ * block an agent uses for its model and engine (run as an ephemeral agent). Neither: Polpo. Every
+ * role turn is a chat turn through the chat pipeline, without tools.
+ */
+export interface SuiteRole {
+  agent?: string;
+  model?: string;
+  reasoning?: string;
+  /** As agent.engine: a harness, or the official CLI with a person's account. */
+  engine?: Record<string, unknown>;
+}
+
 /** A suite's eval settings. */
 export interface SuiteEvalSettings {
+  /** Who judges llm_judge scorers (default Polpo); a scorer's own `judge` wins. */
+  judge?: SuiteRole;
+  /** Who writes "Explain this run" (default Polpo). */
+  reviewer?: SuiteRole;
+  /** @deprecated read as `judge: { model }`. */
   judgeModel?: string;
   repetitions?: number;
   regressionTolerance?: number;
@@ -260,7 +287,11 @@ export interface AgentSuite {
   evals?: SuiteEvalSettings;
   /** A deploy gate: required before a version reaches production (docs/agent-suites.md, "CI gate"). */
   gate?: SuiteGate;
-  /** The simulated users' model (default Polpo's). */
+  /** Who plays the simulated users (default Polpo). */
+  simulator?: SuiteRole;
+  /** Who proposes cases and dataset rows (default Polpo). */
+  generator?: SuiteRole;
+  /** @deprecated read as `simulator: { model }`. */
   simulatorModel?: string;
   tags?: string[];
   revision: number;

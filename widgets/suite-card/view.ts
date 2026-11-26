@@ -31,6 +31,7 @@ export const STRINGS = {
     required: "Required to deploy", gatesTitle: "Deploy gates", onPublish: "also on publish",
     conversation: "Conversation", simulated: "simulated", replayed: (n: number) => `↺ replayed ${n} call${n === 1 ? "" : "s"}`, unmatched: (n: number) => `${n} unmatched`,
     recorded: "● recorded", cassettes: (n: number) => `${n} replaying a cassette`, multiTurn: (n: number) => `${n} multi-turn`, stoppedBy: "stopped by",
+    roles: "Roles", role: { judge: "judge", simulator: "simulated user", generator: "generator", reviewer: "reviewer" } as Record<string, string>,
     gateStatus: { running: "Verifying", passed: "Passed", blocked: "Blocked", failed: "Failed", override: "Override", cancelled: "Cancelled", errored: "Errored" } as Record<string, string>,
     leaderboard: "Leaderboard", matrix: "Case × variant", pareto: "Pareto front", quality: "Quality", latency: "Latency p50", spent: "Spent", progress: "Runs",
     sideBySide: "Side by side", back: "Leaderboard", askBench: "Which variant is best?", missing: "missing", answer: "Answer", toolCalls: "Tool calls", noTools: "no tool calls",
@@ -55,6 +56,7 @@ export const STRINGS = {
     required: "Obbligatoria per il deploy", gatesTitle: "Verifiche di deploy", onPublish: "anche alla pubblicazione",
     conversation: "Conversazione", simulated: "simulato", replayed: (n: number) => `↺ ${n} chiamat${n === 1 ? "a riprodotta" : "e riprodotte"}`, unmatched: (n: number) => `${n} senza registrazione`,
     recorded: "● registrato", cassettes: (n: number) => `${n} con cassetta`, multiTurn: (n: number) => `${n} multi-turno`, stoppedBy: "fermato da",
+    roles: "Ruoli", role: { judge: "giudice", simulator: "utente simulato", generator: "generatore", reviewer: "revisore" } as Record<string, string>,
     gateStatus: { running: "In verifica", passed: "Superata", blocked: "Bloccato", failed: "Fallita", override: "Forzato", cancelled: "Annullata", errored: "Errore" } as Record<string, string>,
     leaderboard: "Classifica", matrix: "Caso × variante", pareto: "Fronte di Pareto", quality: "Qualità", latency: "Latenza p50", spent: "Speso", progress: "Run",
     sideBySide: "Affiancati", back: "Classifica", askBench: "Qual è la variante migliore?", missing: "mancante", answer: "Risposta", toolCalls: "Chiamate ai tool", noTools: "nessuna chiamata",
@@ -146,6 +148,8 @@ export function suitesView(c: SuiteListCard, str: Strings): HTMLElement {
         h("div", { class: "muted small" }, [str.cases(x.cases), x.scorers ? str.scorers(x.scorers) : "", x.cassettes ? str.cassettes(x.cassettes) : "", x.simulated ? str.multiTurn(x.simulated) : "", x.lastRun
           ? `${x.lastRun.passed}/${x.lastRun.total}${x.lastRun.score !== undefined ? ` · ${str.score.toLowerCase()} ${x.lastRun.score.toFixed(2)}` : ""} · ${target(x.lastRun.target, x.lastRun.version)}`
           : str.neverRun].filter(Boolean).join(" · ")),
+        // who plays the judge, the simulated user, the generator and the reviewer (when any is not Polpo)
+        x.roles ? h("div", { class: "muted small", "data-roles": "" }, `${str.roles}: ${Object.entries(x.roles).map(([r, by]) => `${str.role[r] ?? r} ${by}`).join(" · ")}`) : null,
         x.lastRun?.regressions ? h("div", { class: "small danger-text" }, `▼ ${str.regressions(x.lastRun.regressions)}`) : null),
       h("div", { class: "row-actions" },
         x.lastRun ? h("button", { class: "btn btn-sm", disabled: env.superseded || env.busy, onclick: () => env.onShow?.({ run: x.lastRun!.id, suite: x.id, view: "run" }) }, str.report) : null,

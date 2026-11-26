@@ -921,7 +921,8 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
     // on every turn but we only force it here — later turns rely on the
     // tool's own description to remind the model not to re-rename unless
     // the user explicitly asks. Applied after fullSystemPrompt is built.
-    if (isFirstTurn) {
+    // A chat without the tool (a test suite's judge or simulated user: no tools) is not asked to.
+    if (isFirstTurn && effectiveTools.some((t: any) => t?.name === "set_session_title")) {
       fullSystemPrompt = `${fullSystemPrompt}\n\n## First-turn directive\nThis is the FIRST message of a brand new chat session. After completing your response (or as your final tool call), you MUST call \`set_session_title\` with a SHORT (≤50 chars), meaningful title summarising what the user is asking. Do not over-think it — one line in Title Case. On future turns do NOT call set_session_title unless the user explicitly asks for a rename.`;
     }
 

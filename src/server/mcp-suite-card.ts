@@ -5,8 +5,8 @@
  * without MCP Apps.
  */
 import {
-  deployGateFailures, type AgentDeployGate, type BenchmarkCaseComparison, type BenchmarkLeaderboard, type BenchmarkMatrix, type BenchmarkRun, type DiffSegment,
-  type SuiteBaselineComparison, type SuiteRun, type SuiteRunAggregates, type SuiteTrace, type SuiteTrend,
+  SUITE_ROLE_NAMES, deployGateFailures, describeSuiteRole, suiteRoleFor, type SuiteRoleName, type AgentDeployGate, type BenchmarkCaseComparison, type BenchmarkLeaderboard, type BenchmarkMatrix, type BenchmarkRun, type DiffSegment,
+  type AgentSuite, type SuiteBaselineComparison, type SuiteRun, type SuiteRunAggregates, type SuiteTrace, type SuiteTrend,
 } from "@polpo-ai/core/agent-suites";
 
 export interface SuiteCardKey { createdAt: number; seq: number }
@@ -26,6 +26,8 @@ export interface SuiteListCard {
     gate?: { required: boolean; minPassRate: number; onPublish?: boolean };
     /** Cases that replay a cassette, and multi-turn cases (a simulated or scripted user). */
     cassettes?: number; simulated?: number;
+    /** Who plays the suite's roles (judge, simulator, generator, reviewer), when any is not Polpo: "agent judge-bot", "model · engine", "Polpo". */
+    roles?: Partial<Record<SuiteRoleName, string>>;
   }>;
   /** The latest deploy gates (newest first): the required suites verifying versions. */
   gates?: SuiteCardGate[];
@@ -209,7 +211,8 @@ type RunIn = Pick<SuiteRun, "id" | "agent" | "suiteId" | "suiteName" | "status" 
 
 export function buildSuiteListCard(input: {
   agent: string;
-  suites: Array<{ id: string; name: string; cases: Array<{ scorers?: unknown[]; mocks?: { cassette?: unknown; simulatedUser?: unknown } }>; datasets: unknown[]; defaultMode: string; scorers?: unknown[]; gate?: { required?: boolean; minPassRate?: number; onPublish?: boolean } }>;
+  suites: Array<{ id: string; name: string; cases: Array<{ scorers?: unknown[]; mocks?: { cassette?: unknown; simulatedUser?: unknown } }>; datasets: unknown[]; defaultMode: string; scorers?: unknown[]; gate?: { required?: boolean; minPassRate?: number; onPublish?: boolean } }
+    & Partial<Pick<AgentSuite, "evals" | "simulator" | "generator" | "simulatorModel">>>;
   runs: Array<Pick<SuiteRun, "id" | "suiteId" | "status" | "stats" | "startedAt" | "target" | "version" | "isBaseline" | "benchmarkRunId"> & { aggregates?: { score?: number }; baseline?: { regressions: number } }>;
   gates?: Array<Pick<AgentDeployGate, "id" | "version" | "status" | "trigger" | "requestedAt" | "finishedAt" | "progress" | "suites" | "override">>;
   key: SuiteCardKey; link?: string;
@@ -231,6 +234,7 @@ export function buildSuiteListCard(input: {
         ...(s.gate?.required ? { gate: { required: true, minPassRate: s.gate.minPassRate ?? 1, ...(s.gate.onPublish ? { onPublish: true } : {}) } } : {}),
         ...(s.cases.some((c) => c.mocks?.cassette) ? { cassettes: s.cases.filter((c) => c.mocks?.cassette).length } : {}),
         ...(s.cases.some((c) => c.mocks?.simulatedUser) ? { simulated: s.cases.filter((c) => c.mocks?.simulatedUser).length } : {}),
+        ...(SUITE_ROLE_NAMES.some((r) => suiteRoleFor(s, r)) ? { roles: Object.fromEntries(SUITE_ROLE_NAMES.map((r) => [r, describeSuiteRole(suiteRoleFor(s, r))])) } : {}),
       };
     }),
     ...(input.gates?.length ? { gates: input.gates.slice(0, 5).map((g) => ({
@@ -343,6 +347,7 @@ export function suiteCardText(card: SuiteCard): string {
       + (s.lastRun ? ` · last ${s.lastRun.status} ${s.lastRun.passed}/${s.lastRun.total}${s.lastRun.score !== undefined ? ` score ${s.lastRun.score.toFixed(2)}` : ""}${s.lastRun.regressions ? ` · ${s.lastRun.regressions} regression(s)` : ""} (${s.lastRun.id})` : " · never run")
       + (s.baselineRunId ? ` · baseline ${s.baselineRunId}` : "")
       + (s.cassettes ? ` · ${s.cassettes} replaying a cassette` : "") + (s.simulated ? ` · ${s.simulated} multi-turn` : "")
+      + (s.roles ? ` · roles: ${Object.entries(s.roles).map(([r, by]) => `${r} ${by}`).join(", ")}` : "")
       + (s.gate?.required ? ` · REQUIRED to deploy (pass rate ≥ ${pct(s.gate.minPassRate)}${s.gate.onPublish ? ", also on publish" : ""})` : "")),
     ...(card.gates?.length ? ["Deploy gates:", ...card.gates.map((g) => `- ${g.version} · ${g.status === "running" ? `verifying ${g.progress.done}/${g.progress.total}` : g.status}`
       + `${g.override ? ` by ${g.override.by}: "${g.override.reason}"` : ""}${g.failed.length && g.status !== "passed" ? ` · ${g.failed.join(" · ").slice(0, 300)}` : ""} [${g.id}]`)] : [])].join("\n");
