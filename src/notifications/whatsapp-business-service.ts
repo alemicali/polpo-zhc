@@ -681,7 +681,14 @@ export class WaBusinessService implements WaBusinessNotifier {
           this.routing.add(routing);
           replies.push(this.inChatOrder(`${item.channel}:${waId}`, async () => {
             const attachments = await this.attachmentsFor(item.channel, wamid);
-            await this.routeInbound(item.channel, waId, wamid, parsed.text, attachments, stored.name, parsed.media?.voice || parsed.type === "voice");
+            let text = parsed.text;
+            if (parsed.media && !attachments.length) {
+              // the file was not kept (too large, downloads off, Meta refused): the agent is told what it was
+              const skipped = (await store.getMessage(wamid))?.media?.skipped;
+              const what = parsed.media.voice ? "voice message" : parsed.media.kind === "image" ? "photo" : parsed.media.kind;
+              text = `[${what}${parsed.media.filename ? ` ${parsed.media.filename}` : ""} not available${skipped ? `: ${skipped}` : ""}]${text ? ` ${text}` : ""}`;
+            }
+            await this.routeInbound(item.channel, waId, wamid, text, attachments, stored.name, parsed.media?.voice || parsed.type === "voice");
           }).finally(() => this.routing.delete(routing)));
         }
       }

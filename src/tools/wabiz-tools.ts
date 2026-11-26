@@ -88,7 +88,7 @@ export const WabizSendFlowSchema = Type.Object({
   header: Type.Optional(Type.String()), footer: Type.Optional(Type.String()),
   screen: Type.Optional(Type.String({ description: "The screen it opens on" })),
   data: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: "Initial data for that screen" })),
-  flow_token: Type.Optional(Type.String({ description: "Your reference: it comes back with the answers" })),
+  flow_ref: Type.Optional(Type.String({ description: "Your reference (Meta's flow_token): it comes back with the answers" })),
   mode: Type.Optional(Type.Union([Type.Literal("published"), Type.Literal("draft")])),
   action: Type.Optional(Type.Union([Type.Literal("navigate"), Type.Literal("data_exchange")])),
 });
@@ -134,7 +134,7 @@ export const WabizSendTemplateSchema = Type.Object({
   buttons: Type.Optional(Type.Array(Type.Object({
     index: Type.Number({ description: "The button's position in the template (0, 1…)" }),
     text: Type.Optional(Type.String({ description: "A URL button's variable suffix" })), payload: Type.Optional(Type.String({ description: "A quick reply's payload" })),
-    coupon_code: Type.Optional(Type.String({ description: "A copy-code button's code" })), flow_token: Type.Optional(Type.String({ description: "A flow button's token" })),
+    coupon_code: Type.Optional(Type.String({ description: "A copy-code button's code" })), flow_ref: Type.Optional(Type.String({ description: "A flow button's reference (Meta's flow_token)" })),
   }))),
   carousel: Type.Optional(Type.Array(Type.Object({
     header: Type.Object({ type: Type.Union([Type.Literal("image"), Type.Literal("video")]), link: Type.Optional(Type.String()), media_id: Type.Optional(Type.String()) }),
@@ -265,12 +265,12 @@ export function createWabizTools(ctx: WabizToolContext, allowedTools?: string[])
       label: "WhatsApp Business: send a flow",
       description: "Send a published WhatsApp Flow (a form inside WhatsApp, made in WhatsApp Manager → Flows) inside the 24-hour window: its "
         + "button opens it on a screen with initial data; when the person completes it, the answers come back to you as structured data "
-        + "(with your flow_token).",
+        + "(with your flow_ref).",
       parameters: WabizSendFlowSchema,
       execute: (_id, p) => run(() => send(p, {
         type: "flow", body: p.body, cta: p.cta, ...(p.flow_id ? { flowId: p.flow_id } : {}), ...(p.flow_name ? { flowName: p.flow_name } : {}),
         ...(p.header ? { header: { type: "text", text: p.header } } : {}), ...(p.footer ? { footer: p.footer } : {}), ...(p.screen ? { screen: p.screen } : {}),
-        ...(p.data ? { data: p.data } : {}), ...(p.flow_token ? { flowToken: p.flow_token } : {}), ...(p.mode ? { mode: p.mode } : {}), ...(p.action ? { action: p.action } : {}),
+        ...(p.data ? { data: p.data } : {}), ...(p.flow_ref ? { flowToken: p.flow_ref } : {}), ...(p.mode ? { mode: p.mode } : {}), ...(p.action ? { action: p.action } : {}),
         ...(p.reply_to ? { replyTo: p.reply_to } : {}),
       }))(),
     },
@@ -396,7 +396,7 @@ export function createWabizTools(ctx: WabizToolContext, allowedTools?: string[])
 export function templateInput(p: {
   named?: Record<string, string>; otp?: string;
   header?: { type: string; text?: string; link?: string; media_id?: string; filename?: string; latitude?: number; longitude?: number; name?: string; address?: string };
-  buttons?: Array<{ index: number; text?: string; payload?: string; coupon_code?: string; flow_token?: string }>;
+  buttons?: Array<{ index: number; text?: string; payload?: string; coupon_code?: string; flow_ref?: string }>;
   carousel?: Array<{ header: { type: string; link?: string; media_id?: string }; params?: string[]; buttons?: Array<{ index: number; text?: string; payload?: string }> }>;
 }): WaBizTemplateInput | undefined {
   const out: WaBizTemplateInput = {};
@@ -409,7 +409,7 @@ export function templateInput(p: {
         : { type: h.type as "image" | "video" | "document", ...(h.link ? { link: h.link } : {}), ...(h.media_id ? { mediaId: h.media_id } : {}), ...(h.filename ? { filename: h.filename } : {}) };
   }
   if (p.buttons?.length) {
-    out.buttons = p.buttons.map((b) => ({ index: b.index, ...(b.text ? { text: b.text } : {}), ...(b.payload ? { payload: b.payload } : {}), ...(b.coupon_code ? { couponCode: b.coupon_code } : {}), ...(b.flow_token ? { flowToken: b.flow_token } : {}) }));
+    out.buttons = p.buttons.map((b) => ({ index: b.index, ...(b.text ? { text: b.text } : {}), ...(b.payload ? { payload: b.payload } : {}), ...(b.coupon_code ? { couponCode: b.coupon_code } : {}), ...(b.flow_ref ? { flowToken: b.flow_ref } : {}) }));
   }
   if (p.carousel?.length) {
     out.carousel = p.carousel.map((c) => ({

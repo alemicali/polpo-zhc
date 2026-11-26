@@ -310,7 +310,7 @@ function registerWaBusinessRichTools(tool: Register, deps: McpDeps, pickChannel:
     return ok(`Sent ${what} to ${to} (${ids.join(", ")}).`, { sent: true, ids });
   };
 
-  tool("channels", "polpo_wabiz_send_media", {
+  tool("whatsapp-business", "polpo_wabiz_send_media", {
     title: "Send a WhatsApp Business file",
     description: "Send an image, audio, video, document or sticker to a contact of a WhatsApp Business channel, inside the 24-hour window: a file "
       + "(base64, uploaded to Meta first), a public https link or a Meta media id, with a caption (not for audio or stickers). Meta's limits: images "
@@ -337,7 +337,7 @@ function registerWaBusinessRichTools(tool: Register, deps: McpDeps, pickChannel:
     }, confirm, `a ${kind}`, file);
   });
 
-  tool("channels", "polpo_wabiz_send_interactive", {
+  tool("whatsapp-business", "polpo_wabiz_send_interactive", {
     title: "Send WhatsApp Business buttons, a list, a link, a location…",
     description: "Send an interactive message inside the 24-hour window. message.type: buttons { body, buttons: [{ id, title ≤ 20 }] up to 3, header?, "
       + "footer? }; list { body, button ≤ 20, sections: [{ title?, rows: [{ id, title ≤ 24, description? ≤ 72 }] }] (10 rows in all) }; cta_url { body, "
@@ -361,10 +361,10 @@ function registerWaBusinessRichTools(tool: Register, deps: McpDeps, pickChannel:
     return sendMessage(channel, to, { ...message, ...(reply_to ? { replyTo: reply_to } : {}) }, confirm, `a ${type.replace(/_/g, " ")} message`);
   });
 
-  tool("channels", "polpo_wabiz_send_flow", {
+  tool("whatsapp-business", "polpo_wabiz_send_flow", {
     title: "Send a WhatsApp Flow",
     description: "Send a published WhatsApp Flow (a form made in WhatsApp Manager → Flows) inside the 24-hour window: its button opens it on a screen "
-      + "with initial data. The answers come back as structured data (with your flow_token) to the channel's agent and as channel:wabiz-event "
+      + "with initial data. The answers come back as structured data (with your flow_ref) to the channel's agent and as channel:wabiz-event "
       + "kind flow, so a trigger can act on them. Needs confirm: true.",
     inputSchema: {
       channel: channelParam, to: toParam,
@@ -372,7 +372,7 @@ function registerWaBusinessRichTools(tool: Register, deps: McpDeps, pickChannel:
       body: z.string().min(1).describe("The message's text"), cta: z.string().min(1).max(30).describe("The button that opens it"),
       header: z.string().max(60).optional().describe("A text header"), footer: z.string().max(60).optional().describe("A footer"),
       screen: z.string().optional().describe("The screen it opens on"), data: looseObject.optional().describe("Initial data for that screen"),
-      flow_token: z.string().optional().describe("Your reference: it comes back with the answers"),
+      flow_ref: z.string().optional().describe("Your reference (Meta's flow_token): it comes back with the answers"),
       mode: z.enum(["published", "draft"]).optional().describe("draft: test an unpublished flow"),
       action: z.enum(["navigate", "data_exchange"]).optional().describe("navigate (default) or data_exchange (your flow endpoint answers)"),
       reply_to: replyToParam,
@@ -386,12 +386,12 @@ function registerWaBusinessRichTools(tool: Register, deps: McpDeps, pickChannel:
     return sendMessage(a.channel, a.to, {
       type: "flow", body: a.body, cta: a.cta, ...(a.flow_id ? { flowId: a.flow_id } : {}), ...(a.flow_name ? { flowName: a.flow_name } : {}),
       ...(a.header ? { header: { type: "text", text: a.header } } : {}), ...(a.footer ? { footer: a.footer } : {}), ...(a.screen ? { screen: a.screen } : {}),
-      ...(a.data ? { data: a.data } : {}), ...(a.flow_token ? { flowToken: a.flow_token } : {}), ...(a.mode ? { mode: a.mode } : {}), ...(a.action ? { action: a.action } : {}),
+      ...(a.data ? { data: a.data } : {}), ...(a.flow_ref ? { flowToken: a.flow_ref } : {}), ...(a.mode ? { mode: a.mode } : {}), ...(a.action ? { action: a.action } : {}),
       ...(a.reply_to ? { replyTo: a.reply_to } : {}),
     }, a.confirm, "a flow");
   });
 
-  tool("channels", "polpo_wabiz_send_products", {
+  tool("whatsapp-business", "polpo_wabiz_send_products", {
     title: "Send WhatsApp Business products",
     description: "Send products from the catalog connected to the WhatsApp Business account (business.catalogId, or catalog_id), inside the 24-hour "
       + "window: one product, a list of up to 30 in up to 10 sections, or the whole catalog. Orders come back as structured data (channel:wabiz-event "
@@ -419,7 +419,7 @@ function registerWaBusinessRichTools(tool: Register, deps: McpDeps, pickChannel:
       : { type: "catalog", body: a.body ?? "", ...(a.footer ? { footer: a.footer } : {}), ...(a.thumbnail ? { thumbnailProductRetailerId: a.thumbnail } : {}), ...(a.reply_to ? { replyTo: a.reply_to } : {}) },
   a.confirm, a.kind === "catalog" ? "the catalog" : a.kind === "product" ? "a product" : "products"));
 
-  tool("channels", "polpo_wabiz_send_order", {
+  tool("whatsapp-business", "polpo_wabiz_send_order", {
     title: "Send WhatsApp Business order details or status",
     description: "Payments inside WhatsApp exist only in India (payment gateway or UPI) and Brazil (Pix, boleto, payment link): the channel's "
       + "business.payments.market says which. order_details sends an order the person can pay (items, tax, shipping, discount; amounts in the "
@@ -451,7 +451,7 @@ function registerWaBusinessRichTools(tool: Register, deps: McpDeps, pickChannel:
     : { type: "order_status", body: a.body, referenceId: a.reference_id, status: a.status ?? "processing", ...(a.description ? { description: a.description } : {}) },
   a.confirm, a.kind === "order_details" ? "order details" : "an order status"));
 
-  tool("channels", "polpo_wabiz_react", {
+  tool("whatsapp-business", "polpo_wabiz_react", {
     title: "React to a WhatsApp Business message, or mark it read",
     description: "React to a message of a WhatsApp Business conversation with an emoji (an empty emoji removes the reaction), inside the 24-hour "
       + "window; or read: true marks the contact's message read (blue ticks), optionally with the typing indicator. Reactions need confirm: true.",
@@ -480,7 +480,7 @@ function registerWaBusinessRichTools(tool: Register, deps: McpDeps, pickChannel:
     return ok(emoji ? `Reacted ${emoji} to ${message_id}.` : `Removed the reaction on ${message_id}.`, { done: true, ids: (r.data as { ids?: string[] }).ids ?? [] });
   });
 
-  tool("channels", "polpo_wabiz_template_manage", {
+  tool("whatsapp-business", "polpo_wabiz_template_manage", {
     title: "Create, edit or delete a WhatsApp Business template",
     description: "Manage the account's message templates. create: name (lowercase, digits, underscores), language, category (UTILITY, MARKETING, "
       + "AUTHENTICATION), components as Meta defines them (HEADER, BODY with {{1}} or {{name}} and examples, FOOTER, BUTTONS: QUICK_REPLY, URL, "
@@ -520,7 +520,7 @@ function registerWaBusinessRichTools(tool: Register, deps: McpDeps, pickChannel:
     return ok(`Template ${a.action === "create" ? "created (in review)" : a.action === "edit" ? "edited (back in review)" : "deleted"}.`, { channel: p.name, result: r.data as Record<string, unknown> });
   });
 
-  tool("channels", "polpo_wabiz_profile", {
+  tool("whatsapp-business", "polpo_wabiz_profile", {
     title: "WhatsApp Business profile",
     description: "Read or update the number's business profile as customers see it: about (≤ 139), description (≤ 512), address, email, up to 2 "
       + "websites, vertical (RETAIL, RESTAURANT, PROF_SERVICES…) and the photo (JPEG/PNG ≤ 5 MB, base64; needs business.appId). Without changes it "
@@ -551,7 +551,7 @@ function registerWaBusinessRichTools(tool: Register, deps: McpDeps, pickChannel:
     return ok("Profile updated.", { channel: p.name, profile: r.data as Record<string, unknown> });
   });
 
-  tool("channels", "polpo_wabiz_block", {
+  tool("whatsapp-business", "polpo_wabiz_block", {
     title: "Block or unblock WhatsApp Business contacts",
     description: "Block contacts (they can no longer write to the number; Meta allows it only for people who wrote in the last 24 hours) or unblock "
       + "them; list: who is blocked. Block and unblock need confirm: true and the admin scope.",
@@ -580,7 +580,7 @@ function registerWaBusinessRichTools(tool: Register, deps: McpDeps, pickChannel:
     return ok(`${action === "block" ? "Blocked" : "Unblocked"}: ${d.done.join(", ") || "none"}${d.failed.length ? `; refused: ${d.failed.map((f) => `${f.user} (${f.error})`).join(", ")}` : ""}.`, { channel: p.name, result: d as unknown as Record<string, unknown> });
   });
 
-  tool("channels", "polpo_wabiz_analytics", {
+  tool("whatsapp-business", "polpo_wabiz_analytics", {
     title: "WhatsApp Business analytics",
     description: "Meta's analytics for the account: messages (sent and delivered per HALF_HOUR, DAY or MONTH), pricing (cost and volume per category, "
       + "DAILY / HALF_HOUR / MONTHLY, optional dimensions COUNTRY, PHONE, PRICING_CATEGORY, PRICING_TYPE, TIER), templates (sent, delivered, read, "
@@ -608,7 +608,7 @@ function registerWaBusinessRichTools(tool: Register, deps: McpDeps, pickChannel:
     return ok(short(JSON.stringify(r.data), 8000), { channel: p.name, data: r.data });
   });
 
-  tool("channels", "polpo_wabiz_phone", {
+  tool("whatsapp-business", "polpo_wabiz_phone", {
     title: "WhatsApp Business phone number",
     description: "The phone number at Meta and its setup. status (default): name and its review, quality rating, messaging tier, mode, the account "
       + "updates Meta sent (quality, name, templates, capabilities), and the callback Meta uses for it. register (with the 6-digit two-step PIN), "

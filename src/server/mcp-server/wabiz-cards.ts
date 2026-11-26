@@ -85,7 +85,7 @@ const output = z.object({
 }).passthrough();
 
 export function registerWabizCards(app: AppRegister, deps: McpDeps): void {
-  const card = app.gate("channels", READ, ["polpo_wabiz_show"]);
+  const card = app.gate("whatsapp-business", READ, ["polpo_wabiz_show"]);
 
   registerAppResource(card, "WhatsApp Business card", WABIZ_CARD_URI, {
     description: "A WhatsApp Business channel: status, recent conversations, a conversation's transcript and the templates waiting for approval.",
