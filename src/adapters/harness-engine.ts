@@ -15,11 +15,15 @@
  * A run's session is kept per task (key "task:<id>"): a continuation of the task resumes the same
  * runtime conversation; at the end of a run the runtime is stopped (its bridge exits; the
  * conversation stays in the VM for a continuation).
+ *
+ * Codex signed in with ChatGPT (harness/codex-chatgpt.ts): the login cache from the vault is
+ * written into the agent's CODEX_HOME in the computer before the session, and read back into the
+ * vault after each turn, at the end of the run and before the computer's VM goes away.
  */
 import { join } from "node:path";
 import {
   agentEngineProblem, agentHarness, buildAgentSystemPrompt, DEPENDENCY_RESULTS_TOOL, HARNESS_NAMES, harnessesSettingsOf, isRemoteComputer,
-  type AgentHarnessEngine, type PolpoSettings,
+  type AgentHarnessEngine, type PolpoSettings, type VaultRef,
 } from "@polpo-ai/core";
 import { daytonaApiVersion } from "@polpo-ai/core/sandbox";
 import type { AgentConfig, Task, TaskResult } from "../core/types.js";
@@ -31,7 +35,8 @@ import { WorkspaceFileSystem } from "../sandbox/workspace-fs.js";
 import { loadAgentSkills, type LoadedSkill } from "../llm/skills.js";
 import { readSkillTextFiles } from "../llm/skill-bundle.js";
 import { buildAgentToolset, buildPrompt, collectOutcome, createActivity } from "./engine.js";
-import { brokeredHarnessAuth, resolveHarnessAuth, scrubSecrets, type HarnessBrokering, type ResolvedHarnessAuth } from "../harness/credentials.js";
+import { brokeredHarnessAuth, HarnessCredentialError, resolveHarnessAuth, scrubSecrets, type HarnessBrokering, type ResolvedHarnessAuth } from "../harness/credentials.js";
+import { captureCodexAuth, codexAuthSecrets, codexChatgptHome, hostHarnessHome, readMachineCodexAuth, seedCodexAuth } from "../harness/codex-chatgpt.js";
 import { classifyHarnessError, harnessTurnFailure, type HarnessFailure, type HarnessTurnOutcome } from "../harness/errors.js";
 import { harnessRelayPublicUrl, openRelayLease, type HarnessRelayLease, type RelayLeaseOptions } from "../harness/relay.js";
 import { toHarnessHostTools } from "../harness/host-tools.js";
@@ -147,7 +152,7 @@ async function defaultOpenMachine(o: { agent: AgentConfig; cwd: string; ctx: Spa
   }
   const polpoDir = o.ctx.polpoDir;
   // never the server's HOME: the runtime's config, credentials cache and bootstrap live here
-  const home = join(polpoDir, "harness", slug(o.agent.name), "home");
+  const home = hostHarnessHome(polpoDir, o.agent.name);
   return { machine: hostHarnessMachine({ workDir: o.cwd, home, label: "host" }), computerId: "host", home };
 }
 
@@ -253,6 +258,26 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
     let lastText = "";
     let harnessName = "The harness";
     let auth: ResolvedHarnessAuth | undefined;
+    /** Codex signed in with ChatGPT: the agent's CODEX_HOME in the computer and the vault entry of its login. */
+    let codexChatgpt: { home: string; ref: VaultRef } | undefined;
+    /**
+     * Codex refreshes its ChatGPT tokens in auth.json: the machine's copy goes back to the vault when
+     * it changed (never logged; a failure is a warning, never the run's).
+     */
+    const writeBackCodexAuth = async (when: string): Promise<void> => {
+      const cx = codexChatgpt;
+      const m = opened?.machine;
+      if (!cx || !m) return;
+      try {
+        const r = await captureCodexAuth({ read: () => readMachineCodexAuth(m, cx.home), vault: ctx.vaultStore, ref: cx.ref });
+        if (r.secrets.length) secrets = [...new Set([...secrets, ...r.secrets])];
+        if (r.status === "updated") transcript({ type: "log", message: `Codex: the refreshed ChatGPT sign-in was saved to the vault (${when})` });
+      } catch (err) {
+        const warning = `Codex: the ChatGPT sign-in could not be saved back to the vault entry ${cx.ref.owner} / ${cx.ref.service} (${when}): ${scrub((err as Error)?.message ?? String(err))}`;
+        console.warn(`[polpo/harness] ${warning}`);
+        transcript({ type: "log", message: warning });
+      }
+    };
     /** What the current turn produced (errors, output after them, usage): see harness/errors.ts. */
     let turnOutcome: HarnessTurnOutcome = { errors: [], outputAfterError: false, output: false, totalTokens: 0 };
     const label = (raw: string): HarnessFailure =>
@@ -349,6 +374,7 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
         // OpenCode: Polpo wrote its provider config, so the placeholder's rule is Polpo's own
         ...(auth.credentialRules?.length ? { credentialRules: auth.credentialRules } : {}),
       };
+      if (resolved.chatgpt) transcript({ type: "log", message: `${name}: signed in with ChatGPT (the login cache from the vault entry ${resolved.chatgpt.ref.owner} / ${resolved.chatgpt.ref.service}, in the agent's CODEX_HOME in the computer)` });
       if (resolved.route) transcript({ type: "log", message: `${name}: model credential ${brokering === "none" ? "in the computer (not brokered)" : brokering === "relay" ? "brokered by Polpo's model relay (placeholders only in the computer)" : "brokered by the computer's provider (placeholders only in the computer)"}` });
       // where and with what this run executes (the task's run context; no secrets)
       activity.runContext = {
@@ -367,6 +393,21 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
           await machine.exec(`chmod 600 '${path}'`, {});
           creds.env[f.envVar] = path;
         }
+      }
+      // Codex signed in with ChatGPT: the freshest login in the agent's CODEX_HOME (vault → computer)
+      if (resolved.chatgpt) {
+        const homeDir = opened.home ?? (await machine.exec("printf %s \"$HOME\"", {})).stdout.trim();
+        if (!homeDir) throw new Error(`${name}: the computer's HOME directory could not be read`);
+        const home = codexChatgptHome(homeDir, agentConfig.name);
+        const seeded = await seedCodexAuth(machine, home, resolved.chatgpt.authJson);
+        if (seeded.action === "none") {
+          throw new HarnessCredentialError(`${name} signs in with ChatGPT on this instance, and nobody has signed in for agent "${agentConfig.name}" yet: `
+            + `Settings → Harnesses → Codex → Sign in with ChatGPT (or polpo_harnesses_update codex.chatgpt_login), then run the task again`);
+        }
+        codexChatgpt = { home, ref: resolved.chatgpt.ref };
+        if (seeded.machineRaw) secrets = [...new Set([...secrets, ...codexAuthSecrets(seeded.machineRaw)])];
+        // the computer's copy is fresher (a sign-in there, a refresh the vault missed): save it
+        if (seeded.action === "kept") await writeBackCodexAuth("run start");
       }
 
       // ── skills and instructions ──
@@ -409,6 +450,8 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
         // OpenCode's bridge builds a provider from these variables when the computer has them: blank
         // them, so its config is Polpo's (the chosen provider and credential) and nothing else
         ...(engine.harness === "opencode" ? { spawnEnv: OPENCODE_BLANK_ENV } : {}),
+        // Codex signed in with ChatGPT: its own CODEX_HOME (auth.json there), per agent
+        ...(codexChatgpt ? { spawnEnv: { CODEX_HOME: codexChatgpt.home } } : {}),
       });
       const now = () => new Date().toISOString();
       const status = (patch: Partial<HarnessSessionStatus>) => store.update(key, (cur) => ({
@@ -446,6 +489,8 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
       unregister = liveHarnessSessions.register({
         key, agent: agentConfig.name, computerId: opened.computerId,
         suspend: async (mode: HarnessSuspendMode, reason: string) => {
+          // the VM goes away: the refreshed ChatGPT sign-in goes to the vault first
+          await writeBackCodexAuth(`computer ${reason}`);
           if (!session) return;
           if (turnRunning) {
             // a forced rotation under a running turn: the turn breaks; it re-attaches and goes on
@@ -494,6 +539,7 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
         } finally {
           turnRunning = false;
           release?.();
+          await writeBackCodexAuth("after a turn");
         }
       };
 
@@ -541,10 +587,12 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
       // uses Anthropic's list prices: right for Anthropic, approximate through a gateway, wrong for
       // non-Claude models (then only tokens are recorded)
       let leaseCostSeen = 0;
-      const turnCost = (r: HarnessTurnResult): { usd?: number; source: "gateway" | "runtime" | "runtime-estimate" | "tokens-only" } => {
+      const turnCost = (r: HarnessTurnResult): { usd?: number; source: "gateway" | "runtime" | "runtime-estimate" | "tokens-only" | "subscription" } => {
         const gateway = lease ? lease.costUsd - leaseCostSeen : 0;
         if (lease) leaseCostSeen = lease.costUsd;
         if (gateway > 0) return { usd: gateway, source: "gateway" };
+        // a ChatGPT plan pays: tokens only, no USD billed by Polpo
+        if (resolved.chatgpt) return { source: "subscription" };
         if (creds.nonClaude || (resolved.route && resolved.route.mode !== "direct" && engine.harness === "codex")) return { source: "tokens-only" };
         if (r.costUsd === undefined) return { source: "tokens-only" };
         // OpenCode prices steps from its model catalog: a model it has no price for costs "0"
@@ -663,6 +711,8 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
           await store.update(key, (cur) => (cur ? { ...cur, state: "stopped", pid: undefined } : null)).catch(() => undefined);
         }
       }
+      // the run is over: Codex's refreshed ChatGPT sign-in goes back to the vault
+      await writeBackCodexAuth("end of the run");
       // the run is over: its relay token stops working
       await lease?.revoke().catch(() => undefined);
       opened?.machine.close();

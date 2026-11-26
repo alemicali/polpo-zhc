@@ -46,8 +46,12 @@ describe("settings.harnesses", () => {
     }
   });
 
-  it("refuses a Codex ChatGPT login (not supported yet)", () => {
-    expect(() => parseHarnessesSettings({ enabled: ["codex"], codex: { auth: "chatgpt", credentialRef: ref } })).toThrow(/ChatGPT login is not supported/);
+  it("takes a Codex ChatGPT login (auth chatgpt with the vault entry of its login cache)", () => {
+    expect(parseHarnessesSettings({ enabled: ["codex"], codex: { auth: "chatgpt", credentialRef: ref } }).codex).toEqual({ auth: "chatgpt", credentialRef: ref });
+    // other names for it
+    expect(parseHarnessesSettings({ enabled: ["codex"], codex: { auth: "login", credentialRef: ref } }).codex?.auth).toBe("chatgpt");
+    expect(() => parseHarnessesSettings({ enabled: ["codex"], codex: { auth: "chatgpt" } })).toThrow(/vault reference/);
+    expect(() => parseHarnessesSettings({ enabled: ["codex"], codex: { auth: "chatgpt", credentialRef: ref, gateway: { credentialRef: ref } } })).toThrow(/gateway is only for/);
   });
 
   it("never takes a secret in the settings: only a vault reference", () => {

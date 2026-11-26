@@ -21,10 +21,15 @@
  *   computer, never tokens) are part of polpo_harnesses_get (cli: accounts with version and
  *   sign-in status) and polpo_harnesses_update (cli: add, remove, sign out, install, instance Codex).
  *   Signing in is the person's own flow in a terminal: the tool gives the dashboard link and command.
+ * - Codex signed in with ChatGPT (codex.auth "chatgpt"; OpenAI supports it for Codex): the login cache
+ *   is kept in a vault entry (field authJson) and written into each agent's computer. polpo_harnesses_get
+ *   says whether someone has signed in (never the content); polpo_harnesses_update { codex_chatgpt_login }
+ *   gives the sign-in terminal (`codex login --device-auth` on the agent's computer) and, with
+ *   capture: true, saves the login from the computer into the vault.
  */
 import { z } from "zod";
 import {
-  DESTRUCTIVE, READ, UPDATE, apiError, apiGet, apiSend, confirmParam, enc, fail, ok,
+  DESTRUCTIVE, READ, UPDATE, apiError, apiGet, apiSend, confirmParam, dashboardLink, enc, fail, ok,
   type McpDeps, type Register,
 } from "./kit.js";
 import { setupHandoff } from "./setup.js";
@@ -36,6 +41,8 @@ type HarnessItem = {
   model?: string; provider?: string; bedrock?: { region: string }; vertex?: { region: string; projectId: string }; agents: string[];
   gateway?: { preset?: string; format?: string; baseUrl?: string; authScheme?: string; headers?: Array<{ name: string; credentialRef?: { owner: string; service: string }; credentialFound?: boolean; value?: string }>; models?: { main: string }; nonClaude?: boolean };
   brokering?: "relay" | "in-vm" | "not-brokered";
+  /** Codex signed in with ChatGPT: whether the vault entry holds a login (never its content). */
+  chatgpt?: { signedIn: boolean; lastRefresh?: string };
 };
 type Overview = { allowHost: boolean; harnesses: HarnessItem[]; computers: string[]; relay?: { available: boolean; url?: string; path: string; warning?: string } };
 type CliAccountView = {
@@ -108,7 +115,8 @@ export const harnessLine = (h: HarnessItem) => `- ${h.name} (${h.id}): ${h.enabl
   + (h.gateway ? `, gateway ${h.gateway.preset ? `${h.gateway.preset} ` : ""}${h.gateway.baseUrl ?? "(Vercel AI Gateway)"}${h.gateway.authScheme ? ` [${h.gateway.authScheme}]` : ""}`
     + `${h.gateway.headers?.length ? `, headers ${h.gateway.headers.map((x) => `${x.name}${x.credentialRef ? `=${x.credentialRef.owner}/${x.credentialRef.service}${x.credentialFound === false ? " (MISSING)" : ""}` : ""}`).join(", ")}` : ""}`
     + `${h.gateway.nonClaude ? ", non-Claude models" : ""}` : "")
-  + (h.credentialRef ? `, credential ${h.credentialRef.owner} / ${h.credentialRef.service} ${h.credentialFound ? "(found in the vault)" : "(MISSING in the vault)"}` : "")
+  + (h.chatgpt ? `, ChatGPT sign-in in ${h.credentialRef ? `${h.credentialRef.owner} / ${h.credentialRef.service}` : "the vault"}: ${h.chatgpt.signedIn ? `signed in${h.chatgpt.lastRefresh ? ` (refreshed ${h.chatgpt.lastRefresh})` : ""}` : "NOT signed in (polpo_harnesses_update codex_chatgpt_login)"}`
+    : h.credentialRef ? `, credential ${h.credentialRef.owner} / ${h.credentialRef.service} ${h.credentialFound ? "(found in the vault)" : "(MISSING in the vault)"}` : "")
   + (h.model ? `, model ${h.model}` : h.gateway?.models?.main ? `, model ${h.gateway.models.main}` : "")
   + (h.brokering ? `, key ${h.brokering === "relay" ? "brokered by Polpo's relay (not in the VM)" : h.brokering === "in-vm" ? "in the VM (no POLPO_PUBLIC_URL)" : "in the VM (Claude Code on Bedrock/Vertex signs requests)"}` : "")
   + (h.agents.length ? ` · agents: ${h.agents.join(", ")}` : "");
@@ -121,8 +129,8 @@ const sessionLine = (s: Session) => `- ${s.key} · ${s.agent} on ${s.computerId}
 export function registerHarnessTools(tool: Register, deps: McpDeps): void {
   tool("settings", "polpo_harnesses_get", {
     title: "Agent harnesses",
-    description: "The official agent harnesses agents may run on (Claude Code, Codex, OpenCode): which are enabled, their auth type (api-key, bedrock, vertex, ai-gateway, gateway; OpenCode's provider), "
-      + "credential vault reference and whether that entry exists (never its value), region, default model, the agents using each, and the computers "
+    description: "The official agent harnesses agents may run on (Claude Code, Codex, OpenCode): which are enabled, their auth type (api-key, bedrock, vertex, ai-gateway, gateway, chatgpt for Codex; OpenCode's provider), "
+      + "credential vault reference and whether that entry exists (never its value; Codex with ChatGPT: signed in or not), region, default model, the agents using each, and the computers "
       + "that can run them, and whether their key stays on the server (model relay). With test: also checks that harness's connection — one tiny "
       + "streaming model request FROM THE POLPO SERVER (never the computer) with its auth and model (Anthropic Messages with a tool for Claude Code, "
       + "OpenAI Responses for Codex, Converse for Bedrock, rawPredict for Vertex; OpenCode: its provider's format); with agent, that agent's own key and model. The test says ok and "
@@ -161,7 +169,10 @@ export function registerHarnessTools(tool: Register, deps: McpDeps): void {
       + "(owner + service: a reference, never the key), Bedrock region, Vertex project and region, a model gateway (ai-gateway: the Vercel AI Gateway; "
       + "gateway: Cloudflare AI Gateway, OpenRouter, LiteLLM, Portkey, Kong… with format, base_url, auth_scheme, headers from the vault, models), default model. "
       + "Only the fields given change. Gateway keys and secret headers are injected by Polpo's model relay, never put in the computer. "
-      + "A Claude subscription (Pro/Max login) is refused by Anthropic's terms: use an Anthropic API key, Bedrock, Vertex or a gateway. Codex takes an OpenAI API key or a gateway. "
+      + "A Claude subscription (Pro/Max login) is refused by Anthropic's terms: use an Anthropic API key, Bedrock, Vertex or a gateway. "
+      + "Codex takes an OpenAI API key, a gateway, or a ChatGPT login (auth chatgpt, supported by OpenAI for Codex: credential_ref is the vault entry that keeps the login cache, field authJson, empty until someone signs in). "
+      + "To sign in with ChatGPT: codex_chatgpt_login { agent } gives the dashboard terminal on the agent's computer (codex login --device-auth: the person opens the link and enters the code), "
+      + "then codex_chatgpt_login { agent, capture: true } saves the login from the computer into the vault (Polpo also saves it after every run, as Codex refreshes it). "
       + "OpenCode runs any model: a provider API key (provider: " + OPENCODE_PROVIDER_IDS.join(", ") + "), a Bedrock API key (open-weight models on Bedrock: Kimi, GLM, Qwen, DeepSeek…), "
       + "the Vercel AI Gateway or a custom gateway (anthropic, openai-responses or openai-chat); its model is required. OpenCode logins and subscriptions (ChatGPT, Copilot, OpenCode Zen…) are refused. "
       + "Check the result with polpo_harnesses_get { test }. "
@@ -181,8 +192,8 @@ export function registerHarnessTools(tool: Register, deps: McpDeps): void {
         model: z.string().nullable().optional().describe("Default model id (Bedrock: an inference profile such as us.anthropic.claude-sonnet-4-5-20250929-v1:0); null clears it"),
       }).nullable().optional().describe("Claude Code's settings (null removes them)"),
       codex: z.object({
-        auth: z.enum(["api-key", "ai-gateway", "gateway"]).optional().describe("api-key: OpenAI API key; ai-gateway: Vercel AI Gateway; gateway: a custom gateway with the OpenAI Responses API (format openai-responses)"),
-        credential_ref: vaultRef.optional().describe("The vault entry with the OpenAI API key (field apiKey or OPENAI_API_KEY)"),
+        auth: z.enum(["api-key", "ai-gateway", "gateway", "chatgpt"]).optional().describe("api-key: OpenAI API key; ai-gateway: Vercel AI Gateway; gateway: a custom gateway with the OpenAI Responses API (format openai-responses); chatgpt: sign in with a ChatGPT account (codex_chatgpt_login)"),
+        credential_ref: vaultRef.optional().describe("api-key: the vault entry with the OpenAI API key (field apiKey or OPENAI_API_KEY); chatgpt: the entry that keeps Codex's login cache (field authJson; it may not exist before the first sign-in)"),
         gateway: gatewayInput.describe("For auth ai-gateway / gateway (null removes it)"),
         model: z.string().nullable().optional().describe("Default model id; null clears it"),
       }).nullable().optional().describe("Codex's settings (null removes them)"),
@@ -208,12 +219,35 @@ export function registerHarnessTools(tool: Register, deps: McpDeps): void {
         install: z.object({ cli: z.enum(["claude", "codex"]), computer: z.string().optional() }).optional().describe("Install the CLI with its official installer (npm) on this server or a computer"),
         allow_instance_codex: z.boolean().optional().describe("Codex accounts owned by \"instance\" may run any work of the instance (shared ChatGPT plan: check OpenAI's terms)"),
       }).optional().describe("The CLI engine (official Claude Code / Codex signed in with a person's own plan). Polpo never sees a token: signing in is Anthropic's / OpenAI's own flow in a terminal"),
+      codex_chatgpt_login: z.object({
+        agent: z.string().min(1).describe("The agent on the Codex harness to sign in (the login is kept per agent, in its computer)"),
+        capture: z.boolean().optional().describe("true: after the person signed in, save the login from the agent's computer into the vault"),
+      }).optional().describe("Codex with auth chatgpt: sign an agent in with ChatGPT (the dashboard terminal on its computer), or capture: true to save the login into the vault"),
     },
     outputSchema: { harnesses: z.array(harnessItem), changed: z.array(z.string()) },
     annotations: UPDATE,
-  }, async ({ enabled, allow_host, claude_code, codex, opencode, cli }) => {
-    if (enabled === undefined && allow_host === undefined && claude_code === undefined && codex === undefined && opencode === undefined && cli === undefined) {
-      return fail("Nothing to change: give enabled, allow_host, claude_code, codex, opencode or cli.");
+  }, async ({ enabled, allow_host, claude_code, codex, opencode, cli, codex_chatgpt_login }) => {
+    if (enabled === undefined && allow_host === undefined && claude_code === undefined && codex === undefined && opencode === undefined && cli === undefined && codex_chatgpt_login === undefined) {
+      return fail("Nothing to change: give enabled, allow_host, claude_code, codex, opencode, cli or codex_chatgpt_login.");
+    }
+    if (codex_chatgpt_login && enabled === undefined && allow_host === undefined && claude_code === undefined && codex === undefined && opencode === undefined && cli === undefined) {
+      const after = async () => { const a = await apiGet(deps, "/harnesses"); return (a.ok ? a.data : { harnesses: [] }) as Overview; };
+      if (codex_chatgpt_login.capture) {
+        const r = await apiSend(deps, "POST", "/harnesses/codex/chatgpt-login/capture", { agent: codex_chatgpt_login.agent });
+        if (!r.ok) return apiError(r, "Saving the ChatGPT sign-in");
+        const d = r.data as { message: string; signedIn: boolean; result: string };
+        return ok(`${d.message} (agent ${codex_chatgpt_login.agent}: ${d.signedIn ? "signed in" : "not signed in"})`, { harnesses: (await after()).harnesses, changed: d.result === "updated" ? ["codex"] : [] });
+      }
+      const r = await apiSend(deps, "POST", "/harnesses/codex/chatgpt-login", { agent: codex_chatgpt_login.agent });
+      if (!r.ok) return apiError(r, "Preparing the ChatGPT sign-in");
+      const d = r.data as { computer: string; command: string; signedIn: boolean; note: string; credentialRef: { owner: string; service: string } };
+      const link = dashboardLink(deps, `/config?section=harnesses&codexChatgptLogin=${enc(codex_chatgpt_login.agent)}`);
+      return ok([
+        `ChatGPT sign-in for agent ${codex_chatgpt_login.agent} (${d.signedIn ? "signed in already: signing in again replaces the login" : "not signed in yet"}).`,
+        `The person opens ${link} (Settings → Harnesses → Codex → Sign in with ChatGPT): a terminal on ${d.computer === "host" ? "this server" : `computer ${d.computer}`} runs \`codex login --device-auth\`; they open the link it shows and enter the code.`,
+        d.note,
+        `Then call polpo_harnesses_update { codex_chatgpt_login: { agent: "${codex_chatgpt_login.agent}", capture: true } } (the dashboard does it by itself).`,
+      ].join("\n"), { harnesses: (await after()).harnesses, changed: [], sign_in_url: link, command: d.command });
     }
     if (cli && enabled === undefined && allow_host === undefined && claude_code === undefined && codex === undefined && opencode === undefined) {
       const lines: string[] = [];
@@ -325,11 +359,14 @@ export function registerHarnessTools(tool: Register, deps: McpDeps): void {
     const after = await apiGet(deps, "/harnesses");
     const o = (after.ok ? after.data : { harnesses: [] }) as Overview;
     // a credential entry that is not there yet: the person enters the secret in the dashboard
-    const missing = o.harnesses.find((h) => h.credentialRef && h.credentialFound === false && next.enabled.includes(h.id));
+    const missing = o.harnesses.find((h) => h.credentialRef && h.credentialFound === false && next.enabled.includes(h.id) && h.auth !== "chatgpt");
+    // Codex with ChatGPT: nothing to paste; a person signs in (the login lands in the vault)
+    const chatgptPending = o.harnesses.find((h) => h.id === "codex" && h.auth === "chatgpt" && h.chatgpt && !h.chatgpt.signedIn && next.enabled.includes("codex"));
     const handoff = missing?.credentialRef
       ? setupHandoff(deps, { kind: "vault", item: missing.credentialRef.owner, field: missing.credentialRef.service }, `${missing.name} ${missing.auth === "vertex" ? "service account key (serviceAccountJson)" : missing.auth === "bedrock" ? "Bedrock API key" : missing.auth === "ai-gateway" || missing.auth === "gateway" ? "gateway key" : "API key"}`)
       : undefined;
-    return ok([`Harness settings changed: ${changed.join(", ") || "nothing (same values)"}.`, ...o.harnesses.map(harnessLine), ...(handoff ? ["", handoff.next_step] : [])].join("\n"),
+    return ok([`Harness settings changed: ${changed.join(", ") || "nothing (same values)"}.`, ...o.harnesses.map(harnessLine), ...(handoff ? ["", handoff.next_step] : []),
+      ...(chatgptPending ? ["", `Codex signs in with ChatGPT and nobody has signed in yet: for each agent on Codex, polpo_harnesses_update { codex_chatgpt_login: { agent } }.`] : [])].join("\n"),
       { harnesses: o.harnesses, changed, ...(handoff ?? {}) });
   });
 

@@ -75,7 +75,7 @@ export function modelLabel(model: string | undefined): string | undefined {
 }
 
 export function authMark(kind: string | undefined, engine?: string, provider?: string): BrandMark {
-  if (kind === "subscription") return engine === "codex-cli" ? "openai" : "anthropic";
+  if (kind === "subscription") return engine === "codex-cli" || engine === "codex" ? "openai" : "anthropic";
   if (kind === "bedrock") return "bedrock";
   if (kind === "vertex") return "vertex";
   if (engine === "opencode") return kind === "api-key" && provider === "anthropic" ? "anthropic" : kind === "api-key" && provider === "openai" ? "openai" : "api-key";

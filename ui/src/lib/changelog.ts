@@ -32,6 +32,22 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-26-codex-chatgpt-login",
+    date: "2026-11-26",
+    kind: "new",
+    title: "Codex con l'accesso ChatGPT",
+    summary: "Gli agenti sul motore Codex possono usare un account ChatGPT invece di una chiave API OpenAI: accedi una volta dal terminale del computer dell'agente, Polpo conserva l'accesso nel vault e lo tiene aggiornato.",
+    body: [
+      "- **Nuova autenticazione per Codex**: in Impostazioni → Harnesses → Codex scegli **ChatGPT sign-in** e indica la voce del vault che conserva l'accesso (può non esistere ancora). OpenAI supporta l'accesso con ChatGPT per Codex; il lavoro è pagato dal piano ChatGPT dell'account.",
+      "- **Accesso senza copiare file**: scegli un agente su Codex e premi **Sign in with ChatGPT**. Si apre un terminale sul computer dell'agente con `codex login --device-auth`: apri il link, accedi con ChatGPT e inserisci il codice. **Save sign-in** salva l'accesso nel vault.",
+      "- **Sempre aggiornato**: prima di ogni esecuzione Polpo scrive l'accesso nella cartella di Codex dell'agente (`CODEX_HOME` per agente), e dopo ogni turno, a fine esecuzione e prima che il computer vada in ibernazione o venga resettato rilegge i token rinnovati da Codex e li salva nel vault.",
+      "- **Mai mostrato**: la scheda dice solo *signed in* / *not signed in*; i token non finiscono nei log e vengono mascherati nei transcript.",
+      "- Anche via API (`/harnesses/codex/chatgpt-login`), MCP e chat con Polpo (`polpo_harnesses_update` con `codex_chatgpt_login`). Guida: docs/harnesses.md.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri gli harness", to: "/config?section=harnesses" },
+  },
+  {
     id: "2026-11-26-agent-send-notification",
     date: "2026-11-26",
     kind: "new",

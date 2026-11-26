@@ -11,6 +11,13 @@
 import { harnessesSettingsOf, isRemoteComputer, parseComputers, type PolpoSettings, type VaultStore } from "@polpo-ai/core";
 import { liveHarnessSessions } from "./live-sessions.js";
 import { HarnessSessionStore, processAlive, type HarnessSessionStatus } from "./session-store.js";
+import { readVaultCodexAuth } from "./codex-chatgpt.js";
+
+/** Codex's ChatGPT sign-in as people see it: signed in or not, and when it was last refreshed (never the content). */
+export async function codexChatgptStatus(vault: VaultStore | undefined, ref: { owner: string; service: string }): Promise<{ signedIn: boolean; lastRefresh?: string }> {
+  const f = await readVaultCodexAuth(vault, ref).catch(() => undefined);
+  return { signedIn: !!f, ...(f?.freshness ? { lastRefresh: new Date(f.freshness).toISOString() } : {}) };
+}
 
 export interface HarnessSessionView extends HarnessSessionStatus {
   /** Held by a process right now (this server or a task runner). */
@@ -96,8 +103,10 @@ export async function harnessesOverview(settings: PolpoSettings | undefined, vau
       // the setting as saved (vault references only, never a secret): what the dashboard edits
       ...(s ? { settings: s } : {}),
       ...(gateway ? { gateway } : {}),
-      // how the model credential reaches the model at run time
-      ...(s ? { brokering: s.auth === "vertex" || (s.auth === "bedrock" && id !== "opencode") ? "not-brokered" as const : process.env.POLPO_PUBLIC_URL?.trim() ? "relay" as const : "in-vm" as const } : {}),
+      // Codex signed in with ChatGPT: whether the vault entry holds a login (never its content)
+      ...(id === "codex" && s?.auth === "chatgpt" && ref ? { chatgpt: await codexChatgptStatus(vault, ref) } : {}),
+      // how the model credential reaches the model at run time (a ChatGPT login is not brokered: it is in the computer)
+      ...(s && s.auth !== "chatgpt" ? { brokering: s.auth === "vertex" || (s.auth === "bedrock" && id !== "opencode") ? "not-brokered" as const : process.env.POLPO_PUBLIC_URL?.trim() ? "relay" as const : "in-vm" as const } : {}),
       ...(s?.model ? { model: s.model } : {}),
       ...(id === "claude-code" && h?.["claude-code"]?.bedrock ? { bedrock: h["claude-code"].bedrock } : {}),
       ...(id === "claude-code" && h?.["claude-code"]?.vertex ? { vertex: h["claude-code"].vertex } : {}),

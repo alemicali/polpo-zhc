@@ -77,7 +77,7 @@ export interface TerminalSessionSnapshot {
   id: string;
   pid: number;
   cwd: string;
-  agentKind: "terminal" | "claude" | "codex" | "cli-login";
+  agentKind: "terminal" | "claude" | "codex" | "cli-login" | "codex-chatgpt-login";
   agentCommand?: string;
   startedAt: string;
   clients: number;
@@ -96,7 +96,7 @@ type RuntimeTerminalSession = {
   clients: Set<WebSocket>;
   buffer: string;
   cwd: string;
-  agentKind: "terminal" | "claude" | "codex" | "cli-login";
+  agentKind: "terminal" | "claude" | "codex" | "cli-login" | "codex-chatgpt-login";
   agentCommand?: string;
   startedAt: string;
 };
@@ -150,13 +150,16 @@ export function attachTerminalWebSocket(
       const rows = clampNumber(firstValue(query.rows), 8, 80, 30);
       const agentKind = parseAgentKind(firstValue(query.agent));
       const agentSessionId = firstValue(query.agent_session_id) ?? "";
-      const agentCommandOverride = agentKind === "cli-login" ? undefined : firstValue(query.agent_command);
-      // a CLI account's sign-in: the official login command with that account's directory only
+      const agentCommandOverride = agentKind === "cli-login" || agentKind === "codex-chatgpt-login" ? undefined : firstValue(query.agent_command);
+      // a CLI account's sign-in: the official login command with that account's directory only;
+      // Codex's ChatGPT sign-in for an agent harness: `codex login --device-auth` with the agent's CODEX_HOME
       const login = agentKind === "cli-login"
         ? cliLoginInvocation(orchestrator, firstValue(query.cli_account), terminalMember(req, activePolpoDir(orchestrator, opts)))
-        : undefined;
+        : agentKind === "codex-chatgpt-login"
+          ? await codexChatgptLoginInvocation(orchestrator, firstValue(query.harness_agent))
+          : undefined;
       const cwd = login ? login.cwd : resolveTerminalCwd(agentWorkDir, firstValue(query.cwd), orchestrator.getPolpoDir());
-      const sessionId = login ? `cli-login-${login.account.id}` : normalizeSessionId(firstValue(query.session_id));
+      const sessionId = login ? login.sessionId : normalizeSessionId(firstValue(query.session_id));
       const revision = clampNumber(firstValue(query.revision), 0, Number.MAX_SAFE_INTEGER, 0);
       const { command, args } = login
         ? { command: "bash", args: ["-lc", login.command ?? ""] }
@@ -415,10 +418,10 @@ function safeCompare(a: string, b: string): boolean {
   return timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
-type AgentKind = "terminal" | "claude" | "codex" | "cli-login";
+type AgentKind = "terminal" | "claude" | "codex" | "cli-login" | "codex-chatgpt-login";
 
 function parseAgentKind(value: string | undefined): AgentKind {
-  if (value === "claude" || value === "codex" || value === "cli-login") return value;
+  if (value === "claude" || value === "codex" || value === "cli-login" || value === "codex-chatgpt-login") return value;
   return "terminal";
 }
 
@@ -440,7 +443,7 @@ export function cliLoginInvocation(
   accountId: string | undefined,
   member: string | undefined,
   base: NodeJS.ProcessEnv = process.env,
-): { account: CliAccount; command?: string; cwd: string; env: Record<string, string>; remote?: { computer: string; command: string } } {
+): { account: CliAccount; sessionId: string; command?: string; cwd: string; env: Record<string, string>; remote?: { computer: string; command: string } } {
   const account = cliSettingsOf(orchestrator.getConfig()?.settings)?.accounts.find((a) => a.id === accountId);
   if (!account) throw new Error(`Unknown CLI account "${accountId ?? ""}"`);
   if (isInstanceAuthEnabled() && account.owner !== CLI_INSTANCE_OWNER && member !== account.owner) {
@@ -450,14 +453,36 @@ export function cliLoginInvocation(
     // on its computer: the login command with the account's directory, in a terminal there; the
     // sign-in is written to that machine's disk (kept by hibernation and pause, lost on a reset)
     return {
-      account, cwd: process.cwd(), env: {},
+      account, sessionId: `cli-login-${account.id}`, cwd: process.cwd(), env: {},
       remote: { computer: account.computer, command: `${remoteAccountPrefix(account)}cd "$${CLI_CONFIG_ENV[account.cli]}" && ${CLI_LOGIN_COMMANDS[account.cli]}` },
     };
   }
   const env = cliHostEnv(account.cli, account, base);
   const cwd = expandHome(account.configDir, env.HOME!);
   mkdirSync(cwd, { recursive: true, mode: 0o700 });
-  return { account, command: cliLoginCommand(account), cwd, env };
+  return { account, sessionId: `cli-login-${account.id}`, command: cliLoginCommand(account), cwd, env };
+}
+
+/**
+ * Codex's ChatGPT sign-in for an agent on the Codex harness (settings.harnesses.codex.auth
+ * "chatgpt"): `codex login --device-auth` with the agent's CODEX_HOME, in a terminal on its
+ * computer (its provider's PTY), or on this server in the agent's isolated harness HOME (allowHost).
+ * The login is then captured into the vault (POST /harnesses/codex/chatgpt-login/capture).
+ */
+export async function codexChatgptLoginInvocation(
+  orchestrator: Pick<Orchestrator, "getConfig" | "getAgents" | "getPolpoDir">,
+  agentName: string | undefined,
+  base: NodeJS.ProcessEnv = process.env,
+): Promise<{ sessionId: string; command?: string; cwd: string; env: Record<string, string>; remote?: { computer: string; command: string } }> {
+  const { codexChatgptLoginCommand, codexChatgptTarget, codexHomeSlug } = await import("../harness/codex-chatgpt.js");
+  const t = codexChatgptTarget({ settings: orchestrator.getConfig()?.settings, agents: await orchestrator.getAgents(), agent: agentName, polpoDir: orchestrator.getPolpoDir() });
+  if (!t.ok) throw new Error(t.error);
+  const sessionId = `codex-chatgpt-login-${codexHomeSlug(t.agent)}`;
+  if (!t.hostHome) return { sessionId, cwd: process.cwd(), env: {}, remote: { computer: t.computer, command: codexChatgptLoginCommand(t.agent) } };
+  // this server: the agent's isolated harness HOME (never the server's ~/.codex), a minimal environment
+  const { isolatedHostEnv } = await import("../harness/sandbox-session.js");
+  mkdirSync(t.hostHome, { recursive: true, mode: 0o700 });
+  return { sessionId, command: codexChatgptLoginCommand(t.agent, t.hostHome), cwd: t.hostHome, env: isolatedHostEnv(t.hostHome, base) };
 }
 
 /**
