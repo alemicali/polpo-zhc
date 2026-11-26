@@ -1,5 +1,6 @@
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { AgentConfig, AgentUpdate, Team } from "./types.js";
+import { DEFAULT_NEW_AGENT_TALKS_TO } from "./agent-lines.js";
 import { isReservedVaultOwner } from "./vault-store.js";
 
 /**
@@ -150,7 +151,10 @@ export class AgentManager {
       : await this.getDefaultTeam();
     if (!team) throw new Error(`Team "${teamName}" not found`);
 
-    await this.ctx.agentStore.createAgent(agent, team.name);
+    // communication lines: a new agent talks along the org chart unless told otherwise
+    // (agents from before the lines have none, and keep talking to anyone)
+    const withLines = agent.talksTo ? agent : { ...agent, talksTo: { ...DEFAULT_NEW_AGENT_TALKS_TO } };
+    await this.ctx.agentStore.createAgent(withLines, team.name);
     await this.syncConfigCache();
     this.ctx.emitter.emit("log", { level: "info", message: `Agent added: ${agent.name} (team: ${team.name})` });
   }

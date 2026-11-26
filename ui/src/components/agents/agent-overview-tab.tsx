@@ -1,5 +1,5 @@
 /**
- * AgentOverviewTab — bio, role, personality, tone, responsibilities.
+ * AgentOverviewTab — bio, role, personality, tone, communication lines, responsibilities.
  * Reads data from AgentDetailContext.
  */
 
@@ -16,6 +16,7 @@ import { SectionHeader } from "@/components/shared/section-header";
 import { cn } from "@/lib/utils";
 import { useAgentDetail } from "./agent-detail-context";
 import { responsibilityPriorityColors } from "@/lib/agent-meta";
+import { AgentCommunicationSection } from "./agent-communication-section";
 
 export function AgentOverviewTab() {
   const { state: { agent } } = useAgentDetail();
@@ -81,6 +82,9 @@ export function AgentOverviewTab() {
             </CardContent>
           </Card>
         </div>
+
+        {/* Org chart and communication lines */}
+        <AgentCommunicationSection />
 
         {/* Responsibilities */}
         <div>

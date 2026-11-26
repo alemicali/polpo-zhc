@@ -4163,21 +4163,22 @@ interface AgentTalkEvent {
   id: string;
   from: string;
   to: string;
-  kind: "question" | "handoff";
+  kind: "question" | "handoff" | "escalation";
   status: "working" | "answered" | "failed";
   fromSessionId?: string;
 }
 
 /** An answer another agent sent back into this chat (ask_agent / message_agent). */
-const AGENT_REPLY = /^\[([^\]\n]+?) (answered your question|replied to what you handed them)\]\n?/;
+const AGENT_REPLY = /^\[([^\]\n]+?) (answered your question|answered your escalation|replied to what you handed them)\]\n?/;
 
-function parseAgentReply(content: string): { agent: string; kind: "question" | "handoff"; text: string } | null {
+function parseAgentReply(content: string): { agent: string; kind: "question" | "handoff" | "escalation"; text: string } | null {
   const match = AGENT_REPLY.exec(content);
   if (!match) return null;
-  return { agent: match[1]!, kind: match[2]!.startsWith("answered") ? "question" : "handoff", text: content.slice(match[0].length) };
+  const kind = match[2]!.endsWith("escalation") ? "escalation" : match[2]!.startsWith("answered") ? "question" : "handoff";
+  return { agent: match[1]!, kind, text: content.slice(match[0].length) };
 }
 
-function AgentReplyCard({ reply, ts }: { reply: { agent: string; kind: "question" | "handoff"; text: string }; ts?: string }) {
+function AgentReplyCard({ reply, ts }: { reply: { agent: string; kind: "question" | "handoff" | "escalation"; text: string }; ts?: string }) {
   return (
     <div className="group w-full py-3 px-4" data-testid="agent-reply">
       <div className="mx-auto max-w-3xl">
@@ -4186,7 +4187,7 @@ function AgentReplyCard({ reply, ts }: { reply: { agent: string; kind: "question
             <MessagesSquare className="h-3.5 w-3.5 shrink-0" />
             <span>
               <span className="font-medium text-foreground">{reply.agent}</span>
-              {reply.kind === "question" ? " answered" : " replied to the handoff"}
+              {reply.kind === "question" ? " answered" : reply.kind === "escalation" ? " answered the escalation" : " replied to the handoff"}
             </span>
             {ts && <span className="ml-auto text-micro">{chatTimeAgo(new Date(ts))}</span>}
           </div>

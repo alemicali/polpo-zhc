@@ -43,6 +43,8 @@ const STRINGS = {
     error: "Could not load the agent",
     on: "on", connectors: "Connectors", allTools: "all tools", tools: (n: number) => `${n} tool${n === 1 ? "" : "s"}`,
     notRetried: "not retried", failedBecause: "Failed", toolsRestricted: "Tools restricted",
+    lines: "Communication", talksTo: "Talks to", anyAgent: "any agent", noAgent: "no other agent", notSet: "not restricted yet",
+    escalatesTo: "Escalates to", linesMode: { org: "Org chart", list: "Only listed agents", anyone: "Anyone", none: "Nobody" } as Record<string, string>,
   },
   it: {
     working: "Al lavoro", idle: "Libero", waiting: "In attesa di te",
@@ -61,6 +63,8 @@ const STRINGS = {
     error: "Non riesco a caricare l'agente",
     on: "su", connectors: "Connettori", allTools: "tutti gli strumenti", tools: (n: number) => `${n} strument${n === 1 ? "o" : "i"}`,
     notRetried: "non ritentato", failedBecause: "Fallito", toolsRestricted: "Strumenti ristretti",
+    lines: "Comunicazione", talksTo: "Parla con", anyAgent: "qualsiasi agente", noAgent: "nessun altro agente", notSet: "non ancora limitato",
+    escalatesTo: "Escala a", linesMode: { org: "Organigramma", list: "Solo gli agenti elencati", anyone: "Chiunque", none: "Nessuno" } as Record<string, string>,
   },
 };
 type Strings = typeof STRINGS.en;
@@ -185,6 +189,18 @@ function connectorsSection(c: AgentCard, s: Strings): HTMLElement | null {
     x.status ? h("span", { class: `chip chip-sm chip-${x.status === "connected" ? "success" : x.status === "error" || x.status === "needs_reauth" ? "danger" : "neutral"}` }, x.status.replace(/_/g, " ")) : null)));
 }
 
+/** Who it may talk to (its communication lines) and who it escalates to. */
+function linesSection(c: AgentCard, s: Strings): HTMLElement | null {
+  const l = c.lines;
+  if (!l) return null;
+  const who = l.mode === "anyone" ? s.anyAgent : l.reachable.join(", ") || s.noAgent;
+  return h("section", {}, h("h3", {}, s.lines),
+    h("div", { class: "row" },
+      h("div", { class: "row-main" }, h("div", {}, `${s.talksTo}: ${who}`),
+        l.manager ? h("div", { class: "muted small" }, `${s.escalatesTo}: ${l.manager}`) : null),
+      h("span", { class: `chip chip-sm chip-${l.explicit ? "neutral" : "warning"}` }, l.explicit ? (s.linesMode[l.mode] ?? l.mode) : s.notSet)));
+}
+
 function tabs(s: Strings): HTMLElement {
   const items: Array<[Tab, string]> = [["overview", s.overview], ["tasks", s.tasks], ["goals", s.goals], ["routine", s.routine]];
   return h("div", { class: "seg", role: "tablist" }, ...items.map(([id, label]) =>
@@ -200,6 +216,7 @@ function overviewTab(c: AgentCard, s: Strings): HTMLElement {
     c.portrait ? h("section", {}, h("h3", {}, s.portrait), h("p", { class: "prose" }, c.portrait)) : null,
     top.length ? h("section", {}, h("h3", {}, s.goals), ...top.map((g) => goalRow(g, s))) : null,
     connectorsSection(c, s),
+    linesSection(c, s),
     c.journal.length ? h("section", {}, h("h3", {}, s.reflections), ...c.journal.map((j) => h("div", { class: "row" }, h("div", { class: "row-main" }, h("div", { class: "prose" }, j.summary)), h("div", { class: "muted small" }, formatTime(j.at))))) : null);
 }
 

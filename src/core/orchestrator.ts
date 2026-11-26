@@ -28,7 +28,7 @@ import { sandboxedAssessFn } from "../assessment/sandboxed.js";
 import { analyzeBlockedTasks, resolveDeadlock, isResolving } from "./deadlock-resolver.js";
 import { OrchestratorEngine } from "@polpo-ai/core";
 import type { DeadlockResolverPort, DeadlockFacade, MissionEdit } from "@polpo-ai/core";
-import { MISSION_EDIT } from "@polpo-ai/core";
+import { MISSION_EDIT, mayTalk } from "@polpo-ai/core";
 import { agentEngineProblem, HarnessConfigError, parseAgentEngine } from "@polpo-ai/core";
 import { agentHarnessBudgetUsd, computeMissionCost, plannedAgentsOf, summarizeMissionCost, tasksOfMission, type MissionCost, type MissionCostSummary } from "@polpo-ai/core";
 import { daytonaApiVersion } from "@polpo-ai/core/sandbox";
@@ -1146,6 +1146,11 @@ export class Orchestrator extends TypedEmitter {
         host: msg.host, port: msg.port, reason: msg.reason,
       }),
       (msg) => this.reportRemoteSandboxEvent(msg.event as any, { workspaceId: msg.runId, provider: msg.provider, taskId: msg.taskId, agentName: msg.agentName }),
+      // a task run's agent talking to another agent (ask_agent, message_agent, escalate)
+      async (msg) => {
+        const { handleAgentTalkWire } = await import("./agent-talk-bridge.js");
+        return handleAgentTalkWire(msg, { talk: this.agentTalk, run: (runId) => this.runStore.getRun(runId) });
+      },
     );
 
     // Initialize approval gates if configured
@@ -1821,6 +1826,8 @@ export class Orchestrator extends TypedEmitter {
       sessions: this.sessionStore,
       runner: () => this.channelChatRunner,
       intent: this.getGroupIntent(),
+      // communication lines: an agent's reply sets off only the agents it may talk to
+      mayTalk: async (from, to) => mayTalk({ from, to }, await this.getAgents()),
       profile: async (name) => {
         if (name === POLPO) {
           return { id: POLPO, name: orchestratorName(this.getConfig()?.settings), role: "the orchestrator: plans and coordinates the company's work, assigns tasks to the agents", responsibilities: [] };

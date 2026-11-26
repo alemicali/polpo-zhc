@@ -35,7 +35,13 @@ const agentFields = {
     + "mcp__linear__*); omit for the defaults. An agent on a harness engine (Claude Code, Codex, OpenCode) gets the Polpo tools listed here too (artifacts, email, data…), run on the Polpo server"),
   skills: z.array(z.string()).optional().describe("Names of skills it uses"),
   identity: identity.optional().describe("How it presents itself"),
-  reportsTo: z.string().optional().describe("The agent it reports to"),
+  reportsTo: z.string().optional().describe("The agent it reports to (its manager: it can always escalate to it)"),
+  talksTo: z.object({
+    mode: z.enum(["org", "list", "anyone", "none"]).describe("org: its manager, its direct reports and the extra agents (the default for new agents); "
+      + "list: only the listed agents; anyone: every agent; none: no agent. Polpo always talks to it"),
+    agents: z.array(z.string().min(1)).optional().describe("Extra agents (org) or the only agents (list)"),
+    acceptFrom: z.enum(["anyone", "lines"]).optional().describe("lines: it also refuses senders outside its own lines (default anyone)"),
+  }).optional().describe("Its communication lines: which agents it may talk to (ask_agent, message_agent) and set off in rooms (polpo_agent_lines shows the team's)"),
   maxTurns: z.number().int().positive().max(1000).optional().describe("Most steps per run"),
   browserEgress: z.string().regex(/^[A-Za-z0-9_-]*$/, "the name of an egress proxy").optional()
     .describe("Where its browser goes out to the internet: the name of a proxy in the settings' egress proxies (polpo_config_get); '' for direct"),
@@ -79,7 +85,7 @@ async function unknownEgress(deps: McpDeps, name: string | undefined): Promise<s
 
 type Agent = {
   name: string; role?: string; model?: string; systemPrompt?: string; allowedTools?: string[]; skills?: string[]; identity?: { displayName?: string; title?: string };
-  reportsTo?: string; engine?: unknown; connectorTools?: Record<string, "*" | string[]>;
+  reportsTo?: string; talksTo?: { mode: string; agents?: string[]; acceptFrom?: string }; engine?: unknown; connectorTools?: Record<string, "*" | string[]>;
   versioning?: { production?: string; latest?: string; draft?: { hasChanges?: boolean; changedFields?: string[]; stale?: boolean; warning?: string } };
 };
 
@@ -109,7 +115,46 @@ async function loadAgent(deps: McpDeps, name: string): Promise<{ ok: true; agent
   return r.ok ? { ok: true, agent: r.data as Agent } : r;
 }
 
+/** "org (+ seo-writer)" · "list: a, b" · "anyone (not set)" */
+function linesText(talksTo: Agent["talksTo"]): string {
+  if (!talksTo) return "anyone (not set: restrict it with talksTo)";
+  const extra = talksTo.agents?.length ? talksTo.agents.join(", ") : "";
+  const base = talksTo.mode === "org" ? `org (manager and direct reports${extra ? ` + ${extra}` : ""})`
+    : talksTo.mode === "list" ? `list: ${extra || "nobody"}`
+    : talksTo.mode;
+  return `${base}${talksTo.acceptFrom === "lines" ? " · accepts only its lines" : ""}`;
+}
+
+type LinesChart = {
+  agents: Array<{ agent: string; mode: string; explicit: boolean; manager?: string; reports: string[]; agents: string[]; acceptFrom: string; reachable: string[] }>;
+  edges: Array<{ from: string; to: string; kind: string }>;
+  unrestricted: string[];
+};
+
 export function registerTeamTools(tool: Register, deps: McpDeps): void {
+  tool("team", "polpo_agent_lines", {
+    title: "Org chart and communication lines",
+    description: "The team's org chart (who reports to whom) and communication lines: for every agent, its lines mode (org, list, anyone, none), "
+      + "its manager and direct reports, and the agents it can talk to (ask_agent, message_agent, rooms). Polpo talks to every agent; an agent can always escalate to its manager. "
+      + "Agents without lines (created before them) talk to anyone: restrict them with polpo_agent_update talksTo.",
+    inputSchema: { agent: z.string().optional().describe("Only this agent's lines") },
+    outputSchema: { chart: looseObject },
+    annotations: READ,
+  }, async ({ agent }) => {
+    const r = await apiGet(deps, "/agents/lines");
+    if (!r.ok) return apiError(r, "Reading the communication lines");
+    const chart = r.data as LinesChart;
+    const rows = chart.agents.filter((l) => !agent || l.agent === agent);
+    if (agent && rows.length === 0) return fail(`There is no agent "${agent}". Find the name with polpo_agents_list.`);
+    const text = [
+      ...rows.map((l) => `${l.agent}${l.manager ? ` → reports to ${l.manager}` : ""} · ${l.explicit ? l.mode : "anyone (not set)"}`
+        + `${l.acceptFrom === "lines" ? " · accepts only its lines" : ""} · talks to: ${l.mode === "anyone" ? "any agent" : l.reachable.join(", ") || "no agent"}`),
+      ...(!agent && chart.unrestricted.length ? ["", `Not restricted yet (talk to anyone): ${chart.unrestricted.join(", ")}.`] : []),
+      "Polpo talks to every agent; every agent can escalate to its manager.",
+    ].join("\n");
+    return ok(text, { chart: (agent ? { ...chart, agents: rows, edges: chart.edges.filter((e) => e.from === agent || e.to === agent) } : chart) as Record<string, unknown> });
+  });
+
   tool("team", "polpo_agent_get", {
     title: "Get an agent",
     description: "One agent's configuration (what runs in production): role, model, instructions, tools, skills, identity, who it reports to, "
@@ -129,6 +174,7 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
       ...(a.versioning ? [`version: ${a.versioning.production ?? "none"} in production${a.versioning.latest && a.versioning.latest !== a.versioning.production ? ` · latest ${a.versioning.latest}` : ""}`
         + `${a.versioning.draft?.hasChanges ? ` · draft has changes (${(a.versioning.draft.changedFields ?? []).join(", ")})` : ""}`
         + `${a.versioning.draft?.stale ? ` · ⚠ ${a.versioning.draft.warning}` : ""}`] : []),
+      `communication lines: ${linesText(a.talksTo)}`,
       `tools: ${a.allowedTools?.join(", ") ?? "defaults"} · skills: ${a.skills?.join(", ") || "none"}`,
       ...(connectorLine ? [connectorLine] : []),
       ...(a.engine && typeof a.engine === "object"
@@ -167,7 +213,7 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
 
   tool("team", "polpo_agent_update", {
     title: "Update an agent",
-    description: "Change an agent's role, model, instructions, tools (and which tools of each connector: connector_tools), skills, identity, manager, browser egress proxy, computer (defaultComputer) or engine (polpo, or a Claude Code / Codex / OpenCode harness). Only the fields given change "
+    description: "Change an agent's role, model, instructions, tools (and which tools of each connector: connector_tools), skills, identity, manager, communication lines (talksTo), browser egress proxy, computer (defaultComputer) or engine (polpo, or a Claude Code / Codex / OpenCode harness). Only the fields given change "
       + "(a list given replaces the old one); the result lists what changed. Agents are versioned: the change goes to its draft; publish: false keeps it there "
       + "(publish later with polpo_agent_publish), publish: true makes a new version, deploy: true also deploys it to production. Without either flag the instance setting "
       + "decides (by default: published and deployed, so it applies to its next runs).",
@@ -192,7 +238,7 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
     const before = await loadAgent(deps, name);
     if (!before.ok) return before.status === 404 ? fail(`There is no agent "${name}". Find the name with polpo_agents_list.`) : apiError(before, `Reading agent ${name}`);
     const body = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
-    if (Object.keys(body).length === 0) return fail("Nothing to change: give at least one field (role, model, systemPrompt, allowedTools, connector_tools, skills, identity, reportsTo, maxTurns, browserEgress, defaultComputer, engine).");
+    if (Object.keys(body).length === 0) return fail("Nothing to change: give at least one field (role, model, systemPrompt, allowedTools, connector_tools, skills, identity, reportsTo, talksTo, maxTurns, browserEgress, defaultComputer, engine).");
     const egress = await unknownEgress(deps, patch.browserEgress as string | undefined);
     if (egress) return fail(egress);
     const r = await apiSend(deps, "PATCH", `/agents/${enc(name)}`, { ...body, ...flags });

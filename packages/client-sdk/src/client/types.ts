@@ -467,6 +467,8 @@ export interface AgentConfig {
   // NOTE: Vault credentials are stored in encrypted .polpo/vault.enc — not on AgentConfig.
   /** Agent this one reports to — org chart hierarchy for escalation */
   reportsTo?: string;
+  /** Communication lines: who it may talk to. Missing: anyone (an agent from before the lines). */
+  talksTo?: AgentTalksTo;
   systemPrompt?: string;
   skills?: string[];
   /** Suggested starter prompts shown when opening a new chat with this agent. */
@@ -1511,6 +1513,38 @@ export interface UpdateMissionNotificationsRequest {
   notifications: ScopedNotificationRules | null;
 }
 
+/** Communication lines between agents (ask_agent, message_agent, rooms). Polpo always talks to every agent. */
+export type AgentLinesMode = "org" | "list" | "anyone" | "none";
+
+export interface AgentTalksTo {
+  /** org: its manager, direct reports and the extra agents; list: only the listed agents; anyone; none. */
+  mode: AgentLinesMode;
+  /** Extra agents (org) or the only agents (list). */
+  agents?: string[];
+  /** lines: refuse senders outside its own lines (default anyone). */
+  acceptFrom?: "anyone" | "lines";
+}
+
+/** One agent's resolved lines (GET /agents/lines). */
+export interface AgentLines {
+  agent: string;
+  mode: AgentLinesMode;
+  /** false: no lines set (an agent from before the lines: it talks to anyone). */
+  explicit: boolean;
+  manager?: string;
+  reports: string[];
+  agents: string[];
+  acceptFrom: "anyone" | "lines";
+  reachable: string[];
+}
+
+/** The team's org chart and communication lines (GET /agents/lines). */
+export interface AgentLinesChart {
+  agents: AgentLines[];
+  edges: Array<{ from: string; to: string; kind: "manager" | "report" | "extra" | "open" }>;
+  unrestricted: string[];
+}
+
 export interface AddAgentRequest {
   name: string;
   role?: string;
@@ -1531,6 +1565,8 @@ export interface AddAgentRequest {
   // NOTE: Vault credentials managed via encrypted store, not in API body.
   /** Org chart: who this agent reports to. */
   reportsTo?: string;
+  /** Communication lines (omitted: { mode: "org" } for a new agent). */
+  talksTo?: AgentTalksTo;
   runtime?: string;
   loops?: Record<string, LoopConfig>;
   pipeline?: Pipeline;
@@ -1551,6 +1587,8 @@ export interface UpdateAgentRequest {
   maxConcurrency?: number;
   identity?: AgentIdentity;
   reportsTo?: string;
+  /** Communication lines; null removes them (the agent talks to anyone). */
+  talksTo?: AgentTalksTo | null;
   reasoning?: string;
   runtime?: string;
   loops?: Record<string, LoopConfig>;

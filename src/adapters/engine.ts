@@ -62,6 +62,7 @@ import { createStorageAgentTools } from "../tools/storage-tools.js";
 import { createCompanyBrainAgentTools } from "../tools/company-brain-tools.js";
 import { createDecisionTools } from "../tools/decision-tools.js";
 import { createTaskResultTools, wantsTaskResultTools } from "../tools/task-result-tools.js";
+import { createAgentTalkTools } from "../tools/agent-talk-tools.js";
 import { databaseStoresFor } from "../core/storage.js";
 import { FileTaskStore } from "../stores/file-task-store.js";
 import { inkRegistry } from "../core/ink-config.js";
@@ -1089,6 +1090,15 @@ export async function buildAgentToolset(o: {
       const taskPolpoDir = ctx.polpoDir;
       allTools.push(...createTaskResultTools(o.task!, () => taskStoreFor(taskPolpoDir).getAllTasks()));
     }
+  }
+  // Talking to other agents while working the task (every engine: these become host tools for a
+  // harness or a CLI), within the agent's communication lines: ask_agent and escalate wait for the
+  // answer, message_agent hands off (the reply reaches the task)
+  if (ctx?.agentTalk && o.task) {
+    const { talk, reach, task } = ctx.agentTalk;
+    const taken = new Set(allTools.map((tool) => tool.name));
+    allTools.push(...createAgentTalkTools(talk, () => ({ agent: agentConfig.name, chain: [], task }), { reach, task: true })
+      .filter((tool) => !taken.has(tool.name)));
   }
   // Connectors granted to the agent (mcp__<connector>__<tool>): a connector that cannot connect is
   // skipped with a note in the prompt, never failing the run.

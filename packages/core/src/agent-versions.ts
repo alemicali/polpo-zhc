@@ -39,6 +39,7 @@ export const AGENT_FIELD_CLASSIFICATION: Record<keyof Required<AgentConfig>, Age
   systemPrompt: "versioned",
   suggestions: "versioned",
   reportsTo: "versioned",
+  talksTo: "versioned",
   // model, engine, reasoning
   model: "versioned",
   engine: "versioned",

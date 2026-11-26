@@ -99,6 +99,16 @@ export interface AgentCard {
   journal: Array<{ at: string; summary: string }>;
   /** The connectors it may use (external apps over MCP), with their accounts. */
   connectors: AgentCardConnector[];
+  /** Its communication lines: who it may talk to (GET /agents/lines). */
+  lines?: AgentCardLines;
+}
+
+export interface AgentCardLines {
+  mode: string;
+  /** false: not set (an agent from before the lines: it talks to anyone). */
+  explicit: boolean;
+  manager?: string;
+  reachable: string[];
 }
 
 export interface AgentCardInput {
@@ -118,6 +128,8 @@ export interface AgentCardInput {
     id: string; title: string; status: string; assignTo?: string; updatedAt?: string; createdAt?: string;
     runs?: TaskRunContext[]; toolScope?: unknown; result?: { stderr?: string; exitCode?: number; retryable?: boolean; assessment?: { passed?: boolean; llmReview?: string; globalScore?: number } };
   }>;
+  /** GET /agents/lines: the team's lines (the agent's row is used). */
+  lines?: { agents: Array<{ agent: string; mode: string; explicit: boolean; manager?: string; reachable: string[] }> };
   /** GET /connectors: the agent's are those whose access lists it (or "*"). */
   connectors?: Array<{ id: string; name: string; account?: string; status?: string; enabled?: boolean; access?: { agents?: string[] | "*" } }>;
   drive?: {
@@ -265,7 +277,15 @@ export function buildAgentCard(input: AgentCardInput): AgentCard {
     routine: routine.slice(0, 20),
     journal: (input.drive?.journal ?? []).slice(0, 5).map((j) => ({ at: j.at, summary: clip(j.summary, 400) })),
     connectors: agentConnectors(input),
+    ...linesOf(input),
   };
+}
+
+function linesOf(input: AgentCardInput): { lines?: AgentCardLines } {
+  const rows = input.lines?.agents;
+  const row = Array.isArray(rows) ? rows.find((l) => l.agent === input.agent.name) : undefined;
+  if (!row) return {};
+  return { lines: { mode: row.mode, explicit: row.explicit, ...(row.manager ? { manager: row.manager } : {}), reachable: row.reachable.slice(0, 50) } };
 }
 
 /** The agent's engine: a harness (with its model), else Polpo's own engine with the agent's model. */
@@ -293,6 +313,10 @@ export function agentCardText(card: AgentCard): string {
   if (card.next) lines.push(`Next: ${card.next.at} — ${card.next.text}${card.next.proposed ? " (proposed, to confirm)" : ""}.`);
   if (card.goal) lines.push(`Main goal: ${card.goal.title}${card.goal.progress !== undefined ? ` (${card.goal.progress}%)` : ""}.`);
   if (!card.drive) lines.push("Goals and initiative (drive) are off for this agent.");
+  if (card.lines) {
+    lines.push(`Communication lines: ${card.lines.explicit ? card.lines.mode : "anyone (not set)"}`
+      + ` — talks to ${card.lines.mode === "anyone" ? "any agent" : card.lines.reachable.join(", ") || "no agent"}${card.lines.manager ? `; escalates to ${card.lines.manager}` : ""}.`);
+  }
   if (card.connectors.length) lines.push(`Connectors: ${card.connectors.map((c) => `${c.label} [${c.id}]${c.tools === "all" ? "" : ` (${c.tools} tools)`}`).join(", ")}.`);
   return lines.join("\n");
 }

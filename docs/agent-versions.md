@@ -19,7 +19,7 @@ and the compiler rejects it too):
 
 | Versioned | Fields |
 | --- | --- |
-| Role, persona, prompt | `role`, `identity` (display name, title, avatar, colour, persona…), `systemPrompt`, `suggestions`, `reportsTo` |
+| Role, persona, prompt | `role`, `identity` (display name, title, avatar, colour, persona…), `systemPrompt`, `suggestions`, `reportsTo`, `talksTo` (communication lines) |
 | Model and engine | `model`, `engine` (Polpo, a harness or a CLI with its options and CLI account), `reasoning`, `runtime`, `loops`, `pipeline` |
 | Tools and access | `allowedTools`, `allowedPaths`, `skills`, `connectorTools` (per-connector tool selection), `progressiveTools`, `emailAllowedDomains` |
 | Limits | `maxTurns`, `maxConcurrency`, `compaction` |

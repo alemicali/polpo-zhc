@@ -7,7 +7,7 @@ import { normalizeOrchestratorName, ORCHESTRATOR_NAME_MAX_LENGTH } from "./orche
 import { normalizeVaultRef } from "@polpo-ai/core/vault-ref";
 import { parseStoredProvider } from "@polpo-ai/core/provider-config";
 import { setArtifactLimits } from "@polpo-ai/core/artifacts";
-import { sanitizeAppearanceSettings, isEmptyAppearance, parseEgressProxies, parseComputers, parseTailscaleSettings, computerEgressProblem, isRemoteComputer, COMPUTER_ID_PATTERN, HOST_COMPUTER_ID, parseHarnessesSettings, parseAgentEngine, connectorToolsProblems, normalizeConnectorTools, normalizeDependencyResultsSettings, normalizeDecisionSettings, normalizeMediaSettings } from "@polpo-ai/core";
+import { sanitizeAppearanceSettings, isEmptyAppearance, parseEgressProxies, parseComputers, parseTailscaleSettings, computerEgressProblem, isRemoteComputer, COMPUTER_ID_PATTERN, HOST_COMPUTER_ID, parseHarnessesSettings, parseAgentEngine, connectorToolsProblems, normalizeConnectorTools, normalizeDependencyResultsSettings, normalizeDecisionSettings, normalizeMediaSettings, talksToProblem, normalizeTalksTo } from "@polpo-ai/core";
 
 const DEFAULT_SETTINGS: PolpoSettings = {
   maxRetries: 3,
@@ -183,6 +183,12 @@ export function validateAgents(agents: any[]): void {
     // Validate reportsTo — self-reference
     if (agent.reportsTo === agent.name) {
       throw new Error(`Agent "${agent.name}": cannot report to itself`);
+    }
+    // Communication lines (talksTo): names that no longer exist are ignored, not refused
+    if (agent.talksTo !== undefined) {
+      const problem = talksToProblem(agent.talksTo);
+      if (problem) throw new Error(`Agent "${agent.name}": ${problem}`);
+      agent.talksTo = normalizeTalksTo(agent.talksTo);
     }
 
     validateAgentLoops(agent);

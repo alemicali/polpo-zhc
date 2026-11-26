@@ -51,6 +51,7 @@ import type {
   UpdateMissionTeamMemberRequest,
   UpdateMissionNotificationsRequest,
   AddAgentRequest,
+  AgentLinesChart,
   UpdateAgentRequest,
   UpdateSettingsRequest,
   AddTeamRequest,
@@ -1246,6 +1247,11 @@ export class PolpoClient {
   /** An agent as production runs it; view "draft": its draft (working copy), as the dashboard edits it. */
   getAgent(name: string, opts: { view?: "production" | "draft" } = {}): Promise<AgentConfig> {
     return this.get<AgentConfig>(`/agents/${encodeURIComponent(name)}${opts.view === "draft" ? "?view=draft" : ""}`);
+  }
+
+  /** The org chart and the communication lines between agents (who may talk to whom). */
+  getAgentLines(): Promise<AgentLinesChart> {
+    return this.get<AgentLinesChart>("/agents/lines");
   }
 
   addAgent(req: AddAgentRequest, teamName?: string): Promise<{ added: boolean }> {

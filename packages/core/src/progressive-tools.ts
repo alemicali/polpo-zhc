@@ -167,8 +167,8 @@ export const POLPO_TOOL_GROUPS: ToolGroupRule[] = [
     prefixes: ["coding_chat"],
   },
   {
-    id: "learning", label: "Agent learning and drive",
-    names: ["get_agent_learning", "review_agent_learning", "revert_agent_learning", "get_agent_drive", "reflect_agent"],
+    id: "learning", label: "Agent learning and drive; the org chart and the agents' communication lines (who may talk to whom)",
+    names: ["get_agent_learning", "review_agent_learning", "revert_agent_learning", "get_agent_drive", "reflect_agent", "agent_lines"],
   },
   {
     id: "agent-versions", label: "Agent versions, tests and suites: list and read versions, diff two, rebase or discard the draft, publish it, deploy to production, roll back, deploy history; test an agent (engine, tools, connectors, vault, skills, computer, channels, smoke run) and fix what fails; agent suites (test and eval cases with tool and model mocks, datasets, assertions, scorers — exact, numeric, similarity, LLM judge…): list, read, save, delete, run against a version (with repetitions), read run reports, scores and traces, mark a baseline and see regressions, trends over versions, explain a run (AI review); record a case live or from a real chat or task into a cassette and replay it offline, edit cassettes; generate cases with AI (reviewed before saving); suites of hosted MCP servers (their saved tests, HTTP mocked) and missions (every agent mocked); benchmarks (suites × variants × repetitions with a cost estimate and a budget cap: leaderboard, Pareto front, case × variant matrix, one case side by side) and the Playground (compare variants on a message, save an exchange as a test case, promote a variant to the draft)",

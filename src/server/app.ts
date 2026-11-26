@@ -118,6 +118,7 @@ import type { TriggerActionHost } from "../triggers/actions.js";
 import { isMcpToolName, toolResultText } from "../mcp/tools.js";
 import { connectorLabel } from "../mcp/view.js";
 import { AgentTalk } from "./agent-talk.js";
+import { deliverAgentReplyToTask } from "./agent-talk-task.js";
 import { agentTesterFor } from "./agent-tests-host.js";
 import { agentBenchmarksFor, agentDeployGatesFor, agentSuiteRunnerFor } from "./agent-suites-host.js";
 import { DecisionService, decisionServiceFor, registerDecisionService } from "../decisions/service.js";
@@ -707,9 +708,11 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       if (agentTalk && !existingToolNames.has("ask_agent")) {
         const { createAgentTalkTools } = await import("../tools/agent-talk-tools.js");
         const talk = agentTalk;
+        // only the agents its communication lines reach are named (the server refuses the others)
+        const reach = await talk.lines(agentConfig.name).catch(() => undefined);
         tools.push(...createAgentTalkTools(talk, () => ({
           agent: agentConfig.name, chain: context?.chain ?? [], sessionId: context?.sessionId?.(), origin: context?.origin,
-        })).filter((tool) => !existingToolNames.has(tool.name)));
+        }), { reach }).filter((tool) => !existingToolNames.has(tool.name)));
       }
       // Opt-in `render_widget` per agente, via allowedTools (es.
       // `["read","write","render_widget"]` in polpo.json). NON è nei
@@ -1292,7 +1295,12 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       return messages.filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string" && m.content.trim())
         .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
     },
-    agents: async () => (await o.getAgents()).map((a) => ({ name: a.name, ...(a.role ? { role: a.role } : {}) })),
+    agents: async () => (await o.getAgents()).map((a) => ({
+      name: a.name, ...(a.role ? { role: a.role } : {}),
+      ...(a.reportsTo ? { reportsTo: a.reportsTo } : {}), ...(a.talksTo ? { talksTo: a.talksTo } : {}),
+    })),
+    // a task run's later reply: into the run while it works (a follow-up), else on the task
+    toTask: async (task, reply) => { await deliverAgentReplyToTask(o, task, reply); },
     orchestratorName: () => orchestratorName(o.getConfig()?.settings),
     // The answer joins the conversation now: into the running answer, else as the next turn
     // (streamed, so an open chat shows it live), whatever auto-send says.

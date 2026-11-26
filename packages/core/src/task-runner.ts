@@ -2,6 +2,7 @@ import { nanoid } from "nanoid";
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { AgentConfig, Task, TaskResult, RunnerConfig } from "./types.js";
 import { agentMemoryScope } from "./memory-store.js";
+import { reachableAgents, resolveAgentLines } from "./agent-lines.js";
 import { agentEgressName, computerContext, tailnetEgressFor, normalizeSandboxSettings, resolveSandbox, SandboxVolumeGrantError, type ResolvedSandboxVolume, type SandboxSettings } from "./sandbox.js";
 import type { RunRecord } from "./run-store.js";
 import { buildRunContext, finishRunContext, mergeRunContext, upsertTaskRun } from "./run-context.js";
@@ -41,6 +42,19 @@ export class TaskRunner {
   private knownRunContexts = new Map<string, string>();
 
   constructor(private ctx: OrchestratorContext) {}
+
+  /** The run's communication lines: who the agent may reach (and its manager), for its talk tools. */
+  private async agentLinesFor(agentName: string): Promise<Pick<RunnerConfig, "agentLines">> {
+    try {
+      const agents = await this.ctx.agentStore.getAgents();
+      const self = agents.find((a) => a.name === agentName);
+      if (!self) return {};
+      const lines = resolveAgentLines(self, agents);
+      return { agentLines: { reachable: reachableAgents(agentName, agents), ...(lines.manager ? { manager: lines.manager } : {}), mode: lines.mode } };
+    } catch {
+      return {};
+    }
+  }
 
   /**
    * Collect results from terminal runs and pass them to the callback.
@@ -738,6 +752,7 @@ export class TaskRunner {
       ...(volumes.length ? { volumes } : {}),
       whatsappDbPath,
       whatsappProfilePath,
+      ...(await this.agentLinesFor(agent.name)),
     };
 
     try {

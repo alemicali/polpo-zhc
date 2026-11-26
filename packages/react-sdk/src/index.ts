@@ -53,6 +53,8 @@ export { useAgentVersions, useAgentDeploys, useAgentDeployGates } from "./hooks/
 export type { UseAgentVersionsReturn, UseAgentDeploysReturn, UseAgentDeployGatesReturn } from "./hooks/use-agent-versions.js";
 export { useAgentTests } from "./hooks/use-agent-tests.js";
 export type { UseAgentTestsReturn } from "./hooks/use-agent-tests.js";
+export { useAgentLines } from "./hooks/use-agent-lines.js";
+export type { UseAgentLinesReturn } from "./hooks/use-agent-lines.js";
 export { useAgentSuites, useAgentSuiteRun, useAgentSuiteTrend, useSuiteCassette, useTargetSuites, useTargetSuiteRun } from "./hooks/use-agent-suites.js";
 export type { UseAgentSuitesReturn, UseAgentSuiteRunReturn, UseAgentSuiteTrendReturn, UseSuiteCassetteReturn, UseTargetSuitesReturn } from "./hooks/use-agent-suites.js";
 export { useBenchmarks, useBenchmarkRun, usePlayground } from "./hooks/use-benchmarks.js";
@@ -360,6 +362,7 @@ export type {
   TriggerTaskAction, TriggerAgentAction, TriggerNotifyAction, TriggerDeliverTo, TriggerActionLimits, TriggerActionRefs, TriggerActionRun, TriggerActionPreview, WorkOrigin,
   DecisionQuestionType, DecisionQuestion, DecisionFallbackModel, DecisionModelSetting, DecisionSettings, DecideRequest, DecisionAnswer, DecisionUsage, DecideResult,
   DecisionCallerKind, DecisionLogSummary, DecisionLogEntry, DecisionLogPage, DecisionStatus, DecisionNodeState, MissionDecision,
+  AgentTalksTo, AgentLinesMode, AgentLines, AgentLinesChart,
   ImageInput, GenerateImageRequest, EditImageRequest, MediaAsset, MediaImage, MediaResult, MediaCallerKind, MediaCaller, MediaLogEntry, MediaLogPage,
   MediaStatus, MediaSettings, ImageNodeState, MissionImage,
   CodingChatKind, CodingChatStatus, CodingChatErrorKind, CodingRiskCategory, CodingChatToolCall, CodingChatSegment, CodingChatUsage, CodingChatMessage,
