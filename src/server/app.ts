@@ -90,6 +90,9 @@ import { computerSandbox } from "../sandbox/manager.js";
 import { whatsappRoutes } from "./routes/whatsapp.js";
 import { emailRoutes } from "./routes/email.js";
 import { codingRoutes } from "./routes/coding.js";
+import { codingChatRoutes } from "./routes/coding-chats.js";
+import { codingChatManagerFor } from "./coding-chats-host.js";
+import type { CliLauncher } from "../cli-engine/process.js";
 import { roomRoutes } from "./routes/rooms.js";
 import { learningRoutes } from "./routes/learning.js";
 import { checkRoutes, telegramRoutes } from "./routes/checks.js";
@@ -172,6 +175,8 @@ export interface AppOptions {
   /** Hands the long-lived scheduler to /sync routes so flipping the
    * enabled toggle re-arms the cron without a server restart. */
   syncScheduler?: SyncScheduler;
+  /** Coding chats: starts the CLI program (tests inject fake programs; default: the official one on this server). */
+  codingChatLaunch?: CliLauncher;
 }
 
 /**
@@ -2120,6 +2125,12 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   // an `email_send` preview. Re-uses the same SMTP code path as the
   // email_send agent tool (sendEmail() in src/tools/email-tools.ts).
   authed.route("/email", emailRoutes(() => ({ orchestrator: o })));
+
+  // Coding chats: Claude Code / Codex sessions in a worktree on the person's own CLI account, as a chat
+  authed.route("/coding/chats", codingChatRoutes({
+    manager: () => (o.isInitialized ? codingChatManagerFor(o, { launch: opts?.codingChatLaunch }) : undefined),
+    member: (c) => c.get("polpoUserEmail" as never) as string | undefined,
+  }));
 
   authed.route("/coding", codingRoutes(() => ({
     codingSessionStore: o.getCodingSessionStore(),

@@ -93,6 +93,7 @@ export const TOOLSETS = {
   connectors: { default: true, description: "Connectors (MCP servers agents use): catalog, add, access, test, OAuth link (changes need connectors scope)" },
   channels: { default: true, description: "Notification channels, rules and history; send a message on any channel (Telegram, WhatsApp, email, Slack, WhatsApp Business, webhook, push) (sending needs messages scope, rules admin scope)" },
   computers: { default: true, description: "Computers (persistent machines agents work on): live status, create, start, stop, reset, delete (changes need computers scope)" },
+  coding: { default: true, description: "Coding chats: Claude Code and Codex sessions in a git worktree on the person's own CLI account (list, start, send, stop, approve or deny risky actions, the transcript card)" },
   settings: { default: true, description: "The rest of Configuration: sandbox, policies (approval gates, escalation, SLA), members, MCP access, cloud sync, custom LLM providers, channels end to end (setup with write-only secrets, routes, Telegram invites, pairings and allowlist, WhatsApp sign-in) (changes need admin scope)" },
   brain: { default: false, description: "The company brain: search, read, save and delete entities, relations and claims" },
   learning: { default: false, description: "What agents learned: changes, review now, revert (needs admin scope)" },

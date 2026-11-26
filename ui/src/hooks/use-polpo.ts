@@ -274,6 +274,8 @@ export interface ToolCallInfo {
   result?: string;
   progress?: ToolCallProgress;
   state: ToolCallState;
+  /** An edit's unified diff (coding chats: Edit, Write, apply_patch…). */
+  diff?: string;
 }
 
 /** Ordered segment — text, model thinking, or a tool invocation */

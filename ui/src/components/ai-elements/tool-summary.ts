@@ -19,6 +19,8 @@ export interface ToolCallInfo {
     elapsedMs?: number;
   };
   state: ToolState;
+  /** An edit's unified diff (coding chats: Edit, Write, apply_patch…). */
+  diff?: string;
 }
 
 /** Convert tool_name to "Tool name" (sentence case, like the rest of the line). */
@@ -62,10 +64,23 @@ const TOOL_VERBS: Record<string, [string, string]> = {
   artifact_update: ["Updating artifact", "Updated artifact"],
   artifact_from_file: ["Publishing artifact from a file", "Published artifact from a file"],
   render_widget: ["Rendering widget", "Rendered widget"],
+  // Claude Code's and Codex's own tools (coding chats), looked up in lower case
+  multiedit: ["Editing file", "Edited file"],
+  notebookedit: ["Editing notebook", "Edited notebook"],
+  shell: ["Running", "Ran"],
+  apply_patch: ["Changing files", "Changed files"],
+  webfetch: ["Fetching", "Fetched"],
+  websearch: ["Searching the web for", "Searched the web for"],
+  todowrite: ["Updating the plan", "Updated the plan"],
 };
 
+/** The tool's verbs: its own name, else in lower case (Claude Code names them Edit, Bash, Read…). */
+function verbsOf(name: string): [string, string] | undefined {
+  return TOOL_VERBS[name] ?? TOOL_VERBS[name.toLowerCase()];
+}
+
 /** Tools whose target reads like a phrase ("Searched the web for “x”"), not "Verb · x". */
-const QUOTED_TARGET = new Set(["search_web", "web_search", "search_find_similar"]);
+const QUOTED_TARGET = new Set(["search_web", "web_search", "search_find_similar", "websearch"]);
 
 /** Argument keys that name what a call is about, in order of preference. */
 const TARGET_KEYS = [
@@ -86,7 +101,7 @@ function toolTarget(tool: ToolCallInfo): string | undefined {
   const args = tool.arguments;
   if (!args) return undefined;
   // searches are about their pattern, not the folder they look in
-  const keys = PATTERN_FIRST.has(tool.name) ? ["pattern", ...TARGET_KEYS] : TARGET_KEYS;
+  const keys = PATTERN_FIRST.has(tool.name.toLowerCase()) ? ["pattern", ...TARGET_KEYS] : TARGET_KEYS;
   for (const key of keys) {
     const v = args[key];
     if (typeof v === "string" && v.trim()) return oneLine(v);
@@ -114,12 +129,12 @@ export interface ToolSummary {
 /** The single muted line a tool call collapses to, like claude.ai. */
 export function describeTool(tool: ToolCallInfo): ToolSummary {
   const running = tool.state === "preparing" || tool.state === "calling";
-  const verbs = TOOL_VERBS[tool.name];
+  const verbs = verbsOf(tool.name);
   const label = verbs ? verbs[running ? 0 : 1] : formatToolName(tool.name);
   const raw = toolTarget(tool);
-  const target = raw && QUOTED_TARGET.has(tool.name) ? `“${raw}”` : raw;
+  const target = raw && QUOTED_TARGET.has(tool.name.toLowerCase()) ? `“${raw}”` : raw;
   const text = target
-    ? QUOTED_TARGET.has(tool.name) ? `${label} ${target}` : `${label} · ${target}`
+    ? QUOTED_TARGET.has(tool.name.toLowerCase()) ? `${label} ${target}` : `${label} · ${target}`
     : label;
   return { label, target, text };
 }

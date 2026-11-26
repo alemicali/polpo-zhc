@@ -24,6 +24,13 @@ vi.mock("@/pages/chat", () => ({
     </div>
   ),
 }));
+vi.mock("@/pages/coding/coding-nav", () => ({
+  CodingNav: ({ onNavigate }: { onNavigate?: () => void }) => (
+    <div data-testid="coding-nav-panel">
+      <button type="button" onClick={onNavigate}>Session 1</button>
+    </div>
+  ),
+}));
 
 import {
   DRILL_IN_NAV, activeTrail, configSectionId, findActiveTrail, isLinkActive, linkPath, listedNodes, navTargets, pinnedNodes,
@@ -453,5 +460,33 @@ describe("the preference", () => {
     expect(classicShown()).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(screen.queryByText("Try the new sidebar")).toBeNull();
+  });
+});
+
+describe("the Coding level", () => {
+  test("Tools → Coding opens the coding page and its projects and sessions in the sidebar", async () => {
+    const { container } = renderNav("/dashboard");
+    fireEvent.click(screen.getByRole("button", { name: /Tools/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Coding/ }));
+    expect(screen.getByTestId("where").textContent).toBe("/coding");
+    expect(level(container).dataset.level).toBe("coding");
+    expect(await screen.findByTestId("coding-nav-panel")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Projects and sessions" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Back to Tools" }));
+    expect(level(container).dataset.level).toBe("tools");
+  });
+
+  test("on /coding the sidebar opens at the Coding level; picking a session closes the sheet", async () => {
+    const onNavigate = vi.fn();
+    renderNav("/coding", <DrillInNav variant="sheet" onNavigate={onNavigate} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Session 1" }));
+    expect(onNavigate).toHaveBeenCalled();
+  });
+
+  test("the icon rail: a button expands the sidebar to show the sessions", () => {
+    const onExpand = vi.fn();
+    renderNav("/coding", <DrillInNav collapsed onExpand={onExpand} />);
+    fireEvent.click(screen.getByRole("button", { name: "Show projects and sessions" }));
+    expect(onExpand).toHaveBeenCalled();
   });
 });

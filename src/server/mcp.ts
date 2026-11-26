@@ -49,6 +49,7 @@ import { registerDecisionTools } from "./mcp-server/decisions.js";
 import { registerDecisionCards } from "./mcp-server/decision-cards.js";
 import { registerMediaTools } from "./mcp-server/media.js";
 import { registerMediaCards } from "./mcp-server/media-cards.js";
+import { registerCodingCard, registerCodingTools } from "./mcp-server/coding.js";
 
 export type { ApiResponse, McpDeps, McpPrincipal, PolpoScope, ToolScope, ToolsetName } from "./mcp-server/kit.js";
 export {
@@ -104,6 +105,8 @@ export function createPolpoMcpServer(deps: McpDeps, catalog?: ToolScope[]): McpS
   registerDecisionCards(server, deps, enabled, principal, catalog);
   registerMediaTools(tool, deps);
   registerMediaCards(server, deps, enabled, principal, catalog);
+  registerCodingTools(tool, deps);
+  registerCodingCard(server, deps, enabled, principal, catalog);
   registerConnectorTools(tool, deps);
   registerMcpServerTools(tool, deps);
   registerChannelTools(tool, deps);
