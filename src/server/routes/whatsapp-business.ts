@@ -27,6 +27,7 @@
  *   POST   /:name/test                     the phone number at Meta (token, quality rating, tier)
  */
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { WABIZ_SECRET_KINDS, type WaBizOutbound, type WaBizSecretKind, type WaBizTemplateInput } from "@polpo-ai/core/whatsapp-business";
 import type { WaTemplateDefinition } from "../../notifications/channels/whatsapp-business.js";
@@ -169,8 +170,15 @@ const decodeFile = (f: z.infer<typeof fileSchema> | undefined) => {
   return { data, mimeType: f.mimeType, filename: f.filename };
 };
 
+/** A request's largest body: a 20 MB file in base64 and its message. */
+export const WABIZ_ADMIN_MAX_BODY_BYTES = 28 * 1024 * 1024;
+
 export function waBusinessAdminRoutes(deps: WaBusinessRouteDeps): OpenAPIHono {
   const app = new OpenAPIHono();
+  app.use("*", bodyLimit({
+    maxSize: WABIZ_ADMIN_MAX_BODY_BYTES,
+    onError: (c) => c.json({ ok: false, error: "The request is over 28 MB: send larger files by link", code: "VALIDATION_ERROR" }, 413),
+  }));
   const need = () => {
     const s = deps.service();
     if (!s) throw new Error("Polpo is not initialized");
