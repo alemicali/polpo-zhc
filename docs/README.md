@@ -18,6 +18,8 @@ The global search (⌘K in the dashboard, `GET /api/v1/search`, `polpo_search`) 
 
 Decisions — `decide()`: typed judgments with probabilities (yes/no, choice, score, rank) from a decision model through Vercel AI Gateway and the shared gateway resolver, the decision log, mission and playbook decision nodes, the agents' `decide` tool and the suites' decision scorer — are documented in [decisions.md](decisions.md).
 
+Media — image generation and editing as a primitive (`generateImage` / `editImage`) through Vercel AI Gateway and the shared gateway resolver, every image an asset with its provenance in the media log, the agents' `image_generate` / `image_edit` / `image_analyze`, mission and playbook image nodes — is documented in [media.md](media.md).
+
 Triggers — public endpoints (`POST /hooks/{id}`) that receive form submissions and webhooks: secret / HMAC / IP authentication, a versioned contract, filter, dedupe, rate limit, mapping, the delivery log and test tools, and the Tailscale Funnel path — are documented in [triggers.md](triggers.md). Actions on deliveries arrive later with the action engine.
 
 The official WhatsApp Business channel (Meta Cloud API: setup, the 24-hour window, templates, approvals, the Funnel command, retention) is documented in [whatsapp-business.md](whatsapp-business.md).

@@ -1,7 +1,7 @@
 /** LLM usage of one model call (chat turns and background continuations), for cost reporting. */
 export interface TokenUsageRecord {
   timestamp: string;
-  source: "orchestrator_chat" | "agent_chat" | "background_wait" | "agent_harness" | "search_ask" | "decision";
+  source: "orchestrator_chat" | "agent_chat" | "background_wait" | "agent_harness" | "search_ask" | "decision" | "image";
   provider?: string;
   model?: string;
   sessionId?: string;

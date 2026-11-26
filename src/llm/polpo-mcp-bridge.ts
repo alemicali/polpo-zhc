@@ -29,6 +29,7 @@ import { registerChatTools } from "../server/mcp-server/chat.js";
 import { registerAutomationTools } from "../server/mcp-server/automation.js";
 import { registerTriggerTools } from "../server/mcp-server/triggers.js";
 import { registerDecisionTools } from "../server/mcp-server/decisions.js";
+import { registerMediaTools } from "../server/mcp-server/media.js";
 import { registerCodingTools } from "../server/mcp-server/coding.js";
 import { registerMissionTools } from "../server/mcp-server/missions.js";
 import { registerDataTools } from "../server/mcp-server/data.js";
@@ -178,6 +179,11 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_decide", name: "decide", group: "decisions" },
   { mcp: "polpo_decisions", name: "decisions", group: "decisions" },
   { mcp: "polpo_decision_resolve", name: "decision_resolve", group: "decisions" },
+  // Media: image generation and editing (the media primitive), the media log, the status
+  { mcp: "polpo_image_generate", name: "image_generate", group: "media" },
+  { mcp: "polpo_image_edit", name: "image_edit", group: "media" },
+  { mcp: "polpo_media_log", name: "media_log", group: "media" },
+  { mcp: "polpo_media_status", name: "media_status", group: "media" },
   // Coding chats: Claude Code / Codex sessions in a worktree on the person's own CLI account
   { mcp: "polpo_coding_chats_list", name: "coding_chats_list", group: "coding" },
   { mcp: "polpo_coding_chat_get", name: "coding_chat_get", group: "coding" },
@@ -278,6 +284,8 @@ export const MCP_EQUIVALENTS: Record<string, string> = {
   polpo_trigger_show: "trigger_get",
   // the decision card (an MCP App): decide and decisions answer with the same (answers, probabilities)
   polpo_decision_show: "decisions",
+  // the media card (an MCP App): image_generate and media_log answer with the same (the images, their provenance)
+  polpo_image_show: "media_log",
   // the coding chat card (an MCP App): coding_chat_get has the same transcript as text
   polpo_coding_chat_show: "coding_chat_get",
   polpo_mission_create: "create_mission",
@@ -426,7 +434,7 @@ function capture(): Map<string, Captured> {
   };
   for (const register of [
     registerSetupTools, registerTeamTools, registerAgentSuiteTools, registerBenchmarkTools, registerConnectorTools, registerMcpServerTools, registerHarnessTools, registerComputerTools, registerConfigTools,
-    registerSettingsTools, registerChannelTools, registerChannelSetupTools, registerRoomTools, registerChatTools, registerAutomationTools, registerTriggerTools, registerDecisionTools,
+    registerSettingsTools, registerChannelTools, registerChannelSetupTools, registerRoomTools, registerChatTools, registerAutomationTools, registerTriggerTools, registerDecisionTools, registerMediaTools,
     registerMissionTools, registerDataTools, registerBrainTools, registerSkillTools, registerWaBusinessTools, registerSearchTools, registerCodingTools,
     registerArtifactTools,
   ]) register(tool, deps);

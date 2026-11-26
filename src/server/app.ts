@@ -122,6 +122,8 @@ import { agentTesterFor } from "./agent-tests-host.js";
 import { agentBenchmarksFor, agentDeployGatesFor, agentSuiteRunnerFor } from "./agent-suites-host.js";
 import { DecisionService, decisionServiceFor, registerDecisionService } from "../decisions/service.js";
 import { decideRoutes, decisionRoutes } from "./routes/decisions.js";
+import { MediaService, mediaServiceFor, registerMediaService } from "../media/service.js";
+import { mediaRoutes } from "./routes/media.js";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
   SUITE_PLACEHOLDER_MODEL, applySuiteOverrides, currentSuiteCase, suiteCompleteLLM, suiteStreamLLM, suiteToolExecutor,
@@ -586,6 +588,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         shell: chatShell,
         fs: chatFs,
         sandboxProvider: chatSandboxProvider,
+        ...(context?.sessionId?.() ? { mediaContext: { sessionId: context.sessionId()! } } : {}),
       });
       const memoryStore = o.getMemoryStore();
       if (memoryStore) tools.push(...createMemoryTools(memoryStore, agentConfig.name));
@@ -1696,6 +1699,50 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   authed.use("/decide", rateLimitMiddleware(60, 60_000));
   authed.route("/decide", decideRoutes(decisionDeps));
   authed.route("/decisions", decisionRoutes(decisionDeps));
+  // Media (docs/media.md): generateImage / editImage through the shared gateway resolver, every image
+  // an asset with its provenance in the media log, missions' image nodes, the agents' image tools;
+  // image analysis is a chat turn with the image attached (a role turn of the chat pipeline, no tools).
+  const media = (): MediaService => {
+    const polpoDir = activePolpoDir();
+    let s = mediaServiceFor(polpoDir);
+    if (!s) {
+      s = new MediaService({
+        polpoDir: () => polpoDir,
+        workDir: () => o.getWorkDir(),
+        settings: () => o.getConfig()?.settings,
+        vault: () => o.getVaultStore?.(),
+        visionTurn: (req) => agentSuites().playRole("viewer", req.model ? { model: req.model } : req.agent ? { agent: req.agent } : undefined, req.prompt, {
+          images: [`data:${req.image.mimeType};base64,${req.image.data}`],
+        }),
+        recordUsage: async (u) => {
+          await (databaseStoresFor(polpoDir)?.tokenUsageStore ?? new FileTokenUsageStore(polpoDir)).record({
+            timestamp: new Date().toISOString(), source: "image", provider: u.provider, model: u.model,
+            inputTokens: u.inputTokens, outputTokens: u.outputTokens, cacheReadTokens: 0, cacheWriteTokens: 0,
+            totalTokens: u.inputTokens + u.outputTokens, cost: u.cost,
+          });
+          o.emit("token-usage:recorded", { timestamp: new Date().toISOString() });
+        },
+        emit: (payload) => o.emit("media:generated", payload),
+      });
+      registerMediaService(polpoDir, s);
+    }
+    return s;
+  };
+  media();
+  o.setMissionImager(async (req) => {
+    const r = await media().generateImage(
+      { prompt: req.prompt, ...(req.size ? { size: req.size } : {}), ...(req.n ? { n: req.n } : {}), ...(req.model ? { model: req.model } : {}) },
+      { kind: "mission", ...(req.caller.id ? { id: req.caller.id } : {}), label: req.caller.label, ...(req.caller.missionId ? { missionId: req.caller.missionId } : {}) },
+    );
+    return { id: r.id, files: r.images.map((i) => i.file), urls: r.images.map((i) => i.url), model: r.model };
+  });
+  // each image request is a (paid) model call: a rate limit like decide
+  const mediaLimit = rateLimitMiddleware(30, 60_000);
+  for (const path of ["/media/images", "/media/images/edits"]) authed.use(path, (c, next) => (c.req.method === "POST" ? mediaLimit(c, next) : next()));
+  authed.route("/media", mediaRoutes({
+    service: () => (o.isInitialized ? media() : undefined),
+    nodes: () => (o.isInitialized ? o.getImageNodes() : []),
+  }));
   // phase 5 (docs/agent-suites.md): benchmarks (suites × variants × repetitions, compared) and the Playground
   const benchmarks = () => agentBenchmarksFor({
     orchestrator: o, completions: (req) => completionApp.request(req),

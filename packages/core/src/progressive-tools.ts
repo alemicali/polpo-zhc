@@ -159,6 +159,10 @@ export const POLPO_TOOL_GROUPS: ToolGroupRule[] = [
     prefixes: ["decision_"], names: ["decide", "decisions"],
   },
   {
+    id: "media", label: "Media: generate and edit images with the instance's image model (kept with their prompt, model and cost), the media log, the image model's status",
+    prefixes: ["image_"], names: ["media_log", "media_status"],
+  },
+  {
     id: "coding", label: "Coding chats: Claude Code or Codex sessions in a git worktree of the Coding app, on the person's own CLI account (start one in a worktree and ask it to do something, send messages, read the transcript, stop, approve or deny risky actions the person decided on)",
     prefixes: ["coding_chat"],
   },
