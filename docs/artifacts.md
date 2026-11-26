@@ -95,8 +95,8 @@ Limits, in `settings.artifacts` (`polpo.json`; missing or invalid values keep th
 | Setting | Default | What it limits |
 |---|---|---|
 | `maxBytes` | 100 MB | One artifact's content (uploads stop at it: 413) |
-| `versions.maxCount` | 30 | Earlier versions kept per artifact |
-| `versions.maxTotalBytes` | 500 MB | Bytes of an artifact's earlier versions (identical contents counted once; the newest earlier version is always kept) |
+| `versions.maxCount` | 1000 | Earlier versions kept per artifact |
+| `versions.maxTotalBytes` | 1 GB | Bytes of an artifact's earlier versions (identical contents counted once; the newest earlier version is always kept) |
 | `inlineBytes` | 256 KB | Contents larger than this are blobs |
 | `maxEditBytes` | 50 MB | Contents changed in place (`update`, `patch`, `ops`) or read by part / outline, which the server holds in memory to do it; larger ones are replaced by upload or read by byte range |
 | `maxTotalBytes` | 20 GB | Every artifact of the instance together: from 80% `GET /artifacts/usage` warns, over it new large contents are refused (507) |

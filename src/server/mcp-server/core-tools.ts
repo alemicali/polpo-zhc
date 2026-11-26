@@ -247,7 +247,7 @@ const updateItem = z.object({
 const readOutput = z.object({ text: z.string(), size: z.number(), start: z.number().optional(), end: z.number().optional(), more: z.boolean().optional(), outline: z.string().optional() }).passthrough();
 const uploadOutput = { upload_id: z.string(), size: z.number(), complete: z.boolean(), filename: z.string().optional() };
 
-/** "12 earlier versions, 3.1 MB of 500 MB (max 30)". */
+/** "12 earlier versions, 3.1 MB of 1 GB (max 1000)". */
 function usageLine(usage: unknown): string {
   const u = usage as { count?: number; bytes?: number; maxBytes?: number; maxCount?: number } | undefined;
   if (!u || typeof u.count !== "number") return "";

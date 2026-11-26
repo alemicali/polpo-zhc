@@ -71,9 +71,9 @@ describe("artifact model", () => {
     expect(a.versions[0]).toMatchObject({ version: 2, content: "v2", author: "polpo", note: "added totals" });
     // only the title: no new version
     expect(applyArtifactPatch(a, { title: "Q4 report" })).toMatchObject({ title: "Q4 report", version: 3 });
-    for (let i = 4; i < 40; i++) a = applyArtifactPatch(a, { content: `v${i}` });
+    for (let i = 4; i < MAX_ARTIFACT_VERSIONS + 10; i++) a = applyArtifactPatch(a, { content: `v${i}` });
     expect(a.versions).toHaveLength(MAX_ARTIFACT_VERSIONS);
-    expect(a.versions[0]!.version).toBe(38);
+    expect(a.versions[0]!.version).toBe(MAX_ARTIFACT_VERSIONS + 8);
   });
 
   it("applies find/replace edits that each match once", () => {

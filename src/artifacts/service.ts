@@ -120,7 +120,7 @@ export async function readArtifact(store: LargeArtifactStore, artifact: Artifact
   return result;
 }
 
-/** One line on the versions of an artifact against the limits: "12 versions, 3.1 MB of 500 MB (max 30)". */
+/** One line on the versions of an artifact against the limits: "12 versions, 3.1 MB of 1 GB (max 1000)". */
 export function versionUsageLine(artifact: Artifact): string {
   const u = artifactVersionUsage(artifact);
   return `${u.count} earlier version${u.count === 1 ? "" : "s"}, ${formatArtifactBytes(u.bytes)} of ${formatArtifactBytes(u.maxBytes)} (max ${u.maxCount}; the oldest are pruned first)`;
