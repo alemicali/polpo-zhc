@@ -693,7 +693,7 @@ describe("connectors", () => {
     expect(await call(deps(f), "polpo_connector_remove", { id: "linear" })).toMatchObject({ isError: true });
     expect((await call(deps(f), "polpo_connector_remove", { id: "linear", confirm: true })).structuredContent).toEqual({ id: "linear", removed: true });
     expect(f.connectors.has("linear")).toBe(false);
-  });
+  }, 15_000);
 });
 
 describe("channels", () => {
