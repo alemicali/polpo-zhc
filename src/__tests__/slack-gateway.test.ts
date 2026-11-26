@@ -296,7 +296,8 @@ describe("Slack Socket Mode bridge", () => {
     expect(fetchMock).toHaveBeenCalledWith("https://files.slack.com/files-pri/T1-F1/brief.pdf", expect.anything());
     const turn = runner.mock.calls[0]![0].messages.at(-1)!.content;
     expect(JSON.stringify(turn)).toContain("brief.pdf");
-    expect(web.filesUploadV2).toHaveBeenCalledWith(expect.objectContaining({ channel_id: "D0ALICE", filename: "report.ts", thread_ts: "1712345600.000009" }));
+    // the upload reads the file from disk: wait for it (slow runners)
+    await vi.waitFor(() => expect(web.filesUploadV2).toHaveBeenCalledWith(expect.objectContaining({ channel_id: "D0ALICE", filename: "report.ts", thread_ts: "1712345600.000009" })));
   });
 
   it("never sends the bot token to a host that is not Slack's", async () => {
