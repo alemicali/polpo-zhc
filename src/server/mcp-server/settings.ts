@@ -102,7 +102,7 @@ const e2bInput = z.object({
 }).strict();
 
 function registerSandboxTools(tool: Register, deps: McpDeps): void {
-  const setup = dashboardLink(deps, "/config?section=sandbox");
+  const setup = () => dashboardLink(deps, "/config?section=sandbox");
 
   tool("settings", "polpo_sandbox_get", {
     title: "Get the sandbox settings",
@@ -122,8 +122,8 @@ function registerSandboxTools(tool: Register, deps: McpDeps): void {
       `default: ${String(settings?.provider ?? "local")} · allowed: ${(settings?.allowedProviders as string[] | undefined)?.join(", ") ?? "any"} · network: ${JSON.stringify(settings?.network ?? "default")}`,
       `this machine can run: ${(d.available ?? []).join(", ")}`,
       `settings: ${JSON.stringify(settings ?? {})}`,
-      `To set a provider's API key: ${setup}`,
-    ].join("\n"), { settings, available: d.available ?? [], ...(p.ok ? { providers: p.data } : {}), setup_url: setup });
+      `To set a provider's API key: ${setup()}`,
+    ].join("\n"), { settings, available: d.available ?? [], ...(p.ok ? { providers: p.data } : {}), setup_url: setup() });
   });
 
   tool("settings", "polpo_sandbox_update", {
@@ -208,7 +208,7 @@ function registerSandboxTools(tool: Register, deps: McpDeps): void {
       changed.length ? `Changed ${changed.join(", ")}.` : "Nothing changed (the values were the same).",
       ...(ignored.length ? [`Not accepted (invalid, left as before): ${ignored.join(", ")}.`] : []),
       ...(missingKey.length ? [`${missingKey.join(", ")} has no API key yet. ${setupHandoff(deps, { kind: "sandbox", item: missingKey[0], field: "credential" }, `${missingKey[0]} API key (a vault entry)`).next_step}`] : []),
-    ].join(" "), { changed, settings, ignored, ...(missingKey.length ? setupHandoff(deps, { kind: "sandbox", item: missingKey[0], field: "credential" }, `${missingKey[0]} API key (a vault entry)`) : { setup_url: setup }) });
+    ].join(" "), { changed, settings, ignored, ...(missingKey.length ? setupHandoff(deps, { kind: "sandbox", item: missingKey[0], field: "credential" }, `${missingKey[0]} API key (a vault entry)`) : { setup_url: setup() }) });
   });
 
   tool("settings", "polpo_sandbox_provider_test", {
@@ -348,7 +348,7 @@ function registerPolicyTools(tool: Register, deps: McpDeps): void {
 // ── Members ──────────────────────────────────────────────────────────
 
 function registerMemberTools(tool: Register, deps: McpDeps): void {
-  const setup = dashboardLink(deps, "/config?section=members");
+  const setup = () => dashboardLink(deps, "/config?section=members");
 
   tool("settings", "polpo_members_list", {
     title: "List members",
@@ -364,7 +364,7 @@ function registerMemberTools(tool: Register, deps: McpDeps): void {
     const d = r.data as { enabled?: boolean; members?: Array<{ email: string }> };
     const members = d.members ?? [];
     return ok(`${d.enabled ? "Sign-in is on" : "Sign-in is off (anyone who reaches the dashboard can use it)"}. Members: ${members.map((m) => m.email).join(", ") || "none"}.`,
-      { enabled: !!d.enabled, members, setup_url: setup });
+      { enabled: !!d.enabled, members, setup_url: setup() });
   });
 
   tool("settings", "polpo_members_invite", {
@@ -468,7 +468,7 @@ function syncView(c: SyncConfig): Record<string, unknown> {
 }
 
 function registerSyncTools(tool: Register, deps: McpDeps): void {
-  const setup = dashboardLink(deps, "/config?section=sync");
+  const setup = () => dashboardLink(deps, "/config?section=sync");
 
   tool("settings", "polpo_sync_status", {
     title: "Get the cloud sync status",
@@ -482,7 +482,7 @@ function registerSyncTools(tool: Register, deps: McpDeps): void {
     if (!c.ok) return apiError(c, "Reading the sync settings");
     const sync = syncView(c.data as SyncConfig);
     const runs = h.ok && Array.isArray(h.data) ? h.data.slice(0, history ?? 5) : [];
-    const handoff = sync.configured ? { setup_url: setup } : setupHandoff(deps, { kind: "sync", item: "r2", field: "secretAccessKey" }, "R2 endpoint, bucket and keys");
+    const handoff = sync.configured ? { setup_url: setup() } : setupHandoff(deps, { kind: "sync", item: "r2", field: "secretAccessKey" }, "R2 endpoint, bucket and keys");
     return ok([
       sync.configured ? `R2: ${JSON.stringify(sync.r2)}` : `Not set up. ${(handoff as { next_step: string }).next_step}`,
       `schedule: ${sync.schedule ? JSON.stringify(sync.schedule) : "none"} · excludes: ${(sync.excludes as string[]).join(", ") || "none"}`,
@@ -525,7 +525,7 @@ function registerSyncTools(tool: Register, deps: McpDeps): void {
     const now = await apiGet(deps, "/sync/config");
     const after = syncView((now.ok ? now.data : r.data) as SyncConfig);
     const changed = changedKeys(before, after).filter((k) => k !== "next_run_at");
-    return ok(changed.length ? `Changed ${changed.join(", ")}.` : "Nothing changed (the values were the same).", { changed, sync: after, setup_url: setup });
+    return ok(changed.length ? `Changed ${changed.join(", ")}.` : "Nothing changed (the values were the same).", { changed, sync: after, setup_url: setup() });
   });
 
   tool("settings", "polpo_sync_disconnect", {
@@ -549,7 +549,7 @@ function registerSyncTools(tool: Register, deps: McpDeps): void {
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, async () => {
     const r = await apiSend(deps, "POST", "/sync/test");
-    if (!r.ok) return ok(`The test failed: ${r.error}. Check the settings at ${setup}.`, { ok: false, error: r.error });
+    if (!r.ok) return ok(`The test failed: ${r.error}. Check the settings at ${setup()}.`, { ok: false, error: r.error });
     return ok("R2 answered: cloud sync works.", { ok: true });
   });
 
@@ -609,7 +609,7 @@ const customProviderInput = z.object({
 }).passthrough();
 
 function registerProviderTools(tool: Register, deps: McpDeps): void {
-  const setup = dashboardLink(deps, "/config?section=providers");
+  const setup = () => dashboardLink(deps, "/config?section=providers");
   const view = (p: Record<string, unknown>) => {
     // never the key or its hint
     const { keyHint: _h, apiKey: _k, secrets: _s, ...rest } = p;
@@ -627,8 +627,8 @@ function registerProviderTools(tool: Register, deps: McpDeps): void {
     const r = await apiGet(deps, "/providers/custom");
     if (!r.ok) return apiError(r, "Listing custom providers");
     const items = ((r.data as Array<Record<string, unknown>>) ?? []).map(view);
-    return ok(`${items.map((p) => `- ${String(p.id)}: ${String(p.baseUrl)} (${String(p.api)}), ${Array.isArray(p.models) ? p.models.length : 0} models, ${p.configured ? "ready" : "no key"}`).join("\n") || "No custom providers."}\nKeys: ${setup}`,
-      { items, setup_url: setup });
+    return ok(`${items.map((p) => `- ${String(p.id)}: ${String(p.baseUrl)} (${String(p.api)}), ${Array.isArray(p.models) ? p.models.length : 0} models, ${p.configured ? "ready" : "no key"}`).join("\n") || "No custom providers."}\nKeys: ${setup()}`,
+      { items, setup_url: setup() });
   });
 
   tool("settings", "polpo_custom_provider_save", {
@@ -644,7 +644,7 @@ function registerProviderTools(tool: Register, deps: McpDeps): void {
     annotations: UPDATE,
   }, async ({ id, provider }) => {
     const secretish = Object.keys(provider).filter((k) => isSecretKey(k) || k === "secrets");
-    if (secretish.length) return fail(`${secretish.join(", ")} cannot be sent through this connector: the person enters keys at ${setup}.`);
+    if (secretish.length) return fail(`${secretish.join(", ")} cannot be sent through this connector: the person enters keys at ${setup()}.`);
     const cur = await apiGet(deps, `/providers/custom/${enc(id)}`);
     const exists = cur.ok;
     if (!exists && cur.status !== 404) return apiError(cur, `Reading provider ${id}`);
@@ -664,7 +664,7 @@ function registerProviderTools(tool: Register, deps: McpDeps): void {
     const p = saved.ok ? view(saved.data as Record<string, unknown>) : { id };
     const warnings = ((r.data as { warnings?: string[] } | null)?.warnings) ?? [];
     const needsKey = saved.ok ? !(saved.data as { configured?: boolean }).configured : false;
-    const handoff = needsKey ? setupHandoff(deps, { kind: "custom-provider", item: id, field: "apiKey" }, `API key for ${id}`) : { setup_url: setup };
+    const handoff = needsKey ? setupHandoff(deps, { kind: "custom-provider", item: id, field: "apiKey" }, `API key for ${id}`) : { setup_url: setup() };
     return ok(`${exists ? "Updated" : "Created"} provider ${id}.${warnings.length ? ` ${warnings.join(" ")}` : ""}${needsKey ? ` It has no key yet. ${(handoff as { next_step: string }).next_step}` : ""}`,
       { id, created: !exists, provider: p, warnings, needs_key: needsKey, ...handoff });
   });
@@ -729,7 +729,7 @@ const businessInput = z.object({
 }).strict();
 
 function registerChannelConfigTools(tool: Register, deps: McpDeps): void {
-  const setup = dashboardLink(deps, "/config?section=channels");
+  const setup = () => dashboardLink(deps, "/config?section=channels");
 
   tool("settings", "polpo_channel_save", {
     title: "Save a notification channel",

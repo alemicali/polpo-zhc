@@ -7,14 +7,13 @@ import { ARTIFACT_OPS_GUIDE } from "../../artifacts/ops.js";
 import { fetchPublicBytes } from "./config.js";
 import { agentEffectiveModel, agentEngineIdOf, engineTypeText, modelWithEngineText } from "@polpo-ai/core/engine-label";
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { agentCardText, buildAgentCard, type AgentCard } from "../mcp-agent-card.js";
 import { AGENT_CARD_HTML } from "../mcp-widgets.generated.js";
 import { cardAppearance } from "./card-appearance.js";
 import {
-  BAD_CURSOR, DESTRUCTIVE, READ, WRITE, allowed, apiError, apiGet, apiSend, clip, cursorParam, enc, fail, formatBytes, limitParam,
+  BAD_CURSOR, DESTRUCTIVE, READ, WRITE, apiError, apiGet, apiSend, clip, cursorParam, enc, fail, formatBytes, limitParam,
   looseObject, ok, page, pageOutput, qs, short, unwrap,
-  type McpDeps, type McpPrincipal, type Register, type ToolScope, type ToolsetName,
+  type AppRegister, type McpDeps, type Register,
 } from "./kit.js";
 
 /** Largest image or PDF returned inline by polpo_file_read. */
@@ -103,7 +102,7 @@ const agentItem = z.object({
   title: z.string().optional(),
 }).passthrough();
 
-export function registerAgentTools(tool: Register, deps: McpDeps, server: McpServer, enabled: ReadonlySet<ToolsetName>, principal: McpPrincipal, catalog?: ToolScope[]): void {
+export function registerAgentTools(tool: Register, deps: McpDeps, app: AppRegister): void {
   tool("core", "polpo_agents_list", {
     title: "List agents",
     description: "The agents of this instance: name, role, model. Use it to find the name to pass to polpo_agent_chat, polpo_agent_show or a task's assignTo.",
@@ -124,9 +123,9 @@ export function registerAgentTools(tool: Register, deps: McpDeps, server: McpSer
   });
 
   // ── The agent card: an MCP App (interactive UI in Claude, ChatGPT…; text elsewhere) ──
-  if (!allowed(enabled, principal, "core", READ, catalog, ["polpo_agent_show", "agent_card_refresh"])) return;
+  const card = app.gate("core", READ, ["polpo_agent_show", "agent_card_refresh"]);
 
-  registerAppResource(server, "Agent card", AGENT_CARD_URI, {
+  registerAppResource(card, "Agent card", AGENT_CARD_URI, {
     description: "An agent's card: status, the task at hand, today, what is next, its main goal; full screen, its tasks, goals and routine.",
   }, async () => ({
     contents: [{
@@ -138,7 +137,7 @@ export function registerAgentTools(tool: Register, deps: McpDeps, server: McpSer
     }],
   }));
 
-  registerAppTool(server, "polpo_agent_show", {
+  registerAppTool(card, "polpo_agent_show", {
     title: "Show an agent",
     description: "Show one agent's card: whether it is working, its engine (Polpo, Claude Code, Codex, OpenCode) and computer, the task at hand "
       + "(with the engine, model, computer and cost of its latest run, or why it failed), today's results, what it plans next, "
@@ -153,7 +152,7 @@ export function registerAgentTools(tool: Register, deps: McpDeps, server: McpSer
   });
 
   // the card's own tools keep their names: the widget calls them
-  registerAppTool(server, "agent_card_refresh", {
+  registerAppTool(card, "agent_card_refresh", {
     title: "Refresh an agent card",
     description: "The agent card's own refresh (called by its UI).",
     inputSchema: { agent: z.string().min(1).describe("The agent's name") },
@@ -165,8 +164,8 @@ export function registerAgentTools(tool: Register, deps: McpDeps, server: McpSer
     return r.ok ? cardResult(r.card) : fail(r.error);
   });
 
-  if (!allowed(enabled, principal, "core", DESTRUCTIVE, catalog, ["agent_intention_decide"])) return;
-  registerAppTool(server, "agent_intention_decide", {
+  const decide = card.gate("core", DESTRUCTIVE, ["agent_intention_decide"]);
+  registerAppTool(decide, "agent_intention_decide", {
     title: "Confirm or cancel an agent's plan",
     description: "From the agent card: confirm an intention the agent proposed, or cancel one (called by its UI after the person clicked).",
     inputSchema: {

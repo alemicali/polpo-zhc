@@ -2,6 +2,7 @@
  * Shared pieces of Polpo's MCP server: the dependencies a tool gets, the authenticated principal,
  * toolsets and scopes, result builders, pagination cursors and API helpers.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult, ServerNotification, ServerRequest, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
@@ -374,30 +375,6 @@ export type Register = <I extends z.ZodRawShape>(
 ) => void;
 
 /**
- * A registrar that adds a tool only when its toolset is on and the principal holds its scope.
- * Handlers that throw become an isError result (the SDK does that), so tools return fail() for
- * expected errors and let unexpected ones surface. `catalog`, when given, collects every tool of
- * an enabled toolset with its scope, offered or not (the scope matrix).
- */
-export function registrar(server: McpServer, enabled: ReadonlySet<ToolsetName>, principal: McpPrincipal, catalog?: ToolScope[]): Register {
-  return (toolset, name, spec, handler) => {
-    const scope = spec.scope ?? scopeFor(toolset, spec.annotations);
-    if (!enabled.has(toolset)) return;
-    catalog?.push({ name, toolset, scope, readOnly: !!spec.annotations.readOnlyHint, destructive: !!spec.annotations.destructiveHint });
-    if (!hasScope(principal, scope)) return;
-    server.registerTool(name, {
-      title: spec.title,
-      description: spec.description,
-      inputSchema: spec.inputSchema,
-      ...(spec.outputSchema ? { outputSchema: outputObject(spec.outputSchema) } : {}),
-      annotations: { title: spec.title, ...spec.annotations },
-      ...(spec._meta ? { _meta: spec._meta } : {}),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the SDK's generic callback type
-    }, handler as any);
-  };
-}
-
-/**
  * A tool's output schema: the declared fields, open to others. A raw shape becomes a closed object
  * (JSON Schema additionalProperties: false), and the official MCP client rejects a result with any
  * field it does not list: one new field on the API would break the tool for every SDK client.
@@ -407,15 +384,54 @@ export function outputObject(shape: z.ZodRawShape) {
 }
 
 /**
- * Is this tool allowed for the principal and the toolsets (for app tools registered elsewhere)?
- * With `catalog` and the tools' names, they are added to the scope matrix.
+ * Where MCP App tools and resources (registerAppTool, registerAppResource) are registered: behind
+ * a gate, open when its toolset is on and the principal holds the scope its annotations need (and,
+ * for a chained gate, its parent is open). A gate lists its tools' names for the scope matrix
+ * (when its toolset is on, offered or not). Registrations are declared once per process (see
+ * catalog.ts) and the gates are checked for every request.
  */
-export function allowed(enabled: ReadonlySet<ToolsetName>, principal: McpPrincipal, toolset: ToolsetName, annotations: ToolAnnotations,
-  catalog?: ToolScope[], names: string[] = []): boolean {
-  if (!enabled.has(toolset)) return false;
-  const scope = scopeFor(toolset, annotations);
-  for (const name of names) catalog?.push({ name, toolset, scope, readOnly: !!annotations.readOnlyHint, destructive: !!annotations.destructiveHint });
-  return hasScope(principal, scope);
+export interface AppGate extends Pick<McpServer, "registerTool" | "registerResource"> {
+  /** A gate open only when this one is open too. */
+  gate(toolset: ToolsetName, annotations: ToolAnnotations, names?: string[]): AppGate;
+}
+export interface AppRegister {
+  gate(toolset: ToolsetName, annotations: ToolAnnotations, names?: string[]): AppGate;
+  /** Where to register what is needed when any of the gates is open (a widget shared by several tools). */
+  anyOf(...gates: AppGate[]): Pick<McpServer, "registerResource">;
+}
+
+// ── The request's dependencies ───────────────────────────────────────
+//
+// Tools are declared once per process (their schemas are costly to build) with `requestDeps`, a
+// stand-in that reads the dependencies of the request being handled: every handler runs inside
+// withRequestDeps (see catalog.ts). Reading it outside a request throws, so nothing declared once
+// (a description, a schema) can capture one request's values.
+
+const requestStore = new AsyncLocalStorage<McpDeps>();
+
+function currentDeps(key: PropertyKey): McpDeps {
+  const deps = requestStore.getStore();
+  if (!deps) throw new Error(`MCP deps.${String(key)} read outside a request: tool declarations must not depend on a request's dependencies`);
+  return deps;
+}
+
+/** The dependencies of the request being handled (see withRequestDeps). */
+export const requestDeps: McpDeps = new Proxy({} as McpDeps, {
+  get: (_t, key) => (currentDeps(key) as unknown as Record<PropertyKey, unknown>)[key],
+  has: (_t, key) => key in currentDeps(key),
+  ownKeys: () => Reflect.ownKeys(currentDeps("ownKeys")),
+  getOwnPropertyDescriptor: (_t, key) => {
+    const d = Reflect.getOwnPropertyDescriptor(currentDeps(key), key);
+    return d ? { ...d, configurable: true } : undefined;
+  },
+  set: () => false,
+  defineProperty: () => false,
+  deleteProperty: () => false,
+});
+
+/** Run `fn` with `deps` as the request's dependencies. */
+export function withRequestDeps<T>(deps: McpDeps, fn: () => T): T {
+  return requestStore.run(deps, fn);
 }
 
 // Annotation presets (every tool also gets its title)

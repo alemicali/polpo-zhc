@@ -16,13 +16,12 @@
  */
 import { z } from "zod";
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { buildCodingCard, codingCardText, type CodingCard, type CodingSessionShape } from "../mcp-coding-card.js";
 import { CODING_CARD_HTML } from "../mcp-widgets.generated.js";
 import { cardAppearance } from "./card-appearance.js";
 import {
-  MAX_WAIT_SECONDS, READ, UPDATE, WRITE, allowed, apiError, apiGet, apiSend, dashboardLink, enc, fail, looseObject, ok, qs, sleep, unwrap,
-  type McpDeps, type McpPrincipal, type Register, type ToolScope, type ToolsetName,
+  MAX_WAIT_SECONDS, READ, UPDATE, WRITE, apiError, apiGet, apiSend, dashboardLink, enc, fail, looseObject, ok, qs, sleep, unwrap,
+  type AppRegister, type McpDeps, type Register,
 } from "./kit.js";
 
 export const CODING_CARD_URI = "ui://polpo/coding-card.html";
@@ -193,10 +192,10 @@ const cardOutput = z.object({
   earlier: z.number().optional(),
 }).passthrough();
 
-export function registerCodingCard(server: McpServer, deps: McpDeps, enabled: ReadonlySet<ToolsetName>, principal: McpPrincipal, catalog?: ToolScope[]): void {
-  if (!allowed(enabled, principal, "coding", READ, catalog, ["polpo_coding_chat_show"])) return;
+export function registerCodingCard(app: AppRegister, deps: McpDeps): void {
+  const card = app.gate("coding", READ, ["polpo_coding_chat_show"]);
 
-  registerAppResource(server, "Coding chat card", CODING_CARD_URI, {
+  registerAppResource(card, "Coding chat card", CODING_CARD_URI, {
     description: "A Claude Code / Codex session's transcript: messages, tool calls, approvals waiting.",
   }, async () => ({
     contents: [{
@@ -207,7 +206,7 @@ export function registerCodingCard(server: McpServer, deps: McpDeps, enabled: Re
     }],
   }));
 
-  registerAppTool(server, "polpo_coding_chat_show", {
+  registerAppTool(card, "polpo_coding_chat_show", {
     title: "Show a coding chat",
     description: "Show a coding chat (Claude Code / Codex in a worktree) as a card: the latest messages, each tool call in one line (edits with their +/− lines, commands), "
       + "approvals waiting (with their ids), status, model and tokens. The text is the transcript. Use it after polpo_coding_chat_start / _send.",

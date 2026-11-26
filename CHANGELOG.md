@@ -190,6 +190,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A "Beta" badge on Artifacts** wherever the entry appears (both sidebars, the chat-first tabs and menus, the mobile drawer) and on the Artifacts page title.
 
 ### Changed
+- **Performance: the MCP tool catalog is built once per process** instead of on every MCP request. The ~256 tools' zod schemas, descriptions, annotations, app cards and resources are declared once (`src/server/mcp-server/catalog.ts`); each request only registers what its toolsets and scopes allow on a fresh server and binds the handlers to its own deps (principal, api, URLs). tools/list reuses each tool's JSON Schema. On a dev machine: building the server 110 ms → 0.8 ms (median), tools/call 104 ms → 1.2 ms, tools/list 169 ms → 10 ms; a live server holds 0.2 MB instead of 59 MB; GC fell from 44% to a few ms of a tools/call workload. Same tools, scopes, step-up 403s, outputs, cards and scope matrix.
+
 - **Channels catalog**: **Discord** and **Email (inbound)** are "Coming soon" cards (not selectable); a **new webhook channel is outbound only** — the inbound endpoint stays visible and editable on webhooks that already have it on. MCP no longer offers `discord` / `webchat` (never implemented) in `polpo_channel_peers`.
 
 - **Artifacts keep many more versions**: defaults are now `versions.maxCount` 1000 (was 30) and `versions.maxTotalBytes` 1 GB per artifact (was 500 MB); the oldest are still pruned first, the instance total (20 GB) is unchanged. Configurable in `settings.artifacts`.
