@@ -33,6 +33,8 @@ export interface CodingTerminal {
   tabHidden?: boolean;
   /** A coding chat (src/coding): the session is a Claude Code / Codex chat through the CLI engine, not a terminal. */
   chatId?: string;
+  /** "Open as chat": the coding chat that continues this terminal session (the terminal stays). */
+  convertedToChatId?: string;
 }
 
 export interface CodingCodeServerSession {

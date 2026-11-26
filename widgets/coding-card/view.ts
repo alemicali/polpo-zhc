@@ -97,6 +97,7 @@ export function cardView(c: CodingCard, str: Strings): HTMLElement {
         h("div", { class: "role" }, [program, s.model, s.branch].filter(Boolean).join(" · "))),
       h("span", { class: `chip ${STATUS_CHIP[s.status] ?? ""}`, "data-status": s.status }, str.status[s.status] ?? s.status)),
     h("p", { class: "muted small mono" }, `${s.cwd} · ${str.turns(s.turns)} · ${str.tokens(s.totalTokens)}`),
+    s.note ? h("p", { class: "muted small", "data-note": "" }, s.note) : null,
     s.lastError ? h("p", { class: "danger small" }, s.lastError) : null,
     c.earlier ? h("p", { class: "muted small" }, str.earlier(c.earlier)) : null,
     c.messages.length ? h("div", { class: "transcript" }, ...c.messages.map((m) => messageView(str, m, program))) : h("p", { class: "muted empty" }, str.empty),

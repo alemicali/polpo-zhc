@@ -247,6 +247,54 @@ describe("stop, steer, resume", () => {
   });
 });
 
+describe("open a terminal session as a chat", () => {
+  it("Claude Code: the chat resumes the terminal's conversation (--resume <session id>) in the worktree, and says where it comes from", async () => {
+    const { m, worktree, launched } = setup();
+    const s = m.create({ kind: "claude", cwd: worktree, fromTerminal: { id: "terminal_1", label: "Session 2" }, resumeSessionId: "0d9c3a1e-terminal-uuid", prompt: "hello" }, ADA);
+    expect(s.continuedFrom).toMatchObject({ terminalId: "terminal_1", label: "Session 2", resumeSessionId: "0d9c3a1e-terminal-uuid", status: "pending" });
+    expect(s.continuedFrom!.note).toMatch(/^Continued from terminal session “Session 2”/);
+    await m.running(s.id);
+    expect(launched).toHaveLength(1);
+    expect(launched[0]!.cwd).toBe(worktree);
+    expect(launched[0]!.args).toEqual(expect.arrayContaining(["--resume", "0d9c3a1e-terminal-uuid"]));
+    expect(launched[0]!.env.CLAUDE_CONFIG_DIR).toMatch(/ada-max$/);
+    const done = m.get(s.id)!;
+    expect(done.continuedFrom!.status).toBe("resumed");
+    expect(done.runtimeSessionId).toBe("0d9c3a1e-terminal-uuid");
+    expect(done.status).toBe("idle");
+  });
+
+  it("a conversation the opener's account cannot read (another sign-in): a new conversation in the same worktree, and the chat explains", async () => {
+    const { m, worktree, launched } = setup();
+    const s = m.create({ kind: "claude", cwd: worktree, fromTerminal: { id: "terminal_1", label: "Old" }, resumeSessionId: "gone-1234" }, ADA);
+    m.send(s.id, "hello", ADA);
+    await m.running(s.id);
+    expect(launched.map((l) => l.args.includes("--resume"))).toEqual([true, false]);
+    expect(launched[1]!.cwd).toBe(worktree);
+    const done = m.get(s.id)!;
+    expect(done.status).toBe("idle");
+    expect(done.continuedFrom!.status).toBe("new");
+    expect(done.continuedFrom!.note).toMatch(/not readable with your CLI account "ada-max".*another account.*new conversation in the same worktree/);
+    expect(done.runtimeSessionId).toBe("sess-1");
+  });
+
+  it("Codex keeps no conversation id: a new chat in the same worktree, said so", async () => {
+    const { m, worktree, codexLog } = setup();
+    const s = m.create({ kind: "codex", cwd: worktree, fromTerminal: { id: "terminal_9" }, prompt: "hello" }, ADA);
+    expect(s.continuedFrom).toMatchObject({ status: "new", terminalId: "terminal_9" });
+    expect(s.continuedFrom!.note).toMatch(/starts a new conversation in the same worktree/);
+    await m.running(s.id);
+    expect(codexLog.threadStart).toMatchObject({ cwd: worktree });
+    expect(codexLog.resume).toBeUndefined();
+  });
+
+  it("checks the ids", () => {
+    const { m, worktree } = setup();
+    expect(() => m.create({ kind: "claude", cwd: worktree, resumeSessionId: "x; rm -rf /" }, ADA)).toThrow(/resumeSessionId/);
+    expect(() => m.create({ kind: "claude", cwd: worktree, fromTerminal: { id: "" } }, ADA)).toThrow(/fromTerminal/);
+  });
+});
+
 describe("account and ToS guard", () => {
   it("someone without an account gets a session that says how to sign in", () => {
     const { m, worktree } = setup();

@@ -90,7 +90,14 @@ export interface CodingChatCreateInput {
   model?: string;
   /** The first message (the turn starts at once). */
   prompt?: string;
+  /** "Open as chat": the terminal session this chat continues (the Coding app's session id and label). */
+  fromTerminal?: { id: string; label?: string };
+  /** The program's conversation to resume (Claude Code: the terminal's --session-id). */
+  resumeSessionId?: string;
 }
+
+const RESUME_ID = /^[A-Za-z0-9_-]{1,200}$/;
+const LOST_CONVERSATION = /no conversation found|session.*not found|thread.*not found/i;
 
 /** Who acts: the signed-in member (none on a personal installation). */
 export interface CodingChatActor {
@@ -275,6 +282,8 @@ export class CodingChatManager {
     let cwd: string;
     try { cwd = this.deps.checkCwd(input.cwd); } catch (err) { throw new CodingChatError((err as Error).message); }
     if (input.model !== undefined && !/^[A-Za-z0-9._:/@[\]-]{1,200}$/.test(input.model)) throw new CodingChatError("model must be a model id or alias");
+    if (input.resumeSessionId !== undefined && !RESUME_ID.test(input.resumeSessionId)) throw new CodingChatError("resumeSessionId must be the program's session id (letters, digits, - and _)");
+    if (input.fromTerminal && (typeof input.fromTerminal.id !== "string" || !input.fromTerminal.id.trim())) throw new CodingChatError("fromTerminal.id is required");
     const now = this.now();
     const member = actor.member?.toLowerCase();
     const s: CodingChatSession = {
@@ -293,6 +302,9 @@ export class CodingChatManager {
       usage: { ...ZERO_CODING_USAGE },
       costUsd: 0,
       turns: 0,
+      ...(input.fromTerminal || input.resumeSessionId ? { continuedFrom: this.continuation(input) } : {}),
+      // the first turn resumes the terminal's conversation
+      ...(input.resumeSessionId ? { runtimeSessionId: input.resumeSessionId } : {}),
       createdAt: now,
       updatedAt: now,
     };
@@ -309,6 +321,42 @@ export class CodingChatManager {
     this.bus(s, "created");
     if (input.prompt?.trim() && !("problem" in acc)) this.startTurn(s, input.prompt.trim(), actor);
     return s;
+  }
+
+  /** What a chat opened from a terminal session says first, and whether it resumes its conversation. */
+  private continuation(input: CodingChatCreateInput): NonNullable<CodingChatSession["continuedFrom"]> {
+    const name = input.kind === "claude" ? "Claude Code" : "Codex";
+    const t = input.fromTerminal;
+    const label = t?.label?.trim() ? `“${t.label.trim()}”` : t ? t.id : "a terminal";
+    const base = {
+      terminalId: t?.id ?? "",
+      ...(t?.label?.trim() ? { label: t.label.trim().slice(0, 120) } : {}),
+    };
+    if (input.resumeSessionId) {
+      return {
+        ...base, resumeSessionId: input.resumeSessionId, status: "pending",
+        note: `Continued from terminal session ${label}: the first message resumes ${name}'s conversation ${input.resumeSessionId}. The terminal session stays open.`,
+      };
+    }
+    return {
+      ...base, status: "new",
+      note: `Continued from terminal session ${label}: ${name} terminal sessions keep no conversation id Polpo can resume, so this chat starts a new conversation in the same worktree. The terminal session stays open.`,
+    };
+  }
+
+  /**
+   * The terminal's conversation cannot be resumed with this account (the terminal ran with this
+   * server's own sign-in, or another account): the chat goes on with a new conversation and says so.
+   */
+  private terminalConversationLost(s: CodingChatSession, account: CliAccount): void {
+    const c = s.continuedFrom;
+    if (!c || c.status !== "pending") return;
+    const name = s.kind === "claude" ? "Claude Code" : "Codex";
+    s.continuedFrom = {
+      ...c, status: "new",
+      note: `Continued from terminal session ${c.label ? `“${c.label}”` : c.terminalId}: its ${name} conversation ${c.resumeSessionId ?? ""} is not readable with your CLI account "${account.id}" (the terminal ran with this server's own ${name} sign-in, or another account), so this chat started a new conversation in the same worktree. The terminal session stays open, with its conversation.`,
+    };
+    this.emitSession(s);
   }
 
   private assertOwner(s: CodingChatSession, actor: CodingChatActor): void {
@@ -708,6 +756,7 @@ export class CodingChatManager {
       const sameAccount = s.account === account.id;
       s.account = account.id;
       let resume = sameAccount ? s.runtimeSessionId : undefined;
+      if (!resume && s.continuedFrom?.status === "pending") this.terminalConversationLost(s, account);
       const onEvent = (e: CliEvent) => this.onEvent(s, live, e);
       for (let attempt = 0; attempt < 2; attempt++) {
         if (live.stopped) return;
@@ -721,7 +770,8 @@ export class CodingChatManager {
           if (live.stopped) return;
           const raw = [(err as Error).message, live.conv.proc.stderrTail()].filter(Boolean).join("\n");
           // the program lost the conversation (another machine, a cleared account): a new one, with the transcript as context
-          if (resume && /no conversation found|session.*not found|thread.*not found/i.test(raw)) {
+          if (resume && LOST_CONVERSATION.test(raw)) {
+            this.terminalConversationLost(s, account);
             await live.conv.close().catch(() => undefined);
             live.conv = undefined;
             resume = undefined;
@@ -730,7 +780,8 @@ export class CodingChatManager {
           }
           throw new Error(raw);
         }
-        if (!end.ok && resume && /no conversation found|session.*not found|thread.*not found/i.test(end.error ?? "")) {
+        if (!end.ok && resume && LOST_CONVERSATION.test(end.error ?? "")) {
+          this.terminalConversationLost(s, account);
           await live.conv.close().catch(() => undefined);
           live.conv = undefined;
           resume = undefined;
@@ -741,6 +792,10 @@ export class CodingChatManager {
         break;
       }
       if (end?.sessionId) s.runtimeSessionId = end.sessionId;
+      if (end?.ok && resume && s.continuedFrom?.status === "pending") {
+        s.continuedFrom = { ...s.continuedFrom, status: "resumed" };
+        this.emitSession(s);
+      }
       if (live.conv?.session.model) s.model = live.conv.session.model;
       if (end && !end.ok && !live.stopped) {
         const c = classifyCliError(s.kind, [end.error, live.conv?.proc.stderrTail()].filter(Boolean).join("\n"), account);
