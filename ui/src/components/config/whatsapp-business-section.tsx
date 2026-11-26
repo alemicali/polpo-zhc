@@ -14,13 +14,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { Check, Copy, Inbox, Loader2, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { usePolpo, useWaBusinessStatus, type NotificationChannelConfig, type WaBizSecretKind, type WaBusinessEvent, type WaBusinessEventPage, type WaBusinessMessage, type WaBusinessSettings } from "@polpo-ai/react";
+import { usePolpo, useWaBusinessStatus, useWaContacts, type NotificationChannelConfig, type WaBizSecretKind, type WaBusinessEvent, type WaBusinessEventPage, type WaBusinessMessage, type WaBusinessSettings } from "@polpo-ai/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { OutcomeBadge } from "@/components/config/computer-webhook-events-sheet";
+import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { notifySetupSaved } from "@/lib/setup-link";
 import { cn } from "@/lib/utils";
 
@@ -374,6 +375,78 @@ export function WaBusinessLive({ channel }: { channel: string }) {
         </div>
       )}
       <EventsSheet channel={channel} open={eventsOpen} onOpenChange={setEventsOpen} />
+    </div>
+  );
+}
+
+/**
+ * A channel's contacts (newest first): the 24-hour window, opt-in and opt-out, with the operator's
+ * actions — record an opt-in or an opt-out (an opted-out contact gets nothing, templates included)
+ * and erase a contact with its messages (a GDPR request), after a confirmation.
+ */
+export function WaBusinessContacts({ channel }: { channel: string }) {
+  const { contacts, isLoading, error, setOptIn, erase } = useWaContacts(channel);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [erasing, setErasing] = useState<string | null>(null);
+  const run = async (waId: string, fn: () => Promise<void>, done: string) => {
+    setBusy(waId);
+    try {
+      await fn();
+      toast.success(done);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+  if (isLoading && contacts.length === 0) return <div className="flex items-center gap-2 text-caption text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading contacts…</div>;
+  if (error && contacts.length === 0) return <p className="text-caption text-destructive">{error.message}</p>;
+  return (
+    <div className="space-y-1.5" data-testid="wabiz-contacts">
+      {contacts.length === 0 && <p className="text-caption text-muted-foreground">No contacts yet: they appear when someone writes to the number.</p>}
+      {contacts.map((c) => {
+        const optedOut = !!c.optOut;
+        return (
+          <div key={c.waId} className="flex flex-wrap items-center gap-2 rounded-md border border-border/40 bg-muted/15 px-2.5 py-1.5 text-caption" data-testid={`wabiz-contact-${c.waId}`}>
+            <span className="font-medium">{c.name ?? c.waId}</span>
+            {c.name && <span className="font-mono text-muted-foreground">{c.waId}</span>}
+            <Badge variant="outline" className={cn("font-normal", c.window?.open ? "border-success/30 bg-success/10 text-success" : "text-muted-foreground")}>
+              {c.window?.open ? "Window open" : "Window closed"}
+            </Badge>
+            {optedOut && <Badge variant="outline" className="border-warning/30 bg-warning/10 font-normal text-warning">Opted out</Badge>}
+            {c.optIn && <Badge variant="outline" className="border-info/30 bg-info/10 font-normal text-info">Opted in</Badge>}
+            <span className="ml-auto flex gap-1">
+              <Button size="sm" variant="outline" className="h-7 text-xs" disabled={busy === c.waId}
+                onClick={() => void run(c.waId, () => setOptIn(c.waId, optedOut || !c.optIn), optedOut || !c.optIn ? "Opt-in recorded" : "Opt-out recorded")}>
+                {optedOut || !c.optIn ? "Record opt-in" : "Record opt-out"}
+              </Button>
+              {!optedOut && !c.optIn && (
+                <Button size="sm" variant="ghost" className="h-7 text-xs" disabled={busy === c.waId}
+                  onClick={() => void run(c.waId, () => setOptIn(c.waId, false), "Opt-out recorded")}>
+                  Opt out
+                </Button>
+              )}
+              <Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:text-destructive" aria-label={`Erase ${c.waId}`} disabled={busy === c.waId}
+                onClick={() => setErasing(c.waId)}>
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </span>
+          </div>
+        );
+      })}
+      <ConfirmDialog
+        open={!!erasing}
+        onOpenChange={(o) => { if (!o) setErasing(null); }}
+        title={`Erase ${erasing ?? ""}?`}
+        description="This deletes the contact and every message kept for them (a GDPR erasure request). It cannot be undone."
+        confirmLabel="Erase"
+        destructive
+        loading={!!erasing && busy === erasing}
+        onConfirm={() => {
+          const waId = erasing!;
+          void run(waId, () => erase(waId), "Contact erased").then(() => setErasing(null));
+        }}
+      />
     </div>
   );
 }

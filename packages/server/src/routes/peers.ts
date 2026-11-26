@@ -116,15 +116,18 @@ const linkPeersRoute = createRoute({
     body: {
       content: {
         "application/json": {
-          schema: z.object({ peerId: z.string(), linkedTo: z.string() }),
+          schema: z.object({
+            peerId: z.string().min(1).describe("The peer to link, e.g. slack:U0123"),
+            linkedTo: z.string().min(1).nullable().describe("The identity it shares sessions with (another known peer, e.g. telegram:12345); null unlinks it"),
+          }),
         },
       },
     },
   },
   responses: {
     200: { content: { "application/json": { schema: SuccessResponse } }, description: "Peers linked" },
-    400: { content: { "application/json": { schema: ErrorResponse } }, description: "Missing fields" },
-    404: { content: { "application/json": { schema: ErrorResponse } }, description: "Gateway not configured" },
+    400: { content: { "application/json": { schema: ErrorResponse } }, description: "Missing fields, or a peer linked to itself" },
+    404: { content: { "application/json": { schema: ErrorResponse } }, description: "Unknown peer, or gateway not configured" },
   },
 });
 
@@ -246,6 +249,8 @@ export interface PeerRouteDeps {
   peerStore?: any;
   /** Gateway of the named channel, or the primary one when omitted. */
   getGateway?: (channel?: string) => PeerInviteGateway | undefined;
+  /** The named channel's type (invites on Slack are redeemed with the slash command). */
+  getChannelType?: (channel?: string) => string | undefined;
   /** Bot token of the named Telegram channel (or the primary one), for getMe and deep links. */
   getTelegramBotToken?: (channel?: string) => string | undefined;
   /** Tokens of every configured Telegram channel: their pollers own getUpdates. */
@@ -370,7 +375,7 @@ export function peerRoutes(getDeps: () => PeerRouteDeps): OpenAPIHono {
 
   // ── Create invite link ──
   app.openapi(createInviteRoute, async (c) => {
-    const { getGateway, getTelegramBotToken, fetch: fetchImpl = fetch } = getDeps();
+    const { getGateway, getTelegramBotToken, getChannelType, fetch: fetchImpl = fetch } = getDeps();
     const channel = c.req.valid("query").channel;
     const gateway = getGateway?.(channel);
     const telegramBotToken = getTelegramBotToken?.(channel);
@@ -384,7 +389,9 @@ export function peerRoutes(getDeps: () => PeerRouteDeps): OpenAPIHono {
       if (!("error" in me)) bot = me;
     }
     const link = bot ? `https://t.me/${bot.username}?start=${invite.token}` : undefined;
-    return c.json({ ok: true, data: { ...invite, botUsername: bot?.username, link, command: `/start ${invite.token}` } }, 200);
+    // Slack keeps "/start" for itself: the person runs the app's slash command instead (in a DM with the bot)
+    const command = getChannelType?.(channel) === "slack" ? `/polpo start ${invite.token}` : `/start ${invite.token}`;
+    return c.json({ ok: true, data: { ...invite, botUsername: bot?.username, link, command } }, 200);
   });
 
   // ── Invite status (polled by the UI) ──
@@ -464,10 +471,12 @@ export function peerRoutes(getDeps: () => PeerRouteDeps): OpenAPIHono {
     if (!peerStore) return c.json({ ok: false, error: "Channel gateway not configured" }, 404);
 
     const { peerId, linkedTo } = c.req.valid("json");
-    if (!peerId || !linkedTo) {
+    if (!peerId || linkedTo === undefined) {
       return c.json({ ok: false, error: "peerId and linkedTo are required" }, 400);
     }
-
+    if (linkedTo === peerId) return c.json({ ok: false, error: "A peer cannot be linked to itself" }, 400);
+    if (!await peerStore.getPeer(peerId)) return c.json({ ok: false, error: `Unknown peer "${peerId}"` }, 404);
+    if (linkedTo && !await peerStore.getPeer(linkedTo)) return c.json({ ok: false, error: `Unknown peer "${linkedTo}"` }, 404);
     await peerStore.linkPeers(peerId, linkedTo);
     return c.json({ ok: true, data: { peerId, linkedTo } }, 200);
   });
