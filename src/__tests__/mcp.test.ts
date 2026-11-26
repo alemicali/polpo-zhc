@@ -151,7 +151,7 @@ describe("Polpo MCP server", () => {
       "polpo_skill_versions", "polpo_skill_version_diff", "polpo_skill_restore",
       "polpo_schedules_list", "polpo_schedule_create", "polpo_schedule_update", "polpo_schedule_delete", "polpo_schedule_run",
       "polpo_checks_list", "polpo_check_create", "polpo_check_update", "polpo_check_cancel", "polpo_check_delete",
-      "polpo_triggers_list", "polpo_trigger_get", "polpo_trigger_deliveries", "polpo_trigger_create", "polpo_trigger_update", "polpo_trigger_delete", "polpo_trigger_test", "polpo_trigger_auth", "polpo_trigger_show",
+      "polpo_triggers_list", "polpo_trigger_get", "polpo_trigger_deliveries", "polpo_trigger_create", "polpo_trigger_update", "polpo_trigger_delete", "polpo_trigger_test", "polpo_trigger_run_actions", "polpo_trigger_auth", "polpo_trigger_show",
       "polpo_decide", "polpo_decisions", "polpo_decision_resolve", "polpo_decision_show",
       "polpo_connectors_list", "polpo_connector_catalog", "polpo_connector_add", "polpo_connector_update", "polpo_connector_test", "polpo_connector_connect", "polpo_connector_disconnect", "polpo_connector_remove",
       "polpo_mcp_servers_list", "polpo_mcp_server_get", "polpo_mcp_server_create", "polpo_mcp_server_templates", "polpo_mcp_server_install", "polpo_mcp_server_generate", "polpo_mcp_server_update", "polpo_mcp_server_test",

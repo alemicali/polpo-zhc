@@ -1,7 +1,7 @@
 /**
  * The MCP trigger card (widgets/trigger-card/view.ts) rendered in a DOM from the server's cards
  * (src/server/mcp-trigger-card.ts): the list with endpoints, auth, counts and warnings; one trigger
- * with its deliveries, the status filter, the last mapped values, and the actions.
+ * with its deliveries, the status filter, the last mapped values, its actions and each delivery's action runs.
  */
 import { describe, expect, it, vi } from "vitest";
 import { renderView } from "../../widgets/trigger-card/view";
@@ -15,6 +15,7 @@ const trigger: TriggerShape = {
   filter: { mode: "all", conditions: [{ path: "body.event", op: "equals", value: "submitted" }] },
   dedupe: { key: "{{body.id}}", ttlSeconds: 600 }, rateLimitPerMinute: 60, mapping: { email: "{{body.email}}" },
   stats: { counts: { accepted: 4, rejected: 1, filtered: 2 }, total: 7, lastDeliveryAt: "2026-11-26T10:00:00Z", lastStatus: "accepted" },
+  actions: [{ id: "n1", kind: "notify", enabled: true, channel: "tg" }],
 };
 const env = (card: unknown, extra: Record<string, unknown> = {}) => ({ card: card as never, locale: "en", full: false, canFullscreen: true, busy: false, superseded: false, ...extra });
 
@@ -22,7 +23,7 @@ describe("the trigger card (MCP App)", () => {
   it("lists triggers with their endpoint, auth, counts and a missing HMAC secret; a trigger opens", () => {
     const root = document.createElement("div");
     const onShow = vi.fn();
-    const card = buildTriggerListCard({ triggers: [trigger, { ...trigger, id: "off-00000000", name: "Old hook", enabled: false, auth: { secret: true }, hmacSecret: undefined, stats: { counts: {}, total: 0 } }], key });
+    const card = buildTriggerListCard({ triggers: [trigger, { ...trigger, id: "off-00000000", name: "Old hook", enabled: false, auth: { secret: true }, hmacSecret: undefined, stats: { counts: {}, total: 0 }, actions: undefined }], key });
     renderView(root, env(card, { onShow }));
     const row = root.querySelector('[data-trigger="signup-3f9a1c2e"]')!;
     expect(row.textContent).toContain("https://host.ts.net/acme/hooks/signup-3f9a1c2e");
@@ -30,10 +31,38 @@ describe("the trigger card (MCP App)", () => {
     expect(row.textContent).toContain("4 accepted · 1 rejected · 2 filtered");
     expect(row.textContent).toContain("The HMAC signing secret is not set");
     expect(root.querySelector('[data-trigger="off-00000000"]')!.textContent).toContain("Disabled");
-    expect(root.textContent).toContain("No actions run on deliveries yet");
+    expect(row.textContent).toContain("1 action");
+    expect(root.querySelector('[data-trigger="off-00000000"]')!.textContent).toContain("no actions");
     (row.querySelector(".link-btn") as HTMLButtonElement).click();
     expect(onShow).toHaveBeenCalledWith({ id: "signup-3f9a1c2e" });
     expect(triggerCardText(card)).toContain("Signup form [signup-3f9a1c2e]");
+    expect(triggerCardText(card)).toContain("1 action");
+  });
+
+  it("one trigger's actions, and each delivery's action runs with what they created", () => {
+    const root = document.createElement("div");
+    const card = buildTriggerDetailCard({
+      trigger: { ...trigger, actions: [
+        { id: "pb", kind: "playbook", enabled: true, playbook: "onboarding" },
+        { id: "ag", kind: "agent", enabled: false, agent: "writer", deliverTo: { channel: "tg", chatId: "42", name: "Ops" } },
+      ] }, key,
+      deliveries: [{
+        id: "tdl_9", receivedAt: "2026-11-26T10:00:00Z", status: "accepted", httpStatus: 202, reasons: [], bytes: 40, actionsStatus: "partial",
+        actions: [
+          { actionId: "pb", kind: "playbook", status: "done", refs: { missionId: "m1", missionName: "onboarding" } },
+          { actionId: "ag", kind: "agent", status: "failed", error: "model down" },
+        ],
+      }],
+    });
+    renderView(root, env(card));
+    expect(root.textContent).toContain("1. Run playbook onboarding · 2. writer takes a turn → Ops (disabled)");
+    const runs = root.querySelector('[data-runs="tdl_9"]')!;
+    expect(runs.querySelector('[data-run="pb"]')!.textContent).toContain("mission onboarding");
+    expect(runs.querySelector('[data-run="ag"]')!.getAttribute("data-run-status")).toBe("failed");
+    expect(runs.querySelector('[data-run="ag"]')!.textContent).toContain("model down");
+    const text = triggerCardText(card);
+    expect(text).toContain("actions: 1. Run playbook onboarding; 2. writer takes a turn → Ops (disabled)");
+    expect(text).toContain("actions partial (pb done → mission onboarding; ag failed: model down)");
   });
 
   it("one trigger: its rules in words, deliveries with reasons and errors, the status filter, the last mapped values", () => {

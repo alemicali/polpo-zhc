@@ -1766,6 +1766,16 @@
           "retention": {
             "type": "integer"
           },
+          "actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TriggerAction"
+            },
+            "description": "What runs on an accepted delivery, in order"
+          },
+          "actionLimits": {
+            "$ref": "#/components/schemas/TriggerActionLimits"
+          },
           "endpoint": {
             "type": "string",
             "description": "POLPO_PUBLIC_URL + /hooks/{id} (the path when the public URL is unknown)"
@@ -1961,6 +1971,292 @@
           "ttlSeconds"
         ]
       },
+      "TriggerAction": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Stable within the trigger (generated when absent); later actions read its outputs as {{steps.<id>.…}}"
+              },
+              "enabled": {
+                "type": "boolean",
+                "description": "Default true; a disabled action is recorded as skipped"
+              },
+              "name": {
+                "type": "string"
+              },
+              "retries": {
+                "type": "integer",
+                "description": "Retries after a failure with backoff (default 2; 0 for agent). What was created is never created again"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "playbook"
+                ]
+              },
+              "playbook": {
+                "type": "string"
+              },
+              "params": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Parameter → template over body / headers / query / mapped / trigger / delivery / steps, e.g. {{mapped.email}}"
+              },
+              "waitSeconds": {
+                "type": "integer",
+                "description": "Wait until it ends (at most 3600 s): later actions read {{steps.<id>.result}} and .status"
+              }
+            },
+            "required": [
+              "kind",
+              "playbook"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Stable within the trigger (generated when absent); later actions read its outputs as {{steps.<id>.…}}"
+              },
+              "enabled": {
+                "type": "boolean",
+                "description": "Default true; a disabled action is recorded as skipped"
+              },
+              "name": {
+                "type": "string"
+              },
+              "retries": {
+                "type": "integer",
+                "description": "Retries after a failure with backoff (default 2; 0 for agent). What was created is never created again"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "mission"
+                ]
+              },
+              "mission": {
+                "type": "string",
+                "description": "Mission id or name"
+              },
+              "variables": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Replace {{name}} in a copy of the mission"
+              },
+              "waitSeconds": {
+                "type": "integer",
+                "description": "Wait until it ends (at most 3600 s): later actions read {{steps.<id>.result}} and .status"
+              }
+            },
+            "required": [
+              "kind",
+              "mission"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Stable within the trigger (generated when absent); later actions read its outputs as {{steps.<id>.…}}"
+              },
+              "enabled": {
+                "type": "boolean",
+                "description": "Default true; a disabled action is recorded as skipped"
+              },
+              "name": {
+                "type": "string"
+              },
+              "retries": {
+                "type": "integer",
+                "description": "Retries after a failure with backoff (default 2; 0 for agent). What was created is never created again"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "task"
+                ]
+              },
+              "title": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "assignTo": {
+                "type": "string"
+              },
+              "waitSeconds": {
+                "type": "integer",
+                "description": "Wait until it ends (at most 3600 s): later actions read {{steps.<id>.result}} and .status"
+              }
+            },
+            "required": [
+              "kind",
+              "title",
+              "description",
+              "assignTo"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Stable within the trigger (generated when absent); later actions read its outputs as {{steps.<id>.…}}"
+              },
+              "enabled": {
+                "type": "boolean",
+                "description": "Default true; a disabled action is recorded as skipped"
+              },
+              "name": {
+                "type": "string"
+              },
+              "retries": {
+                "type": "integer",
+                "description": "Retries after a failure with backoff (default 2; 0 for agent). What was created is never created again"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "agent"
+                ]
+              },
+              "agent": {
+                "type": "string",
+                "description": "Absent: Polpo"
+              },
+              "instructions": {
+                "type": "string",
+                "description": "Only {{trigger.*}} / {{delivery.*}}: the payload follows as delimited data, never inside the instructions"
+              },
+              "data": {
+                "type": "string",
+                "enum": [
+                  "mapped",
+                  "body",
+                  "both"
+                ]
+              },
+              "allowedTools": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Only these tools in this turn ('prefix*' a family; [] none)"
+              },
+              "maxSteps": {
+                "type": "integer"
+              },
+              "deliverTo": {
+                "type": "object",
+                "properties": {
+                  "channel": {
+                    "type": "string"
+                  },
+                  "chatId": {
+                    "type": "string"
+                  },
+                  "threadId": {
+                    "type": "integer"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "channel",
+                  "chatId"
+                ],
+                "description": "Also send the reply to this chat (e.g. Telegram)"
+              }
+            },
+            "required": [
+              "kind",
+              "instructions"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Stable within the trigger (generated when absent); later actions read its outputs as {{steps.<id>.…}}"
+              },
+              "enabled": {
+                "type": "boolean",
+                "description": "Default true; a disabled action is recorded as skipped"
+              },
+              "name": {
+                "type": "string"
+              },
+              "retries": {
+                "type": "integer",
+                "description": "Retries after a failure with backoff (default 2; 0 for agent). What was created is never created again"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "notify"
+                ]
+              },
+              "channel": {
+                "type": "string",
+                "description": "A notification channel id (settings.notifications.channels)"
+              },
+              "title": {
+                "type": "string"
+              },
+              "body": {
+                "type": "string"
+              },
+              "severity": {
+                "type": "string",
+                "enum": [
+                  "info",
+                  "warning",
+                  "critical"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "channel",
+              "body"
+            ]
+          }
+        ]
+      },
+      "TriggerActionLimits": {
+        "type": "object",
+        "properties": {
+          "concurrency": {
+            "type": "integer",
+            "description": "Deliveries whose actions run at once (default 2)"
+          },
+          "perMinute": {
+            "type": "integer",
+            "description": "Actions started a minute (default 30); beyond: skipped"
+          },
+          "perDay": {
+            "type": "integer",
+            "description": "Actions started a day (default 1000); beyond: skipped"
+          },
+          "agentDailyCostUsd": {
+            "type": "number",
+            "description": "What the agent actions may spend a day (USD); beyond: skipped"
+          }
+        }
+      },
       "TriggerInput": {
         "type": "object",
         "properties": {
@@ -2108,6 +2404,37 @@
           },
           "retention": {
             "type": "integer"
+          },
+          "actions": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "$ref": "#/components/schemas/TriggerAction"
+            },
+            "description": "Replaces the actions (in order); null or [] removes them"
+          },
+          "actionLimits": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "concurrency": {
+                "type": "integer",
+                "description": "Deliveries whose actions run at once (default 2)"
+              },
+              "perMinute": {
+                "type": "integer",
+                "description": "Actions started a minute (default 30); beyond: skipped"
+              },
+              "perDay": {
+                "type": "integer",
+                "description": "Actions started a day (default 1000); beyond: skipped"
+              },
+              "agentDailyCostUsd": {
+                "type": "number",
+                "description": "What the agent actions may spend a day (USD); beyond: skipped"
+              }
+            },
+            "description": "null: the defaults"
           }
         }
       },
@@ -2237,6 +2564,90 @@
           },
           "count": {
             "type": "number"
+          },
+          "actionsStatus": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "done",
+              "failed",
+              "skipped",
+              "partial"
+            ],
+            "description": "The delivery's actions as a whole (partial: some done, some failed)"
+          },
+          "actionsRequestedBy": {
+            "type": "string",
+            "description": "The member the actions ran for (the trigger's owner)"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/WorkOrigin"
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "actionId": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "playbook",
+                    "mission",
+                    "task",
+                    "agent",
+                    "notify"
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "queued",
+                    "running",
+                    "done",
+                    "failed",
+                    "skipped"
+                  ]
+                },
+                "attempts": {
+                  "type": "integer"
+                },
+                "queuedAt": {
+                  "type": "string"
+                },
+                "startedAt": {
+                  "type": "string"
+                },
+                "endedAt": {
+                  "type": "string"
+                },
+                "error": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "refs": {
+                  "$ref": "#/components/schemas/TriggerActionRefs"
+                },
+                "costUsd": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "actionId",
+                "kind",
+                "status",
+                "attempts",
+                "queuedAt"
+              ]
+            }
           }
         },
         "required": [
@@ -2249,6 +2660,70 @@
           "bytes",
           "contractVersion"
         ]
+      },
+      "WorkOrigin": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "trigger"
+            ]
+          },
+          "triggerId": {
+            "type": "string"
+          },
+          "deliveryId": {
+            "type": "string"
+          },
+          "triggerName": {
+            "type": "string"
+          },
+          "actionId": {
+            "type": "string"
+          },
+          "depth": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "triggerId",
+          "deliveryId"
+        ],
+        "description": "It arrived while another trigger's actions ran (loop guard chain)"
+      },
+      "TriggerActionRefs": {
+        "type": "object",
+        "properties": {
+          "playbook": {
+            "type": "string"
+          },
+          "missionId": {
+            "type": "string"
+          },
+          "missionName": {
+            "type": "string"
+          },
+          "copyOf": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "notificationId": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          }
+        }
       },
       "TriggerDelivery": {
         "type": "object",
@@ -2352,6 +2827,64 @@
           "count": {
             "type": "number"
           },
+          "actionsStatus": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "done",
+              "failed",
+              "skipped",
+              "partial"
+            ],
+            "description": "The delivery's actions as a whole (partial: some done, some failed)"
+          },
+          "actionsRequestedBy": {
+            "type": "string",
+            "description": "The member the actions ran for (the trigger's owner)"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/WorkOrigin"
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TriggerActionRun"
+            },
+            "description": "Each action's run: status, attempts, times, error, refs to what it created, outputs"
+          },
+          "previousActions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "endedAt": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "queued",
+                    "running",
+                    "done",
+                    "failed",
+                    "skipped",
+                    "partial"
+                  ]
+                },
+                "runs": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TriggerActionRun"
+                  }
+                }
+              },
+              "required": [
+                "runs"
+              ]
+            },
+            "description": "Earlier runs (re-runs), newest first"
+          },
           "headers": {
             "type": "object",
             "additionalProperties": {
@@ -2425,6 +2958,74 @@
           "contractVersion",
           "headers",
           "query"
+        ]
+      },
+      "TriggerActionRun": {
+        "type": "object",
+        "properties": {
+          "actionId": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "playbook",
+              "mission",
+              "task",
+              "agent",
+              "notify"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "done",
+              "failed",
+              "skipped"
+            ]
+          },
+          "attempts": {
+            "type": "integer"
+          },
+          "queuedAt": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "endedAt": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "refs": {
+            "$ref": "#/components/schemas/TriggerActionRefs"
+          },
+          "costUsd": {
+            "type": "number"
+          },
+          "outputs": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            }
+          }
+        },
+        "required": [
+          "actionId",
+          "kind",
+          "status",
+          "attempts",
+          "queuedAt"
         ]
       },
       "TriggerDryRun": {
@@ -2592,6 +3193,10 @@
                 }
               ]
             }
+          },
+          "runActions": {
+            "type": "boolean",
+            "description": "Test delivery: also run the trigger's actions (default false: a test runs nothing)"
           }
         }
       }
@@ -6311,10 +6916,10 @@
                   ]
                 }
               ],
-              "description": "Alias for `summary=true`. Returns a slim projection (id, name, status, schedule, deadline, endDate, qualityThreshold, budgetUsd, pauseReason, owner, cost, timestamps, taskCount, promptPreview)."
+              "description": "Alias for `summary=true`. Returns a slim projection (id, name, status, schedule, deadline, endDate, qualityThreshold, budgetUsd, pauseReason, owner, origin, cost, timestamps, taskCount, promptPreview)."
             },
             "required": false,
-            "description": "Alias for `summary=true`. Returns a slim projection (id, name, status, schedule, deadline, endDate, qualityThreshold, budgetUsd, pauseReason, owner, cost, timestamps, taskCount, promptPreview).",
+            "description": "Alias for `summary=true`. Returns a slim projection (id, name, status, schedule, deadline, endDate, qualityThreshold, budgetUsd, pauseReason, owner, origin, cost, timestamps, taskCount, promptPreview).",
             "name": "slim",
             "in": "query"
           }
@@ -39837,7 +40442,7 @@
           "Triggers"
         ],
         "summary": "Create a trigger",
-        "description": "A new trigger. With the generated secret on (the default unless only an HMAC is configured), `secret` is returned this once: only its hash is kept. Nothing runs on a delivery yet: the action engine comes later; deliveries are recorded and announced (trigger:delivery).",
+        "description": "A new trigger. With the generated secret on (the default unless only an HMAC is configured), `secret` is returned this once: only its hash is kept. An accepted delivery runs the trigger's actions (in order, after the 202; see actions); deliveries are recorded and announced (trigger:delivery).",
         "requestBody": {
           "content": {
             "application/json": {
@@ -41376,13 +41981,465 @@
         }
       }
     },
+    "/api/v1/triggers/{id}/deliveries/{deliveryId}/run-actions": {
+      "post": {
+        "tags": [
+          "Triggers"
+        ],
+        "summary": "Re-run a delivery's actions",
+        "description": "Runs the trigger's current actions again on a stored accepted delivery (a test one too), after the answer: 202 with the queued runs. The previous runs are kept on the delivery (previousActions). 409 while its actions are still queued or running, or when the trigger is disabled.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "deliveryId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "deliveryId": {
+                          "type": "string"
+                        },
+                        "actionsStatus": {
+                          "type": "string",
+                          "enum": [
+                            "queued",
+                            "running",
+                            "done",
+                            "failed",
+                            "skipped",
+                            "partial"
+                          ]
+                        },
+                        "actions": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/TriggerActionRun"
+                          }
+                        }
+                      },
+                      "required": [
+                        "deliveryId",
+                        "actions"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such trigger (or delivery)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Running, or the trigger is disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/triggers/{id}/actions/preview": {
+      "post": {
+        "tags": [
+          "Triggers"
+        ],
+        "summary": "Preview the actions on a delivery",
+        "description": "Renders the trigger's actions (or a draft of them) against a stored delivery (default: the newest accepted one) without running anything: playbook params, mission variables, task title and description, the agent's message (instructions, then the payload as delimited data), the notification.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "deliveryId": {
+                    "type": "string"
+                  },
+                  "actions": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/TriggerAction"
+                    },
+                    "description": "A draft (unsaved)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The rendered actions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "deliveryId": {
+                          "type": "string"
+                        },
+                        "note": {
+                          "type": "string"
+                        },
+                        "actions": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "actionId": {
+                                "type": "string"
+                              },
+                              "kind": {
+                                "type": "string"
+                              },
+                              "rendered": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "nullable": true
+                                }
+                              },
+                              "error": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "actionId",
+                              "kind",
+                              "rendered"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "actions"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such trigger (or delivery)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/triggers/{id}/action-usage": {
+      "get": {
+        "tags": [
+          "Triggers"
+        ],
+        "summary": "A trigger's action usage today",
+        "description": "Actions started today (UTC) and what its agent actions spent, against the limits (actionLimits).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Usage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "day": {
+                          "type": "string"
+                        },
+                        "actions": {
+                          "type": "number"
+                        },
+                        "agentUsd": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "day",
+                        "actions",
+                        "agentUsd"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such trigger (or delivery)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/triggers/{id}/test": {
       "post": {
         "tags": [
           "Triggers"
         ],
         "summary": "Send a test delivery",
-        "description": "Records a delivery marked test: true, through the contract, filter, dedupe and mapping (no secret, IP or rate limit check) and announces it (trigger:delivery).",
+        "description": "Records a delivery marked test: true, through the contract, filter, dedupe and mapping (no secret, IP or rate limit check) and announces it (trigger:delivery). Its actions run only with runActions: true.",
         "parameters": [
           {
             "schema": {

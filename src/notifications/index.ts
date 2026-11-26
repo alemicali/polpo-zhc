@@ -615,6 +615,10 @@ export class NotificationRouter {
     body: string;
     severity?: "info" | "warning" | "critical";
     delayMs?: number;
+    /** Fail (throw) when the channel refuses the message, instead of only recording the failure (immediate sends). */
+    throwOnError?: boolean;
+    /** The name the notification log shows for it (default "Direct Send"), e.g. the trigger that sent it. */
+    ruleName?: string;
   }): Promise<{ id: string; scheduledAt: string; firesAt: string }> {
     const ch = this.channels.get(opts.channel);
     if (!ch) throw new Error(`Channel "${opts.channel}" not found`);
@@ -649,7 +653,7 @@ export class NotificationRouter {
             id: notification.id,
             timestamp: notification.timestamp,
             ruleId: "direct",
-            ruleName: "Direct Send",
+            ruleName: opts.ruleName ?? "Direct Send",
             channel: opts.channel,
             channelType: ch.type,
             status: "sent",
@@ -673,7 +677,7 @@ export class NotificationRouter {
             id: notification.id,
             timestamp: notification.timestamp,
             ruleId: "direct",
-            ruleName: "Direct Send",
+            ruleName: opts.ruleName ?? "Direct Send",
             channel: opts.channel,
             channelType: ch.type,
             status: "failed",
@@ -686,6 +690,7 @@ export class NotificationRouter {
           };
           this.store.append(record);
         }
+        if (opts.throwOnError && !(opts.delayMs && opts.delayMs > 0)) throw err;
       }
     };
 

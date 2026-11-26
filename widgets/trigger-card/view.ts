@@ -2,9 +2,9 @@
  * The trigger card's view: DOM from a card (src/server/mcp-trigger-card.ts) with no host wiring, so
  * it can be tested in a DOM (ui/tests/mcp-trigger-card.test.ts). main.ts connects it to the MCP host.
  *
- *   triggers  each trigger with its endpoint, auth, contract version, counts and last delivery
- *   trigger   one trigger: its definition in words, delivery counts, the recent deliveries
- *             (status, HTTP answer, reasons, contract errors), the last mapped values
+ *   triggers  each trigger with its endpoint, auth, contract version, counts, actions and last delivery
+ *   trigger   one trigger: its definition in words, its actions, delivery counts, the recent
+ *             deliveries (status, HTTP answer, reasons, contract errors, each action's run), the last mapped values
  */
 import type { TriggerCard, TriggerDetailCard, TriggerListCard } from "../../src/server/mcp-trigger-card.js";
 
@@ -14,7 +14,9 @@ export const STRINGS = {
     noTriggers: "No triggers yet", noDeliveries: "No deliveries yet", never: "no deliveries yet", disabled: "Disabled",
     total: (n: number) => `${n} deliver${n === 1 ? "y" : "ies"}`, mapped: "Last mapped values", filter: "Filter", dedupe: "Dedupe", mapping: "Mapping",
     auth: "Auth", contract: "Contract", rate: (n: number) => `${n}/min`, test: "test", all: "All", error: "Could not load the card", superseded: "There is a newer card for this below",
-    noActions: "No actions run on deliveries yet: the action engine comes later.",
+    noActions: "No actions: deliveries are only recorded.", actions: "Actions", actionsOn: "Actions",
+    actionCount: (n: number) => (n ? `${n} action${n === 1 ? "" : "s"}` : "no actions"),
+    run: { queued: "queued", running: "running", done: "done", failed: "failed", skipped: "skipped", partial: "partial" } as Record<string, string>,
     askAbout: (name: string) => `What did the trigger "${name}" receive lately, and is anything being refused?`,
     askAll: "How are my triggers doing?",
     status: { accepted: "Accepted", rejected: "Rejected", filtered: "Filtered", duplicate: "Duplicate", rate_limited: "Rate limited" } as Record<string, string>,
@@ -24,7 +26,9 @@ export const STRINGS = {
     noTriggers: "Ancora nessun trigger", noDeliveries: "Ancora nessuna consegna", never: "ancora nessuna consegna", disabled: "Disattivato",
     total: (n: number) => `${n} consegn${n === 1 ? "a" : "e"}`, mapped: "Ultimi valori mappati", filter: "Filtro", dedupe: "Deduplica", mapping: "Mappatura",
     auth: "Autenticazione", contract: "Contratto", rate: (n: number) => `${n}/min`, test: "test", all: "Tutte", error: "Non riesco a caricare la scheda", superseded: "C'è una scheda più recente più sotto",
-    noActions: "Per ora le consegne non avviano azioni: il motore delle azioni arriva dopo.",
+    noActions: "Nessuna azione: le consegne vengono solo registrate.", actions: "Azioni", actionsOn: "Azioni",
+    actionCount: (n: number) => (n ? `${n} azion${n === 1 ? "e" : "i"}` : "nessuna azione"),
+    run: { queued: "in coda", running: "in corso", done: "fatta", failed: "fallita", skipped: "saltata", partial: "parziale" } as Record<string, string>,
     askAbout: (name: string) => `Cosa ha ricevuto di recente il trigger "${name}", e qualcosa viene rifiutato?`,
     askAll: "Come stanno andando i miei trigger?",
     status: { accepted: "Accettata", rejected: "Rifiutata", filtered: "Filtrata", duplicate: "Duplicata", rate_limited: "Limitata" } as Record<string, string>,
@@ -70,6 +74,7 @@ const STATUSES = ["accepted", "rejected", "filtered", "duplicate", "rate_limited
 const tone = (st: string) => (st === "accepted" ? "success" : st === "rejected" ? "danger" : st === "rate_limited" ? "warning" : st === "duplicate" ? "info" : "neutral");
 const when = (iso: string | undefined, locale: string | undefined) => (iso ? new Date(iso).toLocaleString(locale, { dateStyle: "short", timeStyle: "short" }) : "");
 const chip = (str: Strings, st: string) => h("span", { class: `chip chip-sm chip-${tone(st)}`, "data-status": st }, str.status[st] ?? st);
+const runTone = (st: string) => (st === "done" ? "success" : st === "failed" ? "danger" : st === "running" || st === "queued" ? "info" : "neutral");
 const countsLine = (str: Strings, c: Record<string, number>) => STATUSES.filter((s) => c[s]).map((s) => `${c[s]} ${(str.status[s] ?? s).toLowerCase()}`).join(" · ");
 
 function header(title: string, subtitle: string, right?: Child): HTMLElement {
@@ -92,12 +97,11 @@ export function listView(c: TriggerListCard, str: Strings): HTMLElement {
         h("div", {}, h("button", { class: "link-btn", disabled: env.superseded || env.busy, onclick: () => env.onShow?.({ id: t.id }) }, t.name),
           t.enabled ? null : h("span", { class: "chip chip-sm" }, str.disabled)),
         h("div", { class: "muted small mono" }, t.endpoint),
-        h("div", { class: "muted small" }, [t.auth.join(" + "), `v${t.contractVersion} ${t.contentTypes.join("/")}`, countsLine(str, t.counts) || str.never].filter(Boolean).join(" · ")),
+        h("div", { class: "muted small" }, [t.auth.join(" + "), `v${t.contractVersion} ${t.contentTypes.join("/")}`, str.actionCount(t.actionCount ?? 0), countsLine(str, t.counts) || str.never].filter(Boolean).join(" · ")),
         t.warning ? h("div", { class: "small danger-text" }, `⚠ ${t.warning}`) : null),
       h("div", { class: "row-actions" },
         t.lastDeliveryAt ? h("span", { class: "muted small" }, when(t.lastDeliveryAt, env.locale)) : null,
         t.lastStatus ? chip(str, t.lastStatus) : null)))) : h("p", { class: "muted empty" }, str.noTriggers),
-    h("p", { class: "muted small" }, str.noActions),
     actions(str));
 }
 
@@ -109,6 +113,7 @@ export function detailView(c: TriggerDetailCard, str: Strings): HTMLElement {
     ...(t.filter ? [[str.filter, t.filter] as [string, string]] : []),
     ...(t.dedupe ? [[str.dedupe, t.dedupe] as [string, string]] : []),
     ...(t.mapping ? [[str.mapping, Object.entries(t.mapping).map(([k, v]) => `${k} ← ${v}`).join(", ")] as [string, string]] : []),
+    [str.actions, t.actions?.length ? t.actions.map((a, i) => `${i + 1}. ${a.label}${a.enabled ? "" : ` (${str.disabled.toLowerCase()})`}`).join(" · ") : str.noActions],
   ];
   const selected = env.statuses ?? [];
   const toggle = (s?: string) => env.onShow?.({ id: t.id, status: s ? (selected.includes(s) ? selected.filter((x) => x !== s) : [...selected, s]) : [] });
@@ -125,10 +130,13 @@ export function detailView(c: TriggerDetailCard, str: Strings): HTMLElement {
         h("div", { class: "small" }, when(d.receivedAt, env.locale), ` · HTTP ${d.httpStatus}`, d.kind ? ` · ${d.kind}` : "", d.count && d.count > 1 ? ` · ×${d.count}` : "", d.test ? h("span", { class: "chip chip-sm chip-info" }, str.test) : null),
         d.reasons.length ? h("div", { class: "muted small fail-line" }, d.reasons.join("; ")) : null,
         ...(d.errors ?? []).slice(0, 3).map((e) => h("div", { class: "small danger-text fail-line" }, e)),
+        d.actions?.length ? h("div", { class: "runs", "data-runs": d.id }, ...d.actions.map((r) => h("div", { class: "small run", "data-run": r.actionId, "data-run-status": r.status },
+          h("span", { class: `chip chip-sm chip-${runTone(r.status)}` }, str.run[r.status] ?? r.status), ` ${r.kind}`,
+          r.created ? h("span", { class: "muted" }, ` → ${r.created}`) : null,
+          r.error || r.reason ? h("span", { class: r.error ? "danger-text" : "muted" }, ` · ${r.error ?? r.reason}`) : null))) : null,
         h("div", { class: "muted small mono" }, d.id)),
       chip(str, d.status)))) : h("p", { class: "muted empty" }, str.noDeliveries),
     c.lastMapped ? h("section", { class: "mapped" }, h("div", { class: "section-title" }, str.mapped), h("pre", { class: "code" }, JSON.stringify(c.lastMapped, null, 2))) : null,
-    h("p", { class: "muted small" }, str.noActions),
     actions(str, [h("button", { class: "btn", disabled: env.superseded || env.busy, onclick: () => env.onShow?.({}) }, str.back)]));
 }
 

@@ -2,7 +2,7 @@ import { isProductionRef, isSemver, parseAgentRef } from "./agent-versions.js";
 import { normalizeTaskToolScope, type TaskToolScope } from "./task-tool-scope.js";
 import type { TaskStore } from "./task-store.js";
 import type { OrchestratorContext } from "./orchestrator-context.js";
-import type { Task, TaskExpectation, ExpectedOutcome, RetryPolicy, ReviewContext, ScopedNotificationRules } from "./types.js";
+import type { Task, TaskExpectation, ExpectedOutcome, RetryPolicy, ReviewContext, ScopedNotificationRules, WorkOrigin } from "./types.js";
 import { setAssessment } from "./types.js";
 import { sanitizeExpectations } from "./schemas.js";
 import type { TaskDirection } from "./task-control-store.js";
@@ -37,6 +37,8 @@ export class TaskManager {
     requestedBy?: string;
     /** A published version of the assignee to run (absent: production). `assignTo: "name@1.2.0"` sets it too. */
     agentVersion?: string;
+    /** What started it, when not a person (a trigger's delivery). */
+    origin?: WorkOrigin;
   }): Promise<Task> {
     if (!this.ctx.registry) throw new Error("Orchestrator not initialized");
     // "writer@1.2.0": the agent and the version it is pinned to
@@ -112,6 +114,7 @@ export class TaskManager {
       ...(normalizeTaskToolScope(opts.toolScope) ? { toolScope: normalizeTaskToolScope(opts.toolScope) } : {}),
       ...(opts.requestedBy ? { requestedBy: opts.requestedBy } : {}),
       ...(opts.agentVersion ? { agentVersion: opts.agentVersion } : {}),
+      ...(opts.origin ? { origin: opts.origin } : {}),
       status: hookData.draft ? "draft" : undefined,
     });
     this.ctx.emitter.emit("task:created", { task });

@@ -18,8 +18,8 @@ export { useMissionCost } from "./hooks/use-mission-cost.js";
 export type { UseMissionCostReturn } from "./hooks/use-mission-cost.js";
 export { useConnectors, connectorLabel } from "./hooks/use-connectors.js";
 export { useWaBusinessStatus, useWaTemplates, useWaConversation } from "./hooks/use-whatsapp-business.js";
-export { useTriggers, useTriggerDeliveries } from "./hooks/use-triggers.js";
-export type { UseTriggersReturn, UseTriggerDeliveriesReturn } from "./hooks/use-triggers.js";
+export { useTriggers, useTriggerDeliveries, useTriggerDelivery } from "./hooks/use-triggers.js";
+export type { UseTriggersReturn, UseTriggerDeliveriesReturn, UseTriggerDeliveryReturn } from "./hooks/use-triggers.js";
 export { useDecide, useDecisions, useDecisionNodes } from "./hooks/use-decisions.js";
 export type { UseDecideReturn, UseDecisionsReturn } from "./hooks/use-decisions.js";
 export type { UseWaBusinessStatusReturn, UseWaTemplatesReturn, UseWaConversationReturn } from "./hooks/use-whatsapp-business.js";
@@ -345,6 +345,8 @@ export type {
   TriggerDraft,
   TriggerDryRun,
   TriggerContractRevision,
+  TriggerActionKind, TriggerActionStatus, TriggerActionsStatus, TriggerAction, TriggerActionInput, TriggerPlaybookAction, TriggerMissionAction,
+  TriggerTaskAction, TriggerAgentAction, TriggerNotifyAction, TriggerDeliverTo, TriggerActionLimits, TriggerActionRefs, TriggerActionRun, TriggerActionPreview, WorkOrigin,
   DecisionQuestionType, DecisionQuestion, DecisionFallbackModel, DecisionModelSetting, DecisionSettings, DecideRequest, DecisionAnswer, DecisionUsage, DecideResult,
   DecisionCallerKind, DecisionLogSummary, DecisionLogEntry, DecisionLogPage, DecisionStatus, DecisionNodeState, MissionDecision,
 } from "@polpo-ai/sdk";

@@ -109,6 +109,8 @@ import {
 } from "../mcp/runtime.js";
 import { triggerServiceFor, TRIGGER_PUBLIC_PATH } from "../triggers/service.js";
 import { triggerAdminRoutes, triggerInboundRoutes } from "./routes/triggers.js";
+import { createTriggerActionHost } from "./trigger-action-host.js";
+import type { TriggerActionHost } from "../triggers/actions.js";
 import { isMcpToolName, toolResultText } from "../mcp/tools.js";
 import { connectorLabel } from "../mcp/view.js";
 import { AgentTalk } from "./agent-talk.js";
@@ -280,9 +282,26 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       publicBase: () => knownPublicOrigin(),
       emit: (kind, payload) => {
         if (kind === "changed") orchestrator.emit("trigger:changed", payload as PolpoEventMap["trigger:changed"]);
+        else if (kind === "actions") orchestrator.emit("trigger:actions", payload as PolpoEventMap["trigger:actions"]);
         else orchestrator.emit("trigger:delivery", payload as PolpoEventMap["trigger:delivery"]);
       },
+      // what actions call: the same internal functions as the other surfaces (no HTTP to ourselves)
+      actionHost: () => (orchestrator?.isInitialized ? triggerActionHost() : undefined),
+      log: (level, message) => orchestrator.emit("log", { level, message }),
     });
+  };
+  let triggerHost: TriggerActionHost | undefined;
+  const triggerActionHost = (): TriggerActionHost => {
+    triggerHost ??= createTriggerActionHost({
+      orchestrator,
+      completions: completionApp,
+      apiKey: () => opts?.apiKeys?.[0],
+      sessionCost: async (sessionId) => {
+        const store = databaseStoresFor(activePolpoDir())?.tokenUsageStore ?? new FileTokenUsageStore(activePolpoDir());
+        return (await store.list("today")).filter((r) => r.sessionId === sessionId).reduce((sum, r) => sum + (r.cost || 0), 0);
+      },
+    });
+    return triggerHost;
   };
   app.route(TRIGGER_PUBLIC_PATH, triggerInboundRoutes({ service: triggerService }));
 

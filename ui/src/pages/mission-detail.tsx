@@ -1,5 +1,6 @@
 import { useMemo, useState, useCallback, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { OriginLink } from "@/components/triggers/origin-link";
 import Markdown from "react-markdown";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -1915,6 +1916,7 @@ export function MissionDetailView({
               <span>{totalCount} task{totalCount !== 1 ? "s" : ""}</span>
               <span>Created {format(new Date(mission.createdAt), "MMM d, HH:mm")}</span>
               <span>Updated {formatDistanceToNow(new Date(mission.updatedAt), { addSuffix: true })}</span>
+              {mission.origin && <OriginLink origin={mission.origin} />}
             </div>
           </div>
         </div>

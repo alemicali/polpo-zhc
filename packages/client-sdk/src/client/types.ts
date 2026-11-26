@@ -135,6 +135,8 @@ export interface Task {
   toolScope?: TaskToolScope;
   /** The member (email) who started it, when known: a CLI engine on a personal sign-in runs only its owner's tasks. */
   requestedBy?: string;
+  /** What started it, when not a person: a trigger's delivery (open it from the task). */
+  origin?: WorkOrigin;
   /** GET /tasks/:id: what of the tool scope the agent no longer has (connector removed, access revoked…). */
   toolScopeStale?: string[];
   /**
@@ -637,6 +639,8 @@ export interface Mission {
   pauseReason?: "budget";
   /** The member (email) who created it or set its schedule: its scheduled runs are their work (tasks' requestedBy). */
   owner?: string;
+  /** What started it, when not a person: a trigger's delivery (its tasks carry it too). */
+  origin?: WorkOrigin;
   /** What it cost so far: full on GET /missions/:id, compact (MissionCostSummary) in lists. */
   cost?: MissionCost | MissionCostSummary;
   createdAt: string;
@@ -2808,7 +2812,7 @@ export interface ComputerWebhookEventPage {
   counts: Record<ComputerWebhookOutcome, number>;
 }
 
-// ── Triggers (POST /hooks/{id}: forms and webhooks; no actions yet) ────
+// ── Triggers (POST /hooks/{id}: forms and webhooks, with actions) ────
 
 export type TriggerContentType = "json" | "form" | "multipart" | "text";
 export type TriggerDeliveryStatus = "accepted" | "rejected" | "filtered" | "duplicate" | "rate_limited";
@@ -2856,6 +2860,9 @@ export interface Trigger {
   rateLimitPerMinute: number;
   mapping?: Record<string, string>;
   retention: number;
+  /** What runs on an accepted delivery, in order. */
+  actions?: TriggerAction[];
+  actionLimits?: TriggerActionLimits;
   /** POLPO_PUBLIC_URL + /hooks/{id} (the path when the public URL is unknown). */
   endpoint: string;
   path: string;
@@ -2877,6 +2884,88 @@ export interface TriggerInput {
   rateLimitPerMinute?: number;
   mapping?: Record<string, string> | null;
   retention?: number;
+  /** Replaces the actions (in order; ids keep runs and {{steps.<id>}} stable); null or [] removes them. */
+  actions?: TriggerActionInput[] | null;
+  actionLimits?: TriggerActionLimits | null;
+}
+
+export type TriggerActionKind = "playbook" | "mission" | "task" | "agent" | "notify";
+export type TriggerActionStatus = "queued" | "running" | "done" | "failed" | "skipped";
+/** A delivery's actions as a whole (partial: some done, some failed). */
+export type TriggerActionsStatus = TriggerActionStatus | "partial";
+
+interface TriggerActionBase {
+  /** Stable within the trigger; later actions read its outputs as {{steps.<id>.…}}. */
+  id: string;
+  kind: TriggerActionKind;
+  enabled: boolean;
+  name?: string;
+  /** Retries after a failure (default 2; 0 for agent). */
+  retries?: number;
+}
+/** Run a playbook; params are templates over body / headers / query / mapped / trigger / delivery / steps. */
+export interface TriggerPlaybookAction extends TriggerActionBase { kind: "playbook"; playbook: string; params?: Record<string, string>; waitSeconds?: number }
+/** Start a mission (id or name); variables run a copy with {{name}} replaced. */
+export interface TriggerMissionAction extends TriggerActionBase { kind: "mission"; mission: string; variables?: Record<string, string>; waitSeconds?: number }
+export interface TriggerTaskAction extends TriggerActionBase { kind: "task"; title: string; description: string; assignTo: string; waitSeconds?: number }
+export interface TriggerDeliverTo { channel: string; chatId: string; threadId?: number; name?: string }
+/** One turn of an agent (absent: Polpo). Instructions use only {{trigger.*}} / {{delivery.*}}: the payload follows as data. */
+export interface TriggerAgentAction extends TriggerActionBase {
+  kind: "agent"; agent?: string; instructions: string; data?: "mapped" | "body" | "both"; allowedTools?: string[]; maxSteps?: number; deliverTo?: TriggerDeliverTo;
+}
+export interface TriggerNotifyAction extends TriggerActionBase { kind: "notify"; channel: string; title?: string; body: string; severity?: "info" | "warning" | "critical" }
+export type TriggerAction = TriggerPlaybookAction | TriggerMissionAction | TriggerTaskAction | TriggerAgentAction | TriggerNotifyAction;
+/** An action as create / update take it (id and enabled optional). */
+export type TriggerActionInput = TriggerAction extends infer A ? A extends TriggerAction ? Omit<A, "id" | "enabled"> & { id?: string; enabled?: boolean } : never : never;
+
+export interface TriggerActionLimits {
+  /** Deliveries whose actions run at once (default 2). */
+  concurrency?: number;
+  /** Actions started a minute (default 30) and a day (default 1000). */
+  perMinute?: number;
+  perDay?: number;
+  /** What the agent actions may spend a day (USD). */
+  agentDailyCostUsd?: number;
+}
+
+/** What an action created. */
+export interface TriggerActionRefs {
+  playbook?: string; missionId?: string; missionName?: string; copyOf?: string; taskId?: string; sessionId?: string; agent?: string; notificationId?: string; channel?: string;
+}
+
+export interface TriggerActionRun {
+  actionId: string;
+  kind: TriggerActionKind;
+  name?: string;
+  status: TriggerActionStatus;
+  attempts: number;
+  queuedAt: string;
+  startedAt?: string;
+  endedAt?: string;
+  error?: string;
+  /** Why it was skipped. */
+  reason?: string;
+  refs?: TriggerActionRefs;
+  costUsd?: number;
+  /** On a delivery (not in lists): what later actions read as {{steps.<id>.…}}. */
+  outputs?: Record<string, unknown>;
+}
+
+/** Where a task, mission or chat session came from: a trigger's delivery. */
+export interface WorkOrigin {
+  kind: "trigger";
+  triggerId: string;
+  deliveryId: string;
+  triggerName?: string;
+  actionId?: string;
+  depth?: number;
+}
+
+/** The actions rendered against a delivery (nothing runs). */
+export interface TriggerActionPreview {
+  deliveryId?: string;
+  note?: string;
+  actions: Array<{ actionId: string; kind: TriggerActionKind; rendered: Record<string, unknown>; error?: string }>;
 }
 
 export interface TriggerDeliverySummary {
@@ -2899,6 +2988,13 @@ export interface TriggerDeliverySummary {
   dedupeHash?: string;
   duplicateOf?: string;
   count?: number;
+  /** Each action's run (without outputs in lists). */
+  actions?: TriggerActionRun[];
+  actionsStatus?: TriggerActionsStatus;
+  /** The member the actions ran for (the trigger's owner). */
+  actionsRequestedBy?: string;
+  /** It arrived while another trigger's actions ran. */
+  origin?: WorkOrigin;
 }
 
 export interface TriggerDelivery extends TriggerDeliverySummary {
@@ -2907,6 +3003,8 @@ export interface TriggerDelivery extends TriggerDeliverySummary {
   body?: unknown;
   files?: Array<{ field: string; filename: string; contentType: string; size: number; sha256: string }>;
   mapped?: Record<string, unknown>;
+  /** Earlier runs (re-runs), newest first. */
+  previousActions?: Array<{ endedAt?: string; status?: TriggerActionsStatus; runs: TriggerActionRun[] }>;
 }
 
 export interface TriggerDeliveryPage {
@@ -2921,6 +3019,8 @@ export interface TriggerSample {
   contentType?: TriggerContentType;
   headers?: Record<string, string>;
   query?: Record<string, string | string[]>;
+  /** A test delivery: also run the trigger's actions (default: a test runs nothing). */
+  runActions?: boolean;
 }
 
 export interface TriggerDraft {

@@ -155,7 +155,7 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_schedule_run", name: "schedule_run", group: "automation" },
   { mcp: "polpo_check_update", name: "check_update", group: "automation" },
   { mcp: "polpo_check_delete", name: "check_delete", group: "automation" },
-  // Triggers: public endpoints (POST /hooks/{id}) for forms and webhooks — definitions, deliveries, test tools, secrets (no actions yet)
+  // Triggers: public endpoints (POST /hooks/{id}) for forms and webhooks — definitions with their actions, deliveries and action runs, re-runs, test tools, secrets
   { mcp: "polpo_triggers_list", name: "triggers_list", group: "triggers" },
   { mcp: "polpo_trigger_get", name: "trigger_get", group: "triggers" },
   { mcp: "polpo_trigger_deliveries", name: "trigger_deliveries", group: "triggers" },
@@ -163,6 +163,7 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_trigger_update", name: "trigger_update", group: "triggers" },
   { mcp: "polpo_trigger_delete", name: "trigger_delete", group: "triggers" },
   { mcp: "polpo_trigger_test", name: "trigger_test", group: "triggers" },
+  { mcp: "polpo_trigger_run_actions", name: "trigger_run_actions", group: "triggers" },
   { mcp: "polpo_trigger_auth", name: "trigger_auth", group: "triggers" },
   // Decisions: typed judgments with probabilities from the decision model (decide), the log, mission nodes waiting for a person
   { mcp: "polpo_decide", name: "decide", group: "decisions" },

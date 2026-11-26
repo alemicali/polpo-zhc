@@ -40,15 +40,57 @@ export function withFlowControlDependencies(data: string): string {
  *
  * All persistence goes through PlaybookStore (injected via getDeps()).
  */
-export function playbookRoutes(getDeps: () => {
+/** What running a playbook needs (the REST route and the trigger action engine pass the same). */
+export interface PlaybookRunDeps {
   playbookStore: any;
   saveMission: (opts: any) => Promise<any>;
-  executeMission: (id: string) => Promise<any>;
+  executeMission: (id: string, opts?: any) => Promise<any>;
   /** Called when a playbook is run, with its mission and the names of the parameters given. */
   onRun?: (name: string, missionId: string, params: string[]) => void;
   /** Removes a mission that could not start. */
   deleteMission?: (missionId: string) => Promise<unknown>;
-}): OpenAPIHono {
+}
+
+/** Why a playbook did not run: 404 (no such playbook) or 400 (parameters, an invalid mission). */
+export class PlaybookRunError extends Error {
+  constructor(message: string, readonly status: 400 | 404, readonly code: "NOT_FOUND" | "VALIDATION_ERROR" | "INVALID_MISSION", readonly details?: string[]) {
+    super(message);
+  }
+}
+
+/**
+ * Run a playbook: validate the parameters, instantiate it, save the mission and execute it. The one
+ * path every surface uses (REST POST /playbooks/{name}/run, and the trigger action engine, which
+ * adds `missionOpts` (the work's origin and owner) and `executeOpts` (requestedBy and origin)).
+ */
+export async function runPlaybook(
+  deps: PlaybookRunDeps,
+  name: string,
+  params: Record<string, string | number | boolean>,
+  o: { missionOpts?: Record<string, unknown>; executeOpts?: Record<string, unknown> } = {},
+): Promise<{ mission: any; tasks: number; group: string; warnings: string[] }> {
+  const playbook = await deps.playbookStore.get(name);
+  if (!playbook) throw new PlaybookRunError("Playbook not found", 404, "NOT_FOUND");
+  const validation = validateParams(playbook, params);
+  if (!validation.valid) throw new PlaybookRunError("Parameter validation failed", 400, "VALIDATION_ERROR", validation.errors);
+  const instance = instantiatePlaybook(playbook, validation.resolved);
+  instance.data = withFlowControlDependencies(instance.data);
+  const mission = await deps.saveMission({ data: instance.data, prompt: instance.prompt, name: instance.name, ...(o.missionOpts ?? {}) });
+  deps.onRun?.(name, mission.id, Object.keys(params));
+  let result;
+  try {
+    result = o.executeOpts ? await deps.executeMission(mission.id, o.executeOpts) : await deps.executeMission(mission.id);
+  } catch (err) {
+    // An invalid mission (e.g. a checkpoint without the matching dependsOn) must not surface as a
+    // bare 500 the dashboard cannot parse, nor leave a mission behind that can never start.
+    await deps.deleteMission?.(mission.id).catch(() => {});
+    const message = err instanceof Error ? err.message : String(err);
+    throw new PlaybookRunError(`The playbook cannot run: ${message}`, 400, "INVALID_MISSION", [message]);
+  }
+  return { mission, tasks: result.tasks.length, group: result.group, warnings: validation.warnings };
+}
+
+export function playbookRoutes(getDeps: () => PlaybookRunDeps): OpenAPIHono {
   const app = new OpenAPIHono();
 
   // GET /playbooks — list available playbooks
@@ -147,60 +189,19 @@ export function playbookRoutes(getDeps: () => {
   });
 
   app.openapi(runPlaybookRoute, async (c) => {
-    const deps = getDeps();
     const { name } = c.req.valid("param");
-
-    const playbook = await deps.playbookStore.get(name);
-    if (!playbook) {
-      return c.json({ ok: false, error: "Playbook not found", code: "NOT_FOUND" }, 404);
-    }
-
     const body = c.req.valid("json");
-    const params = (body.params ?? {}) as Record<string, string | number | boolean>;
-
-    // Validate parameters
-    const validation = validateParams(playbook, params);
-    if (!validation.valid) {
-      return c.json({
-        ok: false,
-        error: "Parameter validation failed",
-        code: "VALIDATION_ERROR",
-        details: validation.errors,
-      }, 400);
-    }
-
-    // Instantiate
-    const instance = instantiatePlaybook(playbook, validation.resolved);
-    instance.data = withFlowControlDependencies(instance.data);
-
-    // Save as mission and execute
-    const mission = await deps.saveMission({
-      data: instance.data,
-      prompt: instance.prompt,
-      name: instance.name,
-    });
-
-    deps.onRun?.(name, mission.id, Object.keys(params));
-    let result;
     try {
-      result = await deps.executeMission(mission.id);
+      const r = await runPlaybook(getDeps(), name, (body.params ?? {}) as Record<string, string | number | boolean>);
+      return c.json({
+        ok: true,
+        data: { mission: r.mission, tasks: r.tasks, group: r.group, ...(r.warnings.length > 0 ? { warnings: r.warnings } : {}) },
+      }, 201);
     } catch (err) {
-      // An invalid mission (e.g. a checkpoint without the matching dependsOn) must not surface as a
-      // bare 500 the dashboard cannot parse, nor leave a mission behind that can never start.
-      await deps.deleteMission?.(mission.id).catch(() => {});
-      const message = err instanceof Error ? err.message : String(err);
-      return c.json({ ok: false, error: `The playbook cannot run: ${message}`, code: "INVALID_MISSION", details: [message] }, 400);
+      if (!(err instanceof PlaybookRunError)) throw err;
+      if (err.status === 404) return c.json({ ok: false, error: err.message, code: err.code }, 404);
+      return c.json({ ok: false, error: err.message, code: err.code, details: err.details }, 400);
     }
-
-    return c.json({
-      ok: true,
-      data: {
-        mission,
-        tasks: result.tasks.length,
-        group: result.group,
-        ...(validation.warnings.length > 0 ? { warnings: validation.warnings } : {}),
-      },
-    }, 201);
   });
 
   // POST /playbooks — create or update a playbook

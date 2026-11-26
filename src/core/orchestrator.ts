@@ -64,6 +64,7 @@ import type {
   MissionStatus,
   RetryPolicy,
   ScopedNotificationRules,
+  WorkOrigin,
 } from "./types.js";
 import { AgentManager } from "./agent-manager.js";
 import { TaskManager } from "./task-manager.js";
@@ -1529,6 +1530,8 @@ export class Orchestrator extends TypedEmitter {
     requestedBy?: string;
     /** A published version of the assignee (absent: production); \`assignTo: "name@1.2.0"\` sets it too. */
     agentVersion?: string;
+    /** What started it when not a person: a trigger's delivery. */
+    origin?: WorkOrigin;
   }): Promise<Task> {
     const { toolScope, ...given } = opts;
     // the member this work is for: given, or the person whose call (dashboard, API, Polpo's chat) created it
@@ -2085,7 +2088,7 @@ export class Orchestrator extends TypedEmitter {
 
   // ─── Mission Management (delegates to OrchestratorEngine → MissionExecutor) ──
 
-  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules; budgetUsd?: number; owner?: string }): Promise<Mission> {
+  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules; budgetUsd?: number; owner?: string; origin?: WorkOrigin }): Promise<Mission> {
     await this.checkMissionToolScopes(opts.data);
     // its owner: the member who creates it (its schedule's runs are their work)
     const owner = opts.owner ?? originMember();
@@ -2291,9 +2294,9 @@ export class Orchestrator extends TypedEmitter {
   async getResumableMissions(): Promise<Mission[]> { return this.engine.getResumableMissions(); }
   async resumeMission(missionId: string, opts?: { retryFailed?: boolean }): Promise<{ retried: number; pending: number }> { return this.engine.resumeMission(missionId, opts); }
   /** Run a mission now: its tasks are for the member who started it (their API call or Polpo's chat), when known. */
-  async executeMission(missionId: string, opts: { requestedBy?: string } = {}): Promise<{ tasks: Task[]; group: string }> {
+  async executeMission(missionId: string, opts: { requestedBy?: string; origin?: WorkOrigin } = {}): Promise<{ tasks: Task[]; group: string }> {
     const requestedBy = opts.requestedBy ?? originMember();
-    return this.engine.executeMission(missionId, requestedBy ? { requestedBy } : {});
+    return this.engine.executeMission(missionId, { ...(requestedBy ? { requestedBy } : {}), ...(opts.origin ? { origin: opts.origin } : {}) });
   }
 
   /** A schedule's run: its tasks are for the schedule's owner (the mission's owner), when it has one. */

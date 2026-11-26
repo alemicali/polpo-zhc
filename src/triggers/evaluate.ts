@@ -415,17 +415,20 @@ export function inferJsonSchema(sample: unknown, depth = 0): Record<string, unkn
 const HEADER_NAME = /^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,100}$/;
 
 /** Problems with templates: unknown roots (body, headers, query only) and bad syntax. */
-export function templateProblems(where: string, template: string): string[] {
+export function templateProblems(where: string, template: string, roots: readonly string[] = TEMPLATE_ROOTS, maxChars = 500): string[] {
   const problems: string[] = [];
   if (typeof template !== "string" || !template.trim()) return [`${where}: an empty template`];
-  if (template.length > 500) problems.push(`${where}: longer than 500 characters`);
+  if (template.length > maxChars) problems.push(`${where}: longer than ${maxChars} characters`);
   if (!/\{\{/.test(template)) return problems; // a literal
   try {
     for (const p of placeholdersOf(template)) {
       const root = p.split(/[.[]/)[0];
-      if (!(TEMPLATE_ROOTS as readonly string[]).includes(root ?? "")) problems.push(`${where}: {{${p}}} — use body.*, headers.* or query.*`);
+      if (!roots.includes(root ?? "")) {
+        const names = roots.map((r) => `${r}.*`);
+        problems.push(`${where}: {{${p}}} — use ${names.length > 1 ? `${names.slice(0, -1).join(", ")} or ${names.at(-1)}` : names[0]}`);
+      }
     }
-    renderValue(template, scopeOf({ body: {}, headers: {}, query: {} }));
+    renderValue(template, { input: {}, vars: Object.fromEntries(roots.map((r) => [r, {}])) });
   } catch (err) {
     problems.push(`${where}: ${err instanceof TemplateError || err instanceof Error ? err.message : String(err)}`);
   }

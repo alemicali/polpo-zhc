@@ -3,7 +3,8 @@
  *
  * Public (mounted before the instance auth gate and outside /api: the trigger's secret / signature
  * authenticates; the only public prefix of this feature):
- *   POST /hooks/:id     a delivery → 202 { deliveryId, status } (200 for a duplicate, with the
+ *   POST /hooks/:id     a delivery → 202 { deliveryId, status, actions? } (actions: "queued" when the
+ *                       trigger has actions: they run after the answer; 200 for a duplicate, with the
  *                       original's id; 400 with errors for a contract mismatch; 401, 413, 415, 429;
  *                       404 for an unknown or disabled trigger and for senders outside the IP allowlist).
  *                       Behind Tailscale Funnel publish /<instance>/hooks/ (see docs/triggers.md).
@@ -23,7 +24,10 @@
  *   GET    /:id/deliveries                 ?limit&cursor&status=accepted,rejected&test
  *   GET    /:id/deliveries/:deliveryId
  *   POST   /:id/deliveries/:deliveryId/replay   dry run through the current (or a draft) contract, filter, dedupe, mapping
- *   POST   /:id/test                       a test delivery (recorded, test: true)
+ *   POST   /:id/deliveries/:deliveryId/run-actions   re-run the actions on a stored accepted delivery (202)
+ *   POST   /:id/actions/preview            the actions (or a draft) rendered against a delivery; nothing runs
+ *   GET    /:id/action-usage               actions started today and the agent actions' spend
+ *   POST   /:id/test                       a test delivery (recorded, test: true; runActions: true runs the actions)
  *   POST   /:id/validate                   dry run of a sample (optionally against a draft)
  *   POST   /:id/infer-schema               { sample } | { deliveryId } → a JSON Schema
  */
@@ -110,6 +114,48 @@ const dedupeSchema = z.object({ key: z.string().openapi({ example: "{{body.submi
 const statsSchema = z.object({
   counts: z.record(z.string(), z.number()), total: z.number(), lastDeliveryAt: z.string().optional(), lastStatus: statusEnum.optional(),
 });
+const templates = z.record(z.string(), z.string());
+const actionCommon = {
+  id: z.string().optional().openapi({ description: "Stable within the trigger (generated when absent); later actions read its outputs as {{steps.<id>.…}}" }),
+  enabled: z.boolean().optional().openapi({ description: "Default true; a disabled action is recorded as skipped" }),
+  name: z.string().optional(),
+  retries: z.number().int().optional().openapi({ description: "Retries after a failure with backoff (default 2; 0 for agent). What was created is never created again" }),
+};
+const waitSeconds = z.number().int().optional().openapi({ description: "Wait until it ends (at most 3600 s): later actions read {{steps.<id>.result}} and .status" });
+const actionSchema = z.discriminatedUnion("kind", [
+  z.object({ ...actionCommon, kind: z.literal("playbook"), playbook: z.string(), params: templates.optional().openapi({ description: "Parameter → template over body / headers / query / mapped / trigger / delivery / steps, e.g. {{mapped.email}}" }), waitSeconds }),
+  z.object({ ...actionCommon, kind: z.literal("mission"), mission: z.string().openapi({ description: "Mission id or name" }), variables: templates.optional().openapi({ description: "Replace {{name}} in a copy of the mission" }), waitSeconds }),
+  z.object({ ...actionCommon, kind: z.literal("task"), title: z.string(), description: z.string(), assignTo: z.string(), waitSeconds }),
+  z.object({
+    ...actionCommon, kind: z.literal("agent"), agent: z.string().optional().openapi({ description: "Absent: Polpo" }),
+    instructions: z.string().openapi({ description: "Only {{trigger.*}} / {{delivery.*}}: the payload follows as delimited data, never inside the instructions" }),
+    data: z.enum(["mapped", "body", "both"]).optional(), allowedTools: z.array(z.string()).optional().openapi({ description: "Only these tools in this turn ('prefix*' a family; [] none)" }),
+    maxSteps: z.number().int().optional(),
+    deliverTo: z.object({ channel: z.string(), chatId: z.string(), threadId: z.number().int().optional(), name: z.string().optional() }).optional().openapi({ description: "Also send the reply to this chat (e.g. Telegram)" }),
+  }),
+  z.object({ ...actionCommon, kind: z.literal("notify"), channel: z.string().openapi({ description: "A notification channel id (settings.notifications.channels)" }), title: z.string().optional(), body: z.string(), severity: z.enum(["info", "warning", "critical"]).optional() }),
+]).openapi("TriggerAction");
+const actionLimitsSchema = z.object({
+  concurrency: z.number().int().optional().openapi({ description: "Deliveries whose actions run at once (default 2)" }),
+  perMinute: z.number().int().optional().openapi({ description: "Actions started a minute (default 30); beyond: skipped" }),
+  perDay: z.number().int().optional().openapi({ description: "Actions started a day (default 1000); beyond: skipped" }),
+  agentDailyCostUsd: z.number().optional().openapi({ description: "What the agent actions may spend a day (USD); beyond: skipped" }),
+}).openapi("TriggerActionLimits");
+const actionStatusEnum = z.enum(["queued", "running", "done", "failed", "skipped"]);
+const actionsStatusEnum = z.enum(["queued", "running", "done", "failed", "skipped", "partial"]);
+const actionRefsSchema = z.object({
+  playbook: z.string().optional(), missionId: z.string().optional(), missionName: z.string().optional(), copyOf: z.string().optional(), taskId: z.string().optional(),
+  sessionId: z.string().optional(), agent: z.string().optional(), notificationId: z.string().optional(), channel: z.string().optional(),
+}).openapi("TriggerActionRefs");
+const actionRunShape = {
+  actionId: z.string(), kind: z.enum(["playbook", "mission", "task", "agent", "notify"]), name: z.string().optional(), status: actionStatusEnum, attempts: z.number().int(),
+  queuedAt: z.string(), startedAt: z.string().optional(), endedAt: z.string().optional(), error: z.string().optional(), reason: z.string().optional(),
+  refs: actionRefsSchema.optional(), costUsd: z.number().optional(),
+};
+const actionRunSchema = z.object({ ...actionRunShape, outputs: z.record(z.string(), z.unknown()).optional() }).openapi("TriggerActionRun");
+const workOriginSchema = z.object({
+  kind: z.literal("trigger"), triggerId: z.string(), deliveryId: z.string(), triggerName: z.string().optional(), actionId: z.string().optional(), depth: z.number().int().optional(),
+}).openapi("WorkOrigin");
 const triggerSchema = z.object({
   id: z.string(), name: z.string(), description: z.string().optional(), enabled: z.boolean(), owner: z.string().optional(),
   createdAt: z.string(), updatedAt: z.string(),
@@ -119,6 +165,7 @@ const triggerSchema = z.object({
   contract: contractSchema, contractVersion: z.number().int(),
   filter: filterSchema.optional(), dedupe: dedupeSchema.optional(),
   rateLimitPerMinute: z.number().int(), mapping: z.record(z.string(), z.string()).optional(), retention: z.number().int(),
+  actions: z.array(actionSchema).optional().openapi({ description: "What runs on an accepted delivery, in order" }), actionLimits: actionLimitsSchema.optional(),
   endpoint: z.string().openapi({ description: "POLPO_PUBLIC_URL + /hooks/{id} (the path when the public URL is unknown)" }),
   path: z.string(), stats: statsSchema,
 }).openapi("Trigger");
@@ -136,10 +183,13 @@ const inputSchema = z.object({
   contractNote: z.string().optional(),
   filter: filterSchema.nullable().optional(), dedupe: dedupeSchema.partial({ ttlSeconds: true }).nullable().optional(),
   rateLimitPerMinute: z.number().int().optional(), mapping: z.record(z.string(), z.string()).nullable().optional(), retention: z.number().int().optional(),
+  actions: z.array(actionSchema).nullable().optional().openapi({ description: "Replaces the actions (in order); null or [] removes them" }),
+  actionLimits: actionLimitsSchema.nullable().optional().openapi({ description: "null: the defaults" }),
 }).openapi("TriggerInput");
 const sampleSchema = z.object({
   body: z.unknown(), contentType: contentTypeEnum.optional(),
   headers: z.record(z.string(), z.string()).optional(), query: z.record(z.string(), z.union([z.string(), z.array(z.string())])).optional(),
+  runActions: z.boolean().optional().openapi({ description: "Test delivery: also run the trigger's actions (default false: a test runs nothing)" }),
 }).openapi("TriggerSample");
 const draftSchema = z.object({
   contract: inputSchema.shape.contract, filter: inputSchema.shape.filter, dedupe: inputSchema.shape.dedupe, mapping: inputSchema.shape.mapping,
@@ -155,10 +205,15 @@ const deliverySummaryShape = {
   auth: z.object({ secret: z.enum(["header", "bearer", "query"]).optional(), secretId: z.string().optional(), hmac: z.enum(["current", "previous"]).optional() }).optional(),
   contentType: z.string().optional(), kind: contentTypeEnum.optional(), bytes: z.number(), bodyTruncated: z.boolean().optional(),
   mappingErrors: z.array(z.string()).optional(), contractVersion: z.number(), dedupeHash: z.string().optional(), duplicateOf: z.string().optional(), count: z.number().optional(),
+  actionsStatus: actionsStatusEnum.optional().openapi({ description: "The delivery's actions as a whole (partial: some done, some failed)" }),
+  actionsRequestedBy: z.string().optional().openapi({ description: "The member the actions ran for (the trigger's owner)" }),
+  origin: workOriginSchema.optional().openapi({ description: "It arrived while another trigger's actions ran (loop guard chain)" }),
 };
-const deliverySummarySchema = z.object(deliverySummaryShape).openapi("TriggerDeliverySummary");
+const deliverySummarySchema = z.object({ ...deliverySummaryShape, actions: z.array(z.object(actionRunShape)).optional() }).openapi("TriggerDeliverySummary");
 const deliverySchema = z.object({
   ...deliverySummaryShape,
+  actions: z.array(actionRunSchema).optional().openapi({ description: "Each action's run: status, attempts, times, error, refs to what it created, outputs" }),
+  previousActions: z.array(z.object({ endedAt: z.string().optional(), status: actionsStatusEnum.optional(), runs: z.array(actionRunSchema) })).optional().openapi({ description: "Earlier runs (re-runs), newest first" }),
   headers: z.record(z.string(), z.string()), query: z.record(z.string(), z.union([z.string(), z.array(z.string())])),
   body: z.unknown().optional(),
   files: z.array(z.object({ field: z.string(), filename: z.string(), contentType: z.string(), size: z.number(), sha256: z.string() })).optional(),
@@ -202,7 +257,7 @@ export function triggerAdminRoutes(deps: TriggerRouteDeps): OpenAPIHono {
   app.openapi(createRoute({
     method: "post", path: "/", tags: ["Triggers"], summary: "Create a trigger",
     description: "A new trigger. With the generated secret on (the default unless only an HMAC is configured), `secret` is returned this once: only its hash is kept. "
-      + "Nothing runs on a delivery yet: the action engine comes later; deliveries are recorded and announced (trigger:delivery).",
+      + "An accepted delivery runs the trigger's actions (in order, after the 202; see actions); deliveries are recorded and announced (trigger:delivery).",
     request: body(inputSchema.extend({ name: z.string() })),
     responses: { 201: json(okOf(z.object({ trigger: triggerSchema, secret: z.string().optional() })), "Created"), ...errors },
   }), (c) => guard(c, async () => c.json({ ok: true as const, data: await need().create(c.req.valid("json") as never, by()) }, 201)));
@@ -323,8 +378,44 @@ export function triggerAdminRoutes(deps: TriggerRouteDeps): OpenAPIHono {
   }));
 
   app.openapi(createRoute({
+    method: "post", path: "/{id}/deliveries/{deliveryId}/run-actions", tags: ["Triggers"], summary: "Re-run a delivery's actions",
+    description: "Runs the trigger's current actions again on a stored accepted delivery (a test one too), after the answer: 202 with the queued runs. "
+      + "The previous runs are kept on the delivery (previousActions). 409 while its actions are still queued or running, or when the trigger is disabled.",
+    request: { params: deliveryParams },
+    responses: { 202: json(okOf(z.object({ deliveryId: z.string(), actionsStatus: actionsStatusEnum.optional(), actions: z.array(actionRunSchema) })), "Queued"), ...errors, 409: json(errorSchema, "Running, or the trigger is disabled") },
+  }), (c) => guard(c, () => {
+    const { id, deliveryId } = c.req.valid("param");
+    const d = need().rerunActions(id, deliveryId);
+    return c.json({ ok: true as const, data: { deliveryId: d.id, ...(d.actionsStatus ? { actionsStatus: d.actionsStatus } : {}), actions: d.actions ?? [] } }, 202);
+  }));
+
+  app.openapi(createRoute({
+    method: "post", path: "/{id}/actions/preview", tags: ["Triggers"], summary: "Preview the actions on a delivery",
+    description: "Renders the trigger's actions (or a draft of them) against a stored delivery (default: the newest accepted one) without running anything: playbook params, "
+      + "mission variables, task title and description, the agent's message (instructions, then the payload as delimited data), the notification.",
+    request: { params: idParam, ...body(z.object({ deliveryId: z.string().optional(), actions: z.array(actionSchema).optional().openapi({ description: "A draft (unsaved)" }) })) },
+    responses: {
+      200: json(okOf(z.object({
+        deliveryId: z.string().optional(), note: z.string().optional(),
+        actions: z.array(z.object({ actionId: z.string(), kind: z.string(), rendered: z.record(z.string(), z.unknown()), error: z.string().optional() })),
+      })), "The rendered actions"),
+      ...errors,
+    },
+  }), (c) => guard(c, () => {
+    const b = c.req.valid("json") as { deliveryId?: string; actions?: unknown[] };
+    return c.json({ ok: true as const, data: need().previewActions(c.req.valid("param").id, b) }, 200);
+  }));
+
+  app.openapi(createRoute({
+    method: "get", path: "/{id}/action-usage", tags: ["Triggers"], summary: "A trigger's action usage today",
+    description: "Actions started today (UTC) and what its agent actions spent, against the limits (actionLimits).",
+    request: { params: idParam },
+    responses: { 200: json(okOf(z.object({ day: z.string(), actions: z.number(), agentUsd: z.number() })), "Usage"), 404: errors[404] },
+  }), (c) => guard(c, () => c.json({ ok: true as const, data: need().actionUsage(c.req.valid("param").id) }, 200)));
+
+  app.openapi(createRoute({
     method: "post", path: "/{id}/test", tags: ["Triggers"], summary: "Send a test delivery",
-    description: "Records a delivery marked test: true, through the contract, filter, dedupe and mapping (no secret, IP or rate limit check) and announces it (trigger:delivery).",
+    description: "Records a delivery marked test: true, through the contract, filter, dedupe and mapping (no secret, IP or rate limit check) and announces it (trigger:delivery). Its actions run only with runActions: true.",
     request: { params: idParam, ...body(sampleSchema) },
     responses: { 200: json(okOf(deliverySchema), "The recorded delivery"), ...errors },
   }), (c) => guard(c, () => c.json({ ok: true as const, data: need().test(c.req.valid("param").id, c.req.valid("json") as never) as never }, 200)));

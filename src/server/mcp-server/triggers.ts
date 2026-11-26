@@ -1,8 +1,9 @@
 /**
  * Triggers: public endpoints (POST /hooks/{id}) that receive form submissions and webhooks, check
  * them (secret, HMAC, IP allowlist, contract, filter, dedupe, rate limit) and record each delivery
- * with the values an action would receive (mapping). Registration and reception only: no action
- * runs on a delivery yet (the action engine comes later).
+ * with the mapped values, and run its actions on accepted deliveries (playbook, mission, task, agent
+ * turn, notification; in order, after the 202): definitions in create / update, each delivery's
+ * action runs in polpo_trigger_deliveries, re-runs in polpo_trigger_run_actions.
  *
  * Scopes: reading (list, get, deliveries) needs read; creating, changing, deleting and the test
  * tools need work; secrets (rotation, the HMAC secret, the query token) and the IP allowlist need
@@ -26,14 +27,49 @@ export type TriggerRow = {
   contract: { contentTypes: string[]; maxBodyBytes: number; maxFileBytes?: number; schema?: Record<string, unknown> };
   contractVersion: number; filter?: { mode?: string; conditions: Array<{ path: string; op: string; value?: unknown }> };
   dedupe?: { key: string; ttlSeconds: number }; rateLimitPerMinute: number; mapping?: Record<string, string>; retention: number; stats: Stats;
+  actions?: ActionRow[]; actionLimits?: { concurrency?: number; perMinute?: number; perDay?: number; agentDailyCostUsd?: number };
+};
+export type ActionRow = {
+  id: string; kind: string; enabled: boolean; name?: string; retries?: number; waitSeconds?: number;
+  playbook?: string; params?: Record<string, string>; mission?: string; variables?: Record<string, string>;
+  title?: string; description?: string; assignTo?: string;
+  agent?: string; instructions?: string; data?: string; allowedTools?: string[]; maxSteps?: number; deliverTo?: { channel: string; chatId: string; threadId?: number; name?: string };
+  channel?: string; body?: string; severity?: string;
+};
+export type ActionRunRow = {
+  actionId: string; kind: string; name?: string; status: string; attempts: number; queuedAt: string; startedAt?: string; endedAt?: string; error?: string; reason?: string;
+  refs?: { playbook?: string; missionId?: string; missionName?: string; copyOf?: string; taskId?: string; sessionId?: string; agent?: string; notificationId?: string; channel?: string };
+  costUsd?: number; outputs?: Record<string, unknown>;
 };
 type DeliveryRow = {
   id: string; receivedAt: string; status: string; httpStatus: number; reasons: string[]; errors?: string[]; test?: boolean; kind?: string; bytes: number;
   duplicateOf?: string; count?: number; body?: unknown; mapped?: Record<string, unknown>; mappingErrors?: string[]; headers?: Record<string, string>;
   files?: Array<{ filename: string; size: number }>; bodyTruncated?: boolean; contractVersion: number; ip?: string;
+  actions?: ActionRunRow[]; actionsStatus?: string; actionsRequestedBy?: string; origin?: { triggerId: string; deliveryId: string; depth?: number };
+  previousActions?: Array<{ endedAt?: string; status?: string; runs: ActionRunRow[] }>;
 };
 
-const NO_ACTIONS = "Nothing runs on a delivery yet (the action engine comes later): deliveries are recorded with their mapped values.";
+const ACTIONS_HELP = "Actions run on an accepted delivery (never on filtered, duplicate or rejected ones; a test only with run_actions), in order, after the 202, as the trigger's owner.";
+
+/** One action as a line. */
+export const actionLine = (a: ActionRow, i: number) => {
+  const what = a.kind === "playbook" ? `run playbook ${a.playbook}${a.params ? ` (${Object.entries(a.params).map(([k, v]) => `${k}=${v}`).join(", ")})` : ""}`
+    : a.kind === "mission" ? `start mission ${a.mission}${a.variables ? ` (${Object.entries(a.variables).map(([k, v]) => `${k}=${v}`).join(", ")})` : ""}`
+      : a.kind === "task" ? `create task "${short(a.title ?? "", 80)}" for ${a.assignTo}`
+        : a.kind === "agent" ? `${a.agent ?? "Polpo"} takes a turn: "${short(a.instructions ?? "", 100)}"${a.allowedTools ? ` (tools: ${a.allowedTools.join(", ") || "none"})` : ""}${a.deliverTo ? ` → reply to ${a.deliverTo.name ?? a.deliverTo.chatId} (${a.deliverTo.channel})` : ""}`
+          : `notify ${a.channel}: "${short(a.body ?? "", 100)}"`;
+  return `  ${i + 1}. [${a.id}] ${a.name ? `${a.name}: ` : ""}${what}${a.waitSeconds ? ` · waits ${a.waitSeconds}s` : ""}${a.enabled ? "" : " (disabled)"}`;
+};
+
+/** What an action run created, as text. */
+const refsText = (r: ActionRunRow["refs"]) => !r ? "" : [
+  r.missionId ? `mission ${r.missionName ?? ""} [${r.missionId}]${r.copyOf ? ` (a copy of ${r.copyOf})` : ""}` : "", r.taskId ? `task ${r.taskId}` : "",
+  r.sessionId ? `chat session ${r.sessionId}${r.agent ? ` (${r.agent})` : ""}` : "", r.notificationId ? `notification ${r.notificationId} on ${r.channel}` : "",
+  !r.notificationId && r.channel ? `reply sent on ${r.channel}` : "",
+].filter(Boolean).join(", ");
+
+export const actionRunLine = (r: ActionRunRow) => `  - [${r.actionId}] ${r.kind} ${r.status}${r.attempts > 1 ? ` after ${r.attempts} attempts` : ""}`
+  + `${refsText(r.refs) ? ` → ${refsText(r.refs)}` : ""}${r.costUsd ? ` · $${r.costUsd.toFixed(4)}` : ""}${r.error ? ` · error: ${short(r.error, 200)}` : ""}${r.reason ? ` · ${short(r.reason, 200)}` : ""}`;
 const STATUS = z.enum(["accepted", "rejected", "filtered", "duplicate", "rate_limited"]);
 const CONTENT = z.enum(["json", "form", "multipart", "text"]);
 const at = (iso?: string) => (iso ? iso.slice(0, 16).replace("T", " ") : "");
@@ -46,7 +82,7 @@ export const triggerLine = (t: TriggerRow) => {
     + `${t.stats.lastDeliveryAt ? ` · last ${at(t.stats.lastDeliveryAt)} ${t.stats.lastStatus}` : ""}`;
 };
 export const deliveryLine = (d: DeliveryRow) => `- ${d.id} ${at(d.receivedAt)} ${d.status}${d.test ? " (test)" : ""} HTTP ${d.httpStatus}${d.kind ? ` ${d.kind}` : ""} ${d.bytes} B`
-  + `${d.count && d.count > 1 ? ` ×${d.count}` : ""}${d.duplicateOf ? ` dup of ${d.duplicateOf}` : ""}${d.reasons.length ? ` · ${short(d.reasons.join("; "), 160)}` : ""}`;
+  + `${d.count && d.count > 1 ? ` ×${d.count}` : ""}${d.duplicateOf ? ` dup of ${d.duplicateOf}` : ""}${d.actionsStatus ? ` · actions ${d.actionsStatus}` : ""}${d.reasons.length ? ` · ${short(d.reasons.join("; "), 160)}` : ""}`;
 
 const triggerDetail = (t: TriggerRow) => [
   triggerLine(t).slice(2),
@@ -59,6 +95,8 @@ const triggerDetail = (t: TriggerRow) => [
   t.dedupe ? `dedupe: ${t.dedupe.key} for ${t.dedupe.ttlSeconds}s` : "no dedupe",
   `rate limit ${t.rateLimitPerMinute}/min · keeps ${t.retention} deliveries`,
   t.mapping ? `mapping: ${Object.entries(t.mapping).map(([k, v]) => `${k} ← ${v}`).join(", ")}` : "no mapping",
+  t.actions?.length ? `actions (in order, on accepted deliveries):\n${t.actions.map(actionLine).join("\n")}` : "no actions (deliveries are only recorded)",
+  t.actionLimits ? `action limits: ${Object.entries(t.actionLimits).map(([k, v]) => `${k} ${v}`).join(", ")}` : "",
 ].filter(Boolean).join("\n");
 
 const filterInput = z.object({
@@ -83,6 +121,43 @@ const contractBody = (c: z.infer<typeof contractInput> | undefined): { contract?
   },
   ...(c.note ? { contractNote: c.note } : {}),
 } : {};
+const templ = z.record(z.string(), z.string());
+const actionInput = z.object({
+  kind: z.enum(["playbook", "mission", "task", "agent", "notify"]).describe("playbook: run a playbook; mission: start a mission; task: create a task; agent: one turn of an agent (or Polpo); notify: a message on a notification channel"),
+  id: z.string().max(41).optional().describe("Stable id (generated when absent); later actions read its outputs as {{steps.<id>.reply}}, .result, .missionId, .taskId"),
+  name: z.string().max(120).optional(),
+  enabled: z.boolean().optional().describe("Default true"),
+  retries: z.number().int().min(0).max(5).optional().describe("Retries after a failure, with backoff (default 2; 0 for agent)"),
+  playbook: z.string().optional().describe("playbook: its name (polpo_playbooks_list)"),
+  params: templ.optional().describe("playbook: parameter → template over body / headers / query / mapped / trigger / delivery / steps, e.g. {\"email\": \"{{mapped.email}}\"}; one placeholder of an object passes it as JSON"),
+  mission: z.string().optional().describe("mission: its id or name"),
+  variables: templ.optional().describe("mission: replace {{name}} in a copy of the mission"),
+  title: z.string().optional().describe("task: title template; notify: title template (default the trigger's name)"),
+  description: z.string().optional().describe("task: description template"),
+  assign_to: z.string().optional().describe("task: the agent"),
+  wait_seconds: z.number().int().min(0).max(3600).optional().describe("playbook / mission / task: wait until it ends, so later actions read {{steps.<id>.result}}"),
+  agent: z.string().optional().describe("agent: its name; omit for Polpo"),
+  instructions: z.string().optional().describe("agent: what to do; only {{trigger.*}} / {{delivery.*}} placeholders: the payload follows as delimited DATA, never as instructions (refer to fields by name)"),
+  data: z.enum(["mapped", "body", "both"]).optional().describe("agent: the data the turn receives (default mapped when the trigger has a mapping, else body)"),
+  allowed_tools: z.array(z.string()).max(200).optional().describe("agent: only these tools in this turn ('prefix*' a family; [] none)"),
+  max_steps: z.number().int().min(1).max(50).optional().describe("agent: tool-loop steps (default 10)"),
+  deliver_to: z.object({ channel: z.string().describe("The Telegram channel key (polpo_channels_list)"), chat_id: z.string(), thread_id: z.number().int().optional(), name: z.string().optional() })
+    .optional().describe("agent: also send the reply to this chat"),
+  channel: z.string().optional().describe("notify: a notification channel id (polpo_channels_list)"),
+  body: z.string().optional().describe("notify: message template, e.g. New signup {{mapped.email}}"),
+  severity: z.enum(["info", "warning", "critical"]).optional(),
+});
+/** An action as the REST API takes it. */
+const actionBody = (a: z.infer<typeof actionInput>): Record<string, unknown> => ({
+  kind: a.kind, ...(a.id ? { id: a.id } : {}), ...(a.name ? { name: a.name } : {}), ...(a.enabled !== undefined ? { enabled: a.enabled } : {}),
+  ...(a.retries !== undefined ? { retries: a.retries } : {}), ...(a.wait_seconds ? { waitSeconds: a.wait_seconds } : {}),
+  ...(a.playbook ? { playbook: a.playbook } : {}), ...(a.params ? { params: a.params } : {}), ...(a.mission ? { mission: a.mission } : {}), ...(a.variables ? { variables: a.variables } : {}),
+  ...(a.title !== undefined ? { title: a.title } : {}), ...(a.description !== undefined ? { description: a.description } : {}), ...(a.assign_to ? { assignTo: a.assign_to } : {}),
+  ...(a.agent ? { agent: a.agent } : {}), ...(a.instructions !== undefined ? { instructions: a.instructions } : {}), ...(a.data ? { data: a.data } : {}),
+  ...(a.allowed_tools ? { allowedTools: a.allowed_tools } : {}), ...(a.max_steps ? { maxSteps: a.max_steps } : {}),
+  ...(a.deliver_to ? { deliverTo: { channel: a.deliver_to.channel, chatId: a.deliver_to.chat_id, ...(a.deliver_to.thread_id !== undefined ? { threadId: a.deliver_to.thread_id } : {}), ...(a.deliver_to.name ? { name: a.deliver_to.name } : {}) } } : {}),
+  ...(a.channel ? { channel: a.channel } : {}), ...(a.body !== undefined ? { body: a.body } : {}), ...(a.severity ? { severity: a.severity } : {}),
+});
 const definitionShape = {
   description: z.string().max(2000).nullable().optional().describe("What it is for; null removes it"),
   enabled: z.boolean().optional().describe("false: the endpoint answers 404 (nothing is recorded)"),
@@ -93,29 +168,46 @@ const definitionShape = {
   rate_limit_per_minute: z.number().int().min(1).max(6000).optional().describe("Default 60; beyond → 429"),
   mapping: z.record(z.string(), z.string()).nullable().optional().describe("Named fields → templates over body / headers / query ({{body.email}}): what an action would receive"),
   retention: z.number().int().min(1).max(5000).optional().describe("Deliveries kept (default 500)"),
+  actions: z.array(actionInput).max(10).nullable().optional().describe("What runs on an accepted delivery, in order (replaces the list; null or [] removes them). " + ACTIONS_HELP),
+  action_limits: z.object({
+    concurrency: z.number().int().min(1).max(10).optional().describe("Deliveries whose actions run at once (default 2)"),
+    per_minute: z.number().int().min(1).max(600).optional().describe("Actions started a minute (default 30)"),
+    per_day: z.number().int().min(1).max(100000).optional().describe("Actions started a day (default 1000)"),
+    agent_daily_cost_usd: z.number().positive().optional().describe("What the agent actions may spend a day (USD)"),
+  }).nullable().optional().describe("Safeguards on the actions; beyond a limit an action is skipped; null: the defaults"),
 };
-type Def = { description?: string | null; enabled?: boolean; contract?: z.infer<typeof contractInput>; filter?: z.infer<typeof filterInput>; dedupe?: { key: string; ttl_seconds?: number } | null; rate_limit_per_minute?: number; mapping?: Record<string, string> | null; retention?: number };
+type Def = {
+  description?: string | null; enabled?: boolean; contract?: z.infer<typeof contractInput>; filter?: z.infer<typeof filterInput>; dedupe?: { key: string; ttl_seconds?: number } | null;
+  rate_limit_per_minute?: number; mapping?: Record<string, string> | null; retention?: number;
+  actions?: Array<z.infer<typeof actionInput>> | null; action_limits?: { concurrency?: number; per_minute?: number; per_day?: number; agent_daily_cost_usd?: number } | null;
+};
 const definitionBody = (d: Def) => ({
   ...(d.description !== undefined ? { description: d.description } : {}), ...(d.enabled !== undefined ? { enabled: d.enabled } : {}),
   ...contractBody(d.contract), ...(d.filter !== undefined ? { filter: d.filter } : {}),
   ...(d.dedupe !== undefined ? { dedupe: d.dedupe === null ? null : { key: d.dedupe.key, ...(d.dedupe.ttl_seconds ? { ttlSeconds: d.dedupe.ttl_seconds } : {}) } } : {}),
   ...(d.rate_limit_per_minute !== undefined ? { rateLimitPerMinute: d.rate_limit_per_minute } : {}),
   ...(d.mapping !== undefined ? { mapping: d.mapping } : {}), ...(d.retention !== undefined ? { retention: d.retention } : {}),
+  ...(d.actions !== undefined ? { actions: d.actions === null ? null : d.actions.map(actionBody) } : {}),
+  ...(d.action_limits !== undefined ? { actionLimits: d.action_limits === null ? null : {
+    ...(d.action_limits.concurrency !== undefined ? { concurrency: d.action_limits.concurrency } : {}), ...(d.action_limits.per_minute !== undefined ? { perMinute: d.action_limits.per_minute } : {}),
+    ...(d.action_limits.per_day !== undefined ? { perDay: d.action_limits.per_day } : {}), ...(d.action_limits.agent_daily_cost_usd !== undefined ? { agentDailyCostUsd: d.action_limits.agent_daily_cost_usd } : {}),
+  } } : {}),
 });
 const sampleInput = z.object({
   body: z.unknown().describe("The parsed body as it would arrive (JSON value; form fields as an object; text as a string)"),
   content_type: CONTENT.optional().describe("Default json"),
   headers: z.record(z.string(), z.string()).optional(),
   query: z.record(z.string(), z.string()).optional(),
+  run_actions: z.boolean().optional().describe("send: also run the trigger's actions (off by default: a test runs nothing)"),
 });
-const sampleBody = (s: z.infer<typeof sampleInput>) => ({ body: s.body, ...(s.content_type ? { contentType: s.content_type } : {}), ...(s.headers ? { headers: s.headers } : {}), ...(s.query ? { query: s.query } : {}) });
+const sampleBody = (s: z.infer<typeof sampleInput>) => ({ body: s.body, ...(s.content_type ? { contentType: s.content_type } : {}), ...(s.headers ? { headers: s.headers } : {}), ...(s.query ? { query: s.query } : {}), ...(s.run_actions ? { runActions: true } : {}) });
 const curl = (t: TriggerRow) => `curl -X POST '${t.endpoint}' -H 'content-type: application/json'${t.auth.secret ? " -H 'Authorization: Bearer <secret>'" : ""}${t.auth.hmac ? ` -H '${t.auth.hmac.header}: <signature>'` : ""} -d '{"hello":"world"}'`;
 
 export function registerTriggerTools(tool: Register, deps: McpDeps): void {
   tool("automation", "polpo_triggers_list", {
     title: "List triggers",
     description: "Triggers: public endpoints (POST /hooks/{id}) that receive form submissions and webhooks. Each with its endpoint URL, auth, contract version, delivery counts per status and last delivery. "
-      + NO_ACTIONS,
+      + ACTIONS_HELP,
     inputSchema: { enabled: z.boolean().optional().describe("true: only enabled ones; false: only disabled ones"), limit: limitParam(30, 100), cursor: cursorParam() },
     outputSchema: { items: z.array(looseObject), next_cursor: z.string().nullable(), total: z.number().int().optional() },
     annotations: READ,
@@ -162,8 +254,8 @@ export function registerTriggerTools(tool: Register, deps: McpDeps): void {
 
   tool("automation", "polpo_trigger_deliveries", {
     title: "A trigger's deliveries",
-    description: "What a trigger received, newest first: status (accepted, rejected, filtered, duplicate, rate_limited), HTTP answer, reasons. "
-      + "With delivery_id: that delivery with its payload (secrets redacted), contract errors and mapped values.",
+    description: "What a trigger received, newest first: status (accepted, rejected, filtered, duplicate, rate_limited), HTTP answer, reasons, the actions' overall status. "
+      + "With delivery_id: that delivery with its payload (secrets redacted), contract errors, mapped values and its actions' runs (status, attempts, error, what each created: mission, task, chat session, notification).",
     inputSchema: {
       id: z.string().min(1).describe("The trigger's id"),
       delivery_id: z.string().optional().describe("One delivery (tdl_…): with its payload, errors and mapped values"),
@@ -186,6 +278,9 @@ export function registerTriggerTools(tool: Register, deps: McpDeps): void {
         d.body !== undefined ? `body${d.bodyTruncated ? " (truncated)" : ""}: ${short(JSON.stringify(d.body), 3000)}` : "body: not kept (refused before it was read or authenticated)",
         d.mapped ? `mapped: ${JSON.stringify(d.mapped)}` : "",
         d.mappingErrors?.length ? `mapping errors: ${d.mappingErrors.join("; ")}` : "",
+        d.origin ? `arrived while trigger ${d.origin.triggerId}'s actions ran (delivery ${d.origin.deliveryId}, depth ${d.origin.depth ?? 1})` : "",
+        d.actions?.length ? `actions ${d.actionsStatus}${d.actionsRequestedBy ? ` (for ${d.actionsRequestedBy})` : ""}:\n${d.actions.map(actionRunLine).join("\n")}` : "",
+        d.previousActions?.length ? `earlier runs: ${d.previousActions.map((p) => `${p.status ?? "?"}${p.endedAt ? ` ${at(p.endedAt)}` : ""}`).join(", ")}` : "",
       ].filter(Boolean).join("\n"), { delivery: d });
     }
     const r = await apiGet(deps, `/triggers/${enc(id)}/deliveries${qs({ limit: limit ?? 20, cursor, status: status?.join(","), test })}`);
@@ -200,7 +295,8 @@ export function registerTriggerTools(tool: Register, deps: McpDeps): void {
     description: "A public endpoint (POST <public URL>/hooks/{id}) for a form (Tally, Typeform…) or any service's webhook, with a contract (content types, size, JSON Schema), "
       + "an optional filter, dedupe, rate limit and mapping. It gets a generated secret (Authorization: Bearer or X-Polpo-Secret); the secret is shown once, "
       + "to admin scope only (else get one with polpo_trigger_auth action rotate_secret, admin, or on the dashboard). HMAC signatures and the IP allowlist: polpo_trigger_auth. "
-      + NO_ACTIONS,
+      + "With actions (playbook, mission, task, agent, notify) it does something on each accepted delivery, e.g. 'when the form arrives run the onboarding playbook': "
+      + "actions: [{ kind: 'playbook', playbook: 'onboarding', params: { email: '{{mapped.email}}' } }]. " + ACTIONS_HELP,
     inputSchema: { name: z.string().min(1).max(120).describe("A name people recognise, e.g. Tally signup form"), slug: z.string().max(40).optional().describe("The id starts with it (a random suffix is added)"), ...definitionShape },
     outputSchema: { trigger: looseObject, secret: z.string().optional(), curl: z.string() },
     annotations: WRITE,
@@ -214,14 +310,16 @@ export function registerTriggerTools(tool: Register, deps: McpDeps): void {
         : "A secret was generated; it is shown once and needs admin scope: ask an admin to rotate it (polpo_trigger_auth action rotate_secret) or use the dashboard."
       : "";
     return ok([`Created trigger ${trigger.name} [${trigger.id}] at ${trigger.endpoint}.`, secretLine, `curl: ${curl(trigger)}`,
-      `Behind Tailscale Funnel the path /<instance>/hooks/ must be published. Dashboard: ${dashboardLink(deps, `/triggers?trigger=${enc(trigger.id)}`)}`, NO_ACTIONS].filter(Boolean).join("\n"),
+      `Behind Tailscale Funnel the path /<instance>/hooks/ must be published. Dashboard: ${dashboardLink(deps, `/triggers?trigger=${enc(trigger.id)}`)}`,
+      trigger.actions?.length ? `Actions:\n${trigger.actions.map(actionLine).join("\n")}` : "No actions yet: deliveries are only recorded (add actions with polpo_trigger_update)."].filter(Boolean).join("\n"),
     { trigger, ...(secret && admin ? { secret } : {}), curl: curl(trigger) });
   });
 
   tool("automation", "polpo_trigger_update", {
     title: "Change a trigger",
-    description: "Change a trigger's name, description, enabled, contract (a change makes a new contract version), filter, dedupe, rate limit, mapping, retention. "
-      + "Only the fields given change; null removes filter, dedupe, mapping, contract.schema. Auth and the IP allowlist: polpo_trigger_auth (admin).",
+    description: "Change a trigger's name, description, enabled (disabling also skips its queued actions), contract (a change makes a new contract version), filter, dedupe, rate limit, mapping, retention, "
+      + "actions (the whole list, in order: give every action, with its id to keep it) and action limits. "
+      + "Only the fields given change; null removes filter, dedupe, mapping, contract.schema, actions. Auth and the IP allowlist: polpo_trigger_auth (admin). " + ACTIONS_HELP,
     inputSchema: { id: z.string().min(1).describe("The trigger's id"), name: z.string().min(1).max(120).optional().describe("A new name"), ...definitionShape },
     outputSchema: { trigger: looseObject },
     annotations: UPDATE,
@@ -248,19 +346,21 @@ export function registerTriggerTools(tool: Register, deps: McpDeps): void {
   tool("automation", "polpo_trigger_test", {
     title: "Test a trigger",
     description: "Test tools: send (a test delivery, recorded with test: true, through contract, filter, dedupe and mapping); validate (a sample against the contract, filter and mapping — saved or a draft — without recording); "
-      + "infer_schema (a JSON Schema from a sample or a delivery, to save as the contract with polpo_trigger_update); replay (a stored delivery through the current contract, filter, dedupe and mapping, dry run). "
-      + NO_ACTIONS,
+      + "infer_schema (a JSON Schema from a sample or a delivery, to save as the contract with polpo_trigger_update); replay (a stored delivery through the current contract, filter, dedupe and mapping, dry run); "
+      + "preview_actions (the actions, or a draft of them, rendered against a delivery, the newest accepted by default: params, task text, the agent's message, the notification; nothing runs). "
+      + "A test delivery runs no action unless sample.run_actions is true.",
     inputSchema: {
       id: z.string().min(1).describe("The trigger's id"),
-      action: z.enum(["send", "validate", "infer_schema", "replay"]).describe("What to do (see the description)"),
+      action: z.enum(["send", "validate", "infer_schema", "replay", "preview_actions"]).describe("What to do (see the description)"),
       sample: sampleInput.optional().describe("send, validate, infer_schema"),
-      delivery_id: z.string().optional().describe("replay, infer_schema"),
+      delivery_id: z.string().optional().describe("replay, infer_schema, preview_actions"),
+      actions: z.array(actionInput).max(10).optional().describe("preview_actions: a draft of the actions (default: the saved ones)"),
       draft: z.object({ contract: contractInput.optional(), filter: filterInput.optional(), mapping: z.record(z.string(), z.string()).nullable().optional() }).optional()
         .describe("validate / replay: unsaved changes to try"),
     },
     outputSchema: { result: looseObject.optional(), delivery: looseObject.optional(), schema: looseObject.optional() },
     annotations: WRITE,
-  }, async ({ id, action, sample, delivery_id, draft }) => {
+  }, async ({ id, action, sample, delivery_id, draft, actions }) => {
     const draftBody = draft ? { ...(draft.contract ? { contract: contractBody(draft.contract).contract } : {}), ...(draft.filter !== undefined ? { filter: draft.filter } : {}), ...(draft.mapping !== undefined ? { mapping: draft.mapping } : {}) } : undefined;
     const dry = (res: { status: string; reasons: string[]; errors: string[]; filterMatched: boolean; mapped?: unknown; mappingErrors?: string[]; duplicateOf?: string; dedupeKey?: string }) => [
       `→ ${res.status}${res.reasons.length ? ` (${res.reasons.join("; ")})` : ""}`,
@@ -276,7 +376,17 @@ export function registerTriggerTools(tool: Register, deps: McpDeps): void {
         const r = await apiSend(deps, "POST", `/triggers/${enc(id)}/test`, sampleBody(sample));
         if (!r.ok) return r.status === 404 ? fail(`There is no trigger "${id}".`) : apiError(r, "Sending a test delivery");
         const d = r.data as DeliveryRow;
-        return ok(`Test delivery ${d.id}: ${d.status} (HTTP ${d.httpStatus})${d.reasons.length ? ` — ${d.reasons.join("; ")}` : ""}${d.errors?.length ? `\n${d.errors.join("\n")}` : ""}${d.mapped ? `\nmapped: ${JSON.stringify(d.mapped)}` : ""}\n${NO_ACTIONS}`, { delivery: d });
+        const acts = d.actions?.length ? `\nactions ${d.actionsStatus}: they run now; follow them with polpo_trigger_deliveries delivery_id ${d.id}` : sample.run_actions ? "\nThis trigger has no actions." : "\nNo action ran (a test runs them only with run_actions: true).";
+        return ok(`Test delivery ${d.id}: ${d.status} (HTTP ${d.httpStatus})${d.reasons.length ? ` — ${d.reasons.join("; ")}` : ""}${d.errors?.length ? `\n${d.errors.join("\n")}` : ""}${d.mapped ? `\nmapped: ${JSON.stringify(d.mapped)}` : ""}${acts}`, { delivery: d });
+      }
+      case "preview_actions": {
+        const r = await apiSend(deps, "POST", `/triggers/${enc(id)}/actions/preview`, { ...(delivery_id ? { deliveryId: delivery_id } : {}), ...(actions ? { actions: actions.map(actionBody) } : {}) });
+        if (!r.ok) return r.status === 404 ? fail(`There is no trigger "${id}" (or no delivery "${delivery_id}").`) : apiError(r, "Previewing the actions");
+        const p = r.data as { deliveryId?: string; note?: string; actions: Array<{ actionId: string; kind: string; rendered: Record<string, unknown>; error?: string }> };
+        return ok([
+          p.note ?? `The actions on delivery ${p.deliveryId} (nothing ran; {{steps.…}} render empty in a preview):`,
+          ...p.actions.map((a) => `- [${a.actionId}] ${a.kind}${a.error ? ` — error: ${a.error}` : ""}\n${short(JSON.stringify(a.rendered, null, 1), 2500)}`),
+        ].join("\n"), { result: p as unknown as Record<string, unknown> });
       }
       case "validate": {
         if (!sample) return fail("validate needs sample { body, content_type? }.");
@@ -298,6 +408,25 @@ export function registerTriggerTools(tool: Register, deps: McpDeps): void {
         return ok(`Inferred schema (save it with polpo_trigger_update contract.schema):\n${JSON.stringify(schema, null, 1)}`, { schema });
       }
     }
+  });
+
+  tool("automation", "polpo_trigger_run_actions", {
+    title: "Re-run a delivery's actions",
+    description: "Run a trigger's current actions again on a stored accepted delivery (a test one too): after a fix, or when an action failed. "
+      + "They run now, in order; the previous runs stay on the delivery. Refused while its actions are still queued or running, or when the trigger is disabled. "
+      + "Follow them with polpo_trigger_deliveries delivery_id.",
+    inputSchema: {
+      id: z.string().min(1).describe("The trigger's id"),
+      delivery_id: z.string().min(1).describe("The delivery (tdl_…; polpo_trigger_deliveries)"),
+    },
+    outputSchema: { delivery_id: z.string(), actions_status: z.string().optional(), actions: z.array(looseObject) },
+    annotations: { ...WRITE, openWorldHint: true },
+  }, async ({ id, delivery_id }) => {
+    const r = await apiSend(deps, "POST", `/triggers/${enc(id)}/deliveries/${enc(delivery_id)}/run-actions`);
+    if (!r.ok) return r.status === 404 ? fail(`No delivery "${delivery_id}" for trigger "${id}" (only the newest are kept).`) : apiError(r, "Re-running the actions");
+    const d = r.data as { deliveryId: string; actionsStatus?: string; actions: ActionRunRow[] };
+    return ok(`Actions of ${d.deliveryId} ${d.actionsStatus ?? "queued"}:\n${d.actions.map(actionRunLine).join("\n")}\nFollow them with polpo_trigger_deliveries delivery_id ${d.deliveryId}.`,
+      { delivery_id: d.deliveryId, ...(d.actionsStatus ? { actions_status: d.actionsStatus } : {}), actions: d.actions as unknown as Array<Record<string, unknown>> });
   });
 
   tool("automation", "polpo_trigger_auth", {
