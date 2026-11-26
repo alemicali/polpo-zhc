@@ -102,6 +102,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SandboxSettingsSection } from "@/components/sandbox/sandbox-settings";
 import { McpAccessSection } from "@/components/config/mcp-access-section";
 import { HarnessesSection } from "@/components/config/harnesses-section";
+import { DecisionsSection } from "@/components/config/decisions-section";
 import { ComputerWebhooksSection } from "@/components/config/computer-webhooks-section";
 import { SectionHeader } from "@/components/shared/section-header";
 import { ChannelsSection } from "@/components/channels/channels-section";
@@ -1799,6 +1800,7 @@ export function ConfigPage() {
 
         {/* ═══ HARNESSES ═══ */}
         {activeSection === "harnesses" && <HarnessesSection />}
+        {activeSection === "decisions" && <DecisionsSection />}
         {activeSection === "computers" && <ComputerWebhooksSection />}
 
         {/* ═══ MCP ACCESS ═══ */}

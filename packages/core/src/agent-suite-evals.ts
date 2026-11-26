@@ -16,6 +16,7 @@ import { argsMatch, scorerJudgeRole, suiteToolMatches, validateJsonSchema } from
 import type {
   SuiteRole, CaseInput, SuiteCaseResult, SuiteCaseStatus, SuiteRun, SuiteScoreResult, SuiteScorer, SuiteScorerType, SuiteTrace,
 } from "./agent-suites.js";
+import type { DecisionAnswer, DecisionQuestion } from "./decisions.js";
 
 // ── Shapes ───────────────────────────────────────────────────────────
 
@@ -324,7 +325,7 @@ function lcs(expected: string[], actual: string[]): number {
 
 /** The default threshold of a scorer type. */
 export function defaultScorerThreshold(type: SuiteScorerType): number {
-  return type === "similarity" ? 0.8 : type === "llm_judge" ? 0.6 : 1;
+  return type === "similarity" ? 0.8 : type === "llm_judge" ? 0.6 : type === "decision" ? 0.5 : 1;
 }
 
 const show = (v: unknown, n = 80) => { const t = typeof v === "string" ? v : JSON.stringify(v) ?? "undefined"; return t.length > n ? `${t.slice(0, n)}…` : t; };
@@ -346,6 +347,7 @@ export function describeScorer(s: SuiteScorer): string {
     case "latency": return `answers within ${s.maxMs} ms`;
     case "llm_judge": return `LLM judge: ${show(s.rubric, 70)}`;
     case "custom": return "custom scorer";
+    case "decision": return `decision (${s.question}): ${show(s.instructions, 70)}${s.expected !== undefined ? ` → ${String(s.expected)}` : ""}`;
   }
 }
 
@@ -366,6 +368,41 @@ export interface ScorerDeps {
   judgeRole?: SuiteRole;
   /** Runs a custom scorer's code in the sandbox; returns what the code returned. */
   custom?: (req: { code: string; input: Record<string, unknown>; timeoutMs?: number }) => Promise<unknown>;
+  /** decide() (the decision model) for decision scorers. */
+  decide?: (req: { state: Record<string, unknown>; questions: DecisionQuestion[] }) => Promise<{ answers: DecisionAnswer[]; model: string; costUsd: number; calibrated: boolean }>;
+}
+
+/** A decision scorer's question and what it reads: the user's message and the value (the reply by default). */
+export function decisionScorerRequest(s: Extract<SuiteScorer, { type: "decision" }>, ctx: ScorerContext): { state: Record<string, unknown>; questions: DecisionQuestion[] } {
+  const { value, found, what } = scorerValue(s, ctx.trace);
+  const message = ctx.input?.message ?? [...ctx.trace.input].reverse().find((m) => m.role === "user")?.content ?? "";
+  return {
+    state: { message: String(message).slice(0, 8000), [s.from && s.from !== "reply" ? s.from : "reply"]: found ? (typeof value === "string" ? value.slice(0, 20_000) : value) : `(${what}: not found)` },
+    questions: [{
+      name: "check", type: s.question, instructions: s.instructions,
+      ...(s.choices ? { choices: s.choices } : {}), ...(s.levels ? { levels: s.levels.map((label) => ({ label })) } : {}),
+    }],
+  };
+}
+
+/** A decision scorer's score from its answer (see SuiteScorer "decision"). */
+export function decisionScore(s: Extract<SuiteScorer, { type: "decision" }>, a: DecisionAnswer): { score: number; reason: string } {
+  if (a.type === "predicate") {
+    const p = a.probability ?? 0;
+    const score = s.expected === false ? 1 - p : p;
+    return { score, reason: `P(yes) ${p.toFixed(2)}${s.expected === false ? " (expected no)" : ""}` };
+  }
+  if (a.type === "choice") {
+    const expected = String(s.expected);
+    const p = a.probabilities?.[expected];
+    return { score: p ?? (a.choice === expected ? 1 : 0), reason: `${a.choice}${p !== undefined ? `; P(${expected}) ${p.toFixed(2)}` : ""}` };
+  }
+  const levels = s.levels ?? [];
+  if (typeof s.expected === "string") {
+    const p = a.probabilities?.[s.expected];
+    return { score: p ?? (a.level === s.expected ? 1 : 0), reason: `${(a.score ?? 0).toFixed(2)} ${a.level ?? ""}; expected ${s.expected}`.trim() };
+  }
+  return { score: levels.length > 1 ? (a.score ?? 0) / (levels.length - 1) : 0, reason: `${(a.score ?? 0).toFixed(2)} ${a.level ?? ""}`.trim() };
 }
 
 type Scored = Pick<SuiteScoreResult, "score"> & Partial<Pick<SuiteScoreResult, "reason" | "expected" | "actual" | "error" | "judge">>;
@@ -557,6 +594,17 @@ export async function evaluateScorer(s: SuiteScorer, ctx: ScorerContext, deps: S
         score: parsed.score,
         reason: parsed.summary ?? parsed.criteria.map((c) => `${c.name} ${c.score}/5`).join(", "),
         judge: { ...(res.model ? { model: res.model } : {}), criteria: parsed.criteria, ...(parsed.summary ? { summary: parsed.summary } : {}), ...(res.costUsd !== undefined ? { costUsd: res.costUsd } : {}) },
+      });
+    }
+    if (s.type === "decision") {
+      if (!deps.decide) return finish(s, id, { score: 0, error: "Decisions are not available on this server" });
+      const res = await deps.decide(decisionScorerRequest(s, ctx));
+      const answer = res.answers[0];
+      if (!answer) throw new Error("the decision model gave no answer");
+      const r = decisionScore(s, answer);
+      return finish(s, id, {
+        score: r.score, reason: `${r.reason}${res.calibrated ? "" : " (uncalibrated)"}`,
+        judge: { model: res.model, criteria: [], costUsd: res.costUsd },
       });
     }
     if (s.type === "custom") {

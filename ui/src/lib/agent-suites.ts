@@ -125,6 +125,7 @@ export const SCORER_TEMPLATES: Record<SuiteScorerType, Record<string, unknown>> 
   latency: { maxMs: 30000 },
   llm_judge: { rubric: "", criteria: [{ name: "correctness", description: "", weight: 1 }], threshold: 0.6 },
   custom: { code: "return reply.includes(String(expected)) ? 1 : 0", expected: "{{row.expected}}" },
+  decision: { question: "predicate", instructions: "Does the reply answer the question politely?", threshold: 0.5 },
 };
 
 export const SCORER_LABELS: Record<SuiteScorerType, string> = {
@@ -140,6 +141,7 @@ export const SCORER_LABELS: Record<SuiteScorerType, string> = {
   latency: "Latency target",
   llm_judge: "LLM judge",
   custom: "Custom (sandboxed JS)",
+  decision: "Decision (decision model)",
 };
 
 export function formatScore(n: number | undefined): string {

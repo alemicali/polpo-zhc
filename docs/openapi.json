@@ -253,6 +253,807 @@
         },
         "additionalProperties": false
       },
+      "DecideResult": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "answers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DecisionAnswer"
+            }
+          },
+          "model": {
+            "type": "string"
+          },
+          "gateway": {
+            "type": "string"
+          },
+          "usage": {
+            "type": "object",
+            "properties": {
+              "inputTokens": {
+                "type": "number"
+              },
+              "outputTokens": {
+                "type": "number"
+              }
+            }
+          },
+          "costUsd": {
+            "type": "number"
+          },
+          "calibrated": {
+            "type": "boolean"
+          },
+          "latencyMs": {
+            "type": "number"
+          },
+          "uncertain": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "answers",
+          "model",
+          "usage",
+          "costUsd",
+          "calibrated",
+          "latencyMs",
+          "uncertain"
+        ]
+      },
+      "DecisionAnswer": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "predicate",
+              "choice",
+              "score",
+              "rank"
+            ]
+          },
+          "value": {
+            "type": "boolean"
+          },
+          "probability": {
+            "type": "number"
+          },
+          "choice": {
+            "type": "string"
+          },
+          "score": {
+            "type": "number"
+          },
+          "level": {
+            "type": "string"
+          },
+          "probabilities": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            }
+          },
+          "ranking": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "score": {
+                  "type": "number"
+                },
+                "confidence": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "score"
+              ]
+            }
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "threshold": {
+            "type": "number"
+          },
+          "uncertain": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "uncertain"
+        ]
+      },
+      "DecideRequest": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "nullable": true
+                }
+              },
+              {
+                "type": "array",
+                "items": {
+                  "nullable": true
+                }
+              }
+            ],
+            "description": "The text or JSON the questions are about"
+          },
+          "questions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DecisionQuestion"
+            }
+          },
+          "model": {
+            "$ref": "#/components/schemas/DecisionModelSetting"
+          },
+          "thresholds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "number"
+                }
+              }
+            ],
+            "description": "A confidence threshold for every question, or per question name"
+          },
+          "fallback": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "string"
+                  },
+                  "confidenceBelow": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "model"
+                ]
+              }
+            ],
+            "description": "Rerun with another model on low confidence (or when the first fails)"
+          }
+        },
+        "required": [
+          "state",
+          "questions"
+        ]
+      },
+      "DecisionQuestion": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "refund"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "predicate",
+              "choice",
+              "score",
+              "rank"
+            ]
+          },
+          "instructions": {
+            "type": "string",
+            "example": "Is the customer asking for money back?"
+          },
+          "choices": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "value"
+              ]
+            },
+            "description": "choice: the options (2–20)"
+          },
+          "levels": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "label"
+                  ]
+                }
+              ]
+            },
+            "description": "score (rank: the rating scale): ordered levels, lowest first (2–11)"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "label"
+                  ]
+                }
+              ]
+            },
+            "description": "rank: the items to sort (2–20); each is rated on the levels"
+          },
+          "threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Confidence below it → uncertain"
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "instructions"
+        ]
+      },
+      "DecisionModelSetting": {
+        "anyOf": [
+          {
+            "type": "string",
+            "example": "vercel-ai-gateway:typesafe-ai/jev"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "gateway": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "fallback": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "model": {
+                        "type": "string"
+                      },
+                      "confidenceBelow": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "model"
+                    ]
+                  }
+                ]
+              },
+              "credentialRef": {
+                "type": "object",
+                "properties": {
+                  "owner": {
+                    "type": "string"
+                  },
+                  "service": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "owner",
+                  "service"
+                ]
+              },
+              "credentialField": {
+                "type": "string"
+              },
+              "zeroDataRetention": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "model"
+            ]
+          }
+        ],
+        "description": "Another decision model than settings.decisionModel"
+      },
+      "DecisionLogSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string"
+          },
+          "caller": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "api",
+                  "mcp",
+                  "chat",
+                  "agent",
+                  "mission",
+                  "suite",
+                  "playground"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "by": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "error"
+            ]
+          },
+          "error": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "gateway": {
+            "type": "string"
+          },
+          "calibrated": {
+            "type": "boolean"
+          },
+          "latencyMs": {
+            "type": "number"
+          },
+          "costUsd": {
+            "type": "number"
+          },
+          "usage": {
+            "type": "object",
+            "properties": {
+              "inputTokens": {
+                "type": "number"
+              },
+              "outputTokens": {
+                "type": "number"
+              }
+            }
+          },
+          "answers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DecisionAnswer"
+            }
+          },
+          "uncertain": {
+            "type": "boolean"
+          },
+          "stateHash": {
+            "type": "string"
+          },
+          "stateChars": {
+            "type": "number"
+          },
+          "questions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "predicate",
+                    "choice",
+                    "score",
+                    "rank"
+                  ]
+                }
+              },
+              "required": [
+                "name",
+                "type"
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "at",
+          "caller",
+          "status",
+          "model",
+          "calibrated",
+          "latencyMs",
+          "costUsd",
+          "usage",
+          "answers",
+          "uncertain",
+          "stateHash",
+          "stateChars",
+          "questions"
+        ]
+      },
+      "DecisionStatus": {
+        "type": "object",
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "model": {
+            "type": "string"
+          },
+          "gateway": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "label"
+            ]
+          },
+          "fallback": {
+            "type": "object",
+            "properties": {
+              "model": {
+                "type": "string"
+              },
+              "confidenceBelow": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "model"
+            ]
+          },
+          "zeroDataRetention": {
+            "type": "boolean"
+          },
+          "key": {
+            "type": "object",
+            "properties": {
+              "ok": {
+                "type": "boolean"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "vault",
+                  "env"
+                ]
+              },
+              "detail": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "ok",
+              "detail"
+            ]
+          },
+          "error": {
+            "type": "string"
+          },
+          "unconfigured": {
+            "type": "string",
+            "enum": [
+              "error",
+              "orchestrator"
+            ]
+          },
+          "retention": {
+            "type": "number"
+          },
+          "retentionDays": {
+            "type": "number"
+          },
+          "storeInputs": {
+            "type": "string",
+            "enum": [
+              "capped",
+              "hash"
+            ]
+          },
+          "gateways": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "envVar": {
+                  "type": "string"
+                },
+                "docsUrl": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "envVar"
+              ]
+            }
+          }
+        },
+        "required": [
+          "configured",
+          "unconfigured",
+          "retention",
+          "retentionDays",
+          "storeInputs",
+          "gateways"
+        ]
+      },
+      "DecisionNodeState": {
+        "type": "object",
+        "properties": {
+          "group": {
+            "type": "string"
+          },
+          "missionId": {
+            "type": "string"
+          },
+          "node": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "deciding",
+              "decided",
+              "awaiting"
+            ]
+          },
+          "branch": {
+            "type": "string",
+            "nullable": true
+          },
+          "suggested": {
+            "type": "string",
+            "nullable": true
+          },
+          "decisionId": {
+            "type": "string"
+          },
+          "answer": {
+            "$ref": "#/components/schemas/DecisionAnswer"
+          },
+          "calibrated": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "decidedAt": {
+            "type": "string"
+          },
+          "decidedBy": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "group",
+          "node",
+          "status",
+          "startedAt"
+        ]
+      },
+      "DecisionLogEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string"
+          },
+          "caller": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "api",
+                  "mcp",
+                  "chat",
+                  "agent",
+                  "mission",
+                  "suite",
+                  "playground"
+                ]
+              },
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "by": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "error"
+            ]
+          },
+          "error": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "gateway": {
+            "type": "string"
+          },
+          "calibrated": {
+            "type": "boolean"
+          },
+          "latencyMs": {
+            "type": "number"
+          },
+          "costUsd": {
+            "type": "number"
+          },
+          "usage": {
+            "type": "object",
+            "properties": {
+              "inputTokens": {
+                "type": "number"
+              },
+              "outputTokens": {
+                "type": "number"
+              }
+            }
+          },
+          "answers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DecisionAnswer"
+            }
+          },
+          "uncertain": {
+            "type": "boolean"
+          },
+          "stateHash": {
+            "type": "string"
+          },
+          "stateChars": {
+            "type": "number"
+          },
+          "questions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DecisionQuestion"
+            }
+          },
+          "state": {
+            "type": "string"
+          },
+          "stateTruncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "at",
+          "caller",
+          "status",
+          "model",
+          "calibrated",
+          "latencyMs",
+          "costUsd",
+          "usage",
+          "answers",
+          "uncertain",
+          "stateHash",
+          "stateChars",
+          "questions"
+        ]
+      },
       "SearchAskResult": {
         "type": "object",
         "properties": {
@@ -18840,6 +19641,661 @@
         }
       }
     },
+    "/api/v1/decide": {
+      "post": {
+        "tags": [
+          "Decisions"
+        ],
+        "summary": "Take a decision",
+        "description": "Typed decisions with probabilities about a state, from the decision model (settings.decisionModel, e.g. vercel-ai-gateway:typesafe-ai/jev): predicate (P(yes)), choice (the option and a probability per option), score (ordered levels → a fractional score and a probability per level), rank (items sorted: one score per item). A threshold marks answers below it `uncertain`. Without a decision model: 409 with a link to Settings, or Polpo's own model through the chat pipeline (settings.decisions.unconfigured \"orchestrator\"), flagged calibrated: false. Every call is in the decision log.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The answers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/DecideResult"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No decision model (or its key) is configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The gateway is rate limiting",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The decision model failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The decision model was too slow",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/decisions": {
+      "get": {
+        "tags": [
+          "Decisions"
+        ],
+        "summary": "The decision log",
+        "description": "Every decision (who called it, the questions, the answers, the model, the cost), newest first.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "api",
+                "mcp",
+                "chat",
+                "agent",
+                "mission",
+                "suite",
+                "playground"
+              ]
+            },
+            "required": false,
+            "name": "caller",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "callerId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "required": false,
+            "name": "uncertain",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ok",
+                "error"
+              ]
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of decisions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "decisions": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/DecisionLogSummary"
+                          }
+                        },
+                        "nextCursor": {
+                          "type": "string"
+                        },
+                        "total": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "decisions",
+                        "total"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/decisions/status": {
+      "get": {
+        "tags": [
+          "Decisions"
+        ],
+        "summary": "Decision model status",
+        "description": "The decision model, its gateway, where the gateway's key comes from (a vault entry or the env var; never the key) and whether it resolves, the policy without a model, the log's retention.",
+        "responses": {
+          "200": {
+            "description": "Status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/DecisionStatus"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/decisions/nodes": {
+      "get": {
+        "tags": [
+          "Decisions"
+        ],
+        "summary": "Mission decision nodes",
+        "description": "Missions' decision nodes of the runs in progress: deciding, decided (the branch taken), or waiting for a person to choose a branch.",
+        "responses": {
+          "200": {
+            "description": "Nodes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/DecisionNodeState"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/decisions/nodes/resolve": {
+      "post": {
+        "tags": [
+          "Decisions"
+        ],
+        "summary": "Choose a waiting decision node's branch",
+        "description": "A mission's decision node whose answer was uncertain (or failed) waits for a person: take a branch (null: none of its tasks run). The mission resumes.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "group": {
+                    "type": "string",
+                    "description": "The mission run (its group)"
+                  },
+                  "node": {
+                    "type": "string"
+                  },
+                  "branch": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                },
+                "required": [
+                  "group",
+                  "node",
+                  "branch"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Decided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/DecisionNodeState"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not waiting, or an unknown branch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/decisions/{id}": {
+      "get": {
+        "tags": [
+          "Decisions"
+        ],
+        "summary": "One decision",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The decision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "data": {
+                      "$ref": "#/components/schemas/DecisionLogEntry"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such decision (or no longer kept)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/benchmarks": {
       "get": {
         "tags": [
@@ -27864,6 +29320,109 @@
                   "imageModel": {
                     "type": "string",
                     "nullable": true
+                  },
+                  "decisionModel": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "gateway": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "fallback": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "model": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "confidenceBelow": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  }
+                                },
+                                "required": [
+                                  "model"
+                                ]
+                              }
+                            ]
+                          },
+                          "credentialRef": {
+                            "type": "object",
+                            "properties": {
+                              "owner": {
+                                "type": "string"
+                              },
+                              "service": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "owner",
+                              "service"
+                            ]
+                          },
+                          "credentialField": {
+                            "type": "string"
+                          },
+                          "zeroDataRetention": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "model"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "nullable": true
+                      }
+                    ]
+                  },
+                  "decisions": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "unconfigured": {
+                        "type": "string",
+                        "enum": [
+                          "error",
+                          "orchestrator"
+                        ]
+                      },
+                      "retention": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 20000
+                      },
+                      "retentionDays": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 3650
+                      },
+                      "storeInputs": {
+                        "type": "string",
+                        "enum": [
+                          "capped",
+                          "hash"
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
                   },
                   "reasoning": {
                     "type": "string",

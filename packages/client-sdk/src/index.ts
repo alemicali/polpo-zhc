@@ -295,3 +295,7 @@ export type {
   MeanSd, BenchmarkVariantStats, BenchmarkLeaderboardEntry, BenchmarkLeaderboard, BenchmarkCellStatus, BenchmarkMatrixCell, BenchmarkMatrixRow, BenchmarkMatrix, BenchmarkReport,
   DiffSegment, BenchmarkCompareColumn, BenchmarkCaseComparison, BenchmarkProgressEvent, PlaygroundMocks, PlaygroundPane, PlaygroundPaneInput, PlaygroundExchange, PlaygroundSession, PlaygroundStreamEvent,
 } from "./client/agent-suite-types.js";
+export type {
+  DecisionQuestionType, DecisionQuestion, DecisionFallbackModel, DecisionModelSetting, DecisionSettings, DecideRequest, DecisionAnswer, DecisionUsage, DecideResult,
+  DecisionCallerKind, DecisionLogSummary, DecisionLogEntry, DecisionLogPage, DecisionStatus, DecisionNodeState, MissionDecision,
+} from "./client/decision-types.js";

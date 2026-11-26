@@ -1000,6 +1000,11 @@ export interface PolpoSettings {
   voiceReplies?: VoiceReplyMode;
   /** Image-capable model for tasks that need vision (falls back to orchestratorModel). */
   imageModel?: string;
+  /** Decision model for decide() (typed decisions with probabilities): "vercel-ai-gateway:typesafe-ai/jev",
+   *  or { gateway, model, fallback?, credentialRef?, credentialField?, zeroDataRetention? } (see decisions.ts). */
+  decisionModel?: import("./decisions.js").DecisionModelSetting;
+  /** Decisions: what happens without a decision model, and the decision log's retention. */
+  decisions?: import("./decisions.js").DecisionSettings;
   /** Model allowlist — when set, only these models can be used.
    *  Keys are model specs (e.g. "anthropic:claude-opus-4-6"), values are aliases/params. */
   modelAllowlist?: Record<string, ModelAllowlistEntry>;
@@ -1611,6 +1616,47 @@ export interface MissionDelay {
   notifyChannels?: string[];
   /** Optional message included in the notification when the delay starts. */
   message?: string;
+}
+
+/** Decision node defined within a mission — a typed decision (decisions.ts) that picks a branch.
+ *
+ * When ALL afterTasks have finished, the state (its template over their results, or every after
+ * task's result) is decided by the decision model; the branch matching the answer runs, the other
+ * branches' tasks (and the tasks that only depend on them) are skipped (done, marked skipped).
+ * An uncertain answer (below `threshold`) or a failed decision goes to `onUncertain`: by default a
+ * person chooses (the mission pauses at a checkpoint), or a named branch runs. The tasks a
+ * branch starts get the decision in their description. */
+export interface MissionDecision {
+  /** Decision name (unique in the mission; used in events and the decision log). */
+  name: string;
+  /** Tasks whose results make the state; the decision is taken when they have all finished. */
+  afterTasks: string[];
+  /** The state: a template with {{tasks.<title>}} (that task's result). Default: every after task's result. */
+  state?: string;
+  question: {
+    type: "predicate" | "choice" | "score" | "rank";
+    instructions: string;
+    /** choice: the options. */
+    choices?: Array<{ value: string; description?: string }>;
+    /** score (rank: the rating scale): ordered levels, lowest first. */
+    levels?: Array<string | { label: string; description?: string }>;
+    /** rank: the items, or a template ({{tasks.<title>}}) whose lines are the items. */
+    items?: string | Array<string | { id?: string; label: string; description?: string }>;
+  };
+  /**
+   * Answer → the tasks it starts: predicate "yes" / "no"; choice an option's value; score a level
+   * index, a range ("0-1") or a level's label; rank "ranked" (the sorted list goes to its tasks).
+   * An answer with no branch runs none of them.
+   */
+  branches: Record<string, string[]>;
+  /** Confidence (0..1) below which the answer is uncertain. */
+  threshold?: number;
+  /** An uncertain answer or a failed decision: "human" (default: a person chooses) or { branch }. */
+  onUncertain?: "human" | { branch: string };
+  /** A decision model for this node ("gateway:model"); default settings.decisionModel. */
+  model?: string;
+  /** Notification channels when a person must choose. */
+  notifyChannels?: string[];
 }
 
 /** SLA configuration for deadline monitoring. */

@@ -45,6 +45,8 @@ import { registerChannelSetupTools } from "./mcp-server/channel-setup.js";
 import { registerSetupTools } from "./mcp-server/setup.js";
 import { registerTriggerTools } from "./mcp-server/triggers.js";
 import { registerTriggerCards } from "./mcp-server/trigger-cards.js";
+import { registerDecisionTools } from "./mcp-server/decisions.js";
+import { registerDecisionCards } from "./mcp-server/decision-cards.js";
 
 export type { ApiResponse, McpDeps, McpPrincipal, PolpoScope, ToolScope, ToolsetName } from "./mcp-server/kit.js";
 export {
@@ -96,6 +98,8 @@ export function createPolpoMcpServer(deps: McpDeps, catalog?: ToolScope[]): McpS
   registerAutomationTools(tool, deps);
   registerTriggerTools(tool, deps);
   registerTriggerCards(server, deps, enabled, principal, catalog);
+  registerDecisionTools(tool, deps);
+  registerDecisionCards(server, deps, enabled, principal, catalog);
   registerConnectorTools(tool, deps);
   registerMcpServerTools(tool, deps);
   registerChannelTools(tool, deps);

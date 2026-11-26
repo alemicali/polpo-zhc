@@ -350,10 +350,16 @@ export type SuiteScorer = ScorerBase & (
   | { type: "llm_judge"; rubric: string; criteria?: JudgeCriterion[]; expected?: string; judge?: SuiteRole; /** @deprecated read as `judge: { model }`. */ model?: string }
   /** A JS function body run in the sandboxed code worker: receives { reply, toolCalls, trace, row, input, expected } and returns a number 0..1, a boolean, or { score, reason }. */
   | { type: "custom"; code: string; expected?: unknown; timeoutMs?: number }
+  /**
+   * A cheap judge: one typed decision (decide(), the decision model) on the user's message and the
+   * value read (the reply by default). predicate: P(yes) (P(no) with expected false); choice: the
+   * probability of `expected`; score: the level reached (0..1), or the probability of `expected`'s level.
+   */
+  | { type: "decision"; question: "predicate" | "choice" | "score"; instructions: string; choices?: Array<{ value: string; description?: string }>; levels?: string[]; expected?: string | boolean }
 );
 export type SuiteScorerType = SuiteScorer["type"];
 export const SUITE_SCORER_TYPES: readonly SuiteScorerType[] = [
-  "exact", "numeric", "contains_all", "contains_any", "regex", "similarity", "json_schema", "tool_trajectory", "cost", "latency", "llm_judge", "custom",
+  "exact", "numeric", "contains_all", "contains_any", "regex", "similarity", "json_schema", "tool_trajectory", "cost", "latency", "llm_judge", "custom", "decision",
 ];
 
 // ── Roles ────────────────────────────────────────────────────────────
@@ -1403,6 +1409,27 @@ function parseScorer(v: unknown, where: string, ids: Set<string>): SuiteScorer {
     }
     case "custom":
       return compact({ ...base, type, code: str(v.code, `${where}.code`, { max: 20_000 })!, expected: v.expected, timeoutMs: num(v.timeoutMs, `${where}.timeoutMs`, { min: 100, max: 30_000, int: true }) });
+    case "decision": {
+      const question = (v.question ?? "predicate") as "predicate" | "choice" | "score";
+      if (!["predicate", "choice", "score"].includes(question)) throw new AgentSuiteError(`${where}.question must be predicate, choice or score`);
+      let choices: Array<{ value: string; description?: string }> | undefined;
+      if (question === "choice") {
+        if (!Array.isArray(v.choices) || v.choices.length < 2 || v.choices.length > 20) throw new AgentSuiteError(`${where}.choices needs 2–20 options ({ value, description })`);
+        choices = v.choices.map((c, i) => (typeof c === "string" ? { value: c } : isObj(c) ? compact({ value: str(c.value, `${where}.choices[${i}].value`, { max: 200 })!, description: str(c.description, `${where}.choices[${i}].description`, { optional: true, max: 1000 }) }) : fail(`${where}.choices[${i}] must be { value, description }`)));
+        if (typeof v.expected !== "string" || !choices.some((c) => c.value === v.expected)) throw new AgentSuiteError(`${where}.expected must be one of the choices`);
+      }
+      let levels: string[] | undefined;
+      if (question === "score") {
+        levels = strList(v.levels, `${where}.levels`);
+        if (!levels || levels.length < 2 || levels.length > 11) throw new AgentSuiteError(`${where}.levels needs 2–11 levels, lowest first`);
+        if (v.expected !== undefined && (typeof v.expected !== "string" || !levels.includes(v.expected))) throw new AgentSuiteError(`${where}.expected must be one of the levels`);
+      }
+      if (question === "predicate" && v.expected !== undefined && typeof v.expected !== "boolean") throw new AgentSuiteError(`${where}.expected must be true or false`);
+      return compact({
+        ...base, type, question, instructions: str(v.instructions, `${where}.instructions`, { max: 4000 })!, choices, levels,
+        expected: v.expected as string | boolean | undefined,
+      });
+    }
   }
 }
 

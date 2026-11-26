@@ -114,6 +114,8 @@ import { connectorLabel } from "../mcp/view.js";
 import { AgentTalk } from "./agent-talk.js";
 import { agentTesterFor } from "./agent-tests-host.js";
 import { agentBenchmarksFor, agentDeployGatesFor, agentSuiteRunnerFor } from "./agent-suites-host.js";
+import { DecisionService, decisionServiceFor, registerDecisionService } from "../decisions/service.js";
+import { decideRoutes, decisionRoutes } from "./routes/decisions.js";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
   SUITE_PLACEHOLDER_MODEL, applySuiteOverrides, currentSuiteCase, suiteCompleteLLM, suiteStreamLLM, suiteToolExecutor,
@@ -594,6 +596,10 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         emitFileChanged: (payload) => o.emit("file:changed", payload),
         fs: chatFs,
       }));
+      // decide: typed judgments from the decision model (allowedTools "decide")
+      const { createDecisionTools } = await import("../tools/decision-tools.js");
+      if (agentConfig.allowedTools?.includes("decide")) decisions(); // the service for this .polpo directory
+      tools.push(...createDecisionTools(polpoDir, agentConfig.name, agentConfig.allowedTools));
       // Connectors granted to this agent (mcp__<connector>__<tool>), filtered by allowedTools. A
       // connector that cannot connect is skipped (and logged): it never breaks the chat.
       try {
@@ -1623,6 +1629,48 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     orchestrator: o, completions: (req) => completionApp.request(req),
     api: (path) => app.request(`/api/v1${path}`, { headers: trustedApiCallHeaders() }),
   });
+  // Decisions (docs/decisions.md): decide() — typed judgments with probabilities from a decision model
+  // through the shared gateway resolver, the uncalibrated fallback through Polpo's chat (a role turn
+  // of the chat pipeline, no tools), the decision log, missions' decision nodes, the agents' tool.
+  const decisions = (): DecisionService => {
+    const polpoDir = activePolpoDir();
+    let s = decisionServiceFor(polpoDir);
+    if (!s) {
+      s = new DecisionService({
+        polpoDir: () => polpoDir,
+        settings: () => o.getConfig()?.settings,
+        vault: () => o.getVaultStore?.(),
+        chatTurn: (prompt, check) => agentSuites().playRole("decider", undefined, prompt, { check }),
+        recordUsage: async (u) => {
+          await (databaseStoresFor(polpoDir)?.tokenUsageStore ?? new FileTokenUsageStore(polpoDir)).record({
+            timestamp: new Date().toISOString(), source: "decision", provider: u.provider, model: u.model,
+            inputTokens: u.inputTokens, outputTokens: u.outputTokens, cacheReadTokens: 0, cacheWriteTokens: 0,
+            totalTokens: u.inputTokens + u.outputTokens, cost: u.cost,
+          });
+          o.emit("token-usage:recorded", { timestamp: new Date().toISOString() });
+        },
+        emit: (payload) => o.emit("decision:made", payload),
+      });
+      registerDecisionService(polpoDir, s);
+    }
+    return s;
+  };
+  decisions();
+  o.setMissionDecider(async (req) => {
+    const r = await decisions().decide(
+      { state: req.state, questions: req.questions, ...(req.model ? { model: req.model } : {}) },
+      { kind: "mission", ...(req.caller.id ? { id: req.caller.id } : {}), label: req.caller.label },
+    );
+    return { id: r.id, answers: r.answers, calibrated: r.calibrated, model: r.model };
+  });
+  const decisionDeps = {
+    service: () => (o.isInitialized ? decisions() : undefined),
+    nodes: () => (o.isInitialized ? { list: () => o.getDecisionNodes(), resolve: (g: string, n: string, b: string | null, by: string) => o.resolveDecisionNode(g, n, b, by) } : undefined),
+  };
+  // each decide() is a model call: a rate limit like Ask
+  authed.use("/decide", rateLimitMiddleware(60, 60_000));
+  authed.route("/decide", decideRoutes(decisionDeps));
+  authed.route("/decisions", decisionRoutes(decisionDeps));
   // phase 5 (docs/agent-suites.md): benchmarks (suites × variants × repetitions, compared) and the Playground
   const benchmarks = () => agentBenchmarksFor({
     orchestrator: o, completions: (req) => completionApp.request(req),

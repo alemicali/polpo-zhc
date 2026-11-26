@@ -253,6 +253,9 @@ export type {
 export * from "./computers.js";
 // Agent harnesses: official agent runtimes (Claude Code, Codex, OpenCode) as an agent's engine
 export * from "./harnesses.js";
+// Gateways (one resolver: name → base URL, key from the vault or env, allowed hosts) and decisions (typed judgments with probabilities)
+export * from "./gateways.js";
+export * from "./decisions.js";
 // The CLI engine: the official Claude Code / Codex programs signed in with a person's own account
 export * from "./cli-engine.js";
 export { computerSelection } from "./sandbox.js";

@@ -24,6 +24,7 @@ import {
   Briefcase,
   CalendarClock,
   Webhook,
+  Scale,
   Cloud,
   Code2,
   Columns3,
@@ -119,6 +120,7 @@ export const DRILL_IN_NAV: NavNode[] = [
       link("tasks", "Tasks", ListChecks, "/tasks"),
       link("schedules", "Schedules", CalendarClock, "/schedules"),
       link("triggers", "Triggers", Webhook, "/triggers"),
+      link("decisions", "Decisions", Scale, "/decisions"),
       link("playbooks", "Playbooks", Workflow, "/playbooks"),
       link("events", "Events", Radio, "/events"),
     ],
@@ -161,6 +163,7 @@ export const DRILL_IN_NAV: NavNode[] = [
       section("settings-models", "Models & agents"),
       settings("providers", "Providers", Key),
       settings("harnesses", "Harnesses", Cpu),
+      settings("decisions", "Decisions", Scale),
       // the section configures Polpo itself, the master agent (its id stays "agent")
       settings("agent", "Orchestrator", Bot),
       section("settings-execution", "Execution"),
