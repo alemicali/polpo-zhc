@@ -81,6 +81,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Playbook parameters with quotes or JSON** (a form's fields, a message with `"`): the value is escaped where it is inserted, so the run no longer fails with "produced invalid JSON". Found running a trigger → playbook flow on lumea.
+- **Trigger actions after a failure**: a failed action now skips the later ones instead of running them on its missing result (a Telegram notification with an empty body); `continueOnError: true` keeps the old behaviour per action (REST, MCP `continue_on_error`, SDK, the Actions tab).
+
 - JSON Schema checks (trigger contracts, suite `tool_args` schema matching, hosted MCP server tools) now validate `format`: `email`, `uri`, `url`, `uuid`, `date`, `time`, `date-time`, `ipv4`, `ipv6`, `hostname`. Unknown formats are still ignored. A trigger accepted `{"email": "nope"}` against `format: email`.
 
 - **Agent suites on the CLI engine: tool calls traced once.** The official program's tool calls reached the trace twice (the tool server's call and the reply's, under different ids); they are now matched by name and arguments.

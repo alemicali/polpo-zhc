@@ -128,6 +128,7 @@ const actionInput = z.object({
   name: z.string().max(120).optional(),
   enabled: z.boolean().optional().describe("Default true"),
   retries: z.number().int().min(0).max(5).optional().describe("Retries after a failure, with backoff (default 2; 0 for agent)"),
+  continue_on_error: z.boolean().optional().describe("When this action fails, still run the later ones (default false: they are skipped)"),
   playbook: z.string().optional().describe("playbook: its name (polpo_playbooks_list)"),
   params: templ.optional().describe("playbook: parameter → template over body / headers / query / mapped / trigger / delivery / steps, e.g. {\"email\": \"{{mapped.email}}\"}; one placeholder of an object passes it as JSON"),
   mission: z.string().optional().describe("mission: its id or name"),
@@ -150,7 +151,7 @@ const actionInput = z.object({
 /** An action as the REST API takes it. */
 const actionBody = (a: z.infer<typeof actionInput>): Record<string, unknown> => ({
   kind: a.kind, ...(a.id ? { id: a.id } : {}), ...(a.name ? { name: a.name } : {}), ...(a.enabled !== undefined ? { enabled: a.enabled } : {}),
-  ...(a.retries !== undefined ? { retries: a.retries } : {}), ...(a.wait_seconds ? { waitSeconds: a.wait_seconds } : {}),
+  ...(a.retries !== undefined ? { retries: a.retries } : {}), ...(a.continue_on_error ? { continueOnError: true } : {}), ...(a.wait_seconds ? { waitSeconds: a.wait_seconds } : {}),
   ...(a.playbook ? { playbook: a.playbook } : {}), ...(a.params ? { params: a.params } : {}), ...(a.mission ? { mission: a.mission } : {}), ...(a.variables ? { variables: a.variables } : {}),
   ...(a.title !== undefined ? { title: a.title } : {}), ...(a.description !== undefined ? { description: a.description } : {}), ...(a.assign_to ? { assignTo: a.assign_to } : {}),
   ...(a.agent ? { agent: a.agent } : {}), ...(a.instructions !== undefined ? { instructions: a.instructions } : {}), ...(a.data ? { data: a.data } : {}),

@@ -131,6 +131,7 @@ export interface ActionDraft {
   enabled: boolean;
   name: string;
   retries: string;
+  continueOnError: boolean;
   waitSeconds: string;
   playbook: string;
   mission: string;
@@ -154,7 +155,7 @@ export interface ActionDraft {
 
 export function emptyAction(kind: TriggerActionKind): ActionDraft {
   return {
-    kind, enabled: true, name: "", retries: "", waitSeconds: "", playbook: "", mission: "", params: [], title: "", description: "", assignTo: "",
+    kind, enabled: true, name: "", retries: "", continueOnError: false, waitSeconds: "", playbook: "", mission: "", params: [], title: "", description: "", assignTo: "",
     agent: "", instructions: "", data: "", allowedTools: "", restrictTools: false, maxSteps: "", deliverChannel: "", deliverChatId: "", deliverThreadId: "",
     channel: "", body: "", severity: "",
   };
@@ -162,7 +163,7 @@ export function emptyAction(kind: TriggerActionKind): ActionDraft {
 
 export function actionDraft(a: TriggerAction): ActionDraft {
   const d = emptyAction(a.kind);
-  const base = { ...d, id: a.id, enabled: a.enabled, name: a.name ?? "", retries: a.retries !== undefined ? String(a.retries) : "" };
+  const base = { ...d, id: a.id, enabled: a.enabled, name: a.name ?? "", retries: a.retries !== undefined ? String(a.retries) : "", continueOnError: !!a.continueOnError };
   switch (a.kind) {
     case "playbook": return { ...base, playbook: a.playbook, params: mappingRows(a.params), waitSeconds: a.waitSeconds ? String(a.waitSeconds) : "" };
     case "mission": return { ...base, mission: a.mission, params: mappingRows(a.variables), waitSeconds: a.waitSeconds ? String(a.waitSeconds) : "" };
@@ -183,6 +184,7 @@ export function actionInput(d: ActionDraft): TriggerActionInput {
   const common = {
     ...(d.id ? { id: d.id } : {}), enabled: d.enabled, ...(d.name.trim() ? { name: d.name.trim() } : {}),
     ...(num(d.retries) !== undefined ? { retries: num(d.retries) } : {}),
+    ...(d.continueOnError ? { continueOnError: true } : {}),
   };
   const wait = num(d.waitSeconds) ? { waitSeconds: num(d.waitSeconds) } : {};
   const rows = mappingObject(d.params) ?? undefined;

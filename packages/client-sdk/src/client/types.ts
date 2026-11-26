@@ -2902,6 +2902,8 @@ interface TriggerActionBase {
   name?: string;
   /** Retries after a failure (default 2; 0 for agent). */
   retries?: number;
+  /** When this action fails, still run the later ones (default false: they are skipped). */
+  continueOnError?: boolean;
 }
 /** Run a playbook; params are templates over body / headers / query / mapped / trigger / delivery / steps. */
 export interface TriggerPlaybookAction extends TriggerActionBase { kind: "playbook"; playbook: string; params?: Record<string, string>; waitSeconds?: number }

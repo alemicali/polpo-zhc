@@ -82,7 +82,8 @@ export function instantiatePlaybook(
 ): { name: string; data: string; prompt: string } {
   let json = JSON.stringify(playbook.mission);
   for (const [key, value] of Object.entries(resolved)) {
-    json = json.split(`{{${key}}}`).join(String(value));
+    // the mission is stringified JSON, so a placeholder always sits inside a string: escape the value
+    json = json.split(`{{${key}}}`).join(JSON.stringify(String(value)).slice(1, -1));
   }
   // {{tasks.<title>}} is filled at run time by decision nodes (a task's result), not a parameter
   const unreplaced = json.match(/\{\{([^}]+)\}\}/g)?.filter(m => !m.slice(2, -2).trim().startsWith("tasks."));

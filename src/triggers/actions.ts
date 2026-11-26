@@ -120,6 +120,7 @@ export function normalizeActions(input: unknown): { actions: TriggerAction[]; pr
       if (!Number.isInteger(r) || r < 0 || r > TRIGGER_LIMITS.maxRetries) problems.push(`${at}.retries: 0–${TRIGGER_LIMITS.maxRetries}`);
       else base.retries = r;
     }
+    if (raw.continueOnError === true) base.continueOnError = true;
     const tpl = (field: string, value: unknown, o: { required?: boolean; roots?: readonly string[]; max?: number } = {}): string | undefined => {
       const v = str(value);
       if (!v.trim()) { if (o.required) problems.push(`${at}.${field}: required`); return undefined; }
@@ -567,6 +568,12 @@ export class TriggerActionEngine {
         });
         runs[i] = { ...runs[i]!, ...result, endedAt: iso(this.now()) };
         if (result.outputs) steps[action.id] = result.outputs;
+        if (result.status === "failed" && !action.continueOnError) {
+          // later actions would run on a missing result (an empty {{steps.<id>.result}}): skip them
+          const reason = `Not run: the earlier action "${action.name ?? action.id}" failed`;
+          const at = iso(this.now());
+          runs = runs.map((r, j) => (j > i && r.status === "queued" ? { ...r, status: "skipped" as const, reason, endedAt: at } : r));
+        }
         this.write(triggerId, deliveryId, runs);
       }
     } finally {
