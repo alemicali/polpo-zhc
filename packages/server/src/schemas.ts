@@ -268,7 +268,16 @@ export const UpdateSettingsSchema = z.object({
   /** The orchestrator's display name (default "Polpo"); null or "" restores the default. */
   orchestratorName: z.string().trim().max(40, "at most 40 characters")
     .regex(/^[^\r\n]*$/, "a single line").nullable().optional(),
+  /** The image generation model (the media primitive): "gateway:provider/model", e.g. "vercel-ai-gateway:openai/gpt-image-2"; null removes it. */
   imageModel: z.string().nullable().optional(),
+  /** Media: the image fallback model, the gateway key's vault entry, limits and the media log's retention; null removes it. */
+  media: z.object({
+    fallbackModel: z.string().min(1).optional(),
+    credentialRef: z.object({ owner: z.string(), service: z.string() }).optional(), credentialField: z.string().optional(),
+    maxImages: z.number().int().min(1).max(10).optional(),
+    retention: z.number().int().min(1).max(20_000).optional(),
+    retentionDays: z.number().int().min(0).max(3650).optional(),
+  }).strict().nullable().optional(),
   /**
    * The decision model for decide(): "vercel-ai-gateway:typesafe-ai/jev", or { gateway, model, fallback?: model | { model,
    * confidenceBelow }, credentialRef?: { owner, service } (the gateway's key in the vault; else its env var), credentialField?,

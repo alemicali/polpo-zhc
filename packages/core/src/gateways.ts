@@ -1,6 +1,6 @@
 /**
  * Gateways: the hosted AI gateways Polpo can call for model families that are not chat models
- * (decisions today). One resolver turns a gateway's name into where requests go and how they
+ * (decisions and images today). One resolver turns a gateway's name into where requests go and how they
  * authenticate:
  *
  *   name → base URL, the hosts the key may be sent to, the key (a vault entry chosen in the
@@ -17,7 +17,7 @@ import { CREDENTIAL_NAMES, describeVaultRef, isVaultRef, pickCredential, resolve
 import type { VaultStore } from "./vault-store.js";
 
 /** What a gateway can be used for beyond chat. */
-export type GatewayCapability = "decisions";
+export type GatewayCapability = "decisions" | "images";
 
 export interface GatewayDefinition {
   /** The preset id, e.g. "vercel-ai-gateway". */
@@ -35,7 +35,7 @@ export interface GatewayDefinition {
 
 /** Capabilities per gateway (the rest are chat-only, through custom providers). */
 const CAPABILITIES: Record<string, GatewayCapability[]> = {
-  "vercel-ai-gateway": ["decisions"],
+  "vercel-ai-gateway": ["decisions", "images"],
 };
 
 /** The gateways: presets of kind "gateway" with a fixed official host and an env var bound to it. */

@@ -91,6 +91,7 @@ import { FileApprovalStore } from "../stores/file-approval-store.js";
 import { FileCheckpointStore } from "../stores/file-checkpoint-store.js";
 import { FileDelayStore } from "../stores/file-delay-store.js";
 import { FileDecisionNodeStore } from "../stores/file-decision-node-store.js";
+import { FileImageNodeStore } from "../stores/file-image-node-store.js";
 import { NotificationRouter } from "../notifications/index.js";
 import { FileNotificationStore } from "../stores/file-notification-store.js";
 import { TelegramCallbackPoller } from "../notifications/channels/telegram.js";
@@ -275,6 +276,8 @@ export class Orchestrator extends TypedEmitter {
   private missionExec!: MissionExecutor;
   /** Who takes mission decision nodes' decisions (set by the server; kept across re-initialization). */
   private missionDecider?: import("@polpo-ai/core").MissionDecider;
+  /** Who generates mission image nodes' images (set by the server; kept across re-initialization). */
+  private missionImager?: import("@polpo-ai/core").MissionImager;
   private runner!: TaskRunner;
   private assessor!: AssessmentOrchestrator;
 
@@ -1100,6 +1103,7 @@ export class Orchestrator extends TypedEmitter {
       leaseStore: this.getLeaseStore(),
       // Mission decision nodes: per-instance files whatever the store (like the decision log)
       decisionNodeStore: new FileDecisionNodeStore(this.polpoDir),
+      imageNodeStore: new FileImageNodeStore(this.polpoDir),
 
       // Inject Drizzle stores when storage is "sqlite" or "postgres"
       ...(this.drizzleStores ? {
@@ -1127,6 +1131,7 @@ export class Orchestrator extends TypedEmitter {
     this.missionExec = new MissionExecutor(ctx, this.taskMgr, this.agentMgr);
     await this.missionExec.ready;
     this.missionExec.setDecider(this.missionDecider);
+    this.missionExec.setImager(this.missionImager);
     this.runner = new TaskRunner(ctx);
     this.assessor = new AssessmentOrchestrator(ctx);
 
@@ -2354,6 +2359,19 @@ export class Orchestrator extends TypedEmitter {
   /** A person chooses the branch of a node waiting for one (null: none of its tasks run). */
   async resolveDecisionNode(group: string, node: string, branch: string | null, by: string): Promise<import("@polpo-ai/core").DecisionNodeState> {
     return this.missionExec.resolveDecisionNode(group, node, branch, by);
+  }
+
+  // ─── Image nodes (the mission executor) ─────
+
+  /** Who generates mission image nodes' images (the server's media service). */
+  setMissionImager(imager: import("@polpo-ai/core").MissionImager | undefined): void {
+    this.missionImager = imager;
+    this.missionExec?.setImager(imager);
+  }
+
+  /** Mission image nodes: generating, done or failed. */
+  getImageNodes(): import("@polpo-ai/core").ImageNodeState[] {
+    return this.missionExec?.listImageNodes() ?? [];
   }
 
   // ─── Delays (delegates to OrchestratorEngine) ─────

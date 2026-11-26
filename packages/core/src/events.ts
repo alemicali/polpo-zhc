@@ -366,6 +366,31 @@ export interface PolpoEventMap {
   };
 
   /**
+   * An image request (generateImage / editImage: REST, MCP, Polpo's chat, an agent's image tools, a
+   * mission's image node) was answered and recorded in the media log — or it failed.
+   */
+  "media:generated": {
+    id: string;
+    kind: "generate" | "edit";
+    caller: string;
+    callerId?: string;
+    model: string;
+    images: number;
+    costUsd: number;
+    status: "ok" | "error";
+    error?: string;
+  };
+  /** A mission's image node is generating, made its image, or failed. */
+  "media:node": {
+    group: string;
+    missionId?: string;
+    node: string;
+    status: "generating" | "done" | "failed";
+    mediaId?: string;
+    error?: string;
+  };
+
+  /**
    * A message of a WhatsApp Business channel changed status: Meta's status webhooks (sent,
    * delivered, read, failed), a send queued for approval, approved or rejected, an inbound message.
    */

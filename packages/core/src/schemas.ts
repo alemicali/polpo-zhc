@@ -8,6 +8,7 @@ import { z } from "zod";
 import type { TaskExpectation, MissionCheckpoint, MissionQualityGate } from "./types.js";
 import { isValidISO8601Duration } from "./iso-duration.js";
 import { missionDecisionProblems } from "./decisions.js";
+import { missionImageProblems, type MissionImage } from "./media.js";
 
 // ── Loop Contract Schemas ────────────────────────────────────────────
 
@@ -205,6 +206,20 @@ export const missionDecisionSchema = z.object({
   notifyChannels: z.array(z.string().min(1)).optional(),
 });
 
+// ── Mission Image Schema ────────────────────────────────────────────
+
+/** An image node (media.ts MissionImage): its shape here; references are checked with the document. */
+export const missionImageSchema = z.object({
+  name: z.string().min(1, "image requires a name"),
+  afterTasks: z.array(z.string().min(1)).min(1, "image requires at least one task in afterTasks"),
+  prompt: z.string().min(1, "image requires a prompt"),
+  forTasks: z.array(z.string().min(1)).min(1, "image requires at least one task in forTasks"),
+  size: z.string().optional(),
+  n: z.number().int().min(1).max(10).optional(),
+  model: z.string().optional(),
+  onError: z.enum(["continue", "fail"]).optional(),
+});
+
 // ── Mission Quality Gate Schema ─────────────────────────────────────
 
 export const missionQualityGateSchema = z.object({
@@ -253,6 +268,8 @@ export const missionDocumentSchema = z.object({
   delays: z.array(missionDelaySchema).optional(),
   /** Decision nodes: a typed decision on the after tasks' results picks the branch that runs. */
   decisions: z.array(missionDecisionSchema).optional(),
+  /** Image nodes: an image generated from the after tasks' results, given to the forTasks. */
+  images: z.array(missionImageSchema).optional(),
   notifications: z.any().optional(),
   /** Sandbox for the mission's runs: may only tighten what the agents allow. */
   sandbox: z.any().optional(),
@@ -358,6 +375,17 @@ export const missionDocumentSchema = z.object({
           owner.set(t, d.name);
         }
       }
+    });
+  }
+
+  // Image nodes: unique names (also against decisions), known tasks, no cycle
+  if (doc.images) {
+    const titles = new Set(taskDeps.keys());
+    const names = new Set<string>((doc.decisions ?? []).map((d) => d.name));
+    doc.images.forEach((n, i) => {
+      if (names.has(n.name)) ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Duplicate node name "${n.name}"`, path: ["images", i, "name"] });
+      names.add(n.name);
+      for (const message of missionImageProblems(n as MissionImage, titles, taskDeps)) ctx.addIssue({ code: z.ZodIssueCode.custom, message, path: ["images", i] });
     });
   }
 });

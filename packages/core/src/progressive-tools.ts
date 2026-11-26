@@ -159,6 +159,10 @@ export const POLPO_TOOL_GROUPS: ToolGroupRule[] = [
     prefixes: ["decision_"], names: ["decide", "decisions"],
   },
   {
+    id: "media", label: "Media: generate and edit images with the instance's image model (kept with their prompt, model and cost), the media log, the image model's status",
+    prefixes: ["image_"], names: ["media_log", "media_status"],
+  },
+  {
     id: "learning", label: "Agent learning and drive; the org chart and the agents' communication lines (who may talk to whom)",
     names: ["get_agent_learning", "review_agent_learning", "revert_agent_learning", "get_agent_drive", "reflect_agent", "agent_lines"],
   },

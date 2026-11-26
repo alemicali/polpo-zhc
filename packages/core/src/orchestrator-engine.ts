@@ -104,6 +104,9 @@ export interface MissionExecutorPort {
   /** Decision nodes (optional: an executor without them holds no task). */
   getBlockingDecision?(group: string, taskTitle: string, taskId: string, allTasks: Task[], missionData?: string): Promise<{ decision: import("./types.js").MissionDecision } | undefined>;
   hasPendingDecisions?(): boolean;
+  /** Image nodes (optional: an executor without them holds no task). */
+  getBlockingImage?(group: string, taskTitle: string, taskId: string, allTasks: Task[], missionData?: string): Promise<{ image: import("./media.js").MissionImage } | undefined>;
+  hasPendingImages?(): boolean;
   // Atomic mission data operations
   addMissionTask(missionId: string, task: { title: string; description: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown; sideEffects?: boolean; toolScope?: import("./task-tool-scope.js").TaskToolScope | null }): Promise<Mission>;
   updateMissionTask(missionId: string, taskTitle: string, updates: { title?: string; description?: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown; sideEffects?: boolean; toolScope?: import("./task-tool-scope.js").TaskToolScope | null }): Promise<Mission>;
@@ -427,6 +430,12 @@ export class OrchestratorEngine {
           const blockingDecision = await this.missionExec.getBlockingDecision?.(task.group, task.title, task.id, tasksOfGroup(task.group), mission?.data);
           if (blockingDecision) isReady = false;
         }
+
+        // Check image nodes — a task receiving an image waits for it (generated once the after tasks finished)
+        if (isReady) {
+          const blockingImage = await this.missionExec.getBlockingImage?.(task.group, task.title, task.id, tasksOfGroup(task.group), mission?.data);
+          if (blockingImage) isReady = false;
+        }
       }
       if (isReady) {
         isReady = task.dependsOn.every(depId => {
@@ -441,7 +450,7 @@ export class OrchestratorEngine {
     // Check for deadlock: no tasks ready, none running, but some pending
     // Don't consider it a deadlock if tasks are awaiting approval, blocked by checkpoints, or waiting on delays
     const hasActiveCheckpoints = this.missionExec.getActiveCheckpoints().length > 0;
-    const hasActiveDelays = this.missionExec.getActiveDelays().length > 0 || !!this.missionExec.hasPendingDecisions?.();
+    const hasActiveDelays = this.missionExec.getActiveDelays().length > 0 || !!this.missionExec.hasPendingDecisions?.() || !!this.missionExec.hasPendingImages?.();
     if (ready.length === 0 && inProgress.length === 0 && pending.length > 0 && awaitingApproval.length === 0 && !hasActiveCheckpoints && !hasActiveDelays && !waitingOnPausedMission) {
       if (this.deadlockResolver) {
         // Async resolution already in progress — wait for next tick

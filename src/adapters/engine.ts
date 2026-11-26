@@ -199,8 +199,9 @@ export function describeToolsForAgent(agent: AgentConfig): string {
     extended.push(
       "",
       "**Image:**",
-      "- `image_generate` — generate images with AI (fal.ai FLUX)",
-      "- `image_analyze` — analyze/describe images with vision models",
+      "- `image_generate` — generate images with the instance's image model (kept as assets with their provenance, saved to `path`)",
+      "- `image_edit` — change an image of your workspace with a prompt (optionally inside a mask)",
+      "- `image_analyze` — look at an image and answer about it (a chat turn with the image, your own model by default)",
     );
   }
 
@@ -1062,6 +1063,8 @@ export async function buildAgentToolset(o: {
       shell,
       fs: remoteFs,
       sandboxProvider,
+      agentName: agentConfig.name,
+      ...(o.task ? { mediaContext: { taskId: o.task.id, ...(o.task.missionId ? { missionId: o.task.missionId } : {}) } } : {}),
     });
   }
   if (ctx?.polpoDir) {

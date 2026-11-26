@@ -88,7 +88,7 @@ export interface AgentSuiteDeps {
    * One chat turn with the agent (`agent`, `agent@draft`, `agent@1.2.0`) through the chat
    * completions pipeline, run inside the case's hooks; the chat is deleted afterwards.
    */
-  turn: (agentRef: string, messages: Array<{ role: string; content: string }>, hooks: SuiteCaseHooks, opts?: { onText?: (delta: string) => void }) => Promise<SuiteTurnResult>;
+  turn: (agentRef: string, messages: Array<{ role: string; content: TurnContent }>, hooks: SuiteCaseHooks, opts?: { onText?: (delta: string) => void }) => Promise<SuiteTurnResult>;
   /** Runs at once on this instance (default 2). */
   maxRunningRuns?: number;
   /** Runs a custom scorer's code in the sandboxed code worker. Absent: custom scorers error. */
@@ -307,15 +307,19 @@ function requestRole(raw: unknown, where: string): SuiteRole | undefined {
   return engine ? { ...rest, engine } : rest;
 }
 
+/** A message's content: text, or OpenAI content parts (text and image_url) — an image to look at. */
+export type TurnContent = string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
+
 /** The ephemeral agent a role's model + engine block runs as: `polpo-suite-judge`… (never saved). */
 const ROLE_AGENT_PREFIX = "polpo-suite-";
 /** A role turn's longest wait (generation writes many cases). */
 const ROLE_TURN_TIMEOUT_MS = 300_000;
 /** A suite's roles, and the decider: decide()'s uncalibrated fallback when no decision model is configured. */
-type RoleKind = SuiteRoleName | "decider";
+type RoleKind = SuiteRoleName | "decider" | "viewer";
 const ROLE_TITLES: Record<RoleKind, string> = {
   judge: "Test suite judge", simulator: "Test suite simulated user", generator: "Test case generator", reviewer: "Test run reviewer",
   decider: "Decision fallback",
+  viewer: "Image analysis",
 };
 /** What every role turn starts with (also the ephemeral agent's instructions). */
 const ROLE_INSTRUCTIONS: Record<RoleKind, string> = {
@@ -324,6 +328,7 @@ const ROLE_INSTRUCTIONS: Record<RoleKind, string> = {
   generator: "You write test cases for an AI agent. You have no tools. Follow the instructions below and answer in exactly the format they ask for.",
   reviewer: "You review a test suite's run of an AI agent. You have no tools. Follow the instructions below.",
   decider: "You estimate typed decisions about a state, with probabilities. You have no tools. Answer with JSON only.",
+  viewer: "You look at the attached image and answer about it: describe it, read its text, answer the question. You have no tools.",
 };
 
 function describeEngineOnly(block: SuiteRole): string | undefined {
@@ -838,7 +843,7 @@ export class AgentSuiteRunner {
    * agent, or Polpo (no agent), through `turn` (the chat completions pipeline) without tools. With
    * `check`, an answer it cannot read gets one corrective follow-up turn in the same conversation.
    */
-  async playRole(kind: RoleKind, role: SuiteRole | undefined, prompt: string, opts: { check?: (text: string) => string | undefined } = {}): Promise<SuiteRoleReply> {
+  async playRole(kind: RoleKind, role: SuiteRole | undefined, prompt: string, opts: { check?: (text: string) => string | undefined; images?: string[] } = {}): Promise<SuiteRoleReply> {
     const block = isRoleBlock(role) ? role! : undefined;
     const roleAgent = block ? {
       name: `${ROLE_AGENT_PREFIX}${kind}`, role: ROLE_TITLES[kind], systemPrompt: ROLE_INSTRUCTIONS[kind], allowedTools: [] as string[],
@@ -846,7 +851,12 @@ export class AgentSuiteRunner {
     } : undefined;
     const agentRef = role?.agent ?? roleAgent?.name ?? "";
     const hooks = new RoleTurnHooks(kind, roleAgent);
-    let messages: Array<{ role: string; content: string }> = [{ role: "user", content: `${ROLE_INSTRUCTIONS[kind]}\n\n${prompt}` }];
+    const text0 = `${ROLE_INSTRUCTIONS[kind]}\n\n${prompt}`;
+    // images (data: URLs) go as content parts, like a chat message with an attachment
+    let messages: Array<{ role: string; content: TurnContent }> = [{
+      role: "user",
+      content: opts.images?.length ? [{ type: "text", text: text0 }, ...opts.images.map((url) => ({ type: "image_url" as const, image_url: { url } }))] : text0,
+    }];
     let text = await this.roleTurnOnce(agentRef, messages, hooks);
     const problem = opts.check?.(text);
     if (problem) {
@@ -858,7 +868,7 @@ export class AgentSuiteRunner {
     return { text, ...(model ? { model } : {}), ...(hooks.turns ? { costUsd: Math.round(hooks.costUsd * 1e6) / 1e6 } : {}) };
   }
 
-  private async roleTurnOnce(agentRef: string, messages: Array<{ role: string; content: string }>, hooks: RoleTurnHooks): Promise<string> {
+  private async roleTurnOnce(agentRef: string, messages: Array<{ role: string; content: TurnContent }>, hooks: RoleTurnHooks): Promise<string> {
     hooks.error = undefined;
     const reply = await within(ROLE_TURN_TIMEOUT_MS, this.deps.turn(agentRef, messages, hooks), `The suite's ${hooks.role}`);
     const text = reply.text.trim();

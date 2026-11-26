@@ -24,6 +24,8 @@ export { useTriggers, useTriggerDeliveries, useTriggerDelivery } from "./hooks/u
 export type { UseTriggersReturn, UseTriggerDeliveriesReturn, UseTriggerDeliveryReturn } from "./hooks/use-triggers.js";
 export { useDecide, useDecisions, useDecisionNodes } from "./hooks/use-decisions.js";
 export type { UseDecideReturn, UseDecisionsReturn } from "./hooks/use-decisions.js";
+export { useGenerateImage, useMediaLog } from "./hooks/use-media.js";
+export type { UseGenerateImageReturn, UseMediaLogReturn } from "./hooks/use-media.js";
 export type { UseWaBusinessStatusReturn, UseWaTemplatesReturn, UseWaConversationReturn, UseWaContactsReturn } from "./hooks/use-whatsapp-business.js";
 export type { UseConnectorsReturn } from "./hooks/use-connectors.js";
 export { useAgents } from "./hooks/use-agents.js";
@@ -359,4 +361,6 @@ export type {
   DecisionQuestionType, DecisionQuestion, DecisionFallbackModel, DecisionModelSetting, DecisionSettings, DecideRequest, DecisionAnswer, DecisionUsage, DecideResult,
   DecisionCallerKind, DecisionLogSummary, DecisionLogEntry, DecisionLogPage, DecisionStatus, DecisionNodeState, MissionDecision,
   AgentTalksTo, AgentLinesMode, AgentLines, AgentLinesChart,
+  ImageInput, GenerateImageRequest, EditImageRequest, MediaAsset, MediaImage, MediaResult, MediaCallerKind, MediaCaller, MediaLogEntry, MediaLogPage,
+  MediaStatus, MediaSettings, ImageNodeState, MissionImage,
 } from "@polpo-ai/sdk";

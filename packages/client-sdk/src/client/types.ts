@@ -1216,6 +1216,8 @@ export interface PolpoSettings {
   decisionModel?: import("./decision-types.js").DecisionModelSetting;
   /** Decisions: the policy without a decision model, the log's retention. */
   decisions?: import("./decision-types.js").DecisionSettings;
+  /** Media: the image fallback model, the gateway key's vault entry, limits, the log's retention (imageModel is the model). */
+  media?: import("./media-types.js").MediaSettings;
   modelAllowlist?: Record<string, ModelAllowlistEntry>;
   /** Global reasoning / deep thinking level. */
   reasoning?: ReasoningLevel;
@@ -1808,6 +1810,8 @@ export interface UpdateSettingsRequest {
   decisionModel?: import("./decision-types.js").DecisionModelSetting | null;
   /** Decisions settings; null removes them. */
   decisions?: import("./decision-types.js").DecisionSettings | null;
+  /** Media settings; null removes them. */
+  media?: import("./media-types.js").MediaSettings | null;
   reasoning?: ReasoningLevel;
   branding?: BrandingConfig;
   /** The dashboard's default look; null removes it. */

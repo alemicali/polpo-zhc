@@ -7,7 +7,7 @@ import { normalizeOrchestratorName, ORCHESTRATOR_NAME_MAX_LENGTH } from "./orche
 import { normalizeVaultRef } from "@polpo-ai/core/vault-ref";
 import { parseStoredProvider } from "@polpo-ai/core/provider-config";
 import { setArtifactLimits } from "@polpo-ai/core/artifacts";
-import { sanitizeAppearanceSettings, isEmptyAppearance, parseEgressProxies, parseComputers, parseTailscaleSettings, computerEgressProblem, isRemoteComputer, COMPUTER_ID_PATTERN, HOST_COMPUTER_ID, parseHarnessesSettings, parseAgentEngine, connectorToolsProblems, normalizeConnectorTools, normalizeDependencyResultsSettings, normalizeDecisionSettings, talksToProblem, normalizeTalksTo } from "@polpo-ai/core";
+import { sanitizeAppearanceSettings, isEmptyAppearance, parseEgressProxies, parseComputers, parseTailscaleSettings, computerEgressProblem, isRemoteComputer, COMPUTER_ID_PATTERN, HOST_COMPUTER_ID, parseHarnessesSettings, parseAgentEngine, connectorToolsProblems, normalizeConnectorTools, normalizeDependencyResultsSettings, normalizeDecisionSettings, normalizeMediaSettings, talksToProblem, normalizeTalksTo } from "@polpo-ai/core";
 
 const DEFAULT_SETTINGS: PolpoSettings = {
   maxRetries: 3,
@@ -443,6 +443,9 @@ function parseSettings(raw: any): PolpoSettings {
   if (raw?.decisionModel && (typeof raw.decisionModel === "string" || typeof raw.decisionModel === "object")) settings.decisionModel = raw.decisionModel;
   const decisionSettings = normalizeDecisionSettings(raw?.decisions);
   if (decisionSettings) settings.decisions = decisionSettings;
+  // media: the image fallback model, the gateway key, limits and the log's retention (imageModel above is the model)
+  const mediaSettings = normalizeMediaSettings(raw?.media);
+  if (mediaSettings) settings.media = mediaSettings;
   if (raw?.modelAllowlist && typeof raw.modelAllowlist === "object") settings.modelAllowlist = raw.modelAllowlist;
   if (raw?.enableVolatileTeams != null) settings.enableVolatileTeams = raw.enableVolatileTeams;
   if (raw?.volatileCleanup) settings.volatileCleanup = raw.volatileCleanup;
