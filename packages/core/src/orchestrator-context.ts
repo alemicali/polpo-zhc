@@ -14,6 +14,7 @@ import type { ApprovalStore } from "./approval-store.js";
 import type { NotificationStore } from "./notification-store.js";
 import type { CheckpointStore } from "./checkpoint-store.js";
 import type { DelayStore } from "./delay-store.js";
+import type { DecisionNodeStore } from "./decisions.js";
 import type { PeerStore } from "./peer-store.js";
 import type { ConfigStore } from "./config-store.js";
 import type { TeamStore } from "./team-store.js";
@@ -114,6 +115,8 @@ export interface OrchestratorContext {
   readonly checkpointStore?: CheckpointStore;
   /** Delay persistence store (when storage is "postgres", injected by shell). */
   readonly delayStore?: DelayStore;
+  /** Mission decision node persistence (file in the shell; in memory when absent). */
+  readonly decisionNodeStore?: DecisionNodeStore;
   /** Peer identity store (when storage is "postgres", injected by shell). */
   readonly peerStore?: PeerStore;
   /** Config persistence store (when storage is "postgres", injected by shell). */

@@ -28,6 +28,7 @@ import { registerRoomTools } from "../server/mcp-server/rooms.js";
 import { registerChatTools } from "../server/mcp-server/chat.js";
 import { registerAutomationTools } from "../server/mcp-server/automation.js";
 import { registerTriggerTools } from "../server/mcp-server/triggers.js";
+import { registerDecisionTools } from "../server/mcp-server/decisions.js";
 import { registerMissionTools } from "../server/mcp-server/missions.js";
 import { registerDataTools } from "../server/mcp-server/data.js";
 import { registerBrainTools } from "../server/mcp-server/knowledge.js";
@@ -163,6 +164,10 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_trigger_delete", name: "trigger_delete", group: "triggers" },
   { mcp: "polpo_trigger_test", name: "trigger_test", group: "triggers" },
   { mcp: "polpo_trigger_auth", name: "trigger_auth", group: "triggers" },
+  // Decisions: typed judgments with probabilities from the decision model (decide), the log, mission nodes waiting for a person
+  { mcp: "polpo_decide", name: "decide", group: "decisions" },
+  { mcp: "polpo_decisions", name: "decisions", group: "decisions" },
+  { mcp: "polpo_decision_resolve", name: "decision_resolve", group: "decisions" },
   // Missions, data, brain, skills
   { mcp: "polpo_mission_wait", name: "mission_wait", group: "mission-editing" },
   { mcp: "polpo_data_activity", name: "data_activity", group: "data" },
@@ -255,6 +260,8 @@ export const MCP_EQUIVALENTS: Record<string, string> = {
   polpo_benchmark_show: "benchmark_get",
   // the trigger card (an MCP App): trigger_get and trigger_deliveries have the same
   polpo_trigger_show: "trigger_get",
+  // the decision card (an MCP App): decide and decisions answer with the same (answers, probabilities)
+  polpo_decision_show: "decisions",
   polpo_mission_create: "create_mission",
   polpo_mission_update: "update_mission",
   polpo_mission_run: "execute_mission",
@@ -401,7 +408,7 @@ function capture(): Map<string, Captured> {
   };
   for (const register of [
     registerSetupTools, registerTeamTools, registerAgentSuiteTools, registerBenchmarkTools, registerConnectorTools, registerMcpServerTools, registerHarnessTools, registerComputerTools, registerConfigTools,
-    registerSettingsTools, registerChannelTools, registerChannelSetupTools, registerRoomTools, registerChatTools, registerAutomationTools, registerTriggerTools,
+    registerSettingsTools, registerChannelTools, registerChannelSetupTools, registerRoomTools, registerChatTools, registerAutomationTools, registerTriggerTools, registerDecisionTools,
     registerMissionTools, registerDataTools, registerBrainTools, registerSkillTools, registerWaBusinessTools, registerSearchTools,
     registerArtifactTools,
   ]) register(tool, deps);

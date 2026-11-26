@@ -84,8 +84,9 @@ export function instantiatePlaybook(
   for (const [key, value] of Object.entries(resolved)) {
     json = json.split(`{{${key}}}`).join(String(value));
   }
-  const unreplaced = json.match(/\{\{([^}]+)\}\}/g);
-  if (unreplaced) {
+  // {{tasks.<title>}} is filled at run time by decision nodes (a task's result), not a parameter
+  const unreplaced = json.match(/\{\{([^}]+)\}\}/g)?.filter(m => !m.slice(2, -2).trim().startsWith("tasks."));
+  if (unreplaced?.length) {
     const names = [...new Set(unreplaced.map(m => m.slice(2, -2)))];
     throw new Error(`Unreplaced placeholders in playbook "${playbook.name}": ${names.join(", ")}`);
   }

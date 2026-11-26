@@ -32,6 +32,22 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-26-decisions",
+    date: "2026-11-26",
+    kind: "new",
+    title: "Decisioni: giudizi tipizzati con le probabilità",
+    summary: "Fai domande tipizzate su un testo o un JSON — sì/no, una scelta tra opzioni, un punteggio su una scala, una classifica — e ricevi la risposta con le probabilità da un modello di decisione (come Jev di TypeSafe, tramite Vercel AI Gateway). Agenti, missioni, playbook e suite lo usano per classificare e instradare in modo economico e calibrato.",
+    body: [
+      "- **Quattro tipi di domanda**: **sì/no** (la probabilità del sì), **scelta** tra opzioni con descrizione (la scelta e una probabilità per opzione), **punteggio** su livelli ordinati (il punteggio e una probabilità per livello) e **classifica** di elementi (ordinati dal migliore). Con una **soglia** le risposte poco sicure vengono segnate come **incerte**.",
+      "- **Il modello di decisione** si imposta in **Impostazioni → Decisioni**: Vercel AI Gateway e il modello (per esempio `typesafe-ai/jev`), la **chiave da una voce del vault** (o la variabile `AI_GATEWAY_API_KEY`), un modello di riserva se la confidenza è bassa e la conservazione zero dei dati. Senza modello: un errore con il link alle impostazioni, oppure, se lo scegli, risponde il modello di Polpo, segnato come **non calibrato**.",
+      "- **Nella nuova pagina Decisioni** provi le domande su un testo, vedi le risposte con le **barre delle probabilità**, il costo e il **registro** di ogni decisione (chi l'ha chiesta, le risposte, il modello, il costo).",
+      "- **Nodo Decisione in missioni e playbook**: dopo alcuni task, una decisione sui loro risultati sceglie il **ramo** da eseguire (sì/no, un'opzione, una fascia di punteggio, la classifica); gli altri rami vengono saltati. Se la risposta è incerta la missione si ferma e **scegli tu** il ramo, oppure prende il ramo che hai indicato.",
+      "- **Per gli agenti**: lo strumento `decide` (da abilitare tra i loro strumenti) per giudizi rapidi; **per le suite**: un punteggio \"decisione\" come giudice economico. Anche via API (`POST /api/v1/decide`), MCP (con la scheda delle decisioni) e nella chat con Polpo.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri le decisioni", to: "/decisions" },
+  },
+  {
     id: "2026-11-26-triggers",
     date: "2026-11-26",
     kind: "new",

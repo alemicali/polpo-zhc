@@ -269,6 +269,27 @@ export const UpdateSettingsSchema = z.object({
   orchestratorName: z.string().trim().max(40, "at most 40 characters")
     .regex(/^[^\r\n]*$/, "a single line").nullable().optional(),
   imageModel: z.string().nullable().optional(),
+  /**
+   * The decision model for decide(): "vercel-ai-gateway:typesafe-ai/jev", or { gateway, model, fallback?: model | { model,
+   * confidenceBelow }, credentialRef?: { owner, service } (the gateway's key in the vault; else its env var), credentialField?,
+   * zeroDataRetention? }; null removes it.
+   */
+  decisionModel: z.union([
+    z.string().min(1),
+    z.object({
+      gateway: z.string().optional(), model: z.string().min(1),
+      fallback: z.union([z.string(), z.object({ model: z.string().min(1), confidenceBelow: z.number().min(0).max(1).optional() })]).optional(),
+      credentialRef: z.object({ owner: z.string(), service: z.string() }).optional(), credentialField: z.string().optional(),
+      zeroDataRetention: z.boolean().optional(),
+    }).strict(),
+  ]).nullable().optional(),
+  /** Decisions: without a decision model "error" (default) or "orchestrator" (Polpo's model, uncalibrated); the log's retention; null removes it. */
+  decisions: z.object({
+    unconfigured: z.enum(["error", "orchestrator"]).optional(),
+    retention: z.number().int().min(1).max(20_000).optional(),
+    retentionDays: z.number().int().min(0).max(3650).optional(),
+    storeInputs: z.enum(["capped", "hash"]).optional(),
+  }).strict().nullable().optional(),
   reasoning: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
   branding: z.object({
     productName: z.string().trim().max(80).optional(),

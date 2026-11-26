@@ -60,6 +60,7 @@ import { createArtifactAgentTools, workspaceFileReader } from "../tools/artifact
 import { getArtifactStore } from "../server/artifact-runtime.js";
 import { createStorageAgentTools } from "../tools/storage-tools.js";
 import { createCompanyBrainAgentTools } from "../tools/company-brain-tools.js";
+import { createDecisionTools } from "../tools/decision-tools.js";
 import { createTaskResultTools, wantsTaskResultTools } from "../tools/task-result-tools.js";
 import { databaseStoresFor } from "../core/storage.js";
 import { FileTaskStore } from "../stores/file-task-store.js";
@@ -1078,6 +1079,8 @@ export async function buildAgentToolset(o: {
     })));
     allTools.push(...createCompanyBrainAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
     allTools.push(...createStorageAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, { vaultStore: ctx.vaultStore as any, cwd, allowedPaths: effectiveAllowedPaths, outputDir, fs: remoteFs }));
+    // decide: typed judgments from the decision model (allowedTools "decide")
+    allTools.push(...createDecisionTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, o.task ? { taskId: o.task.id } : {}));
     // the results of the tasks it depends on and of its mission's tasks (read fresh from the task store)
     if (wantsTaskResultTools(o.task)) {
       const taskPolpoDir = ctx.polpoDir;

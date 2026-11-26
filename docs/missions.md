@@ -185,6 +185,18 @@ Each task in `blocksTasks` must also list the `afterTasks` in its `dependsOn` (t
 otherwise). A checkpoint is for a person's decision; it is not needed to pass results to the next
 task (see above).
 
+# Decision nodes
+
+A decision node lets the decision model pick a branch: after its `afterTasks`, a typed decision
+(yes/no, a choice, a score, a rank) on their results runs one branch's tasks and skips the others;
+an uncertain answer pauses the mission for a person (a checkpoint `Decision: <name>`). See
+docs/decisions.md → "Decision nodes in missions and playbooks".
+
+```json
+{ "name": "route", "afterTasks": ["Triage"], "question": { "type": "predicate", "instructions": "Is it a refund request?" },
+  "branches": { "yes": ["Refund"], "no": ["Reply"] }, "threshold": 0.7 }
+```
+
 ## Suites
 
 A mission can have **suites** (the mission page → **Suites**; docs/agent-suites.md, "Missions"):

@@ -44,6 +44,7 @@ import {
   SlidersHorizontal,
   CalendarClock,
   Webhook,
+  Scale,
   Database,
   Shapes,
   BrainCircuit,
@@ -142,6 +143,7 @@ const secondaryGroups: TabGroup[] = [
       { path: "/notifications", icon: Bell, label: "Notifications" },
       { path: "/schedules", icon: CalendarClock, label: "Schedules" },
       { path: "/triggers", icon: Webhook, label: "Triggers" },
+      { path: "/decisions", icon: Scale, label: "Decisions" },
     ],
   },
   {
@@ -191,6 +193,7 @@ const tabs: TabDef[] = [
   { path: "/notifications", icon: Bell, label: "Notifications" },
   { path: "/schedules", icon: CalendarClock, label: "Schedules" },
   { path: "/triggers", icon: Webhook, label: "Triggers" },
+  { path: "/decisions", icon: Scale, label: "Decisions" },
   { path: "/config", icon: Settings2, label: "Configuration" },
 ];
 
@@ -649,6 +652,7 @@ function resolvePageTitle(pathname: string): string {
     "/events": "Events",
     "/schedules": "Schedules",
     "/triggers": "Triggers",
+    "/decisions": "Decisions",
     "/approvals": "Approvals",
     "/playbooks": "Playbooks",
     "/files": "Files",

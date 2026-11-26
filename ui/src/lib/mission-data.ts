@@ -40,11 +40,35 @@ export interface MissionDelayDef {
   notifyChannels?: string[];
 }
 
+/** A decision node: a typed decision on the after tasks' results picks the branch that runs. */
+export interface MissionDecisionDef {
+  name: string;
+  afterTasks: string[];
+  state?: string;
+  question: { type: "predicate" | "choice" | "score" | "rank"; instructions: string; choices?: Array<{ value: string; description?: string }>; levels?: Array<string | { label: string }>; items?: unknown };
+  /** Answer → the task titles it starts. */
+  branches: Record<string, string[]>;
+  threshold?: number;
+  onUncertain?: "human" | { branch: string };
+}
+
 export interface ParsedMission {
   name?: string;
   tasks: MissionTaskDef[];
   checkpoints?: MissionCheckpointDef[];
   delays?: MissionDelayDef[];
+  decisions?: MissionDecisionDef[];
+}
+
+/** Valid decision nodes of a document (strict: name, afterTasks[], question, branches). */
+export function parseMissionDecisions(raw: unknown): MissionDecisionDef[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const valid = raw.filter((d): d is MissionDecisionDef => {
+    const x = d as Record<string, unknown> | null;
+    return !!x && typeof x === "object" && typeof x.name === "string" && Array.isArray(x.afterTasks)
+      && !!x.question && typeof x.question === "object" && !!x.branches && typeof x.branches === "object";
+  });
+  return valid.length > 0 ? valid : undefined;
 }
 
 export function parseMissionData(data: string): ParsedMission | null {
@@ -80,6 +104,7 @@ export function parseMissionData(data: string): ParsedMission | null {
       tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
       checkpoints,
       delays,
+      decisions: parseMissionDecisions(parsed.decisions),
     };
   } catch {
     return null;

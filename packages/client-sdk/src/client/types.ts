@@ -1154,6 +1154,10 @@ export interface PolpoSettings {
   /** The orchestrator's display name (default "Polpo"). */
   orchestratorName?: string;
   imageModel?: string;
+  /** Decision model for decide(): "vercel-ai-gateway:typesafe-ai/jev" or the object form. */
+  decisionModel?: import("./decision-types.js").DecisionModelSetting;
+  /** Decisions: the policy without a decision model, the log's retention. */
+  decisions?: import("./decision-types.js").DecisionSettings;
   modelAllowlist?: Record<string, ModelAllowlistEntry>;
   /** Global reasoning / deep thinking level. */
   reasoning?: ReasoningLevel;
@@ -1706,6 +1710,10 @@ export interface UpdateSettingsRequest {
   /** The orchestrator's display name (default "Polpo"); in an update, null or "" restores the default. */
   orchestratorName?: string | null;
   imageModel?: string | null;
+  /** The decision model for decide(); null removes it. */
+  decisionModel?: import("./decision-types.js").DecisionModelSetting | null;
+  /** Decisions settings; null removes them. */
+  decisions?: import("./decision-types.js").DecisionSettings | null;
   reasoning?: ReasoningLevel;
   branding?: BrandingConfig;
   /** The dashboard's default look; null removes it. */

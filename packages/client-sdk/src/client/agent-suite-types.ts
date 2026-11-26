@@ -208,6 +208,8 @@ export type SuiteScorer = {
   | { type: "latency"; maxMs: number }
   | { type: "llm_judge"; rubric: string; criteria?: JudgeCriterion[]; expected?: string; judge?: SuiteRole; /** @deprecated read as `judge: { model }`. */ model?: string }
   | { type: "custom"; code: string; expected?: unknown; timeoutMs?: number }
+  /** A cheap judge: one typed decision (the decision model) on the message and the reply. */
+  | { type: "decision"; question: "predicate" | "choice" | "score"; instructions: string; choices?: Array<{ value: string; description?: string }>; levels?: string[]; expected?: string | boolean }
 );
 export type SuiteScorerType = SuiteScorer["type"];
 

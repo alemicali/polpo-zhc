@@ -7,6 +7,7 @@ import { taskToolScopeProblems } from "./task-tool-scope.js";
 import { z } from "zod";
 import type { TaskExpectation, MissionCheckpoint, MissionQualityGate } from "./types.js";
 import { isValidISO8601Duration } from "./iso-duration.js";
+import { missionDecisionProblems } from "./decisions.js";
 
 // ── Loop Contract Schemas ────────────────────────────────────────────
 
@@ -180,6 +181,30 @@ export const missionDelaySchema = z.object({
   notifyChannels: z.array(z.string().min(1)).optional(),
 });
 
+// ── Mission Decision Schema ─────────────────────────────────────────
+
+/** A decision node (types.ts MissionDecision): its shape here; references and question are checked with the document. */
+export const missionDecisionSchema = z.object({
+  name: z.string().min(1, "decision requires a name"),
+  afterTasks: z.array(z.string().min(1)).min(1, "decision requires at least one task in afterTasks"),
+  state: z.string().optional(),
+  question: z.object({
+    type: z.enum(["predicate", "choice", "score", "rank"]),
+    instructions: z.string().min(1, "decision question requires instructions"),
+    choices: z.array(z.object({ value: z.string().min(1), description: z.string().optional() })).optional(),
+    levels: z.array(z.union([z.string().min(1), z.object({ label: z.string().min(1), description: z.string().optional() })])).optional(),
+    items: z.union([
+      z.string().min(1),
+      z.array(z.union([z.string().min(1), z.object({ id: z.string().optional(), label: z.string().min(1), description: z.string().optional() })])),
+    ]).optional(),
+  }),
+  branches: z.record(z.string(), z.array(z.string().min(1))),
+  threshold: z.number().min(0).max(1).optional(),
+  onUncertain: z.union([z.literal("human"), z.object({ branch: z.string().min(1) })]).optional(),
+  model: z.string().optional(),
+  notifyChannels: z.array(z.string().min(1)).optional(),
+});
+
 // ── Mission Quality Gate Schema ─────────────────────────────────────
 
 export const missionQualityGateSchema = z.object({
@@ -226,6 +251,8 @@ export const missionDocumentSchema = z.object({
   qualityGates: z.array(missionQualityGateSchema).optional(),
   checkpoints: z.array(missionCheckpointSchema).optional(),
   delays: z.array(missionDelaySchema).optional(),
+  /** Decision nodes: a typed decision on the after tasks' results picks the branch that runs. */
+  decisions: z.array(missionDecisionSchema).optional(),
   notifications: z.any().optional(),
   /** Sandbox for the mission's runs: may only tighten what the agents allow. */
   sandbox: z.any().optional(),
@@ -314,6 +341,25 @@ export const missionDocumentSchema = z.object({
   if (doc.checkpoints) validateFlowControl("checkpoints", doc.checkpoints);
   if (doc.delays) validateFlowControl("delays", doc.delays);
   if (doc.qualityGates) validateFlowControl("qualityGates", doc.qualityGates);
+
+  // Decision nodes: unique names, known tasks, branches matching the question, branch tasks after the decision
+  if (doc.decisions) {
+    const titles = new Set(taskDeps.keys());
+    const names = new Set<string>();
+    const owner = new Map<string, string>();
+    doc.decisions.forEach((d, i) => {
+      if (names.has(d.name)) ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Duplicate decision name "${d.name}"`, path: ["decisions", i, "name"] });
+      names.add(d.name);
+      for (const message of missionDecisionProblems(d, titles, taskDeps)) ctx.addIssue({ code: z.ZodIssueCode.custom, message, path: ["decisions", i] });
+      for (const list of Object.values(d.branches)) {
+        for (const t of list) {
+          const other = owner.get(t);
+          if (other && other !== d.name) ctx.addIssue({ code: z.ZodIssueCode.custom, message: `task "${t}" is in branches of two decisions ("${other}", "${d.name}")`, path: ["decisions", i, "branches"] });
+          owner.set(t, d.name);
+        }
+      }
+    });
+  }
 });
 
 export type MissionDocumentParsed = z.infer<typeof missionDocumentSchema>;

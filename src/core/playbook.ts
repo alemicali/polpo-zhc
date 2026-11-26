@@ -288,6 +288,11 @@ export function validateParams(
 
 // ── Instantiation ──────────────────────────────────────────────────────
 
+/** `{{tasks.<title>}}`: a task's result, filled at run time (decision nodes' state), never a parameter. */
+export function isRuntimePlaceholder(name: string): boolean {
+  return name.trim().startsWith("tasks.");
+}
+
 /**
  * Instantiate a playbook with resolved parameters.
  *
@@ -310,8 +315,9 @@ export function instantiatePlaybook(
   }
 
   // Check for unreplaced placeholders
-  const unreplaced = json.match(/\{\{([^}]+)\}\}/g);
-  if (unreplaced) {
+  // {{tasks.<title>}} is filled at run time by decision nodes (a task's result), not a parameter
+  const unreplaced = json.match(/\{\{([^}]+)\}\}/g)?.filter(m => !isRuntimePlaceholder(m.slice(2, -2)));
+  if (unreplaced?.length) {
     const names = [...new Set(unreplaced.map(m => m.slice(2, -2)))];
     throw new Error(`Unreplaced placeholders in playbook "${playbook.name}": ${names.join(", ")}`);
   }
@@ -380,7 +386,7 @@ export function validatePlaybookDefinition(def: Partial<PlaybookDefinition>): st
     const json = JSON.stringify(def.mission);
     const placeholders = json.match(/\{\{([^}]+)\}\}/g);
     if (placeholders) {
-      const usedNames = new Set(placeholders.map(m => m.slice(2, -2)));
+      const usedNames = new Set(placeholders.map(m => m.slice(2, -2)).filter(n => !isRuntimePlaceholder(n)));
       const declaredNames = new Set(def.parameters.map(p => p.name));
       for (const name of usedNames) {
         if (!declaredNames.has(name)) {

@@ -93,6 +93,8 @@ export interface AgentSuiteDeps {
   maxRunningRuns?: number;
   /** Runs a custom scorer's code in the sandboxed code worker. Absent: custom scorers error. */
   customScorer?: ScorerDeps["custom"];
+  /** decide() for decision scorers (the instance's decision service). Absent: they error. */
+  decide?: ScorerDeps["decide"];
   /** The vault's secret values: redacted from every recording. */
   secrets?: () => Promise<string[]>;
   /** What the case generator knows about an agent (its tools with descriptions, skills, connectors). */
@@ -309,15 +311,19 @@ function requestRole(raw: unknown, where: string): SuiteRole | undefined {
 const ROLE_AGENT_PREFIX = "polpo-suite-";
 /** A role turn's longest wait (generation writes many cases). */
 const ROLE_TURN_TIMEOUT_MS = 300_000;
-const ROLE_TITLES: Record<SuiteRoleName, string> = {
+/** A suite's roles, and the decider: decide()'s uncalibrated fallback when no decision model is configured. */
+type RoleKind = SuiteRoleName | "decider";
+const ROLE_TITLES: Record<RoleKind, string> = {
   judge: "Test suite judge", simulator: "Test suite simulated user", generator: "Test case generator", reviewer: "Test run reviewer",
+  decider: "Decision fallback",
 };
 /** What every role turn starts with (also the ephemeral agent's instructions). */
-const ROLE_INSTRUCTIONS: Record<SuiteRoleName, string> = {
+const ROLE_INSTRUCTIONS: Record<RoleKind, string> = {
   judge: "You are the strict, impartial judge of a test suite: you score an AI agent's answer. You have no tools. Answer with JSON only.",
   simulator: "You play the user in a test conversation with an AI agent. You have no tools. Follow the instructions below exactly.",
   generator: "You write test cases for an AI agent. You have no tools. Follow the instructions below and answer in exactly the format they ask for.",
   reviewer: "You review a test suite's run of an AI agent. You have no tools. Follow the instructions below.",
+  decider: "You estimate typed decisions about a state, with probabilities. You have no tools. Answer with JSON only.",
 };
 
 function describeEngineOnly(block: SuiteRole): string | undefined {
@@ -333,7 +339,7 @@ class RoleTurnHooks implements SuiteCaseHooks {
   costUsd = 0;
   turns = 0;
   error?: string;
-  constructor(readonly role: SuiteRoleName, readonly roleAgent?: { name: string } & Record<string, unknown>) {}
+  constructor(readonly role: RoleKind, readonly roleAgent?: { name: string } & Record<string, unknown>) {}
   budgetExceeded(): string | undefined { return undefined; }
   nextScriptedTurn(): ScriptedTurn | undefined { return undefined; }
   recordTurn(turn: Omit<SuiteTraceTurn, "index">): void {
@@ -821,6 +827,7 @@ export class AgentSuiteRunner {
       judge: ({ role, prompt, check }) => this.playRole("judge", role, prompt, check ? { check } : {}),
       ...(judgeRole ? { judgeRole } : {}),
       ...(this.deps.customScorer ? { custom: this.deps.customScorer } : {}),
+      ...(this.deps.decide ? { decide: this.deps.decide } : {}),
     };
   }
 
@@ -831,7 +838,7 @@ export class AgentSuiteRunner {
    * agent, or Polpo (no agent), through `turn` (the chat completions pipeline) without tools. With
    * `check`, an answer it cannot read gets one corrective follow-up turn in the same conversation.
    */
-  async playRole(kind: SuiteRoleName, role: SuiteRole | undefined, prompt: string, opts: { check?: (text: string) => string | undefined } = {}): Promise<SuiteRoleReply> {
+  async playRole(kind: RoleKind, role: SuiteRole | undefined, prompt: string, opts: { check?: (text: string) => string | undefined } = {}): Promise<SuiteRoleReply> {
     const block = isRoleBlock(role) ? role! : undefined;
     const roleAgent = block ? {
       name: `${ROLE_AGENT_PREFIX}${kind}`, role: ROLE_TITLES[kind], systemPrompt: ROLE_INSTRUCTIONS[kind], allowedTools: [] as string[],

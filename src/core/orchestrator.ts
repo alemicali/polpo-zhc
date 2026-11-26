@@ -89,6 +89,7 @@ import { ApprovalManager } from "./approval-manager.js";
 import { FileApprovalStore } from "../stores/file-approval-store.js";
 import { FileCheckpointStore } from "../stores/file-checkpoint-store.js";
 import { FileDelayStore } from "../stores/file-delay-store.js";
+import { FileDecisionNodeStore } from "../stores/file-decision-node-store.js";
 import { NotificationRouter } from "../notifications/index.js";
 import { FileNotificationStore } from "../stores/file-notification-store.js";
 import { TelegramCallbackPoller } from "../notifications/channels/telegram.js";
@@ -265,6 +266,8 @@ export class Orchestrator extends TypedEmitter {
   private agentMgr!: AgentManager;
   private taskMgr!: TaskManager;
   private missionExec!: MissionExecutor;
+  /** Who takes mission decision nodes' decisions (set by the server; kept across re-initialization). */
+  private missionDecider?: import("@polpo-ai/core").MissionDecider;
   private runner!: TaskRunner;
   private assessor!: AssessmentOrchestrator;
 
@@ -1084,6 +1087,8 @@ export class Orchestrator extends TypedEmitter {
       // Schedules' state and the claims that keep a run to one process: never only in memory
       scheduleStore: this.getScheduleStore(),
       leaseStore: this.getLeaseStore(),
+      // Mission decision nodes: per-instance files whatever the store (like the decision log)
+      decisionNodeStore: new FileDecisionNodeStore(this.polpoDir),
 
       // Inject Drizzle stores when storage is "sqlite" or "postgres"
       ...(this.drizzleStores ? {
@@ -1110,6 +1115,7 @@ export class Orchestrator extends TypedEmitter {
     this.taskMgr = new TaskManager(ctx);
     this.missionExec = new MissionExecutor(ctx, this.taskMgr, this.agentMgr);
     await this.missionExec.ready;
+    this.missionExec.setDecider(this.missionDecider);
     this.runner = new TaskRunner(ctx);
     this.assessor = new AssessmentOrchestrator(ctx);
 
@@ -2309,6 +2315,24 @@ export class Orchestrator extends TypedEmitter {
   /** Resume a checkpoint by mission ID and checkpoint name. Returns true if resumed. */
   async resumeCheckpointByMissionId(missionId: string, checkpointName: string): Promise<boolean> {
     return this.engine.resumeCheckpointByMissionId(missionId, checkpointName);
+  }
+
+  // ─── Decision nodes (the mission executor) ─────
+
+  /** Who takes mission decision nodes' decisions (the server's decision service). */
+  setMissionDecider(decider: import("@polpo-ai/core").MissionDecider | undefined): void {
+    this.missionDecider = decider;
+    this.missionExec?.setDecider(decider);
+  }
+
+  /** Mission decision nodes: deciding, decided, or waiting for a person. */
+  getDecisionNodes(): import("@polpo-ai/core").DecisionNodeState[] {
+    return this.missionExec?.listDecisionNodes() ?? [];
+  }
+
+  /** A person chooses the branch of a node waiting for one (null: none of its tasks run). */
+  async resolveDecisionNode(group: string, node: string, branch: string | null, by: string): Promise<import("@polpo-ai/core").DecisionNodeState> {
+    return this.missionExec.resolveDecisionNode(group, node, branch, by);
   }
 
   // ─── Delays (delegates to OrchestratorEngine) ─────

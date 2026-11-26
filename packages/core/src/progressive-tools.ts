@@ -155,6 +155,10 @@ export const POLPO_TOOL_GROUPS: ToolGroupRule[] = [
     prefixes: ["trigger_"], names: ["triggers_list"],
   },
   {
+    id: "decisions", label: "Decisions: typed judgments with probabilities from the decision model (yes/no, choice, score, rank), the decision log, mission decision nodes waiting for a person",
+    prefixes: ["decision_"], names: ["decide", "decisions"],
+  },
+  {
     id: "learning", label: "Agent learning and drive",
     names: ["get_agent_learning", "review_agent_learning", "revert_agent_learning", "get_agent_drive", "reflect_agent"],
   },

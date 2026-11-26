@@ -321,6 +321,35 @@ export interface PolpoEventMap {
   };
 
   /**
+   * A decision was taken (decide(): REST, MCP, Polpo's chat, an agent's decide tool, a mission's
+   * decision node, a suite's decision scorer) and recorded in the decision log — or failed.
+   */
+  "decision:made": {
+    id: string;
+    caller: string;
+    callerId?: string;
+    model: string;
+    calibrated: boolean;
+    uncertain: boolean;
+    costUsd: number;
+    status: "ok" | "error";
+    error?: string;
+  };
+  /** A mission's decision node is deciding, took a branch, or waits for a person to choose one. */
+  "decision:node": {
+    group: string;
+    missionId?: string;
+    node: string;
+    status: "deciding" | "decided" | "awaiting";
+    branch?: string | null;
+    suggested?: string | null;
+    decidedBy?: string;
+    decisionId?: string;
+    reason?: string;
+    skipped?: number;
+  };
+
+  /**
    * A message of a WhatsApp Business channel changed status: Meta's status webhooks (sent,
    * delivered, read, failed), a send queued for approval, approved or rejected, an inbound message.
    */

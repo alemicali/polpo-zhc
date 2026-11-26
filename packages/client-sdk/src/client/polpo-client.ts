@@ -5,6 +5,7 @@ import type {
   BenchmarkCaseComparison, BenchmarkDefinition, BenchmarkEstimate, BenchmarkInput, BenchmarkLeaderboard, BenchmarkMatrix, BenchmarkReport, BenchmarkRun,
   BenchmarkVariantStats, BenchmarkWeights, PlaygroundExchange, PlaygroundPane, PlaygroundPaneInput, PlaygroundSession, PlaygroundStreamEvent, SuiteVariantOverrides,
 } from "./agent-suite-types.js";
+import type { DecideRequest, DecideResult, DecisionCallerKind, DecisionLogEntry, DecisionLogPage, DecisionNodeState, DecisionStatus } from "./decision-types.js";
 import type {
   Connector,
   ConnectorTool,
@@ -812,6 +813,46 @@ export class PolpoClient {
   /** The connectors (external apps over MCP), with their status, account and who may use them. */
   getConnectors(): Promise<Connector[]> {
     return this.get<{ connectors: Connector[] }>("/connectors").then((d) => d.connectors);
+  }
+
+  // ── Decisions (decide(): typed judgments with probabilities from the decision model) ──
+
+  /** Ask the decision model typed questions about a state: predicate, choice, score, rank. Throws 409 when no decision model is configured. */
+  decide(req: DecideRequest): Promise<DecideResult> {
+    return this.post("/decide", req);
+  }
+
+  /** The decision log, newest first. */
+  getDecisions(o: { limit?: number; cursor?: string; caller?: DecisionCallerKind; callerId?: string; uncertain?: boolean; status?: "ok" | "error" } = {}): Promise<DecisionLogPage> {
+    const q = new URLSearchParams();
+    if (o.limit) q.set("limit", String(o.limit));
+    if (o.cursor) q.set("cursor", o.cursor);
+    if (o.caller) q.set("caller", o.caller);
+    if (o.callerId) q.set("callerId", o.callerId);
+    if (o.uncertain !== undefined) q.set("uncertain", String(o.uncertain));
+    if (o.status) q.set("status", o.status);
+    const qs = q.toString();
+    return this.get(`/decisions${qs ? `?${qs}` : ""}`);
+  }
+
+  /** One decision with its questions and (capped) state. */
+  getDecision(id: string): Promise<DecisionLogEntry> {
+    return this.get(`/decisions/${encodeURIComponent(id)}`);
+  }
+
+  /** The decision model, its gateway and where its key comes from (never the key). */
+  getDecisionStatus(): Promise<DecisionStatus> {
+    return this.get("/decisions/status");
+  }
+
+  /** Missions' decision nodes: deciding, decided, or waiting for a person. */
+  getDecisionNodes(): Promise<DecisionNodeState[]> {
+    return this.get("/decisions/nodes");
+  }
+
+  /** Choose the branch of a decision node waiting for a person (null: none of its tasks run); the mission resumes. */
+  resolveDecisionNode(group: string, node: string, branch: string | null): Promise<DecisionNodeState> {
+    return this.post("/decisions/nodes/resolve", { group, node, branch });
   }
 
   // ── Triggers (POST /hooks/{id}: forms and webhooks; no actions yet) ──

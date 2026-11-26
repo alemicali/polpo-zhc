@@ -116,6 +116,8 @@ export function PlaybookDetailPage() {
 
   const taskDefs = parsed?.tasks ?? [];
   const checkpoints = parsed?.checkpoints;
+  const delays = parsed?.delays;
+  const decisions = parsed?.decisions;
   const params = playbook?.parameters ?? [];
   const requiredParams = params.filter((p) => p.required);
 
@@ -228,6 +230,8 @@ export function PlaybookDetailPage() {
                   taskDefs={taskDefs}
                   findLiveTask={findLiveTask}
                   checkpoints={checkpoints}
+                  delays={delays}
+                  decisions={decisions}
                 />
               </ReactFlowProvider>
             </div>

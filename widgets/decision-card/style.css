@@ -1,0 +1,19 @@
+/* The decision card: on top of the cards' common look (agent-card/style.css); tokens only. */
+.answer { display: flex; flex-direction: column; gap: 6px; padding: 10px 0; border-bottom: var(--bw) solid var(--line); }
+.answer:last-of-type { border-bottom: 0; }
+.answer-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.answer-name { font-size: var(--t-xs); color: var(--fg3); }
+.answer-headline { font-weight: var(--w-semibold); overflow-wrap: anywhere; }
+.pbar { display: flex; flex-direction: column; gap: 2px; }
+.pbar-label { display: flex; justify-content: space-between; gap: 8px; font-size: var(--t-xs); color: var(--fg2); overflow-wrap: anywhere; }
+.pbar .bar-fill { opacity: 0.45; }
+.pbar.chosen .bar-fill { opacity: 1; }
+.pbar.chosen .pbar-label > span:first-child { color: var(--fg); font-weight: var(--w-medium); }
+.danger-text { color: var(--w-danger); }
+.fail-line { overflow-wrap: anywhere; }
+.mono { font-family: var(--font-mono, ui-monospace, monospace); overflow-wrap: anywhere; }
+.section-title { font-size: var(--t-xs); font-weight: var(--w-medium); color: var(--fg2); margin-bottom: 4px; }
+.code { margin: 0; padding: 8px 10px; border-radius: var(--r-sm); background: var(--fill); font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--t-xs); white-space: pre-wrap; overflow-wrap: anywhere; }
+.link-btn { background: none; border: 0; padding: 0; color: var(--fg); font: inherit; font-weight: var(--w-medium); text-align: start; cursor: pointer; text-decoration: underline; text-decoration-color: var(--line2); }
+.link-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.row .chips { flex: none; }
