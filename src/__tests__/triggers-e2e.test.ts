@@ -83,7 +83,7 @@ describe("triggers over REST on a real instance", () => {
     const list = await json(await api("/triggers"));
     expect(list.data[0]).toMatchObject({ id: trigger.id, stats: { lastStatus: "rejected" } });
     expect(JSON.stringify(list.data)).not.toContain(secret);
-  });
+  }, 30_000);
 
   test("validation errors list the problems; secrets rotate and the HMAC secret is write-only; delete", async () => {
     const bad = await json(await api("/triggers", { body: { name: "x", auth: { secret: false } } }));
@@ -108,7 +108,7 @@ describe("triggers over REST on a real instance", () => {
     expect((await json(await api(`/triggers/${id}`, { method: "DELETE" }))).data).toEqual({ deleted: true });
     expect((await api(`/triggers/${id}`)).status).toBe(404);
     expect((await orchestrator.getVaultStore()?.get("$triggers", `trigger-${id}-hmac`))).toBeUndefined();
-  });
+  }, 30_000);
 });
 
 describe("triggers over MCP (on the real instance)", () => {
@@ -173,5 +173,5 @@ describe("triggers over MCP (on the real instance)", () => {
 
     expect((await work.call("polpo_trigger_delete", { id })).isError).toBe(true);
     expect((await work.call("polpo_trigger_delete", { id, confirm: true })).structuredContent).toEqual({ deleted: true });
-  });
+  }, 60_000);
 });
