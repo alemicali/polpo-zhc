@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Triggers: Standard Webhooks signatures** (`hmac.scheme: "standard-webhooks"`): `webhook-id` / `webhook-timestamp` / `webhook-signature` (`v1,<base64>`, several after a rotation), signed `{id}.{timestamp}.{body}`, `whsec_` secrets decoded, 5-minute tolerance — for SitoInChat, Svix and other Standard Webhooks senders. Dashboard (Auth → Format), REST, MCP `polpo_trigger_auth`, SDK.
 - **WhatsApp Business: everything the Cloud API offers that Polpo can use** (docs/whatsapp-business.md, with a support matrix).
   - **Media in and out**: images, audio, voice notes (transcribed on arrival), video, documents, stickers; downloaded with the token only from Meta's hosts, within Meta's and the channel's size limits (`business.media`), kept for the retention and handed to the agent as attachments; sent by upload, link or media id with captions and file names; `GET /:name/media/:messageId`.
   - **Every inbound type**: location, contact cards, button / list / template quick-reply replies, flow completions (`nfm_reply`), address and call-permission answers, catalog orders, product enquiries, welcome, reactions, the contact's edits and revokes, forwarded flags, quoted messages, ad referrals, payments (India), marketing preferences. Structured ones are announced as the new **`channel:wabiz-event`** (trigger-friendly).

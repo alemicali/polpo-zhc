@@ -88,6 +88,7 @@ export function triggerInboundRoutes(deps: TriggerRouteDeps): Hono {
 const statusEnum = z.enum(["accepted", "rejected", "filtered", "duplicate", "rate_limited"]);
 const contentTypeEnum = z.enum(["json", "form", "multipart", "text"]);
 const hmacSchema = z.object({
+  scheme: z.enum(["standard-webhooks"]).optional().openapi({ description: "standard-webhooks: webhook-id / webhook-timestamp / webhook-signature (v1,<base64>), signed \"{id}.{timestamp}.{body}\", whsec_ secret; the other fields are set for you" }),
   header: z.string().openapi({ example: "x-hub-signature-256" }),
   algorithm: z.enum(["sha256", "sha1"]),
   encoding: z.enum(["hex", "base64"]),

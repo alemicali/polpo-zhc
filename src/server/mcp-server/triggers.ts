@@ -442,7 +442,8 @@ export function registerTriggerTools(tool: Register, deps: McpDeps): void {
       enabled: z.boolean().optional().describe("secret: the generated secret on or off"),
       allow_query_auth: z.boolean().optional().describe("secret: also accept ?token= (URLs end up in logs: only when the sender cannot set headers)"),
       hmac: z.object({
-        header: z.string(), algorithm: z.enum(["sha256", "sha1"]).optional(), encoding: z.enum(["hex", "base64"]).optional(), prefix: z.string().optional(),
+        scheme: z.enum(["standard-webhooks"]).optional().describe("standard-webhooks (webhook-id / webhook-timestamp / webhook-signature v1,<base64>, whsec_ secret): the other fields are set for you"),
+        header: z.string().optional(), algorithm: z.enum(["sha256", "sha1"]).optional(), encoding: z.enum(["hex", "base64"]).optional(), prefix: z.string().optional(),
         timestamp_header: z.string().optional(), tolerance_seconds: z.number().int().min(1).max(86400).optional(), signed_payload: z.string().optional(),
       }).optional().describe("hmac: the signature check (header, algorithm, encoding, prefix, timestamp header and tolerance, signed payload such as {timestamp}.{body})"),
       generate: z.boolean().optional().describe("hmac: Polpo generates the signing secret (shown once) instead of the person entering the sender's"),
@@ -479,8 +480,10 @@ export function registerTriggerTools(tool: Register, deps: McpDeps): void {
     }
     // hmac
     if (hmac) {
-      const r = await apiSend(deps, "PATCH", `/triggers/${enc(id)}`, { auth: { hmac: {
-        header: hmac.header, algorithm: hmac.algorithm ?? "sha256", encoding: hmac.encoding ?? "hex", ...(hmac.prefix ? { prefix: hmac.prefix } : {}),
+      const r = await apiSend(deps, "PATCH", `/triggers/${enc(id)}`, { auth: { hmac: hmac.scheme === "standard-webhooks" ? {
+        scheme: "standard-webhooks", header: "webhook-signature", algorithm: "sha256", encoding: "base64", ...(hmac.tolerance_seconds ? { toleranceSeconds: hmac.tolerance_seconds } : {}),
+      } : {
+        header: hmac.header ?? "", algorithm: hmac.algorithm ?? "sha256", encoding: hmac.encoding ?? "hex", ...(hmac.prefix ? { prefix: hmac.prefix } : {}),
         ...(hmac.timestamp_header ? { timestampHeader: hmac.timestamp_header } : {}), ...(hmac.tolerance_seconds ? { toleranceSeconds: hmac.tolerance_seconds } : {}),
         ...(hmac.signed_payload ? { signedPayload: hmac.signed_payload } : {}),
       } } });

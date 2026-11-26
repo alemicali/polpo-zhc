@@ -139,6 +139,7 @@ function AuthTab({ t, save, onSecret, focus }: { t: Trigger; save: (input: Trigg
   const [overlap, setOverlap] = useState("86400");
   const [busy, setBusy] = useState(false);
   const [hmac, setHmac] = useState(() => ({
+    scheme: t.auth.hmac?.scheme ?? "custom",
     header: t.auth.hmac?.header ?? "", algorithm: t.auth.hmac?.algorithm ?? "sha256", encoding: t.auth.hmac?.encoding ?? "hex", prefix: t.auth.hmac?.prefix ?? "",
     timestampHeader: t.auth.hmac?.timestampHeader ?? "", toleranceSeconds: String(t.auth.hmac?.toleranceSeconds ?? ""), signedPayload: t.auth.hmac?.signedPayload ?? "",
   }));
@@ -150,11 +151,14 @@ function AuthTab({ t, save, onSecret, focus }: { t: Trigger; save: (input: Trigg
     try { await fn(); } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
   };
   const saveHmac = () => run(async () => {
-    await save({ auth: { hmac: hmacOn ? {
+    await save({ auth: { hmac: !hmacOn ? null : hmac.scheme === "standard-webhooks" ? {
+      scheme: "standard-webhooks", header: "webhook-signature", algorithm: "sha256", encoding: "base64",
+      ...(hmac.toleranceSeconds ? { toleranceSeconds: Number(hmac.toleranceSeconds) } : {}),
+    } : {
       header: hmac.header, algorithm: hmac.algorithm as "sha256", encoding: hmac.encoding as "hex", ...(hmac.prefix ? { prefix: hmac.prefix } : {}),
       ...(hmac.timestampHeader ? { timestampHeader: hmac.timestampHeader } : {}), ...(hmac.toleranceSeconds ? { toleranceSeconds: Number(hmac.toleranceSeconds) } : {}),
       ...(hmac.signedPayload ? { signedPayload: hmac.signedPayload } : {}),
-    } : null } }, hmacOn ? "HMAC check saved" : "HMAC check removed");
+    } } }, hmacOn ? "HMAC check saved" : "HMAC check removed");
     if (!hmacOn && t.hmacSecret?.secretSet) await client.removeTriggerHmacSecret(t.id);
   });
   return (
@@ -198,6 +202,15 @@ function AuthTab({ t, save, onSecret, focus }: { t: Trigger; save: (input: Trigg
         actions={<Switch checked={hmacOn} onCheckedChange={setHmacOn} aria-label="Check an HMAC signature" />}>
         {hmacOn && (
           <div className="space-y-3" data-setup-item={t.id}>
+            <Field label="Format" hint="Standard Webhooks: webhook-id / webhook-timestamp / webhook-signature (v1,<base64>) with a whsec_ secret (Svix, SitoInChat…)">
+              <Select value={hmac.scheme} onValueChange={(v) => setHmac({ ...hmac, scheme: v as "custom" })}>
+                <SelectTrigger className="h-8" aria-label="Signature format"><SelectValue /></SelectTrigger>
+                <SelectContent><SelectItem value="custom">Custom HMAC</SelectItem><SelectItem value="standard-webhooks">Standard Webhooks</SelectItem></SelectContent>
+              </Select>
+            </Field>
+            {hmac.scheme === "standard-webhooks" ? (
+              <Field label="Tolerance (seconds)"><Input className="h-8" inputMode="numeric" value={hmac.toleranceSeconds} placeholder="300" onChange={(e) => setHmac({ ...hmac, toleranceSeconds: e.target.value.replace(/\D/g, "") })} /></Field>
+            ) : (<>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Signature header"><Input className="h-8" value={hmac.header} placeholder="x-hub-signature-256" onChange={(e) => setHmac({ ...hmac, header: e.target.value })} /></Field>
               <Field label="Prefix" hint="Stripped before comparing, e.g. sha256="><Input className="h-8" value={hmac.prefix} onChange={(e) => setHmac({ ...hmac, prefix: e.target.value })} /></Field>
@@ -217,7 +230,8 @@ function AuthTab({ t, save, onSecret, focus }: { t: Trigger; save: (input: Trigg
               <Field label="Tolerance (seconds)"><Input className="h-8" inputMode="numeric" value={hmac.toleranceSeconds} placeholder="300" onChange={(e) => setHmac({ ...hmac, toleranceSeconds: e.target.value.replace(/\D/g, "") })} /></Field>
             </div>
             <Field label="Signed payload" hint="{body} (default) or a template like {timestamp}.{body}"><Input className="h-8 font-mono" value={hmac.signedPayload} placeholder="{body}" onChange={(e) => setHmac({ ...hmac, signedPayload: e.target.value })} /></Field>
-            <Button size="sm" disabled={busy || !hmac.header.trim()} onClick={() => void saveHmac()}>Save signature settings</Button>
+            </>)}
+            <Button size="sm" disabled={busy || (hmac.scheme !== "standard-webhooks" && !hmac.header.trim())} onClick={() => void saveHmac()}>Save signature settings</Button>
             {t.auth.hmac && (
               <form className="space-y-2 rounded-md border bg-muted/20 p-3" onSubmit={(e) => {
                 e.preventDefault();

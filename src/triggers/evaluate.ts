@@ -88,6 +88,7 @@ export type HmacOutcome = { ok: true; which: "current" | "previous" } | { ok: fa
  * a rotation's overlap, the previous one. Every comparison is constant-time.
  */
 export function verifyHmac(cfg: TriggerHmacConfig, raw: Buffer, header: (name: string) => string | undefined, secrets: { current?: string; previous?: string }, now: number): HmacOutcome {
+  if (cfg.scheme === "standard-webhooks") return verifyStandardWebhook(cfg, raw, header, secrets, now);
   const sigHeader = header(cfg.header.toLowerCase());
   if (!sigHeader) return { ok: false, reason: `Missing signature header ${cfg.header}` };
   let timestamp: string | undefined;
@@ -119,6 +120,46 @@ export function verifyHmac(cfg: TriggerHmacConfig, raw: Buffer, header: (name: s
   const previous = check(secrets.previous);
   if (current) return { ok: true, which: "current" };
   if (previous) return { ok: true, which: "previous" };
+  return { ok: false, reason: "Invalid signature" };
+}
+
+/** The key of a Standard Webhooks secret: "whsec_<base64>" (or bare base64) decoded; anything else as UTF-8 bytes. */
+export function standardWebhookKey(secret: string): Buffer {
+  const s = secret.trim().replace(/^whsec_/, "");
+  if (/^[A-Za-z0-9+/]+={0,2}$/.test(s) && s.length % 4 === 0) {
+    const key = Buffer.from(s, "base64");
+    if (key.length > 0) return key;
+  }
+  return Buffer.from(secret, "utf8");
+}
+
+/**
+ * Standard Webhooks: HMAC-SHA256 of "{webhook-id}.{webhook-timestamp}.{raw body}", base64, compared in
+ * constant time with every "v1,<sig>" of webhook-signature (space-separated, e.g. during a rotation);
+ * timestamps (unix seconds) outside the tolerance are refused.
+ */
+function verifyStandardWebhook(cfg: TriggerHmacConfig, raw: Buffer, header: (name: string) => string | undefined, secrets: { current?: string; previous?: string }, now: number): HmacOutcome {
+  const id = header("webhook-id")?.trim();
+  const ts = header("webhook-timestamp")?.trim();
+  const sigs = header("webhook-signature")?.trim();
+  if (!id) return { ok: false, reason: "Missing header webhook-id" };
+  if (!ts || !/^\d+$/.test(ts)) return { ok: false, reason: "Missing or unreadable header webhook-timestamp" };
+  if (!sigs) return { ok: false, reason: "Missing header webhook-signature" };
+  const tolerance = cfg.toleranceSeconds ?? TRIGGER_LIMITS.defaultToleranceSeconds;
+  if (Math.abs(now - Number(ts) * 1000) > tolerance * 1000) return { ok: false, reason: `Timestamp outside the tolerance (${tolerance}s): a replay or a clock skew` };
+  const candidates = sigs.split(/\s+/).filter((s) => s.startsWith("v1,")).map((s) => Buffer.from(s.slice(3), "base64"));
+  if (candidates.length === 0) return { ok: false, reason: "No v1 signature in webhook-signature" };
+  const signed = Buffer.concat([Buffer.from(`${id}.${ts}.`, "utf8"), raw]);
+  const check = (secret: string | undefined) => {
+    if (!secret) return false;
+    const expected = createHmac("sha256", standardWebhookKey(secret)).update(signed).digest();
+    let match = false;
+    for (const given of candidates) if (given.length === expected.length && timingSafeEqual(given, expected)) match = true;
+    return match;
+  };
+  if (!secrets.current && !secrets.previous) return { ok: false, reason: "The HMAC secret is not set" };
+  if (check(secrets.current)) return { ok: true, which: "current" };
+  if (check(secrets.previous)) return { ok: true, which: "previous" };
   return { ok: false, reason: "Invalid signature" };
 }
 
@@ -437,6 +478,11 @@ export function templateProblems(where: string, template: string, roots: readonl
 
 export function hmacProblems(h: TriggerHmacConfig): string[] {
   const p: string[] = [];
+  if (h.scheme !== undefined && h.scheme !== "standard-webhooks") p.push("hmac.scheme: standard-webhooks (or absent for the generic HMAC)");
+  if (h.scheme === "standard-webhooks") {
+    if (h.toleranceSeconds !== undefined && (!Number.isInteger(h.toleranceSeconds) || h.toleranceSeconds < 1 || h.toleranceSeconds > 86_400)) p.push("hmac.toleranceSeconds: 1–86400");
+    return p;
+  }
   if (!HEADER_NAME.test(h.header ?? "")) p.push("hmac.header: a header name (e.g. x-hub-signature-256)");
   if (h.algorithm !== "sha256" && h.algorithm !== "sha1") p.push("hmac.algorithm: sha256 or sha1");
   if (h.encoding !== "hex" && h.encoding !== "base64") p.push("hmac.encoding: hex or base64");
