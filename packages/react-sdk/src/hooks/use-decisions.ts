@@ -50,6 +50,20 @@ function useRefetchOn(refetch: () => void) {
   }, [last, refetch]);
 }
 
+/** Missions' decision nodes only (deciding, decided, waiting for a person), live; `enabled: false` fetches nothing. */
+export function useDecisionNodes(o: { enabled?: boolean } = {}): { nodes: DecisionNodeState[]; refetch: () => Promise<void> } {
+  const { client } = usePolpoContext();
+  const [nodes, setNodes] = useState<DecisionNodeState[]>([]);
+  const enabled = o.enabled !== false;
+  const refetch = useCallback(async () => {
+    if (!enabled) return;
+    try { setNodes(await client.getDecisionNodes()); } catch { /* the graph shows the definitions only */ }
+  }, [client, enabled]);
+  useEffect(() => { void refetch(); }, [refetch]);
+  useRefetchOn(() => { void refetch(); });
+  return { nodes, refetch };
+}
+
 export interface UseDecisionsReturn {
   page: DecisionLogPage | undefined;
   /** The decision model and where its key comes from (never the key). */

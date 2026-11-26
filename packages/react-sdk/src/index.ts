@@ -20,7 +20,7 @@ export { useConnectors, connectorLabel } from "./hooks/use-connectors.js";
 export { useWaBusinessStatus, useWaTemplates, useWaConversation } from "./hooks/use-whatsapp-business.js";
 export { useTriggers, useTriggerDeliveries } from "./hooks/use-triggers.js";
 export type { UseTriggersReturn, UseTriggerDeliveriesReturn } from "./hooks/use-triggers.js";
-export { useDecide, useDecisions } from "./hooks/use-decisions.js";
+export { useDecide, useDecisions, useDecisionNodes } from "./hooks/use-decisions.js";
 export type { UseDecideReturn, UseDecisionsReturn } from "./hooks/use-decisions.js";
 export type { UseWaBusinessStatusReturn, UseWaTemplatesReturn, UseWaConversationReturn } from "./hooks/use-whatsapp-business.js";
 export type { UseConnectorsReturn } from "./hooks/use-connectors.js";

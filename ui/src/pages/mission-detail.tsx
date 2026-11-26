@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 
 import {
   ArrowLeft,
+  Scale,
   Play,
   RotateCcw,
   XCircle,
@@ -55,7 +56,7 @@ import {
   type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useMission, useTasks, useSchedules, useActiveDelays } from "@polpo-ai/react";
+import { useMission, useTasks, useSchedules, useActiveDelays, useDecisionNodes } from "@polpo-ai/react";
 import type { MissionReport, TaskStatus, Task, ActiveDelay, Mission, ScheduleEntry } from "@polpo-ai/react";
 import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
@@ -72,6 +73,7 @@ import { useLocalState } from "./coding/use-local-state";
 import {
   parseMissionData,
   type MissionCheckpointDef,
+  type MissionDecisionDef,
   type MissionDelayDef,
   type MissionTaskDef,
 } from "@/lib/mission-data";
@@ -518,6 +520,53 @@ function CheckpointNodeComponent({ data, selected }: NodeProps<Node<CheckpointNo
   );
 }
 
+// ── Decision node component for ReactFlow ──
+
+const DECISION_WIDTH = 220;
+const DECISION_HEIGHT = 84;
+
+/** A decision node's live state in the mission run (from GET /decisions/nodes). */
+export interface DecisionNodeView { status: "deciding" | "decided" | "awaiting"; branch?: string | null; suggested?: string | null }
+
+interface DecisionNodeData {
+  decision: MissionDecisionDef;
+  live?: DecisionNodeView;
+  [key: string]: unknown;
+}
+
+const QUESTION_KIND: Record<string, string> = { predicate: "Yes / no", choice: "Choice", score: "Score", rank: "Rank" };
+
+function DecisionNodeComponent({ data, selected }: NodeProps<Node<DecisionNodeData>>) {
+  const { decision, live } = data;
+  const status = live?.status === "decided" ? `Branch: ${live.branch ?? "none"}` : live?.status === "awaiting" ? "Waiting for you" : live?.status === "deciding" ? "Deciding" : "Decision";
+  const tone = live?.status === "decided" ? "text-success" : live?.status === "awaiting" ? "text-warning" : "text-info";
+  return (
+    <>
+      <Handle type="target" position={Position.Top} className="!bg-info/50 !border-none !w-2 !h-2" />
+      <div
+        data-testid="decision-node"
+        className={cn(
+          "rounded-lg border-2 backdrop-blur-surface transition-all duration-200 bg-card/60",
+          live?.status === "awaiting" ? "border-warning/70" : live?.status === "decided" ? "border-success/50" : "border-info/50",
+          selected && "ring-2 ring-info/30",
+        )}
+        style={{ minWidth: DECISION_WIDTH, maxWidth: DECISION_WIDTH }}
+      >
+        <div className="px-3 py-2.5 flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <Scale className="h-3.5 w-3.5 text-info shrink-0" />
+            <span className="text-caption font-semibold text-foreground/90 truncate">{decision.name}</span>
+            <span className={cn("ml-auto text-micro font-medium uppercase tracking-wider", tone)}>{QUESTION_KIND[decision.question.type] ?? decision.question.type}</span>
+          </div>
+          <p className="text-micro text-muted-foreground leading-tight line-clamp-2">{decision.question.instructions}</p>
+          <span className={cn("text-micro font-medium", tone)}>{status}</span>
+        </div>
+      </div>
+      <Handle type="source" position={Position.Bottom} className="!bg-info/50 !border-none !w-2 !h-2" />
+    </>
+  );
+}
+
 // ── Delay node component for ReactFlow ──
 
 const DELAY_SIZE = 140;
@@ -633,7 +682,7 @@ function DelayNodeComponent({ data, selected }: NodeProps<Node<DelayNodeData>>) 
   );
 }
 
-const nodeTypes = { taskNode: TaskNodeComponent, checkpointNode: CheckpointNodeComponent, delayNode: DelayNodeComponent };
+const nodeTypes = { taskNode: TaskNodeComponent, checkpointNode: CheckpointNodeComponent, delayNode: DelayNodeComponent, decisionNode: DecisionNodeComponent };
 
 // ── Graph layout computation ──
 
@@ -651,6 +700,8 @@ function buildGraphLayout(
   delays?: MissionDelayDef[],
   activeDelayMap?: Map<string, ActiveDelay>,
   expiredDelays?: Set<string>,
+  decisions?: MissionDecisionDef[],
+  decisionStates?: Map<string, DecisionNodeView>,
 ): { nodes: Node[]; edges: Edge[] } {
   // Build dependency graph for layering (topological sort into levels)
   const titleIndex = new Map<string, number>();
@@ -761,8 +812,31 @@ function buildGraphLayout(
     }
   }
 
-  // Recompute max layer after checkpoint and delay pushes
-  const maxLayer = Math.max(...layers, ...cpLayers, ...dlLayers, 0);
+  // ── Decision layer computation (same pattern: between the after tasks and the branch tasks) ──
+  const dcDefs = decisions ?? [];
+  const dcLayers: number[] = [];
+  const branchOf = (d: MissionDecisionDef, title: string) => Object.entries(d.branches).filter(([, list]) => list.includes(title)).map(([k]) => k);
+  for (const d of dcDefs) {
+    let maxAfterLayer = 0;
+    for (const title of d.afterTasks) {
+      const idx = titleIndex.get(title);
+      if (idx != null) maxAfterLayer = Math.max(maxAfterLayer, layers[idx]);
+    }
+    const dcLayer = maxAfterLayer + 1;
+    dcLayers.push(dcLayer);
+    for (const title of Object.values(d.branches).flat()) {
+      const idx = titleIndex.get(title);
+      if (idx != null && layers[idx] <= dcLayer) shiftTaskAndDependents(idx, dcLayer + 1 - layers[idx], taskDefs, titleIndex, layers);
+      if (idx == null) continue;
+      for (const after of d.afterTasks) {
+        const ai = titleIndex.get(after);
+        if (ai != null && (taskDefs[idx].dependsOn ?? []).includes(after)) interceptedEdges.add(`${ai}-${idx}`);
+      }
+    }
+  }
+
+  // Recompute max layer after checkpoint, delay and decision pushes
+  const maxLayer = Math.max(...layers, ...cpLayers, ...dlLayers, ...dcLayers, 0);
 
   // Group task nodes by layer
   const layerGroups: number[][] = Array.from({ length: maxLayer + 1 }, () => []);
@@ -979,6 +1053,44 @@ function buildGraphLayout(
     }
   }
 
+  // ── Decision nodes and edges: afterTasks → decision → each branch's tasks (labelled with the answer) ──
+  for (let i = 0; i < dcDefs.length; i++) {
+    const d = dcDefs[i];
+    const id = `decision-${i}`;
+    const live = decisionStates?.get(d.name);
+    const sameLayer = dcLayers.filter((l) => l === dcLayers[i]).length;
+    const posInLayer = dcLayers.slice(0, i).filter((l) => l === dcLayers[i]).length;
+    const startX = -(sameLayer * DECISION_WIDTH + (sameLayer - 1) * H_GAP) / 2;
+    nodes.push({
+      id, type: "decisionNode",
+      position: { x: startX + posInLayer * (DECISION_WIDTH + H_GAP), y: dcLayers[i] * (NODE_HEIGHT + V_GAP) + (NODE_HEIGHT - DECISION_HEIGHT) / 2 },
+      data: { decision: d, ...(live ? { live } : {}) } as DecisionNodeData,
+    });
+    for (const title of d.afterTasks) {
+      const ai = titleIndex.get(title);
+      if (ai == null) continue;
+      const isDone = findLive(title)?.status === "done";
+      edges.push({
+        id: `e-task${ai}-dc${i}`, source: `task-${ai}`, target: id,
+        markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12 },
+        style: { stroke: isDone ? EDGE.delay : EDGE.idle, strokeWidth: isDone ? 2 : 1.5 },
+      });
+    }
+    for (const title of [...new Set(Object.values(d.branches).flat())]) {
+      const bi = titleIndex.get(title);
+      if (bi == null) continue;
+      const keys = branchOf(d, title);
+      const taken = live?.status === "decided" && !!live.branch && keys.includes(live.branch);
+      const skipped = live?.status === "decided" && !taken;
+      edges.push({
+        id: `e-dc${i}-task${bi}`, source: id, target: `task-${bi}`, label: keys.join(" / "),
+        markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12 },
+        style: { stroke: taken ? EDGE.done : skipped ? EDGE.idle : EDGE.delay, strokeWidth: taken ? 2 : 1.5, ...(skipped ? { strokeDasharray: "4 4" } : {}) },
+        animated: live?.status === "deciding",
+      });
+    }
+  }
+
   return { nodes, edges };
 }
 
@@ -1013,6 +1125,8 @@ export function MissionGraphInner({
   delays,
   activeDelayMap,
   expiredDelays,
+  decisions,
+  decisionStates,
 }: {
   taskDefs: MissionTaskDef[];
   findLiveTask: (title: string) => Task | undefined;
@@ -1022,11 +1136,13 @@ export function MissionGraphInner({
   delays?: MissionDelayDef[];
   activeDelayMap?: Map<string, ActiveDelay>;
   expiredDelays?: Set<string>;
+  decisions?: MissionDecisionDef[];
+  decisionStates?: Map<string, DecisionNodeView>;
 }) {
   const { fitView } = useReactFlow();
   const { nodes: initial, edges: initialEdges } = useMemo(
-    () => buildGraphLayout(taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints, delays, activeDelayMap, expiredDelays),
-    [taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints, delays, activeDelayMap, expiredDelays],
+    () => buildGraphLayout(taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints, delays, activeDelayMap, expiredDelays, decisions, decisionStates),
+    [taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints, delays, activeDelayMap, expiredDelays, decisions, decisionStates],
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initial);
@@ -1036,7 +1152,7 @@ export function MissionGraphInner({
 
   // Sync when live task status changes
   useEffect(() => {
-    const { nodes: n, edges: e } = buildGraphLayout(taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints, delays, activeDelayMap, expiredDelays);
+    const { nodes: n, edges: e } = buildGraphLayout(taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints, delays, activeDelayMap, expiredDelays, decisions, decisionStates);
     setNodes((previous: Node[]) => n.map((node: Node) => {
       const existing = previous.find((candidate) => candidate.id === node.id);
       // Keep the size React Flow measured: a rebuilt node without it is hidden until measured
@@ -1045,7 +1161,7 @@ export function MissionGraphInner({
       return existing?.data.expanded ? { ...kept, data: { ...kept.data, expanded: true } } : kept;
     }));
     setEdges(e);
-  }, [taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints, delays, activeDelayMap, expiredDelays, setNodes, setEdges]);
+  }, [taskDefs, findLiveTask, checkpoints, activeCheckpoints, resumedCheckpoints, delays, activeDelayMap, expiredDelays, decisions, decisionStates, setNodes, setEdges]);
 
   useEffect(() => {
     const t = setTimeout(() => fitView({ padding: 0.2 }), 50);
@@ -1721,6 +1837,16 @@ export function MissionDetailView({
     return map;
   }, [liveDelays, mission.name]);
 
+  // decision nodes of this run: deciding, the branch taken, or waiting for a person
+  const { nodes: liveDecisionNodes } = useDecisionNodes({ enabled: !!parsed?.decisions?.length });
+  const decisionStates = useMemo(() => {
+    const map = new Map<string, DecisionNodeView>();
+    for (const n of liveDecisionNodes) {
+      if (n.missionId ? n.missionId === mission.id : n.group === mission.name) map.set(n.node, { status: n.status, branch: n.branch, suggested: n.suggested });
+    }
+    return map;
+  }, [liveDecisionNodes, mission.id, mission.name]);
+
   const expiredDelays = useMemo(() => {
     const set = new Set<string>();
     if (!parsed?.delays) return set;
@@ -1984,6 +2110,8 @@ export function MissionDetailView({
                   delays={parsed.delays}
                   activeDelayMap={isBlueprint ? undefined : activeDelayMap}
                   expiredDelays={isBlueprint ? undefined : expiredDelays}
+                  decisions={parsed.decisions}
+                  decisionStates={isBlueprint ? undefined : decisionStates}
                 />
               </ReactFlowProvider>
             </div>
