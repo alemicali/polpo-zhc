@@ -17,6 +17,7 @@ import { FileAgentSuiteStore } from "../stores/file-agent-suite-store.js";
 import { FileBenchmarkStore } from "../stores/file-benchmark-store.js";
 import { AgentBenchmarks } from "./agent-benchmarks.js";
 import { sandboxedCustomScorer } from "./agent-suite-scorers.js";
+import { decisionServiceFor } from "../decisions/service.js";
 import { AgentDeployGates } from "./agent-deploy-gates.js";
 import { deployGateSummary } from "@polpo-ai/core";
 import { mcpServerServiceFor } from "./mcp-servers-runtime.js";
@@ -147,6 +148,13 @@ export function agentSuiteDeps(opts: AgentSuiteHostOptions): AgentSuiteDeps {
     store: new FileAgentSuiteStore(o.getPolpoDir()),
     // evals: custom scorers in the sandbox (the judge and the other roles are chat turns: `turn`)
     customScorer: sandboxedCustomScorer(),
+    // decision scorers: the instance's decide() (the decision model; logged as a suite's decision)
+    decide: async (req) => {
+      const service = decisionServiceFor(o.getPolpoDir());
+      if (!service) throw new Error("Decisions are not available on this server");
+      const r = await service.decide(req, { kind: "suite" });
+      return { answers: r.answers, model: r.model, costUsd: r.costUsd, calibrated: r.calibrated };
+    },
     // phase 4: recordings
     secrets: () => vaultSecrets(o),
     agentInfo: async (agent: AgentConfig): Promise<AgentGenerationInfo> => {

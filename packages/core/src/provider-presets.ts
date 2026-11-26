@@ -153,7 +153,8 @@ export const BUILTIN_PROVIDER_ENV_VARS = new Set([
   "AWS_BEARER_TOKEN_BEDROCK",
 ]);
 
-function hostMatches(hostname: string, patterns: string[]): boolean {
+/** Does a hostname match one of the patterns (a leading "." means "any subdomain of")? */
+export function hostMatches(hostname: string, patterns: string[]): boolean {
   const h = hostname.toLowerCase();
   return patterns.some((p) => (p.startsWith(".") ? h.endsWith(p) && h.length > p.length : h === p));
 }

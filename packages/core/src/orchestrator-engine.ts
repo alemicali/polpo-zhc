@@ -99,7 +99,9 @@ export interface MissionExecutorPort {
   getActiveCheckpoints(): Array<{ group: string; checkpointName: string; checkpoint: MissionCheckpoint; reachedAt: string }>;
   releaseGroupFlow(group: string): Promise<void>;
   getActiveDelays(): Array<{ group: string; delayName: string; delay: MissionDelay; startedAt: string; expiresAt: string }>;
-  resumeCheckpoint(group: string, checkpointName: string): Promise<boolean>;
+  resumeCheckpoint(group: string, checkpointName: string, resolvedBy?: string): Promise<boolean>;
+  getBlockingDecision(group: string, taskTitle: string, taskId: string, allTasks: Task[], missionData?: string): Promise<{ decision: import("./types.js").MissionDecision } | undefined>;
+  hasPendingDecisions(): boolean;
   // Atomic mission data operations
   addMissionTask(missionId: string, task: { title: string; description: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown; sideEffects?: boolean; toolScope?: import("./task-tool-scope.js").TaskToolScope | null }): Promise<Mission>;
   updateMissionTask(missionId: string, taskTitle: string, updates: { title?: string; description?: string; assignTo?: string; dependsOn?: string[]; expectations?: unknown[]; expectedOutcomes?: unknown[]; maxDuration?: number; retryPolicy?: { escalateAfter?: number; fallbackAgent?: string }; notifications?: unknown; sideEffects?: boolean; toolScope?: import("./task-tool-scope.js").TaskToolScope | null }): Promise<Mission>;
@@ -417,6 +419,12 @@ export class OrchestratorEngine {
             if (blockingDelay) isReady = false; // Blocked by delay
           }
         }
+
+        // Check decision nodes — a branch task waits for its decision (started once the after tasks finished)
+        if (isReady) {
+          const blockingDecision = await this.missionExec.getBlockingDecision(task.group, task.title, task.id, tasksOfGroup(task.group), mission?.data);
+          if (blockingDecision) isReady = false;
+        }
       }
       if (isReady) {
         isReady = task.dependsOn.every(depId => {
@@ -431,7 +439,7 @@ export class OrchestratorEngine {
     // Check for deadlock: no tasks ready, none running, but some pending
     // Don't consider it a deadlock if tasks are awaiting approval, blocked by checkpoints, or waiting on delays
     const hasActiveCheckpoints = this.missionExec.getActiveCheckpoints().length > 0;
-    const hasActiveDelays = this.missionExec.getActiveDelays().length > 0;
+    const hasActiveDelays = this.missionExec.getActiveDelays().length > 0 || this.missionExec.hasPendingDecisions();
     if (ready.length === 0 && inProgress.length === 0 && pending.length > 0 && awaitingApproval.length === 0 && !hasActiveCheckpoints && !hasActiveDelays && !waitingOnPausedMission) {
       if (this.deadlockResolver) {
         // Async resolution already in progress — wait for next tick

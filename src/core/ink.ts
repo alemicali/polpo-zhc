@@ -613,7 +613,7 @@ export const INK_IMPORTABLE_SETTINGS = new Set<string>([
  * declared by the package, so they are only imported together with custom
  * providers (`polpo ink add --allow-custom-providers`).
  */
-export const INK_MODEL_ROUTING_SETTINGS = new Set<string>(["orchestratorModel", "imageModel"]);
+export const INK_MODEL_ROUTING_SETTINGS = new Set<string>(["orchestratorModel", "imageModel", "decisionModel"]);
 
 /**
  * Merge company settings into `target` (fill-missing only), restricted to

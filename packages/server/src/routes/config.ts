@@ -3,6 +3,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { redactPolpoConfig, redactSecrets, restoreRedactedSecrets } from "../security.js";
 import { UnrestorableSecretError } from "@polpo-ai/core/secret-redaction";
 import { validateWaBusinessChannel } from "@polpo-ai/core/whatsapp-business";
+import { gatewaysWith, parseDecisionModel } from "@polpo-ai/core";
 import { computerEgressProblem, isEmptyAppearance, parseAppearanceSettings, parseComputers, parseEgressProxies, parseTailscaleSettings, type AppearanceSettings, type TailscaleSettings } from "@polpo-ai/core";
 import { agentHarness, HARNESS_NAMES, harnessesVaultProblems, parseHarnessesSettings, type HarnessesSettings } from "@polpo-ai/core/harnesses";
 import {
@@ -400,6 +401,16 @@ export function configRoutes(getDeps: () => {
       const problems = computers.filter((x) => x.kind !== "host").map((x) => computerEgressProblem(x, next)).filter((p): p is string => !!p);
       if (problems.length) return c.json({ ok: false, error: `${problems.join("; ")}. Change the computer's egress first.` }, 400);
     }
+    // the decision model: "gateway:model" or the object, on a gateway that offers decisions
+    if (body.decisionModel) {
+      try {
+        const m = parseDecisionModel(body.decisionModel);
+        const offering = gatewaysWith("decisions").map((g) => g.id);
+        if (m && !offering.includes(m.gateway)) throw new Error(`${m.gateway} does not offer decisions (gateways that do: ${offering.join(", ")})`);
+      } catch (err) {
+        return c.json({ ok: false, error: `decisionModel: ${err instanceof Error ? err.message : String(err)}` }, 400);
+      }
+    }
 
     const result = await mutateConfig(deps, (config) => {
       const settings = config.settings ?? {};
@@ -413,6 +424,8 @@ export function configRoutes(getDeps: () => {
         else delete settings.orchestratorName;
       }
       if (body.imageModel !== undefined) settings.imageModel = body.imageModel === null ? undefined : body.imageModel;
+      if (body.decisionModel !== undefined) settings.decisionModel = body.decisionModel === null ? undefined : body.decisionModel;
+      if (body.decisions !== undefined) settings.decisions = body.decisions === null || Object.keys(body.decisions).length === 0 ? undefined : body.decisions;
       if (body.reasoning !== undefined) settings.reasoning = body.reasoning;
       if (body.sandbox !== undefined) settings.sandbox = body.sandbox === null ? undefined : normalizeSandboxSettings(body.sandbox);
       if (body.compaction !== undefined) settings.compaction = body.compaction === null ? undefined : body.compaction;

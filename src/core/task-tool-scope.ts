@@ -31,12 +31,13 @@ let knownTools: string[] | undefined;
 /** Every built-in tool name an agent can be given through allowedTools. */
 export async function knownBuiltinTools(): Promise<string[]> {
   if (knownTools) return knownTools;
-  const [system, data, artifacts, brain, storage] = await Promise.all([
+  const [system, data, artifacts, brain, storage, decisions] = await Promise.all([
     import("../tools/system-tools.js"),
     import("../tools/data-tools.js"),
     import("../tools/artifact-tools.js"),
     import("../tools/company-brain-tools.js"),
     import("../tools/storage-tools.js"),
+    import("../tools/decision-tools.js"),
   ]);
   knownTools = [...new Set([
     ...system.ALL_EXTENDED_TOOL_NAMES,
@@ -44,6 +45,7 @@ export async function knownBuiltinTools(): Promise<string[]> {
     ...artifacts.ARTIFACT_TOOLS.map((t) => t.name),
     ...brain.BRAIN_ORCHESTRATOR_TOOLS.map((t) => t.name).filter((n) => n.startsWith("brain_")),
     ...storage.STORAGE_AGENT_TOOLS.map((t) => t.name),
+    ...decisions.DECISION_TOOL_NAMES,
   ])];
   return knownTools;
 }
