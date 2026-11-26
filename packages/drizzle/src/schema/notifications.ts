@@ -18,6 +18,8 @@ export const notificationsSqlite = sqliteTable("notifications", {
   sourceEvent: text("source_event").notNull(),
   attachmentCount: integer("attachment_count").notNull().default(0),
   attachmentTypes: text("attachment_types"),
+  /** Who sent it (an agent with its task / chat), JSON; null for rules. */
+  origin: text("origin"),
 }, (table) => [
   index("idx_notifications_timestamp").on(table.timestamp),
   index("idx_notifications_status").on(table.status),
@@ -42,6 +44,8 @@ export const notificationsPg = pgTable("notifications", {
   sourceEvent: pgText("source_event").notNull(),
   attachmentCount: pgInteger("attachment_count").notNull().default(0),
   attachmentTypes: jsonb("attachment_types"),
+  /** Who sent it (an agent with its task / chat); null for rules. */
+  origin: jsonb("origin"),
 }, (table) => [
   pgIndex("idx_pg_notifications_timestamp").on(table.timestamp),
   pgIndex("idx_pg_notifications_status").on(table.status),

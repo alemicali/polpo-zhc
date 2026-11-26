@@ -510,6 +510,31 @@ export interface AgentConfig {
   defaultComputer?: string;
   /** Allowed recipient email domains for email_send. Overrides global setting. */
   emailAllowedDomains?: string[];
+  /** Notification channels it may post to with send_notification (also needs send_notification in allowedTools). */
+  notifyChannels?: AgentNotifyChannels;
+  /** send_notification messages per minute (default 5, at most 60). */
+  notifyRateLimit?: number;
+}
+
+/** A notification channel an agent may post to, and the targets it may pick with `to`. */
+export interface AgentNotifyChannel {
+  /** A configured channel's name (settings.notifications.channels). */
+  channel: string;
+  /** Slack channel ids, Telegram chat ids, email addresses, or "*" for any; absent = the channel's default target only. */
+  targets?: string[];
+}
+
+/** "*" = every configured channel's default target. */
+export type AgentNotifyChannels = "*" | AgentNotifyChannel[];
+
+/** Who sent a notification that no rule sent: an agent with its task, mission or chat. */
+export interface NotificationOrigin {
+  kind: "agent";
+  agent: string;
+  taskId?: string;
+  missionId?: string;
+  sessionId?: string;
+  runId?: string;
 }
 
 export type AgentSuggestion = string | AgentSuggestionConfig;
@@ -947,6 +972,8 @@ export interface NotificationRecord {
   sourceEvent: string;
   attachmentCount: number;
   attachmentTypes?: OutcomeType[];
+  /** Who sent it (an agent's send_notification); absent for rules. */
+  origin?: NotificationOrigin;
 }
 
 export interface NotificationStats {
@@ -1597,6 +1624,10 @@ export interface AddAgentRequest {
   pipeline?: Pipeline;
   /** Allowed email recipient domains (overrides global setting). */
   emailAllowedDomains?: string[];
+  /** Notification channels it may post to with send_notification (also needs send_notification in allowedTools). */
+  notifyChannels?: AgentNotifyChannels;
+  /** send_notification messages per minute (default 5). */
+  notifyRateLimit?: number;
   // Tool categories activated via allowedTools (e.g. ["browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*", "search_*"])
 }
 
@@ -1626,6 +1657,10 @@ export interface UpdateAgentRequest {
   /** Its default machine for chats and tasks (a computer id, or "host"); "" clears it. */
   defaultComputer?: string;
   emailAllowedDomains?: string[];
+  /** Notification channels it may post to with send_notification; null or [] removes them (no tool). */
+  notifyChannels?: AgentNotifyChannels | null;
+  /** send_notification messages per minute (default 5); null resets it. */
+  notifyRateLimit?: number | null;
   /** Move agent to a different team. */
   team?: string;
   /**

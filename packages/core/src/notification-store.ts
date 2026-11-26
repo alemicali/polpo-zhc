@@ -39,6 +39,8 @@ export interface NotificationRecord {
   attachmentCount: number;
   /** Outcome types attached (if any). */
   attachmentTypes?: OutcomeType[];
+  /** Who sent it when it is not a rule's: an agent (send_notification) with its task, mission or chat. */
+  origin?: import("./agent-notify.js").NotificationOrigin;
 }
 
 export interface NotificationStore {

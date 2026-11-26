@@ -88,6 +88,22 @@ gateway: { enableInbound: true } }` creates it and returns the hand-off for the 
 - **Files**: files you send are downloaded and passed to the agent; files the agent produces are
   uploaded in the thread.
 
+## Let an agent post to a channel
+
+An agent can post to Slack as the Polpo bot with its `send_notification` tool — for example
+`lead-notifier` explaining a lead in `#lead-black-friday` for a person to review. Give it
+`send_notification` in its tools and the channel in its allowlist, with the Slack channel ids it may
+pick (agent page → **Tools & Skills** → **Notifications**, or the API):
+
+```json
+{ "allowedTools": ["read", "send_notification"],
+  "notifyChannels": [{ "channel": "slack", "targets": ["C0LEADBF"] }] }
+```
+
+It then calls `send_notification { channel: "slack", to: "C0LEADBF", body: "…", thread_ts? }`;
+anything else is refused with what it may use. The app must be in that channel (`/invite @Polpo`).
+See [agent-notifications.md](agent-notifications.md).
+
 ## Surfaces
 
 - REST: `GET /api/v1/slack`, `GET /api/v1/slack/{name}/status`, `PUT /api/v1/slack/{name}/secrets`

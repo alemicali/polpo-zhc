@@ -60,6 +60,26 @@ export interface AgentTalkWireRequest {
 
 export type AgentTalkWireReply = { ok: true; to: string; answer?: string } | { ok: false; error: string };
 
+/**
+ * A task run's agent posts to a notification channel (send_notification): the server knows the
+ * agent and the task from the run, never from the request, and checks the agent's allowlist.
+ */
+export interface AgentNotifyWireRequest {
+  type: "agent_notify";
+  runId: string;
+  channel: string;
+  to?: string;
+  threadTs?: string;
+  title?: string;
+  body: string;
+  severity?: "info" | "warning" | "critical";
+}
+
+export type AgentNotifyWireReply = { ok: true; id: string; channel: string; to?: string } | { ok: false; error: string };
+
+type WireRequest = AgentTalkWireRequest | AgentNotifyWireRequest;
+type WireReply<R extends WireRequest> = R extends AgentNotifyWireRequest ? AgentNotifyWireReply : AgentTalkWireReply;
+
 /** Server-side: orchestrator listens for runner completion notifications. */
 export function startNotificationServer(
   polpoDir: string,
@@ -68,6 +88,8 @@ export function startNotificationServer(
   onSandboxEvent?: (msg: SandboxEventMessage) => void,
   /** A task run's agent talking to another agent (a request: the reply is written back). */
   onAgentTalk?: (msg: AgentTalkWireRequest) => Promise<AgentTalkWireReply>,
+  /** A task run's agent posting to a notification channel (a request: the reply is written back). */
+  onAgentNotify?: (msg: AgentNotifyWireRequest) => Promise<AgentNotifyWireReply>,
 ): Server {
   const socketPath = getSocketPath(polpoDir);
 
@@ -87,10 +109,15 @@ export function startNotificationServer(
       if (answered || newline < 0) return;
       let msg: { type?: string } | undefined;
       try { msg = JSON.parse(buffer.slice(0, newline)); } catch { return; }
-      if (msg?.type !== "agent_talk") return;
+      if (msg?.type !== "agent_talk" && msg?.type !== "agent_notify") return;
       answered = true;
-      const reply = onAgentTalk
-        ? onAgentTalk(msg as AgentTalkWireRequest).catch((err): AgentTalkWireReply => ({ ok: false, error: err instanceof Error ? err.message : String(err) }))
+      const failed = (err: unknown) => ({ ok: false as const, error: err instanceof Error ? err.message : String(err) });
+      const reply: Promise<AgentTalkWireReply | AgentNotifyWireReply> = msg.type === "agent_notify"
+        ? (onAgentNotify
+          ? onAgentNotify(msg as AgentNotifyWireRequest).catch(failed)
+          : Promise.resolve({ ok: false as const, error: "notifications cannot be sent from here" }))
+        : onAgentTalk
+        ? onAgentTalk(msg as AgentTalkWireRequest).catch(failed)
         : Promise.resolve<AgentTalkWireReply>({ ok: false, error: "agents cannot be reached from here" });
       void reply.then((r) => { if (!conn.destroyed) conn.end(JSON.stringify(r) + "\n"); });
     });
@@ -150,17 +177,17 @@ export function notifySandboxEvent(socketPath: string, msg: Omit<SandboxEventMes
   } catch { /* ignore */ }
 }
 
-/** Client-side: a request (agent_talk) and its reply; an unreachable server or a timeout is an error reply. */
-export function requestOverSocket(socketPath: string, msg: AgentTalkWireRequest, timeoutMs: number): Promise<AgentTalkWireReply> {
+/** Client-side: a request (agent_talk, agent_notify) and its reply; an unreachable server or a timeout is an error reply. */
+export function requestOverSocket<R extends WireRequest>(socketPath: string, msg: R, timeoutMs: number): Promise<WireReply<R>> {
   return new Promise((resolvePromise) => {
     let buffer = "";
     let settled = false;
-    const done = (reply: AgentTalkWireReply) => {
+    const done = (reply: AgentTalkWireReply | AgentNotifyWireReply) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       conn.destroy();
-      resolvePromise(reply);
+      resolvePromise(reply as WireReply<R>);
     };
     const conn = createConnection(socketPath);
     const timer = setTimeout(() => done({ ok: false, error: "no reply from Polpo in time" }), timeoutMs);
@@ -170,7 +197,7 @@ export function requestOverSocket(socketPath: string, msg: AgentTalkWireRequest,
       buffer += chunk;
       const newline = buffer.indexOf("\n");
       if (newline < 0) return;
-      try { done(JSON.parse(buffer.slice(0, newline)) as AgentTalkWireReply); } catch { done({ ok: false, error: "malformed reply" }); }
+      try { done(JSON.parse(buffer.slice(0, newline)) as WireReply<R>); } catch { done({ ok: false, error: "malformed reply" }); }
     });
     conn.on("end", () => done({ ok: false, error: "Polpo closed the connection without a reply" }));
     conn.write(JSON.stringify(msg) + "\n");

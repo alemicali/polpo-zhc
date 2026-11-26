@@ -27,6 +27,7 @@ export class DrizzleNotificationStore implements NotificationStore {
       sourceEvent: row.sourceEvent,
       attachmentCount: row.attachmentCount,
       attachmentTypes: deserializeJson(row.attachmentTypes, undefined, this.dialect),
+      ...(row.origin ? { origin: deserializeJson(row.origin, undefined, this.dialect) } : {}),
     };
   }
 
@@ -46,6 +47,7 @@ export class DrizzleNotificationStore implements NotificationStore {
       sourceEvent: record.sourceEvent,
       attachmentCount: record.attachmentCount,
       attachmentTypes: serializeJson(record.attachmentTypes, this.dialect),
+      origin: record.origin ? serializeJson(record.origin, this.dialect) : null,
     });
   }
 

@@ -44,6 +44,7 @@ import {
   type LucideIcon,
   Shapes,
   Scale,
+  BellRing,
 } from "lucide-react";
 import type { TaskStatus } from "@polpo-ai/react";
 import { agentColorClasses } from "@/lib/agent-colors";
@@ -84,6 +85,7 @@ export function getToolMeta(name: string): ToolMeta {
   if (n.startsWith("data_")) return { icon: Database, ...kind(9) };
   if (n.startsWith("artifact_")) return { icon: Shapes, ...kind(4) };
   if (n === "decide") return { icon: Scale, ...kind(8) };
+  if (n === "send_notification") return { icon: BellRing, ...kind(1) };
   if (n.startsWith("dep_") || n === "bulk_rename") return { icon: Package, ...kind(5) };
   if (n === "register_outcome") return { icon: Target, ...kind(9) };
   return { icon: Wrench, color: "text-muted-foreground", bg: "bg-muted/30" };
@@ -125,6 +127,7 @@ export const toolCategories: { prefix: string; label: string; tools: string; ico
   { prefix: "data_", label: "Structured Data", tools: "source registry, scoped grants, typed queries and mutations", icon: Database, color: kind(9).color },
   { prefix: "artifact_", label: "Artifacts", tools: "artifact_create, artifact_update, artifact_from_file, artifact_get, artifact_list, artifact_delete (documents, html dashboards and designs on its data sources, diagrams; large files published from its workspace)", icon: Shapes, color: kind(4).color },
   { prefix: "storage_", label: "Storage", tools: "storage_list, storage_read, storage_write, storage_delete, storage_presign (S3/R2 buckets granted to the agent)", icon: HardDrive, color: kind(6).color },
+  { prefix: "send_notification", label: "Notifications", tools: "send_notification (post to the notification channels and targets set in the agent's Notifications section: Slack, Telegram, email, webhook, push…)", icon: BellRing, color: kind(1).color },
   { prefix: "decide", label: "Decisions", tools: "decide (typed judgments with probabilities from the decision model: yes/no, choice, score, rank)", icon: Scale, color: kind(8).color },
 ];
 

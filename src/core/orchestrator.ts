@@ -83,6 +83,7 @@ import { setProviderOverrides, validateProviderKeys, setModelAllowlist } from ".
 import { refreshCustomProviderSecretStatus, setProviderSecretsSource } from "../llm/custom-providers.js";
 import { readProviderSecrets } from "../llm/provider-secrets.js";
 import { startNotificationServer, getSocketPath } from "./notification.js";
+import { AgentNotifier, registerAgentNotifier } from "../notifications/agent-notify.js";
 import { createBrowserNetworkGuard, type BrowserNetworkGuard } from "../tools/browser-network-guard.js";
 import { NetworkDeniedLog, type NetworkDeniedReport } from "../sandbox/denied-log.js";
 import { HookRegistry } from "./hooks.js";
@@ -213,6 +214,9 @@ export class Orchestrator extends TypedEmitter {
   private sessionStore!: SessionStore;
   private codingSessionStore!: CodingSessionStore;
   private notificationServer?: Server;
+  /** Agents' send_notification (allowlist, rate limit, origin) over the notification router. */
+  private agentNotifier?: AgentNotifier;
+  private unregisterAgentNotifier?: () => void;
   private hookRegistry = new HookRegistry();
   private approvalMgr?: ApprovalManager;
   private notificationRouter?: NotificationRouter;
@@ -293,6 +297,22 @@ export class Orchestrator extends TypedEmitter {
   }
   getHooks(): HookRegistry { return this.hookRegistry; }
   getNotificationRouter(): NotificationRouter | undefined { return this.notificationRouter; }
+  /** Agents' send_notification sender (allowlist, rate limit, origin). */
+  getAgentNotifier(): AgentNotifier | undefined { return this.agentNotifier; }
+
+  /**
+   * The agent config a task run uses: the run's own (cloud runners keep it), else the version the
+   * task resolves to (production or its pinned version), else the stored agent; narrowed by the
+   * task's tool scope like the runner does.
+   */
+  private async runAgentConfig(run: { agentName: string; config?: { agent?: AgentConfig } }, task: Task | undefined): Promise<AgentConfig | undefined> {
+    let agent: AgentConfig | undefined = run.config?.agent;
+    if (!agent && task) agent = (await this.agentVersions?.resolve(run.agentName, task.agentVersion).catch(() => undefined))?.agent;
+    if (!agent) agent = await this.agentStore.getAgent(run.agentName);
+    if (!agent || !task?.toolScope || run.config?.agent) return agent;
+    const { scopedAgentForRun } = await import("./task-tool-scope.js");
+    return scopedAgentForRun({ agent, task, polpoDir: this.polpoDir });
+  }
   getPeerStore(): PeerStore | undefined { return this.peerStore; }
   /** Primary gateway, or the gateway of a specific channel by name. */
   getChannelGateway(channelName?: string): ChannelGateway | undefined {
@@ -1151,7 +1171,21 @@ export class Orchestrator extends TypedEmitter {
         const { handleAgentTalkWire } = await import("./agent-talk-bridge.js");
         return handleAgentTalkWire(msg, { talk: this.agentTalk, run: (runId) => this.runStore.getRun(runId) });
       },
+      // a task run's agent posting to a notification channel (send_notification), as the run's agent
+      async (msg) => {
+        const { handleAgentNotifyWire } = await import("./agent-notify-bridge.js");
+        return handleAgentNotifyWire(msg, {
+          notifier: this.agentNotifier,
+          run: (runId) => this.runStore.getRun(runId),
+          task: (taskId) => this.registry.getTask(taskId),
+          agentFor: (run, task) => this.runAgentConfig(run, task),
+        });
+      },
     );
+    // send_notification from agents (chats in this process, task runs over the socket above)
+    this.agentNotifier = new AgentNotifier({ router: () => this.notificationRouter });
+    this.unregisterAgentNotifier?.();
+    this.unregisterAgentNotifier = registerAgentNotifier(this.polpoDir, this.agentNotifier);
 
     // Initialize approval gates if configured
     if (this.config.settings.approvalGates && this.config.settings.approvalGates.length > 0) {
@@ -2468,6 +2502,8 @@ export class Orchestrator extends TypedEmitter {
     this.slack = undefined;
     this.slackGateways.clear();
     this.notificationServer?.close();
+    this.unregisterAgentNotifier?.();
+    this.unregisterAgentNotifier = undefined;
     this.approvalMgr?.dispose();
     this.notificationRouter?.dispose();
     this.escalationMgr?.dispose();

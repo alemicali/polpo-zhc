@@ -7,7 +7,7 @@ import { normalizeOrchestratorName, ORCHESTRATOR_NAME_MAX_LENGTH } from "./orche
 import { normalizeVaultRef } from "@polpo-ai/core/vault-ref";
 import { parseStoredProvider } from "@polpo-ai/core/provider-config";
 import { setArtifactLimits } from "@polpo-ai/core/artifacts";
-import { sanitizeAppearanceSettings, isEmptyAppearance, parseEgressProxies, parseComputers, parseTailscaleSettings, computerEgressProblem, isRemoteComputer, COMPUTER_ID_PATTERN, HOST_COMPUTER_ID, parseHarnessesSettings, parseAgentEngine, connectorToolsProblems, normalizeConnectorTools, normalizeDependencyResultsSettings, normalizeDecisionSettings, normalizeMediaSettings, talksToProblem, normalizeTalksTo } from "@polpo-ai/core";
+import { sanitizeAppearanceSettings, isEmptyAppearance, parseEgressProxies, parseComputers, parseTailscaleSettings, computerEgressProblem, isRemoteComputer, COMPUTER_ID_PATTERN, HOST_COMPUTER_ID, parseHarnessesSettings, parseAgentEngine, connectorToolsProblems, normalizeConnectorTools, agentNotifyChannelsProblems, normalizeAgentNotifyChannels, normalizeDependencyResultsSettings, normalizeDecisionSettings, normalizeMediaSettings, talksToProblem, normalizeTalksTo } from "@polpo-ai/core";
 
 const DEFAULT_SETTINGS: PolpoSettings = {
   maxRetries: 3,
@@ -169,6 +169,16 @@ export function validateAgents(agents: any[]): void {
       if (problems.length) throw new Error(`Agent "${agent.name}": ${problems[0]}`);
       const normalized = normalizeConnectorTools(agent.connectorTools);
       if (normalized) agent.connectorTools = normalized; else delete agent.connectorTools;
+    }
+    // notifyChannels: "*" | [{ channel, targets? }] (a channel not configured yet is kept: it may come later)
+    if (agent.notifyChannels !== undefined) {
+      const problems = agentNotifyChannelsProblems(agent.notifyChannels);
+      if (problems.length) throw new Error(`Agent "${agent.name}": ${problems[0]}`);
+      const normalized = normalizeAgentNotifyChannels(agent.notifyChannels);
+      if (normalized) agent.notifyChannels = normalized; else delete agent.notifyChannels;
+    }
+    if (agent.notifyRateLimit !== undefined && (typeof agent.notifyRateLimit !== "number" || !Number.isInteger(agent.notifyRateLimit) || agent.notifyRateLimit < 1 || agent.notifyRateLimit > 60)) {
+      throw new Error(`Agent "${agent.name}": notifyRateLimit must be a whole number of messages per minute (1–60)`);
     }
     // Vault credentials are now stored in .polpo/vault.enc (encrypted) — no longer inline.
     // Silently strip any leftover vault field from old configs.

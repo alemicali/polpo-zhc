@@ -54,6 +54,8 @@ export const AGENT_FIELD_CLASSIFICATION: Record<keyof Required<AgentConfig>, Age
   connectorTools: "versioned",
   progressiveTools: "versioned",
   emailAllowedDomains: "versioned",
+  notifyChannels: "versioned",
+  notifyRateLimit: "versioned",
   // limits and budgets
   maxTurns: "versioned",
   maxConcurrency: "versioned",

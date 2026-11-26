@@ -21,7 +21,7 @@ and the compiler rejects it too):
 | --- | --- |
 | Role, persona, prompt | `role`, `identity` (display name, title, avatar, colour, persona…), `systemPrompt`, `suggestions`, `reportsTo`, `talksTo` (communication lines) |
 | Model and engine | `model`, `engine` (Polpo, a harness or a CLI with its options and CLI account), `reasoning`, `runtime`, `loops`, `pipeline` |
-| Tools and access | `allowedTools`, `allowedPaths`, `skills`, `connectorTools` (per-connector tool selection), `progressiveTools`, `emailAllowedDomains` |
+| Tools and access | `allowedTools`, `allowedPaths`, `skills`, `connectorTools` (per-connector tool selection), `progressiveTools`, `emailAllowedDomains`, `notifyChannels` / `notifyRateLimit` (the notification channels it may post to, [agent-notifications.md](agent-notifications.md)) |
 | Limits | `maxTurns`, `maxConcurrency`, `compaction` |
 | Behaviour | `voiceReplies`, `learning`, `drive` |
 | Where it runs | `sandbox`, `computers`, `defaultComputer`, `browserProfile`, `browserEgress` |

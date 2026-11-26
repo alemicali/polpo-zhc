@@ -126,7 +126,7 @@ export function cliChatRunner(agent: AgentConfig, deps: CliChatRunnerDeps) {
         }
         const host = deps.hostTools
           ? await deps.hostTools(agent)
-          : await cliRunHostTools({ agent, cwd, ctx, workspace: opened?.workspace, interactive: true, log: () => {} });
+          : await cliRunHostTools({ agent, cwd, ctx, workspace: opened?.workspace, interactive: true, log: () => {}, ...(i.sessionId ? { notifyOrigin: { sessionId: i.sessionId } } : {}) });
         cleanup = host.cleanup;
         await status({ state: "starting", pid: process.pid, ...(opened?.remoteId?.() ? { remoteId: opened.remoteId!() } : {}), lastError: undefined });
         conv = await openCliConversation({

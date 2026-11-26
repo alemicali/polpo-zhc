@@ -70,7 +70,7 @@ import { bridgedReadOnly, bridgedTools, BRIDGED_TOOLS, executeBridgedTool, isBri
 import { connectorManagerFor, connectorRedirectUri } from "../mcp/runtime.js";
 import { isMcpToolName, toolResultText } from "../mcp/tools.js";
 import { computerContext, normalizeSandboxSettings, unknownComputersProblem, type EffectiveSandbox } from "@polpo-ai/core/sandbox";
-import { normalizeConnectorTools, describeTaskToolScope, normalizeTalksTo, talksToProblem, type AgentTalksTo } from "@polpo-ai/core";
+import { normalizeConnectorTools, describeTaskToolScope, normalizeTalksTo, talksToProblem, type AgentTalksTo, AGENT_NOTIFY_TOOL, agentNotifyChannelWarnings, agentNotifyChannelsProblems, allowedToolsInclude, describeAgentNotifyAllowlist, normalizeAgentNotifyChannels } from "@polpo-ai/core";
 import { TaskToolScopeError } from "../core/task-tool-scope.js";
 import { loadPolpoConfig, savePolpoConfig } from "../core/config.js";
 import { inkApiUrl, inkRegistry } from "../core/ink-config.js";
@@ -970,6 +970,19 @@ const agentEngineParam = Type.Optional(Type.Union([
 }));
 const agentComputersParam = Type.Optional(Type.Array(Type.String(), { description: "Computers it may use (ids from computers_list; \"host\", this server, always). Replaces the list; [] clears it." }));
 const agentDefaultComputerParam = Type.Optional(Type.String({ description: "The computer its chats and tasks run on (computers_list); \"host\" or \"\" for this server" }));
+/** Notification channels an agent may post to with its send_notification tool. */
+const agentNotifyChannelsSchema = Type.Union([
+  Type.Literal("*"),
+  Type.Array(Type.Object({
+    channel: Type.String({ description: "A configured channel's name (settings.notifications.channels), e.g. slack" }),
+    targets: Type.Optional(Type.Array(Type.String(), { description: "Targets it may pick with `to`: Slack channel ids (C0…), Telegram chat ids, email addresses, or \"*\" for any. Omit: the channel's default target only" })),
+  })),
+], {
+  description: "Notification channels the agent may post to with its send_notification tool (Slack as the Polpo bot, Telegram, email, webhook, push…): "
+    + "\"*\" = every configured channel's default target, or a list of { channel, targets? }. It also needs send_notification in allowedTools. A channel not configured yet is kept, with a warning.",
+});
+const agentNotifyRateLimitParam = Type.Optional(Type.Number({ minimum: 1, maximum: 60, description: "send_notification messages per minute (default 5)" }));
+
 const agentConnectorToolsParam = Type.Optional(Type.Record(Type.String(), Type.Union([Type.Literal("*"), Type.Array(Type.String())]), {
   description: "Which tools of each connector granted to it the agent gets, keyed by connector id: \"*\" = all its tools (current and future); a list = only those "
     + "(the server's tool names, as connectors_list with tools: <id> shows them, without the mcp__<id>__ prefix). Replaces the whole selection. It never grants a "
@@ -981,7 +994,7 @@ const agentProgressiveToolsParam = Type.Optional(Type.Union([Type.Literal("auto"
 
 const addAgentTool: Tool = {
   name: "add_agent",
-  description: "Add a new agent to a team. If no team is specified, adds to the default (first) team. It can get its engine (a Claude Code / Codex / OpenCode harness: engine + a remote computer as defaultComputer), computers, per-connector tools (connectorTools) and browser egress right here. Use allowedTools to grant extended tool access (e.g. ['browser_*', 'email_*', 'artifact_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*', 'whatsapp_*', 'phone_*']); artifact_* lets it make artifacts (docs, html dashboards, diagrams) people open in Polpo, also on a Claude Code / Codex / OpenCode harness (Polpo tools run on the Polpo server). phone_* grants the agent the VAPI phone tools and requires VAPI credentials in that agent's vault or environment. Core tools (including vault_get/vault_list) are always available. Use allowedTools to restrict to specific tool names.",
+  description: "Add a new agent to a team. If no team is specified, adds to the default (first) team. It can get its engine (a Claude Code / Codex / OpenCode harness: engine + a remote computer as defaultComputer), computers, per-connector tools (connectorTools) and browser egress right here. Use allowedTools to grant extended tool access (e.g. ['browser_*', 'email_*', 'artifact_*', 'image_*', 'video_*', 'audio_*', 'excel_*', 'pdf_*', 'docx_*', 'whatsapp_*', 'phone_*']); artifact_* lets it make artifacts (docs, html dashboards, diagrams) people open in Polpo, also on a Claude Code / Codex / OpenCode harness (Polpo tools run on the Polpo server). phone_* grants the agent the VAPI phone tools and requires VAPI credentials in that agent's vault or environment. To let it post to notification channels (Slack as the Polpo bot, Telegram, email…), give it notifyChannels and send_notification in allowedTools. Core tools (including vault_get/vault_list) are always available. Use allowedTools to restrict to specific tool names.",
   parameters: Type.Object({
     name: Type.String({ description: "Agent name (unique identifier, must be globally unique across all teams)" }),
     role: Type.Optional(Type.String({ description: "Agent role description (e.g. 'Frontend developer')" })),
@@ -1008,6 +1021,8 @@ const addAgentTool: Tool = {
     computers: agentComputersParam,
     defaultComputer: agentDefaultComputerParam,
     connectorTools: agentConnectorToolsParam,
+    notifyChannels: Type.Optional(agentNotifyChannelsSchema),
+    notifyRateLimit: agentNotifyRateLimitParam,
     progressiveTools: agentProgressiveToolsParam,
     learning: agentLearningParam,
     voiceReplies: agentVoiceRepliesParam,
@@ -1063,7 +1078,7 @@ function talksToParam(description: string) {
 const updateAgentTool: Tool = {
   name: "update_agent",
   description: "Update an existing agent's configuration or move it to another team: role, model, prompt, tools, skills, engine (polpo or a Claude Code / Codex / OpenCode harness), "
-    + "computers and defaultComputer, per-connector tool selection (connectorTools), browser egress proxy, progressive tools, sandbox, learning, drive. "
+    + "computers and defaultComputer, per-connector tool selection (connectorTools), the notification channels it may post to (notifyChannels + send_notification in allowedTools), browser egress proxy, progressive tools, sandbox, learning, drive. "
     + "By default (instance setting) the change is published as a new version and deployed to production right away; publish: false keeps it in the draft. Do not reload config. Only provided fields are changed; omitted fields keep their current value. Use empty string for reportsTo to remove hierarchy.",
   parameters: Type.Object({
     name: Type.String({ description: "Agent name to update" }),
@@ -1091,6 +1106,8 @@ const updateAgentTool: Tool = {
     computers: agentComputersParam,
     defaultComputer: agentDefaultComputerParam,
     connectorTools: Type.Optional(Type.Union([agentConnectorToolsParam, Type.Null()], { description: "Per-connector tool selection (see add_agent), replacing the whole selection; null clears it (every tool of every granted connector)" })),
+    notifyChannels: Type.Optional(Type.Union([agentNotifyChannelsSchema, Type.Null()], { description: "Notification channels it may post to (see add_agent), replacing the list; null or [] removes them (no send_notification)" })),
+    notifyRateLimit: Type.Optional(Type.Union([Type.Number({ minimum: 1, maximum: 60 }), Type.Null()], { description: "send_notification messages per minute (default 5); null resets it" })),
     progressiveTools: agentProgressiveToolsParam,
     sandbox: agentSandboxParam,
     learning: agentLearningParam,
@@ -4405,7 +4422,7 @@ function resolveAgentModelForConnectedProvider(polpo: Orchestrator, requested: s
  * checked as the agents API checks them (unknown computers; the engine against the harness settings
  * happens in polpo.addAgent / updateAgent). `clearing` (update): null / [] / "" clear a field.
  */
-function agentPlatformFields(polpo: Orchestrator, args: Record<string, unknown>, clearing: boolean): { fields: Record<string, unknown> } | { error: string } {
+function agentPlatformFields(polpo: Orchestrator, args: Record<string, unknown>, clearing: boolean): { fields: Record<string, unknown>; warnings: string[] } | { error: string } {
   const computers = Array.isArray(args.computers) ? (args.computers as string[]) : args.computers === null ? null : undefined;
   const defaultComputer = typeof args.defaultComputer === "string" ? args.defaultComputer.trim() : undefined;
   const known = computers?.length || defaultComputer ? (polpo.getConfig?.()?.settings?.computers ?? []).map((c) => c.id) : [];
@@ -4417,8 +4434,22 @@ function agentPlatformFields(polpo: Orchestrator, args: Record<string, unknown>,
   if (defaultComputer !== undefined) fields.defaultComputer = defaultComputer && defaultComputer !== "host" ? defaultComputer : undefined;
   if (args.connectorTools !== undefined) fields.connectorTools = normalizeConnectorTools(args.connectorTools as AgentConfig["connectorTools"]);
   if (args.progressiveTools !== undefined) fields.progressiveTools = args.progressiveTools ?? undefined;
+  // notifyChannels: shape errors refuse; a channel not configured yet is a warning
+  const warnings: string[] = [];
+  if (args.notifyChannels !== undefined) {
+    const problems = agentNotifyChannelsProblems(args.notifyChannels);
+    if (problems.length) return { error: `Error: ${problems.join("; ")}` };
+    const normalized = normalizeAgentNotifyChannels(args.notifyChannels);
+    fields.notifyChannels = normalized;
+    warnings.push(...agentNotifyChannelWarnings(normalized, Object.keys(polpo.getConfig?.()?.settings?.notifications?.channels ?? {})));
+  }
+  if (args.notifyRateLimit !== undefined) {
+    const n = args.notifyRateLimit;
+    if (n !== null && (typeof n !== "number" || !Number.isInteger(n) || n < 1 || n > 60)) return { error: "Error: notifyRateLimit must be a whole number of messages per minute (1–60)" };
+    fields.notifyRateLimit = n ?? undefined;
+  }
   if (!clearing) for (const k of Object.keys(fields)) if (fields[k] === undefined) delete fields[k];
-  return { fields };
+  return { fields, warnings };
 }
 
 /** An engine the settings refuse (harness not enabled, no computer that can run it) as an answer the model can act on. */
@@ -4471,7 +4502,8 @@ async function execAddAgent(polpo: Orchestrator, args: Record<string, unknown>):
   }
   const engine = (cleaned.engine as { harness?: string } | undefined)?.harness;
   return `Agent "${args.name}" added to ${teamName ? `team "${teamName}"` : "the first team"}`
-    + `${engine ? `, engine ${engine}` : ""}${cleaned.defaultComputer ? `, on computer "${cleaned.defaultComputer}"` : ""}.`;
+    + `${engine ? `, engine ${engine}` : ""}${cleaned.defaultComputer ? `, on computer "${cleaned.defaultComputer}"` : ""}.`
+    + notifyNotes(cleaned as Partial<AgentConfig>, platform.warnings);
 }
 
 async function execRemoveAgent(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
@@ -4569,7 +4601,18 @@ async function execUpdateAgent(polpo: Orchestrator, args: Record<string, unknown
     : result.published && result.deploy?.status === "blocked" ? ` (published as ${result.published.version} but NOT deployed: ${result.deploy.message})`
     : result.published ? ` (published as ${result.published.version}, not deployed: agent_deploy)`
     : result.draftChanged ? " (saved in the draft, production unchanged: agent_publish)" : "";
-  return `Agent "${name}" updated: ${changes}${where}${sandboxNote}`;
+  return `Agent "${name}" updated: ${changes}${where}${sandboxNote}`
+    + (args.notifyChannels !== undefined || args.allowedTools !== undefined ? notifyNotes({ ...existing, ...updates } as Partial<AgentConfig>, platform.warnings) : "");
+}
+
+/** Warnings about notifyChannels (channels not configured) and a reminder when the tool is not in allowedTools. */
+function notifyNotes(agent: Partial<AgentConfig>, warnings: string[]): string {
+  const notes = [...warnings];
+  const hasChannels = agent.notifyChannels === "*" || (Array.isArray(agent.notifyChannels) && agent.notifyChannels.length > 0);
+  if (hasChannels && !allowedToolsInclude(agent.allowedTools, AGENT_NOTIFY_TOOL)) {
+    notes.push(`send_notification is not in its allowedTools: add it so the agent can post to ${describeAgentNotifyAllowlist(agent.notifyChannels)}`);
+  }
+  return notes.length ? `\nWarning: ${notes.join("\nWarning: ")}` : "";
 }
 
 async function execSandboxStatus(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
