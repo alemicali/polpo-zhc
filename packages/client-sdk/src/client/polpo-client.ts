@@ -168,6 +168,16 @@ import type {
   WaBusinessConversation,
   WaBusinessTemplate,
   WaBusinessSendResult,
+  WaBizOutbound,
+  WaBizFileInput,
+  WaBizTemplateInput,
+  WaBusinessTemplateDefinition,
+  WaBusinessProfile,
+  WaBusinessBlockResult,
+  WaBusinessAnalyticsQuery,
+  WaBusinessPhoneAction,
+  WaBusinessWebhookOverride,
+  WaBusinessAccountEvent,
 } from "./types.js";
 
 export interface PolpoClientConfig {
@@ -1153,14 +1163,118 @@ export class PolpoClient {
     return this.del(`/whatsapp-business/${encodeURIComponent(channel)}/contacts/${encodeURIComponent(waId)}`);
   }
 
-  /** Free-form text, inside the 24-hour window only. */
-  sendWaBusinessText(channel: string, to: string, text: string): Promise<WaBusinessSendResult> {
-    return this.post(`/whatsapp-business/${encodeURIComponent(channel)}/send`, { to, text });
+  /** Free-form text, inside the 24-hour window only. replyTo quotes a message (its wamid). */
+  sendWaBusinessText(channel: string, to: string, text: string, o: { replyTo?: string; by?: string } = {}): Promise<WaBusinessSendResult> {
+    return this.post(`/whatsapp-business/${encodeURIComponent(channel)}/send`, { to, text, ...(o.replyTo ? { replyTo: o.replyTo } : {}), ...(o.by ? { by: o.by } : {}) });
   }
 
-  /** An approved template (business-initiated); queue: wait for an operator's approval. */
-  sendWaBusinessTemplate(channel: string, input: { to: string; template: string; language?: string; params?: string[]; queue?: boolean; reason?: string }): Promise<WaBusinessSendResult> {
+  /**
+   * Any message type inside the 24-hour window: text, media (by Meta media id, public link, or a
+   * base64 file uploaded first), location, contacts, reaction, buttons, list, CTA URL, location
+   * request, flow, product / product list / catalog, call button, call permission request,
+   * address (India), order details (India, Brazil) and order status. Checked against Meta's limits.
+   */
+  sendWaBusinessMessage(channel: string, input: { to: string; message: WaBizOutbound; file?: WaBizFileInput; by?: string }): Promise<{ status: "sent"; ids: string[] }> {
+    return this.post(`/whatsapp-business/${encodeURIComponent(channel)}/messages`, input);
+  }
+
+  /** React to a message (an empty emoji removes the reaction). */
+  reactWaBusiness(channel: string, input: { to: string; messageId: string; emoji: string; by?: string }): Promise<{ status: "sent"; ids: string[] }> {
+    return this.post(`/whatsapp-business/${encodeURIComponent(channel)}/react`, input);
+  }
+
+  /** Mark a contact's message read (blue ticks), optionally showing the typing indicator. */
+  markWaBusinessRead(channel: string, messageId: string, o: { typing?: boolean } = {}): Promise<{ read: string }> {
+    return this.post(`/whatsapp-business/${encodeURIComponent(channel)}/read`, { messageId, ...(o.typing ? { typing: true } : {}) });
+  }
+
+  /** The URL of a message's file (inbound downloads, outbound sends): needs the dashboard's session or the API key in a header. */
+  waBusinessMediaUrl(channel: string, messageId: string): string {
+    return this.apiUrl(`/whatsapp-business/${encodeURIComponent(channel)}/media/${encodeURIComponent(messageId)}`);
+  }
+
+  /** A message's file: its bytes, content type and file name (image, audio, voice note, video, document, sticker). */
+  async getWaBusinessMedia(channel: string, messageId: string): Promise<{ contentType: string; bytes: ArrayBuffer; filename?: string }> {
+    const res = await this.fetchFn(this.waBusinessMediaUrl(channel, messageId), { headers: { ...this.headers }, credentials: "include" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null) as { error?: string; code?: string } | null;
+      throw new PolpoApiError(body?.error ?? "Could not read the media", (body?.code ?? "NOT_FOUND") as never, res.status);
+    }
+    const disposition = res.headers.get("content-disposition") ?? "";
+    const filename = /filename="([^"]+)"/.exec(disposition)?.[1];
+    return { contentType: res.headers.get("content-type") ?? "application/octet-stream", bytes: await res.arrayBuffer(), ...(filename ? { filename } : {}) };
+  }
+
+  /**
+   * An approved template (business-initiated); queue: wait for an operator's approval. params are
+   * the positional body variables; components fills every component (header, named body variables,
+   * buttons, carousel cards, OTP).
+   */
+  sendWaBusinessTemplate(channel: string, input: { to: string; template: string; language?: string; params?: string[]; components?: WaBizTemplateInput; queue?: boolean; reason?: string; by?: string }): Promise<WaBusinessSendResult> {
     return this.post(`/whatsapp-business/${encodeURIComponent(channel)}/send-template`, input);
+  }
+
+  /** Create a template (it goes to Meta's review; its status comes back by webhook and sync). */
+  createWaBusinessTemplate(channel: string, definition: WaBusinessTemplateDefinition): Promise<{ id: string; status: string; category: string }> {
+    return this.post(`/whatsapp-business/${encodeURIComponent(channel)}/templates`, definition);
+  }
+
+  /** Edit a template by its id (it goes back to review). */
+  editWaBusinessTemplate(channel: string, id: string, patch: { components?: Array<Record<string, unknown>>; category?: WaBusinessTemplateDefinition["category"] }): Promise<{ id: string; edited: true }> {
+    return this.patch(`/whatsapp-business/${encodeURIComponent(channel)}/templates/${encodeURIComponent(id)}`, patch);
+  }
+
+  /** Delete a template: every language, or only the one with this id. */
+  deleteWaBusinessTemplate(channel: string, template: string, id?: string): Promise<{ template: string; deleted: true }> {
+    return this.del(`/whatsapp-business/${encodeURIComponent(channel)}/templates/${encodeURIComponent(template)}${id ? `?id=${encodeURIComponent(id)}` : ""}`);
+  }
+
+  getWaBusinessProfile(channel: string): Promise<WaBusinessProfile> {
+    return this.get(`/whatsapp-business/${encodeURIComponent(channel)}/profile`);
+  }
+
+  /** Update the business profile; the photo (JPEG or PNG ≤ 5 MB, base64) needs business.appId. */
+  updateWaBusinessProfile(channel: string, profile: Omit<WaBusinessProfile, "profilePictureUrl"> & { photo?: WaBizFileInput }): Promise<WaBusinessProfile> {
+    return this.put(`/whatsapp-business/${encodeURIComponent(channel)}/profile`, profile);
+  }
+
+  /** Block (or unblock) contacts at Meta: only people who wrote in the last 24 hours can be blocked. */
+  blockWaBusinessUsers(channel: string, users: string[], block: boolean, by?: string): Promise<WaBusinessBlockResult> {
+    return this.post(`/whatsapp-business/${encodeURIComponent(channel)}/block`, { users, block, ...(by ? { by } : {}) });
+  }
+
+  /** The contacts blocked at Meta. */
+  getWaBusinessBlocked(channel: string): Promise<string[]> {
+    return this.get<{ blocked: string[] }>(`/whatsapp-business/${encodeURIComponent(channel)}/blocked`).then((d) => d.blocked);
+  }
+
+  /** Meta's analytics: messages sent / delivered, pricing (cost and volume), templates (sent, delivered, read, clicked). */
+  getWaBusinessAnalytics(channel: string, q: WaBusinessAnalyticsQuery): Promise<unknown> {
+    const p = new URLSearchParams({ kind: q.kind, start: String(q.start), end: String(q.end) });
+    if (q.granularity) p.set("granularity", q.granularity);
+    if (q.templateIds?.length) p.set("templateIds", q.templateIds.join(","));
+    if (q.dimensions?.length) p.set("dimensions", q.dimensions.join(","));
+    return this.get(`/whatsapp-business/${encodeURIComponent(channel)}/analytics?${p.toString()}`);
+  }
+
+  /** The phone number at Meta: register (PIN), deregister, set the two-step PIN, request / verify the code, subscribe the app. */
+  waBusinessPhoneAction(channel: string, action: WaBusinessPhoneAction): Promise<{ action: WaBusinessPhoneAction["action"]; done: true }> {
+    return this.post(`/whatsapp-business/${encodeURIComponent(channel)}/phone`, action);
+  }
+
+  /** This number's callback at Meta (one app shared by several instances). */
+  getWaBusinessWebhookOverride(channel: string): Promise<WaBusinessWebhookOverride> {
+    return this.get(`/whatsapp-business/${encodeURIComponent(channel)}/webhook-override`);
+  }
+
+  /** set: true points this number's deliveries at this instance; false goes back to the app's callback. */
+  setWaBusinessWebhookOverride(channel: string, set: boolean): Promise<WaBusinessWebhookOverride> {
+    return this.put(`/whatsapp-business/${encodeURIComponent(channel)}/webhook-override`, { set });
+  }
+
+  /** Account updates from Meta (quality, tier, name review, templates, capabilities, alerts), newest first. */
+  getWaBusinessAccountEvents(channel: string, limit?: number): Promise<WaBusinessAccountEvent[]> {
+    return this.get<{ events: WaBusinessAccountEvent[] }>(`/whatsapp-business/${encodeURIComponent(channel)}/account-events${limit ? `?limit=${limit}` : ""}`).then((d) => d.events);
   }
 
   getWaBusinessTemplates(channel: string, refresh = false): Promise<{ templates: WaBusinessTemplate[]; syncedAt?: string }> {

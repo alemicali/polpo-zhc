@@ -147,6 +147,18 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_wabiz_approval", name: "wabiz_approval", group: "whatsapp-business" },
   { mcp: "polpo_wabiz_contact", name: "wabiz_contact", group: "whatsapp-business" },
   { mcp: "polpo_wabiz_contact_erase", name: "wabiz_contact_erase", group: "whatsapp-business" },
+  // media, interactive messages, flows, catalog, orders and payments, reactions, templates, profile, blocks, analytics, the number
+  { mcp: "polpo_wabiz_send_media", name: "wabiz_send_media", group: "whatsapp-business" },
+  { mcp: "polpo_wabiz_send_interactive", name: "wabiz_send_interactive", group: "whatsapp-business" },
+  { mcp: "polpo_wabiz_send_flow", name: "wabiz_send_flow", group: "whatsapp-business" },
+  { mcp: "polpo_wabiz_send_products", name: "wabiz_send_products", group: "whatsapp-business" },
+  { mcp: "polpo_wabiz_send_order", name: "wabiz_send_order", group: "whatsapp-business" },
+  { mcp: "polpo_wabiz_react", name: "wabiz_react", group: "whatsapp-business" },
+  { mcp: "polpo_wabiz_template_manage", name: "wabiz_template_manage", group: "whatsapp-business" },
+  { mcp: "polpo_wabiz_profile", name: "wabiz_profile", group: "whatsapp-business" },
+  { mcp: "polpo_wabiz_block", name: "wabiz_block", group: "whatsapp-business" },
+  { mcp: "polpo_wabiz_analytics", name: "wabiz_analytics", group: "whatsapp-business" },
+  { mcp: "polpo_wabiz_phone", name: "wabiz_phone", group: "whatsapp-business" },
   // Rooms (group chats of people and agents)
   { mcp: "polpo_rooms_list", name: "rooms_list", group: "rooms" },
   { mcp: "polpo_room_create", name: "room_create", group: "rooms" },
@@ -289,6 +301,8 @@ export const MCP_EQUIVALENTS: Record<string, string> = {
   polpo_image_show: "media_log",
   // the coding chat card (an MCP App): coding_chat_get has the same transcript as text
   polpo_coding_chat_show: "coding_chat_get",
+  // the WhatsApp Business card (an MCP App): wabiz_status, wabiz_conversation and wabiz_approval have the same
+  polpo_wabiz_show: "wabiz_conversation",
   polpo_mission_create: "create_mission",
   polpo_mission_update: "update_mission",
   polpo_mission_run: "execute_mission",

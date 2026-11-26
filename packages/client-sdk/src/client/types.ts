@@ -850,6 +850,18 @@ export interface WaBusinessSettings {
   limits?: { businessInitiatedPerDay?: number; perAgentPerDay?: Record<string, number> };
   /** [90] */
   retentionDays?: number;
+  /** Inbound media (images, documents, audio, voice notes, video, stickers): downloaded [true] and kept up to maxBytes [16 MB]. */
+  media?: { download?: boolean; maxBytes?: number };
+  /** The Commerce catalog connected to the account (product and multi-product messages). */
+  catalogId?: string;
+  /** Payments inside WhatsApp (order_details): India (a payment configuration) or Brazil (Pix, boleto, payment links). */
+  payments?: { market: "IN" | "BR"; configurationName?: string };
+  /** Marketing templates go out through the Marketing Messages API [false]. */
+  marketingMessagesApi?: boolean;
+  /** The Meta app's id: needed to upload the business profile photo. */
+  appId?: string;
+  /** One Meta app shared by several instances: phone_number_id → the owning instance's webhook URL (https). */
+  sharedApp?: { routes?: Record<string, string> };
 }
 
 export interface NotificationChannelConfig {
@@ -3176,8 +3188,35 @@ export interface WaBusinessStatus {
   pendingApprovals: number;
   sentToday: number;
   limits: { businessInitiatedPerDay: number; perAgentPerDay: Record<string, number> };
-  phone?: { displayPhoneNumber?: string; verifiedName?: string; qualityRating?: string; messagingLimitTier?: string; checkedAt: string };
+  phone?: WaBusinessPhoneInfo;
   templates?: { count: number; approved: number; syncedAt: string };
+  /** What this channel can do beyond text: media, catalog, payments, marketing messages, profile photo, shared app routes. */
+  capabilities?: {
+    media: { download: boolean; maxBytes: number };
+    catalogId?: string;
+    payments?: { market: "IN" | "BR" };
+    marketingMessagesApi: boolean;
+    profilePhoto: boolean;
+    sharedRoutes: string[];
+  };
+  lastAccountEvent?: { field: string; summary: string; at: string };
+}
+
+/** The phone number at Meta (after a test): quality rating, messaging tier, display name review. */
+export interface WaBusinessPhoneInfo {
+  id?: string;
+  displayPhoneNumber?: string;
+  verifiedName?: string;
+  qualityRating?: string;
+  messagingLimitTier?: string;
+  nameStatus?: string;
+  newNameStatus?: string;
+  codeVerificationStatus?: string;
+  throughput?: string;
+  platformType?: string;
+  accountMode?: string;
+  officialBusinessAccount?: string;
+  checkedAt: string;
 }
 
 export interface WaBusinessEventSummary {
@@ -3218,9 +3257,136 @@ export interface WaBusinessContact {
   lastInboundAt?: string;
   optIn: { at: string; source: string } | null;
   optOut: { at: string; keyword: string } | null;
+  lastInboundWamid?: string;
+  /** The contact stopped (or resumed) marketing messages from WhatsApp itself. */
+  marketing?: { value: "stop" | "resume"; at: string };
+  /** Blocked by the business: it can no longer write to the number. */
+  blocked?: { at: string; by: string } | null;
+  /** The answer to a call permission request. */
+  callPermission?: { response: "accept" | "reject"; permanent?: boolean; expiresAt?: string; at: string };
   window?: { open: boolean; closesAt?: string };
   createdAt: string;
   updatedAt: string;
+}
+
+export type WaBizMediaKind = "image" | "audio" | "video" | "document" | "sticker";
+
+/** A message's media: what Meta described, and the file kept with the message (download it with getWaBusinessMedia). */
+export interface WaBizMedia {
+  kind: WaBizMediaKind;
+  mediaId?: string;
+  link?: string;
+  mimeType?: string;
+  sha256?: string;
+  size?: number;
+  filename?: string;
+  caption?: string;
+  /** A voice note. */
+  voice?: boolean;
+  /** An animated sticker. */
+  animated?: boolean;
+  /** Kept locally (the media endpoint serves it). */
+  stored?: string;
+  /** Why it was not downloaded. */
+  skipped?: string;
+}
+
+/** What a message quoted, and how it was forwarded. */
+export interface WaBizContext {
+  id?: string;
+  forwarded?: boolean;
+  frequentlyForwarded?: boolean;
+  referredProduct?: { catalogId?: string; productRetailerId?: string };
+}
+
+/** A header of an interactive message (buttons, CTA URL, flow, order details). */
+export type WaBizInteractiveHeader =
+  | { type: "text"; text: string }
+  | { type: "image" | "video" | "document"; link?: string; mediaId?: string; filename?: string };
+
+/** A contact card shared in a message. */
+export interface WaBizSharedContact {
+  name: string;
+  firstName?: string;
+  lastName?: string;
+  phones?: Array<{ phone: string; type?: string; waId?: string }>;
+  emails?: Array<{ email: string; type?: string }>;
+  company?: string;
+  title?: string;
+  urls?: Array<{ url: string; type?: string }>;
+}
+
+/** A line of an order (amounts in the currency's units). */
+export interface WaBizOrderItem {
+  retailerId?: string;
+  name: string;
+  amount: number;
+  quantity: number;
+  saleAmount?: number;
+}
+
+/**
+ * Any free-form message (inside the 24-hour window). replyTo quotes a message (its wamid). Media go
+ * by Meta media id, a public https link, or a file given next to the message (sendWaBusinessMessage).
+ */
+export type WaBizOutbound = { replyTo?: string } & (
+  | { type: "text"; text: string; previewUrl?: boolean }
+  | { type: "media"; kind: WaBizMediaKind; link?: string; mediaId?: string; caption?: string; filename?: string }
+  | { type: "location"; latitude: number; longitude: number; name?: string; address?: string }
+  | { type: "contacts"; contacts: WaBizSharedContact[] }
+  | { type: "reaction"; messageId: string; emoji: string }
+  | { type: "buttons"; body: string; header?: WaBizInteractiveHeader; footer?: string; buttons: Array<{ id: string; title: string }> }
+  | { type: "list"; body: string; header?: string; footer?: string; button: string; sections: Array<{ title?: string; rows: Array<{ id: string; title: string; description?: string }> }> }
+  | { type: "cta_url"; body: string; header?: WaBizInteractiveHeader; footer?: string; displayText: string; url: string }
+  | { type: "location_request"; body: string }
+  | {
+    type: "flow"; body: string; header?: WaBizInteractiveHeader; footer?: string; flowId?: string; flowName?: string; cta: string;
+    flowToken?: string; mode?: "published" | "draft"; action?: "navigate" | "data_exchange"; screen?: string; data?: Record<string, unknown>;
+  }
+  | { type: "product"; catalogId?: string; productRetailerId: string; body?: string; footer?: string }
+  | { type: "product_list"; catalogId?: string; header: string; body: string; footer?: string; sections: Array<{ title: string; productRetailerIds: string[] }> }
+  | { type: "catalog"; body: string; footer?: string; thumbnailProductRetailerId?: string }
+  | { type: "voice_call"; body: string; displayText?: string; ttlMinutes?: number; payload?: string }
+  | { type: "call_permission_request"; body?: string }
+  | { type: "address"; body: string; country: "IN"; values?: Record<string, string>; savedAddresses?: Array<Record<string, unknown>>; validationErrors?: Record<string, string> }
+  | {
+    type: "order_details"; body: string; header?: WaBizInteractiveHeader; footer?: string; referenceId: string;
+    goods?: "digital-goods" | "physical-goods"; items: WaBizOrderItem[]; tax?: number; shipping?: number; discount?: number;
+    catalogId?: string; expiresAt?: string; expirationText?: string; paymentSettings?: Array<Record<string, unknown>>;
+  }
+  | { type: "order_status"; body: string; referenceId: string; status: "pending" | "processing" | "partially-shipped" | "shipped" | "completed" | "canceled"; description?: string; payment?: { status: string; timestamp?: number } }
+);
+
+export type WaBizOutboundType = WaBizOutbound["type"];
+
+/**
+ * A template's parameters for every component: header (text, media, location), body (positional
+ * in order, or named), buttons by index (quick reply payload, URL suffix, coupon code, flow token,
+ * catalog action), carousel cards, the one-time code of an authentication template.
+ */
+export interface WaBizTemplateInput {
+  header?:
+    | { type: "text"; text: string }
+    | { type: "image" | "video" | "document"; link?: string; mediaId?: string; filename?: string }
+    | { type: "location"; latitude: number; longitude: number; name?: string; address?: string };
+  body?: string[] | Record<string, string>;
+  buttons?: Array<{ index: number; payload?: string; text?: string; couponCode?: string; flowToken?: string; flowActionData?: Record<string, unknown>; action?: Record<string, unknown> }>;
+  /** Limited-time offer templates: when the offer ends (ISO time). */
+  offerExpiresAt?: string;
+  carousel?: Array<{
+    header?: { type: "image" | "video"; link?: string; mediaId?: string };
+    body?: string[] | Record<string, string>;
+    buttons?: Array<{ index: number; payload?: string; text?: string }>;
+  }>;
+  /** Authentication templates: the one-time code. */
+  otp?: string;
+}
+
+/** A file sent with a message or as the profile photo: base64 bytes (at most 20 MB). */
+export interface WaBizFileInput {
+  data: string;
+  mimeType: string;
+  filename: string;
 }
 
 export interface WaBusinessMessage {
@@ -3237,7 +3403,23 @@ export interface WaBusinessMessage {
   statuses: Array<{ status: string; at: string; error?: string }>;
   pricing?: { category?: string; type?: string; billable?: boolean; model?: string };
   error?: { code?: number; title?: string; detail?: string };
-  pending?: { template: string; language: string; params: string[]; requestedBy: string; requestedAt: string; reason?: string };
+  pending?: { template: string; language: string; params: string[]; requestedBy: string; requestedAt: string; reason?: string; components?: WaBizTemplateInput };
+  bodyLength?: number;
+  /** Image, audio, voice note, video, document or sticker. */
+  media?: WaBizMedia;
+  /**
+   * The structured content of the other types: a location, shared contacts, an interactive message
+   * sent (the WaBizOutbound without replyTo) or a reply to one ({ reply: "button" | "list" | "flow" |
+   * "address" | "call_permission" | "template_button", … }), an order, a payment, a template's
+   * components ({ components: WaBizTemplateInput }).
+   */
+  content?: Record<string, unknown>;
+  context?: WaBizContext;
+  reactions?: Array<{ emoji: string; by: "contact" | "business"; at: string }>;
+  edited?: { at: string };
+  revoked?: { at: string };
+  /** Ads that click to WhatsApp: where the conversation came from. */
+  referral?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }
@@ -3256,12 +3438,112 @@ export interface WaBusinessTemplate {
   status: string;
   category: string;
   parameterFormat?: "POSITIONAL" | "NAMED";
-  components: Array<{ type: string; format?: string; text?: string }>;
+  components: WaBusinessTemplateComponent[];
+  /** Meta's quality score (GREEN, YELLOW, RED, UNKNOWN). */
+  quality?: string;
+  rejectedReason?: string;
+}
+
+export interface WaBusinessTemplateButton {
+  type?: string;
+  text?: string;
+  url?: string;
+  phone_number?: string;
+  otp_type?: string;
+  flow_id?: string;
+  example?: unknown;
+}
+
+export interface WaBusinessTemplateComponent {
+  type: string;
+  format?: string;
+  text?: string;
+  buttons?: WaBusinessTemplateButton[];
+  /** CAROUSEL: each card's components. */
+  cards?: Array<{ components: WaBusinessTemplateComponent[] }>;
+  example?: unknown;
+  limited_time_offer?: { text?: string; has_expiration?: boolean };
+  add_security_recommendation?: boolean;
+  code_expiration_minutes?: number;
+}
+
+/** A template to create (Meta's shape; it goes to Meta's review). */
+export interface WaBusinessTemplateDefinition {
+  name: string;
+  language: string;
+  category: "UTILITY" | "MARKETING" | "AUTHENTICATION";
+  components: Array<Record<string, unknown>>;
+  parameterFormat?: "POSITIONAL" | "NAMED";
+  allowCategoryChange?: boolean;
 }
 
 export type WaBusinessSendResult =
   | { status: "sent"; ids: string[] }
   | { status: "pending_approval"; id: string; note: string };
+
+/** The business profile shown in WhatsApp (about ≤ 139, description ≤ 512, address ≤ 256, email ≤ 128, up to 2 websites, vertical). */
+export interface WaBusinessProfile {
+  about?: string;
+  address?: string;
+  description?: string;
+  email?: string;
+  profilePictureUrl?: string;
+  websites?: string[];
+  vertical?: string;
+}
+
+export interface WaBusinessBlockResult {
+  done: string[];
+  failed: Array<{ user: string; error: string }>;
+}
+
+export type WaBusinessAnalyticsKind = "messages" | "pricing" | "templates";
+
+/** Analytics query: start / end in Unix seconds. */
+export interface WaBusinessAnalyticsQuery {
+  kind: WaBusinessAnalyticsKind;
+  start: number;
+  end: number;
+  /** messages: HALF_HOUR, DAY, MONTH; pricing: DAILY, HALF_HOUR, MONTHLY; templates: DAILY. */
+  granularity?: string;
+  /** templates: up to 10 template ids. */
+  templateIds?: string[];
+  /** pricing: COUNTRY, PHONE, PRICING_CATEGORY, PRICING_TYPE, TIER. */
+  dimensions?: string[];
+}
+
+export type WaBusinessPhoneAction =
+  | { action: "register"; pin: string }
+  | { action: "deregister" }
+  | { action: "set_pin"; pin: string }
+  | { action: "request_code"; method?: "SMS" | "VOICE"; language?: string }
+  | { action: "verify_code"; code: string }
+  | { action: "subscribe_app" };
+
+/** This number's callback at Meta: the one here, and what Meta has (app, number override, account). */
+export interface WaBusinessWebhookOverride {
+  callbackUrl?: string;
+  current: { application?: string; phoneNumber?: string; whatsappBusinessAccount?: string };
+}
+
+/** An account-level update from Meta (quality, tier, name review, templates, capabilities, alerts). */
+export interface WaBusinessAccountEvent {
+  id: string;
+  channel: string;
+  field: string;
+  at: string;
+  summary: string;
+  value: Record<string, unknown>;
+}
+
+/** The "channel:wabiz-event" payload: a flow completed, an order, a payment, a reply, a reaction, an account update… */
+export interface WaBusinessLiveEvent {
+  channel: string;
+  kind: string;
+  contact?: string;
+  messageId?: string;
+  data: Record<string, unknown>;
+}
 
 
 // ── Hosted MCP servers ─────────────────────────────────────────────────

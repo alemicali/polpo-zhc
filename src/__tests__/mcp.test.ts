@@ -334,7 +334,7 @@ describe("toolsets and scopes", () => {
     const defaults = ["core", "tasks", "missions", "artifacts", "data", "files", "team", "config", "rooms", "chat", "memory", "skills", "automation", "connectors", "channels", "computers", "coding", "settings"];
     expect(resolveToolsets()).toEqual(defaults);
     expect(resolveToolsets("core, admin")).toEqual(["core", "admin"]);
-    expect(resolveToolsets(undefined, ["all"])).toEqual([...defaults, "brain", "learning", "watchers", "vault", "apps", "admin"]);
+    expect(resolveToolsets(undefined, ["all"])).toEqual([...defaults, "brain", "learning", "watchers", "vault", "apps", "whatsapp-business", "admin"]);
     expect(resolveToolsets("default,admin")).toEqual([...defaults, "admin"]);
     expect(resolveToolsets("default,brain,vault")).toEqual([...defaults, "brain", "vault"]);
     expect(resolveToolsets("nonsense")).toEqual(resolveToolsets());

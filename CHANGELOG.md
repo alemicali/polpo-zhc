@@ -8,8 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-
 - **Triggers: Standard Webhooks signatures** (`hmac.scheme: "standard-webhooks"`): `webhook-id` / `webhook-timestamp` / `webhook-signature` (`v1,<base64>`, several after a rotation), signed `{id}.{timestamp}.{body}`, `whsec_` secrets decoded, 5-minute tolerance — for SitoInChat, Svix and other Standard Webhooks senders. Dashboard (Auth → Format), REST, MCP `polpo_trigger_auth`, SDK.
+- **WhatsApp Business: everything the Cloud API offers that Polpo can use** (docs/whatsapp-business.md, with a support matrix).
+  - **Media in and out**: images, audio, voice notes (transcribed on arrival), video, documents, stickers; downloaded with the token only from Meta's hosts, within Meta's and the channel's size limits (`business.media`), kept for the retention and handed to the agent as attachments; sent by upload, link or media id with captions and file names; `GET /:name/media/:messageId`.
+  - **Every inbound type**: location, contact cards, button / list / template quick-reply replies, flow completions (`nfm_reply`), address and call-permission answers, catalog orders, product enquiries, welcome, reactions, the contact's edits and revokes, forwarded flags, quoted messages, ad referrals, payments (India), marketing preferences. Structured ones are announced as the new **`channel:wabiz-event`** (trigger-friendly).
+  - **Interactive messages**: reply buttons, lists, CTA URL, location request, location, contact cards, call button and call permission request, address request (India), **flows**, product / product list / catalog messages, order details and status (payments only in India and Brazil, `business.payments`). The agent's reply buttons go out as WhatsApp buttons or a list, its files as media, voice replies as audio.
+  - **Templates with every component**: text / media / location headers, positional and named variables, quick reply, URL suffix, copy code, OTP (copy code, one-tap, zero-tap), flow, catalog and multi-product buttons, carousels, limited-time offers — validated against the template's definition before Meta is called; queued templates keep them through approval. **Template management** (create, edit, delete) with status / quality / category webhooks; Marketing Messages API (`business.marketingMessagesApi`).
+  - **Reactions, read receipts with typing, quoting**; statuses with pricing and errors in the conversation log.
+  - **Account management**: business profile (with photo, `business.appId`), phone number (status, register, two-step PIN, request / verify code, subscribe the app), block / unblock, messages / pricing / template analytics, an account log of every account webhook field.
+  - **One Meta app, several instances**: per-number webhook override, routing by `phone_number_id` to the local channel, or forwarding unchanged (body and signature) to the owning instance (`business.sharedApp.routes`).
+  - **Everywhere**: REST (`/messages`, `/react`, `/read`, `/media`, templates, `/profile`, `/block`, `/analytics`, `/phone`, `/webhook-override`, `/account-events`), MCP toolset **`whatsapp-business`** (off by default: `polpo_wabiz_send_media`, `_send_interactive`, `_send_flow`, `_send_products`, `_send_order`, `_react`, `_template_manage`, `_profile`, `_block`, `_analytics`, `_phone`) and the **`polpo_wabiz_show` card** (MCP App: status, conversations with thumbnails, WhatsApp-style transcript, approve / reject), Polpo's chat (`wabiz_*`), agent tools (`wabiz_send_media`, `wabiz_send_interactive`, `wabiz_send_flow`, `wabiz_send_products`, `wabiz_send_order`, `wabiz_react`; `to` defaults to the chat the turn came from), SDK methods and React hooks, the dashboard's channel sheet.
+
+### Changed
+- MCP: the `polpo_wabiz_send_flow` / `wabiz_send_flow` reference parameter is `flow_ref` (Meta's `flow_token`).
 
 ## [0.8.0] — 2026-11-26 — Agent tests and evals, triggers, decisions, media, CLI coding chats
 

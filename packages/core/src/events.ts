@@ -420,6 +420,19 @@ export interface PolpoEventMap {
     error?: string;
     pricingCategory?: string;
   };
+  /**
+   * A structured WhatsApp Business event: a flow completed, an order, a payment, a button or list
+   * reply, an address, a call permission answer, a reaction, a marketing preference, an account
+   * update (quality, name review, templates, capabilities). `data` is the structured content.
+   */
+  "channel:wabiz-event": {
+    channel: string;
+    kind: string;
+    /** The contact, masked (39•••••567). */
+    contact?: string;
+    messageId?: string;
+    data: Record<string, unknown>;
+  };
   /** A WhatsApp Business webhook delivery was recorded in the channel's event log, or its processing finished. */
   "channel:webhook": {
     channel: string;

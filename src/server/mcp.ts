@@ -41,6 +41,7 @@ import { registerChannelTools, registerVaultTools } from "./mcp-server/channels.
 import { registerAppTools } from "./mcp-server/apps.js";
 import { registerComputerTools } from "./mcp-server/computers.js";
 import { registerWaBusinessTools } from "./mcp-server/whatsapp-business.js";
+import { registerWabizCards } from "./mcp-server/wabiz-cards.js";
 import { registerHarnessTools } from "./mcp-server/harnesses.js";
 import { registerSettingsTools } from "./mcp-server/settings.js";
 import { registerChannelSetupTools } from "./mcp-server/channel-setup.js";
@@ -114,6 +115,7 @@ const declareAll: Declare = (tool, app, deps) => {
   registerAppTools(tool, deps);
   registerComputerTools(tool, deps);
   registerWaBusinessTools(tool, deps);
+  registerWabizCards(app, deps);
   registerHarnessTools(tool, deps);
   registerAdminTools(tool, deps);
 };

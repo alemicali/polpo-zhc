@@ -575,6 +575,8 @@ export class ChannelGateway {
    * group its transcript. Only Telegram delivers check reports; elsewhere they stay in the session.
    */
   private checkTarget(msg: InboundMessage): ConversationCheckTarget | undefined {
+    // WhatsApp Business turns carry their chat too: the wabiz_* tools answer in it by default
+    if (msg.channel === "whatsapp-business" && this.key) return { channel: this.key, chatId: msg.chatId, ...(msg.displayName ? { name: msg.displayName } : {}) };
     if (msg.channel !== "telegram") return undefined;
     return {
       channel: this.key,

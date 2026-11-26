@@ -38,7 +38,15 @@ vi.mock("@polpo-ai/react", () => ({
     return { channels, status: channels[0], isLoading: false, error: null, refetch: vi.fn(), setSecrets: live.setSecrets, removeSecret: vi.fn(), test: vi.fn(async () => true) };
   },
   usePeers: () => ({ peers: live.peers, presence: live.presence, isLoading: false, unavailable: false, refetch: vi.fn(), link: live.link }),
-  useWaContacts: () => ({ contacts: live.contacts, isLoading: false, error: null, refetch: vi.fn(), setOptIn: live.setOptIn, erase: live.erase }),
+  useWaContacts: () => ({ contacts: live.contacts, isLoading: false, error: null, refetch: vi.fn(), setOptIn: live.setOptIn, erase: live.erase, setBlocked: vi.fn(async () => ({ done: [], failed: [] })) }),
+  useWaTemplates: () => ({ templates: [], isLoading: false, error: null, sync: vi.fn(), create: vi.fn(), edit: vi.fn(), remove: vi.fn() }),
+  useWaConversation: () => ({ conversation: undefined, isLoading: false, error: null, refetch: vi.fn(), send: vi.fn(), sendTemplate: vi.fn(), react: vi.fn(), markRead: vi.fn() }),
+  useWaBusinessProfile: () => ({ profile: {}, isLoading: false, error: null, refetch: vi.fn(), update: vi.fn() }),
+  useWaBlocked: () => ({ blocked: [], isLoading: false, error: null, refetch: vi.fn(), block: vi.fn(), unblock: vi.fn() }),
+  useWaAnalytics: () => ({ data: undefined, isLoading: false, error: null, refetch: vi.fn() }),
+  useWaAccountEvents: () => ({ events: [], isLoading: false, error: null, refetch: vi.fn() }),
+  useWaPhone: () => ({ webhook: undefined, isLoading: false, error: null, refetch: vi.fn(), setOverride: vi.fn(), action: vi.fn() }),
+  useWaMedia: () => ({ url: undefined, isLoading: false, error: null }),
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
@@ -273,7 +281,9 @@ describe("Channels section", () => {
     team: ["Setup", "WhatsApp profile", "Profile Directory", "Connect WhatsApp", "Logout", "Refresh", "Notification Chat ID", "Routing", "DM Policy", "Allow From", "Replies go to"],
     shop: ["Setup", "Phone number ID", "WhatsApp Business Account ID", "Who writes to it", "Graph API version", "Operators", "Business-initiated a day", "Keep messages (days)",
       "Template categories agents may send", "Templates from agents and Polpo", "Notifications outside 24 h", "Meta Cloud API", "Access token", "App secret", "Verify token",
-      "Generate", "Test", "Callback URL", "Expose it (Tailscale Funnel)", "Events", "Routing", "Agent that answers customers (required)", "DM Policy", "Allow From"],
+      "Generate", "Test", "Callback URL", "Expose it (Tailscale Funnel)", "Events", "Routing", "Agent that answers customers (required)", "DM Policy", "Allow From",
+      "Read receipts", "Typing indicator", "Download inbound media", "Largest file kept (MB)", "Catalog ID", "Meta app ID", "Payments in WhatsApp", "Marketing Messages API",
+      "Shared Meta app", "WhatsApp Business account", "Templates", "Profile", "Phone number", "Analytics", "Account updates", "Blocked", "New template"],
     eng: ["Setup", "Channel ID", "Webhook URL", "API Key", "Slack app", "Routing"],
     mail: ["Setup", "Provider", "API Key", "From Address", "Recipients"],
     hook: ["Setup", "Notification URL", "Headers", "Routing", "Endpoint", "Secret", "New", "iOS Shortcuts", "Dedicated agent", "Replies go to", "DM Policy"],
