@@ -22,6 +22,8 @@ export { useTriggers, useTriggerDeliveries, useTriggerDelivery } from "./hooks/u
 export type { UseTriggersReturn, UseTriggerDeliveriesReturn, UseTriggerDeliveryReturn } from "./hooks/use-triggers.js";
 export { useDecide, useDecisions, useDecisionNodes } from "./hooks/use-decisions.js";
 export type { UseDecideReturn, UseDecisionsReturn } from "./hooks/use-decisions.js";
+export { useCodingChats, useCodingChat } from "./hooks/use-coding-chats.js";
+export type { UseCodingChatsReturn, UseCodingChatReturn } from "./hooks/use-coding-chats.js";
 export type { UseWaBusinessStatusReturn, UseWaTemplatesReturn, UseWaConversationReturn } from "./hooks/use-whatsapp-business.js";
 export type { UseConnectorsReturn } from "./hooks/use-connectors.js";
 export { useAgents } from "./hooks/use-agents.js";
@@ -349,4 +351,6 @@ export type {
   TriggerTaskAction, TriggerAgentAction, TriggerNotifyAction, TriggerDeliverTo, TriggerActionLimits, TriggerActionRefs, TriggerActionRun, TriggerActionPreview, WorkOrigin,
   DecisionQuestionType, DecisionQuestion, DecisionFallbackModel, DecisionModelSetting, DecisionSettings, DecideRequest, DecisionAnswer, DecisionUsage, DecideResult,
   DecisionCallerKind, DecisionLogSummary, DecisionLogEntry, DecisionLogPage, DecisionStatus, DecisionNodeState, MissionDecision,
+  CodingChatKind, CodingChatStatus, CodingChatErrorKind, CodingRiskCategory, CodingChatToolCall, CodingChatSegment, CodingChatUsage, CodingChatMessage,
+  CodingChatApproval, CodingChatSession, CodingChatSummary, CodingChatCreateRequest, CodingChatAccountInfo, CodingChatEvent,
 } from "@polpo-ai/sdk";

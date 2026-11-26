@@ -6,6 +6,7 @@ import type {
   BenchmarkVariantStats, BenchmarkWeights, PlaygroundExchange, PlaygroundPane, PlaygroundPaneInput, PlaygroundSession, PlaygroundStreamEvent, SuiteVariantOverrides,
 } from "./agent-suite-types.js";
 import type { DecideRequest, DecideResult, DecisionCallerKind, DecisionLogEntry, DecisionLogPage, DecisionNodeState, DecisionStatus } from "./decision-types.js";
+import type { CodingChatAccountInfo, CodingChatApproval, CodingChatCreateRequest, CodingChatEvent, CodingChatKind, CodingChatSession, CodingChatSummary } from "./coding-types.js";
 import type {
   Connector,
   ConnectorTool,
@@ -400,6 +401,93 @@ export class PolpoClient {
     this.headers = {};
     if (config.apiKey) {
       this.headers["Authorization"] = `Bearer ${config.apiKey}`;
+    }
+  }
+
+  // ── Coding chats (Claude Code / Codex in a worktree, on your own CLI account) ──
+
+  /** Coding chat sessions, newest first, without their transcripts. */
+  getCodingChats(o: { cwd?: string; workspaceId?: string; kind?: CodingChatKind } = {}): Promise<CodingChatSummary[]> {
+    const q = new URLSearchParams();
+    if (o.cwd) q.set("cwd", o.cwd);
+    if (o.workspaceId) q.set("workspaceId", o.workspaceId);
+    if (o.kind) q.set("kind", o.kind);
+    const qs = q.toString();
+    return this.get(`/coding/chats${qs ? `?${qs}` : ""}`);
+  }
+
+  /** One coding chat with its transcript and approvals. */
+  getCodingChat(id: string): Promise<CodingChatSession> {
+    return this.get(`/coding/chats/${encodeURIComponent(id)}`);
+  }
+
+  /** A new coding chat in a worktree (with prompt, its first turn starts at once). */
+  createCodingChat(req: CodingChatCreateRequest): Promise<CodingChatSession> {
+    return this.post("/coding/chats", req);
+  }
+
+  /** A message: a new turn, or a steer while one runs. */
+  sendCodingChatMessage(id: string, text: string): Promise<{ steered: boolean; session: CodingChatSession }> {
+    return this.post(`/coding/chats/${encodeURIComponent(id)}/messages`, { text });
+  }
+
+  /** Stop the running turn (the conversation stays). */
+  stopCodingChat(id: string): Promise<CodingChatSession> {
+    return this.post(`/coding/chats/${encodeURIComponent(id)}/stop`);
+  }
+
+  /** Approve or deny a risky action waiting in a coding chat. */
+  resolveCodingChatApproval(id: string, approvalId: string, decision: "approve" | "deny"): Promise<CodingChatApproval> {
+    return this.post(`/coding/chats/${encodeURIComponent(id)}/approvals/${encodeURIComponent(approvalId)}`, { decision });
+  }
+
+  deleteCodingChat(id: string): Promise<{ deleted: boolean }> {
+    return this.request("DELETE", this.apiUrl(`/coding/chats/${encodeURIComponent(id)}`));
+  }
+
+  /** The CLI account a coding chat of yours would use, or why none (and where to sign in). */
+  getCodingChatAccount(kind: CodingChatKind): Promise<CodingChatAccountInfo> {
+    return this.get(`/coding/chats/account?kind=${kind}`);
+  }
+
+  /**
+   * Follow a coding chat live (Server-Sent Events over fetch, so the API key header works too):
+   * the session first, then messages as they are written, approvals, files-changed. Resolves when
+   * the stream ends (aborted, or the session deleted).
+   */
+  async streamCodingChat(id: string, onEvent: (e: CodingChatEvent) => void, signal?: AbortSignal): Promise<void> {
+    const res = await this.fetchFn(this.apiUrl(`/coding/chats/${encodeURIComponent(id)}/events`), {
+      headers: { ...this.headers, accept: "text/event-stream" },
+      credentials: "include",
+      ...(signal ? { signal } : {}),
+    });
+    if (!res.ok || !(res.headers.get("content-type") ?? "").includes("text/event-stream")) {
+      const json = (await res.json().catch(() => null)) as ApiResult<unknown> | null;
+      throw new PolpoApiError(json && !json.ok ? json.error : `Stream failed (${res.status})`, (json && !json.ok ? json.code : "INTERNAL_ERROR") as never, res.status);
+    }
+    const reader = res.body?.getReader();
+    if (!reader) return;
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const flush = (block: string) => {
+      const data = block.split("\n").filter((l) => l.startsWith("data:")).map((l) => l.slice(5).trimStart()).join("\n");
+      if (!data) return;
+      try { onEvent(JSON.parse(data) as CodingChatEvent); } catch { /* not an event */ }
+    };
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+        let i: number;
+        while ((i = buffer.indexOf("\n\n")) >= 0) {
+          flush(buffer.slice(0, i));
+          buffer = buffer.slice(i + 2);
+        }
+      }
+      if (buffer.trim()) flush(buffer);
+    } catch (err) {
+      if ((err as Error)?.name !== "AbortError") throw err;
     }
   }
 

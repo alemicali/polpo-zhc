@@ -315,3 +315,7 @@ export type {
   DecisionQuestionType, DecisionQuestion, DecisionFallbackModel, DecisionModelSetting, DecisionSettings, DecideRequest, DecisionAnswer, DecisionUsage, DecideResult,
   DecisionCallerKind, DecisionLogSummary, DecisionLogEntry, DecisionLogPage, DecisionStatus, DecisionNodeState, MissionDecision,
 } from "./client/decision-types.js";
+export type {
+  CodingChatKind, CodingChatStatus, CodingChatErrorKind, CodingRiskCategory, CodingChatToolCall, CodingChatSegment, CodingChatUsage, CodingChatMessage,
+  CodingChatApproval, CodingChatSession, CodingChatSummary, CodingChatCreateRequest, CodingChatAccountInfo, CodingChatEvent,
+} from "./client/coding-types.js";
