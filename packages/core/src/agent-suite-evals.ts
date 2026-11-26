@@ -12,9 +12,9 @@
  *                regressions and improvements beyond a tolerance
  *   Trend        a suite's runs over time (score, pass rate, cost, latency), by version
  */
-import { argsMatch, suiteToolMatches, validateJsonSchema } from "./agent-suites.js";
+import { argsMatch, scorerJudgeRole, suiteToolMatches, validateJsonSchema } from "./agent-suites.js";
 import type {
-  CaseInput, SuiteCaseResult, SuiteCaseStatus, SuiteRun, SuiteScoreResult, SuiteScorer, SuiteScorerType, SuiteTrace,
+  SuiteRole, CaseInput, SuiteCaseResult, SuiteCaseStatus, SuiteRun, SuiteScoreResult, SuiteScorer, SuiteScorerType, SuiteTrace,
 } from "./agent-suites.js";
 
 // ── Shapes ───────────────────────────────────────────────────────────
@@ -356,10 +356,14 @@ export interface ScorerContext {
 }
 
 export interface ScorerDeps {
-  /** The LLM judge (the host calls a model at temperature 0). */
-  judge?: (req: { model?: string; prompt: string }) => Promise<{ text: string; model?: string; costUsd?: number }>;
-  /** The suite's judge model (evals.judgeModel). */
-  judgeModel?: string;
+  /**
+   * The LLM judge: a chat turn of the judge's role (an agent, a model + engine block, or Polpo) through
+   * the chat completions pipeline. `check` reads an answer (undefined: readable, else why not): an
+   * unreadable one gets one corrective follow-up turn in the same conversation.
+   */
+  judge?: (req: { role?: SuiteRole; prompt: string; check?: (text: string) => string | undefined }) => Promise<{ text: string; model?: string; costUsd?: number }>;
+  /** The suite's judge (evals.judge; the old evals.judgeModel as a model block). */
+  judgeRole?: SuiteRole;
   /** Runs a custom scorer's code in the sandbox; returns what the code returned. */
   custom?: (req: { code: string; input: Record<string, unknown>; timeoutMs?: number }) => Promise<unknown>;
 }
@@ -541,8 +545,14 @@ export async function evaluateScorer(s: SuiteScorer, ctx: ScorerContext, deps: S
   try {
     if (s.type === "llm_judge") {
       if (!deps.judge) return finish(s, id, { score: 0, error: "No LLM judge is available on this server" });
-      const res = await deps.judge({ model: s.model ?? deps.judgeModel, prompt: judgePrompt(s, ctx) });
-      const parsed = parseJudgeResponse(res.text, s);
+      const role = scorerJudgeRole(s) ?? deps.judgeRole;
+      const check = (text: string): string | undefined => { try { parseJudgeResponse(text, s); return undefined; } catch (err) { return err instanceof Error ? err.message : String(err); } };
+      const res = await deps.judge({ ...(role ? { role } : {}), prompt: judgePrompt(s, ctx), check });
+      let parsed: ReturnType<typeof parseJudgeResponse>;
+      try { parsed = parseJudgeResponse(res.text, s); } catch (err) {
+        // the raw answer, for the person reading the result
+        throw new Error(`${err instanceof Error ? err.message : String(err)}. The judge answered: ${show(res.text.trim() || "(nothing)", 2000)}`);
+      }
       return finish(s, id, {
         score: parsed.score,
         reason: parsed.summary ?? parsed.criteria.map((c) => `${c.name} ${c.score}/5`).join(", "),

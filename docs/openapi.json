@@ -228,6 +228,31 @@
           }
         ]
       },
+      "SuiteRole": {
+        "type": "object",
+        "properties": {
+          "agent": {
+            "type": "string",
+            "maxLength": 170,
+            "description": "An existing agent plays the role: its name, optionally @version or @draft (judge-bot@1.2.0)"
+          },
+          "model": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Or a model + engine block, as an agent's (run as an ephemeral agent): the model (provider:id)"
+          },
+          "reasoning": {
+            "type": "string",
+            "maxLength": 20,
+            "description": "The block's reasoning level"
+          },
+          "engine": {
+            "nullable": true,
+            "description": "The block's engine, as agent.engine: \"polpo\", { harness, … } or { type: \"cli\", cli, account?, model? }"
+          }
+        },
+        "additionalProperties": false
+      },
       "SearchAskResult": {
         "type": "object",
         "properties": {
@@ -12346,7 +12371,7 @@
           "Agent suites"
         ],
         "summary": "Explain a run (AI review)",
-        "description": "Asks Polpo's model (the orchestrator's effective model) to explain a finished run: a summary, what failed or regressed and why, and suggested fixes (instruction and tool changes, or the test itself). Stored on the run as `review` (Markdown); costs tokens.",
+        "description": "Asks the suite's reviewer (evals.reviewer, or `reviewer` here: an agent or a model + engine block; default Polpo) to explain a finished run, in a chat turn without tools: a summary, what failed or regressed and why, and suggested fixes (instruction and tool changes, or the test itself). Stored on the run as `review` (Markdown); costs tokens.",
         "parameters": [
           {
             "schema": {
@@ -12375,6 +12400,9 @@
                   "language": {
                     "type": "string",
                     "maxLength": 40
+                  },
+                  "reviewer": {
+                    "$ref": "#/components/schemas/SuiteRole"
                   }
                 },
                 "additionalProperties": false
@@ -12701,7 +12729,7 @@
           "Agent suites"
         ],
         "summary": "Generate dataset rows",
-        "description": "Polpo's model proposes rows for a case's dataset (its columns kept; edge and adversarial values included), or a first dataset for a case that uses {{row.x}}. Nothing is saved: add the rows you keep (datasets/import or a save). Costs tokens.",
+        "description": "The suite's generator (or `generator` here; default Polpo) proposes rows for a case's dataset (its columns kept; edge and adversarial values included), or a first dataset for a case that uses {{row.x}}, in a chat turn without tools. Nothing is saved: add the rows you keep (datasets/import or a save). Costs tokens.",
         "parameters": [
           {
             "schema": {
@@ -12738,6 +12766,9 @@
                   "brief": {
                     "type": "string",
                     "maxLength": 2000
+                  },
+                  "generator": {
+                    "$ref": "#/components/schemas/SuiteRole"
                   }
                 },
                 "required": [
@@ -12857,7 +12888,7 @@
           "Agent suites"
         ],
         "summary": "Generate cases (AI)",
-        "description": "Polpo's model proposes cases from the agent's instructions, tools, skills and connectors (and a brief, sample chats): input, mocks, assertions, scorers and dataset rows, including edge cases and adversarial / prompt-injection ones. Each proposal is validated and returned with its rationale; nothing is saved — accept the ones you keep with POST …/suites/{id}/cases. Costs tokens.",
+        "description": "The suite's generator (or `generator` here: an agent or a model + engine block; default Polpo, in a chat turn without tools) proposes cases from the agent's instructions, tools, skills and connectors (and a brief, sample chats): input, mocks, assertions, scorers and dataset rows, including edge cases and adversarial / prompt-injection ones. Each proposal is validated and returned with its rationale; nothing is saved — accept the ones you keep with POST …/suites/{id}/cases. Costs tokens.",
         "parameters": [
           {
             "schema": {
@@ -12915,6 +12946,16 @@
                       "tools"
                     ],
                     "description": "contract (default): scripted model turns and tool mocks (offline); tools: the real model with mocked tools"
+                  },
+                  "generator": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/SuiteRole"
+                      },
+                      {
+                        "description": "Who writes them (default the suite's generator, else Polpo): a chat turn of that agent or model + engine block"
+                      }
+                    ]
                   }
                 },
                 "additionalProperties": false
@@ -15313,7 +15354,7 @@
           "MCP server suites"
         ],
         "summary": "Explain a run (AI review)",
-        "description": "Asks Polpo's model (the orchestrator's effective model) to explain a finished run: a summary, what failed or regressed and why, and suggested fixes (instruction and tool changes, or the test itself). Stored on the run as `review` (Markdown); costs tokens.",
+        "description": "Asks the suite's reviewer (evals.reviewer, or `reviewer` here: an agent or a model + engine block; default Polpo) to explain a finished run, in a chat turn without tools: a summary, what failed or regressed and why, and suggested fixes (instruction and tool changes, or the test itself). Stored on the run as `review` (Markdown); costs tokens.",
         "parameters": [
           {
             "schema": {
@@ -15342,6 +15383,9 @@
                   "language": {
                     "type": "string",
                     "maxLength": 40
+                  },
+                  "reviewer": {
+                    "$ref": "#/components/schemas/SuiteRole"
                   }
                 },
                 "additionalProperties": false
@@ -15668,7 +15712,7 @@
           "MCP server suites"
         ],
         "summary": "Generate dataset rows",
-        "description": "Polpo's model proposes rows for a case's dataset (its columns kept; edge and adversarial values included), or a first dataset for a case that uses {{row.x}}. Nothing is saved: add the rows you keep (datasets/import or a save). Costs tokens.",
+        "description": "The suite's generator (or `generator` here; default Polpo) proposes rows for a case's dataset (its columns kept; edge and adversarial values included), or a first dataset for a case that uses {{row.x}}, in a chat turn without tools. Nothing is saved: add the rows you keep (datasets/import or a save). Costs tokens.",
         "parameters": [
           {
             "schema": {
@@ -15705,6 +15749,9 @@
                   "brief": {
                     "type": "string",
                     "maxLength": 2000
+                  },
+                  "generator": {
+                    "$ref": "#/components/schemas/SuiteRole"
                   }
                 },
                 "required": [
@@ -17342,7 +17389,7 @@
           "Mission suites"
         ],
         "summary": "Explain a run (AI review)",
-        "description": "Asks Polpo's model (the orchestrator's effective model) to explain a finished run: a summary, what failed or regressed and why, and suggested fixes (instruction and tool changes, or the test itself). Stored on the run as `review` (Markdown); costs tokens.",
+        "description": "Asks the suite's reviewer (evals.reviewer, or `reviewer` here: an agent or a model + engine block; default Polpo) to explain a finished run, in a chat turn without tools: a summary, what failed or regressed and why, and suggested fixes (instruction and tool changes, or the test itself). Stored on the run as `review` (Markdown); costs tokens.",
         "parameters": [
           {
             "schema": {
@@ -17371,6 +17418,9 @@
                   "language": {
                     "type": "string",
                     "maxLength": 40
+                  },
+                  "reviewer": {
+                    "$ref": "#/components/schemas/SuiteRole"
                   }
                 },
                 "additionalProperties": false
@@ -17697,7 +17747,7 @@
           "Mission suites"
         ],
         "summary": "Generate dataset rows",
-        "description": "Polpo's model proposes rows for a case's dataset (its columns kept; edge and adversarial values included), or a first dataset for a case that uses {{row.x}}. Nothing is saved: add the rows you keep (datasets/import or a save). Costs tokens.",
+        "description": "The suite's generator (or `generator` here; default Polpo) proposes rows for a case's dataset (its columns kept; edge and adversarial values included), or a first dataset for a case that uses {{row.x}}, in a chat turn without tools. Nothing is saved: add the rows you keep (datasets/import or a save). Costs tokens.",
         "parameters": [
           {
             "schema": {
@@ -17734,6 +17784,9 @@
                   "brief": {
                     "type": "string",
                     "maxLength": 2000
+                  },
+                  "generator": {
+                    "$ref": "#/components/schemas/SuiteRole"
                   }
                 },
                 "required": [

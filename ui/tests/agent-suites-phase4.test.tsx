@@ -15,7 +15,7 @@ const SUITE = {
     { id: "refund", name: "Refund", input: { kind: "chat", message: "I want a refund" }, mocks: { simulatedUser: { persona: "annoyed", goal: "refund" } }, assertions: [] },
     { id: "rec", name: "Recorded", input: { kind: "chat", message: "rates?" }, mocks: { cassette: { id: "rec-rec" } }, assertions: [] },
   ],
-  datasets: [],
+  datasets: [], simulatorModel: "openai:gpt-5-nano",
 };
 const trace = (over: Record<string, unknown>) => ({ input: [], turns: [], toolCalls: [], text: "", approvals: [], usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 }, durationMs: 10, notes: [], ...over });
 const RUN = {
@@ -59,6 +59,8 @@ vi.mock("@polpo-ai/react", () => ({
   useSuiteCassette: () => ({ cassette: CASSETTE, isLoading: false, error: null, ...cassetteApi }),
   useTargetSuites: () => ({ suites: [MISSION_SUITE], runs: [MISSION_RUN], isLoading: false, error: null, ...targetApi }),
   useTargetSuiteRun: () => ({ run: MISSION_RUN, isLoading: false, error: null, refetch: async () => undefined }),
+  useAgents: () => ({ agents: [{ name: "shop" }, { name: "checker" }], teams: [], isLoading: false, error: null }),
+  useAuthStatus: () => ({ authStatus: null }),
 }));
 vi.mock("../src/components/agents/agent-detail-context", () => ({ useAgentDetail: () => ({ meta: { agentName: "shop" }, actions: { refetch: async () => undefined } }) }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
@@ -86,6 +88,14 @@ const q = (sel: string) => document.body.querySelector(sel) as HTMLElement | nul
 const qa = (sel: string) => [...document.body.querySelectorAll(sel)] as HTMLElement[];
 const byText = (text: string, sel = "button") => [...document.body.querySelectorAll(sel)].find((e) => e.textContent?.trim() === text) as HTMLElement | undefined;
 const click = async (el: HTMLElement | null | undefined) => { await act(async () => { el!.click(); }); await flush(); };
+
+/** Pick an option of a native select (the role pickers, the engine picker). */
+const choose = async (el: Element | null, value: string) => {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(el as HTMLSelectElement, value);
+    (el as HTMLSelectElement).dispatchEvent(new Event("change", { bubbles: true }));
+  });
+};
 const type = async (el: HTMLElement | null, value: string) => {
   await act(async () => {
     const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), "value")!.set!;
@@ -133,20 +143,27 @@ test("the cassette viewer: edit a response, turn a call into a mock, re-record o
   expect(api.record).toHaveBeenCalledWith("quotes", "rec", {});
 });
 
-test("the editor: a simulated user's stop condition and model, the suite's simulator model", async () => {
+test("the editor: a simulated user's stop condition and who plays it, the suite's simulator (old simulatorModel read as a model block)", async () => {
   api.save.mockImplementation(async () => SUITE);
   await render(<AgentSuitesTab />);
   await click(q('[aria-label="Edit Quotes"]'));
   const sim = q('[data-testid="suite-simulated-user"]')!;
   expect(sim.querySelector('[aria-label="Persona"]')).toBeTruthy();
   expect(sim.querySelector('[data-testid="suite-simulated-stop"]')!.textContent).toContain("Stop when the goal is reached");
-  await type(sim.querySelector('[aria-label="Simulator model"]'), "openai:gpt-5-mini");
+  const caseSim = sim.querySelector('[data-testid="suite-case-simulator"]')!;
+  await choose(caseSim.querySelector("select"), "agent");
+  await choose(caseSim.querySelector('select[aria-label$=": agent"]'), "checker");
   await click(q('[data-testid="suite-view-evals"]'));
-  await type(q('[data-testid="suite-simulator-model"]'), "openai:gpt-5-nano");
+  // the suite's old simulatorModel shows as a model block; switching to an agent drops it
+  const suiteSim = q('[data-testid="suite-role-simulator"]')!;
+  expect(suiteSim.getAttribute("data-role-kind")).toBe("block");
+  await choose(suiteSim.querySelector("select"), "agent");
   await click(q('[data-testid="suite-save"]'));
-  const body = api.save.mock.calls.at(-1)![0] as unknown as { simulatorModel?: string; cases: Array<{ mocks?: { simulatedUser?: { model?: string } } }> };
-  expect(body.simulatorModel).toBe("openai:gpt-5-nano");
-  expect(body.cases[0]!.mocks!.simulatedUser!.model).toBe("openai:gpt-5-mini");
+  const body = api.save.mock.calls.at(-1)![0] as unknown as { simulatorModel?: string; simulator?: unknown; cases: Array<{ mocks?: { simulatedUser?: { simulator?: unknown; model?: string } } }> };
+  expect(body.simulatorModel).toBeUndefined();
+  expect(body.simulator).toEqual({ agent: "shop" });
+  expect(body.cases[0]!.mocks!.simulatedUser!.simulator).toEqual({ agent: "checker" });
+  expect(body.cases[0]!.mocks!.simulatedUser!.model).toBeUndefined();
 });
 
 test("Add cases: proposals are generated, nothing is saved until ticked and added", async () => {

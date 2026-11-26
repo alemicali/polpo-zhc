@@ -14,13 +14,15 @@
  *                      hosted MCP server tools) is matched against the case's mocks BEFORE it runs,
  *                      so a mocked call has no side effect; unmocked calls are blocked or run for real
  *   CLI tool server    the same for Polpo's tools served to the official claude / codex program
- *   resolveAgent       per-run overrides (model, reasoning, instructions, tools) for the variant
+ *   resolveAgent       per-run overrides (model, reasoning, instructions, tools) for the variant;
+ *                      a role's model + engine block as an ephemeral agent
+ *   tools              a role turn (judge, simulated user, generator, reviewer) gets none
  *
  * Approvals are never answered here: a gated send or ask_user still stops the turn for a person
  * (recorded as "approval requested"), a hosted tool that needs approval is still queued.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { ScriptedTurn, SuiteVariantOverrides } from "@polpo-ai/core/agent-suites";
+import type { ScriptedTurn, SuiteRoleName, SuiteVariantOverrides } from "@polpo-ai/core/agent-suites";
 
 /** What the pipeline reports back to the running case. */
 export interface SuiteCaseHooks {
@@ -28,6 +30,13 @@ export interface SuiteCaseHooks {
   readonly mocksModel: boolean;
   /** Per-run overrides applied to the agent (the variant). */
   readonly overrides?: SuiteVariantOverrides;
+  /**
+   * A suite role's turn (the judge, the simulated user, the generator, the reviewer), not a case:
+   * the chat gets no tools (Polpo's or the agent's), only the role's prompt.
+   */
+  readonly role?: SuiteRoleName;
+  /** A role played by a model + engine block: the ephemeral agent the chat resolves by this name. */
+  readonly roleAgent?: { name: string } & Record<string, unknown>;
   /** Why the next model call must not happen (a budget is spent), or undefined. */
   budgetExceeded(): string | undefined;
   /** The next scripted turn; undefined when the script is over. */

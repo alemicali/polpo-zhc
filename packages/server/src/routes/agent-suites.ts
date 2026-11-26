@@ -3,7 +3,7 @@ import type { Context } from "hono";
 import {
   SUITE_MOCK_MODES, summarizeCassette, summarizeSuiteRun,
   type AgentSuite, type CaseGenerationRequest, type CassetteCallEdit, type GeneratedCaseProposal, type SuiteBaselineComparison, type SuiteCase,
-  type SuiteCassetteRecord, type SuiteMockMode, type SuiteRun, type SuiteRunListOptions, type SuiteRunRequest, type SuiteTrend,
+  type SuiteCassetteRecord, type SuiteMockMode, type SuiteRole, type SuiteRun, type SuiteRunListOptions, type SuiteRunRequest, type SuiteTrend,
 } from "@polpo-ai/core/agent-suites";
 
 /** What the agent suite routes need from the host (src/server/agent-suites.ts). */
@@ -25,7 +25,7 @@ export interface AgentSuiteRouteDeps {
   compareRuns: (agent: string, runId: string, opts: { baselineRunId?: string; tolerance?: number }) => Promise<SuiteBaselineComparison | undefined>;
   trend: (agent: string, suiteId: string, opts: { limit?: number }) => Promise<SuiteTrend>;
   /** "Explain this run": an AI review stored on the run. */
-  reviewRun: (agent: string, runId: string, opts: { actor: string; language?: string }) => Promise<SuiteRun>;
+  reviewRun: (agent: string, runId: string, opts: { actor: string; language?: string; reviewer?: SuiteRole }) => Promise<SuiteRun>;
   /** YAML ⇄ objects (the suite's YAML view). */
   toYaml: (value: unknown) => string;
   fromYaml: (text: string) => unknown;
@@ -47,7 +47,7 @@ export interface AgentSuiteRouteDeps {
   /** Add the cases a person accepted. */
   acceptCases?: (agent: string, suiteId: string, req: { cases: unknown[]; datasets?: unknown[]; revision?: number }, opts: { actor: string }) => Promise<AgentSuite>;
   /** Proposed dataset rows for a case (not saved). */
-  generateDatasetRows?: (agent: string, suiteId: string, req: { caseId: string; count?: number; brief?: string }) => Promise<{ datasetId?: string; columns: string[]; rows: Array<Record<string, unknown>>; model?: string; costUsd?: number }>;
+  generateDatasetRows?: (agent: string, suiteId: string, req: { caseId: string; count?: number; brief?: string; generator?: SuiteRole }) => Promise<{ datasetId?: string; columns: string[]; rows: Array<Record<string, unknown>>; model?: string; costUsd?: number }>;
 }
 
 /** Suites of a target other than an agent (a hosted MCP server, a mission): the same routes under that target's path. */
@@ -75,6 +75,14 @@ const overridesSchema = z.object({
   allowedTools: z.array(z.string()).optional(),
   maxTurns: z.number().int().positive().optional(),
 }).strict();
+
+/** Who plays a suite role (the judge, the simulated user, the generator, the reviewer): an agent, or a model + engine block; empty: Polpo. */
+export const suiteRoleSchema = z.object({
+  agent: z.string().max(170).optional().describe("An existing agent plays the role: its name, optionally @version or @draft (judge-bot@1.2.0)"),
+  model: z.string().max(200).optional().describe("Or a model + engine block, as an agent's (run as an ephemeral agent): the model (provider:id)"),
+  reasoning: z.string().max(20).optional().describe("The block's reasoning level"),
+  engine: z.any().optional().describe('The block\'s engine, as agent.engine: "polpo", { harness, … } or { type: "cli", cli, account?, model? }'),
+}).strict().openapi("SuiteRole");
 
 const runBody = z.object({
   target: z.string().optional().describe("production (default), draft, or a published version (1.2.0)"),
@@ -112,6 +120,7 @@ const generateBody = z.object({
   sessionIds: z.array(z.string()).max(5).optional().describe("Real chats with the agent to draw from"),
   include: z.array(z.enum(["happy", "edge", "adversarial"])).optional(),
   style: z.enum(["contract", "tools"]).optional().describe("contract (default): scripted model turns and tool mocks (offline); tools: the real model with mocked tools"),
+  generator: suiteRoleSchema.optional().describe("Who writes them (default the suite's generator, else Polpo): a chat turn of that agent or model + engine block"),
 }).strict();
 
 const importBody = z.object({
@@ -380,16 +389,21 @@ export function registerAgentSuiteRoutes(app: OpenAPIHono, getDeps: () => { suit
   // POST /agents/{name}/suite-runs/{runId}/review
   app.openapi(createRoute({
     method: "post", path: "/{name}/suite-runs/{runId}/review", tags, summary: "Explain a run (AI review)",
-    description: "Asks Polpo's model (the orchestrator's effective model) to explain a finished run: a summary, what failed or regressed and why, and suggested fixes (instruction and tool changes, or the test itself). Stored on the run as `review` (Markdown); costs tokens.",
-    request: { params: runParam, body: { content: { "application/json": { schema: z.object({ language: z.string().max(40).optional() }).strict() } }, required: false } },
+    description: "Asks the suite's reviewer (evals.reviewer, or `reviewer` here: an agent or a model + engine block; default Polpo) to explain a finished run, in a chat turn without tools: a summary, what failed or regressed and why, and suggested fixes (instruction and tool changes, or the test itself). Stored on the run as `review` (Markdown); costs tokens.",
+    request: { params: runParam, body: { content: { "application/json": { schema: z.object({ language: z.string().max(40).optional(), reviewer: suiteRoleSchema.optional() }).strict() } }, required: false } },
     responses: { 200: r[200], 400: r[400], 404: r[404], 409: { content: { "application/json": { schema: errorSchema } }, description: "No model, or the review failed" } },
   }), async (c) => {
     const { name, runId } = c.req.valid("param");
     if (!(await exists(name))) return notFound(c, name);
-    const body = (await c.req.json().catch(() => ({}))) as { language?: unknown };
+    const body = (await c.req.json().catch(() => ({}))) as { language?: unknown; reviewer?: unknown };
+    const reviewer = body?.reviewer === undefined ? undefined : suiteRoleSchema.safeParse(body.reviewer);
+    if (reviewer && !reviewer.success) return invalid(c, reviewer.error.issues);
     try {
       const deps = s();
-      return c.json({ ok: true, data: await deps.reviewRun(own(name), runId, { actor: deps.actor(c), ...(typeof body?.language === "string" && body.language ? { language: body.language.slice(0, 40) } : {}) }) }, 200);
+      return c.json({ ok: true, data: await deps.reviewRun(own(name), runId, {
+        actor: deps.actor(c), ...(typeof body?.language === "string" && body.language ? { language: body.language.slice(0, 40) } : {}),
+        ...(reviewer?.data ? { reviewer: reviewer.data as SuiteRole } : {}),
+      }) }, 200);
     } catch (err) { return errorResponse(c, err); }
   });
 
@@ -427,13 +441,13 @@ export function registerAgentSuiteRoutes(app: OpenAPIHono, getDeps: () => { suit
   // POST /{name}/suites/{id}/datasets/generate — proposed rows (not saved)
   app.openapi(createRoute({
     method: "post", path: "/{name}/suites/{id}/datasets/generate", tags, summary: "Generate dataset rows",
-    description: "Polpo's model proposes rows for a case's dataset (its columns kept; edge and adversarial values included), or a first dataset for a case that uses {{row.x}}. Nothing is saved: add the rows you keep (datasets/import or a save). Costs tokens.",
-    request: { params: suiteParam, body: { content: { "application/json": { schema: z.object({ caseId: z.string().min(1), count: z.number().int().min(1).max(50).optional(), brief: z.string().max(2000).optional() }).strict() } } } },
+    description: "The suite's generator (or `generator` here; default Polpo) proposes rows for a case's dataset (its columns kept; edge and adversarial values included), or a first dataset for a case that uses {{row.x}}, in a chat turn without tools. Nothing is saved: add the rows you keep (datasets/import or a save). Costs tokens.",
+    request: { params: suiteParam, body: { content: { "application/json": { schema: z.object({ caseId: z.string().min(1), count: z.number().int().min(1).max(50).optional(), brief: z.string().max(2000).optional(), generator: suiteRoleSchema.optional() }).strict() } } } },
     responses: { 200: r[200], 400: r[400], 404: r[404], 409: { content: { "application/json": { schema: errorSchema } }, description: "No model" } },
   }), async (c) => {
     const { name, id } = c.req.valid("param");
     if (!(await exists(name))) return notFound(c, name);
-    try { return c.json({ ok: true, data: await need("generateDatasetRows", "Generation")(own(name), id, c.req.valid("json")) }, 200); } catch (err) { return errorResponse(c, err); }
+    try { return c.json({ ok: true, data: await need("generateDatasetRows", "Generation")(own(name), id, c.req.valid("json") as { caseId: string; count?: number; brief?: string; generator?: SuiteRole }) }, 200); } catch (err) { return errorResponse(c, err); }
   });
 
   // the rest is for agents: cassettes (record / replay) and case generation
@@ -442,7 +456,7 @@ export function registerAgentSuiteRoutes(app: OpenAPIHono, getDeps: () => { suit
   // POST /agents/{name}/suites/generate-cases — proposed cases (not saved)
   app.openapi(createRoute({
     method: "post", path: "/{name}/suites/generate-cases", tags, summary: "Generate cases (AI)",
-    description: "Polpo's model proposes cases from the agent's instructions, tools, skills and connectors (and a brief, sample chats): input, mocks, assertions, scorers and dataset rows, "
+    description: "The suite's generator (or `generator` here: an agent or a model + engine block; default Polpo, in a chat turn without tools) proposes cases from the agent's instructions, tools, skills and connectors (and a brief, sample chats): input, mocks, assertions, scorers and dataset rows, "
       + "including edge cases and adversarial / prompt-injection ones. Each proposal is validated and returned with its rationale; nothing is saved — accept the ones you keep with POST …/suites/{id}/cases. Costs tokens.",
     request: { params: nameParam, body: { content: { "application/json": { schema: generateBody } }, required: false } },
     responses: { 200: r[200], 400: r[400], 404: r[404], 409: { content: { "application/json": { schema: errorSchema } }, description: "No model, or the generation failed" } },
@@ -451,7 +465,7 @@ export function registerAgentSuiteRoutes(app: OpenAPIHono, getDeps: () => { suit
     if (!(await exists(name))) return notFound(c, name);
     const parsed = generateBody.safeParse((await c.req.json().catch(() => ({}))) ?? {});
     if (!parsed.success) return invalid(c, parsed.error.issues);
-    try { return c.json({ ok: true, data: await need("generateCases", "Case generation")(name, parsed.data) }, 200); } catch (err) { return errorResponse(c, err); }
+    try { return c.json({ ok: true, data: await need("generateCases", "Case generation")(name, parsed.data as CaseGenerationRequest & { suiteId?: string; sessionIds?: string[] }) }, 200); } catch (err) { return errorResponse(c, err); }
   });
 
   // POST /agents/{name}/suites/{id}/cases/from-recording — a case from a real chat or task run

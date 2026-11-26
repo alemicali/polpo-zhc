@@ -77,6 +77,9 @@ vi.mock("@polpo-ai/react", () => ({
   useAgentSuiteRun: () => ({ run: current, isLoading: false, error: null, refetch }),
   useAgentSuiteTrend: () => ({ trend: TREND, isLoading: false, error: null, refetch: async () => undefined }),
   useAgentVersions: () => ({ data: { state: {}, versions: [{ version: "1.2.0" }] }, isLoading: false, error: null }),
+  // the role pickers: the agents to name, the providers of the model field
+  useAgents: () => ({ agents: [{ name: "shop" }, { name: "judge-bot" }], teams: [], isLoading: false, error: null }),
+  useAuthStatus: () => ({ authStatus: null }),
 }));
 vi.mock("../src/components/agents/agent-detail-context", () => ({
   useAgentDetail: () => ({ meta: { agentName: "shop" }, actions: { refetch: async () => undefined } }),
@@ -107,6 +110,14 @@ const q = (sel: string) => document.body.querySelector(sel) as HTMLElement | nul
 const qa = (sel: string) => [...document.body.querySelectorAll(sel)] as HTMLElement[];
 const click = async (el: HTMLElement | null | undefined) => { await act(async () => { el!.click(); }); await flush(); };
 const row = (id: string) => q(`[data-testid="suite-row"][data-suite="${id}"]`)!;
+/** Pick an option of a native select (the role pickers, the engine picker). */
+const choose = async (el: Element | null, value: string) => {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(el as HTMLSelectElement, value);
+    (el as HTMLSelectElement).dispatchEvent(new Event("change", { bubbles: true }));
+  });
+};
+
 
 async function render() {
   await act(async () => root.render(<MemoryRouter><AgentSuitesTab /></MemoryRouter>));
@@ -181,7 +192,7 @@ test("the trend: a chart and the means by version", async () => {
   expect(versions).toContain("50%");
 });
 
-test("the editor: a scorer in the case form, and the Evals view (judge model, repetitions, default scorers) saved", async () => {
+test("the editor: a scorer in the case form, and the Evals view (the judge and reviewer roles, repetitions, default scorers) saved", async () => {
   await render();
   await click(row("quotes").querySelector("button") as HTMLElement);
   expect(qa('[data-testid="suite-scorer-form"]')).toHaveLength(1);
@@ -196,13 +207,29 @@ test("the editor: a scorer in the case form, and the Evals view (judge model, re
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
   };
-  await set("Judge model", "anthropic:judge");
+  // the four roles: Polpo by default; the judge is an agent at a version, the reviewer a model + engine block
+  expect(qa('[data-testid="suite-roles"] [data-role-kind]').map((x) => x.getAttribute("data-role-kind"))).toEqual(["polpo", "polpo", "polpo", "polpo"]);
+  const judge = q('[data-testid="suite-role-judge"]')!;
+  await choose(judge.querySelector("select"), "agent");
+  await choose(judge.querySelector('select[aria-label$=": agent"]'), "judge-bot");
+  const version = judge.querySelector('input[aria-label$=": version"]') as HTMLInputElement;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(version, "1.2.0");
+    version.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const reviewer = q('[data-testid="suite-role-reviewer"]')!;
+  await choose(reviewer.querySelector("select"), "block");
+  expect(reviewer.getAttribute("data-role-kind")).toBe("block");
+  // the block: the shared model field (model · engine badge) and the reasoning
+  expect(reviewer.querySelector('[aria-label="Reviewer (Explain this run): model"]')).toBeTruthy();
+  expect(reviewer.querySelector('[data-testid="engine-mark"]')!.getAttribute("data-engine")).toBe("polpo");
+  await choose(reviewer.querySelector('select[aria-label$=": reasoning"]'), "high");
   await set("Repetitions", "3");
   await click(evals.querySelector('[data-testid="suite-add-scorer"]') as HTMLElement);
   await click(q('[data-testid="suite-save"]'));
   const [body, opts] = api.save.mock.calls[0] as unknown as [{ cases: Array<{ scorers: Array<{ type: string }> }>; evals: unknown; scorers: Array<{ type: string }> }, unknown];
   expect(opts).toEqual({ id: "quotes", revision: 2 });
   expect(body.cases[0].scorers.map((s) => s.type)).toEqual(["numeric", "exact"]);
-  expect(body.evals).toEqual({ judgeModel: "anthropic:judge", repetitions: 3 });
+  expect(body.evals).toEqual({ judge: { agent: "judge-bot@1.2.0" }, reviewer: { reasoning: "high" }, repetitions: 3 });
   expect(body.scorers).toEqual([{ type: "exact", expected: "{{row.expected}}" }]);
 });

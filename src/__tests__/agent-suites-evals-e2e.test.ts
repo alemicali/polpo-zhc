@@ -2,7 +2,9 @@
  * Agent suite evals end to end: scorers (dataset expected values, an LLM judge), repetitions,
  * baselines and deltas, trends and "explain this run" through the REST API on a real instance, and
  * the same over MCP (text tools and the suite card widget). Every model is mocked: the agent's
- * turns are scripted (mode all), the judge and the reviewer answer from the pi-client mock.
+ * turns are scripted (mode all); the judge and the reviewer are chat turns through the real chat
+ * completions pipeline (an ephemeral agent for a model block, Polpo's own chat by default), whose
+ * provider stream is the pi-client mock. Nothing calls a completion directly.
  */
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { vi } from "vitest";
@@ -12,7 +14,7 @@ import { join } from "node:path";
 import type { Orchestrator } from "../core/orchestrator.js";
 import { handleMcpRequest, type McpDeps } from "../server/mcp.js";
 
-const judgeCalls: Array<{ prompt: string; options: unknown }> = [];
+const judgeCalls: Array<{ prompt: string; options: unknown; system: string; tools: number }> = [];
 const reviewCalls: string[] = [];
 let judgeAnswer = '{"criteria":[{"name":"overall","reasoning":"Polite and correct","score":5}],"summary":"Polite and correct."}';
 
@@ -36,17 +38,23 @@ vi.mock("../llm/pi-client.js", async (importOriginal) => {
     resolveModel: () => mockModel(),
     resolveModelSpec: (spec: unknown) => (typeof spec === "object" && spec ? (spec as { primary: string }).primary : spec) ?? "anthropic:mock-model",
     resolveApiKeyAsync: async () => "mock-api-key",
-    streamSimpleWithAuth: () => { throw new Error("the agent's model was called (the cases are scripted)"); },
-    // the LLM judge
-    completeSimpleWithAuth: async (_m: unknown, ctx: { messages: Array<{ content: string }> }, options: unknown) => {
-      judgeCalls.push({ prompt: ctx.messages[0].content, options });
-      return { role: "assistant", content: [{ type: "text", text: judgeAnswer }], stopReason: "stop", usage: { input: 10, output: 10, cacheRead: 0, cacheWrite: 0, totalTokens: 20, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
+    // the chat pipeline's provider stream: the cases are scripted (never here); the judge's and the
+    // reviewer's chat turns answer from here
+    streamSimpleWithAuth: async (_m: unknown, ctx: { systemPrompt: string; messages: Array<{ content: unknown }>; tools?: unknown[] }, options: unknown) => {
+      const { mockTextStream } = await import("./helpers/mock-llm.js");
+      const last = ctx.messages[ctx.messages.length - 1]?.content;
+      const prompt = typeof last === "string" ? last : Array.isArray(last) ? last.map((p: any) => p?.text ?? "").join("") : "";
+      if (prompt.includes("judge of a test suite")) {
+        judgeCalls.push({ prompt, options, system: ctx.systemPrompt, tools: ctx.tools?.length ?? 0 });
+        return mockTextStream(judgeAnswer);
+      }
+      if (prompt.includes("review a test suite's run")) {
+        reviewCalls.push(prompt);
+        return mockTextStream("## Summary\nThe German quote regressed: the reply says 9.99.\n\n## Suggested fixes\nRead the rate from the tool result.");
+      }
+      throw new Error("the agent's model was called (the cases are scripted)");
     },
-    // "explain this run" (queryOrchestratorText)
-    queryText: async (prompt: string) => {
-      reviewCalls.push(prompt);
-      return { text: "## Summary\nThe German quote regressed: the reply says 9.99.\n\n## Suggested fixes\nRead the rate from the tool result.", model: mockModel() };
-    },
+    completeSimpleWithAuth: async () => { throw new Error("a suite role called a completion directly"); },
     buildStreamOpts: () => undefined,
   };
 });
@@ -108,7 +116,7 @@ beforeEach(() => {
 describe("agent suite evals over REST", () => {
   let firstRun: string;
 
-  test("scorers: expected values from the dataset, an LLM judge at temperature 0 with the suite's judge model; aggregates", async () => {
+  test("scorers: expected values from the dataset, an LLM judge (the suite's old judgeModel: a model block, an ephemeral agent's chat turn); aggregates", async () => {
     expect((await json(await api("/agents/shop/suites", { body: evalSuite() }))).ok).toBe(true);
     const res = await json(await api("/agents/shop/suites/quotes/runs", { body: { wait: true } }));
     expect(res.ok).toBe(true);
@@ -122,8 +130,14 @@ describe("agent suite evals over REST", () => {
     expect(it.score).toBe(1);
     // the judge: one call per case, deterministic, with the reply
     expect(judgeCalls).toHaveLength(2);
-    expect(judgeCalls[0].options).toMatchObject({ temperature: 0 });
+    // a chat turn: no temperature or provider options from the suite, no tools, the ephemeral agent's prompt
+    expect(JSON.stringify(judgeCalls[0].options ?? {})).not.toContain("temperature");
+    expect(judgeCalls[0].tools).toBe(0);
+    expect(judgeCalls[0].system).toContain("Test suite judge");
     expect(judgeCalls[0].prompt).toContain("Standard shipping to IT costs 4.99 EUR.");
+    // the judge's chat is not left behind
+    const sessions = await orchestrator.getSessionStore()!.listSessions();
+    expect(sessions.filter((x: any) => x.agent === "polpo-suite-judge")).toEqual([]);
     expect(run.aggregates).toMatchObject({ score: 1, passRate: 1, repetitions: 1, flaky: [] });
     expect(run.aggregates.scorers.map((x: any) => x.id)).toEqual(["cost", "price", "judge"]);
     expect(run.baseline).toBeUndefined();
@@ -186,7 +200,8 @@ describe("agent suite evals over REST", () => {
     const last = trend.points[2].runId;
     const reviewed = await json(await api(`/agents/shop/suite-runs/${last}/review`, { body: { language: "Italian" } }));
     expect(reviewed.ok).toBe(true);
-    expect(reviewed.data.review).toMatchObject({ text: expect.stringContaining("The German quote regressed"), model: "anthropic:polpo-model" });
+    // no reviewer set: Polpo's own chat (the orchestrator's model), without tools
+    expect(reviewed.data.review).toMatchObject({ text: expect.stringContaining("The German quote regressed"), model: "Polpo (mock-model)" });
     expect(reviewCalls[0]).toContain("Quote shipping from the Printful rates.");
     expect(reviewCalls[0]).toContain("regressed: Quote [quote#2]");
     expect(reviewCalls[0]).toContain("Answer in Italian");

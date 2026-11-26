@@ -11,6 +11,14 @@ import {
   type McpDeps, type Register,
 } from "./kit.js";
 
+/** Who plays a suite role (judge, simulated user, generator, reviewer): an agent, or a model + engine block; empty: Polpo. */
+const roleSchema = z.object({
+  agent: z.string().max(170).optional().describe("An existing agent plays it: its name, optionally @version or @draft"),
+  model: z.string().max(200).optional().describe("Or a model + engine block, as an agent's: the model (provider:id)"),
+  reasoning: z.string().max(20).optional(),
+  engine: z.union([z.string(), looseObject]).optional().describe('As agent.engine: "polpo", { harness, … } or { type: "cli", cli: claude | codex, account?, model? }'),
+}).strict();
+
 type Assertion = { description: string; passed: boolean; message: string; diff?: string };
 type Score = { id: string; description: string; score: number; threshold: number; passed: boolean; reason?: string; error?: string; judge?: { model?: string; summary?: string; criteria: Array<{ name: string; score: number; reasoning: string }> } };
 type Delta = { id: string; label?: string; baseline?: number; current?: number; delta?: number; change: string };
@@ -209,8 +217,11 @@ export function registerAgentSuiteTools(tool: Register, deps: McpDeps): void {
       + "model?: { turns: [{ text?, toolCalls?: [{ name, args }] }] }, unmockedTools?: block | real }, "
       + "assertions: [{ type: tool_called | tool_not_called | tool_order | tool_args | no_tool_errors | outcome_registered | artifact_created | approval_requested | text_contains | text_not_contains | text_regex | max_turns | max_cost | max_duration, ... }], "
       + "scorers?: [{ type: exact | numeric | contains_all | contains_any | regex | similarity | json_schema | tool_trajectory | cost | latency | llm_judge | custom, id?, threshold? (0..1), weight?, "
-      + "from?: reply | reply_json | tool_args | tool_result | outcome, tool?, path?, expected / values / pattern / schema / maxUsd / maxMs / rubric + criteria [{ name, description, weight }] / code }] (evals: a score 0..1 each; "
-      + "expected may be {{row.expected}} from a dataset) }], scorers?: defaults for every case, evals?: { judgeModel, repetitions, regressionTolerance, baseline: previous | production | none }, "
+      + "from?: reply | reply_json | tool_args | tool_result | outcome, tool?, path?, expected / values / pattern / schema / maxUsd / maxMs / rubric + criteria [{ name, description, weight }] + judge? (a role) / code }] (evals: a score 0..1 each; "
+      + "expected may be {{row.expected}} from a dataset) }], scorers?: defaults for every case, evals?: { judge?, reviewer?, repetitions, regressionTolerance, baseline: previous | production | none }, simulator?, generator?, "
+      + "where a role (who plays the LLM judge, the simulated users, the case generator, the run reviewer) is { agent: \"judge-bot\" | \"judge-bot@1.2.0\" } or a model + engine block as an agent's "
+      + "{ model?: provider:id, reasoning?, engine?: \"polpo\" | { harness, ... } | { type: \"cli\", cli: claude | codex, account?, model? } }; none: Polpo. Every role is a chat turn without tools "
+      + "(the old judgeModel / simulatorModel / scorer model still work as a model block). "
       + "gate?: { required: true (a deploy gate: the suite must pass before any version of the agent reaches production), minPassRate? (0..1, default 1), maxRegression? (largest pass-rate or score drop versus the baseline), "
       + "scoreThresholds?: { scorerId | score: minimum mean }, onPublish? (also run when a version is published, non-blocking), allowRealTools? (the gate may run its real-tools cases: admin only) } }. "
       + "Or yaml: the same as YAML (polpo_agent_suite_get format yaml). revision: the one you edited (refused if changed meanwhile). "
@@ -426,25 +437,26 @@ export function registerAgentSuiteTools(tool: Register, deps: McpDeps): void {
 
   tool("team", "polpo_agent_suite_review", {
     title: "Explain a suite run",
-    description: "An AI review of a finished run by Polpo's model: a summary, what failed or regressed and why, and suggested fixes (instruction edits, tool changes, or the test itself). "
+    description: "An AI review of a finished run by the suite's reviewer (evals.reviewer, or reviewer here; default Polpo), in a chat turn without tools: a summary, what failed or regressed and why, and suggested fixes (instruction edits, tool changes, or the test itself). "
       + "Stored on the run (the dashboard shows it); costs tokens. With refresh: false (default), an existing review is returned as is.",
     inputSchema: {
       agent: z.string().min(1).describe("The agent's name (polpo_agents_list)"),
       run: z.string().min(1).describe("The run id (sr-…)"),
       language: z.string().max(40).optional().describe("The review's language (default English)"),
       refresh: z.boolean().optional().describe("Write a new review even when the run has one"),
+      reviewer: roleSchema.optional().describe("Who writes it (default the suite's reviewer, else Polpo)"),
     },
     outputSchema: { review: looseObject, run: looseObject.optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     scope: "polpo:work",
-  }, async ({ agent, run, language, refresh }) => {
+  }, async ({ agent, run, language, refresh, reviewer }) => {
     if (!refresh) {
       const g = await apiGet(deps, `/agents/${enc(agent)}/suite-runs/${enc(run)}`);
       if (!g.ok) return g.status === 404 ? notFound(g, `There is no run "${run}" for ${agent}.`) : apiError(g, "Reading the run");
       const existing = (g.data as Run).review;
       if (existing) return ok(existing.text, { review: existing as unknown as Record<string, unknown> });
     }
-    const r = await apiSend(deps, "POST", `/agents/${enc(agent)}/suite-runs/${enc(run)}/review`, language ? { language } : {});
+    const r = await apiSend(deps, "POST", `/agents/${enc(agent)}/suite-runs/${enc(run)}/review`, { ...(language ? { language } : {}), ...(reviewer ? { reviewer } : {}) });
     if (!r.ok) return r.status === 404 ? notFound(r, `There is no run "${run}" for ${agent}.`) : apiError(r, "Reviewing the run");
     const done = r.data as Run;
     return ok(`${done.review?.text ?? ""}\n\n${runHeader(done)}`, { review: (done.review ?? {}) as unknown as Record<string, unknown>, run: { id: done.id, status: done.status } });
@@ -621,7 +633,7 @@ export function registerPhase4SuiteTools(tool: Register, deps: McpDeps, h: { isA
 
   tool("team", "polpo_agent_suite_generate", {
     title: "Generate cases (AI)",
-    description: "Polpo's model proposes test cases for an agent from its instructions, tools, skills and connectors (and brief, sample chats): input, mocks, assertions, scorers, dataset rows — happy paths, "
+    description: "The suite's generator (generator here, else the suite's, else Polpo; a chat turn without tools) proposes test cases for an agent from its instructions, tools, skills and connectors (and brief, sample chats): input, mocks, assertions, scorers, dataset rows — happy paths, "
       + "edge cases and adversarial / prompt-injection ones. Proposals are NOT saved: show them to the person, then send the ones they accept with accept (the case objects, and their datasets). "
       + "rows_for_case: propose dataset rows for one case instead. Costs tokens.",
     inputSchema: {
@@ -635,11 +647,12 @@ export function registerPhase4SuiteTools(tool: Register, deps: McpDeps, h: { isA
       accept: z.object({ cases: z.array(looseObject).min(1), datasets: z.array(looseObject).optional() }).optional().describe("Add these accepted cases (and datasets) to suite"),
       rows_for_case: z.string().optional().describe("A case id: propose rows for its dataset"),
       rows: z.number().int().min(1).max(50).optional().describe("How many rows (rows_for_case)"),
+      generator: roleSchema.optional().describe("Who writes them (default the suite's generator, else Polpo)"),
     },
     outputSchema: { proposals: z.array(looseObject).optional(), suite: looseObject.optional(), rows: z.array(looseObject).optional(), columns: z.array(z.string()).optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     scope: "polpo:work",
-  }, async ({ agent, suite, count, brief, sessions, include, style, accept, rows_for_case, rows }) => {
+  }, async ({ agent, suite, count, brief, sessions, include, style, accept, rows_for_case, rows, generator }) => {
     if (accept) {
       if (!suite) return fail("accept needs suite (the suite to add the cases to).");
       const r = await apiSend(deps, "POST", `/agents/${enc(agent)}/suites/${enc(suite)}/cases`, accept);
@@ -649,7 +662,7 @@ export function registerPhase4SuiteTools(tool: Register, deps: McpDeps, h: { isA
     }
     if (rows_for_case) {
       if (!suite) return fail("rows_for_case needs suite.");
-      const r = await apiSend(deps, "POST", `/agents/${enc(agent)}/suites/${enc(suite)}/datasets/generate`, { caseId: rows_for_case, ...(rows ? { count: rows } : {}), ...(brief ? { brief } : {}) });
+      const r = await apiSend(deps, "POST", `/agents/${enc(agent)}/suites/${enc(suite)}/datasets/generate`, { caseId: rows_for_case, ...(rows ? { count: rows } : {}), ...(brief ? { brief } : {}), ...(generator ? { generator } : {}) });
       if (!r.ok) return r.status === 404 ? notFound(r, `There is no suite "${suite}" or case "${rows_for_case}".`) : apiError(r, "Generating rows");
       const d = r.data as { datasetId?: string; columns: string[]; rows: Array<Record<string, unknown>> };
       return ok(`Proposed ${d.rows.length} row(s)${d.datasetId ? ` for the dataset ${d.datasetId}` : ""} (not saved: import the ones you keep with polpo_agent_suite_save import_dataset):\n${d.rows.map((x) => JSON.stringify(x)).join("\n")}`,
@@ -657,6 +670,7 @@ export function registerPhase4SuiteTools(tool: Register, deps: McpDeps, h: { isA
     }
     const r = await apiSend(deps, "POST", `/agents/${enc(agent)}/suites/generate-cases`, {
       ...(suite ? { suiteId: suite } : {}), ...(count ? { count } : {}), ...(brief ? { brief } : {}), ...(sessions?.length ? { sessionIds: sessions } : {}), ...(include ? { include } : {}), ...(style ? { style } : {}),
+      ...(generator ? { generator } : {}),
     });
     if (!r.ok) return r.status === 404 ? notFound(r, `There is no agent "${agent}".`) : apiError(r, "Generating cases");
     const out = r.data as { proposals: Proposal[]; model?: string };

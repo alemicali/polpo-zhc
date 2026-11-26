@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
 import type {
   AgentSuite, AgentSuiteInput, CaseGenerationRequest, GeneratedCaseProposal, SuiteCase, SuiteCassette, SuiteCassetteEdit, SuiteDataset, SuiteDatasetImport,
-  SuiteRun, SuiteRunRequest, SuiteTargetKind, SuiteTrend,
+  SuiteRole, SuiteRun, SuiteRunRequest, SuiteTargetKind, SuiteTrend,
 } from "@polpo-ai/sdk";
 
 export interface UseAgentSuitesReturn {
@@ -24,7 +24,7 @@ export interface UseAgentSuitesReturn {
   /** Mark a finished run as its suite's baseline (null clears the mark); the runs list refreshes. */
   setBaseline: (suiteId: string, runId: string | null) => Promise<void>;
   /** "Explain this run": an AI review stored on the run. */
-  review: (runId: string, opts?: { language?: string }) => Promise<SuiteRun>;
+  review: (runId: string, opts?: { language?: string; reviewer?: SuiteRole }) => Promise<SuiteRun>;
   /** Record (or re-record) a case live into its cassette (admins; real model and tools). */
   record: (suiteId: string, caseId: string, opts?: { target?: string }) => Promise<SuiteRun>;
   /** A case and its cassette from a real chat (sessionId) or task run (taskId), added to the suite. */
@@ -34,7 +34,7 @@ export interface UseAgentSuitesReturn {
   /** Add the accepted cases (and their datasets) to a suite. */
   accept: (suiteId: string, cases: Array<Partial<SuiteCase>>, datasets?: Array<Partial<SuiteDataset>>) => Promise<AgentSuite>;
   /** AI-proposed dataset rows for a case (not saved). */
-  generateRows: (suiteId: string, req: { caseId: string; count?: number; brief?: string }) => Promise<{ datasetId?: string; columns: string[]; rows: Array<Record<string, unknown>> }>;
+  generateRows: (suiteId: string, req: { caseId: string; count?: number; brief?: string; generator?: SuiteRole }) => Promise<{ datasetId?: string; columns: string[]; rows: Array<Record<string, unknown>> }>;
 }
 
 /** An agent's suites and runs: save, delete, import datasets, run, cancel. */
@@ -91,7 +91,7 @@ export function useAgentSuites(name: string | undefined, opts: { runsLimit?: num
     await client.setAgentSuiteBaseline(name ?? "", suiteId, runId);
     await fetch_();
   }, [client, name, fetch_]);
-  const review = useCallback(async (runId: string, o: { language?: string } = {}) => {
+  const review = useCallback(async (runId: string, o: { language?: string; reviewer?: SuiteRole } = {}) => {
     const r = await client.reviewAgentSuiteRun(name ?? "", runId, o);
     await fetch_();
     return r;
@@ -113,7 +113,7 @@ export function useAgentSuites(name: string | undefined, opts: { runsLimit?: num
     await fetch_();
     return s;
   }, [client, name, fetch_]);
-  const generateRows = useCallback((suiteId: string, req: { caseId: string; count?: number; brief?: string }) => client.generateAgentSuiteDatasetRows(name ?? "", suiteId, req), [client, name]);
+  const generateRows = useCallback((suiteId: string, req: { caseId: string; count?: number; brief?: string; generator?: SuiteRole }) => client.generateAgentSuiteDatasetRows(name ?? "", suiteId, req), [client, name]);
 
   return {
     suites: current?.suites,

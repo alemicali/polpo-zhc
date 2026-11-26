@@ -32,6 +32,22 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-26-suite-roles",
+    date: "2026-11-26",
+    kind: "improved",
+    title: "Suite: chi fa da giudice lo scegli tu (Polpo, un agente o modello e motore)",
+    summary: "Giudice, utente simulato, generatore di casi e revisore delle suite ora parlano come una normale chat: li fa Polpo, un tuo agente o un modello con il motore che preferisci, anche il CLI di Claude o Codex con il tuo account.",
+    body: [
+      "- **Quattro ruoli**: il **giudice** dei punteggi LLM, l'**utente simulato** delle conversazioni a più turni, il **generatore** di casi e righe di dataset, il **revisore** di \"Spiega questa esecuzione\".",
+      "- **Chi li fa**: se non scegli nulla li fa **Polpo**; altrimenti un **agente** (anche una sua versione o la bozza) oppure **modello e motore** scelti come per un agente — lo stesso selettore del modello con il badge del motore e lo stesso selettore del motore (Polpo, un harness, il CLI ufficiale con il tuo account).",
+      "- **Stesso percorso delle chat**: ogni ruolo è un turno di chat come quelli degli agenti, senza strumenti, con autenticazione, limiti, alternative in caso di errore e costi già collaudati. Niente più errori con i modelli che rifiutano la temperatura.",
+      "- **Giudizi leggibili**: se il giudice non risponde in JSON gli viene chiesto una volta di correggersi; se ancora non va, il punteggio mostra la sua risposta così com'è.",
+      "- Imposti i ruoli nella vista **Valutazioni** dell'editor della suite; un punteggio LLM e un caso a più turni possono avere il loro; in **Aggiungi casi** scegli chi li scrive. Anche via API, MCP e nella chat con Polpo. Le suite con il vecchio \"modello del giudice\" continuano a funzionare.",
+      "- Corretto anche: con il motore CLI le chiamate agli strumenti comparivano due volte nella traccia.",
+    ].join("\n"),
+    highlight: true,
+  },
+  {
     id: "2026-11-25-agent-benchmarks-playground",
     date: "2026-11-25",
     kind: "new",

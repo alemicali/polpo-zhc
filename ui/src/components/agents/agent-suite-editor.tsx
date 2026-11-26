@@ -7,13 +7,14 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Code2, Database, FileText, Gauge, ListChecks, Loader2, Plus, Save, ShieldCheck, Trash2, Upload } from "lucide-react";
-import type { AgentSuite, AgentSuiteInput, SuiteAssertion, SuiteAssertionType, SuiteCase, SuiteEvalSettings, SuiteGate, SuiteMockMode, SuiteScorer, SuiteScorerType, ToolMock, ScriptedTurn, UseAgentSuitesReturn } from "@polpo-ai/react";
+import type { AgentSuite, AgentSuiteInput, SuiteRole, SuiteAssertion, SuiteAssertionType, SuiteCase, SuiteEvalSettings, SuiteGate, SuiteMockMode, SuiteScorer, SuiteScorerType, ToolMock, ScriptedTurn, UseAgentSuitesReturn } from "@polpo-ai/react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ASSERTION_LABELS, ASSERTION_TEMPLATES, SCORER_LABELS, SCORER_TEMPLATES, SUITE_MODES, blankCase } from "@/lib/agent-suites";
+import { SuiteRolePicker } from "./suite-role-picker";
 import { cn } from "@/lib/utils";
 
 type View = "form" | "evals" | "gate" | "datasets" | "json" | "yaml";
@@ -73,12 +74,22 @@ function ScorerList({ value, onChange, title, hint }: { value: SuiteScorer[]; on
       <RowHeader title={title} />
       {hint && <p className="text-micro text-muted-foreground">{hint}</p>}
       {value.map((sc, i) => {
-        const { type, threshold, weight, ...params } = sc;
+        const { type, threshold, weight, ...all } = sc;
+        // an LLM judge's own judge is picked below, not in the JSON (its old `model` reads as a model block)
+        const { judge: ownJudge, model: oldModel, ...params } = all as typeof all & { judge?: SuiteRole; model?: string };
+        const judge = type === "llm_judge" ? ownJudge ?? (oldModel ? { model: oldModel } : undefined) : undefined;
+        const shown = type === "llm_judge" ? params : all;
         return (
           <div key={`${i}-${type}`} className="flex flex-wrap items-start gap-2" data-testid="suite-scorer-form">
             <span className="mt-2 w-36 shrink-0 text-caption font-medium">{SCORER_LABELS[type]}</span>
             <div className="min-w-0 flex-1 basis-64">
-              <JsonField label={`${type} parameters`} value={params} onChange={(v) => set(i, { ...(v as object ?? {}), type, ...(threshold !== undefined ? { threshold } : {}), ...(weight !== undefined ? { weight } : {}) } as SuiteScorer)} />
+              <JsonField label={`${type} parameters`} value={shown} onChange={(v) => set(i, { ...(v as object ?? {}), type, ...(judge ? { judge } : {}), ...(threshold !== undefined ? { threshold } : {}), ...(weight !== undefined ? { weight } : {}) } as SuiteScorer)} />
+              {type === "llm_judge" && (
+                <div className="mt-2">
+                  <SuiteRolePicker label="Judge of this scorer" inheritLabel="The suite's judge" value={judge} testId="suite-scorer-judge"
+                    onChange={(role) => set(i, { ...params, type, ...(role ? { judge: role } : {}), ...(threshold !== undefined ? { threshold } : {}), ...(weight !== undefined ? { weight } : {}) } as SuiteScorer)} />
+                </div>
+              )}
             </div>
             <label className="w-20 shrink-0">
               <span className="text-micro text-muted-foreground">Threshold</span>
@@ -119,16 +130,18 @@ function EvalsView({ draft, setDraft }: { draft: Draft; setDraft: (d: Draft) => 
   const num = (v: string) => (v === "" ? undefined : Number(v));
   return (
     <div className="space-y-4 px-4 py-3" data-testid="suite-evals">
+      {/* who plays the LLM roles: Polpo, an agent, or a model + engine block (each a chat turn without tools) */}
+      <div className="grid gap-3 lg:grid-cols-2" data-testid="suite-roles">
+        <SuiteRolePicker label="Judge (LLM judge scorers)" value={evals.judge ?? (evals.judgeModel ? { model: evals.judgeModel } : undefined)} testId="suite-role-judge"
+          onChange={(judge) => setEvals({ judge, judgeModel: undefined })} />
+        <SuiteRolePicker label="Simulated user (multi-turn cases)" value={draft.simulator ?? (draft.simulatorModel ? { model: draft.simulatorModel } : undefined)} testId="suite-role-simulator"
+          onChange={(simulator) => { const { simulatorModel: _old, ...rest } = draft; setDraft({ ...rest, ...(simulator ? { simulator } : { simulator: undefined }) }); }} />
+        <SuiteRolePicker label="Case generator (Generate cases, dataset rows)" value={draft.generator} testId="suite-role-generator"
+          onChange={(generator) => setDraft({ ...draft, generator })} />
+        <SuiteRolePicker label="Reviewer (Explain this run)" value={evals.reviewer} testId="suite-role-reviewer"
+          onChange={(reviewer) => setEvals({ reviewer })} />
+      </div>
       <div className="grid gap-3 sm:grid-cols-2">
-        <label className="block min-w-0">
-          <span className="text-micro text-muted-foreground">Judge model (LLM judge scorers; default: Polpo's model)</span>
-          <Input value={evals.judgeModel ?? ""} placeholder="anthropic:claude-sonnet-5-5" aria-label="Judge model" className="h-8 font-mono text-caption" onChange={(e) => setEvals({ judgeModel: e.target.value || undefined })} />
-        </label>
-        <label className="block min-w-0">
-          <span className="text-micro text-muted-foreground">Simulated user model (multi-turn cases; default: Polpo's model)</span>
-          <Input value={draft.simulatorModel ?? ""} placeholder="openai:gpt-5-mini" aria-label="Simulated user model" className="h-8 font-mono text-caption" data-testid="suite-simulator-model"
-            onChange={(e) => setDraft({ ...draft, simulatorModel: e.target.value || undefined })} />
-        </label>
         <label className="block min-w-0">
           <span className="text-micro text-muted-foreground">Repetitions (runs per case: mean, stddev, flakiness)</span>
           <Input type="number" min={1} max={10} value={evals.repetitions ?? ""} placeholder="1" aria-label="Repetitions" className="h-8 text-caption" onChange={(e) => setEvals({ repetitions: num(e.target.value) })} />
@@ -297,8 +310,11 @@ function CaseForm({ value, onChange, onRemove, defaultMode, datasets }: { value:
               <Input value={value.mocks.simulatedUser.stopScorer ?? ""} aria-label="Stop when this scorer passes" placeholder="The scorer's id" className="h-8 font-mono text-caption"
                 onChange={(e) => setMocks({ simulatedUser: { ...value.mocks!.simulatedUser, stopScorer: e.target.value || undefined } })} />
             )}
-            <Input value={value.mocks.simulatedUser.model ?? ""} aria-label="Simulator model" placeholder="Simulator model (default: the suite's, else Polpo's)" className="h-8 font-mono text-caption"
-              onChange={(e) => setMocks({ simulatedUser: { ...value.mocks!.simulatedUser, model: e.target.value || undefined } })} />
+            <div className="sm:col-span-2">
+              <SuiteRolePicker label="Who plays this user" inheritLabel="The suite's simulated user" testId="suite-case-simulator"
+                value={value.mocks.simulatedUser.simulator ?? (value.mocks.simulatedUser.model ? { model: value.mocks.simulatedUser.model } : undefined)}
+                onChange={(simulator) => setMocks({ simulatedUser: { ...value.mocks!.simulatedUser, simulator, model: undefined } })} />
+            </div>
           </div>
         ) : (
           <Button variant="outline" size="sm" className="h-7" onClick={() => setMocks({ simulatedUser: { persona: "", goal: "", maxTurns: 5 } })} data-testid="suite-add-simulated-user"><Plus className="mr-1 h-3 w-3" /> Simulated user</Button>

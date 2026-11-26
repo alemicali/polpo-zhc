@@ -1,53 +1,16 @@
 /**
- * The host side of agent suite evals: the LLM judge (temperature 0, the suite's judge model or the
- * orchestrator's effective one), "explain this run" (the orchestrator's effective model) and custom
- * scorers run in the sandboxed code worker hosted MCP servers use (bubblewrap: no network, no
- * instance files, no secrets, a time and memory limit).
+ * The host side of agent suite evals: custom scorers run in the sandboxed code worker hosted MCP
+ * servers use (bubblewrap: no network, no instance files, no secrets, a time and memory limit).
+ * The LLM judge and "explain this run" are suite roles: chat turns through the chat completions
+ * pipeline (AgentSuiteRunner.playRole), never a model called from here.
  */
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ScorerDeps } from "@polpo-ai/core";
-import type { ModelConfig } from "../core/types.js";
-import { completeSimpleWithAuth, estimateCost, resolveModel, resolveModelSpec } from "../llm/pi-client.js";
-import { requireOrchestratorModel } from "../llm/orchestrator-model.js";
-import { queryOrchestratorText } from "../llm/query.js";
 import { sharedCodeRunner } from "../mcp-servers/host.js";
 import { DEFAULT_LIMITS } from "../mcp-servers/types.js";
-
-const JUDGE_SYSTEM = "You are a strict, impartial evaluator. You answer with JSON only.";
-
-/** The LLM judge: one completion at temperature 0. */
-export function suiteJudge(configured: () => string | ModelConfig | undefined): NonNullable<ScorerDeps["judge"]> {
-  return async ({ model, prompt }) => {
-    const spec = resolveModelSpec(model ?? requireOrchestratorModel(configured()));
-    if (!spec) throw new Error("No model for the LLM judge: set the suite's judge model or Polpo's model (Settings → Orchestrator)");
-    const m = resolveModel(spec);
-    const context = { systemPrompt: JUDGE_SYSTEM, messages: [{ role: "user" as const, content: prompt, timestamp: Date.now() }] };
-    const maxTokens = Math.min(m.maxTokens || 4096, 4096);
-    // Reasoning models (Codex, o-series…) reject `temperature`: ask without it, and retry without it
-    // when a provider refuses it anyway.
-    let res = await completeSimpleWithAuth(m, context, (m.reasoning ? { maxTokens } : { temperature: 0, maxTokens }) as never);
-    if (res.stopReason === "error" && /temperature/i.test(res.errorMessage ?? "")) {
-      res = await completeSimpleWithAuth(m, context, { maxTokens } as never);
-    }
-    if (res.stopReason === "error" || res.stopReason === "aborted") throw new Error(res.errorMessage ?? "the judge's model failed");
-    const text = res.content.filter((c): c is { type: "text"; text: string } => c.type === "text").map((c) => c.text).join("\n").trim();
-    let costUsd: number | undefined;
-    try { costUsd = res.usage ? estimateCost(m, res.usage).totalCost : undefined; } catch { /* no pricing */ }
-    return { text, model: spec, ...(costUsd !== undefined ? { costUsd } : {}) };
-  };
-}
-
-/** "Explain this run" with the orchestrator's effective model. */
-export function suiteReviewer(configured: () => string | ModelConfig | undefined): (prompt: string) => Promise<{ text: string; model?: string; costUsd?: number }> {
-  return async (prompt) => {
-    const model = requireOrchestratorModel(configured());
-    const res = await queryOrchestratorText(prompt, model);
-    return { text: res.text, model: res.usedSpec ?? resolveModelSpec(model), ...(res.costUsd !== undefined ? { costUsd: res.costUsd } : {}) };
-  };
-}
 
 /**
  * The module a custom scorer runs as: its code is the body of an async function that gets
