@@ -149,8 +149,27 @@ results picks the branch that runs.
   none of them.
 - **Then**: the chosen branch's tasks go on, with the decision (question, answer, ranking) appended to
   their description; the other branches' tasks — and the tasks whose dependencies are all skipped —
-  are **skipped** (done, their result says why). A task that also depends on the chosen branch (a
+  are **not reached**: closed without running. A task that also depends on the chosen branch (a
   join) still runs.
+- **Not reached** is machine-readable: the task's status stays `done` (joins, mission completion,
+  retries and status filters are unchanged) and `result.skipped` is
+  `{ reason: "decision", node, branch, answer?, confidence?, decidedBy?, at? }` (the result text says
+  it too). Every surface reads it — `taskSkip()` in `@polpo-ai/core` / `@polpo-ai/sdk` (also
+  re-exported by `@polpo-ai/react`), which also recognises tasks skipped before the marker existed
+  from their result text:
+  - **REST**: `GET /tasks` (full and `slim=true`) and `GET /tasks/{id}` add `notReached` (the marker);
+    the mission report (`mission:completed`) marks its tasks `notReached: true` and counts them in
+    `notReached`; the `task:transition` event of a skipped task has `skipped: true`.
+  - **MCP**: `polpo_tasks_list`, `polpo_task_get` and `polpo_mission_get` show `[not reached]` (never
+    done) with the decision, `not_reached` in their structured content, and `task_counts.not_reached`;
+    the task and mission cards show "Not reached" (dashed, muted).
+  - **Polpo's chat**: `list_tasks`, `get_task`, `get_mission` say "not reached" and count them apart.
+  - **Dashboard**: the mission and playbook graphs highlight the branch taken (its edge labelled with
+    the answer and confidence, its tasks ringed) and draw the others dashed and muted, "Not reached"
+    (tooltip "Decision <name> chose <answer>"); while the decision is pending the branches are
+    neutral, when uncertain the node waits for you. The mission's task list, the tasks list and
+    board (a "Not reached" tab / column when there are any), the task page and every count show them
+    as not reached, never done (`n not reached`; progress is over the tasks that can still run).
 - **Uncertain or failed** (no decision model, the gateway failing): `onUncertain: "human"` (default)
   pauses the mission at a checkpoint `Decision: <name>` (notified like any checkpoint): resuming it
   takes the model's suggestion; or choose a branch (or none) on the Decisions page,
@@ -162,6 +181,7 @@ results picks the branch that runs.
 
 The mission and playbook graphs draw decision nodes between their after tasks and their branches,
 each edge labelled with its answer, and show the live state (deciding, the branch taken, waiting).
+Once the run ended (the live state is gone) the branch taken is read from the not-reached tasks.
 
 ## Suites: the decision scorer
 

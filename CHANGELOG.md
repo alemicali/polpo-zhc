@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - MCP: the `polpo_wabiz_send_flow` / `wabiz_send_flow` reference parameter is `flow_ref` (Meta's `flow_token`).
 
+### Fixed
+- **Decision branches not taken no longer look done** (docs/decisions.md). The tasks a mission or playbook decision node skips are now **not reached** everywhere: a machine-readable marker `result.skipped` (`{ reason: "decision", node, branch, answer, confidence, decidedBy, at }`) next to the status `done` (joins, completion and retries are unchanged); tasks skipped before are recognised from their result text (`taskSkip()` in `@polpo-ai/core`, `@polpo-ai/sdk`, `@polpo-ai/react`).
+  - **Dashboard**: the mission and playbook graphs highlight the branch taken (its edge with the answer and confidence, its tasks) and draw the others dashed and muted, "Not reached" (tooltip "Decision <name> chose <answer>"), neutral while the decision is pending, waiting for you when uncertain — also once the run ended. The mission's task list, the tasks list and board ("Not reached" tab / column), the task page, the agent's tasks, the dashboard and mission counts show them as not reached, never done (`n not reached`).
+  - **REST**: `notReached` on `GET /tasks` (full and slim) and `GET /tasks/{id}`; the mission report marks them (`notReached`); `task:transition` has `skipped: true`.
+  - **MCP**: `polpo_tasks_list`, `polpo_task_get`, `polpo_mission_get` (`[not reached]`, `not_reached`, `task_counts.not_reached`) and the task / mission cards. **Polpo's chat**: `list_tasks`, `get_task`, `get_mission`. Notifications and the CLI log say "not reached".
+
 ## [0.8.0] — 2026-11-26 — Agent tests and evals, triggers, decisions, media, CLI coding chats
 
 ### Added

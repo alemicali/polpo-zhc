@@ -32,6 +32,21 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-26-decision-branches-not-reached",
+    date: "2026-11-26",
+    kind: "fixed",
+    title: "Decisioni: i rami non scelti ora sono \"non raggiunti\"",
+    summary: "Nelle missioni e nei playbook con un nodo decisione, il ramo scelto è evidenziato con la risposta e la sicurezza; i task degli altri rami sono tratteggiati e segnati \"Not reached\", non più verdi come se fossero stati fatti.",
+    body: [
+      "- **Grafo della missione e del playbook**: il ramo scelto dalla decisione è evidenziato, con la risposta e la sicurezza sull'arco, e i suoi task sono messi in risalto; gli altri rami sono tratteggiati e attenuati, con l'etichetta **Not reached** e il suggerimento \"Decision <nome> chose <risposta>\". Mentre la decisione è in attesa i rami restano neutri; se è incerta, il nodo aspetta te. Il ramo scelto resta visibile anche a missione finita.",
+      "- **Ovunque**: lista dei task della missione, pagina Task (con una scheda e una colonna **Not reached** quando ce ne sono), pagina del task, task dell'agente, dashboard e conteggi delle missioni mostrano i task saltati come non raggiunti, mai come fatti (\"n not reached\"); l'avanzamento conta solo i task che possono ancora essere eseguiti.",
+      "- **Stato reale solo su ciò che è stato eseguito**: in esecuzione, fatto, fallito restano sui task del ramo scelto.",
+      "- Anche via API (`notReached` sui task, `result.skipped`), MCP (`polpo_tasks_list`, `polpo_task_get`, `polpo_mission_get` e le schede), nella chat con Polpo e nell'SDK. I task saltati prima di oggi vengono riconosciuti dal loro risultato.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri le missioni", to: "/missions" },
+  },
+  {
     id: "wabiz-full-cloud-api-2026-11-26",
     date: "2026-11-26",
     kind: "new",
