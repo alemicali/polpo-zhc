@@ -17,7 +17,10 @@ export { useMission } from "./hooks/use-mission.js";
 export { useMissionCost } from "./hooks/use-mission-cost.js";
 export type { UseMissionCostReturn } from "./hooks/use-mission-cost.js";
 export { useConnectors, connectorLabel } from "./hooks/use-connectors.js";
-export { useWaBusinessStatus, useWaTemplates, useWaConversation, useWaContacts } from "./hooks/use-whatsapp-business.js";
+export {
+  useWaBusinessStatus, useWaTemplates, useWaConversation, useWaContacts, useWaPending, useWaBusinessProfile, useWaBlocked, useWaAnalytics,
+  useWaAccountEvents, useWaPhone, useWaBusinessEvents, useWaMedia,
+} from "./hooks/use-whatsapp-business.js";
 export { useSlackStatus, usePeers } from "./hooks/use-channels.js";
 export type { UseSlackStatusReturn, UsePeersReturn } from "./hooks/use-channels.js";
 export { useTriggers, useTriggerDeliveries, useTriggerDelivery } from "./hooks/use-triggers.js";
@@ -28,7 +31,10 @@ export { useGenerateImage, useMediaLog } from "./hooks/use-media.js";
 export type { UseGenerateImageReturn, UseMediaLogReturn } from "./hooks/use-media.js";
 export { useCodingChats, useCodingChat } from "./hooks/use-coding-chats.js";
 export type { UseCodingChatsReturn, UseCodingChatReturn } from "./hooks/use-coding-chats.js";
-export type { UseWaBusinessStatusReturn, UseWaTemplatesReturn, UseWaConversationReturn, UseWaContactsReturn } from "./hooks/use-whatsapp-business.js";
+export type {
+  UseWaBusinessStatusReturn, UseWaTemplatesReturn, UseWaConversationReturn, UseWaContactsReturn, UseWaPendingReturn, UseWaBusinessProfileReturn,
+  UseWaBlockedReturn, UseWaAnalyticsReturn, UseWaAccountEventsReturn, UseWaPhoneReturn, UseWaBusinessEventsReturn, UseWaMediaReturn,
+} from "./hooks/use-whatsapp-business.js";
 export type { UseConnectorsReturn } from "./hooks/use-connectors.js";
 export { useAgents } from "./hooks/use-agents.js";
 export type { UseAgentsReturn } from "./hooks/use-agents.js";
@@ -337,6 +343,28 @@ export type {
   WaBusinessConversation,
   WaBusinessTemplate,
   WaBusinessSendResult,
+  WaBusinessPhoneInfo,
+  WaBizMediaKind,
+  WaBizMedia,
+  WaBizContext,
+  WaBizInteractiveHeader,
+  WaBizSharedContact,
+  WaBizOrderItem,
+  WaBizOutbound,
+  WaBizOutboundType,
+  WaBizTemplateInput,
+  WaBizFileInput,
+  WaBusinessTemplateButton,
+  WaBusinessTemplateComponent,
+  WaBusinessTemplateDefinition,
+  WaBusinessProfile,
+  WaBusinessBlockResult,
+  WaBusinessAnalyticsKind,
+  WaBusinessAnalyticsQuery,
+  WaBusinessPhoneAction,
+  WaBusinessWebhookOverride,
+  WaBusinessAccountEvent,
+  WaBusinessLiveEvent,
   ComputerWebhookOutcome,
   ComputerWebhookStatus,
   ComputerWebhookCountsBefore,
