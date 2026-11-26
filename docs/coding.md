@@ -36,6 +36,27 @@ A session is either:
   claude / codex terminal sessions created before coding chats (they stay terminals, resumed with
   `--resume` as before).
 
+### Open as chat
+
+An older Claude Code or Codex **terminal** session can continue as a coding chat: **Open as chat** in
+its header (above the terminal), or in the session's context menu in the navigation. The chat opens in
+the **same worktree**, on **your** CLI account, and the view moves to it; the terminal session stays
+(marked as continued: its header then says **Go to chat**).
+
+- **Claude Code**: the terminal ran `claude --session-id <id>`, so the chat **resumes that
+  conversation** (`claude -p --resume <id>`, the session's `agentSessionId`). That works when your CLI
+  account's config directory has it. The terminal ran with this server's own Claude Code sign-in
+  (`~/.claude`), so if your account is another directory, the program cannot find the conversation:
+  the chat then starts **a new conversation in the same worktree** and says why (the terminal keeps
+  its conversation).
+- **Codex**: its terminal sessions keep no conversation id Polpo knows (`codex resume --last`), so the
+  chat starts a new conversation in the same worktree, and says so.
+- The chat's first line: "Continued from terminal session …", with whether the conversation was
+  resumed (`continuedFrom.status`: `pending` until the first turn, then `resumed` or `new`).
+- REST: `POST /api/v1/coding/chats` with `fromTerminal: { id, label? }` and `resumeSessionId`; MCP:
+  `polpo_coding_chat_start` with `from_terminal` and `resume_session_id` (Polpo's chat: the same
+  parameters of `coding_chat_start`); SDK: `createCodingChat({ …, fromTerminal, resumeSessionId })`.
+
 ## Coding chats
 
 A coding chat runs the **official, unmodified `claude` or `codex` program through the CLI engine**

@@ -90,6 +90,11 @@ export function fakeClaude(l: Omit<Launched, "proc">, cwd: string): (line: strin
     const text = msg.message.content;
     p.out({ type: "user", message: { role: "user", content: text } }); // --replay-user-messages
     if (!init) { init = true; p.out({ type: "system", subtype: "init", session_id: sessionId, model: "claude-opus-4-5" }); }
+    // a conversation this account's config directory does not have (e.g. made with another sign-in)
+    if (sessionId.startsWith("gone-")) {
+      result(p, `No conversation found with session ID: ${sessionId}`, { is_error: true, subtype: "error_during_execution" });
+      return;
+    }
     if (text.includes("hello")) {
       p.out({ type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hel" } } });
       p.out({ type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "lo" } } });

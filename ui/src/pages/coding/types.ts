@@ -56,6 +56,8 @@ export type CodingTerminal = {
   chatId?: string;
   /** The chat could not be created (shown in its place). */
   chatError?: string;
+  /** "Open as chat": the coding chat that continues this terminal session (the terminal stays). */
+  convertedToChatId?: string;
 };
 
 /** A worktree created on disk that has no session yet (the quick-start screen). */

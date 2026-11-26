@@ -119,12 +119,17 @@ export function registerCodingTools(tool: Register, deps: McpDeps): void {
       title: z.string().max(120).optional().describe("A name for the session (default: the program's)"),
       branch: z.string().max(300).optional().describe("The worktree's branch, shown with the session"),
       model: z.string().max(200).optional().describe("A model id or alias of that CLI (default: the CLI's)"),
+      from_terminal: z.object({ id: z.string().min(1), label: z.string().optional() }).optional()
+        .describe("Open as chat: the Coding app's terminal session this chat continues (its id and label; the terminal stays open)"),
+      resume_session_id: z.string().max(200).optional()
+        .describe("The program's conversation to resume (Claude Code: the terminal session's id). If the person's CLI account cannot read it, a new conversation starts and the chat says so"),
       ...waitParams,
     },
     outputSchema: { session: looseObject },
     annotations: { ...WRITE, openWorldHint: true },
   }, async (args, extra) => {
-    const { wait, timeout_seconds, ...body } = args;
+    const { wait, timeout_seconds, from_terminal, resume_session_id, ...rest } = args;
+    const body = { ...rest, ...(from_terminal ? { fromTerminal: from_terminal } : {}), ...(resume_session_id ? { resumeSessionId: resume_session_id } : {}) };
     const r = await apiSend(deps, "POST", "/coding/chats", body);
     if (!r.ok) return apiError(r, "Starting the coding chat");
     let s = r.data as CodingSessionShape;

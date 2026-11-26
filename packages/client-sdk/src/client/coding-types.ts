@@ -81,6 +81,8 @@ interface CodingChatBase {
   /** The CLI's own estimate (the plan pays). */
   costUsd: number;
   turns: number;
+  /** Opened from a terminal session: what it continues, and whether its conversation was resumed. */
+  continuedFrom?: { terminalId: string; label?: string; resumeSessionId?: string; status: "pending" | "resumed" | "new"; note: string };
   createdAt: string;
   updatedAt: string;
 }
@@ -106,6 +108,10 @@ export interface CodingChatCreateRequest {
   model?: string;
   /** The first message: the turn starts at once. */
   prompt?: string;
+  /** Open as chat: the Coding app's terminal session this chat continues (it stays open). */
+  fromTerminal?: { id: string; label?: string };
+  /** The program's conversation to resume (Claude Code: the terminal's --session-id). */
+  resumeSessionId?: string;
 }
 
 export interface CodingChatAccountInfo {
