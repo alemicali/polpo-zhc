@@ -228,6 +228,41 @@
           }
         ]
       },
+      "AgentTalksTo": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "org",
+              "list",
+              "anyone",
+              "none"
+            ],
+            "description": "org: its manager, its direct reports and the extra agents; list: only the listed agents; anyone: every agent; none: no agent (Polpo always talks to it)"
+          },
+          "agents": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "description": "Extra agents (org) or the only agents (list)"
+          },
+          "acceptFrom": {
+            "type": "string",
+            "enum": [
+              "anyone",
+              "lines"
+            ],
+            "description": "lines: refuse senders outside its own lines (default anyone)"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "additionalProperties": false
+      },
       "SuiteRole": {
         "type": "object",
         "properties": {
@@ -10073,6 +10108,9 @@
                   "reportsTo": {
                     "type": "string"
                   },
+                  "talksTo": {
+                    "$ref": "#/components/schemas/AgentTalksTo"
+                  },
                   "browserProfile": {
                     "type": "string"
                   },
@@ -10620,6 +10658,16 @@
                   },
                   "reportsTo": {
                     "type": "string"
+                  },
+                  "talksTo": {
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/AgentTalksTo"
+                      },
+                      {
+                        "nullable": true
+                      }
+                    ]
                   },
                   "reasoning": {
                     "type": "string"
@@ -16253,6 +16301,140 @@
                     "ok",
                     "error",
                     "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agents/lines": {
+      "get": {
+        "tags": [
+          "Agents"
+        ],
+        "summary": "Org chart and communication lines",
+        "description": "Every agent's communication lines (mode, manager, direct reports, extra agents, who it can reach) and the directed edges between agents (from may talk to to). `unrestricted`: agents with no lines set (from before the lines): they talk to anyone. Polpo talks to every agent.",
+        "responses": {
+          "200": {
+            "description": "The team's lines",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "agents": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "agent": {
+                                "type": "string"
+                              },
+                              "mode": {
+                                "type": "string",
+                                "enum": [
+                                  "org",
+                                  "list",
+                                  "anyone",
+                                  "none"
+                                ]
+                              },
+                              "explicit": {
+                                "type": "boolean"
+                              },
+                              "manager": {
+                                "type": "string"
+                              },
+                              "reports": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "agents": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "acceptFrom": {
+                                "type": "string",
+                                "enum": [
+                                  "anyone",
+                                  "lines"
+                                ]
+                              },
+                              "reachable": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": [
+                              "agent",
+                              "mode",
+                              "explicit",
+                              "reports",
+                              "agents",
+                              "acceptFrom",
+                              "reachable"
+                            ]
+                          }
+                        },
+                        "edges": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "from": {
+                                "type": "string"
+                              },
+                              "to": {
+                                "type": "string"
+                              },
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "manager",
+                                  "report",
+                                  "extra",
+                                  "open"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "from",
+                              "to",
+                              "kind"
+                            ]
+                          }
+                        },
+                        "unrestricted": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "agents",
+                        "edges",
+                        "unrestricted"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
                   ]
                 }
               }

@@ -24,6 +24,8 @@ The official WhatsApp Business channel (Meta Cloud API: setup, the 24-hour windo
 
 Slack (an app over Socket Mode: DMs, mentions and threads as conversations with Polpo or an agent, files, buttons, `/polpo`; no public URL needed) is documented in [slack.md](slack.md).
 
+Communication lines between agents — who may talk to whom (`talksTo`: org chart, a list, anyone, nobody), how `ask_agent`, `message_agent`, `escalate` and rooms enforce them, and agents working a task talking to other agents — are documented in [agent-lines.md](agent-lines.md).
+
 Agent versions — drafts, semver versions, deploying to production, rollback, the deploy history with diffs, pinning a task or chat to a version (`writer@1.2.0`) and the API compatibility setting — are documented in [agent-versions.md](agent-versions.md).
 
 Agent suites — tests and evals of an agent with tool mocks and scripted models, datasets, assertions, runs against a version with a trace per case, and the per-engine mock support —, benchmarks (suites × variants × repetitions: leaderboard, Pareto front, case × variant matrix, side by side) and the Playground (chat with several variants at once) are documented in [agent-suites.md](agent-suites.md).

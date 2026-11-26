@@ -32,6 +32,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-26-agent-comm-lines",
+    date: "2026-11-26",
+    kind: "new",
+    title: "Linee di comunicazione tra agenti",
+    summary: "Decidi chi può parlare con chi: di default ogni agente parla con il suo responsabile e i suoi diretti; gli agenti che lavorano a un task ora possono chiedere aiuto agli altri e fare escalation.",
+    body: [
+      "- **Chi parla con chi**: nella scheda dell'agente, Panoramica → **Communication**, scegli il **responsabile** e le linee: **organigramma** (responsabile, diretti e gli agenti in più che aggiungi), **solo gli agenti elencati**, **chiunque** o **nessuno**. Puoi anche far rifiutare all'agente i messaggi di chi è fuori dalle sue linee. Polpo parla sempre con tutti, e ogni agente può sempre fare **escalation** al suo responsabile.",
+      "- **I nuovi agenti** seguono l'organigramma; quelli che esistevano già continuano a parlare con chiunque, finché non li limiti (un avviso te lo ricorda, con un clic).",
+      "- **Rispettate ovunque**: `ask_agent` e `message_agent` rifiutano chi è fuori dalle linee e dicono con chi l'agente può parlare; gli strumenti nominano solo quegli agenti; nelle stanze la risposta di un agente coinvolge solo gli agenti con cui può parlare (le tue menzioni restano libere).",
+      "- **Agenti al lavoro su un task, anche su un computer**: ora possono chiedere a un altro agente e **aspettare la risposta**, passargli del lavoro (la risposta arriva al task) o fare **escalation** al responsabile, con qualsiasi motore (Polpo, Claude Code, Codex, OpenCode, CLI).",
+      "- **Organigramma**: nella pagina Agenti il pulsante **Communication lines** mostra chi può parlare con chi sopra l'organigramma; è spento di default e il browser ricorda la tua scelta.",
+      "- Tutto anche da API, MCP (`polpo_agent_lines`, `talksTo` su `polpo_agent_update`) e nella chat con Polpo. Guida: docs/agent-lines.md.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri gli agenti", to: "/agents" },
+  },
+  {
     id: "2026-11-26-slack-channels",
     date: "2026-11-26",
     kind: "new",
