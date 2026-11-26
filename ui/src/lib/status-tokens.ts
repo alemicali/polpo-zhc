@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   Calendar,
   CheckCircle2,
+  CircleDashed,
   Clock,
   Eye,
   FileEdit,
@@ -93,6 +94,12 @@ export const taskStatusStyles: Record<TaskStatus, TaskStatusStyle> = {
   done:              style("success",     { icon: CheckCircle2,  label: "Done",              short: "Done" }),
   failed:            style("destructive", { icon: AlertTriangle, label: "Failed",            short: "Failed" }),
 };
+
+/**
+ * A task a mission decision node left out (its branch was not taken): closed as done without
+ * running. Muted and dashed — never the done colour (lib/task-not-reached.ts decides which tasks).
+ */
+export const taskNotReachedStyle: TaskStatusStyle = style("muted", { icon: CircleDashed, label: "Not reached", short: "Not reached" });
 
 // ── Task phase (execution → review → fix / clarification) ──
 

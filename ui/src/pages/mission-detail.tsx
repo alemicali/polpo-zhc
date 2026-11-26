@@ -63,7 +63,7 @@ import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { cronToHuman } from "@/lib/cron";
-import { missionStatusStyles, taskStatusStyles, taskPhaseStyles } from "@/lib/status-tokens";
+import { missionStatusStyles, taskStatusStyles, taskPhaseStyles, taskNotReachedStyle } from "@/lib/status-tokens";
 import { JsonBlock } from "@/components/json-block";
 import { Calendar, Repeat, Bell, FlaskRound } from "lucide-react";
 import { TargetSuitesPanel } from "@/components/suites/target-suites-panel";
@@ -78,6 +78,8 @@ import {
   type MissionDelayDef,
   type MissionTaskDef,
 } from "@/lib/mission-data";
+import { shortAnswer } from "@/lib/decisions";
+import { branchEdgeState, confidenceText, decisionBranchView, notReachedOf, notReachedTooltip, countTaskOutcomes, type DecisionBranchView } from "@/lib/task-not-reached";
 import { withMeasured } from "@/lib/graph-nodes";
 import { TaskCostBadge, TaskEngineBadge } from "@/components/shared/run-context";
 import { taskCostSummaryOf } from "@/lib/task-cost";
@@ -159,6 +161,8 @@ const taskStatusConfig: Record<TaskStatus, TaskNodeStatusStyle> = {
   failed: nodeStatus("failed", true),
 };
 
+const notReachedNodeStatus: TaskNodeStatusStyle = { icon: taskNotReachedStyle.icon, color: taskNotReachedStyle.color, label: taskNotReachedStyle.short, nodeColor: taskNotReachedStyle.border };
+
 const phaseIcons: Record<string, { icon: React.ElementType; color: string; label: string }> = {
   fix: { icon: taskPhaseStyles.fix.icon, color: taskPhaseStyles.fix.color, label: taskPhaseStyles.fix.short },
   clarification: { icon: taskPhaseStyles.clarification.icon, color: taskPhaseStyles.clarification.color, label: taskPhaseStyles.clarification.short },
@@ -172,6 +176,9 @@ const EDGE = {
   checkpoint: "var(--warning)",
   delay: "var(--info)",
   idle: "color-mix(in oklch, var(--muted-foreground) 30%, transparent)",
+  /** The branch a decision took. */
+  chosen: "var(--primary)",
+  mutedText: "var(--muted-foreground)",
 };
 
 // ── Graph node data ──
@@ -181,6 +188,8 @@ interface TaskNodeData {
   liveTask?: Task;
   index: number;
   expanded?: boolean;
+  /** On the branch a decision took ("route → billing"): highlighted. */
+  chosenBranch?: string;
   [key: string]: unknown;
 }
 
@@ -210,8 +219,10 @@ interface DelayNodeData {
 
 function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
   const navigate = useNavigate();
-  const { taskDef, liveTask, index, expanded } = data;
-  const statusCfg = liveTask ? taskStatusConfig[liveTask.status] : null;
+  const { taskDef, liveTask, index, expanded, chosenBranch } = data;
+  // a decision took another branch: closed without running — muted, dashed, never the done colour
+  const skip = notReachedOf(liveTask);
+  const statusCfg = liveTask ? (skip ? notReachedNodeStatus : taskStatusConfig[liveTask.status]) : null;
   const StatusIcon = statusCfg?.icon ?? Clock;
   const phase = liveTask?.phase && liveTask.phase !== "execution" ? phaseIcons[liveTask.phase] : null;
   const score = liveTask?.result?.assessment?.globalScore;
@@ -219,7 +230,9 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
   const totalChecks = taskDef.expectations?.length ?? 0;
 
   const bgColor = liveTask
-    ? liveTask.status === "done"
+    ? skip
+      ? "bg-muted/30"
+      : liveTask.status === "done"
       ? "bg-success/5"
       : liveTask.status === "failed"
         ? "bg-destructive/5"
@@ -236,12 +249,18 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
     <>
       <Handle type="target" position={Position.Top} className="!bg-muted-foreground/50 !border-none !w-2 !h-2" />
       <div
+        data-testid="mission-task-node"
+        data-not-reached={skip ? "true" : undefined}
+        data-chosen-branch={chosenBranch && !skip ? "true" : undefined}
+        title={skip ? notReachedTooltip(skip) : chosenBranch ? `Chosen branch: ${chosenBranch}` : undefined}
         className={cn(
           "rounded-xl border-2 px-4 py-3 shadow-card backdrop-blur-surface transition-all cursor-pointer overflow-hidden",
           expanded ? "min-w-[320px] max-w-[420px]" : "min-w-[200px] max-w-[280px]",
           selected
             ? "border-primary ring-2 ring-primary/30 shadow-glow"
             : borderColor,
+          skip && "border-dashed opacity-60 shadow-none",
+          chosenBranch && !skip && !selected && "ring-2 ring-primary/40",
           bgColor,
         )}
       >
@@ -256,8 +275,13 @@ function TaskNodeComponent({ data, selected }: NodeProps<Node<TaskNodeData>>) {
             )}
           />
           {statusCfg && (
-            <Badge variant="outline" className={cn("text-micro px-1 py-0", statusCfg.color)}>
+            <Badge variant="outline" className={cn("text-micro px-1 py-0", statusCfg.color, skip && "border-dashed")} title={skip ? notReachedTooltip(skip) : undefined}>
               {statusCfg.label}
+            </Badge>
+          )}
+          {chosenBranch && !skip && (
+            <Badge variant="outline" className="text-micro px-1 py-0 text-primary border-primary/40" title={`Chosen branch: ${chosenBranch}`}>
+              {chosenBranch.split(" → ").pop()}
             </Badge>
           )}
           {phase && (
@@ -527,28 +551,33 @@ const DECISION_WIDTH = 220;
 const DECISION_HEIGHT = 84;
 
 /** A decision node's live state in the mission run (from GET /decisions/nodes). */
-export interface DecisionNodeView { status: "deciding" | "decided" | "awaiting"; branch?: string | null; suggested?: string | null }
+export interface DecisionNodeView { status: "deciding" | "decided" | "awaiting"; branch?: string | null; suggested?: string | null; answer?: string; confidence?: number }
 
 interface DecisionNodeData {
   decision: MissionDecisionDef;
-  live?: DecisionNodeView;
+  /** Live state, else what the branch tasks' skip markers say (the run ended), else pending. */
+  view: DecisionBranchView;
   [key: string]: unknown;
 }
 
 const QUESTION_KIND: Record<string, string> = { predicate: "Yes / no", choice: "Choice", score: "Score", rank: "Rank" };
 
 function DecisionNodeComponent({ data, selected }: NodeProps<Node<DecisionNodeData>>) {
-  const { decision, live } = data;
-  const status = live?.status === "decided" ? `Branch: ${live.branch ?? "none"}` : live?.status === "awaiting" ? "Waiting for you" : live?.status === "deciding" ? "Deciding" : "Decision";
-  const tone = live?.status === "decided" ? "text-success" : live?.status === "awaiting" ? "text-warning" : "text-info";
+  const { decision, view } = data;
+  const conf = confidenceText(view.confidence);
+  const status = view.status === "decided" ? `Chose ${view.branch ?? "no branch"}${conf ? ` · ${conf}` : ""}` : view.status === "awaiting" ? "Waiting for you" : view.status === "deciding" ? "Deciding" : "Not decided yet";
+  const tone = view.status === "decided" ? "text-primary" : view.status === "awaiting" ? "text-warning" : view.status === "deciding" ? "text-info" : "text-muted-foreground";
+  const live = view.status === "pending" ? undefined : view;
   return (
     <>
       <Handle type="target" position={Position.Top} className="!bg-info/50 !border-none !w-2 !h-2" />
       <div
         data-testid="decision-node"
+        data-state={view.status}
+        title={view.answer ? `${decision.name}: ${view.answer}` : undefined}
         className={cn(
           "rounded-lg border-2 backdrop-blur-surface transition-all duration-200 bg-card/60",
-          live?.status === "awaiting" ? "border-warning/70" : live?.status === "decided" ? "border-success/50" : "border-info/50",
+          live?.status === "awaiting" ? "border-warning/70" : live?.status === "decided" ? "border-primary/50" : live?.status === "deciding" ? "border-info/50" : "border-border",
           selected && "ring-2 ring-info/30",
         )}
         style={{ minWidth: DECISION_WIDTH, maxWidth: DECISION_WIDTH }}
@@ -836,6 +865,14 @@ function buildGraphLayout(
     }
   }
 
+  // the tasks of the branch each decision took (highlighted on their node)
+  const chosenBranch = new Map<string, string>();
+  for (const d of dcDefs) {
+    const v = decisionBranchView(d, decisionStates?.get(d.name), findLive);
+    if (v.status !== "decided" || v.branch == null) continue;
+    for (const title of d.branches[v.branch] ?? []) chosenBranch.set(title, `${d.name} → ${v.branch}`);
+  }
+
   // Recompute max layer after checkpoint, delay and decision pushes
   const maxLayer = Math.max(...layers, ...cpLayers, ...dlLayers, ...dcLayers, 0);
 
@@ -863,6 +900,7 @@ function buildGraphLayout(
           taskDef: taskDefs[idx],
           liveTask: findLive(taskDefs[idx].title),
           index: idx,
+          ...(chosenBranch.has(taskDefs[idx].title) ? { chosenBranch: chosenBranch.get(taskDefs[idx].title) } : {}),
         } as TaskNodeData,
       });
     });
@@ -931,7 +969,9 @@ function buildGraphLayout(
         if (interceptedEdges.has(`${di}-${idx}`)) continue;
 
         const sourceLive = findLive(taskDefs[di].title);
-        const isDone = sourceLive?.status === "done";
+        // a source a decision left out is not done: its outgoing edges stay dashed and muted
+        const notReached = !!notReachedOf(sourceLive);
+        const isDone = sourceLive?.status === "done" && !notReached;
         const isFailed = sourceLive?.status === "failed";
         edges.push({
           id: `e-${di}-${idx}`,
@@ -945,6 +985,7 @@ function buildGraphLayout(
                 ? EDGE.done
                 : EDGE.idle,
             strokeWidth: isDone || isFailed ? 2 : 1.5,
+            ...(notReached ? { strokeDasharray: "4 4", opacity: 0.6 } : {}),
           },
           animated: sourceLive?.status === "in_progress",
         });
@@ -964,7 +1005,7 @@ function buildGraphLayout(
       const ai = titleIndex.get(title);
       if (ai == null) continue;
       const sourceLive = findLive(title);
-      const isDone = sourceLive?.status === "done";
+      const isDone = sourceLive?.status === "done" && !notReachedOf(sourceLive);
       edges.push({
         id: `e-task${ai}-cp${ci}`,
         source: `task-${ai}`,
@@ -1015,7 +1056,7 @@ function buildGraphLayout(
       const ai = titleIndex.get(title);
       if (ai == null) continue;
       const sourceLive = findLive(title);
-      const isDone = sourceLive?.status === "done";
+      const isDone = sourceLive?.status === "done" && !notReachedOf(sourceLive);
       edges.push({
         id: `e-task${ai}-dl${di}`,
         source: `task-${ai}`,
@@ -1058,19 +1099,19 @@ function buildGraphLayout(
   for (let i = 0; i < dcDefs.length; i++) {
     const d = dcDefs[i];
     const id = `decision-${i}`;
-    const live = decisionStates?.get(d.name);
+    const view = decisionBranchView(d, decisionStates?.get(d.name), findLive);
     const sameLayer = dcLayers.filter((l) => l === dcLayers[i]).length;
     const posInLayer = dcLayers.slice(0, i).filter((l) => l === dcLayers[i]).length;
     const startX = -(sameLayer * DECISION_WIDTH + (sameLayer - 1) * H_GAP) / 2;
     nodes.push({
       id, type: "decisionNode",
       position: { x: startX + posInLayer * (DECISION_WIDTH + H_GAP), y: dcLayers[i] * (NODE_HEIGHT + V_GAP) + (NODE_HEIGHT - DECISION_HEIGHT) / 2 },
-      data: { decision: d, ...(live ? { live } : {}) } as DecisionNodeData,
+      data: { decision: d, view } as DecisionNodeData,
     });
     for (const title of d.afterTasks) {
       const ai = titleIndex.get(title);
       if (ai == null) continue;
-      const isDone = findLive(title)?.status === "done";
+      const isDone = findLive(title)?.status === "done" && !notReachedOf(findLive(title));
       edges.push({
         id: `e-task${ai}-dc${i}`, source: `task-${ai}`, target: id,
         markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12 },
@@ -1081,13 +1122,20 @@ function buildGraphLayout(
       const bi = titleIndex.get(title);
       if (bi == null) continue;
       const keys = branchOf(d, title);
-      const taken = live?.status === "decided" && !!live.branch && keys.includes(live.branch);
-      const skipped = live?.status === "decided" && !taken;
+      // chosen: highlighted with the answer and confidence; the others dashed and muted, "Not reached"
+      const state = branchEdgeState(view, keys);
+      const conf = confidenceText(view.confidence);
+      const label = state === "taken" ? `${keys.join(" / ")} ✓${conf ? ` ${conf}` : ""}` : state === "not_reached" ? `${keys.join(" / ")} · Not reached` : keys.join(" / ");
+      const stroke = state === "taken" ? EDGE.chosen : state === "awaiting" ? EDGE.checkpoint : state === "deciding" ? EDGE.delay : EDGE.idle;
       edges.push({
-        id: `e-dc${i}-task${bi}`, source: id, target: `task-${bi}`, label: keys.join(" / "),
-        markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12 },
-        style: { stroke: taken ? EDGE.done : skipped ? EDGE.idle : EDGE.delay, strokeWidth: taken ? 2 : 1.5, ...(skipped ? { strokeDasharray: "4 4" } : {}) },
-        animated: live?.status === "deciding",
+        id: `e-dc${i}-task${bi}`, source: id, target: `task-${bi}`, label,
+        data: { branchState: state },
+        className: `decision-branch decision-branch-${state}`,
+        markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12, color: stroke },
+        style: { stroke, strokeWidth: state === "taken" ? 2.5 : 1.5, ...(state === "not_reached" ? { strokeDasharray: "4 4", opacity: 0.6 } : {}) },
+        labelStyle: { fill: state === "taken" ? EDGE.chosen : state === "awaiting" ? EDGE.checkpoint : EDGE.mutedText, fontWeight: state === "taken" ? 600 : 400 },
+        animated: state === "deciding",
+        ...(state === "not_reached" ? { ariaLabel: `Not reached: decision ${d.name} chose ${view.branch ?? "no branch"}` } : state === "taken" ? { ariaLabel: `Chosen: ${keys.join(" / ")}${view.answer ? ` (${view.answer})` : ""}` } : {}),
       });
     }
   }
@@ -1329,8 +1377,10 @@ export function TaskStepCard({
   navigate: (path: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const statusCfg = liveTask ? taskStatusConfig[liveTask.status] : null;
-  const isDone = liveTask?.status === "done";
+  // a decision took another branch: "Not reached", never done
+  const skip = notReachedOf(liveTask);
+  const statusCfg = liveTask ? (skip ? notReachedNodeStatus : taskStatusConfig[liveTask.status]) : null;
+  const isDone = liveTask?.status === "done" && !skip;
   const isFailed = liveTask?.status === "failed";
   const isRunning = liveTask?.status === "in_progress";
   const isReview = liveTask?.status === "review";
@@ -1351,10 +1401,13 @@ export function TaskStepCard({
             isRunning && "border-info bg-info/15 text-info",
             isReview && "border-warning bg-warning/15 text-warning",
             !liveTask && "border-border bg-muted/50 text-muted-foreground",
+            skip && "border-dashed",
             liveTask && !isDone && !isFailed && !isRunning && !isReview && "border-border bg-muted-foreground/10 text-muted-foreground",
           )}
         >
-          {isDone ? (
+          {skip ? (
+            <taskNotReachedStyle.icon className="h-4 w-4" />
+          ) : isDone ? (
             <CheckCircle2 className="h-4 w-4" />
           ) : isFailed ? (
             <XCircle className="h-4 w-4" />
@@ -1389,7 +1442,10 @@ export function TaskStepCard({
             isReview && "border-warning/20 bg-warning/[0.03]",
             !liveTask && "border-border/60 bg-card/40",
             liveTask && !isDone && !isFailed && !isRunning && !isReview && "border-border/60 bg-card/60",
+            skip && "border-dashed opacity-60",
           )}
+          data-testid="mission-task-step"
+          data-not-reached={skip ? "true" : undefined}
         >
           {/* Header — always visible, clickable to expand */}
           <button
@@ -1401,10 +1457,11 @@ export function TaskStepCard({
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-sm font-semibold leading-snug">{taskDef.title}</span>
                   {statusCfg && (
-                    <Badge variant="outline" className={cn("text-micro shrink-0", statusCfg.color)}>
+                    <Badge variant="outline" className={cn("text-micro shrink-0", statusCfg.color, skip && "border-dashed")} title={skip ? notReachedTooltip(skip) : undefined}>
                       {statusCfg.label}
                     </Badge>
                   )}
+                  {skip && <span className="text-micro text-muted-foreground">{notReachedTooltip(skip)}</span>}
                   {phaseInfo && (
                     <Badge variant="outline" className={cn("text-micro gap-0.5 shrink-0", phaseInfo.color)}>
                       <phaseInfo.icon className="h-2.5 w-2.5" />
@@ -1638,6 +1695,8 @@ interface RunBatch {
   allFailed: boolean;
   doneCount: number;
   failedCount: number;
+  /** Tasks a decision left out (done without running): not counted as done. */
+  notReachedCount: number;
 }
 
 function groupTasksIntoRuns(tasks: Task[], playbookTaskCount: number): RunBatch[] {
@@ -1648,8 +1707,9 @@ function groupTasksIntoRuns(tasks: Task[], playbookTaskCount: number): RunBatch[
   const runs: RunBatch[] = [];
   for (let i = 0; i < sorted.length; i += playbookTaskCount) {
     const batch = sorted.slice(i, i + playbookTaskCount);
-    const doneCount = batch.filter(t => t.status === "done").length;
-    const failedCount = batch.filter(t => t.status === "failed").length;
+    const outcome = countTaskOutcomes(batch);
+    const doneCount = outcome.done;
+    const failedCount = outcome.failed;
     const allTerminal = batch.every(t => t.status === "done" || t.status === "failed");
     runs.push({
       runIndex: runs.length + 1,
@@ -1659,6 +1719,7 @@ function groupTasksIntoRuns(tasks: Task[], playbookTaskCount: number): RunBatch[
       allFailed: allTerminal && doneCount === 0,
       doneCount,
       failedCount,
+      notReachedCount: outcome.notReached,
     });
   }
   // Most recent first
@@ -1734,7 +1795,12 @@ function RunsTimeline({
                 )}
                 {!allTerminal && !isActive && (
                   <Badge variant="secondary" className="text-micro">
-                    {run.doneCount}/{run.tasks.length}
+                    {run.doneCount}/{run.tasks.length - run.notReachedCount}
+                  </Badge>
+                )}
+                {run.notReachedCount > 0 && (
+                  <Badge variant="outline" className="text-micro border-dashed text-muted-foreground">
+                    {run.notReachedCount} not reached
                   </Badge>
                 )}
               </div>
@@ -1817,10 +1883,13 @@ export function MissionDetailView({
     [groupTasks],
   );
 
-  const doneCount = groupTasks.filter(t => t.status === "done").length;
-  const failedCount = groupTasks.filter(t => t.status === "failed").length;
+  // tasks a decision left out are "not reached": out of the done count and out of the total to reach
+  const outcome = countTaskOutcomes(groupTasks);
+  const doneCount = outcome.done;
+  const failedCount = outcome.failed;
+  const notReachedCount = outcome.notReached;
   const runningCount = groupTasks.filter(t => t.status === "in_progress" || t.status === "review").length;
-  const totalCount = parsed?.tasks.length ?? 0;
+  const totalCount = Math.max(0, (parsed?.tasks.length ?? 0) - notReachedCount);
   const progress = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
 
   const isRecurring = mission.status === "recurring";
@@ -1843,7 +1912,7 @@ export function MissionDetailView({
   const decisionStates = useMemo(() => {
     const map = new Map<string, DecisionNodeView>();
     for (const n of liveDecisionNodes) {
-      if (n.missionId ? n.missionId === mission.id : n.group === mission.name) map.set(n.node, { status: n.status, branch: n.branch, suggested: n.suggested });
+      if (n.missionId ? n.missionId === mission.id : n.group === mission.name) map.set(n.node, { status: n.status, branch: n.branch, suggested: n.suggested, ...(n.answer ? { answer: shortAnswer(n.answer), ...(n.answer.confidence !== undefined ? { confidence: n.answer.confidence } : {}) } : {}) });
     }
     return map;
   }, [liveDecisionNodes, mission.id, mission.name]);
@@ -1939,6 +2008,9 @@ export function MissionDetailView({
               )}
               {failedCount > 0 && (
                 <Badge variant="destructive" className="text-micro">{failedCount} failed</Badge>
+              )}
+              {notReachedCount > 0 && (
+                <Badge variant="outline" className="text-micro border-dashed text-muted-foreground" title="A decision took another branch: these tasks were closed without running">{notReachedCount} not reached</Badge>
               )}
             </div>
           )}
@@ -2258,7 +2330,7 @@ export function MissionDetailView({
                       </div>
                       <div>
                         <span className="text-xs text-muted-foreground block mb-1">Tasks</span>
-                        <span>{report.tasks.length} total</span>
+                        <span>{report.tasks.length} total{report.notReached ? ` · ${report.notReached} not reached` : ""}</span>
                       </div>
                     </div>
 
@@ -2302,14 +2374,17 @@ export function MissionDetailView({
                     </p>
                     <div className="space-y-2">
                       {report.tasks.map((t: MissionReport["tasks"][number], i: number) => (
-                        <div key={i} className="rounded-md border border-border p-3">
+                        <div key={i} className={cn("rounded-md border border-border p-3", t.notReached && "border-dashed opacity-60")}>
                           <div className="flex items-center gap-2">
-                            {t.status === "done" ? (
+                            {t.notReached ? (
+                              <taskNotReachedStyle.icon className="h-3.5 w-3.5 text-muted-foreground shrink-0" aria-label="Not reached" />
+                            ) : t.status === "done" ? (
                               <CheckCircle2 className="h-3.5 w-3.5 text-success shrink-0" />
                             ) : (
                               <XCircle className="h-3.5 w-3.5 text-destructive shrink-0" />
                             )}
                             <span className="text-sm font-medium truncate">{t.title}</span>
+                            {t.notReached && <Badge variant="outline" className="text-micro border-dashed text-muted-foreground shrink-0">Not reached</Badge>}
                             {t.score != null && (
                               <Badge variant="outline" className="text-micro ml-auto shrink-0">
                                 <Star className="h-2.5 w-2.5 mr-0.5" />
