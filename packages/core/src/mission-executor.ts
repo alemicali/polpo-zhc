@@ -2,7 +2,7 @@ import { parseAgentRef } from "./agent-versions.js";
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { TaskManager } from "./task-manager.js";
 import type { AgentManager } from "./agent-manager.js";
-import type { Mission, MissionStatus, MissionReport, Task, TaskExpectation, ExpectedOutcome, MissionQualityGate, MissionCheckpoint, MissionDelay, ScopedNotificationRules, TaskOutcome } from "./types.js";
+import type { Mission, MissionStatus, MissionReport, Task, TaskExpectation, ExpectedOutcome, MissionQualityGate, MissionCheckpoint, MissionDelay, ScopedNotificationRules, TaskOutcome, WorkOrigin } from "./types.js";
 import type { QualityController } from "./quality-controller.js";
 import { normalizeTaskToolScope, type TaskToolScope } from "./task-tool-scope.js";
 import { sanitizeExpectations, parseMissionDocument, dependencyOrder, type MissionDocumentParsed } from "./schemas.js";
@@ -694,7 +694,7 @@ export class MissionExecutor {
     return this.resolveMissionForGroup(groupTasks, group);
   }
 
-  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules; budgetUsd?: number; owner?: string }): Promise<Mission> {
+  async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules; budgetUsd?: number; owner?: string; origin?: WorkOrigin }): Promise<Mission> {
     if (!this.ctx.registry.saveMission) throw new Error("Store does not support missions");
     if (opts.budgetUsd !== undefined && !isValidBudgetUsd(opts.budgetUsd)) throw new Error("budgetUsd must be a positive number of USD");
     const requested = opts.name ?? (await this.ctx.registry.nextMissionName?.()) ?? `mission-${Date.now()}`;
@@ -707,6 +707,7 @@ export class MissionExecutor {
       notifications: opts.notifications,
       ...(opts.budgetUsd !== undefined ? { budgetUsd: opts.budgetUsd } : {}),
       ...(opts.owner ? { owner: opts.owner.toLowerCase() } : {}),
+      ...(opts.origin ? { origin: opts.origin } : {}),
     });
     this.ctx.emitter.emit("mission:saved", { missionId: mission.id, name: mission.name, status: mission.status });
     return mission;
@@ -892,7 +893,7 @@ export class MissionExecutor {
    * `requestedBy`: the member this run is for (who started it, or the schedule's owner): its tasks
    * carry it (a CLI engine on a personal sign-in runs only its owner's work).
    */
-  async executeMission(missionId: string, opts: { requestedBy?: string } = {}): Promise<{ tasks: Task[]; group: string }> {
+  async executeMission(missionId: string, opts: { requestedBy?: string; origin?: WorkOrigin } = {}): Promise<{ tasks: Task[]; group: string }> {
     const mission = await this.ctx.registry.getMission?.(missionId);
     if (!mission) throw new Error("Mission not found");
     const executableStates = ["draft", "scheduled", "recurring", "failed", "cancelled"];
@@ -997,6 +998,8 @@ export class MissionExecutor {
         sideEffects: t.sideEffects,
         ...(normalizeTaskToolScope(t.toolScope) ? { toolScope: normalizeTaskToolScope(t.toolScope) } : {}),
         ...(opts.requestedBy ? { requestedBy: opts.requestedBy.toLowerCase() } : {}),
+        // what started this run (a trigger's delivery), else what started the mission
+        ...((opts.origin ?? mission.origin) ? { origin: opts.origin ?? mission.origin } : {}),
       });
       titleToId.set(t.title, task.id);
       tasks.push(task);

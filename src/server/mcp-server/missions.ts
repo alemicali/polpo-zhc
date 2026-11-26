@@ -34,7 +34,10 @@ type Mission = {
   budgetUsd?: number; pauseReason?: string; cost?: MissionCost | MissionCostSummary;
   /** The member who created it or set its schedule. */
   owner?: string;
+  /** What started it, when not a person: a trigger's delivery. */
+  origin?: { kind: string; triggerId: string; deliveryId: string; triggerName?: string };
 };
+const originText = (o?: Mission["origin"]) => (o ? `started by trigger ${o.triggerName ?? o.triggerId} [${o.triggerId}], delivery ${o.deliveryId} (polpo_trigger_deliveries)` : "");
 
 const usd = (v: number) => (v === 0 ? "$0" : v < 0.01 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`);
 
@@ -179,6 +182,7 @@ export function registerMissionTools(tool: Register, deps: McpDeps): void {
         ...(m.budgetUsd !== undefined ? { budget_usd: m.budgetUsd, over_budget: (m.cost?.usd ?? 0) >= m.budgetUsd } : {}),
         ...(m.pauseReason ? { pause_reason: m.pauseReason } : {}),
         ...(m.owner ? { owner: m.owner } : {}),
+        ...(m.origin ? { origin: m.origin } : {}),
       }));
     const p = page(all, limit ?? 20, cursor);
     if (!p) return fail(BAD_CURSOR);
@@ -202,7 +206,7 @@ export function registerMissionTools(tool: Register, deps: McpDeps): void {
     const { data: _d, cost, ...mission } = m.mission;
     const full = cost && "byAgent" in cost ? cost : undefined;
     const text = [
-      `${m.mission.id} [${m.mission.status}${m.mission.pauseReason === "budget" ? ": over budget" : ""}] ${m.mission.name}${m.mission.prompt ? `\ngoal: ${short(m.mission.prompt, 400)}` : ""}${m.mission.owner ? `\nowner: ${m.mission.owner}` : ""}`,
+      `${m.mission.id} [${m.mission.status}${m.mission.pauseReason === "budget" ? ": over budget" : ""}] ${m.mission.name}${m.mission.prompt ? `\ngoal: ${short(m.mission.prompt, 400)}` : ""}${m.mission.owner ? `\nowner: ${m.mission.owner}` : ""}${m.mission.origin ? `\n${originText(m.mission.origin)}` : ""}`,
       ...(full ? [describeMissionCost(full)] : m.mission.budgetUsd !== undefined ? [`budget: ${usd(m.mission.budgetUsd)}`] : []),
       "", "plan:",
       ...planTasks.map((t, i) => `${i + 1}. ${t.title}${t.assignTo ? ` → ${t.assignTo}` : ""}${t.dependsOn?.length ? ` (after ${t.dependsOn.join(", ")})` : ""}`),

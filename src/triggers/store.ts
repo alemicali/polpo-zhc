@@ -6,6 +6,7 @@
  *   deliveries/index.json   the deliveries' summaries, newest first (the newest `retention` kept)
  *   deliveries/<id>.json    one delivery with its (capped, redacted) body, headers and mapped values
  *   dedupe.json             dedupe key hashes → the delivery that first carried them, until their TTL
+ *   action-usage.json       today's (UTC) actions started and the agent actions' spend (the limits)
  *
  * Like the agent suites and the webhook event logs: per-instance files whatever the instance's
  * store (file, SQLite or Postgres), bounded, never queried across instances, no table or migration.
@@ -35,7 +36,13 @@ function writeJson(path: string, value: unknown, pretty = false): void {
   renameSync(tmp, path);
 }
 
-export const summarizeDelivery = ({ body: _b, headers: _h, query: _q, files: _f, mapped: _m, ...summary }: TriggerDelivery): TriggerDeliverySummary => summary;
+/** A trigger's action usage for one (UTC) day: actions started and what its agent actions spent. */
+export interface TriggerActionUsage { day: string; actions: number; agentUsd: number }
+
+export const summarizeDelivery = ({ body: _b, headers: _h, query: _q, files: _f, mapped: _m, previousActions: _p, actions, ...summary }: TriggerDelivery): TriggerDeliverySummary => ({
+  ...summary,
+  ...(actions ? { actions: actions.map(({ outputs: _o, ...run }) => run) } : {}),
+});
 
 export class FileTriggerStore {
   constructor(private readonly polpoDir: () => string) {}
@@ -164,6 +171,23 @@ export class FileTriggerStore {
     const counts = emptyStatusCounts();
     for (const d of all) if (d.status in counts) counts[d.status] += d.count && d.status === "rate_limited" ? d.count : 1;
     return { counts, total: all.length, ...(all[0] ? { lastDeliveryAt: all[0].receivedAt, lastStatus: all[0].status } : {}) };
+  }
+
+  /** Deliveries whose actions are still queued or running (as recorded). */
+  unfinishedActionDeliveries(triggerId: string): TriggerDeliverySummary[] {
+    return this.index(triggerId).filter((d) => d.actionsStatus === "queued" || d.actionsStatus === "running");
+  }
+
+  // ── Action usage (per day: actions started, agent spend) ──
+
+  actionUsage(triggerId: string): TriggerActionUsage | undefined {
+    if (!isTriggerId(triggerId)) return undefined;
+    return readJson<TriggerActionUsage>(join(this.dir(triggerId), "action-usage.json"));
+  }
+
+  saveActionUsage(triggerId: string, usage: TriggerActionUsage): void {
+    if (!this.exists(triggerId)) return;
+    writeJson(join(this.dir(triggerId), "action-usage.json"), usage);
   }
 
   // ── Dedupe ──

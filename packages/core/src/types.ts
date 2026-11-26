@@ -186,8 +186,27 @@ export interface Task {
    * tools). Absent: everything the agent has. It never grants. See task-tool-scope.ts.
    */
   toolScope?: import("./task-tool-scope.js").TaskToolScope;
+  /** What started it, when it was not a person: a trigger's delivery (open the delivery from the task). */
+  origin?: WorkOrigin;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Where a piece of work (a task, a mission, a chat session) came from when an automation started
+ * it: today a trigger's delivery (POST /hooks/{id}) through one of the trigger's actions. Optional
+ * everywhere: work started by a person has none.
+ */
+export interface WorkOrigin {
+  kind: "trigger";
+  triggerId: string;
+  deliveryId: string;
+  /** The trigger's name when the action ran (for lists; the id is what links). */
+  triggerName?: string;
+  /** The action on the trigger that created it. */
+  actionId?: string;
+  /** Loop guard: how many triggers deep the chain is (1: a delivery from outside). */
+  depth?: number;
 }
 
 export interface TaskResult {
@@ -753,6 +772,8 @@ export interface Mission {
    * (their tasks carry requestedBy = owner). A run a member starts by hand carries that member.
    */
   owner?: string;
+  /** What started it, when it was not a person: a trigger's delivery (its tasks carry it too). */
+  origin?: WorkOrigin;
   createdAt: string;
   updatedAt: string;
 }

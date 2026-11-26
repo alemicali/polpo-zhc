@@ -408,7 +408,7 @@ export class DriveManager {
     const stamp = (ts: string) => ts.slice(0, 16).replace("T", " ");
 
     const sessions = (await this.deps.sessions.listSessions())
-      .filter((s) => s.agent === agent && !isReflectionScope(s.scope) && !isRoomScope(s.scope) && !s.scope?.startsWith("learning:") && !s.scope?.startsWith("check:"))
+      .filter((s) => s.agent === agent && !isReflectionScope(s.scope) && !isRoomScope(s.scope) && !s.scope?.startsWith("learning:") && !s.scope?.startsWith("check:") && !s.scope?.startsWith("trigger:"))
       .filter((s) => s.updatedAt > floor)
       .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
     for (const session of sessions) {

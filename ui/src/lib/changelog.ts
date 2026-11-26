@@ -32,6 +32,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-26-trigger-actions",
+    date: "2026-11-26",
+    kind: "new",
+    title: "Trigger: ora fanno qualcosa",
+    summary: "Quando arriva un modulo o un webhook, un trigger può avviare un playbook, una missione o un task, far lavorare un agente (anche rispondendo su Telegram) o mandare una notifica, in ordine, con lo stato di ogni azione registrato sulla consegna.",
+    body: [
+      "- **Cinque azioni**: **esegui un playbook** con i parametri presi dai campi del modulo, **avvia una missione**, **crea un task** per un agente, **un turno di un agente** (o di Polpo) che lavora sui dati ricevuti e può mandare la risposta in una chat Telegram, **invia una notifica** su un canale (Telegram, Slack, email…). Le scegli nella nuova scheda **Azioni** del trigger, le metti in ordine, le accendi e spegni, con l'**anteprima dal vivo** sull'ultima consegna.",
+      "- **I campi del modulo dove servono**: `{{mapped.email}}`, `{{body.…}}`, e anche il risultato di un'azione precedente (`{{steps.<id>.result}}`): per esempio un playbook in cui un agente rielabora i campi, poi la notifica con il suo risultato su Telegram. I segreti non finiscono mai nei testi.",
+      "- **Sicuro per gli agenti**: il contenuto del modulo arriva all'agente come **dati delimitati**, mai come istruzioni; puoi limitare gli strumenti di quel turno e i passi.",
+      "- **Si vede tutto**: per ogni consegna lo stato di ogni azione (in coda, in corso, fatta, fallita, saltata), i tentativi, l'errore e i link alla missione, al task o alla chat creati; puoi **rieseguire le azioni**. Task e missioni avviati da un trigger rimandano alla consegna che li ha creati.",
+      "- **Con dei limiti**: quante consegne alla volta, quante azioni al minuto e al giorno, quanto possono spendere al giorno gli agenti, e niente cicli (un trigger che si riattiva da solo si ferma). Spegnere il trigger ferma le azioni in coda. Le azioni lavorano per conto del proprietario del trigger.",
+      "- Le consegne filtrate, doppie o rifiutate non avviano nulla; un invio di **test** solo se lo chiedi. Anche via API, MCP (con la scheda dei trigger aggiornata) e nella chat con Polpo: «quando arriva il modulo esegui il playbook di onboarding».",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i trigger", to: "/triggers" },
+  },
+  {
     id: "2026-11-26-artifact-versions-1000",
     date: "2026-11-26",
     kind: "improved",
@@ -64,7 +81,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     date: "2026-11-26",
     kind: "new",
     title: "Trigger: un indirizzo pubblico per moduli e webhook",
-    summary: "Crea un trigger e dai il suo indirizzo a un modulo (Tally, Typeform…) o a un servizio: ogni invio viene controllato, validato, filtrato, deduplicato e registrato con i valori che un'azione riceverebbe. Le azioni arriveranno con il motore delle azioni.",
+    summary: "Crea un trigger e dai il suo indirizzo a un modulo (Tally, Typeform…) o a un servizio: ogni invio viene controllato, validato, filtrato, deduplicato e registrato con i valori che un'azione riceverebbe. Ora un trigger avvia anche le sue azioni (vedi sopra).",
     body: [
       "- **Un indirizzo per trigger**: `POST …/hooks/<id>`, l'unico percorso pubblico della funzione (dietro Tailscale Funnel va pubblicato `/<istanza>/hooks/`). L'id ha un suffisso casuale, quindi non si indovina.",
       "- **Chi può inviare**: un segreto generato da Polpo e mostrato **una volta sola** (nell'header `Authorization: Bearer` o `X-Polpo-Secret`), che puoi ruotare lasciando valido il vecchio per un po'; oppure una **firma HMAC** come quelle di GitHub, Typeform o Stripe (header, algoritmo, codifica, prefisso, timestamp con tolleranza), con il segreto nel vault; e se vuoi solo certi **indirizzi IP**.",

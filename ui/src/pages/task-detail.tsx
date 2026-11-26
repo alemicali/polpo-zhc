@@ -1,5 +1,6 @@
 import { useMemo, useState, memo } from "react";
 import { useParams, useNavigate, useSearchParams, Link } from "react-router-dom";
+import { OriginLink } from "@/components/triggers/origin-link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -1631,6 +1632,12 @@ export function TaskDetailPage() {
                         <span className="truncate text-muted-foreground">{identity?.displayName ? `@${task.assignTo}` : task.assignTo}</span>
                       </Link>
                     </dd>
+                    {task.origin && (
+                      <>
+                        <dt className="text-xs text-muted-foreground">Started by</dt>
+                        <dd className="min-w-0"><OriginLink origin={task.origin} /></dd>
+                      </>
+                    )}
                     {/* what ran last (as recorded), else what its agent is set to */}
                     {(task.runs?.length || agentConfig) && (
                       <>

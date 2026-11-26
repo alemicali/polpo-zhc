@@ -45,6 +45,8 @@ type FullTask = TaskRow & {
   sideEffects?: boolean;
   /** The member it is for (who started it, the mission's starter, the schedule's owner). */
   requestedBy?: string;
+  /** What started it, when not a person: a trigger's delivery. */
+  origin?: { kind: string; triggerId: string; deliveryId: string; triggerName?: string };
   /** Where and with what each run executed (engine, model, computer, egress, session, cost), newest last. */
   runs?: TaskRunContext[];
   toolScope?: TaskToolScope;
@@ -248,6 +250,7 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
       ...(dependencies.length ? [`depends on: ${dependencies.map((d) => `${d.id} [${d.status}] ${short(d.title, 60)}`).join(", ")}`] : []),
       ...(failure ? [`failed: ${describeTaskFailure(failure)}`] : []),
       ...(t.requestedBy ? [`for: ${t.requestedBy}`] : []),
+      ...(t.origin ? [`started by trigger ${t.origin.triggerName ?? t.origin.triggerId} [${t.origin.triggerId}], delivery ${t.origin.deliveryId} (polpo_trigger_deliveries)`] : []),
       ...(t.toolScope ? [`tools: ${describeTaskToolScope(t.toolScope)}${t.toolScopeStale?.length ? ` · stale: ${t.toolScopeStale.join("; ")}` : ""}`] : []),
       `created ${t.createdAt ?? "?"} · updated ${t.updatedAt ?? "?"}`,
       "",

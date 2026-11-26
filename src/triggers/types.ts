@@ -4,9 +4,9 @@
  * signature, an IP allowlist), parse and validate them against a contract, filter and de-duplicate
  * them, and record each one as a delivery with the values an action would receive (mapping).
  *
- * This is the primitive only: registration and reception. What a trigger DOES (start a mission, a
- * playbook, a task, an agent turn, a notification) arrives later with the action engine, which will
- * subscribe to the `trigger:delivery` event. Nothing is executed today.
+ * What a trigger DOES on an accepted delivery is its actions (actions.ts): run a playbook, start a
+ * mission, create a task, run an agent turn, send a notification, in order, after the 202, each
+ * run's status (and what it created) recorded on the delivery.
  */
 
 export type TriggerContentType = "json" | "form" | "multipart" | "text";
@@ -50,6 +50,33 @@ export const TRIGGER_LIMITS = {
   maxFilterConditions: 20,
   /** IP allowlist entries. */
   maxIpAllowlist: 50,
+  /** Actions per trigger. */
+  maxActions: 10,
+  /** Deliveries whose actions run at once, per trigger: default and most. */
+  defaultActionConcurrency: 2,
+  maxActionConcurrency: 10,
+  /** Actions started per minute and per day, per trigger: defaults and most. */
+  defaultActionsPerMinute: 30,
+  maxActionsPerMinute: 600,
+  defaultActionsPerDay: 1000,
+  maxActionsPerDay: 100_000,
+  /** Loop guard: how many triggers deep a chain of actions may go (A's action fires B, B's fires C). */
+  maxChainDepth: 3,
+  /** Retries of an action: the most, and the defaults (an agent turn is not repeated by default). */
+  maxRetries: 5,
+  defaultRetries: 2,
+  defaultAgentRetries: 0,
+  /** How long an action may wait for its mission or task to finish (seconds). */
+  maxWaitSeconds: 3600,
+  /** An agent action's tool-loop steps: default and most. */
+  defaultAgentMaxSteps: 10,
+  maxAgentMaxSteps: 50,
+  /** The payload an agent action receives as data (bytes of JSON; larger is cut). */
+  agentDataBytes: 20 * 1024,
+  /** Earlier runs of a delivery's actions kept when it is re-run. */
+  previousActionRunsKept: 5,
+  /** A template in an action (title, body, instructions, a parameter). */
+  maxActionTemplateChars: 8000,
 } as const;
 
 /** An HMAC signature check: the sender signs the raw body (optionally with a timestamp) with a shared secret. */
@@ -160,6 +187,153 @@ export interface Trigger {
   mapping?: Record<string, string>;
   /** Deliveries kept (newest). */
   retention: number;
+  /** What runs on an accepted delivery, in order. Absent or empty: nothing runs (the delivery is only recorded). */
+  actions?: TriggerAction[];
+  /** Safeguards on the actions (defaults in TRIGGER_LIMITS). */
+  actionLimits?: TriggerActionLimits;
+}
+
+// ── Actions ──────────────────────────────────────────────────────────
+
+export type TriggerActionKind = "playbook" | "mission" | "task" | "agent" | "notify";
+export const TRIGGER_ACTION_KINDS: readonly TriggerActionKind[] = ["playbook", "mission", "task", "agent", "notify"];
+
+/** A run of one action on one delivery. */
+export type TriggerActionStatus = "queued" | "running" | "done" | "failed" | "skipped";
+export const TRIGGER_ACTION_STATUSES: readonly TriggerActionStatus[] = ["queued", "running", "done", "failed", "skipped"];
+/** A delivery's actions as a whole: partial = some done, some failed. */
+export type TriggerActionsStatus = TriggerActionStatus | "partial";
+
+interface TriggerActionBase {
+  /** Stable within the trigger (generated when absent): runs and {{steps.<id>.…}} refer to it. */
+  id: string;
+  kind: TriggerActionKind;
+  /** Off: skipped (recorded as skipped). Default on. */
+  enabled: boolean;
+  /** A label for lists. */
+  name?: string;
+  /** Retries after a failure, with backoff (default 2; 0 for agent turns). Never repeats what was already created. */
+  retries?: number;
+}
+
+/**
+ * Run a playbook by name (the same function as POST /playbooks/{name}/run). `params`: templates
+ * over body / headers / query / mapped (`{{mapped.email}}`); a template that is one placeholder of
+ * an object or list passes it as JSON.
+ */
+export interface TriggerPlaybookAction extends TriggerActionBase {
+  kind: "playbook";
+  playbook: string;
+  params?: Record<string, string>;
+  /** Wait until the playbook's mission ends (seconds, at most 3600): later actions can read {{steps.<id>.result}}. */
+  waitSeconds?: number;
+}
+
+/**
+ * Start an existing mission (by id or name), the same way as POST /missions/{id}/execute. With
+ * `variables` (or when it cannot start again: completed, running) a copy runs, with its `{{name}}`
+ * placeholders replaced by the variables.
+ */
+export interface TriggerMissionAction extends TriggerActionBase {
+  kind: "mission";
+  mission: string;
+  variables?: Record<string, string>;
+  waitSeconds?: number;
+}
+
+/** Create a task (the orchestrator's normal task creation). Title and description are templates. */
+export interface TriggerTaskAction extends TriggerActionBase {
+  kind: "task";
+  title: string;
+  description: string;
+  assignTo: string;
+  waitSeconds?: number;
+}
+
+/** Where an agent action's reply is sent (a Telegram chat through the instance's bots). */
+export interface TriggerDeliverTo {
+  /** Channel key of the bot that delivers (settings.notifications.channels). */
+  channel: string;
+  chatId: string;
+  threadId?: number;
+  /** The chat's name, for lists. */
+  name?: string;
+}
+
+/**
+ * One turn of an agent (or Polpo, when `agent` is absent) through the chat pipeline, in its own
+ * session. `instructions` may only use {{trigger.*}} and {{delivery.*}}: the payload reaches the
+ * agent as clearly delimited DATA after the instructions, never inside them.
+ */
+export interface TriggerAgentAction extends TriggerActionBase {
+  kind: "agent";
+  agent?: string;
+  instructions: string;
+  /** What data the turn receives: the mapped values, the body, or both (default: mapped when the trigger has a mapping, else body). */
+  data?: "mapped" | "body" | "both";
+  /** Only these tools in this turn (names; "prefix*" a family; [] none). Absent: the agent's own. */
+  allowedTools?: string[];
+  /** Tool-loop steps for the turn (default 10, at most 50). */
+  maxSteps?: number;
+  /** Send the reply there too (e.g. a Telegram chat). */
+  deliverTo?: TriggerDeliverTo;
+}
+
+/** Send a message through a notification channel (the notification router). */
+export interface TriggerNotifyAction extends TriggerActionBase {
+  kind: "notify";
+  channel: string;
+  /** Template; default the trigger's name. */
+  title?: string;
+  body: string;
+  severity?: "info" | "warning" | "critical";
+}
+
+export type TriggerAction = TriggerPlaybookAction | TriggerMissionAction | TriggerTaskAction | TriggerAgentAction | TriggerNotifyAction;
+
+/** Safeguards on a trigger's actions. */
+export interface TriggerActionLimits {
+  /** Deliveries whose actions run at once (default 2). */
+  concurrency?: number;
+  /** Actions started per minute (default 30) and per day (default 1000); beyond, they are skipped. */
+  perMinute?: number;
+  perDay?: number;
+  /** What the trigger's agent actions may spend per day (USD, from the recorded token usage); beyond, they are skipped. */
+  agentDailyCostUsd?: number;
+}
+
+/** What an action created, to open from the delivery. */
+export interface TriggerActionRefs {
+  playbook?: string;
+  missionId?: string;
+  missionName?: string;
+  /** mission: the mission the copy was made from. */
+  copyOf?: string;
+  taskId?: string;
+  sessionId?: string;
+  agent?: string;
+  notificationId?: string;
+  channel?: string;
+}
+
+/** One action's run on a delivery. */
+export interface TriggerActionRun {
+  actionId: string;
+  kind: TriggerActionKind;
+  name?: string;
+  status: TriggerActionStatus;
+  attempts: number;
+  queuedAt: string;
+  startedAt?: string;
+  endedAt?: string;
+  error?: string;
+  /** Why it was skipped. */
+  reason?: string;
+  refs?: TriggerActionRefs;
+  /** An agent turn's cost (USD), from the recorded token usage. */
+  costUsd?: number;
+  /** What later actions read as {{steps.<actionId>.<key>}} (reply, result, status, ids). Kept on the delivery only, not in lists. */
+  outputs?: Record<string, unknown>;
 }
 
 /** A trigger's HMAC secret as the API shows it: set or not, never the value. */
@@ -236,10 +410,23 @@ export interface TriggerDelivery {
   duplicateOf?: string;
   /** rate_limited: refusals counted in this record (one record per minute). */
   count?: number;
+  /** The actions' runs on this delivery (accepted ones; tests only when asked). */
+  actions?: TriggerActionRun[];
+  /** The actions as a whole. */
+  actionsStatus?: TriggerActionsStatus;
+  /** The member the actions ran for (the trigger's owner). */
+  actionsRequestedBy?: string;
+  /** Earlier runs (re-runs), newest first. */
+  previousActions?: Array<{ endedAt?: string; status?: TriggerActionsStatus; runs: TriggerActionRun[] }>;
+  /** It arrived while another trigger's actions ran (the loop guard's chain). */
+  origin?: import("@polpo-ai/core").WorkOrigin;
 }
 
 /** A delivery in the list (no body, headers, files or mapped values). */
-export type TriggerDeliverySummary = Omit<TriggerDelivery, "body" | "headers" | "query" | "files" | "mapped">;
+export type TriggerDeliverySummary = Omit<TriggerDelivery, "body" | "headers" | "query" | "files" | "mapped" | "previousActions" | "actions"> & {
+  /** The runs without their outputs. */
+  actions?: Array<Omit<TriggerActionRun, "outputs">>;
+};
 
 export interface TriggerDeliveryPage {
   deliveries: TriggerDeliverySummary[];

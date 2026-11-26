@@ -5,12 +5,16 @@
  * delivery, a dry run of a sample or of a stored delivery, schema inference, contract diffs).
  *
  * Every delivery is recorded (accepted, rejected, filtered, duplicate, rate_limited; at most one
- * rate_limited record a minute) and announced as `trigger:delivery` on the orchestrator's bus — what
- * the action engine will subscribe to. No action runs: the engine is not built yet.
+ * rate_limited record a minute) and announced as `trigger:delivery` on the orchestrator's bus. An
+ * accepted delivery's actions are queued on it before the 202 and run after it (actions.ts).
  */
 import { randomBytes } from "node:crypto";
 import { unifiedLineDiff, type VaultStore } from "@polpo-ai/core";
 import { FileTriggerStore } from "./store.js";
+import {
+  TriggerActionEngine, actionScope, actionsStatusOf, agentTurnMessage, chainOrigin, currentTriggerChain, loopGuard, normalizeActionLimits, normalizeActions,
+  renderParam, renderText, type TriggerActionHost,
+} from "./actions.js";
 import {
   applyMapping, contentKind, contractErrors, contractProblems, dedupeHash, dedupeKeyOf, filterMatches, filterProblems, generateTriggerSecret,
   hashSecret, hmacProblems, inferJsonSchema, ipAllowed, matchSecret, parseBody, parseCidr, providedSecret, storableBody, storableHeaders,
@@ -21,6 +25,7 @@ import {
   type Trigger, type TriggerAuth, type TriggerContentType, type TriggerContract, type TriggerContractRevision, type TriggerDedupe,
   type TriggerDelivery, type TriggerDeliveryPage, type TriggerDeliveryStatus, type TriggerDryRun, type TriggerFileMeta, type TriggerFilter,
   type TriggerHmacConfig, type TriggerHmacSecretStatus, type TriggerView,
+  type TriggerActionLimits, type TriggerActionRun, type TriggerActionsStatus,
 } from "./types.js";
 
 /** Vault namespace of the triggers' HMAC secrets (reserved: internal code only). */
@@ -31,7 +36,8 @@ export const TRIGGER_PUBLIC_PATH = "/hooks";
 
 export interface TriggerEventPayloads {
   changed: { id: string; action: "created" | "updated" | "deleted" | "secret-rotated" | "hmac-secret" };
-  delivery: { triggerId: string; deliveryId: string; status: TriggerDeliveryStatus; httpStatus: number; test?: boolean; replay?: boolean; mapped?: Record<string, unknown> };
+  delivery: { triggerId: string; deliveryId: string; status: TriggerDeliveryStatus; httpStatus: number; test?: boolean; replay?: boolean; mapped?: Record<string, unknown>; actions?: TriggerActionsStatus };
+  actions: { triggerId: string; deliveryId: string; status?: TriggerActionsStatus; actions: Array<Omit<TriggerActionRun, "outputs">> };
 }
 
 export interface TriggerServiceDeps {
@@ -41,6 +47,12 @@ export interface TriggerServiceDeps {
   publicBase?: () => string | undefined;
   emit?: <K extends keyof TriggerEventPayloads>(kind: K, payload: TriggerEventPayloads[K]) => void;
   now?: () => number;
+  /** The internal functions actions call (absent or undefined: actions fail with "Polpo is not running"). */
+  actionHost?: () => TriggerActionHost | undefined;
+  log?: (level: "info" | "warn", message: string) => void;
+  /** Tests: the backoff between retries and the sleep. */
+  backoffMs?: (attempt: number) => number;
+  sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
 }
 
 export class TriggerError extends Error {
@@ -66,6 +78,10 @@ export interface TriggerInput {
   rateLimitPerMinute?: number;
   mapping?: Record<string, string> | null;
   retention?: number;
+  /** What runs on an accepted delivery, in order (replaces the list); null or [] removes them. */
+  actions?: unknown[] | null;
+  /** Safeguards on the actions; null resets them to the defaults. */
+  actionLimits?: TriggerActionLimits | null;
 }
 
 /** A sample to dry-run, test or validate: the parsed body as it would arrive. */
@@ -75,6 +91,15 @@ export interface TriggerSample {
   contentType?: TriggerContentType;
   headers?: Record<string, string>;
   query?: Record<string, string | string[]>;
+  /** A test delivery: also run the trigger's actions (off by default: a test runs nothing). */
+  runActions?: boolean;
+}
+
+/** The actions rendered against a delivery (nothing runs). */
+export interface TriggerActionPreview {
+  deliveryId?: string;
+  note?: string;
+  actions: Array<{ actionId: string; kind: string; rendered: Record<string, unknown>; error?: string }>;
 }
 
 /** What the public endpoint answers. */
@@ -98,10 +123,18 @@ const iso = (ms: number) => new Date(ms).toISOString();
 
 export class TriggerService {
   readonly store: FileTriggerStore;
+  readonly actions: TriggerActionEngine;
   private readonly hits = new Map<string, number[]>();
 
   constructor(private readonly deps: TriggerServiceDeps) {
     this.store = new FileTriggerStore(deps.polpoDir);
+    this.actions = new TriggerActionEngine({
+      store: this.store,
+      host: () => deps.actionHost?.(),
+      emit: (payload) => deps.emit?.("actions", payload),
+      ...(deps.log ? { log: deps.log } : {}), ...(deps.now ? { now: deps.now } : {}),
+      ...(deps.backoffMs ? { backoffMs: deps.backoffMs } : {}), ...(deps.sleep ? { sleep: deps.sleep } : {}),
+    });
   }
 
   private now(): number { return this.deps.now?.() ?? Date.now(); }
@@ -233,6 +266,19 @@ export class TriggerService {
       if (!Number.isInteger(input.retention) || input.retention < 1 || input.retention > TRIGGER_LIMITS.maxRetention) problems.push(`retention: 1–${TRIGGER_LIMITS.maxRetention}`);
       else next.retention = input.retention;
     }
+    if (input.actions !== undefined) {
+      if (input.actions === null || (Array.isArray(input.actions) && input.actions.length === 0)) delete next.actions;
+      else {
+        const a = normalizeActions(input.actions);
+        problems.push(...a.problems);
+        next.actions = a.actions;
+      }
+    }
+    if (input.actionLimits !== undefined) {
+      const l = normalizeActionLimits(input.actionLimits);
+      problems.push(...l.problems);
+      if (l.limits) next.actionLimits = l.limits; else delete next.actionLimits;
+    }
     return { next, problems, contractChanged };
   }
 
@@ -283,12 +329,15 @@ export class TriggerService {
     }
     this.store.save(next);
     if (next.retention < current.retention) this.store.prune(id, next.retention);
+    // disabling stops what is queued (and the waits of what runs)
+    if (current.enabled && !next.enabled) this.actions.cancel(id, "The trigger was disabled");
     this.deps.emit?.("changed", { id, action: "updated" });
     return { trigger: await this.view(next), ...(secret ? { secret } : {}) };
   }
 
   async delete(id: string): Promise<boolean> {
     if (!this.store.exists(id)) return false;
+    this.actions.cancel(id, "The trigger was deleted");
     this.store.delete(id);
     this.hits.delete(id);
     await this.deps.vault()?.remove(TRIGGER_VAULT_OWNER, triggerVaultService(id)).catch(() => false);
@@ -397,9 +446,53 @@ export class TriggerService {
     this.store.addDelivery(d, t.retention);
     this.deps.emit?.("delivery", {
       triggerId: t.id, deliveryId: d.id, status: d.status, httpStatus: d.httpStatus,
-      ...(d.test ? { test: true } : {}), ...(d.mapped ? { mapped: d.mapped } : {}),
+      ...(d.test ? { test: true } : {}), ...(d.mapped ? { mapped: d.mapped } : {}), ...(d.actionsStatus ? { actions: d.actionsStatus } : {}),
     });
     return d;
+  }
+
+  /**
+   * The actions part of an accepted delivery: every action queued (disabled ones skipped), or all
+   * skipped by the loop guard when it arrived inside this trigger's own actions or too deep a chain.
+   */
+  private withActions(t: Trigger, d: TriggerDelivery): TriggerDelivery {
+    const chain = currentTriggerChain();
+    const origin = chainOrigin(chain);
+    if (origin) d.origin = origin;
+    if (!t.actions?.length) return d;
+    const guard = loopGuard(t.id, chain);
+    const runs = this.actions.initialRuns(t, guard.ok ? undefined : { reason: guard.reason });
+    const requestedBy = t.owner && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t.owner) ? t.owner.toLowerCase() : undefined;
+    return { ...d, actions: runs, actionsStatus: actionsStatusOf(runs), ...(requestedBy ? { actionsRequestedBy: requestedBy } : {}) };
+  }
+
+  /** Start a recorded delivery's queued actions (after the answer). */
+  private startActions(d: TriggerDelivery): void {
+    if (d.actions?.some((r) => r.status === "queued")) this.actions.enqueue(d.triggerId, d.id, currentTriggerChain());
+  }
+
+  /**
+   * Run a delivery's actions again (the trigger's current actions, on the delivery as stored): an
+   * accepted delivery (or a test one) whose actions are not queued or running. The previous runs are
+   * kept (the newest TRIGGER_LIMITS.previousActionRunsKept).
+   */
+  rerunActions(id: string, deliveryId: string): TriggerDelivery {
+    const t = this.require(id);
+    const d = this.delivery(id, deliveryId);
+    if (d.status !== "accepted") throw new TriggerError(`Only an accepted delivery runs actions (this one is ${d.status})`, 400);
+    if (!t.actions?.length) throw new TriggerError("This trigger has no actions", 400);
+    if (!t.enabled) throw new TriggerError("The trigger is disabled: enable it to run its actions", 409);
+    if (this.actions.busy(id, deliveryId) || d.actionsStatus === "queued" || d.actionsStatus === "running") throw new TriggerError("This delivery's actions are still queued or running", 409);
+    if (d.bodyTruncated) throw new TriggerError("That delivery's body was kept truncated: its actions cannot be re-run", 400);
+    const previous = d.actions?.length ? [{ ...(d.actions.at(-1)?.endedAt ? { endedAt: d.actions.at(-1)!.endedAt } : {}), ...(d.actionsStatus ? { status: d.actionsStatus } : {}), runs: d.actions }, ...(d.previousActions ?? [])].slice(0, TRIGGER_LIMITS.previousActionRunsKept) : d.previousActions;
+    const guard = loopGuard(t.id);
+    const runs = this.actions.initialRuns(t, guard.ok ? undefined : { reason: guard.reason });
+    const patch: Partial<TriggerDelivery> = { actions: runs, actionsStatus: actionsStatusOf(runs), ...(previous ? { previousActions: previous } : {}) };
+    this.store.updateDelivery(id, deliveryId, patch);
+    const next = { ...d, ...patch };
+    this.deps.emit?.("actions", { triggerId: id, deliveryId, ...(next.actionsStatus ? { status: next.actionsStatus } : {}), actions: runs });
+    this.startActions(next);
+    return next;
   }
 
   /** The evaluation shared by real, test and dry-run deliveries: contract → filter → dedupe → mapping. */
@@ -539,12 +632,12 @@ export class TriggerService {
   }
 
   /** Evaluate, record and answer a parsed delivery (real or test). */
-  private finish(t: Trigger, base: Partial<TriggerDelivery> & { headers: Record<string, string>; query: Record<string, string | string[]>; bytes: number; kind?: TriggerContentType }, body: unknown, test = false): TriggerReceiveResult & { delivery: TriggerDelivery } {
+  private finish(t: Trigger, base: Partial<TriggerDelivery> & { headers: Record<string, string>; query: Record<string, string | string[]>; bytes: number; kind?: TriggerContentType }, body: unknown, test = false, runActions = !test): TriggerReceiveResult & { delivery: TriggerDelivery } {
     const now = this.now();
     const ev = this.evaluate(t, { body, headers: base.headers, query: base.query }, base.kind);
     const httpStatus = ev.status === "rejected" ? 400 : ev.status === "duplicate" ? 200 : 202;
     const stored = storableBody(body);
-    const d: TriggerDelivery = {
+    let d: TriggerDelivery = {
       id: newDeliveryId(now), triggerId: t.id, receivedAt: iso(now), status: ev.status, httpStatus, reasons: ev.reasons,
       contractVersion: t.contractVersion, ...base,
       ...(ev.errors.length ? { errors: ev.errors } : {}),
@@ -553,11 +646,15 @@ export class TriggerService {
       ...(ev.dedupeHashValue ? { dedupeHash: ev.dedupeHashValue } : {}), ...(ev.duplicateOf ? { duplicateOf: ev.duplicateOf } : {}),
       ...(test ? { test: true } : {}),
     };
+    // only an accepted delivery runs actions (a test one only when asked); filtered, duplicate and rejected never do
+    if (ev.status === "accepted" && runActions) d = this.withActions(t, d);
+    else { const origin = chainOrigin(currentTriggerChain()); if (origin) d.origin = origin; }
     this.record(t, d);
     if (ev.status === "accepted" && ev.dedupeHashValue && t.dedupe) this.store.dedupeRemember(t.id, ev.dedupeHashValue, d.id, now + t.dedupe.ttlSeconds * 1000, now);
     if (ev.status === "rejected") return { status: 400, body: { deliveryId: d.id, status: d.status, error: "The body does not match the trigger's contract", errors: ev.errors }, delivery: d };
     if (ev.status === "duplicate") return { status: 200, body: { deliveryId: ev.duplicateOf, status: d.status, duplicateDeliveryId: d.id }, delivery: d };
-    return { status: 202, body: { deliveryId: d.id, status: d.status }, delivery: d };
+    this.startActions(d);
+    return { status: 202, body: { deliveryId: d.id, status: d.status, ...(d.actionsStatus ? { actions: d.actionsStatus } : {}) }, delivery: d };
   }
 
   /** A test delivery (dashboard, API, tools): recorded with test: true, through contract, filter, dedupe and mapping (no auth, no rate limit). */
@@ -569,7 +666,7 @@ export class TriggerService {
     const query = storableQuery(new URLSearchParams(Object.entries(sample.query ?? {}).flatMap(([k, v]) => (Array.isArray(v) ? v.map((x) => [k, x]) : [[k, v]])) as [string, string][]));
     const bytes = Buffer.byteLength(typeof sample.body === "string" ? sample.body : JSON.stringify(sample.body ?? null));
     if (bytes > t.contract.maxBodyBytes) throw new TriggerError(`The sample is larger than the contract's maxBodyBytes (${t.contract.maxBodyBytes})`, 400);
-    return this.finish(t, { headers, query, bytes, kind, contentType: headers["content-type"] }, sample.body, true).delivery;
+    return this.finish(t, { headers, query, bytes, kind, contentType: headers["content-type"] }, sample.body, true, sample.runActions === true).delivery;
   }
 
   /** Run a sample (or a stored delivery: replay) through the contract, filter, dedupe and mapping without recording it; `draft` overrides unsaved parts. */
@@ -595,6 +692,51 @@ export class TriggerService {
     }
     const { dedupeHashValue: _h, ...result } = this.evaluate(target, scope, kind, { dryRun: true });
     return { ...result, ...(o.deliveryId ? { replayOf: o.deliveryId } : {}) };
+  }
+
+  /**
+   * What the actions (saved, or a draft of them) would receive for a delivery (the newest accepted
+   * one by default), rendered without running anything: playbook params, mission variables, task
+   * title and description, the agent's message (instructions + data), the notification. Earlier
+   * actions' outputs ({{steps.…}}) are unknown in a preview and render empty.
+   */
+  previewActions(id: string, o: { deliveryId?: string; actions?: unknown[] } = {}): TriggerActionPreview {
+    const t = this.require(id);
+    let actions = t.actions ?? [];
+    if (o.actions !== undefined) {
+      const n = normalizeActions(o.actions);
+      if (n.problems.length) throw new TriggerError(`Invalid actions: ${n.problems.join("; ")}`, 400, "VALIDATION_ERROR", n.problems);
+      actions = n.actions;
+    }
+    const deliveryId = o.deliveryId ?? this.store.listDeliveries(id, { statuses: ["accepted"], limit: 1 }).deliveries[0]?.id;
+    if (!deliveryId) return { actions: actions.map((a) => ({ actionId: a.id, kind: a.kind, rendered: {} })), note: "No accepted delivery yet: send a test delivery to preview the actions" };
+    const d = this.delivery(id, deliveryId);
+    const scope = actionScope({ trigger: t, delivery: d });
+    const render = (f: () => Record<string, unknown>): { rendered: Record<string, unknown>; error?: string } => {
+      try { return { rendered: f() }; } catch (err) { return { rendered: {}, error: err instanceof Error ? err.message : String(err) }; }
+    };
+    const params = (m: Record<string, string> | undefined) => Object.fromEntries(Object.entries(m ?? {}).map(([k, v]) => [k, renderParam(v, scope) ?? null]));
+    return {
+      deliveryId,
+      actions: actions.map((a) => ({
+        actionId: a.id, kind: a.kind,
+        ...render(() => {
+          switch (a.kind) {
+            case "playbook": return { playbook: a.playbook, params: params(a.params) };
+            case "mission": return { mission: a.mission, ...(a.variables ? { variables: params(a.variables) } : {}) };
+            case "task": return { title: renderText(a.title, scope), description: renderText(a.description, scope), assignTo: a.assignTo };
+            case "agent": return { agent: a.agent ?? "Polpo", message: agentTurnMessage(a, { trigger: t, delivery: d, hasMapping: !!t.mapping }, "preview"), ...(a.deliverTo ? { deliverTo: a.deliverTo } : {}) };
+            case "notify": return { channel: a.channel, title: (a.title ? renderText(a.title, scope) : "") || t.name, body: renderText(a.body, scope) };
+          }
+        }),
+      })),
+    };
+  }
+
+  /** What a trigger's actions started today and its agent actions spent. */
+  actionUsage(id: string): { day: string; actions: number; agentUsd: number } {
+    this.require(id);
+    return this.actions.usageToday(id);
   }
 
   /** A JSON Schema inferred from a sample or a stored delivery's body. */

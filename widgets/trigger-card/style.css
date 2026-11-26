@@ -8,3 +8,6 @@
 .code { margin: 0; padding: 8px 10px; border-radius: var(--r-sm); background: var(--fill); font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--t-xs); white-space: pre-wrap; overflow-wrap: anywhere; }
 .link-btn { background: none; border: 0; padding: 0; color: var(--fg); font: inherit; font-weight: var(--w-medium); text-align: start; cursor: pointer; text-decoration: underline; text-decoration-color: var(--line2); }
 .link-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.runs { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+.run { overflow-wrap: anywhere; }
+.run .chip-sm { margin-inline-start: 0; }

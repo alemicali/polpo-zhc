@@ -33,8 +33,26 @@ vi.mock("@polpo-ai/react", async () => {
     getTriggerDelivery: record("getTriggerDelivery", (_t: string, id: string) => state.deliveries.find((d) => d.id === id)),
     replayTriggerDelivery: record("replayTriggerDelivery", { status: "accepted", reasons: [], errors: [], filterMatched: true, mapped: { email: "ada@example.com" }, contractVersion: 2, replayOf: "tdl_1" }),
     sendTriggerTest: record("sendTriggerTest", () => state.deliveries[0]),
+    getConfig: record("getConfig", { settings: { notifications: { channels: { telegram: { type: "telegram" }, ops: { type: "slack" } } } } }),
+    getTriggerActionUsage: record("getTriggerActionUsage", { day: "2026-11-26", actions: 3, agentUsd: 0.25 }),
+    previewTriggerActions: record("previewTriggerActions", (_id: string, o: { actions?: Array<{ id?: string; kind: string }> }) => ({
+      deliveryId: "tdl_1",
+      actions: (o.actions ?? []).map((a, i) => ({ actionId: a.id ?? `new${i}`, kind: a.kind, rendered: a.kind === "playbook" ? { playbook: "onboarding", params: { email: "ada@example.com" } } : { body: "New ada@example.com" } })),
+    })),
+    rerunTriggerActions: record("rerunTriggerActions", (_id: string, deliveryId: string) => ({ deliveryId, actionsStatus: "queued", actions: [] })),
   };
   return {
+    useTriggerDelivery: (id: string | undefined, deliveryId: string | undefined) => {
+      useVersion();
+      const delivery = state.deliveries.find((d) => d.triggerId === id && d.id === deliveryId);
+      return {
+        delivery, isLoading: false, error: null, refetch: async () => {},
+        rerunActions: async () => { state.calls.push({ fn: "rerunActions", args: [id, deliveryId] }); return { deliveryId, actions: [] }; },
+      };
+    },
+    usePlaybooks: () => ({ playbooks: [{ name: "onboarding", description: "Onboard", parameters: [{ name: "email", description: "Who" }, { name: "plan", description: "Plan" }], path: "/p" }] }),
+    useMissions: () => ({ missions: [{ id: "m-welcome", name: "welcome", status: "draft" }] }),
+    useAgents: () => ({ agents: [{ name: "writer" }, { name: "dev" }] }),
     usePolpo: () => ({ client }),
     useEvents: () => ({ events: [] }),
     useTriggers: () => {
@@ -230,4 +248,96 @@ test("an assistant's setup link opens the trigger on Auth with the HMAC secret f
   await render("/triggers?trigger=tally-signup-3f9a1c2e&focus=hmac&setup=trigger:tally-signup-3f9a1c2e:hmac");
   expect([...document.querySelectorAll('[role="tab"]')].find((x) => x.getAttribute("aria-selected") === "true")!.textContent).toBe("Auth");
   expect($('input[data-setup-field="hmac"]')).toBeTruthy();
+});
+
+test("actions: add a playbook (parameters prefilled from the mapping) and a notification, reorder, disable, a live preview, limits; saved together", async () => {
+  await render("/triggers?trigger=tally-signup-3f9a1c2e");
+  await tab("Actions");
+  expect($('[data-testid="no-actions"]')!.textContent).toContain("only recorded");
+  expect($('[data-testid="action-usage"]')!.textContent).toContain("3 actions started · agents spent $0.25");
+  await click(buttons(/Add action/)[0]!);
+  const pick = $<HTMLSelectElement>('select[aria-label="Playbook"]')!;
+  await act(async () => { pick.value = "onboarding"; pick.dispatchEvent(new Event("change", { bubbles: true })); });
+  await flush();
+  expect($<HTMLInputElement>('input[aria-label="Parameters 1 template"]')!.value).toBe("{{mapped.email}}");
+  expect($<HTMLInputElement>('input[aria-label="Parameters 2 name"]')!.value).toBe("plan");
+  await click(document.querySelector('button[aria-label="Remove parameters 2"]')!);
+  const kind = $<HTMLSelectElement>('select[aria-label="Action kind"]')!;
+  await act(async () => { kind.value = "notify"; kind.dispatchEvent(new Event("change", { bubbles: true })); });
+  await click(buttons(/Add action/)[0]!);
+  const channel = $<HTMLSelectElement>('select[aria-label="Channel"]')!;
+  expect([...channel.options].map((o) => o.value)).toEqual(["", "telegram", "ops"]);
+  await act(async () => { channel.value = "telegram"; channel.dispatchEvent(new Event("change", { bubbles: true })); });
+  await type($<HTMLTextAreaElement>('textarea[aria-label="Notification message"]')!, "New {{mapped.email}}");
+  // the notification first, then disabled
+  await click(document.querySelector('button[aria-label="Move action 2 up"]')!);
+  expect([...document.querySelectorAll("[data-kind]")].map((x) => x.getAttribute("data-kind"))).toEqual(["notify", "playbook"]);
+  await click(document.querySelector('button[aria-label="Action 2 enabled"]')!);
+  await type($<HTMLInputElement>('input[aria-label="Actions per minute"]')!, "10");
+  await act(async () => { await new Promise((r) => setTimeout(r, 650)); });
+  await flush();
+  expect($('[data-testid="actions-preview"]')!.textContent).toContain("New ada@example.com");
+  expect(state.calls.filter((c) => c.fn === "previewTriggerActions").at(-1)!.args[0]).toBe("tally-signup-3f9a1c2e");
+  await click(buttons("Save actions")[0]!);
+  expect(state.calls.find((c) => c.fn === "updateTrigger")!.args[1]).toEqual({
+    actions: [
+      { kind: "notify", enabled: true, channel: "telegram", body: "New {{mapped.email}}" },
+      { kind: "playbook", enabled: false, playbook: "onboarding", params: { email: "{{mapped.email}}" } },
+    ],
+    actionLimits: { perMinute: 10 },
+  });
+});
+
+test("an agent action: Polpo or an agent, the data it gets, a tool restriction, the reply to a Telegram chat", async () => {
+  state.triggers = [trigger({ actions: [{ id: "ag", kind: "agent", enabled: true, agent: "writer", instructions: "Uppercase every field", allowedTools: [], deliverTo: { channel: "telegram", chatId: "42" } }] })];
+  await render("/triggers?trigger=tally-signup-3f9a1c2e");
+  expect([...document.querySelectorAll('[role="tab"]')].map((x) => x.textContent)).toContain("Actions 1");
+  await tab("Actions 1");
+  expect($<HTMLSelectElement>('select[aria-label="Agent"]')!.value).toBe("writer");
+  expect($<HTMLInputElement>('input[aria-label="Allowed tools"]')!.value).toBe("");
+  expect($<HTMLInputElement>('input[aria-label="Reply chat id"]')!.value).toBe("42");
+  expect(document.body.textContent).toContain("never as instructions");
+  await type($<HTMLInputElement>('input[aria-label="Allowed tools"]')!, "read_file, mcp__x__*");
+  await click(buttons("Save actions")[0]!);
+  expect(state.calls.find((c) => c.fn === "updateTrigger")!.args[1]).toEqual({
+    actions: [{ id: "ag", kind: "agent", enabled: true, agent: "writer", instructions: "Uppercase every field", allowedTools: ["read_file", "mcp__x__*"], deliverTo: { channel: "telegram", chatId: "42" } }],
+    actionLimits: null,
+  });
+});
+
+test("a delivery's action runs link to what they created; Re-run actions; a deep link opens the delivery; a test can run the actions", async () => {
+  state.triggers = [trigger({ actions: [{ id: "pb", kind: "playbook", enabled: true, playbook: "onboarding" }, { id: "nt", kind: "notify", enabled: true, channel: "telegram", body: "x" }] })];
+  state.deliveries = [delivery("tdl_1", {
+    body: { email: "ada@example.com" }, mapped: { email: "ada@example.com" }, actionsStatus: "partial", actionsRequestedBy: "ada@example.com",
+    actions: [
+      { actionId: "pb", kind: "playbook", status: "done", attempts: 1, queuedAt: "2026-11-26T10:00:00Z", startedAt: "2026-11-26T10:00:01Z", endedAt: "2026-11-26T10:00:02Z", refs: { playbook: "onboarding", missionId: "m-77", missionName: "onboarding" } },
+      { actionId: "nt", kind: "notify", status: "failed", attempts: 3, queuedAt: "2026-11-26T10:00:00Z", error: "Channel \"telegram\" refused" },
+    ],
+    previousActions: [{ status: "failed", runs: [] }],
+  })];
+  await render("/triggers?trigger=tally-signup-3f9a1c2e&delivery=tdl_1");
+  const dialog = $('[data-testid="delivery-dialog"]')!;
+  expect(dialog.querySelector('[data-action-status="partial"]')).toBeTruthy();
+  expect(dialog.querySelector('[data-run="pb"] a[data-ref="/missions/m-77"]')!.textContent).toBe("Mission onboarding");
+  expect(dialog.querySelector('[data-run="nt"]')!.textContent).toContain("3 attempts");
+  expect(dialog.querySelector('[data-run="nt"]')!.textContent).toContain("refused");
+  expect(dialog.textContent).toContain("for ada@example.com");
+  expect(dialog.textContent).toContain("Earlier runs: failed");
+  await click(buttons(/Re-run actions/)[0]!);
+  expect(state.calls.find((c) => c.fn === "rerunActions")!.args).toEqual(["tally-signup-3f9a1c2e", "tdl_1"]);
+  await act(async () => { document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  await flush();
+  expect($('[data-delivery="tdl_1"] [data-action-status="partial"]')).toBeTruthy();
+  await click(document.querySelector('button[aria-label="Run the actions"]')!);
+  await click(buttons(/Send test/)[0]!);
+  expect(state.calls.find((c) => c.fn === "sendTriggerTest")!.args[1]).toMatchObject({ runActions: true });
+  expect($('[data-trigger="tally-signup-3f9a1c2e"] [data-testid="row-actions"]')!.textContent).toBe("2 actions");
+});
+
+test("a task or mission started by a trigger links to its delivery", async () => {
+  const { OriginLink } = await import("../src/components/triggers/origin-link");
+  await act(async () => root.render(<MemoryRouter><OriginLink origin={{ kind: "trigger", triggerId: "tally-signup-3f9a1c2e", deliveryId: "tdl_1", triggerName: "Tally signup" }} /></MemoryRouter>));
+  const a = $<HTMLAnchorElement>('[data-testid="origin-link"]')!;
+  expect(a.getAttribute("href")).toBe("/triggers?trigger=tally-signup-3f9a1c2e&delivery=tdl_1");
+  expect(a.textContent).toBe("Trigger Tally signup");
 });

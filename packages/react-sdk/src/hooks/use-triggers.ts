@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
 import { useEvents } from "./use-events.js";
-import type { Trigger, TriggerDeliveryPage, TriggerDeliveryStatus, TriggerInput } from "@polpo-ai/sdk";
+import type { Trigger, TriggerActionRun, TriggerActionsStatus, TriggerDelivery, TriggerDeliveryPage, TriggerDeliveryStatus, TriggerInput } from "@polpo-ai/sdk";
 
-/** Live: a trigger changed, or recorded a delivery. */
-const TRIGGER_EVENTS = ["trigger:changed", "trigger:delivery"];
+/** Live: a trigger changed, recorded a delivery, or a delivery's actions moved on. */
+const TRIGGER_EVENTS = ["trigger:changed", "trigger:delivery", "trigger:actions"];
 
 /** Refetch when one of the events arrives (after the first load); with `id`, only that trigger's. */
 function useRefetchOn(refetch: () => void, id?: string) {
@@ -100,4 +100,43 @@ export function useTriggerDeliveries(id: string | undefined, o: { status?: Trigg
   }, [refetch, id]);
   useRefetchOn(() => { void refetch(); }, id);
   return { page, isLoading, error, refetch };
+}
+
+export interface UseTriggerDeliveryReturn {
+  delivery: TriggerDelivery | undefined;
+  isLoading: boolean;
+  error: Error | null;
+  refetch: () => Promise<void>;
+  /** Run the trigger's current actions again on this delivery (they run after the answer; the delivery refreshes live). */
+  rerunActions: () => Promise<{ deliveryId: string; actionsStatus?: TriggerActionsStatus; actions: TriggerActionRun[] }>;
+}
+
+/** One delivery with its payload and each action's run, live: its actions' progress refreshes it. */
+export function useTriggerDelivery(id: string | undefined, deliveryId: string | undefined): UseTriggerDeliveryReturn {
+  const { client } = usePolpoContext();
+  const [delivery, setDelivery] = useState<TriggerDelivery | undefined>(undefined);
+  const [isLoading, setIsLoading] = useState(!!(id && deliveryId));
+  const [error, setError] = useState<Error | null>(null);
+  const refetch = useCallback(async () => {
+    if (!id || !deliveryId) return;
+    try {
+      setDelivery(await client.getTriggerDelivery(id, deliveryId));
+      setError(null);
+    } catch (err) {
+      setError(err as Error);
+    }
+  }, [client, id, deliveryId]);
+  useEffect(() => {
+    if (!id || !deliveryId) { setDelivery(undefined); return; }
+    setIsLoading(true);
+    refetch().finally(() => setIsLoading(false));
+  }, [refetch, id, deliveryId]);
+  useRefetchOn(() => { void refetch(); }, id);
+  const rerunActions = useCallback(async () => {
+    if (!id || !deliveryId) throw new Error("No delivery");
+    const r = await client.rerunTriggerActions(id, deliveryId);
+    await refetch();
+    return r;
+  }, [client, id, deliveryId, refetch]);
+  return { delivery, isLoading, error, refetch, rerunActions };
 }

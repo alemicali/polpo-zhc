@@ -596,6 +596,21 @@ export interface ToolExecutionContext {
 export const CHAT_ORIGIN_HEADER = "x-polpo-chat-origin";
 /** The agents already in an agent-to-agent exchange (comma-separated); honoured only on internal calls. */
 export const AGENT_CHAIN_HEADER = "x-polpo-agent-chain";
+/** The tools a turn may use (URI-encoded JSON list of names, "prefix*" allowed); honoured only on internal calls. */
+export const TURN_TOOLS_HEADER = "x-polpo-turn-tools";
+/** The most tool-loop steps a turn may take; honoured only on internal calls (it only lowers the limit). */
+export const TURN_MAX_STEPS_HEADER = "x-polpo-turn-max-steps";
+
+/** The tool allowlist of TURN_TOOLS_HEADER, or undefined when absent or malformed. */
+export function turnToolAllowlist(header: string | undefined): string[] | undefined {
+  if (!header) return undefined;
+  try {
+    const value = JSON.parse(decodeURIComponent(header)) as unknown;
+    return Array.isArray(value) && value.every((v) => typeof v === "string") ? value.map((v) => v.trim()).filter(Boolean) : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 function chatOrigin(header: string | undefined): ConversationCheckTarget | undefined {
   if (!header) return undefined;
@@ -823,6 +838,23 @@ export function completionRoutes(getDeps: () => CompletionRouteDeps, apiKeys?: s
       effectiveTools = ctx.tools;
       effectiveToolExecutor = ctx.executor;
       isInteractiveFn = ctx.isInteractive;
+    }
+
+    // A turn this process runs for an automation (a trigger's agent action) may narrow the tools
+    // (names; "prefix*" matches a family; [] = none) and cap the tool-loop steps. Never from outside.
+    if (internal) {
+      const allow = turnToolAllowlist(c.req.header(TURN_TOOLS_HEADER));
+      if (allow) {
+        const allowed = (name: string) => allow.some((p) => (p.endsWith("*") ? name.startsWith(p.slice(0, -1)) : name === p));
+        effectiveTools = effectiveTools.filter((t: any) => allowed(String(t?.name ?? "")));
+        const runAllowed = effectiveToolExecutor;
+        effectiveToolExecutor = async (name, args, context) => {
+          if (!allowed(name)) return `Error: the tool "${name}" is not allowed in this turn.`;
+          return runAllowed(name, args, context);
+        };
+      }
+      const cap = Number(c.req.header(TURN_MAX_STEPS_HEADER));
+      if (Number.isInteger(cap) && cap > 0) maxTurns = Math.min(maxTurns, cap);
     }
 
     const completionId = `chatcmpl-${nanoid(24)}`;

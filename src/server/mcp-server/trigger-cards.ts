@@ -1,13 +1,13 @@
 /**
  * The trigger card: an MCP App (interactive UI in Claude, ChatGPT…; text elsewhere) shown by
- * polpo_trigger_show — the triggers (endpoint, auth, counts, last delivery) or one trigger with its
- * recent deliveries and the values an action would receive. Its UI calls the same tool to refresh
+ * polpo_trigger_show — the triggers (endpoint, auth, counts, actions, last delivery) or one trigger
+ * with its actions, its recent deliveries (each action's run and what it created) and the mapped values. Its UI calls the same tool to refresh
  * and to switch view.
  */
 import { z } from "zod";
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from "@modelcontextprotocol/ext-apps/server";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { buildTriggerDetailCard, buildTriggerListCard, triggerCardText, type TriggerCard, type TriggerCardDelivery, type TriggerShape } from "../mcp-trigger-card.js";
+import { buildTriggerDetailCard, buildTriggerListCard, triggerCardText, type TriggerCard, type TriggerShape } from "../mcp-trigger-card.js";
 import { TRIGGER_CARD_HTML } from "../mcp-widgets.generated.js";
 import { cardAppearance } from "./card-appearance.js";
 import { READ, allowed, dashboardLink, enc, fail, looseObject, unwrap, type McpDeps, type McpPrincipal, type ToolScope, type ToolsetName } from "./kit.js";
@@ -25,7 +25,7 @@ export async function loadTriggerCard(deps: McpDeps, args: { id?: string; status
     if (!t.ok) return { ok: false, error: t.status === 404 ? `There is no trigger "${args.id}" (polpo_triggers_list).` : t.error };
     const q = new URLSearchParams({ limit: String(args.limit ?? 15), ...(args.status?.length ? { status: args.status.join(",") } : {}) });
     const d = unwrap(await deps.api("GET", `/api/v1/triggers/${enc(args.id)}/deliveries?${q.toString()}`));
-    const deliveries = d.ok ? (d.data as { deliveries: TriggerCardDelivery[] }).deliveries : [];
+    const deliveries = d.ok ? (d.data as { deliveries: Parameters<typeof buildTriggerDetailCard>[0]["deliveries"] }).deliveries : [];
     const accepted = deliveries.find((x) => x.status === "accepted");
     let lastMapped: Record<string, unknown> | undefined;
     if (accepted) {
@@ -47,9 +47,9 @@ const output = z.object({
   key: z.object({ createdAt: z.number(), seq: z.number() }).passthrough().optional(),
   generatedAt: z.string().optional(),
   triggers: z.array(looseObject).optional().describe("triggers view: each with its endpoint, auth, contract version, counts per status and last delivery"),
-  trigger: looseObject.optional().describe("trigger view: the definition in words (auth, filter, dedupe, mapping) and its counts"),
-  deliveries: z.array(looseObject).optional().describe("trigger view: the recent deliveries (status, HTTP answer, reasons)"),
-  lastMapped: looseObject.optional().describe("trigger view: the newest accepted delivery's mapped values — what an action would receive"),
+  trigger: looseObject.optional().describe("trigger view: the definition in words (auth, filter, dedupe, mapping, actions) and its counts"),
+  deliveries: z.array(looseObject).optional().describe("trigger view: the recent deliveries (status, HTTP answer, reasons, each action's run and what it created)"),
+  lastMapped: looseObject.optional().describe("trigger view: the newest accepted delivery's mapped values — what the actions receive"),
 }).passthrough();
 
 export function registerTriggerCards(server: McpServer, deps: McpDeps, enabled: ReadonlySet<ToolsetName>, principal: McpPrincipal, catalog?: ToolScope[]): void {
@@ -68,9 +68,9 @@ export function registerTriggerCards(server: McpServer, deps: McpDeps, enabled: 
 
   registerAppTool(server, "polpo_trigger_show", {
     title: "Show triggers",
-    description: "Show triggers as a card: every trigger with its endpoint, auth, contract version, delivery counts and last delivery; with id, that trigger "
-      + "with its recent deliveries (status, HTTP answer, reasons, contract errors) and the newest accepted delivery's mapped values. "
-      + "Use it when the person asks what a form or webhook sent, or whether deliveries arrive. No actions run on deliveries yet.",
+    description: "Show triggers as a card: every trigger with its endpoint, auth, contract version, delivery counts, actions and last delivery; with id, that trigger "
+      + "with its actions, its recent deliveries (status, HTTP answer, reasons, contract errors, each action's run: done / failed / skipped and what it created) "
+      + "and the newest accepted delivery's mapped values. Use it when the person asks what a form or webhook sent, whether deliveries arrive, or what their actions did.",
     inputSchema: {
       id: z.string().optional().describe("A trigger id (polpo_triggers_list): its deliveries"),
       status: z.array(z.enum(["accepted", "rejected", "filtered", "duplicate", "rate_limited"])).optional().describe("Only these delivery statuses"),

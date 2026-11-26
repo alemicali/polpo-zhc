@@ -47,6 +47,9 @@ function TriggerRow({ t, onOpen }: { t: Trigger; onOpen: () => void }) {
           <span className="truncate text-sm font-medium">{t.name}</span>
           <Badge variant="outline" className={cn("text-micro font-normal", t.enabled ? "text-success" : "text-warning")}>{t.enabled ? "Enabled" : "Disabled"}</Badge>
           <Badge variant="outline" className="text-micro font-normal">v{t.contractVersion} · {t.contract.contentTypes.join("/")}</Badge>
+          <Badge variant="outline" className="text-micro font-normal" data-testid="row-actions">
+            {t.actions?.length ? `${t.actions.length} action${t.actions.length === 1 ? "" : "s"}` : "No actions"}
+          </Badge>
         </div>
         <p className="truncate font-mono text-caption text-muted-foreground">{t.endpoint}</p>
         <p className="flex flex-wrap items-center gap-x-2 text-caption text-muted-foreground">
@@ -141,7 +144,9 @@ export function TriggersPage() {
   const [secret, setSecret] = useState<{ value: string; what: string } | null>(null);
   const setup = useMemo(() => readSetupParams(`?${params.toString()}`), [params]);
   const selectedId = params.get("trigger") ?? undefined;
-  const [tab, setTab] = useState<TriggerTab>(setup.focus === "hmac" ? "auth" : "overview");
+  // ?delivery=<id>: a link from what a trigger started (a task, a mission, a chat) opens that delivery
+  const deliveryLink = params.get("delivery") ?? undefined;
+  const [tab, setTab] = useState<TriggerTab>(setup.focus === "hmac" ? "auth" : deliveryLink ? "deliveries" : "overview");
   const selected = triggers.find((t) => t.id === selectedId);
 
   // an assistant's setup link (?trigger=<id>&focus=hmac): the sheet opens on Auth; focus the HMAC secret field
@@ -152,7 +157,7 @@ export function TriggersPage() {
 
   const open = useCallback((id: string | undefined, nextTab: TriggerTab = "overview") => {
     const next = new URLSearchParams(params);
-    if (id) next.set("trigger", id); else { next.delete("trigger"); next.delete("focus"); next.delete("setup"); }
+    if (id) next.set("trigger", id); else { next.delete("trigger"); next.delete("focus"); next.delete("setup"); next.delete("delivery"); }
     setParams(next, { replace: true });
     setTab(nextTab);
   }, [params, setParams]);
@@ -173,7 +178,7 @@ export function TriggersPage() {
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4 sm:p-6">
       <PageHeader title="Triggers" icon={Webhook}
-        description="Public endpoints that receive form submissions and webhooks: checked (secret, signature, IP, contract), filtered, de-duplicated and recorded with the values an action would receive. Actions arrive with the action engine."
+        description="Public endpoints that receive form submissions and webhooks: checked (secret, signature, IP, contract), filtered, de-duplicated, recorded with their mapped values, and acted on: run a playbook, start a mission, create a task, an agent turn, a notification."
         actions={<Button size="sm" onClick={() => setCreating(true)}><Plus className="h-3.5 w-3.5" /> New trigger</Button>} />
       <div className="relative max-w-sm">
         <Search className="pointer-events-none absolute left-2.5 top-2 h-4 w-4 text-muted-foreground" />
@@ -205,7 +210,7 @@ export function TriggersPage() {
         }
       }} />
       <TriggerSheet trigger={selected} open={!!selected} onOpenChange={(o) => { if (!o) open(undefined); }} tab={tab} onTab={setTab} focus={setup.focus}
-        save={save} onSecret={(value, what) => setSecret({ value, what })}
+        save={save} onSecret={(value, what) => setSecret({ value, what })} initialDelivery={deliveryLink}
         onDelete={async (id) => {
           try { await deleteTrigger(id); toast.success("Trigger deleted"); open(undefined); } catch (e) { toast.error((e as Error).message); }
         }} />

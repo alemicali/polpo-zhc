@@ -148,6 +148,10 @@ import type {
   TriggerDraft,
   TriggerDryRun,
   TriggerContractRevision,
+  TriggerActionsStatus,
+  TriggerActionRun,
+  TriggerActionInput,
+  TriggerActionPreview,
   WaBusinessStatus,
   WaBusinessEventSummary,
   WaBusinessEvent,
@@ -855,7 +859,7 @@ export class PolpoClient {
     return this.post("/decisions/nodes/resolve", { group, node, branch });
   }
 
-  // ── Triggers (POST /hooks/{id}: forms and webhooks; no actions yet) ──
+  // ── Triggers (POST /hooks/{id}: forms and webhooks, with actions on accepted deliveries) ──
 
   getTriggers(): Promise<Trigger[]> {
     return this.get("/triggers");
@@ -928,6 +932,21 @@ export class PolpoClient {
   /** A stored delivery through the current (or a draft) contract, filter, dedupe and mapping: a dry run. */
   replayTriggerDelivery(id: string, deliveryId: string, draft?: TriggerDraft): Promise<TriggerDryRun> {
     return this.post(`/triggers/${encodeURIComponent(id)}/deliveries/${encodeURIComponent(deliveryId)}/replay`, draft ? { draft } : {});
+  }
+
+  /** Run the trigger's current actions again on a stored accepted delivery (they run after the answer). */
+  rerunTriggerActions(id: string, deliveryId: string): Promise<{ deliveryId: string; actionsStatus?: TriggerActionsStatus; actions: TriggerActionRun[] }> {
+    return this.post(`/triggers/${encodeURIComponent(id)}/deliveries/${encodeURIComponent(deliveryId)}/run-actions`, {});
+  }
+
+  /** The actions (saved, or a draft) rendered against a delivery (default: the newest accepted one); nothing runs. */
+  previewTriggerActions(id: string, o: { deliveryId?: string; actions?: TriggerActionInput[] } = {}): Promise<TriggerActionPreview> {
+    return this.post(`/triggers/${encodeURIComponent(id)}/actions/preview`, o);
+  }
+
+  /** Actions started today and what the agent actions spent (UTC day). */
+  getTriggerActionUsage(id: string): Promise<{ day: string; actions: number; agentUsd: number }> {
+    return this.get(`/triggers/${encodeURIComponent(id)}/action-usage`);
   }
 
   /** A JSON Schema from a sample (or, with a trigger, from one of its deliveries). */

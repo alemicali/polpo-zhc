@@ -2,14 +2,15 @@
  * A trigger's sheet: Overview (endpoint, curl, on/off, name), Auth (the generated secret with
  * rotation, the HMAC check and its secret, the IP allowlist), Contract (content types, sizes, the
  * JSON Schema with a JSON / YAML view, inference from a sample, validation, versions and diffs),
- * Rules (filter, dedupe, rate limit, retention, mapping with a preview) and Deliveries (by status,
- * a delivery's payload / errors / mapped values, replay as a dry run, send a test delivery).
- * No actions run on deliveries yet: the action engine comes later.
+ * Rules (filter, dedupe, rate limit, retention, mapping with a preview), Actions (what runs on each
+ * accepted delivery: trigger-actions.tsx) and Deliveries (by status, a delivery's payload / errors /
+ * mapped values / action runs with links to what they created, re-run actions, replay as a dry run,
+ * send a test delivery, optionally running the actions).
  */
 import { useEffect, useMemo, useState } from "react";
 import { Check, Copy, History, Loader2, Play, Plus, RefreshCw, RotateCcw, Send, Sparkles, Trash2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
-import { usePolpo, useTriggerDeliveries } from "@polpo-ai/react";
+import { usePolpo, useTriggerDeliveries, useTriggerDelivery } from "@polpo-ai/react";
 import type { Trigger, TriggerContentType, TriggerContractRevision, TriggerDelivery, TriggerDeliveryStatus, TriggerDraft, TriggerDryRun, TriggerFilter, TriggerFilterOp, TriggerInput } from "@polpo-ai/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,8 +29,9 @@ import {
   CONTENT_TYPES, DELIVERY_STATUSES, STATUS_CLASS, STATUS_LABEL, curlExample, formatBytes, mappingObject, mappingRows, parseJson, toYaml, type MappingRow,
 } from "@/lib/triggers";
 import { cn } from "@/lib/utils";
+import { ActionStatusBadge, ActionsTab, DeliveryActions } from "./trigger-actions";
 
-export type TriggerTab = "overview" | "auth" | "contract" | "rules" | "deliveries";
+export type TriggerTab = "overview" | "auth" | "contract" | "rules" | "actions" | "deliveries";
 
 const when = (iso?: string) => (iso ? new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "—");
 
@@ -87,7 +89,7 @@ export function DryRunResult({ r }: { r: TriggerDryRun }) {
       </div>
       {r.reasons.map((x) => <p key={x} className="text-muted-foreground">{x}</p>)}
       {r.errors.length > 0 && <ul className="list-disc space-y-0.5 pl-4 text-destructive" data-testid="dry-run-errors">{r.errors.map((e) => <li key={e}>{e}</li>)}</ul>}
-      {r.mapped && <div><p className="mb-1 font-medium">Mapped values (what an action would receive)</p><JsonBlock data={r.mapped} /></div>}
+      {r.mapped && <div><p className="mb-1 font-medium">Mapped values (what the actions receive)</p><JsonBlock data={r.mapped} /></div>}
       {r.mappingErrors?.map((e) => <p key={e} className="text-warning">{e}</p>)}
     </div>
   );
@@ -113,7 +115,7 @@ function OverviewTab({ t, save, onDelete }: { t: Trigger; save: (input: TriggerI
         <div className="flex flex-wrap gap-1.5" data-testid="trigger-counts">
           {DELIVERY_STATUSES.map((s) => <Badge key={s} variant="outline" className={cn("font-normal", STATUS_CLASS[s])}>{t.stats.counts[s] ?? 0} {STATUS_LABEL[s].toLowerCase()}</Badge>)}
         </div>
-        <p className="text-caption text-muted-foreground">Last delivery: {t.stats.lastDeliveryAt ? `${when(t.stats.lastDeliveryAt)} (${STATUS_LABEL[t.stats.lastStatus!]})` : "none yet"}. No actions run on deliveries yet: the action engine comes later.</p>
+        <p className="text-caption text-muted-foreground">Last delivery: {t.stats.lastDeliveryAt ? `${when(t.stats.lastDeliveryAt)} (${STATUS_LABEL[t.stats.lastStatus!]})` : "none yet"}. {t.actions?.length ? `${t.actions.filter((a) => a.enabled).length} of ${t.actions.length} action${t.actions.length === 1 ? "" : "s"} run on each accepted delivery.` : "No actions: deliveries are only recorded."}</p>
       </Section>
       <Section title="Details">
         <Field label="Name"><Input value={name} onChange={(e) => setName(e.target.value)} className="h-8" /></Field>
@@ -416,7 +418,7 @@ function RulesTab({ t, save }: { t: Trigger; save: (input: TriggerInput, done?: 
           <Field label="Deliveries kept" hint="The newest; older ones are pruned"><Input className="h-8" inputMode="numeric" value={retention} onChange={(e) => setRetention(e.target.value.replace(/\D/g, ""))} /></Field>
         </div>
       </Section>
-      <Section title="Mapping" description="Named fields an action would receive, as templates over body, headers and query ({{body.email}}, {{query.ref ?? &quot;direct&quot;}}). Stored on every delivery; no action runs yet.">
+      <Section title="Mapping" description="Named fields an action would receive, as templates over body, headers and query ({{body.email}}, {{query.ref ?? &quot;direct&quot;}}). Stored on every delivery; the actions read them as {{mapped.name}}.">
         <div className="space-y-2" data-testid="mapping-rows">
           {rows.map((r, i) => (
             <div key={i} className="flex flex-col gap-1.5 sm:flex-row">
@@ -444,11 +446,11 @@ function RulesTab({ t, save }: { t: Trigger; save: (input: TriggerInput, done?: 
 
 function DeliveryDialog({ t, id, onClose }: { t: Trigger; id: string | null; onClose: () => void }) {
   const { client } = usePolpo();
-  const [d, setD] = useState<TriggerDelivery | null>(null);
+  // live: the actions' progress refreshes it
+  const { delivery, error, rerunActions } = useTriggerDelivery(t.id, id ?? undefined);
+  const d: TriggerDelivery | null = delivery ?? null;
   const [replay, setReplay] = useState<TriggerDryRun | null>(null);
-  useEffect(() => {
-    if (id) void client.getTriggerDelivery(t.id, id).then(setD, (e: Error) => toast.error(e.message));
-  }, [client, t.id, id]);
+  useEffect(() => { if (error) toast.error(error.message); }, [error]);
   return (
     <Dialog open={!!id} onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl" data-testid="delivery-dialog">
@@ -463,6 +465,7 @@ function DeliveryDialog({ t, id, onClose }: { t: Trigger; id: string | null; onC
               {d.errors?.length ? <ul className="list-disc space-y-0.5 pl-4 text-destructive">{d.errors.map((e) => <li key={e}>{e}</li>)}</ul> : null}
               {d.duplicateOf && <p>Duplicate of <code>{d.duplicateOf}</code>.</p>}
               {d.mapped && <div><p className="mb-1 font-medium">Mapped values</p><JsonBlock data={d.mapped} /></div>}
+              <DeliveryActions d={d} onRerun={rerunActions} />
               <div><p className="mb-1 font-medium">Body{d.bodyTruncated ? " (truncated)" : ""}</p>{d.body !== undefined ? <JsonBlock data={d.body} /> : <p className="text-muted-foreground">Not kept: the request was refused before it was authenticated or read.</p>}</div>
               {d.files?.length ? <div><p className="mb-1 font-medium">Files (metadata only)</p><ul className="space-y-0.5">{d.files.map((f) => <li key={f.sha256 + f.field}><code>{f.field}</code> {f.filename} · {f.contentType} · {formatBytes(f.size)}</li>)}</ul></div> : null}
               <div><p className="mb-1 font-medium">Headers (secrets redacted)</p><JsonBlock data={d.headers} /></div>
@@ -481,18 +484,19 @@ function DeliveryDialog({ t, id, onClose }: { t: Trigger; id: string | null; onC
   );
 }
 
-function DeliveriesTab({ t }: { t: Trigger }) {
+function DeliveriesTab({ t, initialDelivery }: { t: Trigger; initialDelivery?: string }) {
   const { client } = usePolpo();
   const [status, setStatus] = useState<TriggerDeliveryStatus[]>([]);
   const { page, isLoading } = useTriggerDeliveries(t.id, { status, limit: 100 });
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(initialDelivery ?? null);
+  const [runActions, setRunActions] = useState(false);
   const [body, setBody] = useState('{\n  "hello": "world"\n}');
   const [kind, setKind] = useState<TriggerContentType>(t.contract.contentTypes[0] ?? "json");
   const [sending, setSending] = useState(false);
   const parsed = kind === "text" ? { ok: true as const, value: body } : parseJson(body);
   return (
     <div className="space-y-5">
-      <Section title="Send a test delivery" description="Goes through the contract, filter, dedupe and mapping and is recorded as a test (no secret, IP or rate check).">
+      <Section title="Send a test delivery" description="Goes through the contract, filter, dedupe and mapping and is recorded as a test (no secret, IP or rate check). Its actions run only when you tick “Run the actions too”.">
         <Textarea rows={4} className="font-mono text-xs" value={body} onChange={(e) => setBody(e.target.value)} aria-label="Test body" />
         {!parsed.ok && <p className="text-xs text-destructive">{parsed.error}</p>}
         <div className="flex flex-wrap items-center gap-2">
@@ -502,10 +506,13 @@ function DeliveriesTab({ t }: { t: Trigger }) {
           </Select>
           <Button size="sm" disabled={!parsed.ok || sending} onClick={() => {
             setSending(true);
-            void client.sendTriggerTest(t.id, { body: parsed.ok ? parsed.value : undefined, contentType: kind })
+            void client.sendTriggerTest(t.id, { body: parsed.ok ? parsed.value : undefined, contentType: kind, ...(runActions ? { runActions: true } : {}) })
               .then((d) => { toast.success(`Test delivery: ${STATUS_LABEL[d.status].toLowerCase()}`); setOpen(d.id); }, (e: Error) => toast.error(e.message))
               .finally(() => setSending(false));
           }}>{sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Send test</Button>
+          {t.actions?.length ? (
+            <label className="flex items-center gap-2 text-xs"><Checkbox checked={runActions} onCheckedChange={(v) => setRunActions(v === true)} aria-label="Run the actions" /> Run the actions too</label>
+          ) : null}
         </div>
       </Section>
       <Section title="Deliveries" description={`The newest ${t.retention} are kept.`}>
@@ -527,6 +534,7 @@ function DeliveriesTab({ t }: { t: Trigger }) {
                   className="flex w-full flex-wrap items-center gap-2 px-3 py-2 text-left text-xs hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   <StatusBadge status={d.status} />
                   {d.test && <Badge variant="outline" className="border-info/30 bg-info/10 font-normal text-info">test</Badge>}
+                  {d.actionsStatus && <ActionStatusBadge status={d.actionsStatus} />}
                   <span className="tabular-nums text-muted-foreground">{when(d.receivedAt)} · HTTP {d.httpStatus}{d.count && d.count > 1 ? ` · ×${d.count}` : ""}</span>
                   <span className="min-w-0 flex-1 truncate text-muted-foreground">{d.reasons.join("; ")}</span>
                 </button>
@@ -542,7 +550,7 @@ function DeliveriesTab({ t }: { t: Trigger }) {
 
 // ── The sheet ──
 
-export function TriggerSheet({ trigger, open, onOpenChange, tab, onTab, focus, save, onSecret, onDelete }: {
+export function TriggerSheet({ trigger, open, onOpenChange, tab, onTab, focus, save, onSecret, onDelete, initialDelivery }: {
   trigger: Trigger | undefined;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -552,6 +560,8 @@ export function TriggerSheet({ trigger, open, onOpenChange, tab, onTab, focus, s
   save: (id: string, input: TriggerInput, done?: string) => Promise<{ secret?: string } | undefined>;
   onSecret: (secret: string, what: string) => void;
   onDelete: (id: string) => Promise<void>;
+  /** A delivery to open (a deep link from a task, a mission or a chat the trigger started). */
+  initialDelivery?: string;
 }) {
   const [confirm, setConfirm] = useState(false);
   const t = trigger;
@@ -571,6 +581,7 @@ export function TriggerSheet({ trigger, open, onOpenChange, tab, onTab, focus, s
                 <TabsTrigger value="auth">Auth</TabsTrigger>
                 <TabsTrigger value="contract">Contract</TabsTrigger>
                 <TabsTrigger value="rules">Rules</TabsTrigger>
+                <TabsTrigger value="actions">Actions{t.actions?.length ? ` ${t.actions.length}` : ""}</TabsTrigger>
                 <TabsTrigger value="deliveries">Deliveries</TabsTrigger>
               </TabsList>
               <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
@@ -578,7 +589,8 @@ export function TriggerSheet({ trigger, open, onOpenChange, tab, onTab, focus, s
                 <TabsContent value="auth"><AuthTab key={`${t.id}-${t.updatedAt}`} t={t} save={bound} onSecret={onSecret} focus={focus} /></TabsContent>
                 <TabsContent value="contract"><ContractTab key={`${t.id}-${t.contractVersion}`} t={t} save={bound} /></TabsContent>
                 <TabsContent value="rules"><RulesTab key={`${t.id}-${t.updatedAt}`} t={t} save={bound} /></TabsContent>
-                <TabsContent value="deliveries"><DeliveriesTab t={t} /></TabsContent>
+                <TabsContent value="actions"><ActionsTab key={`${t.id}-${t.updatedAt}`} t={t} save={bound} /></TabsContent>
+                <TabsContent value="deliveries"><DeliveriesTab t={t} initialDelivery={initialDelivery} /></TabsContent>
               </div>
             </Tabs>
             <ConfirmDialog open={confirm} onOpenChange={setConfirm} destructive title={`Delete ${t.name}?`}
