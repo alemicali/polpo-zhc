@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
 import { useEvents } from "./use-events.js";
-import type { WaBusinessConversation, WaBusinessStatus, WaBusinessTemplate } from "@polpo-ai/sdk";
+import type { WaBusinessContact, WaBusinessConversation, WaBusinessStatus, WaBusinessTemplate } from "@polpo-ai/sdk";
 
 /** Live: a delivery recorded or a message's status changed. */
 const WABIZ_EVENTS = ["channel:webhook", "channel:message-status"];
@@ -110,4 +110,48 @@ export function useWaConversation(channel: string | undefined, waId: string | un
   }, [refetch]);
   useRefetchOn(["channel:message-status"], () => { void refetch(); }, channel);
   return { conversation, isLoading, error, refetch };
+}
+
+export interface UseWaContactsReturn {
+  contacts: WaBusinessContact[];
+  isLoading: boolean;
+  error: Error | null;
+  refetch: () => Promise<void>;
+  /** Record the contact's opt-in (true) or opt-out (false). */
+  setOptIn: (waId: string, optIn: boolean, source?: string) => Promise<void>;
+  /** Erase the contact and its messages (GDPR). */
+  erase: (waId: string) => Promise<void>;
+}
+
+/** A WhatsApp Business channel's contacts (window, opt-in, opt-out), with the opt-in / opt-out and erasure actions. */
+export function useWaContacts(channel: string | undefined, limit = 100): UseWaContactsReturn {
+  const { client } = usePolpoContext();
+  const [contacts, setContacts] = useState<WaBusinessContact[]>([]);
+  const [isLoading, setIsLoading] = useState(!!channel);
+  const [error, setError] = useState<Error | null>(null);
+  const refetch = useCallback(async () => {
+    if (!channel) return;
+    try {
+      setContacts(await client.getWaBusinessContacts(channel, limit));
+      setError(null);
+    } catch (err) {
+      setError(err as Error);
+    }
+  }, [client, channel, limit]);
+  useEffect(() => {
+    setIsLoading(true);
+    refetch().finally(() => setIsLoading(false));
+  }, [refetch]);
+  useRefetchOn(WABIZ_EVENTS, () => { void refetch(); }, channel);
+  const setOptIn = useCallback(async (waId: string, optIn: boolean, source?: string) => {
+    if (!channel) return;
+    await client.setWaBusinessOptIn(channel, waId, optIn, source);
+    await refetch();
+  }, [client, channel, refetch]);
+  const erase = useCallback(async (waId: string) => {
+    if (!channel) return;
+    await client.deleteWaBusinessContact(channel, waId);
+    await refetch();
+  }, [client, channel, refetch]);
+  return { contacts, isLoading, error, refetch, setOptIn, erase };
 }

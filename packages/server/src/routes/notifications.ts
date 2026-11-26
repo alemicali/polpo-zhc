@@ -205,6 +205,8 @@ export function notificationRoutes(getDeps: () => {
         body: body.body,
         severity: body.severity,
         delayMs: body.delayMs,
+        ...(body.throwOnError ? { throwOnError: true } : {}),
+        ...(body.to || body.threadTs ? { target: { ...(body.to ? { chatId: body.to } : {}), ...(body.threadTs ? { threadTs: body.threadTs } : {}) } } : {}),
       });
 
       return c.json({ ok: true, data: result }, 200);
