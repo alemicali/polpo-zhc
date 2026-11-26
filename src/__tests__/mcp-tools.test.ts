@@ -491,6 +491,28 @@ describe("missions", () => {
     expect((await call(deps(f), "polpo_mission_wait", { id: "m1" })).structuredContent).toMatchObject({ reached: true, mission: { status: "cancelled" } });
   }, 20_000); // runs a mission and waits for it: slow on CI runners
 
+  it("tasks a decision left out are not reached (never done): polpo_mission_get counts, polpo_tasks_list rows, polpo_task_get", async () => {
+    const f = fakeInstance();
+    f.missions.set("md", { id: "md", name: "Ticket", status: "completed", data: JSON.stringify(plan), updatedAt: "2026-11-21T10:00:00Z" });
+    const skipped = { reason: "decision", node: "route", branch: "support", answer: "decision: support (0.81)", confidence: 0.81 };
+    const at = "2026-11-21T11:00:00Z";
+    f.tasks.set("d1", { id: "d1", title: "Triage", status: "done", assignTo: "coach", description: "x", missionId: "md", group: "Ticket", updatedAt: at, result: { exitCode: 0, stdout: "read", stderr: "", duration: 1 } } as never);
+    f.tasks.set("d2", { id: "d2", title: "Refund", status: "done", assignTo: "coach", description: "x", missionId: "md", group: "Ticket", updatedAt: at, result: { exitCode: 0, stdout: 'Skipped: the decision "route" took the branch "support" (decision: support (0.81))', stderr: "", duration: 0, skipped } } as never);
+    // skipped before the marker existed: only the result text
+    f.tasks.set("d3", { id: "d3", title: "Escalate", status: "done", assignTo: "coach", description: "x", missionId: "md", group: "Ticket", updatedAt: at, result: { exitCode: 0, stdout: 'Skipped: the decision "route" took the branch "support" (decision: support (0.81))', stderr: "", duration: 0 } } as never);
+    const got = await call(deps(f), "polpo_mission_get", { id: "md" });
+    expect(got.structuredContent.task_counts).toEqual({ done: 1, not_reached: 2 });
+    expect(got.content[0].text).toContain("tasks: 1 done, 2 not reached");
+    expect(got.content[0].text).toMatch(/d2 \[not reached\] Refund.*Not reached: the decision "route" chose "support"/);
+    const list = await call(deps(f), "polpo_tasks_list", { mission_id: "md" });
+    expect(list.structuredContent.items.find((x: { id: string }) => x.id === "d3")).toMatchObject({ status: "done", not_reached: { node: "route", branch: "support" } });
+    expect(list.structuredContent.items.find((x: { id: string }) => x.id === "d1").not_reached).toBeUndefined();
+    const one = await call(deps(f), "polpo_task_get", { id: "d2", activity: 0 });
+    expect(one.structuredContent.not_reached).toMatchObject({ node: "route", branch: "support", confidence: 0.81 });
+    expect(one.content[0].text).toMatch(/^d2 \[not reached\] Refund/);
+    expect(one.content[0].text).toContain("closed without running");
+  });
+
   it("polpo_mission_wait returns for a recurring mission once its run finished, with the run's outcome (live: it never settled)", async () => {
     const f = fakeInstance();
     f.missions.set("mr", { id: "mr", name: "Digest", status: "recurring", data: JSON.stringify(plan), updatedAt: "2026-11-21T10:00:00Z", executionCount: 2, schedule: "0 3 1 1 *" });

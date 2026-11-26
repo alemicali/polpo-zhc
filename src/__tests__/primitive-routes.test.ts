@@ -89,6 +89,29 @@ describe("POST /tasks dependsOn", () => {
   });
 });
 
+describe("GET /tasks: tasks a decision left out", () => {
+  it("expose notReached (from result.skipped, or the legacy result text) in the full list, the slim list and one task", async () => {
+    const skipped = { reason: "decision", node: "route", branch: "support", answer: "decision: support (0.81)", confidence: 0.81 };
+    const text = 'Skipped: the decision "route" took the branch "support" (decision: support (0.81))';
+    const all = [
+      { id: "t1", title: "Triage", status: "done", dependsOn: [], result: { exitCode: 0, stdout: "read", stderr: "", duration: 1 }, createdAt: "a", updatedAt: "a" },
+      { id: "t2", title: "Refund", status: "done", dependsOn: [], result: { exitCode: 0, stdout: text, stderr: "", duration: 0, skipped }, createdAt: "a", updatedAt: "a" },
+      { id: "t3", title: "Escalate", status: "done", dependsOn: [], result: { exitCode: 0, stdout: text, stderr: "", duration: 0 }, createdAt: "a", updatedAt: "a" },
+    ];
+    const app = taskRoutes(() => ({ taskStore: { getAllTasks: async () => all, getTask: async (id: string) => all.find((t) => t.id === id) } } as any));
+    const full = (await (await app.request("/")).json()).data;
+    expect(full[0].notReached).toBeUndefined();
+    expect(full[1].notReached).toMatchObject({ reason: "decision", node: "route", branch: "support", confidence: 0.81 });
+    expect(full[2].notReached).toMatchObject({ node: "route", branch: "support" });
+    // the status stays done (joins and completion are unchanged): notReached is what surfaces read
+    expect(full[1].status).toBe("done");
+    const slim = (await (await app.request("/?slim=true")).json()).data;
+    expect(slim.map((t: any) => t.notReached?.branch ?? null)).toEqual([null, "support", "support"]);
+    const one = (await (await app.request("/t3")).json()).data;
+    expect(one.notReached).toMatchObject({ node: "route", branch: "support" });
+  });
+});
+
 describe("POST /schedules/:missionId/run", () => {
   it("runs a scheduled mission now; 404 without a schedule; 409 when it cannot run", async () => {
     const entry = { id: "sched-m1", missionId: "m1", expression: "0 9 * * *", recurring: true, enabled: true };

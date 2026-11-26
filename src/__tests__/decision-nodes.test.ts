@@ -19,6 +19,7 @@ import { InMemoryTaskStore, InMemoryRunStore, createMockStores } from "./fixture
 import type { OrchestratorContext } from "../core/orchestrator-context.js";
 import type { Mission, PolpoConfig, Task } from "../core/types.js";
 import type { DecisionAnswer, MissionDecider } from "@polpo-ai/core";
+import { countTaskOutcomes, taskSkip, taskSkipText } from "@polpo-ai/core";
 import { FileCheckpointStore } from "../stores/file-checkpoint-store.js";
 import { FileDelayStore } from "../stores/file-delay-store.js";
 import { FileDecisionNodeStore } from "../stores/file-decision-node-store.js";
@@ -124,6 +125,42 @@ describe("mission decision nodes", () => {
     expect(events.map((e) => e.status)).toEqual(["deciding", "decided"]);
     expect(events[1]).toMatchObject({ branch: "billing" });
     expect(exec.hasPendingDecisions()).toBe(false);
+  });
+
+  test("skipped tasks carry a machine-readable marker (result.skipped), the transition says skipped, and the mission completes with them counted as not reached", async () => {
+    const transitions: Array<{ taskId: string; to: string; skipped?: boolean }> = [];
+    ctx.emitter.on("task:transition", (e) => transitions.push(e));
+    const completed: Array<{ allPassed: boolean; report: { notReached?: number; tasks: Array<{ title: string; notReached?: boolean }> } }> = [];
+    ctx.emitter.on("mission:completed", (e) => completed.push(e as never));
+    const s = await start(DOC, async () => ({ id: "dec_abc", answers: [choice("billing", 0.9)], calibrated: true, model: "m" }));
+    await s.finish("Triage", "charged twice");
+    await s.blocking("Refund");
+    await vi.waitFor(() => expect(events.some((e) => e.status === "decided")).toBe(true));
+    const tasks = await s.all();
+    const t = (title: string) => tasks.find((x) => x.title === title)!;
+    expect(t("Reply").result?.skipped).toMatchObject({ reason: "decision", node: "route", branch: "billing", answer: "decision: billing (0.90)", confidence: 0.9, decidedBy: "model" });
+    expect(taskSkip(t("Reply"))).toMatchObject({ node: "route", branch: "billing" });
+    expect(taskSkip(t("Follow up"))).toMatchObject({ node: "route" });
+    expect(taskSkip(t("Refund"))).toBeUndefined();
+    expect(transitions.filter((e) => e.skipped).map((e) => e.taskId).sort()).toEqual([t("Follow up").id, t("Reply").id].sort());
+    // the chosen branch runs, the join runs: then the mission completes (skipped tasks are terminal), with 2 not reached
+    await s.finish("Refund", "refunded");
+    await s.finish("Close", "closed");
+    await exec.cleanupCompletedGroups(await s.all());
+    expect((await ctx.registry.getMission!(s.m.id))?.status).toBe("completed");
+    expect(completed[0]).toMatchObject({ allPassed: true, report: { notReached: 2 } });
+    expect(completed[0].report.tasks.filter((x) => x.notReached).map((x) => x.title).sort()).toEqual(["Follow up", "Reply"]);
+    expect(countTaskOutcomes(await s.all())).toMatchObject({ done: 3, notReached: 2, failed: 0 });
+  });
+
+  test("tasks skipped before the marker existed are recognised from their result text", () => {
+    const legacy = { status: "done", result: { exitCode: 0, stdout: 'Skipped: the decision "route" took the branch "billing" (decision: billing (0.90))', stderr: "", duration: 0 } };
+    expect(taskSkip(legacy)).toEqual({ reason: "decision", node: "route", branch: "billing", answer: "decision: billing (0.90)", confidence: 0.9 });
+    expect(taskSkip({ status: "done", result: { stdout: 'Skipped: the decision "route" took no branch (no answer)' } })).toEqual({ reason: "decision", node: "route", branch: null });
+    // not a skip: a failed task with that text, or an ordinary result
+    expect(taskSkip({ status: "failed", result: { stdout: legacy.result.stdout } })).toBeUndefined();
+    expect(taskSkip({ status: "done", result: { stdout: "Skipped the intro, wrote the rest" } })).toBeUndefined();
+    expect(taskSkipText({ node: "n", branch: null })).toBe('Skipped: the decision "n" took no branch (no answer)');
   });
 
   test("uncertain → a person chooses: the mission pauses at a checkpoint; resuming it takes the suggestion", async () => {
