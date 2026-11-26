@@ -16,6 +16,8 @@ The dashboard's look (instance default, per-browser customization, design tokens
 
 The global search (⌘K in the dashboard, `GET /api/v1/search`, `polpo_search`) — what it finds, how it ranks, the full-text index on chat messages — is documented in [search.md](search.md).
 
+Triggers — public endpoints (`POST /hooks/{id}`) that receive form submissions and webhooks: secret / HMAC / IP authentication, a versioned contract, filter, dedupe, rate limit, mapping, the delivery log and test tools, and the Tailscale Funnel path — are documented in [triggers.md](triggers.md). Actions on deliveries arrive later with the action engine.
+
 The official WhatsApp Business channel (Meta Cloud API: setup, the 24-hour window, templates, approvals, the Funnel command, retention) is documented in [whatsapp-business.md](whatsapp-business.md).
 
 Agent versions — drafts, semver versions, deploying to production, rollback, the deploy history with diffs, pinning a task or chat to a version (`writer@1.2.0`) and the API compatibility setting — are documented in [agent-versions.md](agent-versions.md).

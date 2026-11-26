@@ -32,6 +32,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-26-triggers",
+    date: "2026-11-26",
+    kind: "new",
+    title: "Trigger: un indirizzo pubblico per moduli e webhook",
+    summary: "Crea un trigger e dai il suo indirizzo a un modulo (Tally, Typeform…) o a un servizio: ogni invio viene controllato, validato, filtrato, deduplicato e registrato con i valori che un'azione riceverebbe. Le azioni arriveranno con il motore delle azioni.",
+    body: [
+      "- **Un indirizzo per trigger**: `POST …/hooks/<id>`, l'unico percorso pubblico della funzione (dietro Tailscale Funnel va pubblicato `/<istanza>/hooks/`). L'id ha un suffisso casuale, quindi non si indovina.",
+      "- **Chi può inviare**: un segreto generato da Polpo e mostrato **una volta sola** (nell'header `Authorization: Bearer` o `X-Polpo-Secret`), che puoi ruotare lasciando valido il vecchio per un po'; oppure una **firma HMAC** come quelle di GitHub, Typeform o Stripe (header, algoritmo, codifica, prefisso, timestamp con tolleranza), con il segreto nel vault; e se vuoi solo certi **indirizzi IP**.",
+      "- **Il contratto**: tipi accettati (JSON, form, multipart con i file, testo), dimensione massima e uno **schema JSON** che puoi **ricavare da un esempio** e poi modificare (vista JSON o YAML). Ogni modifica è una nuova **versione**, con le differenze tra due versioni.",
+      "- **Filtro, deduplica, limite e mappatura**: scarta gli invii che non ti interessano, riconosce i doppioni (stesso id entro una finestra di tempo), limita le richieste al minuto e prepara i **campi** che un'azione riceverà (`{{body.email}}`…).",
+      "- **Consegne**: ogni invio resta nel registro (accettato, rifiutato, filtrato, doppione, limitato) con il contenuto, gli errori e i valori mappati; puoi **inviare un test**, **validare un esempio** e **rigiocare** una consegna con le regole attuali senza registrarla.",
+      "- Per ora un trigger **non avvia nulla**: le azioni (missioni, playbook, task, agenti, notifiche) arriveranno con il motore delle azioni. Nella nuova pagina **Trigger** accanto alle Pianificazioni, via API, MCP (con la scheda dei trigger) e nella chat con Polpo.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i trigger", to: "/triggers" },
+  },
+  {
     id: "2026-11-26-suite-roles",
     date: "2026-11-26",
     kind: "improved",

@@ -301,6 +301,25 @@ export interface PolpoEventMap {
     computerId?: string;
   };
 
+  /** A trigger (POST /hooks/{id}) was created, changed, deleted, or its secret rotated / HMAC secret set. */
+  "trigger:changed": {
+    id: string;
+    action: "created" | "updated" | "deleted" | "secret-rotated" | "hmac-secret";
+  } & EventOrigin;
+  /**
+   * A trigger recorded a delivery: accepted, rejected (auth, size, type, contract), filtered,
+   * duplicate or rate_limited; `test` when sent from the dashboard / API / a tool. `mapped`: the
+   * mapping's values (what an action would receive). What the action engine will subscribe to.
+   */
+  "trigger:delivery": {
+    triggerId: string;
+    deliveryId: string;
+    status: "accepted" | "rejected" | "filtered" | "duplicate" | "rate_limited";
+    httpStatus: number;
+    test?: boolean;
+    mapped?: Record<string, unknown>;
+  };
+
   /**
    * A message of a WhatsApp Business channel changed status: Meta's status webhooks (sent,
    * delivered, read, failed), a send queued for approval, approved or rejected, an inbound message.

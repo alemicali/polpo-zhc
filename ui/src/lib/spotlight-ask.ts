@@ -20,7 +20,7 @@ const FILLER = new Set(["a", "ad", "al", "allo", "alla", "alle", "ai", "agli", "
 const ALIASES: Record<string, string> = {
   artefatti: "artifacts", artifatti: "artifacts", artefatto: "artifacts", artifacts: "artifacts", artifact: "artifacts",
   attivita: "tasks", compiti: "tasks", task: "tasks", missioni: "missions", missione: "missions", mission: "missions",
-  agenti: "agents", agente: "agents", agent: "agents", pianificazioni: "schedules", programmazioni: "schedules", schedule: "schedules",
+  agenti: "agents", agente: "agents", agent: "agents", pianificazioni: "schedules", programmazioni: "schedules", schedule: "schedules", webhook: "triggers", webhooks: "triggers", trigger: "triggers",
   eventi: "events", approvazioni: "approvals", approvazione: "approvals", abilita: "skills", competenze: "skills", skill: "skills",
   memoria: "memory", dati: "data", cervello: "brain", aziendale: "company", strumenti: "tools", calcolatori: "computers",
   impostazioni: "settings", configurazione: "settings", config: "settings", preferenze: "settings",

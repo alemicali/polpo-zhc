@@ -22,6 +22,7 @@ const WIDGETS = {
   "agent-card": { constant: "AGENT_CARD_HTML", css: ["shared/marks.css", "agent-card/style.css"] },
   "work-card": { constant: "WORK_CARD_HTML", css: ["shared/marks.css", "agent-card/style.css", "work-card/style.css"] },
   "suite-card": { constant: "SUITE_CARD_HTML", css: ["agent-card/style.css", "suite-card/style.css"] },
+  "trigger-card": { constant: "TRIGGER_CARD_HTML", css: ["agent-card/style.css", "trigger-card/style.css"] },
 };
 
 async function widgetHtml(name, sheets) {

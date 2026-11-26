@@ -27,6 +27,7 @@ import { registerConfigTools } from "../server/mcp-server/config.js";
 import { registerRoomTools } from "../server/mcp-server/rooms.js";
 import { registerChatTools } from "../server/mcp-server/chat.js";
 import { registerAutomationTools } from "../server/mcp-server/automation.js";
+import { registerTriggerTools } from "../server/mcp-server/triggers.js";
 import { registerMissionTools } from "../server/mcp-server/missions.js";
 import { registerDataTools } from "../server/mcp-server/data.js";
 import { registerBrainTools } from "../server/mcp-server/knowledge.js";
@@ -153,6 +154,15 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_schedule_run", name: "schedule_run", group: "automation" },
   { mcp: "polpo_check_update", name: "check_update", group: "automation" },
   { mcp: "polpo_check_delete", name: "check_delete", group: "automation" },
+  // Triggers: public endpoints (POST /hooks/{id}) for forms and webhooks — definitions, deliveries, test tools, secrets (no actions yet)
+  { mcp: "polpo_triggers_list", name: "triggers_list", group: "triggers" },
+  { mcp: "polpo_trigger_get", name: "trigger_get", group: "triggers" },
+  { mcp: "polpo_trigger_deliveries", name: "trigger_deliveries", group: "triggers" },
+  { mcp: "polpo_trigger_create", name: "trigger_create", group: "triggers" },
+  { mcp: "polpo_trigger_update", name: "trigger_update", group: "triggers" },
+  { mcp: "polpo_trigger_delete", name: "trigger_delete", group: "triggers" },
+  { mcp: "polpo_trigger_test", name: "trigger_test", group: "triggers" },
+  { mcp: "polpo_trigger_auth", name: "trigger_auth", group: "triggers" },
   // Missions, data, brain, skills
   { mcp: "polpo_mission_wait", name: "mission_wait", group: "mission-editing" },
   { mcp: "polpo_data_activity", name: "data_activity", group: "data" },
@@ -243,6 +253,8 @@ export const MCP_EQUIVALENTS: Record<string, string> = {
   polpo_agent_suite_show: "agent_suite_run_get",
   // the benchmark card (an MCP App): benchmark_get and benchmark_compare have the same (leaderboard, matrix, side by side)
   polpo_benchmark_show: "benchmark_get",
+  // the trigger card (an MCP App): trigger_get and trigger_deliveries have the same
+  polpo_trigger_show: "trigger_get",
   polpo_mission_create: "create_mission",
   polpo_mission_update: "update_mission",
   polpo_mission_run: "execute_mission",
@@ -389,7 +401,7 @@ function capture(): Map<string, Captured> {
   };
   for (const register of [
     registerSetupTools, registerTeamTools, registerAgentSuiteTools, registerBenchmarkTools, registerConnectorTools, registerMcpServerTools, registerHarnessTools, registerComputerTools, registerConfigTools,
-    registerSettingsTools, registerChannelTools, registerChannelSetupTools, registerRoomTools, registerChatTools, registerAutomationTools,
+    registerSettingsTools, registerChannelTools, registerChannelSetupTools, registerRoomTools, registerChatTools, registerAutomationTools, registerTriggerTools,
     registerMissionTools, registerDataTools, registerBrainTools, registerSkillTools, registerWaBusinessTools, registerSearchTools,
     registerArtifactTools,
   ]) register(tool, deps);

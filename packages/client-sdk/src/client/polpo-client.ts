@@ -132,6 +132,21 @@ import type {
   SendTaskDirectionResult,
   WaBizOutcome,
   WaBizSecretKind,
+  TriggerContentType,
+  TriggerDeliveryStatus,
+  TriggerFilterOp,
+  TriggerHmacConfig,
+  TriggerContract,
+  TriggerFilter,
+  Trigger,
+  TriggerInput,
+  TriggerDeliverySummary,
+  TriggerDelivery,
+  TriggerDeliveryPage,
+  TriggerSample,
+  TriggerDraft,
+  TriggerDryRun,
+  TriggerContractRevision,
   WaBusinessStatus,
   WaBusinessEventSummary,
   WaBusinessEvent,
@@ -797,6 +812,87 @@ export class PolpoClient {
   /** The connectors (external apps over MCP), with their status, account and who may use them. */
   getConnectors(): Promise<Connector[]> {
     return this.get<{ connectors: Connector[] }>("/connectors").then((d) => d.connectors);
+  }
+
+  // ── Triggers (POST /hooks/{id}: forms and webhooks; no actions yet) ──
+
+  getTriggers(): Promise<Trigger[]> {
+    return this.get("/triggers");
+  }
+
+  getTrigger(id: string): Promise<Trigger> {
+    return this.get(`/triggers/${encodeURIComponent(id)}`);
+  }
+
+  /** Create a trigger; `secret` (the generated one) is returned this once. */
+  createTrigger(input: TriggerInput & { name: string }): Promise<{ trigger: Trigger; secret?: string }> {
+    return this.post("/triggers", input);
+  }
+
+  /** Change a trigger; a contract change makes a new contract version. */
+  updateTrigger(id: string, input: TriggerInput): Promise<{ trigger: Trigger; secret?: string }> {
+    return this.patch(`/triggers/${encodeURIComponent(id)}`, input);
+  }
+
+  deleteTrigger(id: string): Promise<{ deleted: boolean }> {
+    return this.del(`/triggers/${encodeURIComponent(id)}`);
+  }
+
+  /** A new generated secret (returned this once); the previous works for overlapSeconds (default a day). */
+  rotateTriggerSecret(id: string, overlapSeconds?: number): Promise<{ secret: string; previousValidUntil?: string; trigger: Trigger }> {
+    return this.post(`/triggers/${encodeURIComponent(id)}/rotate-secret`, overlapSeconds !== undefined ? { overlapSeconds } : {});
+  }
+
+  /** The HMAC signing secret into the vault (never echoed); `generate: true` makes one, returned this once. */
+  setTriggerHmacSecret(id: string, o: { secret?: string; generate?: boolean; overlapSeconds?: number }): Promise<{ secret?: string; status: { secretSet: boolean; previousUntil?: string } }> {
+    return this.put(`/triggers/${encodeURIComponent(id)}/hmac-secret`, o);
+  }
+
+  removeTriggerHmacSecret(id: string): Promise<{ secretSet: boolean }> {
+    return this.del(`/triggers/${encodeURIComponent(id)}/hmac-secret`);
+  }
+
+  getTriggerContractVersions(id: string): Promise<TriggerContractRevision[]> {
+    return this.get(`/triggers/${encodeURIComponent(id)}/contract-versions`);
+  }
+
+  diffTriggerContract(id: string, from: number, to: number): Promise<{ from: number; to: number; diff: string }> {
+    return this.get(`/triggers/${encodeURIComponent(id)}/contract-versions/diff?from=${from}&to=${to}`);
+  }
+
+  getTriggerDeliveries(id: string, o: { limit?: number; cursor?: string; status?: TriggerDeliveryStatus[]; test?: boolean } = {}): Promise<TriggerDeliveryPage> {
+    const q = new URLSearchParams();
+    if (o.limit) q.set("limit", String(o.limit));
+    if (o.cursor) q.set("cursor", o.cursor);
+    if (o.status?.length) q.set("status", o.status.join(","));
+    if (o.test !== undefined) q.set("test", String(o.test));
+    const qs = q.toString();
+    return this.get(`/triggers/${encodeURIComponent(id)}/deliveries${qs ? `?${qs}` : ""}`);
+  }
+
+  getTriggerDelivery(id: string, deliveryId: string): Promise<TriggerDelivery> {
+    return this.get(`/triggers/${encodeURIComponent(id)}/deliveries/${encodeURIComponent(deliveryId)}`);
+  }
+
+  /** A test delivery (recorded with test: true) through the contract, filter, dedupe and mapping. */
+  sendTriggerTest(id: string, sample: TriggerSample): Promise<TriggerDelivery> {
+    return this.post(`/triggers/${encodeURIComponent(id)}/test`, sample);
+  }
+
+  /** A sample against the contract, filter, dedupe and mapping (saved, or a draft), without recording it. */
+  validateTriggerSample(id: string, sample: TriggerSample, draft?: TriggerDraft): Promise<TriggerDryRun> {
+    return this.post(`/triggers/${encodeURIComponent(id)}/validate`, { sample, ...(draft ? { draft } : {}) });
+  }
+
+  /** A stored delivery through the current (or a draft) contract, filter, dedupe and mapping: a dry run. */
+  replayTriggerDelivery(id: string, deliveryId: string, draft?: TriggerDraft): Promise<TriggerDryRun> {
+    return this.post(`/triggers/${encodeURIComponent(id)}/deliveries/${encodeURIComponent(deliveryId)}/replay`, draft ? { draft } : {});
+  }
+
+  /** A JSON Schema from a sample (or, with a trigger, from one of its deliveries). */
+  inferTriggerSchema(o: { sample?: unknown; triggerId?: string; deliveryId?: string }): Promise<{ schema: Record<string, unknown> }> {
+    if (o.triggerId) return this.post(`/triggers/${encodeURIComponent(o.triggerId)}/infer-schema`, o.deliveryId ? { deliveryId: o.deliveryId } : { sample: o.sample });
+    return this.post("/triggers/infer-schema", { sample: o.sample });
   }
 
   // ── WhatsApp Business (Meta Cloud API) ─────────────────────
