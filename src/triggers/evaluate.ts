@@ -81,7 +81,7 @@ function signatureCandidates(value: string, prefix: string | undefined): string[
   return out;
 }
 
-export type HmacOutcome = { ok: true; which: "current" | "previous" } | { ok: false; reason: string };
+export type HmacOutcome = { ok: true; which: "current" | "previous"; note?: string } | { ok: false; reason: string };
 
 /**
  * Check an HMAC signature over the raw body (byte for byte). `secrets`: the current secret and, during
@@ -126,7 +126,8 @@ export function verifyHmac(cfg: TriggerHmacConfig, raw: Buffer, header: (name: s
 /** The key of a Standard Webhooks secret: "whsec_<base64>" (or bare base64) decoded; anything else as UTF-8 bytes. */
 export function standardWebhookKey(secret: string): Buffer {
   const s = secret.trim().replace(/^whsec_/, "");
-  if (/^[A-Za-z0-9+/]+={0,2}$/.test(s) && s.length % 4 === 0) {
+  // decoded leniently, as the official standardwebhooks libraries do (a length that is not a multiple of 4 is fine)
+  if (/^[A-Za-z0-9+/]+={0,2}$/.test(s)) {
     const key = Buffer.from(s, "base64");
     if (key.length > 0) return key;
   }
@@ -150,17 +151,33 @@ function verifyStandardWebhook(cfg: TriggerHmacConfig, raw: Buffer, header: (nam
   const candidates = sigs.split(/\s+/).filter((s) => s.startsWith("v1,")).map((s) => Buffer.from(s.slice(3), "base64"));
   if (candidates.length === 0) return { ok: false, reason: "No v1 signature in webhook-signature" };
   const signed = Buffer.concat([Buffer.from(`${id}.${ts}.`, "utf8"), raw]);
-  const check = (secret: string | undefined) => {
-    if (!secret) return false;
-    const expected = createHmac("sha256", standardWebhookKey(secret)).update(signed).digest();
-    let match = false;
-    for (const given of candidates) if (given.length === expected.length && timingSafeEqual(given, expected)) match = true;
-    return match;
+  // The spec's key is the decoded base64 after "whsec_"; some senders sign with the secret as text
+  // (whole, or without the prefix): accept those too, and say so on the delivery.
+  const keys = (secret: string): Array<{ key: Buffer; as: string }> => {
+    const out = [{ key: standardWebhookKey(secret), as: "decoded" }];
+    const t = secret.trim();
+    for (const [k, as] of [[t, "text"], [t.replace(/^whsec_/, ""), "text without whsec_"]] as const) {
+      const b = Buffer.from(k, "utf8");
+      if (!out.some((o) => o.key.equals(b))) out.push({ key: b, as });
+    }
+    return out;
+  };
+  const check = (secret: string | undefined): string | undefined => {
+    if (!secret) return undefined;
+    for (const { key, as } of keys(secret)) {
+      const expected = createHmac("sha256", key).update(signed).digest();
+      for (const given of candidates) if (given.length === expected.length && timingSafeEqual(given, expected)) return as;
+    }
+    return undefined;
   };
   if (!secrets.current && !secrets.previous) return { ok: false, reason: "The HMAC secret is not set" };
-  if (check(secrets.current)) return { ok: true, which: "current" };
-  if (check(secrets.previous)) return { ok: true, which: "previous" };
-  return { ok: false, reason: "Invalid signature" };
+  const cur = check(secrets.current);
+  if (cur) return { ok: true, which: "current", ...(cur !== "decoded" ? { note: `signed with the secret as ${cur}` } : {}) };
+  const prev = check(secrets.previous);
+  if (prev) return { ok: true, which: "previous", ...(prev !== "decoded" ? { note: `signed with the secret as ${prev}` } : {}) };
+  const sec = (secrets.current ?? secrets.previous ?? "").trim();
+  const fmt = /^whsec_/.test(sec) ? `whsec_ + ${standardWebhookKey(sec).length}-byte key` : `no whsec_ prefix (${sec.length} characters)`;
+  return { ok: false, reason: `Invalid signature (${candidates.length} v1 signature(s), ${raw.length}-byte body, stored secret: ${fmt}) — is the secret the one of this webhook?` };
 }
 
 function splitOnce(s: string, sep: string): [string, string | undefined] {

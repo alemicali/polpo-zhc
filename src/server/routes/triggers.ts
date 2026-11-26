@@ -204,7 +204,7 @@ const dryRunSchema = z.object({
 const deliverySummaryShape = {
   id: z.string(), triggerId: z.string(), receivedAt: z.string(), status: statusEnum, httpStatus: z.number(), reasons: z.array(z.string()),
   errors: z.array(z.string()).optional(), test: z.boolean().optional(), ip: z.string().optional(),
-  auth: z.object({ secret: z.enum(["header", "bearer", "query"]).optional(), secretId: z.string().optional(), hmac: z.enum(["current", "previous"]).optional() }).optional(),
+  auth: z.object({ secret: z.enum(["header", "bearer", "query"]).optional(), secretId: z.string().optional(), hmac: z.enum(["current", "previous"]).optional(), hmacNote: z.string().optional() }).optional(),
   contentType: z.string().optional(), kind: contentTypeEnum.optional(), bytes: z.number(), bodyTruncated: z.boolean().optional(),
   mappingErrors: z.array(z.string()).optional(), contractVersion: z.number(), dedupeHash: z.string().optional(), duplicateOf: z.string().optional(), count: z.number().optional(),
   actionsStatus: actionsStatusEnum.optional().openapi({ description: "The delivery's actions as a whole (partial: some done, some failed)" }),
