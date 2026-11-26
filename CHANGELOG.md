@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-11-26 — Agent tests and evals, triggers, decisions, media, CLI coding chats
+
 ### Added
 - **Communication lines between agents** (docs/agent-lines.md).
   - **`talksTo`** on every agent: `org` (its manager, its direct reports and extra agents — the default for agents created from now on), `list` (only the listed agents), `anyone`, `none`; `acceptFrom: "lines"` lets a receiver refuse senders outside its own lines. Polpo always talks to every agent; `escalate` always reaches the manager. Agents without the field (from before) keep talking to anyone, and the dashboard suggests restricting them. A versioned field: draft → publish → deploy, with the deploy gates.
