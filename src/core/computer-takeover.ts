@@ -80,18 +80,23 @@ export class ComputerTakeoverService {
     try { this.deps.emit({ ...e, holder: e.holder ?? control.holder } as TakeoverEvent); } catch { /* listeners never change the operation */ }
   }
 
-  private rotate(c: ComputerConfig): void {
-    void this.deps.rotate?.(c).catch((err) => this.deps.log?.("warn", `Computer "${c.id}": new live-view passwords failed: ${(err as Error).message}`));
+  /**
+   * New live-view passwords, awaited BEFORE the change is announced or returned: viewers reload
+   * on the event and must get passwords the VNC server already uses (else "password check failed"
+   * and the take-control view never connects).
+   */
+  private async rotate(c: ComputerConfig): Promise<void> {
+    await this.deps.rotate?.(c).catch((err) => this.deps.log?.("warn", `Computer "${c.id}": new live-view passwords failed: ${(err as Error).message}`));
   }
 
   async takeover(id: string, person: string | undefined, o: { force?: boolean } = {}): Promise<ComputerControlView> {
     const c = this.computer(id);
     const r = await this.store.takeover(id, person ?? "someone", o);
+    await this.rotate(c);
     for (const req of r.requests) {
       this.announce({ id, action: "taken", person: r.control.person, requestId: req.id, agent: req.agent, ...(req.taskId ? { taskId: req.taskId } : {}) }, r.control);
     }
     if (!r.requests.length) this.announce({ id, action: "taken", person: r.control.person }, r.control);
-    this.rotate(c);
     return this.store.get(id);
   }
 
@@ -99,12 +104,12 @@ export class ComputerTakeoverService {
     const c = this.computer(id);
     const before = this.store.get(id).person;
     const r = await this.store.release(id, person ?? "someone", note, o);
+    await this.rotate(c);
     const who = before ?? person;
     for (const req of r.requests) {
       this.announce({ id, action: "released", ...(who ? { person: who } : {}), requestId: req.id, agent: req.agent, ...(req.note ? { note: req.note } : {}), ...(req.taskId ? { taskId: req.taskId } : {}) }, r.control);
     }
     if (!r.requests.length) this.announce({ id, action: "released", ...(who ? { person: who } : {}), ...(r.control.lastNote ? { note: r.control.lastNote } : {}) }, r.control);
-    this.rotate(c);
     return this.store.get(id);
   }
 
