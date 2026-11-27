@@ -71,6 +71,38 @@ export interface ComputerConfig {
   egress?: string;
   /** Volumes attached to runs on this computer (names granted to the agent on their storage entry). */
   volumes?: SandboxVolumeSelection[];
+  /** Its desktop (remote computers): the screen the live view shows and headed browsers open on. */
+  desktop?: ComputerDesktopConfig;
+}
+
+export interface ComputerDesktopConfig {
+  /**
+   * The screen size, "WIDTHxHEIGHT" (default "1280x800"): the virtual display's (Xvfb) and its
+   * agents' Chrome windows. A running display keeps its size until its machine restarts.
+   */
+  size?: string;
+}
+
+/** The desktop's default screen size. */
+export const DEFAULT_COMPUTER_DESKTOP_SIZE = "1280x800";
+export const COMPUTER_DESKTOP_SIZE_PATTERN = /^(\d{3,4})x(\d{3,4})$/;
+/** Smallest and largest desktop: [width, height]. */
+export const COMPUTER_DESKTOP_MIN_SIZE: readonly [number, number] = [800, 600];
+export const COMPUTER_DESKTOP_MAX_SIZE: readonly [number, number] = [3840, 2160];
+
+/** A desktop size ("1600x900") as [width, height], undefined when it is not one Polpo accepts. */
+export function parseDesktopSize(size: string | undefined): [number, number] | undefined {
+  const m = COMPUTER_DESKTOP_SIZE_PATTERN.exec(size?.trim() ?? "");
+  if (!m) return undefined;
+  const w = Number(m[1]), h = Number(m[2]);
+  if (w < COMPUTER_DESKTOP_MIN_SIZE[0] || h < COMPUTER_DESKTOP_MIN_SIZE[1] || w > COMPUTER_DESKTOP_MAX_SIZE[0] || h > COMPUTER_DESKTOP_MAX_SIZE[1]) return undefined;
+  return [w, h];
+}
+
+/** A computer's desktop size ("1280x800" when it sets none). */
+export function computerDesktopSize(c: Pick<ComputerConfig, "desktop"> | undefined): string {
+  const size = c?.desktop?.size?.trim();
+  return size && parseDesktopSize(size) ? size : DEFAULT_COMPUTER_DESKTOP_SIZE;
 }
 
 /** The implicit computer every agent has: this server. */
@@ -171,6 +203,20 @@ export function parseComputer(raw: unknown, where = "computer"): ComputerConfig 
     if (!volumes) throw new ComputerConfigError(`${where}.volumes must be a list of volume names (or { name, access })`);
     out.volumes = volumes;
   }
+  if (r.desktop !== undefined && r.desktop !== null) {
+    if (typeof r.desktop !== "object" || Array.isArray(r.desktop)) throw new ComputerConfigError(`${where}.desktop must be an object, e.g. { "size": "1600x900" }`);
+    const d = r.desktop as Record<string, unknown>;
+    const desktop: ComputerDesktopConfig = {};
+    if (d.size !== undefined && d.size !== null && d.size !== "") {
+      const size = typeof d.size === "string" ? d.size.trim() : "";
+      if (!parseDesktopSize(size)) {
+        throw new ComputerConfigError(`${where}.desktop.size must be WIDTHxHEIGHT from ${COMPUTER_DESKTOP_MIN_SIZE.join("x")} to ${COMPUTER_DESKTOP_MAX_SIZE.join("x")}, e.g. "1600x900"`);
+      }
+      desktop.size = size;
+    }
+    if (Object.keys(desktop).length) out.desktop = desktop;
+  }
+  if (out.kind === "host" && out.desktop) throw new ComputerConfigError(`${where}: a computer on this server ("host") has no desktop of its own`);
   if (out.kind === "host" && (out.resources || out.volumes || out.lifecycle)) {
     throw new ComputerConfigError(`${where}: a computer on this server ("host") has no size, lifecycle or volumes of its own (the agent's sandbox settings apply)`);
   }

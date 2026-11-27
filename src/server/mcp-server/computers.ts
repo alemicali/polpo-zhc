@@ -18,7 +18,7 @@ import { setupHandoff } from "./setup.js";
 type Computer = {
   id: string; name: string; kind: string; status: string; builtin?: boolean; snapshot?: string; image?: string; template?: string;
   lastUsedAt?: string; uptimeMinutes?: number; lastError?: string; agents?: Array<{ name: string; isDefault: boolean }>;
-  lifecycle?: { idleStopMinutes?: number; autoArchiveDays?: number }; note?: string;
+  lifecycle?: { idleStopMinutes?: number; autoArchiveDays?: number }; desktop?: { size?: string }; note?: string;
   lastSnapshot?: { at: string; diskBytes?: number; memoryBytes?: number }; notice?: string;
 };
 
@@ -65,12 +65,14 @@ const line = (c: Computer) => {
 type TakeoverRequest = { id: string; computerId: string; agent: string; reason: string; url?: string; whatToDo?: string; createdAt: string; expiresAt: string; status: string; takenBy?: string; note?: string; taskId?: string };
 type ControlView = { computerId: string; holder: "agent" | "person"; person?: string; since?: string; lastNote?: string; requests: TakeoverRequest[]; open: TakeoverRequest[] };
 /** What the desktop routes answer (never a password: the server answers the VM's VNC authentication itself). */
-type DesktopView = { desktop: { state: string; display: string; note?: string; error?: string; startedAt?: string; processes?: Record<string, boolean> }; control: ControlView };
+type DesktopView = { desktop: { state: string; display: string; size?: string; note?: string; error?: string; startedAt?: string; processes?: Record<string, unknown> }; control: ControlView };
 
 function desktopLine(id: string, d: DesktopView["desktop"]): string {
   const what = d.state === "running" ? `running${d.startedAt ? ` since ${d.startedAt}` : ""} (open it in the dashboard: Computers → ${id} → Live)`
     : d.state === "machine-off" ? "off: its machine is not running (start starts it)" : d.state === "unsupported" ? "not available" : "stopped";
-  return `Live view of ${id}: ${what}${d.note ? `. ${d.note}` : ""}${d.error ? `. Error: ${d.error}` : ""}`;
+  const session = d.processes?.session === "xfce" ? "XFCE desktop" : d.processes?.session === "openbox" ? "openbox (XFCE could not be installed)" : "";
+  const screen = [d.size, session].filter(Boolean).join(", ");
+  return `Live view of ${id}: ${what}${screen ? ` [${screen}]` : ""}${d.note ? `. ${d.note}` : ""}${d.error ? `. Error: ${d.error}` : ""}`;
 }
 
 function controlLine(c: ControlView): string {
@@ -122,6 +124,7 @@ export function registerComputerTools(tool: Register, deps: McpDeps): void {
       lines.push(`New machine from: ${m.snapshot ? `snapshot ${m.snapshot}` : m.image ? `image ${m.image}` : m.template ? `template ${m.template}` : "the provider's default"}${m.region ? `, region ${m.region}` : ""}${size ? `, ${size}` : ""}`);
     }
     if (c.idleStopAt) lines.push(`${c.status === "running" && c.hibernate ? "Hibernates" : "Stops"} by itself at ${c.idleStopAt} unless used`);
+    if (c.kind === "daytona" || c.kind === "e2b") lines.push(`Desktop: ${c.desktop?.size ?? "1280x800"} (XFCE)`);
     if (c.snapshots?.length) lines.push(`Snapshots (${c.snapshots.length}${c.hibernate ? `, keeps ${c.hibernate.keepSnapshots}` : ""}): ${c.snapshots.map((s) => `${s.at} ${s.status}`).join("; ")}`);
     lines.push(`Spent: $${c.cost.totalUsd.toFixed(2)} (task runs $${c.cost.runsUsd.toFixed(2)}, chat harness sessions $${c.cost.chatSessionsUsd.toFixed(2)})`);
     if (c.sessions.length) {
@@ -255,6 +258,10 @@ export function registerComputerTools(tool: Register, deps: McpDeps): void {
         .describe("Network rule; default the instance's. allow: host names (\"*.example.com\" covers subdomains); Daytona v2 takes host names only"),
       egress: z.string().nullable().optional().describe("Egress proxy name (settings.egressProxies) for its agents' browsers; a remote computer reaches it through Tailscale in its VM (needs settings.tailscale and a SOCKS5 proxy on a tailnet address)"),
       volumes: z.array(z.union([z.string(), looseObject])).nullable().optional().describe("Volumes attached to runs on it (names granted to the agent)"),
+      desktop: z.object({
+        size: z.string().regex(/^\d{3,4}x\d{3,4}$/, "WIDTHxHEIGHT, e.g. 1600x900").optional()
+          .describe("Screen size WIDTHxHEIGHT, 800x600 to 3840x2160 (default 1280x800): its virtual display and its agents' Chrome windows; a running display keeps its size until the machine restarts"),
+      }).nullable().optional().describe("Its desktop (Daytona/E2B): the XFCE screen the live view shows and headed browsers open on"),
       start: z.boolean().optional().describe("Create: start the machine now"),
     },
     outputSchema: { computer: computerItem, created: z.boolean() },
@@ -335,7 +342,8 @@ export function registerComputerTools(tool: Register, deps: McpDeps): void {
 
   tool("computers", "polpo_computer_desktop", {
     title: "A computer's live view",
-    description: "A remote computer's desktop (Daytona v2): the virtual display its agents' headed browsers open on (agent browserHeaded), "
+    description: "A remote computer's desktop (Daytona v2): a full XFCE desktop (panel, menu, files, terminal, editor; the agent's language, timezone and keyboard) "
+      + "where its agents' headed browsers open (agent browserHeaded), with a \"Chrome di <agent>\" launcher that reopens the agent's own Chrome; its size is the computer's desktop.size (default 1280x800), "
       + "watched live and taken control of from its page in the dashboard (Computers → the computer → Live). action status (default): whether the live view runs, "
       + "who holds the desktop (the agent, or a person since when) and its agents' open takeover requests; never starts the computer. start: start the live "
       + "view (starts or wakes the computer: it costs money while it runs; packages missing on an older image are installed once). stop: stop the live view "

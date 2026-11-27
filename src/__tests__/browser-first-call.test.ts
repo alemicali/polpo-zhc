@@ -14,7 +14,9 @@ import {
   AGENT_BROWSER_CHECK_COMMAND, BROWSER_SLOW_CALL_MS, browserEvalArgs, createBrowserTools, formatBrowserTiming, sandboxBrowserCommand,
 } from "../tools/browser-tools.js";
 import { execWithin, withDeadline } from "../tools/browser-egress.js";
-import { DESKTOP_DISPLAY_QUICK_COMMAND, desktopInstallCommand } from "../sandbox/desktop.js";
+import {
+  DESKTOP_DISPLAY_QUICK_COMMAND, DESKTOP_XFCE_EXTRA_PACKAGES, DESKTOP_XFCE_PACKAGES, desktopDisplayCommand, desktopDisplayQuickCommand, desktopInstallCommand,
+} from "../sandbox/desktop.js";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -106,6 +108,18 @@ describe("the first browser call on a remote computer", () => {
     const fast = new DelayedVmShell({});
     const quick = await createBrowserTools("/vm/work", "fast", ["browser_navigate"], undefined, "/vm/out", undefined, undefined, { shell: fast, headed: false })[0]!.execute("1", { url: "https://example.com" });
     expect(JSON.stringify(quick)).not.toContain("took");
+  });
+
+  test("the quick display check wants the XFCE desktop (openbox only where XFCE could not be installed) and its session running", () => {
+    for (const bin of Object.keys(DESKTOP_XFCE_PACKAGES)) expect(DESKTOP_DISPLAY_QUICK_COMMAND).toContain(`command -v ${bin} >/dev/null 2>&1`);
+    for (const pkg of DESKTOP_XFCE_EXTRA_PACKAGES) expect(DESKTOP_DISPLAY_QUICK_COMMAND).toContain(pkg);
+    expect(DESKTOP_DISPLAY_QUICK_COMMAND).toContain("grep -q 'XFCE could not be installed'");
+    expect(DESKTOP_DISPLAY_QUICK_COMMAND).toMatch(/\|\| exit 3; \(/);
+    expect(DESKTOP_DISPLAY_QUICK_COMMAND).toContain(`[ "$(cat "$D/wm.kind" 2>/dev/null)" = xfce ]`);
+    // the desktop's options reach the session it starts (size, language)
+    expect(desktopDisplayQuickCommand({ size: "1600x900", locale: "en-GB" })).toContain(desktopDisplayCommand({ size: "1600x900", locale: "en-GB" }));
+    // and the install path covers XFCE (the slow path, only when the check says missing)
+    expect(desktopInstallCommand("display")).toContain("xfce4");
   });
 
   test("timing breakdown and deadlines", async () => {

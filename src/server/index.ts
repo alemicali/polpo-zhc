@@ -275,6 +275,7 @@ export class PolpoServer {
         manager: () => computerManagerWithEvents(this.orchestrator.getPolpoDir(), (payload) => this.orchestrator.emit("computer:changed", payload)),
         sandboxFor: (c) => computerSandbox(c, this.orchestrator.getConfig()?.settings),
         vault: () => this.orchestrator.getVaultStore(),
+        agents: () => this.orchestrator.getAgents(),
       }),
       // the person, as the REST routes see them (member email, else "someone")
       person: (req) => terminalRequestMember(req, this.orchestrator.getPolpoDir()),

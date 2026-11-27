@@ -33,6 +33,8 @@ export interface Computer {
   network?: ComputerNetwork;
   egress?: string;
   volumes?: Array<string | { name: string; access?: string }>;
+  /** Its desktop (remote computers): the screen size, "WIDTHxHEIGHT" (default 1280x800). */
+  desktop?: { size?: string };
   /** Live. */
   status: ComputerStatus;
   remoteId?: string;
@@ -126,7 +128,7 @@ export interface ComputerEgress {
   note?: string;
 }
 
-export type ComputerInput = Partial<Pick<Computer, "id" | "name" | "kind" | "description" | "image" | "snapshot" | "template" | "resources" | "lifecycle" | "network" | "egress">> & { start?: boolean };
+export type ComputerInput = Partial<Pick<Computer, "id" | "name" | "kind" | "description" | "image" | "snapshot" | "template" | "resources" | "lifecycle" | "network" | "egress" | "desktop">> & { start?: boolean };
 
 /** "recreate": a reset of a computer whose machine was deleted at the provider (a new one from the image). */
 export type ComputerAction = "start" | "stop" | "restart" | "reset" | "recreate";
@@ -311,6 +313,8 @@ export interface ComputerForm {
   idleStopMinutes: string;
   autoArchiveDays: string;
   egress: string;
+  /** The desktop's screen "WIDTHxHEIGHT" ("" = 1280x800). */
+  desktopSize: string;
   /** "" = the agent's or the instance's rule. */
   networkMode: "" | ComputerNetwork["mode"];
   /** Allowlist: host names, one per line or comma separated. */
@@ -323,7 +327,7 @@ export interface ComputerForm {
 }
 
 export const EMPTY_COMPUTER_FORM: ComputerForm = {
-  id: "", name: "", kind: "daytona", image: "", imageKind: "snapshot", idleStopMinutes: "15", autoArchiveDays: "", egress: "",
+  id: "", name: "", kind: "daytona", image: "", imageKind: "snapshot", idleStopMinutes: "15", autoArchiveDays: "", egress: "", desktopSize: "",
   networkMode: "", networkAllow: "", cpus: "", memoryGb: "", diskGb: "", start: false,
 };
 
@@ -337,6 +341,7 @@ export function formFromComputer(c: Computer): ComputerForm {
     idleStopMinutes: c.lifecycle?.idleStopMinutes ? String(c.lifecycle.idleStopMinutes) : "15",
     autoArchiveDays: c.lifecycle?.autoArchiveDays ? String(c.lifecycle.autoArchiveDays) : "",
     egress: c.egress ?? "",
+    desktopSize: c.desktop?.size ?? "",
     networkMode: c.network?.mode ?? "", networkAllow: (c.network?.allow ?? []).join("\n"),
     cpus: c.resources?.cpus ? String(c.resources.cpus) : "", memoryGb: gbOf(c.resources?.memoryMb), diskGb: gbOf(c.resources?.diskMb),
     start: false,
@@ -358,6 +363,18 @@ export function suggestComputerId(name: string, taken: string[]): string {
   return id;
 }
 
+/** The desktop's default screen, and the sizes people pick from (any WIDTHxHEIGHT in range works). */
+export const DEFAULT_DESKTOP_SIZE = "1280x800";
+export const DESKTOP_SIZE_PRESETS = ["1280x800", "1366x768", "1440x900", "1600x900", "1920x1080"] as const;
+
+/** A desktop size Polpo accepts: WIDTHxHEIGHT from 800x600 to 3840x2160. */
+export function desktopSizeValid(size: string): boolean {
+  const m = /^(\d{3,4})x(\d{3,4})$/.exec(size.trim().toLowerCase());
+  if (!m) return false;
+  const w = Number(m[1]), h = Number(m[2]);
+  return w >= 800 && h >= 600 && w <= 3840 && h <= 2160;
+}
+
 export function validateComputerForm(form: ComputerForm, existingIds: string[] = [], editing = false): Partial<Record<keyof ComputerForm, string>> {
   const errors: Partial<Record<keyof ComputerForm, string>> = {};
   if (!editing) {
@@ -372,6 +389,7 @@ export function validateComputerForm(form: ComputerForm, existingIds: string[] =
       const days = Number(form.autoArchiveDays);
       if (!Number.isInteger(days) || days < 1 || days > 30) errors.autoArchiveDays = "Whole days, 1 to 30";
     }
+    if (form.desktopSize.trim() !== "" && !desktopSizeValid(form.desktopSize)) errors.desktopSize = "WIDTHxHEIGHT from 800x600 to 3840x2160, e.g. 1600x900";
     if (form.networkMode === "allowlist" && allowEntries(form.networkAllow).length === 0) errors.networkAllow = "Add at least one host (e.g. github.com)";
     for (const key of ["cpus", "memoryGb", "diskGb"] as const) {
       if (form[key] !== "" && !(Number(form[key]) > 0)) errors[key] = "A positive number";
@@ -406,6 +424,8 @@ export function computerInput(form: ComputerForm, editing = false): Record<strin
       diskMb: form.diskGb !== "" ? Math.round(Number(form.diskGb) * 1024) : undefined,
     }).filter(([, v]) => v !== undefined));
     out.resources = Object.keys(resources).length ? resources : editing ? null : undefined;
+    const size = form.desktopSize.trim().toLowerCase();
+    out.desktop = size ? { size } : editing ? null : undefined;
   }
   if (!editing && form.start && form.kind !== "host") out.start = true;
   return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined));

@@ -764,7 +764,7 @@ export function createSystemTools(cwd: string, allowedTools?: string[], allowedP
 
 // === Extended Tools Factory ===
 
-import { createBrowserTools, ALL_BROWSER_TOOL_NAMES, agentBrowserEnv, browserProfileName, shellIsRemote, type BrowserIdentity } from "./browser-tools.js";
+import { createBrowserTools, ALL_BROWSER_TOOL_NAMES, agentBrowserEnv, browserProfileName, shellIsRemote, type BrowserDesktop, type BrowserIdentity } from "./browser-tools.js";
 import { ALL_HTTP_TOOL_NAMES } from "./http-tools.js";
 import { createEmailTools, ALL_EMAIL_TOOL_NAMES } from "./email-tools.js";
 import { createVaultTools, ALL_VAULT_TOOL_NAMES } from "./vault-tools.js";
@@ -897,6 +897,8 @@ export interface CreateAllToolsOptions {
   browserControl?: { computerId: string; store: Pick<import("../sandbox/computer-control.js").ComputerControlStore, "heldByPerson"> };
   /** identity.locale / identity.timezone: its Chrome's language and timezone on a remote computer (default it-IT, Europe/Rome). */
   browserIdentity?: BrowserIdentity;
+  /** A remote computer's desktop: its size (desktop.size) and the agent's "Chrome di <name>" launcher label. */
+  browserDesktop?: BrowserDesktop;
 }
 
 /**
@@ -954,6 +956,7 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
       shell: options.shell, fs: options.fs, vault: options.vault, egress: options.browserEgress,
       ...(typeof options.browserHeaded === "boolean" ? { headed: options.browserHeaded } : {}), ...(options.browserControl ? { control: options.browserControl } : {}),
       ...(options.browserIdentity ? { identity: options.browserIdentity } : {}),
+      ...(options.browserDesktop ? { desktop: options.browserDesktop } : {}),
     }));
   }
 

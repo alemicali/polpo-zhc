@@ -20,6 +20,7 @@ import {
   isContextOverflowError,
   parseSummary,
   isRemoteComputer,
+  computerDesktopSize,
   type CompactionInfo,
 } from "@polpo-ai/core";
 import {
@@ -1093,6 +1094,8 @@ export async function buildAgentToolset(o: {
       ...(agentConfig.identity?.locale || agentConfig.identity?.timezone
         ? { browserIdentity: { ...(agentConfig.identity.locale ? { locale: agentConfig.identity.locale } : {}), ...(agentConfig.identity.timezone ? { timezone: agentConfig.identity.timezone } : {}) } }
         : {}),
+      // its computer's desktop: the screen size and its "Chrome di <name>" launcher
+      ...(remoteComputer ? { browserDesktop: { size: computerDesktopSize(remoteComputer), label: agentConfig.identity?.displayName?.trim() || agentConfig.name } } : {}),
     });
   }
   if (ctx?.polpoDir) {

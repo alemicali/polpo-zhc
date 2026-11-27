@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { NETWORK_MODES } from "@/lib/sandbox-api";
 import {
-  EMPTY_COMPUTER_FORM, computerInput, computersApi, formFromComputer, validateComputerForm,
+  DEFAULT_DESKTOP_SIZE, DESKTOP_SIZE_PRESETS, EMPTY_COMPUTER_FORM, computerInput, computersApi, formFromComputer, validateComputerForm,
   type Computer, type ComputerForm, type ComputerKind,
 } from "@/lib/computers-api";
 
@@ -154,6 +154,13 @@ export function ComputerDialog({
               </Field>
               <p className="col-span-3 -mt-1 text-xs text-muted-foreground">With a Docker image (a snapshot has its own size). Size, image and network apply to a new machine (Reset); on Daytona v2 the network applies at the next start or wake.</p>
             </div>
+          )}
+          {kind !== "host" && (
+            <Field label="Desktop size" hint="Its XFCE desktop and its agents' Chrome windows (live view). A running desktop keeps its size until the machine restarts." error={visible.desktopSize}>
+              <Input value={form.desktopSize} onChange={(e) => set("desktopSize", e.target.value)} placeholder={DEFAULT_DESKTOP_SIZE} list="computer-desktop-sizes"
+                aria-label="Desktop size" aria-invalid={!!visible.desktopSize} data-testid="computer-desktop-size" />
+              <datalist id="computer-desktop-sizes">{DESKTOP_SIZE_PRESETS.map((s) => <option key={s} value={s} />)}</datalist>
+            </Field>
           )}
           <Field
             label="Egress proxy"
