@@ -292,10 +292,10 @@ describe("MCP computer tools", () => {
   it("reads need polpo:read; changes need polpo:admin", async () => {
     const work = await mcp(["polpo:work"]);
     const names = ((await work.rpc("tools/list")).tools as Array<{ name: string }>).map((x) => x.name);
-    expect(names).toEqual(["polpo_computers_list", "polpo_computer_get", "polpo_egress_status"]);
+    expect(names).toEqual(["polpo_computer_show", "polpo_computers_list", "polpo_computer_get", "polpo_egress_status"]);
     const admin = await mcp(["polpo:admin"]);
     expect(((await admin.rpc("tools/list")).tools as Array<{ name: string }>).map((x) => x.name))
-      .toEqual(["polpo_computers_list", "polpo_computer_get", "polpo_computer_webhooks", "polpo_computer_save", "polpo_computer_control", "polpo_egress_status", "polpo_computer_delete"]);
+      .toEqual(["polpo_computer_show", "polpo_computers_list", "polpo_computer_get", "polpo_computer_webhooks", "polpo_computer_save", "polpo_computer_control", "polpo_egress_status", "polpo_computer_desktop", "polpo_computer_takeover", "polpo_computer_release", "polpo_computer_delete"]);
   });
 
   it("polpo_egress_status: proxies with the agents and host computers using them, and each remote computer's egress (read-only, never starts it)", async () => {
