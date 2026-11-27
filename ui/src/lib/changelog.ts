@@ -48,6 +48,22 @@ export const CHANGELOG: ChangelogEntry[] = [
     highlight: true,
   },
   {
+    id: "2026-11-27-agent-browser-real-chrome",
+    date: "2026-11-27",
+    kind: "improved",
+    title: "Il browser degli agenti è Google Chrome vero",
+    summary: "Gli agenti navigano con Google Chrome, mai con Chromium: Google Maps, Instagram e Facebook non li scambiano più per bot. Sui computer remoti il browser si apre con la finestra sul desktop, di default.",
+    body: [
+      "- **Sempre Google Chrome**: il browser che Polpo apre per gli agenti (strumenti `browser_*`, il login dei profili browser, `polpo browser login`) è Google Chrome installato, mai il Chromium di agent-browser o di Playwright, che siti come Google Maps, Instagram e Facebook segnalano come bot.",
+      "- **Su questo server**: Polpo trova Chrome da solo (`google-chrome-stable` / `google-chrome`, o l'app su macOS); con `POLPO_AGENT_BROWSER_EXECUTABLE` indichi un percorso diverso. Se Chrome non c'è, lo strumento lo dice chiaramente invece di ripiegare su Chromium.",
+      "- **Sui computer remoti** (Daytona): Chrome si installa da solo al primo uso, una volta sola, se manca; la nuova immagine `polpo-runner-vm-4` lo include già.",
+      "- **Con la finestra, di default**: su un computer remoto il browser dell'agente si apre sul desktop del computer, così lo guardi dal vivo e prendi il controllo quando serve. Per tenerlo senza finestra spegni **Headed browser** nella scheda Computer dell'agente (`browserHeaded: false`). Su questo server resta senza finestra, salvo che tu lo attivi.",
+      "- **Un solo browser**: gli agenti sanno che devono usare il browser di Polpo (gli strumenti `browser_*`, o `CDP_URL` dagli script) e non avviarne uno loro.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i computer", to: "/computers" },
+  },
+  {
     id: "2026-11-27-computer-live-view",
     date: "2026-11-27",
     kind: "new",

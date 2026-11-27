@@ -504,7 +504,7 @@ export interface AgentConfig {
   browserProfile?: string;
   /** Name of an egress proxy (settings.egressProxies) its browser goes out through. */
   browserEgress?: string;
-  /** Headed browser (a visible window on its computer's display, watchable and controllable live); default headless. */
+  /** Headed browser (a visible window on its computer's display, watchable and controllable live). Unset: headed on a remote computer, headless on this server. */
   browserHeaded?: boolean;
   /** Computers (settings.computers ids) it may use; "host" (this server) always. */
   computers?: string[];

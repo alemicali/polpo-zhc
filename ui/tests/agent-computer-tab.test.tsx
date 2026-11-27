@@ -191,11 +191,23 @@ test("its browser: the headed switch PATCHes browserHeaded; a Daytona default co
   expect($('[data-testid="agent-browser-card"]')!.textContent).toMatch(/opens a real window on Nina's desktop/);
   expect($('[data-testid="computer-live"]')).toBeTruthy();
   expect(server.calls.some((c) => c.path === "/computers/nina/desktop?viewer=1")).toBe(true);
+  // unset on a remote computer: headed by default (real Google Chrome on its desktop)
+  expect($('[data-testid="agent-browser-card"]')!.textContent).toMatch(/real Google Chrome.*Headed by default on a remote computer/);
+  const sw = $<HTMLButtonElement>('button[aria-label="Headed browser"]')!;
+  expect(sw.getAttribute("aria-checked")).toBe("true");
+  await click(sw);
+  expect(patches()).toEqual([{ browserHeaded: false, publish: false }]);
+  expect($<HTMLButtonElement>('button[aria-label="Headed browser"]')!.getAttribute("aria-checked")).toBe("false");
+});
+
+test("its browser on this server: headless unless browserHeaded is true", async () => {
+  setup({ name: "sitoinchat" }, [HOST, machine("nina")]);
+  await render();
+  expect($('[data-testid="agent-browser-card"]')!.textContent).toMatch(/Headless by default on this server/);
   const sw = $<HTMLButtonElement>('button[aria-label="Headed browser"]')!;
   expect(sw.getAttribute("aria-checked")).toBe("false");
   await click(sw);
   expect(patches()).toEqual([{ browserHeaded: true, publish: false }]);
-  expect($<HTMLButtonElement>('button[aria-label="Headed browser"]')!.getAttribute("aria-checked")).toBe("true");
 });
 
 test("the default-computer picker lives here", async () => {

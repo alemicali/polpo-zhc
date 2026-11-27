@@ -71,7 +71,7 @@ const agentFields = {
   browserEgress: z.string().regex(/^[A-Za-z0-9_-]*$/, "the name of an egress proxy").optional()
     .describe("Where its browser goes out to the internet: the name of a proxy in the settings' egress proxies (polpo_config_get); '' for direct"),
   browserHeaded: z.boolean().optional()
-    .describe("true: its browser runs headed (a visible window on its computer's virtual display), so a person can watch it live and take control (login, 2FA, CAPTCHA) from the computer's page; false: headless (default)"),
+    .describe("true: its browser (always real Google Chrome) runs headed (a visible window on its computer's virtual display), so a person can watch it live and take control (login, 2FA, CAPTCHA) from the computer's page; false: headless. Unset: headed on a remote computer (Daytona, E2B), headless on this server"),
   computers: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/)).optional()
     .describe("Computers it may use (ids from polpo_computers_list); \"host\" (this server) always"),
   defaultComputer: z.string().regex(/^([a-z0-9][a-z0-9-]{0,39})?$/).optional()

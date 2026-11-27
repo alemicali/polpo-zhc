@@ -83,7 +83,9 @@ export function desktopViewCommand(o: { rotate: boolean }): string {
     + `command -v x11vnc >/dev/null 2>&1 || { echo "x11vnc is not installed" >&2; exit 2; }; `
     + `command -v websockify >/dev/null 2>&1 || { echo "websockify is not installed" >&2; exit 2; }; `
     + `if [ "${o.rotate ? 1 : 0}" = 1 ] || ! alive "$D/vnc.pid"; then `
-    + `if alive "$D/vnc.pid"; then kill "$(cat "$D/vnc.pid")" 2>/dev/null; i=0; while [ $i -lt 20 ] && alive "$D/vnc.pid"; do sleep 0.1; i=$((i+1)); done; fi; `
+    + `if alive "$D/vnc.pid"; then kill "$(cat "$D/vnc.pid")" 2>/dev/null; i=0; while [ $i -lt 50 ] && alive "$D/vnc.pid"; do sleep 0.1; i=$((i+1)); done; `
+    // an old server still answering would keep the old passwords: never leave it running
+    + `alive "$D/vnc.pid" && kill -9 "$(cat "$D/vnc.pid")" 2>/dev/null; i=0; while [ $i -lt 20 ] && ${portAnswers(DESKTOP_VNC_PORT)}; do sleep 0.1; i=$((i+1)); done; fi; `
     + `(umask 077; printf '%s\\n__BEGIN_VIEWONLY__\\n%s\\n' "$${DESKTOP_PASSWORD_ENV}" "$${DESKTOP_VIEW_PASSWORD_ENV}" >"$D/vnc.pass"); `
     + `DISPLAY=${DESKTOP_DISPLAY} $S nohup x11vnc -display ${DESKTOP_DISPLAY} -rfbport ${DESKTOP_VNC_PORT} -localhost -forever -shared `
     + `-passwdfile "rm:$D/vnc.pass" -noxdamage -repeat -quiet >"$D/vnc.log" 2>&1 </dev/null & echo $! >"$D/vnc.pid"; `

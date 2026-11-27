@@ -9,8 +9,9 @@
  * - Add one: an existing computer of the instance, or a new one (the Computers page's dialog,
  *   prefilled with the agent's name), assigned right after and optionally made the default.
  *
- * - Its browser: headed (a window on its computer's desktop, watched live with take control in
- *   the Live panel) or headless (`PATCH /agents/:name { browserHeaded }`).
+ * - Its browser (always real Google Chrome): headed (a window on its computer's desktop, watched
+ *   live with take control in the Live panel) or headless (`PATCH /agents/:name { browserHeaded }`).
+ *   Unset, it is headed on a remote computer (Daytona, E2B) and headless on this server.
  *
  * Assignments are `PATCH /agents/:name { defaultComputer, computers }`. Live: `computer:changed`.
  */
@@ -61,7 +62,10 @@ export function AgentComputerTab() {
   const [defaultChoice, setDefaultChoice] = useState<string | null>(null);
   const selectedDefault = defaultChoice ?? defaultId;
   const [creating, setCreating] = useState(false);
-  const headed = (agent as { browserHeaded?: boolean }).browserHeaded === true;
+  // unset: headed on a remote computer (it has a desktop), headless on this server
+  const headedSetting = (agent as { browserHeaded?: boolean }).browserHeaded;
+  const remoteDefault = current?.kind === "daytona" || current?.kind === "e2b";
+  const headed = headedSetting ?? remoteDefault;
   const [savingHeaded, setSavingHeaded] = useState(false);
   const saveHeaded = async (next: boolean) => {
     setSavingHeaded(true);
@@ -192,7 +196,8 @@ export function AgentComputerTab() {
                   {current?.kind === "daytona" && current.providerApi === "v2"
                     ? `Its browser opens a real window on ${current.name}'s desktop: you watch it live below and take control for a login, a 2FA code or a CAPTCHA (it asks with request_computer_takeover).`
                     : "Its browser opens a real window (on this server's virtual display, Browser Live) instead of running headless."}
-                  {" "}Its scripts reach the same browser through CDP_URL.
+                  {" "}It is always real Google Chrome (never Chromium, which sites flag as a bot); its scripts reach the same browser through CDP_URL.
+                  {headedSetting === undefined && (remoteDefault ? " Headed by default on a remote computer." : " Headless by default on this server.")}
                 </span>
               </span>
             </label>
