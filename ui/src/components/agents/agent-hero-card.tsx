@@ -36,6 +36,9 @@ export function AgentHeroCard() {
   const identity = agent.identity;
   const tc = getTeamColor(teamColorIndex);
   const { engine, model } = agentEngineInfo(agent);
+  // a harness runs with its own effort setting; Polpo's engine with the agent's reasoning
+  const harnessEffort = (agent as { engine?: { effort?: unknown } }).engine?.effort;
+  const reasoning = typeof harnessEffort === "string" ? harnessEffort : agent.reasoning;
 
   return (
     <Card className="gap-0 overflow-hidden py-0">
@@ -146,9 +149,9 @@ export function AgentHeroCard() {
           <div className="flex items-center gap-2 py-1.5">
             <Brain className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <span className="text-muted-foreground shrink-0">Reasoning</span>
-            {agent.reasoning && agent.reasoning !== "off" ? (
-              <Badge variant="outline" className={cn("text-micro ml-auto", reasoningMeta[agent.reasoning]?.color)}>
-                {reasoningMeta[agent.reasoning]?.label ?? agent.reasoning}
+            {reasoning && reasoning !== "off" ? (
+              <Badge variant="outline" className={cn("text-micro ml-auto", reasoningMeta[reasoning]?.color ?? reasoningMeta.xhigh.color)}>
+                {reasoningMeta[reasoning]?.label ?? reasoning}
               </Badge>
             ) : (
               <span className="ml-auto text-muted-foreground/60 italic">off</span>
