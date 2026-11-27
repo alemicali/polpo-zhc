@@ -27,7 +27,7 @@ export function AgentHierarchyCard() {
         {/* Manager */}
         {manager && (
           <div>
-            <p className="text-label text-muted-foreground mb-1.5">
+            <p className="text-caption font-medium normal-case tracking-normal text-muted-foreground mb-1.5">
               <ArrowUpRight className="h-2.5 w-2.5 inline mr-1" />
               Manager
             </p>
@@ -48,7 +48,7 @@ export function AgentHierarchyCard() {
         )}
         {agent.reportsTo && !manager && (
           <div>
-            <p className="text-label text-muted-foreground mb-1.5">
+            <p className="text-caption font-medium normal-case tracking-normal text-muted-foreground mb-1.5">
               <ArrowUpRight className="h-2.5 w-2.5 inline mr-1" />
               Manager
             </p>
@@ -62,7 +62,7 @@ export function AgentHierarchyCard() {
         {/* Direct reports */}
         {subordinates.length > 0 && (
           <div>
-            <p className="text-label text-muted-foreground mb-1.5">
+            <p className="text-caption font-medium normal-case tracking-normal text-muted-foreground mb-1.5">
               <Users className="h-2.5 w-2.5 inline mr-1" />
               Direct reports ({subordinates.length})
             </p>

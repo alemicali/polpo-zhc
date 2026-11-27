@@ -36,7 +36,7 @@ export function agentEngineId(engine: unknown): TaskRunEngine {
 export const AUTH_LABELS: Record<string, string> = { bedrock: "Bedrock", vertex: "Vertex AI", "api-key": "API key", "ai-gateway": "Vercel AI Gateway", gateway: "model gateway", subscription: "personal plan" };
 
 export function authBrand(kind: string | undefined, engine?: string, provider?: string): BrandName {
-  if (kind === "subscription") return engine === "codex-cli" ? "openai" : "anthropic";
+  if (kind === "subscription") return engine === "codex-cli" || engine === "codex" ? "openai" : "anthropic";
   if (kind === "bedrock") return "bedrock";
   if (kind === "vertex") return "vertex";
   if (kind === "api-key") {

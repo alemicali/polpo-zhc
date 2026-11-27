@@ -532,6 +532,12 @@ test("agent page: connectors section grants and revokes this agent", async () =>
   ));
   await flush();
   const sw = (id: string) => container.querySelector(`[data-testid="agent-connector-${id}"] [role="switch"]`)!;
+  // two tabs: Enabled (open) and Available, so the two never mix
+  expect(container.querySelector('[data-testid="agent-connectors-tab-enabled"]')?.textContent).toBe("Enabled (1)");
+  expect(container.querySelector('[data-testid="agent-connectors-tab-available"]')?.textContent).toBe("Available (1)");
+  expect(container.querySelector('[data-testid="agent-connectors-enabled"] [data-testid="agent-connector-notion"]')).not.toBeNull();
+  expect(container.querySelector('[data-testid="agent-connectors-available"] [data-testid="agent-connector-linear"]')).not.toBeNull();
+  expect(container.querySelector('[data-testid="agent-connectors-available"]')?.getAttribute("data-state")).toBe("inactive");
   expect(sw("linear").getAttribute("aria-checked")).toBe("false");
   expect(sw("notion").getAttribute("aria-checked")).toBe("true");
   // notion is granted but the agent's allowlist does not cover it

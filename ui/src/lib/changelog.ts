@@ -32,8 +32,8 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    id: "2026-11-26-computer-live-view",
-    date: "2026-11-26",
+    id: "2026-11-27-computer-live-view",
+    date: "2026-11-27",
     kind: "new",
     title: "Guarda il computer dell'agente dal vivo e prendi il controllo",
     summary: "Il browser di un agente può aprirsi in una finestra vera sul desktop del suo computer: lo guardi dal vivo, prendi il controllo per un login, un codice 2FA o un CAPTCHA e lo restituisci. L'agente aspetta e non vede mai cosa scrivi.",
@@ -48,6 +48,48 @@ export const CHANGELOG: ChangelogEntry[] = [
     ].join("\n"),
     highlight: true,
     cta: { label: "Apri i computer", to: "/computers" },
+  },
+  {
+    id: "2026-11-27-agent-profile-polish",
+    date: "2026-11-27",
+    kind: "improved",
+    title: "Pagina dell'agente più da profilo",
+    summary: "Ruolo, personalità e modo di comunicare in una sezione «About», responsabilità subito dopo, icone social nei colori originali.",
+    body: [
+      "Nella pagina di un agente la scheda Overview si legge come un profilo: in **About** il ruolo fa da presentazione, poi la personalità e come comunica, in testo pieno. Le **responsabilità** vengono subito dopo, prima dell'organigramma e delle linee di comunicazione.",
+      "",
+      "Le icone dei social hanno i colori originali (Instagram con il suo sfumato, Facebook blu; X, Threads e GitHub nel colore del testo, per il tema scuro). La testa della scheda del profilo resta della stessa altezza anche con una bio lunga, e in Hierarchy «Manager» e «Direct reports» non sono più in maiuscolo come i titoli. In testa alla scheda la versione sta accanto a @nome e porta alla scheda Versions; il colore è un pallino accanto al nome (si cambia da lì) e sotto ci sono due righe separate, **Harness** e **Model**. In Tools & Skills i connettori stanno in due schede, **Enabled** (quelli che l'agente usa) e **Available**. La riga Reasoning mostra il ragionamento dell'harness (per esempio «High» per Codex).",
+    ].join("\n"),
+  },
+  {
+    id: "2026-11-26-codex-chatgpt-login",
+    date: "2026-11-26",
+    kind: "new",
+    title: "Codex con l'accesso ChatGPT",
+    summary: "Gli agenti sul motore Codex possono usare un account ChatGPT invece di una chiave API OpenAI: accedi una volta dal terminale del computer dell'agente, Polpo conserva l'accesso nel vault e lo tiene aggiornato.",
+    body: [
+      "- **Nuova autenticazione per Codex**: in Impostazioni → Harnesses → Codex scegli **ChatGPT sign-in** e indica la voce del vault che conserva l'accesso (può non esistere ancora). OpenAI supporta l'accesso con ChatGPT per Codex; il lavoro è pagato dal piano ChatGPT dell'account.",
+      "- **Accesso senza copiare file**: scegli un agente su Codex e premi **Sign in with ChatGPT**. Si apre un terminale sul computer dell'agente con `codex login --device-auth`: apri il link, accedi con ChatGPT e inserisci il codice. **Save sign-in** salva l'accesso nel vault.",
+      "- **Sempre aggiornato**: prima di ogni esecuzione Polpo scrive l'accesso nella cartella di Codex dell'agente (`CODEX_HOME` per agente), e dopo ogni turno, a fine esecuzione e prima che il computer vada in ibernazione o venga resettato rilegge i token rinnovati da Codex e li salva nel vault.",
+      "- **Mai mostrato**: la scheda dice solo *signed in* / *not signed in*; i token non finiscono nei log e vengono mascherati nei transcript.",
+      "- Anche via API (`/harnesses/codex/chatgpt-login`), MCP e chat con Polpo (`polpo_harnesses_update` con `codex_chatgpt_login`). Guida: docs/harnesses.md.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri gli harness", to: "/config?section=harnesses" },
+  },
+  {
+    id: "2026-11-26-agent-socials-links",
+    date: "2026-11-26",
+    kind: "improved",
+    title: "Profilo degli agenti: bio in evidenza e social cliccabili",
+    summary: "La bio di un agente sta sotto il nome, come su LinkedIn e X, e ogni account social ha la sua icona e si apre con un clic.",
+    body: [
+      "Nella pagina di un agente la **bio** ora sta nella scheda del profilo, subito sotto il nome e prima di titolo e azienda, come su LinkedIn e X.",
+      "",
+      "La scheda **Social** mostra l'icona di Instagram, Facebook, X, TikTok, YouTube, GitHub, WhatsApp, Telegram e delle altre piattaforme più usate, e il nome dell'account.",
+      "",
+      "Un clic apre il profilo in una nuova scheda: va bene sia l'indirizzo completo sia il solo nome utente (per esempio `@nina.ferraro_`), da cui Polpo ricava il link. I valori che non sono un indirizzo web restano come testo.",
+    ].join("\n"),
   },
   {
     id: "2026-11-26-agent-send-notification",

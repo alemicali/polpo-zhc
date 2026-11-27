@@ -48,8 +48,52 @@ subscription store or `~/.codex/auth.json`.
 
 `auth: "api-key"` with an OpenAI API key (`apiKey` or `OPENAI_API_KEY` in the entry), `"ai-gateway"`
 (the Vercel AI Gateway: model ids `openai/…`) or `"gateway"` (a gateway that speaks the OpenAI
-Responses API, `format: "openai-responses"`, base URL ending in `/v1`). Signing in with ChatGPT is not
-supported yet.
+Responses API, `format: "openai-responses"`, base URL ending in `/v1`), or `"chatgpt"`: **sign in
+with a ChatGPT account**, which OpenAI supports for Codex, also on headless machines
+(`codex login --device-auth`, or a copy of `~/.codex/auth.json`:
+[developers.openai.com/codex/auth](https://developers.openai.com/codex/auth)). The ChatGPT plan pays
+for the work.
+
+#### Codex signed in with ChatGPT
+
+```json
+"codex": { "auth": "chatgpt", "credentialRef": { "owner": "ops", "service": "codex-chatgpt" }, "model": "gpt-5-codex" }
+```
+
+- `credentialRef` is the vault entry that keeps Codex's **login cache**: a custom entry whose field
+  `authJson` holds the whole `auth.json` (ChatGPT tokens). It may not exist before the first sign-in:
+  the sign-in creates it. An agent's `engine.credentialRef` points it to its own entry (another
+  ChatGPT account for that agent).
+- **No API key is passed and nothing is brokered**: Codex gets an explicit, empty authentication
+  environment (nothing from this server) and reads its own `auth.json`. Each agent has its own
+  `CODEX_HOME` in its computer, `$HOME/.polpo-harness/codex/<agent>` (on this server, under the
+  agent's isolated harness HOME).
+- **Before a session** Polpo writes the vault's `auth.json` there (mode 600, directory 700, file
+  storage: `cli_auth_credentials_store = "file"`) when the computer has none or an older one
+  (`last_refresh`).
+- **Write-back**: Codex refreshes its tokens inside `auth.json`. After each turn, at the end of the
+  run and before the computer's VM goes away (hibernate, reset, delete), Polpo reads the file back
+  and, when it changed and is not older than the vault's copy, saves it into the vault entry. The
+  content is never logged; its tokens (`access_token`, `refresh_token`, `id_token`, an API key)
+  are masked in transcripts and errors. A failed write-back is a warning in the run's log, never a
+  failure of the run.
+- **Signing in** (no files copied by hand): **Settings → Harnesses → Codex**, authentication
+  *ChatGPT sign-in*, save, choose an agent on Codex and **Sign in with ChatGPT**. A terminal on the
+  agent's computer (started if needed) runs `codex login --device-auth` with that agent's
+  `CODEX_HOME`: open the link it shows, sign in with the ChatGPT account, enter the code. **Save
+  sign-in** (also done when the dialog closes) captures the login into the vault. The card shows
+  *signed in* / *not signed in* (whether the vault entry holds a login), never the login.
+- Costs: tokens only (`costSource: "subscription"`), as for the CLI engine; the connection test
+  says whether someone has signed in (no model request from this server: the login is used in the
+  computer).
+- REST: `GET /api/v1/harnesses/codex/chatgpt-login?agent=` (signed in, last refresh),
+  `POST /api/v1/harnesses/codex/chatgpt-login { agent }` (the terminal to open:
+  `/ws/terminal?agent=codex-chatgpt-login&harness_agent=<agent>`, the command, the vault entry),
+  `POST /api/v1/harnesses/codex/chatgpt-login/capture { agent }` (reads `auth.json` from the agent's
+  running computer into the vault: `updated`, `unchanged`, `missing`, `invalid` or `older`).
+- MCP and Polpo's chat: `polpo_harnesses_update { codex: { auth: "chatgpt", credential_ref } }`,
+  `polpo_harnesses_update { codex_chatgpt_login: { agent } }` (the dashboard link and the command),
+  then `{ codex_chatgpt_login: { agent, capture: true } }`; `polpo_harnesses_get` says signed in or not.
 
 ### OpenCode: any model, open-weight ones included
 
@@ -142,7 +186,8 @@ credential entry comes back as `setup_url` + `setup_id` for `polpo_setup_wait`; 
 `ai-gateway` / `gateway`), `polpo_harnesses_get { test, agent? }` (the connection test), `polpo_harness_sessions_list`,
 `polpo_harness_session_control` (work), and `engine` on `polpo_agent_create` / `polpo_agent_update`.
 
-REST: `GET /api/v1/harnesses` (with `relay` and each harness's `brokering`),
+REST: `GET /api/v1/harnesses` (with `relay`, each harness's `brokering`, and `chatgpt { signedIn }`
+for Codex signed in with ChatGPT; see [Codex signed in with ChatGPT](#codex-signed-in-with-chatgpt)),
 `GET /api/v1/harnesses/sessions?agent=&computer=`, `POST /api/v1/harnesses/sessions/:key/stop`,
 `POST /api/v1/harnesses/sessions/:key/reset { confirm: true }`,
 `POST /api/v1/harnesses/test { harness, settings?, agent? }` (see [Connection test](#connection-test)).

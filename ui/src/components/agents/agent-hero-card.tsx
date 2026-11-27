@@ -19,26 +19,31 @@ import {
   Brain,
   Cake,
   RefreshCw,
-  Palette,
+  Cpu,
 } from "lucide-react";
 import { AgentColorPicker } from "./agent-color-picker";
-import { AgentVersionBadges } from "./agent-versions-tab";
+import { Link } from "react-router-dom";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { cn } from "@/lib/utils";
 import { useAgentDetail } from "./agent-detail-context";
 import { reasoningMeta, formatAgentAge } from "@/lib/agent-meta";
 import { getTeamColor } from "./agents-team-colors";
-import { AgentModelWithEngine } from "@/components/shared/model-with-engine";
+import { EngineMark } from "@/components/shared/model-with-engine";
+import { agentEngineInfo } from "@/lib/engine-mark";
 
 export function AgentHeroCard() {
   const { state: { agent, process, teamColorIndex, isRefreshing }, actions: { refetch } } = useAgentDetail();
   const identity = agent.identity;
   const tc = getTeamColor(teamColorIndex);
+  const { engine, model } = agentEngineInfo(agent);
+  // a harness runs with its own effort setting; Polpo's engine with the agent's reasoning
+  const harnessEffort = (agent as { engine?: { effort?: unknown } }).engine?.effort;
+  const reasoning = typeof harnessEffort === "string" ? harnessEffort : agent.reasoning;
 
   return (
     <Card className="gap-0 overflow-hidden py-0">
       {/* Gradient header bar — colored by team */}
-      <div className={cn("h-10 bg-gradient-to-r to-transparent", tc.gradientFrom, tc.gradientVia)} />
+      <div className={cn("h-10 shrink-0 bg-gradient-to-r to-transparent", tc.gradientFrom, tc.gradientVia)} />
       <CardContent className="pt-0 -mt-5 pb-4 space-y-3">
         {/* Avatar + name */}
         <div className="flex items-center gap-3">
@@ -50,15 +55,39 @@ export function AgentHeroCard() {
               <h1 className="font-heading text-h2 truncate">
                 {identity?.displayName ?? agent.name}
               </h1>
+              <AgentColorPicker agent={agent} onChanged={refetch} compact />
               {process && (
                 <div className="h-2 w-2 rounded-pill bg-primary animate-pulse" />
               )}
             </div>
-            {identity?.displayName && identity.displayName !== agent.name && (
-              <p className="truncate text-micro font-mono text-muted-foreground" title={`@${agent.name}`}>@{agent.name}</p>
-            )}
-            <AgentModelWithEngine agent={agent} size={14} className="mt-0.5 text-caption text-muted-foreground" mono testId="agent-hero-model" />
-            <AgentVersionBadges agent={agent} className="mt-1" />
+            {/* @handle · version (opens the Versions tab); the model is in the Model row below */}
+            <p className="flex min-w-0 items-center gap-1.5 text-micro font-mono text-muted-foreground" data-testid="agent-hero-handle">
+              {identity?.displayName && identity.displayName !== agent.name && (
+                <span className="min-w-0 truncate" title={`@${agent.name}`}>@{agent.name}</span>
+              )}
+              {agent.versioning?.production && (
+                <>
+                  {identity?.displayName && identity.displayName !== agent.name && <span aria-hidden>·</span>}
+                  <Link
+                    to={{ search: "?tab=versions" }}
+                    className="shrink-0 rounded-sm hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    title="The version production runs: open Versions"
+                    data-testid="agent-hero-version"
+                  >
+                    v{agent.versioning.production}
+                  </Link>
+                </>
+              )}
+              {agent.versioning?.draft.hasChanges && (
+                <Link
+                  to={{ search: "?tab=versions" }}
+                  className="shrink-0 font-sans text-warning hover:underline"
+                  title={agent.versioning.draft.warning ?? `Unpublished: ${agent.versioning.draft.changedFields.join(", ")}`}
+                >
+                  {agent.versioning.draft.stale ? "draft out of date" : "draft"}
+                </Link>
+              )}
+            </p>
           </div>
         </div>
 
@@ -76,6 +105,13 @@ export function AgentHeroCard() {
               </Badge>
             )}
           </div>
+        )}
+
+        {/* Bio — under the name, like a LinkedIn / X profile */}
+        {identity?.bio && (
+          <p className="whitespace-pre-line break-words text-small leading-relaxed text-foreground" data-testid="agent-hero-bio">
+            {identity.bio}
+          </p>
         )}
 
         {/* Identity fields */}
@@ -101,21 +137,21 @@ export function AgentHeroCard() {
             <span title={identity?.timezone || undefined} className={cn("ml-auto min-w-0 truncate", identity?.timezone ? "text-foreground" : "text-muted-foreground/60 italic")}>{identity?.timezone || "not set"}</span>
           </div>
           <div className="flex items-center gap-2 py-1.5">
-            <Palette className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-            <span className="text-muted-foreground shrink-0">Colour</span>
-            <AgentColorPicker agent={agent} onChanged={refetch} />
+            <Cpu className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <span className="text-muted-foreground shrink-0">Harness</span>
+            <EngineMark engine={engine} model={model} size={13} className="ml-auto text-foreground" />
           </div>
-          <div className="flex items-center gap-2 py-1.5">
+          <div className="flex items-center gap-2 py-1.5" data-testid="agent-hero-model-row" data-engine={engine.id}>
             <Zap className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <span className="text-muted-foreground shrink-0">Model</span>
-            <AgentModelWithEngine agent={agent} fallback="default" mono size={13} className="ml-auto justify-end text-foreground" testId="agent-hero-model-row" />
+            <span title={model || undefined} className={cn("ml-auto min-w-0 truncate font-mono", model ? "text-foreground" : "text-muted-foreground/60 italic")} data-testid="model-name">{model || "default"}</span>
           </div>
           <div className="flex items-center gap-2 py-1.5">
             <Brain className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <span className="text-muted-foreground shrink-0">Reasoning</span>
-            {agent.reasoning && agent.reasoning !== "off" ? (
-              <Badge variant="outline" className={cn("text-micro ml-auto", reasoningMeta[agent.reasoning]?.color)}>
-                {reasoningMeta[agent.reasoning]?.label ?? agent.reasoning}
+            {reasoning && reasoning !== "off" ? (
+              <Badge variant="outline" className={cn("text-micro ml-auto", reasoningMeta[reasoning]?.color ?? reasoningMeta.xhigh.color)}>
+                {reasoningMeta[reasoning]?.label ?? reasoning}
               </Badge>
             ) : (
               <span className="ml-auto text-muted-foreground/60 italic">off</span>

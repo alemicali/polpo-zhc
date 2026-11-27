@@ -5,12 +5,14 @@
  * model: a provider's API key (provider picker), a Bedrock API key (open-weight models on Bedrock),
  * a gateway; its logins and subscriptions are not offered. Credentials are vault
  * references (the picker; the key itself is added in an agent's Credentials tab). A Claude
- * subscription is not offered (Anthropic's terms). "Test connection" (and every save) sends one
+ * subscription is not offered (Anthropic's terms). Codex may also sign in with ChatGPT (OpenAI
+ * supports it): a vault entry keeps the login, each agent signs in through a terminal on its
+ * computer (codex-chatgpt-login.tsx). "Test connection" (and every save) sends one
  * tiny model request from the Polpo server and shows the result. Below: the CLI engine's accounts
  * (personal Claude Code / Codex sign-ins, cli-accounts-section.tsx) and the harness sessions.
  */
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Loader2, PlugZap, RefreshCw, Save, ShieldCheck, Square, Trash2 } from "lucide-react";
+import { AlertTriangle, Loader2, PlugZap, RefreshCw, Save, ShieldCheck, Square, Terminal as TerminalIcon, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,6 +33,7 @@ import {
 import { HarnessGatewayFields } from "./harness-gateway-fields";
 import { HarnessTestLine } from "./harness-test-line";
 import { CliAccountsSection } from "./cli-accounts-section";
+import { CodexChatgptBadge, CodexChatgptLoginDialog } from "./codex-chatgpt-login";
 
 const selectClass = "h-8 rounded-md border bg-transparent px-2 text-xs";
 
@@ -42,6 +45,12 @@ export function HarnessesSection() {
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState<string | null>(null);
   const [tests, setTests] = useState<Partial<Record<HarnessId, HarnessTestResult | "running">>>({});
+  /** Codex's ChatGPT sign-in: the agent being signed in (the dialog), the agent chosen in the card. */
+  const [chatgptAgent, setChatgptAgent] = useState<string | null>(() => {
+    // a link from Polpo or the MCP tool: ?codexChatgptLogin=<agent>
+    try { return new URLSearchParams(window.location.search).get("codexChatgptLogin"); } catch { return null; }
+  });
+  const [chatgptPick, setChatgptPick] = useState<string>("");
 
   const runTest = useCallback(async (id: HarnessId, settings?: HarnessesSettings) => {
     setTests((t) => ({ ...t, [id]: "running" }));
@@ -215,7 +224,18 @@ export function HarnessesSection() {
               {(Object.keys(CODEX_AUTH_LABELS) as CodexAuth[]).map((a) => <option key={a} value={a}>{CODEX_AUTH_LABELS[a]}</option>)}
             </select>
           </label>
-          {!isGateway(cx?.auth) && (
+          {cx?.auth === "chatgpt" && (
+            <div className="space-y-1">
+              <span className="flex items-center gap-1.5 text-muted-foreground">Sign-in kept in the vault entry <BrandIcon name="openai" size={14} /></span>
+              <div className="flex gap-1">
+                <Input className="h-8 text-xs" placeholder="owner (an agent)" value={cx.credentialRef?.owner ?? ""} aria-label="Codex ChatGPT vault owner"
+                  onChange={(e) => setCx({ credentialRef: { owner: e.target.value.trim(), service: cx.credentialRef?.service ?? "codex-chatgpt" } })} />
+                <Input className="h-8 text-xs" placeholder="codex-chatgpt" value={cx.credentialRef?.service ?? ""} aria-label="Codex ChatGPT vault entry"
+                  onChange={(e) => setCx({ credentialRef: { owner: cx.credentialRef?.owner ?? "", service: e.target.value.trim() } })} />
+              </div>
+            </div>
+          )}
+          {!isGateway(cx?.auth) && cx?.auth !== "chatgpt" && (
             <label className="space-y-1">
               <span className="flex items-center gap-1.5 text-muted-foreground">OpenAI API key (vault entry) <BrandIcon name="openai" size={14} /></span>
               <VaultRefPicker value={cx?.credentialRef} onChange={(ref) => setCx({ credentialRef: ref ?? undefined })}
@@ -230,9 +250,27 @@ export function HarnessesSection() {
           )}
         </div>
         {isGateway(cx?.auth) && <HarnessGatewayFields harness="codex" auth={cx!.auth as "ai-gateway" | "gateway"} value={cx!.gateway} onChange={(gateway) => setCx({ gateway })} />}
-        {brokeringNote("codex")}
+        {cx?.auth === "chatgpt" ? (
+          <div className="space-y-2" data-testid="codex-chatgpt">
+            <p className="flex flex-wrap items-center gap-1.5 text-micro text-muted-foreground">
+              ChatGPT sign-in <CodexChatgptBadge status={item("codex")?.auth === "chatgpt" ? item("codex")?.chatgpt : undefined} />
+              · Codex uses the plan of the ChatGPT account that signs in. The login stays in the vault and in each agent's computer, and is saved back when Codex refreshes it.
+            </p>
+            {item("codex")?.auth === "chatgpt" ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <select className={selectClass} aria-label="Agent to sign in with ChatGPT" value={chatgptPick || item("codex")?.agents[0] || ""} onChange={(e) => setChatgptPick(e.target.value)}>
+                  {(item("codex")?.agents ?? []).length === 0 && <option value="">No agent on Codex yet</option>}
+                  {(item("codex")?.agents ?? []).map((a) => <option key={a} value={a}>{a}</option>)}
+                </select>
+                <Button size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={!(chatgptPick || item("codex")?.agents[0])}
+                  onClick={() => setChatgptAgent(chatgptPick || item("codex")!.agents[0]!)}>
+                  <TerminalIcon className="h-3 w-3" /> Sign in with ChatGPT
+                </Button>
+              </div>
+            ) : <p className="text-micro text-muted-foreground">Save first, then sign in each agent on Codex.</p>}
+          </div>
+        ) : brokeringNote("codex")}
         <div className="flex flex-wrap items-center gap-2">{testButton("codex")}<HarnessTestLine result={tests.codex} /></div>
-        <p className="text-micro text-muted-foreground">Signing in with ChatGPT is not supported yet.</p>
       </CardContent></Card>
 
       {/* OpenCode */}
@@ -341,6 +379,11 @@ export function HarnessesSection() {
           </div>
         ))}
       </div>
+
+      <CodexChatgptLoginDialog agent={chatgptAgent} onClose={(changed) => {
+        setChatgptAgent(null);
+        if (changed) { toast.success("ChatGPT sign-in saved"); void load(); }
+      }} />
 
       <ConfirmDialog
         open={!!resetting}

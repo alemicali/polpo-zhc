@@ -153,7 +153,9 @@ function harnessSetting(settings: BuildRunContextInput["settings"], harness: Har
   const h = (all as Record<string, unknown>)[harness];
   if (!h || typeof h !== "object") return undefined;
   const r = h as { auth?: unknown; model?: unknown; provider?: unknown; bedrock?: { region?: unknown }; vertex?: { region?: unknown }; gateway?: { models?: { main?: unknown } } };
-  const auth = r.auth === "api-key" || r.auth === "bedrock" || r.auth === "vertex" || r.auth === "ai-gateway" || r.auth === "gateway" ? r.auth : undefined;
+  // Codex signed in with ChatGPT: a personal plan pays (no API key billed)
+  const auth = r.auth === "api-key" || r.auth === "bedrock" || r.auth === "vertex" || r.auth === "ai-gateway" || r.auth === "gateway" ? r.auth
+    : r.auth === "chatgpt" ? "subscription" as const : undefined;
   const model = typeof r.gateway?.models?.main === "string" && r.gateway.models.main ? r.gateway.models.main : r.model;
   const region = auth === "bedrock" ? r.bedrock?.region : auth === "vertex" ? r.vertex?.region : undefined;
   // OpenCode: the model's provider (its logo; the model id is the provider's)

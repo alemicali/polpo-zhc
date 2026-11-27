@@ -379,6 +379,16 @@ export async function testHarnessConnection(o: {
   } catch (err) {
     return { ...base, ok: false, latencyMs: Date.now() - t0, errorKind: "config", error: (err as Error).message };
   }
+  // Codex signed in with ChatGPT: the login lives in the agent's computer (and the vault), never
+  // used from this server; the test says whether someone has signed in
+  if (a.chatgpt) {
+    const ref = `${a.chatgpt.ref.owner} / ${a.chatgpt.ref.service}`;
+    return a.chatgpt.authJson
+      ? { ...base, ok: true, latencyMs: Date.now() - t0, ...(a.model ? { model: a.model } : {}), endpoint: "chatgpt.com (from the agent's computer)",
+          note: `signed in with ChatGPT (login cache in the vault entry ${ref}); Codex uses it inside the agent's computer, so no model request is made from this server` }
+      : { ...base, ok: false, latencyMs: Date.now() - t0, errorKind: "auth",
+          error: `Codex signs in with ChatGPT, and nobody has signed in yet (the vault entry ${ref} has no login): Settings → Harnesses → Codex → Sign in with ChatGPT` };
+  }
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(new Error("timeout")), o.timeoutMs ?? 30_000);
   try {

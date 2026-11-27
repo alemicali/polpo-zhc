@@ -1,6 +1,6 @@
 /**
  * Agent page → Tools: which connectors this agent can use, with a switch to grant or revoke each
- * one (PATCH the connector's access). Connectors open to every agent show as granted; turning one
+ * one (PATCH the connector's access). Two tabs: Enabled (this agent can use them) and Available. Connectors open to every agent show as granted; turning one
  * off keeps every other agent. A granted connector expands to choose which of its tools the agent
  * gets (all, or only selected ones: agent.connectorTools).
  */
@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { AlertTriangle, ChevronDown, Plug } from "lucide-react";
 import { SectionHeader } from "@/components/shared/section-header";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useConnectors } from "@/hooks/use-connectors";
 import {
   accountLabel, agentHasAccess, allowedToolsCoverConnector, connectorState, connectorToolsEntry, connectorsApi, toggleAgentAccess,
@@ -38,7 +39,12 @@ export function AgentConnectorsSection({
   // the last saved selection, ahead of the agent reload
   const [selection, setSelection] = useState<{ value: Selection | undefined; base: Selection | undefined } | null>(null);
   const current = selection && selection.base === connectorTools ? selection.value : connectorTools;
-  const granted = connectors.filter((c) => agentHasAccess(c.access, agentName)).length;
+  const enabled = connectors.filter((c) => agentHasAccess(c.access, agentName));
+  const available = connectors.filter((c) => !agentHasAccess(c.access, agentName));
+  const granted = enabled.length;
+  // Enabled first; with none enabled yet, open on Available. A toggle keeps the tab where it is.
+  const [chosenTab, setTab] = useState<"enabled" | "available" | null>(null);
+  const tab = chosenTab ?? (granted > 0 ? "enabled" : "available");
 
   const toggle = async (connector: Connector, on: boolean) => {
     const access = toggleAgentAccess(connector.access, agentName, on, agents.map((a) => a.name));
@@ -66,8 +72,22 @@ export function AgentConnectorsSection({
           No connectors yet. <Link to="/connectors" className="text-primary hover:underline">Connect an app</Link> (Linear, Notion, GitHub…) and give this agent its tools.
         </p>
       ) : (
-        <div className="space-y-1.5">
-          {connectors.map((connector) => {
+        <div className="space-y-2">
+        <Tabs value={tab} onValueChange={(v) => setTab(v as "enabled" | "available")} className="gap-2">
+          <TabsList>
+            <TabsTrigger value="enabled" data-testid="agent-connectors-tab-enabled">Enabled ({enabled.length})</TabsTrigger>
+            <TabsTrigger value="available" data-testid="agent-connectors-tab-available">Available ({available.length})</TabsTrigger>
+          </TabsList>
+          {(["enabled", "available"] as const).map((key) => {
+            const list = key === "enabled" ? enabled : available;
+            return (
+              <TabsContent key={key} value={key} forceMount className="space-y-1.5 data-[state=inactive]:hidden" data-testid={`agent-connectors-${key}`}>
+                {list.length === 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    {key === "enabled" ? "No connector enabled for this agent yet: turn one on in Available." : "Every connector is enabled for this agent."}
+                  </p>
+                )}
+          {list.map((connector) => {
             const on = agentHasAccess(connector.access, agentName);
             const blockedByAllowlist = on && !allowedToolsCoverConnector(allowedTools, connector.id);
             const entry = connectorToolsEntry(current, connector.id);
@@ -128,6 +148,10 @@ export function AgentConnectorsSection({
               </div>
             );
           })}
+              </TabsContent>
+            );
+          })}
+        </Tabs>
           <Link to="/connectors" className="inline-block pt-1 text-xs text-primary hover:underline">Manage connectors</Link>
         </div>
       )}
