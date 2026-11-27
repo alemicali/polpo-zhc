@@ -1,11 +1,13 @@
 /**
  * A computer's live view and take control: the headed browser command in the VM, CDP_URL in the
  * agent's commands (never launching a browser), the desktop's start commands (idempotent, the
- * passwords through the environment only), the control state machine (take control, give back
- * with a note, conflicts, timeouts), the waiting tool (release note, timeout, abort), the browser
- * waiting while a person holds the computer, the server's takeover service (events, new
- * passwords, notifications), the task-run wire, and the authorization of every new WebSocket and
- * of Browser Live's. Fakes only: no VM, no browser, no VNC server.
+ * password through the environment only, kept in the vault, re-attached after a restart), the
+ * control state machine (take control, give back with a note, conflicts, timeouts), the waiting
+ * tool (release note, timeout, abort), the browser waiting while a person holds the computer, the
+ * server's takeover service (events, nothing restarting, the live view started for a request,
+ * notifications), the task-run wire, no password in REST or MCP answers, and the authorization of
+ * every new WebSocket and of Browser Live's. Fakes only: no VM, no browser, no VNC server
+ * (the RFB proxy itself: computer-live-rfb.test.ts).
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -22,8 +24,8 @@ import {
 import { SANDBOX_CHROME_FLAGS } from "../tools/agent-chrome.js";
 import { createSystemTools } from "../tools/system-tools.js";
 import {
-  ComputerDesktops, DESKTOP_DISPLAY_COMMAND, DESKTOP_INSPECT_COMMAND, DESKTOP_PASSWORD_ENV, DESKTOP_STOP_COMMAND, DESKTOP_VIEW_PASSWORD_ENV,
-  desktopInstallCommand, desktopUnsupported, desktopViewCommand, parseDesktopInspect, vncPassword,
+  ComputerDesktops, DESKTOP_DISPLAY_COMMAND, DESKTOP_INSPECT_COMMAND, DESKTOP_PASSWORD_ENV, DESKTOP_STOP_COMMAND, DESKTOP_VAULT_OWNER,
+  DESKTOP_VNC_OPTIONS, desktopInstallCommand, desktopUnsupported, desktopViewCommand, parseDesktopInspect, vncPassword,
 } from "../sandbox/desktop.js";
 import { ComputerControlError, ComputerControlStore, waitForAgentControl } from "../sandbox/computer-control.js";
 import { COMPUTER_TAKEOVER_TOOL, createComputerTakeoverTools, waitForTakeover, wantsComputerTakeoverTool } from "../tools/computer-takeover-tools.js";
@@ -31,6 +33,8 @@ import { ComputerTakeoverService, handleTakeoverWire } from "../core/computer-ta
 import { attachComputerDesktopWebSocket } from "../server/computer-desktop-ws.js";
 import { attachBrowserDashboardWebSocket } from "../server/routes/browser-dashboard.js";
 import { isTerminalRequestAuthorized } from "../server/terminal.js";
+import { computerRoutes, type ComputerRouteDeps } from "../server/routes/computers.js";
+import { handleMcpRequest, type McpDeps } from "../server/mcp.js";
 
 const dirs: string[] = [];
 const servers: Server[] = [];
@@ -41,6 +45,16 @@ afterEach(async () => {
 const tmp = () => { const d = mkdtempSync(join(tmpdir(), "polpo-live-")); dirs.push(d); return d; };
 
 const NINA: ComputerConfig = { id: "nina", name: "Nina", kind: "daytona" };
+
+/** A vault in memory (get/set/remove: what the live view uses). */
+function fakeVault() {
+  const m = new Map<string, { type: string; credentials: Record<string, string> }>();
+  return {
+    get: async (owner: string, key: string) => m.get(`${owner}/${key}`) as never,
+    set: async (owner: string, key: string, entry: { type: string; credentials: Record<string, string> }) => { m.set(`${owner}/${key}`, entry); },
+    remove: async (owner: string, key: string) => m.delete(`${owner}/${key}`),
+  } as unknown as import("@polpo-ai/core").VaultStore & { get(o: string, k: string): Promise<{ credentials: Record<string, string> } | undefined> };
+}
 const AGENT: AgentConfig = { name: "sitoinchat", allowedTools: ["browser_*"], defaultComputer: "nina", browserHeaded: true };
 
 /** A VM shell: records commands and environments, answers like agent-browser. */
@@ -123,15 +137,21 @@ describe("CDP_URL", () => {
 });
 
 describe("the desktop in the VM", () => {
-  it("commands are idempotent (alive checks) and passwords travel in the environment only", () => {
+  it("commands are idempotent (alive checks) and the one password travels in the environment only", () => {
     expect(DESKTOP_DISPLAY_COMMAND).toContain("alive \"$D/xvfb.pid\"");
     expect(DESKTOP_DISPLAY_COMMAND).toContain("-nolisten tcp");
-    const keep = desktopViewCommand({ rotate: false });
+    const keep = desktopViewCommand({ restart: false });
     expect(keep).toContain(`if [ "0" = 1 ] || ! alive "$D/vnc.pid"`);
     expect(keep).toContain("-localhost");
     expect(keep).toContain(`-passwdfile "rm:$D/vnc.pass"`);
+    // one full-access password: no view-only one (the server filters viewers' input)
+    expect(keep).toContain(`printf '%s\\n' "$${DESKTOP_PASSWORD_ENV}" >"$D/vnc.pass"`);
+    expect(keep).not.toContain("VIEWONLY");
+    expect(keep).toContain(DESKTOP_VNC_OPTIONS);
+    expect(DESKTOP_VNC_OPTIONS).toContain("-cursor arrow");
+    expect(DESKTOP_VNC_OPTIONS).toContain("-noncache");
     expect(keep).toContain("websockify 0.0.0.0:6080 127.0.0.1:5900");
-    expect(desktopViewCommand({ rotate: true })).toContain(`if [ "1" = 1 ]`);
+    expect(desktopViewCommand({ restart: true })).toContain(`if [ "1" = 1 ]`);
     expect(keep).toContain(`"$${DESKTOP_PASSWORD_ENV}"`);
     expect(desktopInstallCommand("view")).toContain("command -v x11vnc >/dev/null 2>&1 || need=\"$need x11vnc\"");
     expect(desktopInstallCommand("view")).toContain("[ -z \"$need\" ] && exit 0");
@@ -141,52 +161,95 @@ describe("the desktop in the VM", () => {
     expect(vncPassword()).toMatch(/^[A-Za-z2-9]{8}$/);
   });
 
-  /** A computer manager whose machine runs and records what it is asked. */
-  const fakeManager = (running = true) => {
+  /** A computer manager whose machine runs (VM `remoteId`) and records what it is asked. */
+  const fakeManager = (o: { running?: boolean; remoteId?: string; vnc?: boolean } = {}) => {
     const execs: Array<{ command: string; env?: Record<string, string> }> = [];
+    const vm = { remoteId: o.remoteId ?? "vm-1", vnc: o.vnc ?? true, running: o.running ?? true };
     const driver = {
-      remoteId: "vm-1",
-      exec: async (command: string, o: { env?: Record<string, string> } = {}) => {
-        execs.push({ command, ...(o.env ? { env: o.env } : {}) });
-        return { exitCode: 0, stdout: command === DESKTOP_INSPECT_COMMAND ? "display=1\nwm=1\nvnc=1\nws=1\ninstalled=1\n" : "", stderr: "", timedOut: false };
+      get remoteId() { return vm.remoteId; },
+      exec: async (command: string, x: { env?: Record<string, string> } = {}) => {
+        execs.push({ command, ...(x.env ? { env: x.env } : {}) });
+        const up = vm.vnc ? 1 : 0;
+        return { exitCode: 0, stdout: command === DESKTOP_INSPECT_COMMAND ? `display=1\nwm=1\nvnc=${up}\nws=${up}\ninstalled=1\n` : "", stderr: "", timedOut: false };
       },
       portEndpoint: async (port: number) => ({ url: `wss://${port}-vm-1.preview.test/signed`, headers: { "X-Daytona-Skip-Preview-Warning": "true" } }),
     };
     const manager = {
       attach: async () => driver,
-      whenRunning: async <T>(_c: ComputerConfig, fn: (d: typeof driver) => Promise<T>) => (running ? fn(driver) : undefined),
+      whenRunning: async <T>(_c: ComputerConfig, fn: (d: typeof driver) => Promise<T>) => (vm.running ? fn(driver) : undefined),
       hold: () => () => {},
     };
-    return { execs, manager: manager as never };
+    return { execs, vm, manager: manager as never };
   };
 
-  it("start installs what is missing, starts the display and VNC; a second start keeps the passwords", async () => {
+  it("start installs what is missing, starts the display and VNC with one password kept in the vault; nothing restarts after", async () => {
     const { execs, manager } = fakeManager();
-    const d = new ComputerDesktops({ manager: () => manager, sandboxFor: () => ({ provider: "daytona" } as never) });
+    const vault = fakeVault();
+    const d = new ComputerDesktops({ manager: () => manager, sandboxFor: () => ({ provider: "daytona" } as never), vault: () => vault });
     await d.start(NINA);
-    expect(execs.map((e) => e.command)).toEqual([desktopInstallCommand("view"), DESKTOP_DISPLAY_COMMAND, desktopViewCommand({ rotate: true })]);
+    expect(execs.map((e) => e.command)).toEqual([desktopInstallCommand("view"), DESKTOP_DISPLAY_COMMAND, desktopViewCommand({ restart: true })]);
     const first = execs[2]!.env!;
+    expect(Object.keys(first)).toEqual([DESKTOP_PASSWORD_ENV]);
     expect(first[DESKTOP_PASSWORD_ENV]).toMatch(/^.{8}$/);
-    expect(first[DESKTOP_VIEW_PASSWORD_ENV]).not.toBe(first[DESKTOP_PASSWORD_ENV]);
-    // the passwords are never on a command line
+    // the password is never on a command line; it is in the vault, under the reserved owner
     expect(execs.some((e) => e.command.includes(first[DESKTOP_PASSWORD_ENV]!))).toBe(false);
+    expect((await vault.get(DESKTOP_VAULT_OWNER, "nina"))?.credentials).toMatchObject({ password: first[DESKTOP_PASSWORD_ENV], remoteId: "vm-1" });
     await d.start(NINA);
-    expect(execs[5]!.command).toBe(desktopViewCommand({ rotate: false }));
+    expect(execs[5]!.command).toBe(desktopViewCommand({ restart: false }));
     expect(execs[5]!.env).toEqual(first);
-    expect(d.password("nina", "control")).toBe(first[DESKTOP_PASSWORD_ENV]);
-    expect(d.password("nina", "view")).toBe(first[DESKTOP_VIEW_PASSWORD_ENV]);
-    // control changes hands: new passwords
-    await d.rotate(NINA);
-    expect(execs.at(-1)!.command).toBe(desktopViewCommand({ rotate: true }));
-    expect(d.password("nina", "control")).not.toBe(first[DESKTOP_PASSWORD_ENV]);
+    expect(d.password("nina")).toBe(first[DESKTOP_PASSWORD_ENV]);
     expect((await d.status(NINA)).state).toBe("running");
     await d.stop(NINA);
     expect(execs.at(-2)!.command).toBe(DESKTOP_STOP_COMMAND);
-    expect(d.started("nina")).toBe(false);
+    expect(d.password("nina")).toBeUndefined();
+    await new Promise((r) => setTimeout(r, 5));
+    expect(await vault.get(DESKTOP_VAULT_OWNER, "nina")).toBeUndefined();
+  });
+
+  it("after a restart it re-attaches to a live view still running on the same VM, without starting anything", async () => {
+    const vault = fakeVault();
+    const before = fakeManager();
+    await new ComputerDesktops({ manager: () => before.manager, sandboxFor: () => ({ provider: "daytona" } as never), vault: () => vault }).start(NINA);
+    const password = before.execs[2]!.env![DESKTOP_PASSWORD_ENV];
+    // a new server process: nothing in memory
+    const after = fakeManager();
+    const d = new ComputerDesktops({ manager: () => after.manager, sandboxFor: () => ({ provider: "daytona" } as never), vault: () => vault });
+    expect(d.password("nina")).toBeUndefined();
+    expect(await d.attached(NINA)).toBe(true);
+    expect(d.password("nina")).toBe(password);
+    expect((await d.status(NINA)).state).toBe("running");
+    expect(after.execs.map((e) => e.command)).toEqual([DESKTOP_INSPECT_COMMAND, DESKTOP_INSPECT_COMMAND]);
+    // a start keeps x11vnc and its password
+    await d.start(NINA);
+    expect(after.execs.at(-1)).toEqual({ command: desktopViewCommand({ restart: false }), env: { [DESKTOP_PASSWORD_ENV]: password } });
+  });
+
+  it("a machine that is off is never started to re-attach; another VM or a refused password gets a new one", async () => {
+    const vault = fakeVault();
+    const first = fakeManager();
+    await new ComputerDesktops({ manager: () => first.manager, sandboxFor: () => ({ provider: "daytona" } as never), vault: () => vault }).start(NINA);
+    const off = fakeManager({ running: false });
+    const d = new ComputerDesktops({ manager: () => off.manager, sandboxFor: () => ({ provider: "daytona" } as never), vault: () => vault });
+    expect(await d.attached(NINA)).toBe(false);
+    expect(off.execs).toEqual([]);
+    // a new VM: its VNC server (if any) never had this password
+    const other = fakeManager({ remoteId: "vm-2" });
+    const d2 = new ComputerDesktops({ manager: () => other.manager, sandboxFor: () => ({ provider: "daytona" } as never), vault: () => vault });
+    const s = await d2.status(NINA);
+    expect(s).toMatchObject({ state: "stopped", note: expect.stringMatching(/does not know/) });
+    await d2.start(NINA);
+    expect(other.execs.at(-1)!.command).toBe(desktopViewCommand({ restart: true }));
+    expect((await vault.get(DESKTOP_VAULT_OWNER, "nina"))?.credentials.remoteId).toBe("vm-2");
+    // the VNC server refused it (rfb-proxy): forgotten, the next start restarts it with a new one
+    const old = d2.password("nina");
+    d2.invalidate("nina");
+    await d2.start(NINA);
+    expect(other.execs.at(-1)!.command).toBe(desktopViewCommand({ restart: true }));
+    expect(d2.password("nina")).not.toBe(old);
   });
 
   it("status never starts a machine that is off; host and E2B computers have no live view", async () => {
-    const { execs, manager } = fakeManager(false);
+    const { execs, manager } = fakeManager({ running: false });
     const d = new ComputerDesktops({ manager: () => manager, sandboxFor: () => ({ provider: "daytona" } as never) });
     expect((await d.status(NINA)).state).toBe("machine-off");
     expect(execs).toEqual([]);
@@ -305,41 +368,43 @@ describe("the agent's browser waits while a person holds the computer", () => {
 });
 
 describe("the server's takeover service", () => {
-  it("announces, changes the passwords on every change of hands and notifies the person", async () => {
+  it("announces, starts the live view for a request, notifies the person; take control and give back restart nothing", async () => {
     const events: Array<Record<string, unknown>> = [];
-    const rotated: string[] = [];
+    const started: string[] = [];
     const sent: Array<{ channel: string; title: string }> = [];
     const service = new ComputerTakeoverService({
       polpoDir: tmp(), computers: () => [NINA, { id: "h", name: "H", kind: "host" }],
-      emit: (e) => events.push(e as never), rotate: async (c) => { rotated.push(c.id); },
+      emit: (e) => events.push(e as never), startDesktop: async (c) => { started.push(c.id); },
       router: () => ({ getChannelIds: () => ["slack", "tg"], getRules: () => [], sendDirect: async (o) => { sent.push(o); } }),
     });
     const r = await service.request(AGENT, "nina", { reason: "2FA" }, { sessionId: "s1" });
+    await service.desktopStarting;
     await new Promise((x) => setTimeout(x, 5));
+    expect(started).toEqual(["nina"]);
     expect(sent.map((s) => s.channel)).toEqual(["slack", "tg"]);
     expect(sent[0]!.title).toBe("sitoinchat needs you on computer Nina");
     await service.takeover("nina", "ale@x.it");
     await service.release("nina", "ale@x.it", "ok");
-    expect(events.map((e) => e.action)).toEqual(["requested", "taken", "released"]);
-    expect(events[2]).toMatchObject({ holder: "agent", requestId: r.id, note: "ok", person: "ale@x.it" });
-    expect(rotated).toEqual(["nina", "nina"]);
+    expect(events.map((e) => e.action)).toEqual(["requested", "desktop-started", "taken", "released"]);
+    expect(events[3]).toMatchObject({ holder: "agent", requestId: r.id, note: "ok", person: "ale@x.it" });
+    expect(started).toEqual(["nina"]);
     // only a remote computer, only an agent that uses it
     await expect(service.takeover("h", "x")).rejects.toMatchObject({ code: "INVALID" });
     await expect(service.request({ name: "other" }, "nina", { reason: "x" })).rejects.toMatchObject({ code: "INVALID" });
   });
 
-  it("the new passwords are in place before the change is announced or returned (viewers reconnect with them)", async () => {
-    const order: string[] = [];
+  it("a live view that cannot start never fails the agent's request (the agent still waits for the person)", async () => {
+    const logs: string[] = [];
+    const events: string[] = [];
     const service = new ComputerTakeoverService({
-      polpoDir: tmp(), computers: () => [NINA],
-      emit: (e) => order.push(`event:${(e as { action: string }).action}`),
-      rotate: async () => { await new Promise((x) => setTimeout(x, 20)); order.push("rotated"); },
+      polpoDir: tmp(), computers: () => [NINA], emit: (e) => events.push((e as { action: string }).action),
+      startDesktop: async () => { throw new Error("no ports"); }, log: (_l, m) => logs.push(m),
     });
-    await service.takeover("nina", "ale@x.it");
-    order.push("returned");
-    await service.release("nina", "ale@x.it");
-    order.push("returned");
-    expect(order).toEqual(["rotated", "event:taken", "returned", "rotated", "event:released", "returned"]);
+    const r = await service.request(AGENT, "nina", { reason: "CAPTCHA" });
+    await service.desktopStarting;
+    expect(r.status).toBe("pending");
+    expect(events).toEqual(["requested"]);
+    expect(logs.join("\n")).toMatch(/could not be started.*no ports/);
   });
 
   it("the instance's rules on computer:takeover notify instead of the fallback", async () => {
@@ -394,7 +459,7 @@ describe("WebSocket authorization", () => {
     expect(isTerminalRequestAuthorized(req({}), tmp(), [], undefined)).toBe(true);
   });
 
-  it("the live view: 401 without login, 409 before the live view is started, proxied when it is", async () => {
+  it("the live view: 401 without login, 409 before the live view is started, proxied (the server speaks RFB first) when it is", async () => {
     // the VM side: an echo server standing for websockify
     const upstream = createServer();
     servers.push(upstream);
@@ -406,7 +471,8 @@ describe("WebSocket authorization", () => {
     let started = false;
     const holds: string[] = [];
     const desktops = {
-      started: () => started,
+      attached: async () => started,
+      password: () => (started ? "pw" : undefined),
       endpoint: async () => ({ url: `ws://127.0.0.1:${upstreamPort}/`, headers: {} }),
       hold: () => { holds.push("hold"); return () => holds.push("release"); },
     } as unknown as ComputerDesktops;
@@ -420,7 +486,6 @@ describe("WebSocket authorization", () => {
     started = true;
     const ws = new WebSocket(`ws://127.0.0.1:${port}/api/v1/computers/nina/desktop/vnc?api_key=secret`);
     const got = await new Promise<string>((resolve, reject) => {
-      ws.on("open", () => ws.send(Buffer.from("RFB 003.008\n")));
       ws.on("message", (m) => resolve(m.toString()));
       ws.on("error", reject);
     });
@@ -445,4 +510,56 @@ it("no secret in a takeover event or a desktop status", async () => {
   await service.request(AGENT, "nina", { reason: "x" });
   await service.takeover("nina", undefined);
   expect(JSON.stringify(events)).not.toMatch(/password/i);
+});
+
+it("no VNC password in any REST or MCP answer about the live view", async () => {
+  const PASSWORD = "Zq7pW3xK";
+  const desktops = {
+    status: async () => ({ computerId: "nina", state: "running", display: ":99", startedAt: "2026-11-27T10:00:00Z" }),
+    start: async () => ({ computerId: "nina", state: "running", display: ":99", startedAt: "2026-11-27T10:00:00Z" }),
+    stop: async () => ({ computerId: "nina", state: "stopped", display: ":99" }),
+    password: () => PASSWORD,
+  } as unknown as ComputerDesktops;
+  const service = new ComputerTakeoverService({ polpoDir: tmp(), computers: () => [NINA], emit: () => {} });
+  const app = computerRoutes({
+    computers: () => [NINA], settings: () => undefined, agents: async () => [AGENT], manager: () => ({}) as never,
+    save: async () => {}, sandboxFor: () => ({ error: "x" }), emit: () => {}, emitTakeover: () => {},
+    desktops: () => desktops, takeover: () => service, member: () => "ale@x.it",
+  } as ComputerRouteDeps);
+  const answers: string[] = [];
+  const rest = async (method: string, path: string, body?: unknown) => {
+    const res = await app.request(path, { method, ...(body !== undefined ? { headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : {}) });
+    const text = await res.text();
+    answers.push(text);
+    return { status: res.status, text };
+  };
+  for (const [m, p] of [["GET", "/nina/desktop?viewer=1"], ["POST", "/nina/desktop/start"], ["POST", "/nina/takeover"], ["GET", "/nina/desktop?viewer=1"], ["POST", "/nina/release"], ["POST", "/nina/desktop/stop"]] as const) {
+    expect((await rest(m, p, m === "POST" ? {} : undefined)).status).toBe(200);
+  }
+  // the viewer's role and path, never a password
+  expect(JSON.parse(answers[0]!).data.viewer).toEqual({ mode: "view", path: "/api/v1/computers/nina/desktop/vnc" });
+  expect(JSON.parse(answers[2]!).data.viewer).toEqual({ mode: "control", path: "/api/v1/computers/nina/desktop/vnc" });
+  // MCP reads the same routes
+  const api: McpDeps["api"] = async (method, path, body) => {
+    const r = await rest(method, path.replace(/^\/api\/v1\/computers/, ""), body);
+    return { status: r.status, body: JSON.parse(r.text), headers: new Headers() };
+  };
+  const rpc = async (name: string, args: Record<string, unknown>) => {
+    const res = await handleMcpRequest(new Request("http://localhost/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-protocol-version": "2025-06-18" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }),
+    }), { api, version: "x", toolsets: ["computers"] });
+    const out = await res.text();
+    answers.push(out);
+    return out;
+  };
+  expect(await rpc("polpo_computer_desktop", { id: "nina", action: "start" })).toMatch(/Live view of nina: running/);
+  await rpc("polpo_computer_desktop", { id: "nina" });
+  await rpc("polpo_computer_takeover", { id: "nina" });
+  await rpc("polpo_computer_release", { id: "nina", note: "done" });
+  for (const a of answers) {
+    expect(a).not.toContain(PASSWORD);
+    expect(a).not.toMatch(/"password"/i);
+  }
 });

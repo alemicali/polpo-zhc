@@ -28,7 +28,7 @@ vi.mock("@polpo-ai/react", async () => {
 });
 
 // ── noVNC mock: records how the live view connects (never opens a socket) ────
-const vnc = vi.hoisted(() => ({ clients: [] as Array<{ url: string; options: { credentials?: { password?: string } }; viewOnly: boolean }> }));
+const vnc = vi.hoisted(() => ({ clients: [] as Array<{ url: string; options: { credentials?: { password?: string } }; viewOnly: boolean; disconnected?: boolean }> }));
 vi.mock("@novnc/novnc", () => ({
   default: class {
     viewOnly = false; scaleViewport = false; resizeSession = false; focusOnClick = false; showDotCursor = false; qualityLevel = 0; compressionLevel = 0; background = "";
@@ -106,7 +106,7 @@ function installFetch() {
       const control = { computerId: id, holder: d.holder, ...(d.person ? { person: d.person, since: new Date().toISOString() } : {}), requests: d.requests, open };
       const mode = d.holder === "person" ? "control" : "view";
       const viewer = d.state === "running" && (url.searchParams.get("viewer") === "1" || method === "POST")
-        ? { viewer: { mode, password: mode === "control" ? "FULLPASS" : "viewpass", path: `/api/v1/computers/${id}/desktop/vnc` } } : {};
+        ? { viewer: { mode, path: `/api/v1/computers/${id}/desktop/vnc` } } : {};
       return ok({ desktop: { computerId: id, state: d.state, display: ":99" }, control, ...viewer });
     }
     if (action === "egress") return ok({ computerId: id, proxy: current.egress, tailnet: "up", node: "polpo-nina", path: "direct", proxyReachable: true, effective: `via ${current.egress}`, machine: "running" });
@@ -459,7 +459,7 @@ test("a computer deleted at the provider: its page says so, offers Recreate and 
   expect(server.calls.find((c) => c.path === "/computers/nina/reset")!.body).toEqual({ confirm: true });
 });
 
-test("the computer's live view: start it, view-only while the agent holds it, take control (full access), give back with a note", async () => {
+test("the computer's live view: start it, view-only while the agent holds it, take control (full access, same connection), give back with a note", async () => {
   installFetch();
   server.computers = [HOST, nina({ status: "running", providerApi: "v2" })];
   server.desktop.requests = [{
@@ -475,20 +475,25 @@ test("the computer's live view: start it, view-only while the agent holds it, ta
   await click(byText("Start live view"));
   await flush();
   expect(server.calls.some((c) => c.method === "POST" && c.path === "/computers/nina/desktop/start")).toBe(true);
-  // view-only, with the view-only password, on the authorized WebSocket path
-  expect(vnc.clients.at(-1)).toMatchObject({ viewOnly: true, options: { credentials: { password: "viewpass" } } });
+  // view-only, without any password (the server authenticates to the VM), on the authorized WebSocket path
+  expect(vnc.clients).toHaveLength(1);
+  expect(vnc.clients.at(-1)).toMatchObject({ viewOnly: true, options: { shared: true } });
+  expect(vnc.clients.at(-1)!.options.credentials).toBeUndefined();
   expect(vnc.clients.at(-1)!.url).toMatch(/\/api\/v1\/computers\/nina\/desktop\/vnc$/);
   expect($('[data-testid="computer-control-holder"]')!.textContent).toMatch(/The agent has control/);
   await click(byText("Take control"));
   await flush();
   expect(server.calls.some((c) => c.method === "POST" && c.path === "/computers/nina/takeover")).toBe(true);
-  expect(vnc.clients.at(-1)).toMatchObject({ viewOnly: false, options: { credentials: { password: "FULLPASS" } } });
+  // the same connection becomes interactive: no reconnect
+  expect(vnc.clients).toHaveLength(1);
+  expect(vnc.clients.at(-1)).toMatchObject({ viewOnly: false });
   expect($('[data-testid="computer-control-holder"]')!.textContent).toMatch(/You have control/);
   await type($<HTMLInputElement>('input[aria-label="Note for the agent"]')!, "Signed in, you are on the feed");
   await click(byText("Give back"));
   await flush();
   expect(server.calls.find((c) => c.path === "/computers/nina/release")!.body).toEqual({ note: "Signed in, you are on the feed" });
-  expect(vnc.clients.at(-1)).toMatchObject({ viewOnly: true, options: { credentials: { password: "viewpass" } } });
+  expect(vnc.clients).toHaveLength(1);
+  expect(vnc.clients.at(-1)).toMatchObject({ viewOnly: true });
   expect($('[data-testid="takeover-requests"]')).toBeNull();
 });
 

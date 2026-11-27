@@ -6,7 +6,7 @@ import { loadPolpoConfig } from "../core/config.js";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
 import { SyncScheduler } from "./sync-scheduler.js";
-import { attachTerminalWebSocket, isTerminalRequestAuthorized, type TerminalWebSocketHandle } from "./terminal.js";
+import { attachTerminalWebSocket, isTerminalRequestAuthorized, terminalRequestMember, type TerminalWebSocketHandle } from "./terminal.js";
 import { attachComputerDesktopWebSocket } from "./computer-desktop-ws.js";
 import { computerDesktopsFor } from "../sandbox/desktop.js";
 import { attachCodeServerWebSocket, CodeServerManager } from "./code-server.js";
@@ -264,15 +264,26 @@ export class PolpoServer {
     this.browserDashboardWs = attachBrowserDashboardWebSocket(this.server, { authorize: authorizeWs });
     // a computer's live view (its desktop over VNC, take control):
     //   /api/v1/computers/:id/desktop/vnc → the VM's websockify through the provider's preview link
-    this.computerDesktopWs = attachComputerDesktopWebSocket(this.server, {
+    //   the server answers the VM's VNC password itself; input passes only for the person holding it
+    const desktopWs = attachComputerDesktopWebSocket(this.server, {
       authorize: authorizeWs,
       ready: () => this.orchestrator.isInitialized,
       computer: (id) => (this.orchestrator.getConfig()?.settings?.computers ?? []).find((c) => c.id === id),
       desktops: () => computerDesktopsFor(this.orchestrator.getPolpoDir(), {
         manager: () => computerManagerWithEvents(this.orchestrator.getPolpoDir(), (payload) => this.orchestrator.emit("computer:changed", payload)),
         sandboxFor: (c) => computerSandbox(c, this.orchestrator.getConfig()?.settings),
+        vault: () => this.orchestrator.getVaultStore(),
       }),
+      // the person, as the REST routes see them (member email, else "someone")
+      person: (req) => terminalRequestMember(req, this.orchestrator.getPolpoDir()),
+      holder: (id) => {
+        const control = this.orchestrator.getComputerTakeover()?.get(id);
+        return control?.holder === "person" ? control.person ?? "someone" : undefined;
+      },
     });
+    const onControl = (e: { id?: string }) => desktopWs.controlChanged(e?.id);
+    this.orchestrator.on("computer:takeover", onControl);
+    this.computerDesktopWs = { close: () => { this.orchestrator.off("computer:takeover", onControl); desktopWs.close(); } };
 
     const base = `http://${this.config.host}:${this.config.port}`;
 

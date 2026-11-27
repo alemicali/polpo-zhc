@@ -343,6 +343,13 @@ export function isTerminalRequestAuthorized(
   return !!validateSession(polpoDir, token);
 }
 
+/** The signed-in member behind a WebSocket upgrade (their instance session), if any. */
+export function terminalRequestMember(req: IncomingMessage, polpoDir: string): string | undefined {
+  if (!isInstanceAuthEnabled()) return undefined;
+  const token = parseCookie(req.headers.cookie ?? "")[AUTH_COOKIE_NAME];
+  return validateSession(polpoDir, token)?.email;
+}
+
 function hasValidApiKey(req: IncomingMessage, apiKeys: string[], queryApiKey?: string): boolean {
   if (apiKeys.length === 0) return false;
   const xApiKey = singleHeader(req.headers["x-api-key"]);

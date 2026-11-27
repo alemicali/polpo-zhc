@@ -1218,14 +1218,16 @@ export class Orchestrator extends TypedEmitter {
       polpoDir: this.polpoDir,
       computers: () => this.config?.settings?.computers ?? [],
       emit: (payload) => this.emit("computer:takeover", payload),
-      rotate: async (computer) => {
+      // an agent asked for a person: its computer's live view is ready when they open it
+      startDesktop: async (computer) => {
         const [{ computerDesktopsFor }, { computerManager }, { computerSandbox }] = await Promise.all([
           import("../sandbox/desktop.js"), import("../sandbox/computers.js"), import("../sandbox/manager.js"),
         ]);
         await computerDesktopsFor(this.polpoDir, {
           manager: () => computerManager(this.polpoDir),
           sandboxFor: (c) => computerSandbox(c, this.config?.settings),
-        }).rotate(computer);
+          vault: () => this.vaultStore,
+        }).start(computer);
       },
       notifier: () => this.agentNotifier,
       router: () => this.notificationRouter,

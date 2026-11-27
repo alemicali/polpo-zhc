@@ -2,12 +2,15 @@
  * ComputerLivePanel — a remote computer's desktop, live (noVNC), with take control.
  *
  * - The live view of its virtual display, where the agents' headed browsers open (agent
- *   browserHeaded). Start it (starts or wakes the computer) or stop it; it never starts by itself.
- * - View-only while the agent holds the computer. "Take control" gives it to this person: the
- *   viewer becomes interactive (the server hands out the full-control VNC password only to the
- *   person holding it, and changes the passwords whenever control changes hands, so viewers
- *   reconnect) and the agent's browser tools wait. "Give back" returns it, with an optional note
- *   the agent reads.
+ *   browserHeaded). It connects by itself whenever the desktop runs (an agent's takeover request
+ *   starts it; a restarted server re-attaches); Start starts it (starts or wakes the computer).
+ * - The server answers the VM's VNC password itself (the browser connects with security type
+ *   None, no password ever reaches it) and lets input through only for the person holding the
+ *   computer, per message: "Take control" and "Give back" flip the same connection at once, no
+ *   reconnect. View-only while the agent holds it; the agent's browser tools wait while a person
+ *   does. "Give back" returns it, with an optional note the agent reads.
+ * - Quality follows the role: sharper and less compressed while you have control, lighter while
+ *   you watch (noVNC qualityLevel/compressionLevel, changed on the fly).
  * - Agents waiting for a person (request_computer_takeover) show as a banner: reason, page, what
  *   to do, until when they wait.
  *
@@ -50,6 +53,9 @@ export function TakeoverRequestBanner({ requests, className }: { requests: Compu
 
 const LIVE_EVENTS = ["computer:takeover", "computer:changed"];
 
+/** JPEG quality and zlib compression (0-9): sharp and quick to encode in control, light to watch. */
+export const LIVE_QUALITY = { control: { quality: 8, compression: 2 }, view: { quality: 5, compression: 7 } } as const;
+
 /** The live view with this person's viewer access, live (computer:takeover, computer:changed). */
 function useDesktopView(computerId: string) {
   const [view, setView] = useState<ComputerDesktopView>();
@@ -79,6 +85,17 @@ function useDesktopView(computerId: string) {
   };
 }
 
+/** The viewer's role on a live connection: input, focus, cursor and quality (no reconnect). */
+function applyRole(client: VncClient, viewOnly: boolean): void {
+  const q = viewOnly ? LIVE_QUALITY.view : LIVE_QUALITY.control;
+  client.viewOnly = viewOnly;
+  client.focusOnClick = !viewOnly;
+  // the remote cursor (x11vnc -cursor arrow) is drawn by noVNC; a dot when it is invisible
+  client.showDotCursor = !viewOnly;
+  client.qualityLevel = q.quality;
+  client.compressionLevel = q.compression;
+}
+
 export function ComputerLivePanel({ computerId, className }: { computerId: string; className?: string }) {
   const { view, isLoading, error, start, stop, takeover, release } = useDesktopView(computerId);
   const [busy, setBusy] = useState<string | null>(null);
@@ -101,13 +118,14 @@ export function ComputerLivePanel({ computerId, className }: { computerId: strin
     try { await fn(); } catch (e) { setActionError((e as Error).message); } finally { setBusy(null); }
   };
 
-  // the viewer: (re)connect whenever the password changes (control changed hands) or the mode does
-  const password = viewer?.password;
+  // the viewer: one connection while the live view runs (control flips on it, no reconnect)
   const path = viewer?.path;
   const viewOnly = !mine;
+  const viewOnlyRef = useRef(viewOnly);
+  viewOnlyRef.current = viewOnly;
   useEffect(() => {
     const screen = screenRef.current;
-    if (!running || !password || !path || !screen) { setStream("idle"); return; }
+    if (!running || !path || !screen) { setStream("idle"); return; }
     let disposed = false;
     let retry: number | null = null;
     let attempt = 0;
@@ -120,17 +138,13 @@ export function ComputerLivePanel({ computerId, className }: { computerId: strin
       screen.replaceChildren();
       const url = new URL(websocketUrl(path));
       if (config.apiKey) url.searchParams.set("api_key", config.apiKey);
-      client = new RFB(screen, url.toString(), { shared: true, credentials: { password } }) as VncClient;
+      // security type None: the server authenticates to the VM, the browser never has a password
+      client = new RFB(screen, url.toString(), { shared: true }) as VncClient;
       clientRef.current = client;
       client.scaleViewport = true;
       client.resizeSession = false;
-      client.viewOnly = viewOnly;
-      client.focusOnClick = !viewOnly;
-      client.showDotCursor = !viewOnly;
-      client.qualityLevel = 6;
-      client.compressionLevel = 6;
       client.background = "var(--muted)";
-      client.addEventListener("credentialsrequired", () => client?.sendCredentials({ password }));
+      applyRole(client, viewOnlyRef.current);
       client.addEventListener("connect", () => { if (!disposed) { attempt = 0; setStream("live"); } });
       client.addEventListener("securityfailure", () => { if (!disposed) setStream("error"); });
       client.addEventListener("disconnect", () => {
@@ -150,7 +164,12 @@ export function ComputerLivePanel({ computerId, className }: { computerId: strin
       clientRef.current = null;
       screen.replaceChildren();
     };
-  }, [running, password, path, viewOnly]);
+  }, [running, path]);
+
+  // control changed hands: the same connection becomes interactive (or view-only), with its quality
+  useEffect(() => {
+    if (clientRef.current) applyRole(clientRef.current, viewOnly);
+  }, [viewOnly]);
 
   if (isLoading && !view) {
     return <p className={cn("flex items-center gap-2 text-xs text-muted-foreground", className)}><Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading the live view…</p>;
@@ -170,7 +189,7 @@ export function ComputerLivePanel({ computerId, className }: { computerId: strin
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <span className={cn("h-2 w-2 shrink-0 rounded-pill", stream === "live" ? "bg-success" : stream === "connecting" || stream === "reconnecting" ? "animate-pulse bg-warning" : "bg-muted-foreground/40")}
           title={stream === "live" ? "Connected" : stream === "error" ? "Not connected" : "Connecting"} />
-        <span className="min-w-0 flex-1 text-muted-foreground" data-testid="computer-control-holder">{running ? holderText : desktop?.state === "machine-off" ? "Its machine is off: starting the live view starts it." : "The live view is off."}</span>
+        <span className="min-w-0 flex-1 text-muted-foreground" data-testid="computer-control-holder">{running ? holderText : desktop?.state === "machine-off" ? "Its machine is off: starting the live view starts it." : desktop?.note ?? "The live view is off."}</span>
         {running ? (
           <>
             {mine ? (

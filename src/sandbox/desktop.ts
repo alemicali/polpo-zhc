@@ -5,22 +5,24 @@
  * In the VM (everything in DESKTOP_DIR, 0700, under /tmp):
  *   - Xvfb on DESKTOP_DISPLAY (:99, no TCP) and openbox: the display agents' headed browsers open
  *     their window on (browserHeaded). Started on demand by the browser itself or by the live view;
- *   - x11vnc on 127.0.0.1:DESKTOP_VNC_PORT only, with two passwords (full control, view-only) from
- *     the command's environment, read from a file x11vnc deletes right after (`rm:`): never on a
- *     command line, never on disk afterwards. They change whenever control changes hands (x11vnc
- *     restarts, open viewers reconnect with the password their role allows);
+ *   - x11vnc on 127.0.0.1:DESKTOP_VNC_PORT only, with ONE password from the command's environment,
+ *     read from a file x11vnc deletes right after (`rm:`): never on a command line, never on disk
+ *     afterwards. It does not change when control changes hands (nothing restarts);
  *   - websockify on 0.0.0.0:DESKTOP_WS_PORT → the VNC port: what the provider's preview link
  *     reaches (Daytona v2 signed links carry their token; VNC still asks its password).
  *
  * Missing packages (a VM from an older image) are installed once with apt-get, idempotently; the
  * runner image polpo-runner-vm-4 ships them (scripts/build-sandbox-images.mjs).
  *
- * The server side (ComputerDesktops) starts and stops the live view, keeps the passwords in memory
- * (never in a file, never in events or tool results) and gives the person's viewer the password
- * their role allows: full control only to the person holding the computer (computer-control.ts).
+ * The server side (ComputerDesktops) starts and stops the live view and keeps the password: in
+ * memory, and in the vault (reserved owner "$desktop", encrypted at rest, keyed by computer) so a
+ * restarted server re-attaches to a desktop that still runs without restarting x11vnc. The Polpo
+ * server answers the VNC Authentication itself (rfb-proxy.ts): the password never reaches a
+ * browser, an event or a tool result; input passes only for the person holding the computer.
  */
 import { randomInt } from "node:crypto";
 import { isRemoteComputer, type ComputerConfig, type EffectiveSandbox } from "@polpo-ai/core/sandbox";
+import type { VaultStore } from "@polpo-ai/core";
 import type { ComputerManager } from "./computers.js";
 import type { RemoteDriver, RemotePortEndpoint } from "./remote-adapters.js";
 
@@ -29,9 +31,10 @@ export const DESKTOP_DISPLAY = ":99";
 export const DESKTOP_SCREEN = "1280x800x24";
 export const DESKTOP_VNC_PORT = 5900;
 export const DESKTOP_WS_PORT = 6080;
-/** The environment variables the view's passwords travel in (never a command line). */
+/** The environment variable the VNC password travels in (never a command line). */
 export const DESKTOP_PASSWORD_ENV = "POLPO_VNC_PASSWORD";
-export const DESKTOP_VIEW_PASSWORD_ENV = "POLPO_VNC_VIEW_PASSWORD";
+/** Vault namespace of the live views' VNC passwords (reserved: "$" owners are never agents). */
+export const DESKTOP_VAULT_OWNER = "$desktop";
 
 const X_SOCKET = `/tmp/.X11-unix/X${DESKTOP_DISPLAY.slice(1)}`;
 
@@ -74,21 +77,35 @@ const portAnswers = (port: number) =>
   `node -e "require('net').connect(${port},'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))" >/dev/null 2>&1`;
 
 /**
- * The live view (needs the display): x11vnc local only with the passwords from the environment
- * (restarted when `rotate`, or when it is not running), and websockify on 0.0.0.0.
+ * x11vnc's options besides the display, port and password:
+ * - `-localhost -shared -forever`: only websockify reaches it, every viewer on one session;
+ * - `-cursor arrow`: a visible arrow (the cursor shape goes to the viewer, noVNC draws it);
+ * - `-noncache`: no client-side cache (its extra framebuffer area confuses noVNC);
+ * - `-wait 10 -defer 10`: poll the display and send updates every 10 ms (default 20-30);
+ * - `-nowf`: windows move as they are, not as wireframes;
+ * - `-noxdamage` (kept): on Xvfb, DAMAGE hints can miss parts of what a browser paints; polling
+ *   (every `-wait` ms) never does;
+ * - `-repeat`: key autorepeat for the person typing.
  */
-export function desktopViewCommand(o: { rotate: boolean }): string {
+export const DESKTOP_VNC_OPTIONS = "-cursor arrow -noncache -wait 10 -defer 10 -nowf -noxdamage -repeat -quiet";
+
+/**
+ * The live view (needs the display): x11vnc local only with ONE password from the environment
+ * (the Polpo server answers its VNC Authentication: rfb-proxy.ts; viewers never see it), started
+ * when it is not running or when `restart` (a new password), and websockify on 0.0.0.0.
+ */
+export function desktopViewCommand(o: { restart: boolean }): string {
   return COMMON
-    + `[ -n "$${DESKTOP_PASSWORD_ENV}" ] && [ -n "$${DESKTOP_VIEW_PASSWORD_ENV}" ] || { echo "no VNC password" >&2; exit 2; }; `
+    + `[ -n "$${DESKTOP_PASSWORD_ENV}" ] || { echo "no VNC password" >&2; exit 2; }; `
     + `command -v x11vnc >/dev/null 2>&1 || { echo "x11vnc is not installed" >&2; exit 2; }; `
     + `command -v websockify >/dev/null 2>&1 || { echo "websockify is not installed" >&2; exit 2; }; `
-    + `if [ "${o.rotate ? 1 : 0}" = 1 ] || ! alive "$D/vnc.pid"; then `
+    + `if [ "${o.restart ? 1 : 0}" = 1 ] || ! alive "$D/vnc.pid"; then `
     + `if alive "$D/vnc.pid"; then kill "$(cat "$D/vnc.pid")" 2>/dev/null; i=0; while [ $i -lt 50 ] && alive "$D/vnc.pid"; do sleep 0.1; i=$((i+1)); done; `
-    // an old server still answering would keep the old passwords: never leave it running
+    // an old server still answering would keep the old password: never leave it running
     + `alive "$D/vnc.pid" && kill -9 "$(cat "$D/vnc.pid")" 2>/dev/null; i=0; while [ $i -lt 20 ] && ${portAnswers(DESKTOP_VNC_PORT)}; do sleep 0.1; i=$((i+1)); done; fi; `
-    + `(umask 077; printf '%s\\n__BEGIN_VIEWONLY__\\n%s\\n' "$${DESKTOP_PASSWORD_ENV}" "$${DESKTOP_VIEW_PASSWORD_ENV}" >"$D/vnc.pass"); `
+    + `(umask 077; printf '%s\\n' "$${DESKTOP_PASSWORD_ENV}" >"$D/vnc.pass"); `
     + `DISPLAY=${DESKTOP_DISPLAY} $S nohup x11vnc -display ${DESKTOP_DISPLAY} -rfbport ${DESKTOP_VNC_PORT} -localhost -forever -shared `
-    + `-passwdfile "rm:$D/vnc.pass" -noxdamage -repeat -quiet >"$D/vnc.log" 2>&1 </dev/null & echo $! >"$D/vnc.pid"; `
+    + `-passwdfile "rm:$D/vnc.pass" ${DESKTOP_VNC_OPTIONS} >"$D/vnc.log" 2>&1 </dev/null & echo $! >"$D/vnc.pid"; `
     + `i=0; while [ $i -lt 50 ] && ! ${portAnswers(DESKTOP_VNC_PORT)}; do sleep 0.1; i=$((i+1)); done; `
     + `${portAnswers(DESKTOP_VNC_PORT)} || { rm -f "$D/vnc.pass"; echo "the VNC server did not start: $(tail -c 300 "$D/vnc.log" 2>/dev/null)" >&2; exit 1; }; fi; `
     + `if ! alive "$D/ws.pid"; then $S nohup websockify 0.0.0.0:${DESKTOP_WS_PORT} 127.0.0.1:${DESKTOP_VNC_PORT} >"$D/ws.log" 2>&1 </dev/null & echo $! >"$D/ws.pid"; `
@@ -140,7 +157,7 @@ export function vncPassword(): string {
 
 export type DesktopState = "running" | "stopped" | "machine-off" | "unsupported";
 
-/** A computer's desktop as the API shows it (never its passwords). */
+/** A computer's desktop as the API shows it (never its password). */
 export interface DesktopStatus {
   computerId: string;
   state: DesktopState;
@@ -153,11 +170,13 @@ export interface DesktopStatus {
   startedAt?: string;
 }
 
-interface Session { full: string; view: string; remoteId?: string; startedAt: string }
+interface Session { password: string; remoteId?: string; startedAt: string }
 
 export interface ComputerDesktopsDeps {
   manager: () => ComputerManager;
   sandboxFor: (computer: ComputerConfig) => EffectiveSandbox | { error: string };
+  /** Where the password survives a restart (encrypted, owner "$desktop"); without it, memory only. */
+  vault?: () => VaultStore | undefined;
 }
 
 /** Why a computer has no desktop here (undefined: it can have one). */
@@ -168,8 +187,9 @@ export function desktopUnsupported(computer: ComputerConfig): string | undefined
 }
 
 /**
- * The live views of a project's computers (server process). Passwords stay in memory: after a
- * restart, the next start sets new ones.
+ * The live views of a project's computers (server process). The password of each is set when its
+ * x11vnc starts and kept in memory and in the vault: a restarted server re-attaches to a desktop
+ * still running on the same VM; a new VM (or a password the VNC server refuses) gets a new one.
  */
 export class ComputerDesktops {
   private readonly sessions = new Map<string, Session>();
@@ -182,18 +202,59 @@ export class ComputerDesktops {
     return this.deps.manager().attach(computer, sandbox);
   }
 
-  /** What runs on its VM now; never starts or wakes it. */
+  /** The password this server knows for the desktop of `remoteId` (memory, else the vault). */
+  private async remembered(computerId: string, remoteId: string | undefined): Promise<Session | undefined> {
+    const s = this.sessions.get(computerId);
+    if (s) {
+      if (s.remoteId === remoteId) return s;
+      this.forget(computerId); // another VM: its x11vnc never had this password
+      return undefined;
+    }
+    const entry = await this.deps.vault?.()?.get(DESKTOP_VAULT_OWNER, computerId).catch(() => undefined);
+    const c = entry?.credentials;
+    if (!c?.password || (c.remoteId || undefined) !== remoteId) return undefined;
+    const kept: Session = { password: c.password, ...(remoteId ? { remoteId } : {}), startedAt: c.startedAt || new Date().toISOString() };
+    this.sessions.set(computerId, kept);
+    return kept;
+  }
+
+  private async persist(computerId: string, s: Session): Promise<void> {
+    await this.deps.vault?.()?.set(DESKTOP_VAULT_OWNER, computerId, {
+      type: "custom",
+      label: `Live view of computer ${computerId} (VNC password, server only)`,
+      credentials: { password: s.password, remoteId: s.remoteId ?? "", startedAt: s.startedAt },
+    }).catch(() => undefined);
+  }
+
+  /** Forget a computer's password (memory and vault): the next start sets a new one. */
+  forget(computerId: string): void {
+    this.sessions.delete(computerId);
+    void this.deps.vault?.()?.remove(DESKTOP_VAULT_OWNER, computerId).catch(() => false);
+  }
+
+  /** The VNC server refused the password: forgotten, so the next start restarts it with a new one. */
+  invalidate(computerId: string): void {
+    this.forget(computerId);
+  }
+
+  /**
+   * What runs on its VM now; never starts or wakes it. A live view still running on the same VM
+   * (a server restart) is re-attached with the password kept in the vault.
+   */
   async status(computer: ComputerConfig): Promise<DesktopStatus> {
     const base = { computerId: computer.id, display: DESKTOP_DISPLAY };
     const unsupported = desktopUnsupported(computer);
     if (unsupported) return { ...base, state: "unsupported", note: unsupported };
     try {
-      const r = await this.deps.manager().whenRunning(computer, (d) => d.exec(DESKTOP_INSPECT_COMMAND, { timeoutMs: 20_000 }));
+      const r = await this.deps.manager().whenRunning(computer, async (d) => ({ out: await d.exec(DESKTOP_INSPECT_COMMAND, { timeoutMs: 20_000 }), remoteId: d.remoteId }));
       if (!r) return { ...base, state: "machine-off", note: "Its machine is not running: starting the live view starts it" };
-      const processes = parseDesktopInspect(r.stdout);
-      const s = this.sessions.get(computer.id);
-      const running = processes.vnc && processes.ws && !!s;
-      return { ...base, state: running ? "running" : "stopped", processes, ...(running && s ? { startedAt: s.startedAt } : {}) };
+      const processes = parseDesktopInspect(r.out.stdout);
+      const s = processes.vnc && processes.ws ? await this.remembered(computer.id, r.remoteId) : undefined;
+      if (s) return { ...base, state: "running", processes, startedAt: s.startedAt };
+      return {
+        ...base, state: "stopped", processes,
+        ...(processes.vnc && processes.ws ? { note: "Its VNC server runs with a password this server does not know: starting the live view restarts it" } : {}),
+      };
     } catch (err) {
       return { ...base, state: "stopped", error: (err as Error).message };
     }
@@ -201,9 +262,10 @@ export class ComputerDesktops {
 
   /**
    * Start the live view (starting or waking the computer): install what is missing, the display,
-   * then VNC (new passwords when it has none here, its VM changed, or `rotate`) and websockify.
+   * then VNC (restarted with a new password only when this server knows none for this VM) and
+   * websockify. Idempotent: a running live view keeps its password and its viewers.
    */
-  async start(computer: ComputerConfig, o: { rotate?: boolean } = {}): Promise<DesktopStatus> {
+  async start(computer: ComputerConfig): Promise<DesktopStatus> {
     const unsupported = desktopUnsupported(computer);
     if (unsupported) throw new Error(unsupported);
     const driver = await this.driverFor(computer);
@@ -212,49 +274,36 @@ export class ComputerDesktops {
     if (install.exitCode !== 0) throw new Error(`The desktop cannot be installed on computer "${computer.id}": ${(install.stderr || install.stdout).trim().slice(0, 400)}`);
     const display = await host.exec(DESKTOP_DISPLAY_COMMAND, { timeoutMs: 30_000 });
     if (display.exitCode !== 0) throw new Error(`The virtual display did not start on computer "${computer.id}": ${(display.stderr || display.stdout).trim().slice(0, 400)}`);
-    let s = this.sessions.get(computer.id);
-    const rotate = !!o.rotate || !s || s.remoteId !== driver.remoteId;
-    if (rotate) s = { full: vncPassword(), view: vncPassword(), remoteId: driver.remoteId, startedAt: new Date().toISOString() };
-    const view = await host.exec(desktopViewCommand({ rotate }), {
-      timeoutMs: 30_000, env: { [DESKTOP_PASSWORD_ENV]: s!.full, [DESKTOP_VIEW_PASSWORD_ENV]: s!.view },
-    });
+    const known = await this.remembered(computer.id, driver.remoteId);
+    const s: Session = known ?? { password: vncPassword(), ...(driver.remoteId ? { remoteId: driver.remoteId } : {}), startedAt: new Date().toISOString() };
+    const view = await host.exec(desktopViewCommand({ restart: !known }), { timeoutMs: 30_000, env: { [DESKTOP_PASSWORD_ENV]: s.password } });
     if (view.exitCode !== 0) {
-      this.sessions.delete(computer.id);
+      this.forget(computer.id);
       throw new Error(`The live view did not start on computer "${computer.id}": ${(view.stderr || view.stdout).trim().slice(0, 400)}`);
     }
-    this.sessions.set(computer.id, s!);
-    return { computerId: computer.id, display: DESKTOP_DISPLAY, state: "running", startedAt: s!.startedAt };
+    this.sessions.set(computer.id, s);
+    if (!known) await this.persist(computer.id, s);
+    return { computerId: computer.id, display: DESKTOP_DISPLAY, state: "running", startedAt: s.startedAt };
   }
 
   /** Stop the live view (the display and its browser windows stay). Never starts the computer. */
   async stop(computer: ComputerConfig): Promise<DesktopStatus> {
-    this.sessions.delete(computer.id);
+    this.forget(computer.id);
     if (!desktopUnsupported(computer)) {
       await this.deps.manager().whenRunning(computer, (d) => d.exec(DESKTOP_STOP_COMMAND, { timeoutMs: 20_000 })).catch(() => undefined);
     }
     return this.status(computer);
   }
 
-  /**
-   * Control changed hands: new passwords (open viewers are cut and reconnect with what their role
-   * allows). Only when the live view runs here; never starts the computer.
-   */
-  async rotate(computer: ComputerConfig): Promise<void> {
-    if (!this.sessions.has(computer.id) || desktopUnsupported(computer)) return;
-    const running = await this.deps.manager().whenRunning(computer, async () => true).catch(() => undefined);
-    if (!running) { this.sessions.delete(computer.id); return; }
-    await this.start(computer, { rotate: true }).catch(() => { this.sessions.delete(computer.id); });
+  /** The VNC password (server side only: the RFB proxy answers the VM with it). */
+  password(computerId: string): string | undefined {
+    return this.sessions.get(computerId)?.password;
   }
 
-  /** The password for a viewer: full control or view-only (undefined: the live view is not started here). */
-  password(computerId: string, mode: "control" | "view"): string | undefined {
-    const s = this.sessions.get(computerId);
-    return s ? (mode === "control" ? s.full : s.view) : undefined;
-  }
-
-  /** Whether this server started the live view (and knows its passwords). */
-  started(computerId: string): boolean {
-    return this.sessions.has(computerId);
+  /** Whether the live view runs and this server knows its password (re-attaching after a restart). */
+  async attached(computer: ComputerConfig): Promise<boolean> {
+    if (this.sessions.has(computer.id)) return true;
+    return (await this.status(computer)).state === "running";
   }
 
   /** websockify through the provider's preview link (a signed link: its token in the URL). */

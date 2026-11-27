@@ -18,7 +18,7 @@ function useRefetchOn(refetch: () => void, match: (data: unknown) => boolean) {
 }
 
 export interface UseComputerDesktopReturn {
-  /** The live view, who holds the desktop, its agents' requests; with viewer, this person's VNC access while it runs. */
+  /** The live view, who holds the desktop, its agents' requests; with viewer, this person's role and WS path while it runs. */
   view: ComputerDesktopView | undefined;
   isLoading: boolean;
   error: Error | null;
@@ -34,8 +34,9 @@ export interface UseComputerDesktopReturn {
 
 /**
  * A remote computer's live view and take control, live (`computer:takeover`, `computer:changed`).
- * `viewer: true` also fetches this person's VNC password (full control only while they hold it)
- * for a noVNC client on `view.viewer.path`.
+ * `viewer: true` also fetches this person's role (control only while they hold it) and the path
+ * a noVNC client connects to (`view.viewer.path`, security type None: the server answers the VM's
+ * VNC password itself and lets input through only for the person in control).
  */
 export function useComputerDesktop(id: string | undefined, o: { viewer?: boolean } = {}): UseComputerDesktopReturn {
   const { client } = usePolpoContext();

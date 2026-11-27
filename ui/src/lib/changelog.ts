@@ -32,6 +32,21 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-27-live-view-instant-control",
+    date: "2026-11-27",
+    kind: "improved",
+    title: "Vista dal vivo sempre pronta, controllo immediato",
+    summary: "Prendere e restituire il controllo del computer dell'agente ora è istantaneo, senza riconnessioni; la vista si collega da sola e la password VNC non arriva più al browser.",
+    body: [
+      "- **Controllo immediato**: *Take control* e *Give back* non riavviano più nulla. Il server di Polpo fa da intermediario tra il browser e il computer e lascia passare tastiera, mouse e appunti solo per chi ha il controllo, messaggio per messaggio: la stessa connessione diventa interattiva (o torna in sola lettura) all'istante.",
+      "- **Nessuna password nel browser**: il server si autentica da solo verso il computer (una sola password VNC, che resta sul server e nel vault cifrato). Le risposte dell'API, di MCP e della chat non contengono password.",
+      "- **Sempre pronta**: quando un agente chiede una persona (`request_computer_takeover`) la vista dal vivo parte da sola; dopo un riavvio di Polpo si ricollega al desktop ancora acceso, senza dover premere *Start live view*. Il pannello si collega appena il desktop è acceso.",
+      "- **Qualità adattiva**: immagine più nitida e reattiva mentre hai il controllo, più leggera mentre guardi, cambiata al volo; il cursore del computer è sempre visibile.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i computer", to: "/computers" },
+  },
+  {
     id: "2026-11-27-data-transactions",
     date: "2026-11-27",
     kind: "new",
@@ -89,7 +104,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     body: [
       "- **Browser con finestra** (`browserHeaded`): nella scheda Computer dell'agente attiva **Headed browser**; sul suo computer (Daytona v2) il browser si apre sul desktop virtuale, con lo stesso profilo, la stessa sessione e la stessa uscita di rete di prima.",
       "- **Vista dal vivo**: nella pagina del computer, sezione **Live** (e nella scheda Computer dell'agente), avvii la vista e vedi il desktop, in sola lettura finché il controllo è dell'agente.",
-      "- **Prendi il controllo / Restituisci** (*Take control* / *Give back*): mentre hai il controllo la vista diventa interattiva e gli strumenti browser dell'agente aspettano; quando restituisci puoi lasciargli una nota (mai una password). Solo chi ha il controllo riceve la password VNC completa, e le password cambiano a ogni passaggio di mano.",
+      "- **Prendi il controllo / Restituisci** (*Take control* / *Give back*): mentre hai il controllo la vista diventa interattiva e gli strumenti browser dell'agente aspettano; quando restituisci puoi lasciargli una nota (mai una password). Solo chi ha il controllo può agire sul desktop: gli altri guardano.",
       "- **L'agente ti chiama quando serve**: con `request_computer_takeover` chiede una persona per un login, un 2FA o un CAPTCHA; vedi un avviso sulla pagina del computer e ricevi una notifica (sui canali dell'agente, se li ha, altrimenti su quelli di Polpo). L'agente aspetta (30 minuti di default) e riparte con la tua nota.",
       "- **`CDP_URL` nei comandi**: gli script dell'agente (per esempio un client CDP in Python di una skill) guidano lo stesso browser già connesso, senza aprirne un altro.",
       "- **Sicurezza**: le connessioni WebSocket della vista dal vivo e di Browser Live ora richiedono il login (o la chiave API).",
