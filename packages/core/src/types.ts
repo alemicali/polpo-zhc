@@ -519,7 +519,8 @@ export interface AgentConfig {
    * Run its browser headed (a visible window) instead of headless. On a remote computer the
    * window opens on the computer's virtual display (:99), which a person can watch live and take
    * control of (login, 2FA, CAPTCHA) from the computer's page; on this server, on Polpo's virtual
-   * display. Profile, session and egress proxy are unchanged. Default false (headless).
+   * display. Profile, session and egress proxy are unchanged. false: headless. Unset: headed on a
+   * remote computer (Daytona, E2B), headless on this server. Always real Google Chrome.
    */
   browserHeaded?: boolean;
   /** Allowed recipient email domains for email_send (e.g. ["acme.com", "partner.io"]).

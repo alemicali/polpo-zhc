@@ -437,7 +437,8 @@ describe("the browser of a remote computer going out through the tailnet", () =>
 
   test("a remote computer without a tailnet egress: the browser in the VM goes out from the VM", async () => {
     const vm = new FakeTailnetVm();
-    const tools = createBrowserTools("/vm/work", "growth4", ["browser_navigate"], undefined, "/vm/out", undefined, undefined, { shell: new VmShell(vm), egress: { name: "home", url: proxies.home } });
+    // headless (headed by default on a remote computer: the display's commands are not this test's business)
+    const tools = createBrowserTools("/vm/work", "growth4", ["browser_navigate"], undefined, "/vm/out", undefined, undefined, { shell: new VmShell(vm), egress: { name: "home", url: proxies.home }, headed: false });
     await tool(tools, "browser_navigate").execute("1", { url: "https://example.com" });
     expect(vm.calls.map((c) => c.kind)).toEqual(["browser"]);
     expect(browserCalls(vm)[0]).not.toContain("--proxy");

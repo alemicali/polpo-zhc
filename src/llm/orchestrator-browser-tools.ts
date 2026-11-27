@@ -19,7 +19,7 @@ import { Type } from "typebox";
 import type { Tool } from "@earendil-works/pi-ai";
 import { join } from "node:path";
 import { mkdirSync } from "node:fs";
-import { execBrowserAsync } from "../tools/browser-tools.js";
+import { execChromeBrowserAsync as execBrowserAsync } from "../tools/browser-tools.js";
 import { getCdpTarget } from "../core/browser-cdp-state.js";
 import type { Orchestrator } from "../core/orchestrator.js";
 
@@ -125,7 +125,7 @@ export async function executeOrchestratorBrowserTool(
   const session = ORCH_SESSION;
   // When the user launched their real Chrome (Agent Live tab → "Launch my
   // Chrome"), it's CDP-attached on this port and we drive THAT browser.
-  // Otherwise fall back to agent-browser's managed profile for the session.
+  // Otherwise agent-browser launches Google Chrome (never Chromium) with the session's profile.
   const cdpPort = getCdpTarget();
   // Polpo's browser runs on the host: it follows the sandbox network rule of Polpo's chat sandbox.
   const network = await polpo.chatBrowserNetwork?.();

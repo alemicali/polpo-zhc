@@ -4,8 +4,9 @@
  * docker/runner/Dockerfile): the tools agents use in a VM are preinstalled, so nothing is
  * downloaded at run time.
  *
- *   - agent-browser + its Chromium, with every shared library Chromium needs, and fonts;
- *     playwright-core (pdf_create renders HTML with that Chromium, in the VM)
+ *   - agent-browser + Google Chrome (vm-4; agents' browsers are real Chrome, never Chromium: sites
+ *     flag Chromium as a bot), agent-browser's Chromium with every shared library it needs, and
+ *     fonts; playwright-core (pdf_create renders HTML with that Chromium, in the VM)
  *   - mountpoint-s3, rclone and FUSE (storage mounts)
  *   - tailscale + tailscaled (a pinned release, checksum checked): computers whose browser goes out
  *     through a tailnet-only egress proxy join the tailnet from inside the VM
@@ -83,6 +84,13 @@ const TAILSCALE_STEP =
   + ` && echo "$S  /tmp/ts.tgz" | sha256sum -c - && tar xzf /tmp/ts.tgz -C /tmp`
   + ` && install -m 755 "/tmp/$F/tailscale" "/tmp/$F/tailscaled" /usr/local/bin/ && rm -rf /tmp/ts.tgz "/tmp/$F" && tailscale version`;
 
+/** Google Chrome from Google's .deb (apt-get pulls its libraries), only when it is not there yet. */
+export const CHROME_DEB_URL = "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb";
+const CHROME_STEP =
+  `command -v google-chrome >/dev/null 2>&1 || { [ "$(dpkg --print-architecture)" = amd64 ] || { echo "Google Chrome needs amd64" >&2; exit 1; }; `
+  + `curl -fsSL -o /tmp/google-chrome.deb ${CHROME_DEB_URL} && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/google-chrome.deb `
+  + `&& rm -rf /tmp/google-chrome.deb /var/lib/apt/lists/*; } && google-chrome --version`;
+
 /** Steps run as root, in order (shared by both providers and the printed Dockerfile). */
 export const ROOT_STEPS = [
   `apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ${APT_PACKAGES.join(" ")} && rm -rf /var/lib/apt/lists/*`,
@@ -94,14 +102,17 @@ export const ROOT_STEPS = [
   TAILSCALE_STEP,
   // edge-tts: free voices for audio_speak (slim Debian is PEP 668 locked)
   "pip install --no-cache-dir --break-system-packages edge-tts",
-  // agent-browser CLI (its Chromium is downloaded per user, below); playwright-core for pdf_create
+  // agent-browser CLI (its Chromium is downloaded per user, below, for pdf_create only); playwright-core for pdf_create
   "npm install -g agent-browser playwright-core && npm cache clean --force",
+  // Google Chrome (vm-4): the browser agents use (src/tools/agent-chrome.ts installs it the same way in
+  // VMs from older images). Google ships Linux builds for amd64 only.
+  CHROME_STEP,
   // pnpm 10 for agent harness bootstraps (corepack ships with node 22; pinned, no download prompt)
   `COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack prepare pnpm@${PNPM_VERSION} --activate && corepack enable pnpm && pnpm --version`,
   "sed -i 's/^# *user_allow_other/user_allow_other/' /etc/fuse.conf || true",
 ];
 
-/** Chromium for agent-browser, in the home of the user commands run as. */
+/** agent-browser's Chromium (pdf_create renders with it; agents' browsers use Google Chrome), in the home of the user commands run as. */
 export const USER_STEPS = ["agent-browser install"];
 
 /** The same image as a Dockerfile (for docker, other providers, or review). */

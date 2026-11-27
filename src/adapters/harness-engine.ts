@@ -194,6 +194,11 @@ export function buildHarnessInstructions(o: {
   if (o.hostTools.length) {
     parts.push("", "## Polpo tools",
       `Besides your own tools you have Polpo's tools (they run on the Polpo server with your permissions): ${o.hostTools.join(", ")}.`);
+    if (o.hostTools.some((t) => t.startsWith("browser_"))) {
+      parts.push("For anything in a browser use Polpo's browser: the browser_* tools above, or from scripts the same browser over $CDP_URL "
+        + "(`agent-browser --session <your session> get cdp-url` when it is not set). Never launch a Chromium, Chrome or Playwright/Puppeteer browser of your own "
+        + "(no `npx playwright install`, no browser launch() in scripts): sites flag those as bots, and they have none of your sign-ins.");
+    }
   }
   if (o.connectorNote) parts.push("", o.connectorNote);
   if (o.agentsMd && o.harness === "claude-code") parts.push("", "## Repository instructions (AGENTS.md)", o.agentsMd.slice(0, 40_000));

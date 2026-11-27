@@ -3,8 +3,9 @@
  * desktop for something only they can do (a login with their password, a 2FA code, a CAPTCHA),
  * then wait until they give it back.
  *
- * Offered to agents running on a remote computer whose browser is headed (agent.browserHeaded:
- * the person sees the window) or that have the tool in allowedTools. The request is recorded on the
+ * Offered to agents running on a remote computer whose browser is headed (the default there with
+ * browser tools, or agent.browserHeaded: true: the person sees the window) or that have the tool in
+ * allowedTools. The request is recorded on the
  * computer (its page shows a banner, REST/MCP list it) and the person is notified; the tool then
  * waits (polling the control state, abortable by the run) until the person took control and gave
  * it back, or the wait ends (timeout_minutes, default 30). The result is the person's note, never
@@ -42,7 +43,9 @@ export interface ComputerTakeoverAccess {
 /** Whether the run's agent gets the tool on this computer. */
 export function wantsComputerTakeoverTool(agent: Pick<AgentConfig, "browserHeaded" | "allowedTools">, computer: ComputerConfig | undefined): boolean {
   if (!computer || !isRemoteComputer(computer)) return false;
-  return agent.browserHeaded === true || allowedToolsInclude(agent.allowedTools, COMPUTER_TAKEOVER_TOOL);
+  if (allowedToolsInclude(agent.allowedTools, COMPUTER_TAKEOVER_TOOL) || agent.browserHeaded === true) return true;
+  // headed by default on a remote computer: an agent with a browser gets it unless browserHeaded is false
+  return agent.browserHeaded !== false && allowedToolsInclude(agent.allowedTools, "browser_navigate");
 }
 
 const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve) => {

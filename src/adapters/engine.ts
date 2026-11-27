@@ -66,7 +66,7 @@ import { createAgentNotifyTools } from "../tools/notify-tools.js";
 import { COMPUTER_TAKEOVER_TOOL, createComputerTakeoverTools } from "../tools/computer-takeover-tools.js";
 import { computerTakeoverFor } from "../core/computer-takeover.js";
 import { computerControlStore } from "../sandbox/computer-control.js";
-import { browserPromptNote } from "../tools/browser-tools.js";
+import { browserPromptNote, effectiveBrowserHeaded } from "../tools/browser-tools.js";
 import { agentNotifierFor } from "../notifications/agent-notify.js";
 import { createTaskResultTools, wantsTaskResultTools } from "../tools/task-result-tools.js";
 import { createAgentTalkTools } from "../tools/agent-talk-tools.js";
@@ -162,7 +162,7 @@ export function describeToolsForAgent(agent: AgentConfig): string {
   if (hasPattern("browser_")) {
     extended.push(
       "",
-      "**Browser (agent-browser):**",
+      "**Browser (Polpo's real Google Chrome, via agent-browser):**",
       "- `browser_navigate` — open a URL",
       "- `browser_snapshot` — capture page accessibility snapshot",
       "- `browser_click` / `browser_fill` / `browser_select` — interact with page elements",
@@ -170,6 +170,7 @@ export function describeToolsForAgent(agent: AgentConfig): string {
       "- `browser_screenshot` — take a screenshot",
       "- Plus: browser_scroll, browser_back, browser_forward, browser_wait, browser_tabs, browser_tab_new, browser_tab_close, browser_tab_switch, browser_pdf, browser_drag, browser_hover, browser_keypress",
       "Use browser tools instead of curl/wget for pages that require JavaScript rendering or authentication.",
+      "Always use Polpo's browser (these browser_* tools, or $CDP_URL / `agent-browser --session <your session> get cdp-url` from scripts): never launch your own Chromium, Chrome or Playwright/Puppeteer browser — sites like Google Maps, Instagram and Facebook flag those as bots, and they have none of your sign-ins.",
     );
   }
 
@@ -1077,7 +1078,8 @@ export async function buildAgentToolset(o: {
       sandboxProvider,
       agentName: agentConfig.name,
       ...(o.task ? { mediaContext: { taskId: o.task.id, ...(o.task.missionId ? { missionId: o.task.missionId } : {}) } } : {}),
-      ...(agentConfig.browserHeaded ? { browserHeaded: true } : {}),
+      // unset: headed on a remote computer, headless here
+      ...(typeof agentConfig.browserHeaded === "boolean" ? { browserHeaded: agentConfig.browserHeaded } : {}),
       // while a person holds the computer's desktop, its browser waits
       ...(remoteComputer && ctx?.polpoDir ? { browserControl: { computerId: remoteComputer.id, store: computerControlStore(ctx.polpoDir) } } : {}),
     });
@@ -1157,7 +1159,7 @@ export async function buildAgentToolset(o: {
   // what the prompt says about its browser: CDP_URL, headed, take control
   if (allTools.some((t) => t.name.startsWith("browser_"))) {
     const takeover = allTools.some((t) => t.name === COMPUTER_TAKEOVER_TOOL);
-    const note = browserPromptNote({ headed: !!agentConfig.browserHeaded, ...(remoteComputer ? { computer: { id: remoteComputer.id, name: remoteComputer.name } } : {}), takeover, session: agentConfig.name });
+    const note = browserPromptNote({ headed: effectiveBrowserHeaded(agentConfig.browserHeaded, !!remoteComputer), ...(remoteComputer ? { computer: { id: remoteComputer.id, name: remoteComputer.name } } : {}), takeover, session: agentConfig.name });
     connectorNote = connectorNote ? `${connectorNote}\n${note}` : note.trimStart();
   }
   return { tools: allTools, vault, connectorNote, connectorManager, browserNetwork };

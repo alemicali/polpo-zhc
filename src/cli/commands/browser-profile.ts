@@ -14,6 +14,7 @@ import type { Command } from "commander";
 import chalk from "chalk";
 import type { AgentConfig } from "../../core/types.js";
 import { createCliAgentStore } from "../stores.js";
+import { hostChromeArgs } from "../../tools/agent-chrome.js";
 
 /** Resolve the browser profile directory for a given agent. */
 function profileDir(polpoDir: string, agentName: string, agent?: AgentConfig): string {
@@ -60,18 +61,25 @@ export function registerBrowserCommands(parent: Command): void {
       console.log(chalk.dim(`  URL:     ${startUrl}`));
       console.log();
 
+      // real Google Chrome, like the agent that will use the profile (never Chromium)
+      const chrome = hostChromeArgs();
+      if (!chrome.ok) {
+        console.error(chalk.red(`  ${chrome.error}`));
+        process.exit(1);
+      }
+
       console.log(chalk.cyan("  Opening browser... Log in to any services you need."));
       console.log(chalk.cyan("  Close the browser window when done — your session will be saved."));
       console.log();
 
       try {
         // Use agent-browser with visible mode + persistent profile for login
-        const { execSync } = await import("node:child_process");
+        const { execFileSync } = await import("node:child_process");
         const session = agentName;
 
         console.log(chalk.dim("  Using agent-browser for login session..."));
         mkdirSync(profDir, { recursive: true });
-        execSync(`agent-browser --session ${session} --profile ${profDir} --headed open ${startUrl}`, {
+        execFileSync("agent-browser", ["--session", session, "--profile", profDir, ...chrome.args, ...(opts.headless ? [] : ["--headed"]), "open", startUrl], {
           encoding: "utf-8",
           timeout: 60_000,
           stdio: "inherit",
@@ -89,7 +97,7 @@ export function registerBrowserCommands(parent: Command): void {
 
         // Close the session (profile data auto-saved by --profile)
         try {
-          execSync(`agent-browser --session ${session} close`, {
+          execFileSync("agent-browser", ["--session", session, "close"], {
             encoding: "utf-8",
             timeout: 10_000,
             stdio: ["ignore", "pipe", "pipe"],
@@ -113,14 +121,9 @@ export function registerBrowserCommands(parent: Command): void {
 
         console.log();
       } catch (err: any) {
-        if (err.message?.includes("Executable doesn't exist")) {
-          console.error(chalk.red("  Chromium not installed. Run:"));
-          console.error(chalk.cyan("    npx playwright install chromium"));
-          process.exit(1);
-        }
-        if (err.message?.includes("agent-browser")) {
+        if (err.code === "ENOENT" || err.message?.includes("agent-browser")) {
           console.error(chalk.red("  agent-browser not found. Install it:"));
-          console.error(chalk.cyan("    npm install -g agent-browser && agent-browser install"));
+          console.error(chalk.cyan("    npm install -g agent-browser"));
           process.exit(1);
         }
         console.error(chalk.red(`  Error: ${err.message}`));
