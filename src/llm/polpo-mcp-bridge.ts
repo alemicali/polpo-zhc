@@ -331,6 +331,7 @@ export const MCP_EQUIVALENTS: Record<string, string> = {
   polpo_data_source_delete: "data_delete_source",
   polpo_data_sql: "data_sql",
   polpo_data_mutate: "data_mutate",
+  polpo_data_transaction: "data_transaction",
   polpo_data_views_list: "data_list_views",
   polpo_data_view_get: "data_get_view",
   polpo_data_view_save: "data_create_view",

@@ -303,6 +303,7 @@ export function describeToolsForAgent(agent: AgentConfig): string {
       "- `data_create_view` / `data_update_view` — compose native interactive views from live source bindings, bounded inline data, or both",
       "- `data_sql` — optional read-only SQL escape hatch",
       "- `data_mutate` — change records only when explicitly assigned and requested",
+      "- `data_transaction` — several SQL statements atomically in one transaction (PostgreSQL/SQLite): multi-row writes that must succeed together, `INSERT … ON CONFLICT DO NOTHING`, conditional updates with `expectRows` (e.g. `UPDATE … WHERE id = $1 AND state = $2` touching exactly 1 row), `settings` applied as SET LOCAL for triggers; values always in `params`, never in the SQL text; any failure rolls everything back",
       "Use data tools instead of shell/database clients so grants, audit, limits, and generated views remain enforced.",
     );
   }

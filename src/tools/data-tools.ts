@@ -3,7 +3,7 @@ import type { Tool } from "@earendil-works/pi-ai";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { nanoid } from "nanoid";
 import { normalizeDataTags, type DataQuery, type DataSource, type DataViewBinding, type DataViewWidget } from "@polpo-ai/core/data-registry";
-import { getDataRegistryRuntime, type DataPrincipal } from "../server/data-runtime.js";
+import { getDataRegistryRuntime, type DataPrincipal, type DataTransactionInput } from "../server/data-runtime.js";
 import type { VaultStore } from "../core/vault-store.js";
 import type { DataRegistryChangeEmitter } from "../stores/file-data-registry-store.js";
 
@@ -68,7 +68,7 @@ const SourceConfig = Type.Object({
 
 export const DATA_TOOL_NAMES = [
   "data_list_sources", "data_register_source", "data_update_source", "data_delete_source", "data_test_source", "data_set_source_grant",
-  "data_describe", "data_query", "data_sql", "data_mutate",
+  "data_describe", "data_query", "data_sql", "data_mutate", "data_transaction",
   "data_list_views", "data_get_view", "data_create_view", "data_update_view", "data_delete_view",
 ] as const;
 
@@ -136,6 +136,29 @@ export const DATA_ORCHESTRATOR_TOOLS: Tool[] = [
       sourceId: Type.String(), dataset: Type.String(),
       operation: Type.Union([Type.Literal("insert"), Type.Literal("update"), Type.Literal("delete")]),
       values: Type.Optional(Type.Record(Type.String(), Type.Any())), filters: Type.Optional(Type.Array(Filter)),
+    }),
+  },
+  {
+    name: "data_transaction",
+    description: "Run several SQL statements atomically in ONE transaction on a PostgreSQL or SQLite source: all commit or, if any statement fails "
+      + "or an expectRows check fails, everything rolls back and the result says which statement and why. Use it for multi-row writes that must "
+      + "succeed together, idempotent inserts (INSERT ... ON CONFLICT DO NOTHING) and conditional updates (UPDATE ... WHERE id = $1 AND state = $2 "
+      + "with expectRows: 1). Values always go in params ($1, $2 on PostgreSQL; ? on SQLite), never inside the SQL text. One statement per sql; "
+      + "no BEGIN/COMMIT/SAVEPOINT/SET (use settings, applied as SET LOCAL, e.g. { \"app.author\": \"me\" } for triggers). Needs the write grant "
+      + "(readOnly: true needs read); DDL and privileged statements need admin. Returns per statement: command, rowCount and returned rows (SELECT/RETURNING).",
+    parameters: Type.Object({
+      sourceId: Type.String({ description: "Source ID or slug from data_list_sources" }),
+      statements: Type.Array(Type.Object({
+        sql: Type.String({ description: "One SQL statement with placeholders ($1, $2 on PostgreSQL; ? on SQLite)" }),
+        params: Type.Optional(Type.Array(Type.Any(), { description: "Bind parameters, in placeholder order" })),
+        expectRows: Type.Optional(Type.Union([
+          Type.Number({ minimum: 0, description: "Exactly this many rows must be changed (INSERT/UPDATE/DELETE) or returned (SELECT)" }),
+          Type.Object({ min: Type.Optional(Type.Number({ minimum: 0 })), max: Type.Optional(Type.Number({ minimum: 0 })) }),
+        ])),
+      }), { minItems: 1, maxItems: 50 }),
+      settings: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "PostgreSQL only: custom settings applied with SET LOCAL (namespace.name keys, e.g. app.author)" })),
+      readOnly: Type.Optional(Type.Boolean({ description: "Run READ ONLY (only SELECT-like statements; needs only the read grant)" })),
+      timeoutMs: Type.Optional(Type.Number({ minimum: 100, maximum: 60000, description: "Statement and lock timeout, also the longest the transaction may run (default 15000, max 60000)" })),
     }),
   },
   {
@@ -240,6 +263,7 @@ export async function executeDataTool(
   if (name === "data_query") return json(await runtime.query(args as unknown as DataQuery, principal));
   if (name === "data_sql") return json(await runtime.rawSql(String(args.sourceId), String(args.sql), principal));
   if (name === "data_mutate") return json(await runtime.mutate(args as any, principal));
+  if (name === "data_transaction") return json(await runtime.transaction(args as unknown as DataTransactionInput, principal));
   if (name === "data_list_views") return json(await visibleViews(runtime, principal));
   if (name === "data_get_view") {
     const view = await runtime.store.getView(String(args.id));

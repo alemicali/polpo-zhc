@@ -37658,6 +37658,241 @@
         }
       }
     },
+    "/api/v1/data/{id}/transaction": {
+      "post": {
+        "tags": [
+          "Data"
+        ],
+        "summary": "Run several SQL statements in one transaction",
+        "description": "PostgreSQL and SQLite sources. BEGIN; settings (SET LOCAL); every statement with bind parameters; COMMIT. A failing statement or an expectRows mismatch rolls everything back: status \"rolled_back\" and failed say which statement and why. Transaction control, SET/RESET, SET ROLE, SESSION AUTHORIZATION, COPY ... PROGRAM and more than one statement per sql are refused.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Data source ID or slug"
+            },
+            "required": true,
+            "description": "Data source ID or slug",
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "statements": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "sql": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 20000,
+                          "description": "One statement; placeholders $1, $2 (PostgreSQL) or ? (SQLite)"
+                        },
+                        "params": {
+                          "type": "array",
+                          "items": {
+                            "nullable": true
+                          },
+                          "maxItems": 1000,
+                          "description": "Bind parameters in placeholder order"
+                        },
+                        "expectRows": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "min": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "max": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          ],
+                          "description": "Rows the statement must change (INSERT/UPDATE/DELETE) or return (SELECT): exactly n, or { min, max }. A mismatch rolls the transaction back."
+                        }
+                      },
+                      "required": [
+                        "sql"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "minItems": 1,
+                    "maxItems": 50
+                  },
+                  "settings": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string",
+                      "maxLength": 1000
+                    },
+                    "description": "PostgreSQL only: applied with set_config(key, value, true) (SET LOCAL). Keys namespace.name; built-in settings need the admin grant."
+                  },
+                  "readOnly": {
+                    "type": "boolean",
+                    "description": "Run READ ONLY: only SELECT-like statements"
+                  },
+                  "timeoutMs": {
+                    "type": "integer",
+                    "minimum": 100,
+                    "maximum": 60000,
+                    "description": "Statement and lock timeout, and the longest the transaction may run (default 15000, max 60000)"
+                  }
+                },
+                "required": [
+                  "statements"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed or rolled back",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "sourceId": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "committed",
+                            "rolled_back"
+                          ]
+                        },
+                        "readOnly": {
+                          "type": "boolean"
+                        },
+                        "durationMs": {
+                          "type": "number"
+                        },
+                        "statements": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "index": {
+                                "type": "integer"
+                              },
+                              "command": {
+                                "type": "string"
+                              },
+                              "rowCount": {
+                                "type": "integer"
+                              },
+                              "rows": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "nullable": true
+                                  }
+                                }
+                              },
+                              "truncated": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "index",
+                              "command",
+                              "rowCount"
+                            ]
+                          }
+                        },
+                        "failed": {
+                          "type": "object",
+                          "properties": {
+                            "index": {
+                              "type": "integer"
+                            },
+                            "reason": {
+                              "type": "string",
+                              "enum": [
+                                "error",
+                                "expect_rows",
+                                "timeout"
+                              ]
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "index",
+                            "reason",
+                            "message"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "sourceId",
+                        "status",
+                        "readOnly",
+                        "durationMs",
+                        "statements"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or refused transaction",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/storage": {
       "get": {
         "tags": [

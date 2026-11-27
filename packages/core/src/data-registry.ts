@@ -186,10 +186,15 @@ export interface DataActivity {
   id: string;
   sourceId: string;
   agent?: string;
-  action: "test" | "discover" | "query" | "sql" | "mutate";
+  action: "test" | "discover" | "query" | "sql" | "mutate" | "transaction";
+  /** The dataset (for a transaction: the tables it named, comma separated). */
   dataset?: string;
   status: "succeeded" | "failed";
   rowCount?: number;
+  /** transaction: how many statements it held. */
+  statementCount?: number;
+  /** transaction: whether it ran READ ONLY. */
+  readOnly?: boolean;
   durationMs: number;
   error?: string;
   createdAt: string;

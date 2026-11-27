@@ -12,8 +12,8 @@ import { cn } from "@/lib/utils";
 import { relativeTime, useLoader } from "./data-utils";
 import { DataEmpty, DataError, DataLoading } from "./data-states";
 
-const ACTIONS = ["all", "query", "sql", "mutate", "discover", "test"] as const;
-const ACTION_LABEL: Record<string, string> = { query: "Query", sql: "SQL", mutate: "Row change", discover: "Schema read", test: "Connection test" };
+const ACTIONS = ["all", "query", "sql", "mutate", "transaction", "discover", "test"] as const;
+const ACTION_LABEL: Record<string, string> = { query: "Query", sql: "SQL", mutate: "Row change", transaction: "Transaction", discover: "Schema read", test: "Connection test" };
 
 export function ActivityTab({ source, registry }: { source: DataSource; registry: DataRegistry }) {
   const activity = useLoader<DataActivity[]>(`activity:${source.id}`, () => registry.sourceActivity(source.id));

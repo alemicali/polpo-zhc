@@ -70,7 +70,8 @@ export function DataPage() {
 type Health = { status: "ok" | "error" | "unknown"; at?: string; detail?: string };
 
 function healthOf(activity: DataActivity[] | undefined): Health {
-  const last = activity?.find((item) => item.action !== "mutate" || item.status === "failed");
+  // a rolled-back transaction (an expectRows check, a constraint) says nothing about the connection
+  const last = activity?.find((item) => item.action !== "transaction" && (item.action !== "mutate" || item.status === "failed"));
   if (!last) return { status: "unknown" };
   return { status: last.status === "succeeded" ? "ok" : "error", at: last.createdAt, detail: last.error };
 }

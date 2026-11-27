@@ -21,7 +21,7 @@ let app: Hono;
 
 const DATA_TOOLS = [
   "polpo_data_sources_list", "polpo_data_query", "polpo_data_source_get", "polpo_data_source_save", "polpo_data_source_test",
-  "polpo_data_source_delete", "polpo_data_activity", "polpo_data_sql", "polpo_data_mutate",
+  "polpo_data_source_delete", "polpo_data_activity", "polpo_data_sql", "polpo_data_mutate", "polpo_data_transaction",
   "polpo_data_views_list", "polpo_data_view_get", "polpo_data_view_save", "polpo_data_view_delete",
 ];
 
@@ -83,7 +83,7 @@ describe("the Data area through MCP", () => {
     for (const n of ["polpo_data_source_get", "polpo_data_source_test", "polpo_data_activity", "polpo_data_sql", "polpo_data_views_list", "polpo_data_view_get"]) {
       expect(by[n]!.annotations, n).toMatchObject({ readOnlyHint: true, destructiveHint: false });
     }
-    for (const n of ["polpo_data_source_delete", "polpo_data_mutate", "polpo_data_view_delete"]) expect(by[n]!.annotations, n).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    for (const n of ["polpo_data_source_delete", "polpo_data_mutate", "polpo_data_transaction", "polpo_data_view_delete"]) expect(by[n]!.annotations, n).toMatchObject({ readOnlyHint: false, destructiveHint: true });
     for (const n of ["polpo_data_source_save", "polpo_data_view_save"]) expect(by[n]!.annotations, n).toMatchObject({ readOnlyHint: false, destructiveHint: false });
     expect(by.polpo_data_sql!.annotations).toMatchObject({ openWorldHint: true });
   });
@@ -92,7 +92,7 @@ describe("the Data area through MCP", () => {
     const { toolScopeMatrix, handleMcpRequest } = await import("../server/mcp.js");
     const m = Object.fromEntries(toolScopeMatrix().map((t) => [t.name, t.scope]));
     for (const n of ["polpo_data_source_get", "polpo_data_source_test", "polpo_data_activity", "polpo_data_sql", "polpo_data_views_list", "polpo_data_view_get"]) expect(m[n], n).toBe("polpo:read");
-    for (const n of ["polpo_data_mutate", "polpo_data_view_save", "polpo_data_view_delete"]) expect(m[n], n).toBe("polpo:work");
+    for (const n of ["polpo_data_mutate", "polpo_data_transaction", "polpo_data_view_save", "polpo_data_view_delete"]) expect(m[n], n).toBe("polpo:work");
     for (const n of ["polpo_data_source_save", "polpo_data_source_delete"]) expect(m[n], n).toBe("polpo:admin");
     const list = async (scopes: string[]) => {
       const res = await handleMcpRequest(new Request("http://localhost/mcp", {
@@ -104,7 +104,7 @@ describe("the Data area through MCP", () => {
     };
     const read = await list(["polpo:read"]);
     expect(read).toContain("polpo_data_sql");
-    for (const n of ["polpo_data_mutate", "polpo_data_view_save", "polpo_data_source_save", "polpo_data_source_delete"]) expect(read).not.toContain(n);
+    for (const n of ["polpo_data_mutate", "polpo_data_transaction", "polpo_data_view_save", "polpo_data_source_save", "polpo_data_source_delete"]) expect(read).not.toContain(n);
     const work = await list(["polpo:read", "polpo:work"]);
     expect(work).toEqual(expect.arrayContaining(["polpo_data_mutate", "polpo_data_view_save", "polpo_data_view_delete"]));
     for (const n of ["polpo_data_source_save", "polpo_data_source_delete"]) expect(work).not.toContain(n);
@@ -169,13 +169,41 @@ describe("the Data area through MCP", () => {
     const left = await tool("polpo_data_sql", { sourceId: id, sql: "SELECT name, region FROM customers ORDER BY name" });
     expect(left.structuredContent.rows).toEqual([{ name: "Ada", region: "UK" }, { name: "Edsger", region: "EU" }]);
 
+    // several statements in one transaction: confirm for writes, all-or-nothing, which statement failed
+    const stmts = [
+      { sql: "INSERT INTO customers (name, region, revenue) VALUES (?, ?, ?) RETURNING name", params: ["Barbara", "EU", 700], expect_rows: 1 },
+      { sql: "UPDATE customers SET region = ? WHERE name = ? AND region = ?", params: ["IT", "Ada", "UK"], expect_rows: 1 },
+    ];
+    const unconfirmed = await tool("polpo_data_transaction", { sourceId: "business-db", statements: stmts });
+    expect(unconfirmed.isError).toBe(true);
+    expect(text(unconfirmed)).toMatch(/2 statement\(s\).*confirm: true/);
+    const committed = await tool("polpo_data_transaction", { sourceId: "business-db", statements: stmts, confirm: true });
+    expect(committed.isError).toBeFalsy();
+    expect(committed.structuredContent).toMatchObject({ source_id: id, status: "committed", statements: [
+      { index: 0, command: "INSERT", row_count: 1, rows: [{ name: "Barbara" }] }, { index: 1, command: "UPDATE", row_count: 1 },
+    ] });
+    const rolledBack = await tool("polpo_data_transaction", { sourceId: id, confirm: true, statements: [
+      { sql: "DELETE FROM customers WHERE name = ?", params: ["Barbara"] },
+      { sql: "UPDATE customers SET region = 'X' WHERE name = ? AND region = ?", params: ["Ada", "UK"], expect_rows: 1 },
+    ] });
+    expect(rolledBack.isError).toBe(true);
+    expect(rolledBack.structuredContent).toMatchObject({ status: "rolled_back", failed: { index: 1, reason: "expect_rows" } });
+    expect(text(rolledBack)).toMatch(/statement 2 failed.*Nothing was changed/);
+    const readOnly = await tool("polpo_data_transaction", { sourceId: id, read_only: true, statements: [{ sql: "SELECT name FROM customers WHERE region = ?", params: ["IT"] }] });
+    expect(readOnly.structuredContent).toMatchObject({ status: "committed", read_only: true, statements: [{ rows: [{ name: "Ada" }] }] });
+    const refusedTx = await tool("polpo_data_transaction", { sourceId: id, confirm: true, statements: [{ sql: "BEGIN" }] });
+    expect(refusedTx.isError).toBe(true);
+    expect(text(refusedTx)).toMatch(/Transaction control/);
+    const restTx = await rest("POST", `/data/${id}/transaction`, { statements: [{ sql: "SELECT count(*) AS n FROM customers" }], readOnly: true });
+    expect((await restTx.json()).data).toMatchObject({ status: "committed", statements: [{ rows: [{ n: 3 }] }] });
+
     // activity, newest first, paginated
     const act = await tool("polpo_data_activity", { sourceId: id, limit: 2 });
     expect(act.structuredContent.items).toHaveLength(2);
     expect(act.structuredContent.next_cursor).toBeTruthy();
     expect(act.structuredContent.total).toBeGreaterThan(4);
     const actions = (await tool("polpo_data_activity", { sourceId: id, limit: 100 })).structuredContent.items.map((a: { action: string }) => a.action);
-    expect(actions).toEqual(expect.arrayContaining(["test", "discover", "sql", "mutate"]));
+    expect(actions).toEqual(expect.arrayContaining(["test", "discover", "sql", "mutate", "transaction"]));
     expect((await tool("polpo_data_activity", { sourceId: id, cursor: "nope!" })).isError).toBe(true);
   }, 20_000); // ~25 MCP calls, each building the server and checking the full tool list: ~4.5 s on Node 20 runners
 

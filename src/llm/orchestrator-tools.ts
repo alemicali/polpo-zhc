@@ -2472,7 +2472,7 @@ export const WRITE_TOOLS = new Set([
   "control_app", "control_app_service", "run_app_deployment", "capture_app_screenshot",
   // Structured data
   "data_register_source", "data_update_source", "data_delete_source", "data_set_source_grant",
-  "data_mutate", "data_create_view", "data_update_view", "data_delete_view",
+  "data_mutate", "data_transaction", "data_create_view", "data_update_view", "data_delete_view",
   // Company Brain
   "brain_upsert_entity", "brain_upsert_relation", "brain_upsert_claim", "brain_ingest_data_source",
   "brain_enrich_text", "brain_merge_entities", "brain_set_grant",
@@ -2679,6 +2679,7 @@ const TOOL_LABELS: Record<string, string> = {
   data_query: "Query Data",
   data_sql: "Run Read-only SQL",
   data_mutate: "Change Source Data",
+  data_transaction: "Run Data Transaction",
   data_list_views: "List Data Views",
   data_get_view: "Get Data View",
   data_create_view: "Create Data View",
@@ -2941,7 +2942,7 @@ export async function executeOrchestratorTool(
 
       // ── Structured data ──
       case "data_list_sources": case "data_register_source": case "data_update_source": case "data_delete_source":
-      case "data_test_source": case "data_set_source_grant": case "data_describe": case "data_query": case "data_sql": case "data_mutate":
+      case "data_test_source": case "data_set_source_grant": case "data_describe": case "data_query": case "data_sql": case "data_mutate": case "data_transaction":
       case "data_list_views": case "data_get_view": case "data_create_view": case "data_update_view": case "data_delete_view":
         return executeDataTool(toolName, args, polpo.getPolpoDir(), { admin: true }, polpo.getVaultStore(), context.sessionId, (event) => {
           if (event.type === "source") {

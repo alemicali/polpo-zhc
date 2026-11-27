@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Data transactions** (`data_transaction`, docs/data.md): several SQL statements in ONE transaction on one connection of a PostgreSQL or SQLite source — all commit, or a failing statement or an `expectRows` mismatch rolls everything back and the result says which statement and why. For writes that must succeed together, idempotent inserts (`INSERT … ON CONFLICT DO NOTHING`) and conditional updates (`UPDATE … WHERE id = $1 AND stato = $2` with `expectRows: 1`).
+  - **Parameters**: `statements` (`sql`, bind `params`, `expectRows`: n or `{ min, max }`), `settings` applied as `SET LOCAL` with `set_config(key, value, true)` (PostgreSQL; `namespace.name` keys, e.g. `archivio.autore` for a trigger), `readOnly`, `timeoutMs` (default 15 s, max 60 s: `statement_timeout` and `lock_timeout` inside the transaction). Per statement: command, row count, returned rows (bounded like `data_query`).
+  - **Safety** (`src/server/data-sql.ts`, a tokenizer-based classifier): write grant (read for `readOnly`); DDL, privileged statements and admin functions need the admin grant; transaction control, `SET`/`RESET` (`SET ROLE`, `SET SESSION AUTHORIZATION`), `COPY … PROGRAM`, several statements in one `sql` are never allowed; dataset grants apply to every table the statements name. Audited in the source's Activity (`transaction`: statements, tables, rows, outcome; never parameter values).
+  - **Surfaces**: agent tool (Polpo's engine, chats, harness host tool; `data_transaction` or `data_*`), Polpo's chat, REST `POST /api/v1/data/{id}/transaction` (OpenAPI regenerated), MCP `polpo_data_transaction`, SDK `runDataTransaction`, dashboard Activity filter.
+
+### Changed
+- **`data_sql` honours dataset grants**: an agent whose grant lists some datasets can no longer read other tables through raw SQL.
+
 ### Fixed
 - **Dashboard → Active Agents**: each row shows the agent's avatar, colour and display name (not just its id) with the task's title, and opens the task.
 
