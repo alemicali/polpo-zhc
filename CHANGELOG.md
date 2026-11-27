@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Computer live view: Take control connects** — the new VNC passwords were set in the background after the change of hands was announced, so the viewer reconnected with the old ones ("password check failed") and stayed on "connecting". Takeover and release now await the new passwords before announcing and returning; the VNC server restart kills a stuck old server so it can never keep the old passwords.
+
 ### Changed
 - **Agent page reads like a profile**: Overview opens with **About** (the role as the headline, then personality and how it communicates as full text), then **Responsibilities** (a plain list, no nested boxes), then the org chart and communication lines. Social marks in their brand colours (Instagram's gradient; near-black marks such as X, Threads, GitHub in the text colour for dark mode). The hero card's header band no longer shrinks with a long bio; Hierarchy's sub-headings are no longer upper case. The hero card shows `@name · vX.Y.Z` (the version links to the Versions tab, plus a draft marker) instead of the version badge and the model line; the colour is a dot next to the name (opens the picker) and the card has separate **Harness** and **Model** rows. Agent → Tools & Skills → Connectors has two tabs, **Enabled** and **Available**. The hero card's Reasoning row shows a harness agent's `engine.effort`.
 

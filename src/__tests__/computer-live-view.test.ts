@@ -325,6 +325,20 @@ describe("the server's takeover service", () => {
     await expect(service.request({ name: "other" }, "nina", { reason: "x" })).rejects.toMatchObject({ code: "INVALID" });
   });
 
+  it("the new passwords are in place before the change is announced or returned (viewers reconnect with them)", async () => {
+    const order: string[] = [];
+    const service = new ComputerTakeoverService({
+      polpoDir: tmp(), computers: () => [NINA],
+      emit: (e) => order.push(`event:${(e as { action: string }).action}`),
+      rotate: async () => { await new Promise((x) => setTimeout(x, 20)); order.push("rotated"); },
+    });
+    await service.takeover("nina", "ale@x.it");
+    order.push("returned");
+    await service.release("nina", "ale@x.it");
+    order.push("returned");
+    expect(order).toEqual(["rotated", "event:taken", "returned", "rotated", "event:released", "returned"]);
+  });
+
   it("the instance's rules on computer:takeover notify instead of the fallback", async () => {
     const sent: string[] = [];
     const service = new ComputerTakeoverService({
