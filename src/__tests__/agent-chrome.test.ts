@@ -175,7 +175,7 @@ describe("Google Chrome in a remote computer", () => {
       const bin = tmp();
       const log = join(bin, "calls.log");
       const script = (name: string, body: string) => { writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`); chmodSync(join(bin, name), 0o755); };
-      for (const real of ["sh", "rm", "tail", "uname", "cat"]) {
+      for (const real of ["sh", "rm", "tail", "uname", "cat", "chmod"]) {
         const found = ["/bin", "/usr/bin"].map((d) => join(d, real)).find((p) => existsSync(p));
         if (found) symlinkSync(found, join(bin, real));
       }
