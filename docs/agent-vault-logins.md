@@ -11,7 +11,7 @@ narrow it like any other built-in tool.
 
 ```
 vault_create_login {
-  service: "sitoinchat",          // the vault entry: a slug (letters, digits, _ or -)
+  service: "notion",          // the vault entry: a slug (letters, digits, _ or -)
   email?: "ops@acme.com",
   username?: "acme-ops",
   url?: "https://sitoinchat.it",  // the site
@@ -26,10 +26,10 @@ It returns only `{ service, keys: ["email", "password", "url"], created | rotate
 it, never the password:
 
 ```
-browser_fill { selector: "#password", from_vault: "sitoinchat.password" }
+browser_fill { selector: "#password", from_vault: "notion.password" }
 ```
 
-`env_from_vault` (bash) works too: `{ "SITE_PASSWORD": "sitoinchat.password" }`.
+`env_from_vault` (bash) works too: `{ "SITE_PASSWORD": "notion.password" }`.
 
 ## The password
 
@@ -42,7 +42,7 @@ browser_fill { selector: "#password", from_vault: "sitoinchat.password" }
 ## Where it can and cannot leak
 
 - **The model never receives it.** The tool result has key names only; `browser_fill` reports
-  "filled with sitoinchat.password from the vault"; `vault_get` shows `***` for values Polpo
+  "filled with notion.password from the vault"; `vault_get` shows `***` for values Polpo
   generated, even outside a sandbox.
 - **Masked as soon as it exists.** The value joins the run's secret masker at once: the task
   transcript, the run log, the run's result, harness output and, in chats, tool output show `***`
