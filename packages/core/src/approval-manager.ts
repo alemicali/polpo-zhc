@@ -2,8 +2,24 @@ import { nanoid } from "nanoid";
 import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { ApprovalStore } from "./approval-store.js";
 import type { ApprovalGate, ApprovalRequest, ApprovalStatus } from "./types.js";
-import type { LifecycleHook } from "./hooks.js";
+import type { HookRegistry, LifecycleHook } from "./hooks.js";
 import type { NotificationRouterPort } from "./notification-router-port.js";
+
+/**
+ * Gate hooks currently registered on a HookRegistry, by gate id. Kept per registry (not per
+ * manager) because the orchestrator builds a new ApprovalManager on every config reload while
+ * the HookRegistry lives on: a gate saved again must replace its hook, never add a second one.
+ */
+const gateHooksByRegistry = new WeakMap<HookRegistry, Map<string, () => void>>();
+
+function gateHooksOf(hooks: HookRegistry): Map<string, () => void> {
+  let map = gateHooksByRegistry.get(hooks);
+  if (!map) {
+    map = new Map();
+    gateHooksByRegistry.set(hooks, map);
+  }
+  return map;
+}
 
 /**
  * Manages approval gates — both automatic (condition-based) and human (blocking).
@@ -19,6 +35,10 @@ export class ApprovalManager {
   private timers = new Map<string, ReturnType<typeof setTimeout>>();
   private notificationRouter?: NotificationRouterPort;
   private registeredGateRules = new Set<string>();
+  /** Hook unregister functions this manager installed (run on dispose). */
+  private ownGateHooks = new Map<string, () => void>();
+  /** Pending human requests by gate+task, so one completion never asks twice. */
+  private pendingByGateTask = new Map<string, string>();
 
   constructor(
     private ctx: OrchestratorContext,
@@ -39,8 +59,17 @@ export class ApprovalManager {
 
   /** Initialize: register hooks for all configured approval gates. */
   async init(): Promise<void> {
-    const gates = this.ctx.config.settings.approvalGates;
-    if (!gates || gates.length === 0) return;
+    const gates = this.ctx.config.settings.approvalGates ?? [];
+
+    // Drop hooks of gates that are no longer configured (deleted while running).
+    const registered = gateHooksByRegistry.get(this.ctx.hooks) ?? new Map<string, () => void>();
+    for (const [gateId, unregister] of registered) {
+      if (!gates.some(g => g.id === gateId)) {
+        unregister();
+        registered.delete(gateId);
+      }
+    }
+    if (gates.length === 0) return;
 
     for (const gate of gates) {
       this.registerGate(gate);
@@ -49,6 +78,10 @@ export class ApprovalManager {
     // Resume any pending approval timeouts from previous session
     const pending = await this.store.list("pending");
     for (const req of pending) {
+      if (req.taskId) {
+        const key = this.gateTaskKey(req.gateId, req.taskId);
+        if (!this.pendingByGateTask.has(key)) this.pendingByGateTask.set(key, req.id);
+      }
       const gate = gates.find(g => g.id === req.gateId);
       if (gate?.timeoutMs && gate.timeoutMs > 0) {
         const elapsed = Date.now() - new Date(req.requestedAt).getTime();
@@ -103,7 +136,11 @@ export class ApprovalManager {
 
     this.ensureGateNotificationRules(gate);
 
-    this.ctx.hooks.register({
+    // One hook per gate id: saving a gate again replaces its previous hook.
+    const registered = gateHooksOf(this.ctx.hooks);
+    registered.get(gate.id)?.();
+
+    const unregister = this.ctx.hooks.register({
       hook,
       phase: "before",
       priority: gate.priority ?? 50,
@@ -125,10 +162,18 @@ export class ApprovalManager {
           return;
         }
 
+        const taskId = this.extractTaskId(ctx.data);
+
+        // Already waiting on a human for this gate and task: keep blocking, don't ask again.
+        const existingId = taskId ? this.pendingByGateTask.get(this.gateTaskKey(gate.id, taskId)) : undefined;
+        if (existingId) {
+          ctx.cancel(`Awaiting human approval: ${gate.name} (request: ${existingId})`);
+          return;
+        }
+
         const request = this.createRequest(gate, ctx.data);
         ctx.cancel(`Awaiting human approval: ${gate.name} (request: ${request.id})`);
 
-        const taskId = this.extractTaskId(ctx.data);
         if (taskId) {
           // Fire-and-forget async transition
           this.ctx.registry.transition(taskId, "awaiting_approval").catch(() => {
@@ -149,6 +194,19 @@ export class ApprovalManager {
         }
       },
     });
+    registered.set(gate.id, unregister);
+    this.ownGateHooks.set(gate.id, unregister);
+  }
+
+  private gateTaskKey(gateId: string, taskId: string): string {
+    return `${gateId}\u0000${taskId}`;
+  }
+
+  /** A request is no longer pending: the next completion of its task may ask again. */
+  private forgetPending(request: ApprovalRequest): void {
+    if (!request.taskId) return;
+    const key = this.gateTaskKey(request.gateId, request.taskId);
+    if (this.pendingByGateTask.get(key) === request.id) this.pendingByGateTask.delete(key);
   }
 
   private createRequest(gate: ApprovalGate, payload: unknown): ApprovalRequest {
@@ -162,6 +220,7 @@ export class ApprovalManager {
       payload,
       requestedAt: new Date().toISOString(),
     };
+    if (request.taskId) this.pendingByGateTask.set(this.gateTaskKey(gate.id, request.taskId), request.id);
     // Fire-and-forget async store write
     this.store.upsert(request).catch(() => {});
     return request;
@@ -216,6 +275,7 @@ export class ApprovalManager {
     request.resolvedBy = resolvedBy ?? "user";
     request.note = feedback;
     await this.store.upsert(request);
+    this.forgetPending(request);
 
     this.clearTimer(requestId);
 
@@ -273,6 +333,7 @@ export class ApprovalManager {
     request.resolvedBy = resolvedBy ?? "user";
     request.note = note;
     await this.store.upsert(request);
+    this.forgetPending(request);
 
     this.clearTimer(requestId);
 
@@ -305,6 +366,7 @@ export class ApprovalManager {
     request.resolvedAt = new Date().toISOString();
     request.resolvedBy = "timeout";
     await this.store.upsert(request);
+    this.forgetPending(request);
 
     this.ctx.emitter.emit("approval:timeout", {
       requestId: request.id,
@@ -389,6 +451,14 @@ export class ApprovalManager {
   }
 
   dispose(): void {
+    // Remove this manager's gate hooks, unless a newer manager already replaced them.
+    const registered = gateHooksByRegistry.get(this.ctx.hooks);
+    for (const [gateId, unregister] of this.ownGateHooks) {
+      unregister();
+      if (registered?.get(gateId) === unregister) registered.delete(gateId);
+    }
+    this.ownGateHooks.clear();
+    this.pendingByGateTask.clear();
     for (const timer of this.timers.values()) {
       clearTimeout(timer);
     }

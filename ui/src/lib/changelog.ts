@@ -32,6 +32,18 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-27-approval-gate-duplicates",
+    date: "2026-11-27",
+    kind: "fixed",
+    title: "Un'approvazione per volta: niente più richieste doppie dai gate",
+    summary: "Un gate di approvazione salvato più volte non chiede più la stessa approvazione più volte per un'unica attività completata.",
+    body: [
+      "- **Una richiesta, non cinque**: ogni volta che un gate di approvazione veniva salvato (creato, poi modificato) mentre Polpo era acceso, si aggiungeva un controllo in più, e un'attività completata generava una richiesta per ciascun salvataggio. Ora ogni gate ha un solo controllo, che viene sostituito quando lo modifichi e tolto quando lo elimini.",
+      "- **La condizione nuova vale subito**: dopo una modifica conta solo la condizione salvata per ultima; un gate eliminato smette di fermare le attività.",
+      "- **Nessun doppione mentre aspetti**: se un'attività si completa di nuovo mentre la sua approvazione è ancora in attesa (anche dopo un riavvio), resta ferma sulla stessa richiesta. Dopo un rifiuto, un'approvazione o una scadenza, il completamento successivo chiede di nuovo.",
+    ].join("\n"),
+  },
+  {
     id: "2026-11-27-computer-xfce-desktop",
     date: "2026-11-27",
     kind: "improved",
