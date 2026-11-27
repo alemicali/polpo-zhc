@@ -29,6 +29,7 @@ import { socketAgentTalk } from "./agent-talk-bridge.js";
 import { socketAgentNotify } from "./agent-notify-bridge.js";
 import { socketComputerTakeover } from "./computer-takeover.js";
 import { socketVaultLogin } from "./vault-login-bridge.js";
+import { socketDecide } from "./decision-bridge.js";
 import { createRunSecrets } from "../vault/env-from-vault.js";
 import { computerControlStore } from "../sandbox/computer-control.js";
 import { sanitizeTranscriptEntry } from "../server/security.js";
@@ -386,6 +387,8 @@ async function main(): Promise<void> {
       } : {}),
       // vault_create_login: the orchestrator writes the login into the vault of this run's agent
       ...(config.notifySocket ? { vaultLogin: socketVaultLogin(config.notifySocket, config.runId) } : {}),
+      // decide: the orchestrator's decision service decides as this run's agent (this process has none)
+      ...(config.notifySocket ? { decide: socketDecide(config.notifySocket, config.runId) } : {}),
       runSecrets,
       vaultStore,
       whatsappStore: waStore,

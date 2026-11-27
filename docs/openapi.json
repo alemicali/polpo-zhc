@@ -738,6 +738,12 @@
               },
               "by": {
                 "type": "string"
+              },
+              "taskId": {
+                "type": "string"
+              },
+              "runId": {
+                "type": "string"
               }
             },
             "required": [
@@ -1046,6 +1052,12 @@
                 "type": "string"
               },
               "by": {
+                "type": "string"
+              },
+              "taskId": {
+                "type": "string"
+              },
+              "runId": {
                 "type": "string"
               }
             },

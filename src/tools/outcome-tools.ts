@@ -7,16 +7,35 @@
  * deliverable artifact.
  *
  * Supports files, media, text, URLs, and structured JSON data.
- * The tool validates that file outcomes actually exist on disk before
- * registering them.
+ * The tool validates that file outcomes actually exist before registering
+ * them. On a remote computer (the agent's files live in its VM) the file is
+ * read through the run's workspace and copied into the task's output
+ * directory on this server, so the deliverable outlives the VM; the outcome
+ * points at that copy. Registering the same thing twice is a no-op (an agent
+ * retrying cannot pile up duplicates).
  */
 
-import { resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import type { FileSystem } from "@polpo-ai/core/filesystem";
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
-import { fileSize as sizeOf, toolFs } from "./tool-fs.js";
+import { resolveAllowedPaths, isPathAllowed } from "./path-sandbox.js";
+import { fileSize as sizeOf, readBytes, toolFs } from "./tool-fs.js";
+
+/** The largest file a remote computer's outcome may be (copied to this server). */
+export const OUTCOME_FILE_MAX_BYTES = 100 * 1024 * 1024;
+
+export interface OutcomeToolOptions {
+  /**
+   * The agent's files live in a remote VM (`fs` is its workspace): a registered file is copied
+   * into the output directory on this server.
+   */
+  remote?: boolean;
+  /** Copy limit for a remote file (default OUTCOME_FILE_MAX_BYTES). */
+  maxBytes?: number;
+}
 
 // ─── Tool: register_outcome ───
 
@@ -62,9 +81,17 @@ function guessMime(filePath: string): string | undefined {
   return EXT_MIME[filePath.slice(dot).toLowerCase()];
 }
 
-function createRegisterOutcomeTool(cwd: string, sandbox: string[], fs: FileSystem, outputDir?: string): AgentTool<typeof RegisterOutcomeSchema> {
+function createRegisterOutcomeTool(cwd: string, sandbox: string[], fs: FileSystem, outputDir?: string, opts: OutcomeToolOptions = {}): AgentTool<typeof RegisterOutcomeSchema> {
   // Use outputDir in examples when available so the agent naturally writes there
   const exampleDir = outputDir ? outputDir.replace(/\/$/, "") : "output";
+  // the task's output directory is always a place deliverables may be registered from
+  const allowed = outputDir && !isPathAllowed(resolve(outputDir), sandbox) ? [...sandbox, resolve(outputDir)] : sandbox;
+  const maxBytes = opts.maxBytes ?? OUTCOME_FILE_MAX_BYTES;
+  const where = opts.remote ? "in your computer" : "on disk";
+  /** What this run registered already (type + path or content): repeats are not added again. */
+  const registered = new Map<string, string>();
+  /** Remote file → its copy on this server. */
+  const copies = new Map<string, string>();
   return {
     name: "register_outcome",
     label: "Register Outcome",
@@ -113,23 +140,68 @@ function createRegisterOutcomeTool(cwd: string, sandbox: string[], fs: FileSyste
       let filePath: string | undefined;
       let fileSize: number | undefined;
       let mimeType: string | undefined;
+      let copiedFrom: string | undefined;
 
       if (params.path) {
-        filePath = resolve(cwd, params.path);
-        assertPathAllowed(filePath, sandbox, "register_outcome");
-
-        // where the agent's files live (this machine or the sandbox VM)
-        if (!(await fs.exists(filePath))) {
-          return {
-            content: [{ type: "text", text: `Error: file not found: ${filePath}` }],
-            details: { error: "file_not_found", path: filePath },
-          };
+        const requested = resolve(cwd, params.path);
+        if (!isPathAllowed(requested, allowed)) {
+          const dirs = [...new Set([cwd, ...(outputDir ? [outputDir] : [])])].join(", ");
+          return fail(`Error: cannot register ${requested}: it is outside the folders deliverables can come from (${dirs}).`
+            + (outputDir ? ` Write the file to ${outputDir} and register that path.` : ""), { error: "path_not_allowed", path: requested });
         }
 
-        fileSize = await sizeOf(fs, filePath);
+        // where the agent's files live (this machine or the computer's VM)
+        let size: number | undefined;
+        try {
+          size = (await fs.exists(requested)) ? await sizeOf(fs, requested) : undefined;
+        } catch (err) {
+          return fail(`Error: could not read ${requested} ${where}: ${err instanceof Error ? err.message : String(err)}. Try again; if it keeps failing, register the content as type 'text'.`, { error: "read_failed", path: requested });
+        }
+        if (size === undefined) {
+          return fail(`Error: file not found at ${requested} ${where} (working directory ${cwd}). Check the path (ls), write the file there, then register it again.`, { error: "file_not_found", path: requested });
+        }
+        filePath = requested;
+        fileSize = size;
+
+        // a remote computer's file: copied to this server (the VM may go away, the output stays)
+        if (opts.remote && outputDir) {
+          if (size > maxBytes) {
+            return fail(`Error: ${requested} is too large to register (${formatBytes(size)}; the limit is ${formatBytes(maxBytes)}). Compress or split it, or register a link to where it is published.`, { error: "too_large", path: requested, size, limit: maxBytes });
+          }
+          let bytes: Buffer;
+          try {
+            bytes = await readBytes(fs, requested);
+          } catch (err) {
+            return fail(`Error: could not copy ${requested} from your computer: ${err instanceof Error ? err.message : String(err)}. Try again; if it keeps failing, register the content as type 'text'.`, { error: "copy_failed", path: requested });
+          }
+          if (bytes.byteLength > maxBytes) {
+            return fail(`Error: ${requested} is too large to register (${formatBytes(bytes.byteLength)}; the limit is ${formatBytes(maxBytes)}).`, { error: "too_large", path: requested, size: bytes.byteLength, limit: maxBytes });
+          }
+          const local = await serverCopyPath(requested, resolve(outputDir), bytes, copies);
+          try {
+            await mkdir(dirname(local), { recursive: true });
+            await writeFile(local, bytes);
+          } catch (err) {
+            return fail(`Error: could not store ${requested} on the Polpo server: ${err instanceof Error ? err.message : String(err)}`, { error: "store_failed", path: requested });
+          }
+          copiedFrom = requested;
+          filePath = local;
+          fileSize = bytes.byteLength;
+        }
 
         mimeType = guessMime(filePath);
       }
+
+      // the same deliverable again (an agent retrying): nothing new is added
+      const key = outcomeKey(type, copiedFrom ?? filePath, params);
+      const previous = registered.get(key);
+      if (previous !== undefined) {
+        return {
+          content: [{ type: "text", text: `Already registered: "${previous}" (${type})${filePath ? ` at ${filePath}` : ""}${copiedFrom ? " (the copy is up to date)" : ""}. Nothing else to do for it.` }],
+          details: { duplicate: true, ...(filePath ? { path: filePath } : {}) },
+        };
+      }
+      registered.set(key, label);
 
       // Build the details object that engine.ts collectOutcome() will consume.
       // The key fields are: path, outcomeType, outcomeLabel, outcomeTags,
@@ -142,6 +214,7 @@ function createRegisterOutcomeTool(cwd: string, sandbox: string[], fs: FileSyste
 
       if (mimeType) details.outcomeMimeType = mimeType;
       if (fileSize !== undefined) details.outcomeSize = fileSize;
+      if (copiedFrom) details.copiedFrom = copiedFrom;
       if (params.text) details.outcomeText = params.text;
       if (params.url) details.outcomeUrl = params.url;
       if (params.data !== undefined) details.outcomeData = params.data;
@@ -150,6 +223,7 @@ function createRegisterOutcomeTool(cwd: string, sandbox: string[], fs: FileSyste
       // Build human-readable confirmation
       const parts = [`Outcome registered: "${label}" (${type})`];
       if (filePath) parts.push(`  Path: ${filePath}`);
+      if (copiedFrom) parts.push(`  Copied from your computer: ${copiedFrom}`);
       if (mimeType) parts.push(`  MIME: ${mimeType}`);
       if (fileSize !== undefined) parts.push(`  Size: ${formatBytes(fileSize)}`);
       if (params.url) parts.push(`  URL: ${params.url}`);
@@ -162,6 +236,43 @@ function createRegisterOutcomeTool(cwd: string, sandbox: string[], fs: FileSyste
       };
     },
   };
+}
+
+function fail(text: string, details: Record<string, unknown>) {
+  return { content: [{ type: "text" as const, text }], details };
+}
+
+/** What makes two registrations the same deliverable. */
+function outcomeKey(type: string, path: string | undefined, params: { text?: string; url?: string; data?: unknown }): string {
+  if (path) return `${type}:path:${path}`;
+  const body = type === "text" ? params.text : type === "url" ? params.url : JSON.stringify(params.data ?? null);
+  return `${type}:${createHash("sha256").update(String(body ?? "")).digest("hex")}`;
+}
+
+/**
+ * Where a remote file goes on this server: the same path when it is in the output directory (the
+ * VM's output directory has this server's path), else <outputDir>/<name> — <name>-2… when another
+ * file of this run already took that name.
+ */
+async function serverCopyPath(remotePath: string, outputDir: string, bytes: Buffer, copies: Map<string, string>): Promise<string> {
+  const rel = relative(outputDir, remotePath);
+  if (rel && !rel.startsWith("..") && !isAbsolute(rel)) return remotePath;
+  const known = copies.get(remotePath);
+  if (known) return known;
+  const taken = new Set(copies.values());
+  const name = basename(remotePath);
+  const ext = extname(name);
+  const stem = ext ? name.slice(0, -ext.length) : name;
+  let chosen = join(outputDir, `${stem}-${Date.now()}${ext}`);
+  for (let i = 1; i < 1000; i++) {
+    const candidate = join(outputDir, i === 1 ? name : `${stem}-${i}${ext}`);
+    if (taken.has(candidate)) continue;
+    // free, or already holding these bytes
+    const existing = await readFile(candidate).catch(() => undefined);
+    if (!existing || existing.equals(bytes)) { chosen = candidate; break; }
+  }
+  copies.set(remotePath, chosen);
+  return chosen;
 }
 
 function formatBytes(bytes: number): string {
@@ -186,8 +297,9 @@ export const ALL_OUTCOME_TOOL_NAMES: OutcomeToolName[] = ["register_outcome"];
  *   without it a run ended "done" with no outcome)
  * @param outputDir - Per-task output directory for deliverables
  * @param fs - Where the agent's files live (default: this machine's disk)
+ * @param opts - remote: `fs` is a remote computer's workspace (files are copied to outputDir)
  */
-export function createOutcomeTools(cwd: string, allowedPaths?: string[], _allowedTools?: string[], outputDir?: string, fs?: FileSystem): AgentTool<any>[] {
+export function createOutcomeTools(cwd: string, allowedPaths?: string[], _allowedTools?: string[], outputDir?: string, fs?: FileSystem, opts: OutcomeToolOptions = {}): AgentTool<any>[] {
   const sandbox = resolveAllowedPaths(cwd, allowedPaths);
-  return [createRegisterOutcomeTool(cwd, sandbox, toolFs(fs), outputDir)];
+  return [createRegisterOutcomeTool(cwd, sandbox, toolFs(fs), outputDir, opts)];
 }

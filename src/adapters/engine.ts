@@ -1111,8 +1111,10 @@ export async function buildAgentToolset(o: {
     })));
     allTools.push(...createCompanyBrainAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, ctx.vaultStore as any));
     allTools.push(...createStorageAgentTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, { vaultStore: ctx.vaultStore as any, cwd, allowedPaths: effectiveAllowedPaths, outputDir, fs: remoteFs }));
-    // decide: typed judgments from the decision model (allowedTools "decide")
-    allTools.push(...createDecisionTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools, o.task ? { taskId: o.task.id } : {}));
+    // decide: typed judgments from the decision model (allowedTools "decide"). A task run asks the
+    // server over the socket (ctx.decide); in the server process the instance's service directly.
+    allTools.push(...createDecisionTools(ctx.polpoDir, agentConfig.name, agentConfig.allowedTools,
+      o.task ? { taskId: o.task.id, ...(ctx.runId ? { runId: ctx.runId } : {}) } : {}, ctx.decide));
     // the results of the tasks it depends on and of its mission's tasks (read fresh from the task store)
     if (wantsTaskResultTools(o.task)) {
       const taskPolpoDir = ctx.polpoDir;

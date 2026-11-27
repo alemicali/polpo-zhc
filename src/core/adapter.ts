@@ -76,6 +76,11 @@ export interface SpawnContext {
    */
   vaultLogin?: import("../tools/vault-tools.js").VaultLoginAccess;
   /**
+   * decide: task runs ask over the notification socket (the server's decision service decides as
+   * the run's agent); unset in the server process, where the instance's service is used directly.
+   */
+  decide?: import("../tools/decision-tools.js").DecisionAccess;
+  /**
    * Secrets the run learns while it runs (a generated password): the transcript, logs and harness
    * output are masked with them. Created by the runner; an engine without one makes its own.
    */
