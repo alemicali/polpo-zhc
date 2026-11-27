@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Dashboard → Active Agents**: each row shows the agent's avatar, colour and display name (not just its id) with the task's title, and opens the task.
+
+### Fixed
 - **Computer live view: Take control connects** — the new VNC passwords were set in the background after the change of hands was announced, so the viewer reconnected with the old ones ("password check failed") and stayed on "connecting". Takeover and release now await the new passwords before announcing and returning; the VNC server restart kills a stuck old server so it can never keep the old passwords.
 
 ### Changed
