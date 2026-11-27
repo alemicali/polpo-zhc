@@ -37,7 +37,7 @@ export function AgentHeroCard() {
   const tc = getTeamColor(teamColorIndex);
   const { engine, model } = agentEngineInfo(agent);
   // a harness runs with its own effort setting; Polpo's engine with the agent's reasoning
-  const harnessEffort = (agent.engine as { effort?: unknown } | undefined)?.effort;
+  const harnessEffort = (agent as { engine?: { effort?: unknown } }).engine?.effort;
   const reasoning = typeof harnessEffort === "string" ? harnessEffort : agent.reasoning;
 
   return (
