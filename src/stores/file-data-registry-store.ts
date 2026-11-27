@@ -137,7 +137,7 @@ export class FileDataRegistryStore implements DataRegistryStore {
       data.activity.unshift(activity);
       data.activity = data.activity.slice(0, 1_000);
     });
-    this.emitSource(input.sourceId, input.action === "mutate" && input.status === "succeeded" ? "data" : "activity");
+    this.emitSource(input.sourceId, (input.action === "mutate" || (input.action === "transaction" && !input.readOnly)) && input.status === "succeeded" ? "data" : "activity");
     return activity;
   }
 

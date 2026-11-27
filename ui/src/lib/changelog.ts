@@ -32,6 +32,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-27-data-transactions",
+    date: "2026-11-27",
+    kind: "new",
+    title: "Transazioni sui dati: più modifiche, tutte o nessuna",
+    summary: "Un agente può eseguire più istruzioni SQL in una sola transazione su PostgreSQL o SQLite: o vanno tutte a buon fine, o non cambia niente e ti dice quale istruzione è fallita e perché.",
+    body: [
+      "- **Tutto o niente**: con `data_transaction` un agente scrive più righe insieme (una pratica e i suoi eventi, per esempio). Se un'istruzione fallisce, Polpo annulla tutto e indica quale e il motivo.",
+      "- **Controlli sulle righe** (`expectRows`): un aggiornamento condizionato come `UPDATE … WHERE id = $1 AND stato = $2` deve toccare esattamente una riga, altrimenti la transazione si annulla. Gli inserimenti con `ON CONFLICT DO NOTHING` si possono ripetere senza doppioni.",
+      "- **Impostazioni per i trigger** (`settings`, solo PostgreSQL): valori come `archivio.autore` applicati con `SET LOCAL`, così un trigger registra chi ha fatto la modifica.",
+      "- **Sicuro**: i valori passano sempre come parametri, mai dentro il testo SQL; serve il permesso di scrittura sulla sorgente (lettura per le transazioni `readOnly`); le modifiche allo schema richiedono il permesso admin; `BEGIN`, `COMMIT`, `SET ROLE` e più istruzioni in un solo testo sono sempre rifiutati; un agente limitato ad alcune tabelle non può toccarne altre. Ogni transazione compare nell'**Attività** della sorgente, senza i valori.",
+      "- **Ovunque**: strumento degli agenti (anche nelle chat e con gli harness), chat con Polpo, API REST (`POST /api/v1/data/{id}/transaction`), MCP (`polpo_data_transaction`) e SDK.",
+      "- **Anche `data_sql`** ora rispetta le tabelle che il permesso di un agente gli consente.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i dati", to: "/data" },
+  },
+  {
     id: "2026-11-27-agent-browser-real-chrome",
     date: "2026-11-27",
     kind: "improved",

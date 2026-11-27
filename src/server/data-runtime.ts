@@ -20,6 +20,7 @@ import { FileDataRegistryStore } from "../stores/file-data-registry-store.js";
 import type { DataRegistryChangeEmitter, DataRegistryStore } from "@polpo-ai/core/data-registry";
 import { databaseStoresFor } from "../core/storage.js";
 import { loadPolpoConfig } from "../core/config.js";
+import { classifySql, settingNeedsAdmin, sqlTables, tableAllowed, type ClassifiedSql, type SqlDialect } from "./data-sql.js";
 
 const require = createRequire(import.meta.url);
 const MAX_ROWS = 1_000;
@@ -39,6 +40,66 @@ export interface DataMutation {
   operation: "insert" | "update" | "delete";
   values?: Record<string, unknown>;
   filters?: DataFilter[];
+}
+
+/** Bounds of data_transaction. */
+export const DATA_TX_LIMITS = {
+  /** Default and longest time a statement (and the whole transaction) may run. */
+  defaultTimeoutMs: 15_000,
+  minTimeoutMs: 100,
+  maxTimeoutMs: 60_000,
+  maxStatements: 50,
+  maxSqlLength: 20_000,
+  maxParams: 1_000,
+  maxSettings: 20,
+  maxSettingValueLength: 1_000,
+  /** Rows returned per statement (RETURNING / SELECT); the rest is reported as truncated. */
+  maxRowsPerStatement: MAX_ROWS,
+  /** Rows returned across the whole transaction. */
+  maxRowsTotal: 5_000,
+} as const;
+
+export type DataTransactionExpectRows = number | { min?: number; max?: number };
+
+export interface DataTransactionStatement {
+  sql: string;
+  params?: unknown[];
+  expectRows?: DataTransactionExpectRows;
+}
+
+export interface DataTransactionInput {
+  sourceId: string;
+  statements: DataTransactionStatement[];
+  /** Applied as SET LOCAL (set_config(key, value, true)) before the first statement. */
+  settings?: Record<string, string>;
+  readOnly?: boolean;
+  timeoutMs?: number;
+}
+
+export interface DataTransactionStatementResult {
+  index: number;
+  /** The statement's command (INSERT, UPDATE, SELECT, ...). */
+  command: string;
+  /** Rows changed (INSERT/UPDATE/DELETE) or returned (SELECT, RETURNING). */
+  rowCount: number;
+  /** Returned rows (SELECT, RETURNING), bounded; absent for statements that return none. */
+  rows?: Record<string, unknown>[];
+  truncated?: boolean;
+}
+
+export interface DataTransactionResult {
+  sourceId: string;
+  status: "committed" | "rolled_back";
+  readOnly: boolean;
+  durationMs: number;
+  statements: DataTransactionStatementResult[];
+  /** When rolled back: which statement (0-based) failed and why. */
+  failed?: { index: number; reason: "error" | "expect_rows" | "timeout"; message: string };
+}
+
+/** A failure inside the transaction that rolls it back (thrown to make the driver roll back). */
+class TransactionAbort extends Error {
+  constructor(readonly index: number, readonly reason: "error" | "expect_rows" | "timeout", message: string) { super(message); }
 }
 
 export class DataRuntime {
@@ -134,6 +195,8 @@ export class DataRuntime {
     const source = await this.requireSource(sourceId, principal, "read");
     if (source.kind !== "sqlite" && source.kind !== "postgres") throw new Error("Raw SQL is supported only for SQLite and PostgreSQL sources");
     assertReadOnlySql(sql);
+    // a grant limited to some datasets: every table the statement reads must be one of them
+    this.requireTables(source, principal, () => sqlTables(sql, source.kind as SqlDialect));
     try {
       const rows = await this.executeRaw(source, sql);
       const visibleRows = rows.slice(0, MAX_ROWS);
@@ -172,6 +235,78 @@ export class DataRuntime {
     } catch (error) {
       await this.record(source.id, principal, "mutate", "failed", started, { dataset: input.dataset, error: errorMessage(error) });
       throw error;
+    }
+  }
+
+  /**
+   * Several statements in ONE transaction on one connection (PostgreSQL, SQLite): all commit or
+   * none do. Settings apply as SET LOCAL; a failing statement or an expectRows mismatch rolls
+   * everything back and says which statement and why. Needs the write grant (read for readOnly);
+   * DDL and privileged statements need admin; transaction control and identity switches never run.
+   */
+  async transaction(input: DataTransactionInput, principal: DataPrincipal): Promise<DataTransactionResult> {
+    const started = Date.now();
+    const readOnly = input.readOnly === true;
+    const source = await this.requireSource(input.sourceId, principal, readOnly ? "read" : "write");
+    if (source.kind !== "sqlite" && source.kind !== "postgres") throw new Error(`Transactions are not supported for ${source.kind} sources (only PostgreSQL and SQLite)`);
+    const dialect = source.kind as SqlDialect;
+    const timeoutMs = input.timeoutMs ?? DATA_TX_LIMITS.defaultTimeoutMs;
+    if (!Number.isInteger(timeoutMs) || timeoutMs < DATA_TX_LIMITS.minTimeoutMs || timeoutMs > DATA_TX_LIMITS.maxTimeoutMs) {
+      throw new Error(`timeoutMs must be an integer between ${DATA_TX_LIMITS.minTimeoutMs} and ${DATA_TX_LIMITS.maxTimeoutMs}`);
+    }
+    const statements = input.statements ?? [];
+    if (!Array.isArray(statements) || statements.length === 0) throw new Error("A transaction needs at least one statement");
+    if (statements.length > DATA_TX_LIMITS.maxStatements) throw new Error(`A transaction may hold at most ${DATA_TX_LIMITS.maxStatements} statements`);
+    const isAdmin = this.hasCapability(source, principal, "admin");
+    const settings = Object.entries(input.settings ?? {});
+    if (settings.length > DATA_TX_LIMITS.maxSettings) throw new Error(`At most ${DATA_TX_LIMITS.maxSettings} settings per transaction`);
+    if (settings.length && dialect !== "postgres") throw new Error("Transaction settings (SET LOCAL) are supported only for PostgreSQL sources");
+    for (const [key, value] of settings) {
+      if (typeof value !== "string") throw new Error(`Setting "${key}" must be a string`);
+      if (value.length > DATA_TX_LIMITS.maxSettingValueLength) throw new Error(`Setting "${key}" is longer than ${DATA_TX_LIMITS.maxSettingValueLength} characters`);
+      if (settingNeedsAdmin(key) && !isAdmin) throw new Error(`Setting "${key}" is a server setting and needs the admin grant; use a custom namespace.name setting`);
+    }
+    // Validate every statement before opening the transaction
+    const classified: ClassifiedSql[] = statements.map((statement, index) => {
+      const where = `Statement ${index + 1}`;
+      if (!statement || typeof statement.sql !== "string" || !statement.sql.trim()) throw new Error(`${where}: sql is required`);
+      if (statement.sql.length > DATA_TX_LIMITS.maxSqlLength) throw new Error(`${where}: sql is longer than ${DATA_TX_LIMITS.maxSqlLength} characters`);
+      if (statement.params !== undefined && !Array.isArray(statement.params)) throw new Error(`${where}: params must be an array`);
+      if ((statement.params?.length ?? 0) > DATA_TX_LIMITS.maxParams) throw new Error(`${where}: at most ${DATA_TX_LIMITS.maxParams} params`);
+      validateExpectRows(statement.expectRows, where);
+      let result: ClassifiedSql;
+      try { result = classifySql(statement.sql, dialect); } catch (error) { throw new Error(`${where}: ${errorMessage(error)}`); }
+      if (result.kind === "admin" && !isAdmin) throw new Error(`${where}: ${result.command} needs the admin grant on ${source.name} (${result.adminReason ?? "privileged statement"})`);
+      if (readOnly && result.kind !== "read") throw new Error(`${where}: a readOnly transaction runs only SELECT, WITH, VALUES, TABLE, EXPLAIN and SHOW`);
+      try {
+        this.requireTables(source, principal, () => result.tables);
+      } catch (error) { throw new Error(`${where}: ${errorMessage(error)}`); }
+      return result;
+    });
+    const blocked = new Set(this.grantFor(source, principal)?.excludedFields ?? []);
+    const detail = { statementCount: statements.length, dataset: datasetsLabel(classified) };
+    try {
+      const result = dialect === "postgres"
+        ? await this.withPostgres(source, (sql) => runPostgresTransaction(sql, statements, classified, settings, readOnly, timeoutMs, blocked))
+        : await this.withSqlite(source, (db) => runSqliteTransaction(db, statements, classified, readOnly, timeoutMs, blocked), { readonly: readOnly });
+      const out: DataTransactionResult = { sourceId: source.id, readOnly, durationMs: Date.now() - started, ...result };
+      const rowCount = out.statements.reduce((sum, statement) => sum + statement.rowCount, 0);
+      if (out.status === "committed") await this.record(source.id, principal, "transaction", "succeeded", started, { ...detail, rowCount, readOnly });
+      else await this.record(source.id, principal, "transaction", "failed", started, { ...detail, readOnly, error: `Rolled back at statement ${out.failed!.index + 1}: ${out.failed!.message}` });
+      return out;
+    } catch (error) {
+      await this.record(source.id, principal, "transaction", "failed", started, { ...detail, readOnly, error: errorMessage(error) });
+      throw error;
+    }
+  }
+
+  /** With a grant limited to some datasets, every named table must be one of them. */
+  private requireTables(source: DataSource, principal: DataPrincipal, tables: () => string[]): void {
+    const grant = this.grantFor(source, principal);
+    if (!grant || grant.datasets.length === 0 || grant.datasets.includes("*")) return;
+    const dialect = source.kind as SqlDialect;
+    for (const table of tables()) {
+      if (!tableAllowed(table, dialect, (dataset) => matchesDataset(grant, dataset))) throw new Error(`Access denied to ${source.name} / ${table}: the data grant does not include it`);
     }
   }
 
@@ -337,10 +472,10 @@ export class DataRuntime {
   private async record(
     sourceId: string,
     principal: DataPrincipal,
-    action: "test" | "discover" | "query" | "sql" | "mutate",
+    action: "test" | "discover" | "query" | "sql" | "mutate" | "transaction",
     status: "succeeded" | "failed",
     started: number,
-    detail: { dataset?: string; rowCount?: number; error?: string },
+    detail: { dataset?: string; rowCount?: number; error?: string; statementCount?: number; readOnly?: boolean },
   ): Promise<void> {
     await this.store.addActivity({ sourceId, agent: principal.agent, action, status, durationMs: Date.now() - started, ...detail }).catch(() => undefined);
   }
@@ -733,6 +868,166 @@ function coerceCsv(value: string): unknown {
   if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) return Number(trimmed);
   if (/^(true|false)$/i.test(trimmed)) return trimmed.toLowerCase() === "true";
   return value;
+}
+
+function validateExpectRows(expect: DataTransactionExpectRows | undefined, where: string): void {
+  if (expect === undefined) return;
+  const valid = (value: unknown) => value === undefined || (typeof value === "number" && Number.isInteger(value) && value >= 0);
+  if (typeof expect === "number") { if (!valid(expect)) throw new Error(`${where}: expectRows must be a non-negative integer`); return; }
+  if (!expect || typeof expect !== "object" || Array.isArray(expect) || !valid(expect.min) || !valid(expect.max)) {
+    throw new Error(`${where}: expectRows must be a number or { min?, max? } with non-negative integers`);
+  }
+  if (expect.min !== undefined && expect.max !== undefined && expect.min > expect.max) throw new Error(`${where}: expectRows.min is greater than expectRows.max`);
+}
+
+/** Why a row count does not meet expectRows, or undefined when it does. */
+function expectRowsMismatch(expect: DataTransactionExpectRows | undefined, rowCount: number): string | undefined {
+  if (expect === undefined) return undefined;
+  if (typeof expect === "number") return rowCount === expect ? undefined : `expected exactly ${expect} row(s), got ${rowCount}`;
+  if (expect.min !== undefined && rowCount < expect.min) return `expected at least ${expect.min} row(s), got ${rowCount}`;
+  if (expect.max !== undefined && rowCount > expect.max) return `expected at most ${expect.max} row(s), got ${rowCount}`;
+  return undefined;
+}
+
+/** The tables a transaction touches, for the activity log (never values). */
+function datasetsLabel(classified: ClassifiedSql[]): string | undefined {
+  const tables = [...new Set(classified.flatMap((item) => item.tables))];
+  if (!tables.length) return undefined;
+  return tables.slice(0, 8).join(", ") + (tables.length > 8 ? `, +${tables.length - 8}` : "");
+}
+
+function stripFields(rows: Record<string, unknown>[], blocked: Set<string>): Record<string, unknown>[] {
+  if (!blocked.size) return rows;
+  return rows.map((row) => Object.fromEntries(Object.entries(row).filter(([key]) => !blocked.has(key))));
+}
+
+/** Bounded rows for the result: per statement and across the transaction. */
+function boundRows(rows: Record<string, unknown>[], budget: { left: number }, blocked: Set<string>): { rows: Record<string, unknown>[]; truncated: boolean } {
+  const take = Math.max(0, Math.min(DATA_TX_LIMITS.maxRowsPerStatement, budget.left));
+  budget.left -= Math.min(rows.length, take);
+  return { rows: stripFields(rows.slice(0, take), blocked), truncated: rows.length > take };
+}
+
+type TxOutcome = Pick<DataTransactionResult, "status" | "statements" | "failed">;
+
+async function runPostgresTransaction(
+  sql: any,
+  statements: DataTransactionStatement[],
+  classified: ClassifiedSql[],
+  settings: Array<[string, string]>,
+  readOnly: boolean,
+  timeoutMs: number,
+  blocked: Set<string>,
+): Promise<TxOutcome> {
+  const results: DataTransactionStatementResult[] = [];
+  const deadline = Date.now() + timeoutMs;
+  const budget = { left: DATA_TX_LIMITS.maxRowsTotal };
+  let index = -1;
+  // Belt and braces: if the server does not cancel (statement_timeout) in time, drop the connection;
+  // the server then rolls the transaction back.
+  let killed = false;
+  const hardStop = setTimeout(() => { killed = true; void Promise.resolve(sql.end({ timeout: 0 })).catch(() => undefined); }, timeoutMs * 2 + 2_000);
+  const killedAbort = () => new TransactionAbort(Math.max(0, Math.min(index, statements.length - 1)), "timeout", `the transaction ran longer than ${timeoutMs} ms and its connection was closed`);
+  try {
+    await sql.begin(readOnly ? "read only" : "read write", async (tx: any) => {
+      // Settings first, then Polpo's own bounds (so a setting can never lift them)
+      for (const [key, value] of settings) await tx.unsafe("SELECT set_config($1, $2, true)", [key, value]);
+      await tx.unsafe("SELECT set_config('statement_timeout', $1, true), set_config('lock_timeout', $1, true), set_config('idle_in_transaction_session_timeout', $2, true)",
+        [`${timeoutMs}ms`, `${timeoutMs * 2}ms`]);
+      for (index = 0; index < statements.length; index++) {
+        if (Date.now() > deadline) throw new TransactionAbort(index, "timeout", `the transaction ran longer than ${timeoutMs} ms`);
+        const statement = statements[index]!;
+        let result: any;
+        try {
+          result = await tx.unsafe(statement.sql, (statement.params ?? []).map(toPostgresParam));
+        } catch (error) {
+          if (killed) throw killedAbort();
+          const message = errorMessage(error);
+          const timedOut = /statement timeout|lock timeout/i.test(message);
+          throw new TransactionAbort(index, timedOut ? "timeout" : "error", message);
+        }
+        const rows = Array.isArray(result) ? result as Record<string, unknown>[] : [];
+        const returnsRows = Array.isArray(result?.columns) && result.columns.length > 0;
+        const command = String(result?.command ?? classified[index]!.command).toUpperCase();
+        const rowCount = Number(result?.count ?? rows.length ?? 0);
+        const mismatch = expectRowsMismatch(statement.expectRows, rowCount);
+        if (mismatch) throw new TransactionAbort(index, "expect_rows", mismatch);
+        results.push({ index, command, rowCount, ...(returnsRows ? boundRows(rows, budget, blocked) : {}) });
+      }
+    });
+    return { status: "committed", statements: results };
+  } catch (caught) {
+    const error = killed ? killedAbort() : caught;
+    if (error instanceof TransactionAbort) {
+      return { status: "rolled_back", statements: results, failed: { index: error.index, reason: error.reason, message: error.message } };
+    }
+    // Setting a value or BEGIN failed before any statement, or COMMIT itself failed (deferred constraints)
+    const at = Math.max(0, Math.min(index, statements.length - 1));
+    if (index >= 0) return { status: "rolled_back", statements: results, failed: { index: at, reason: "error", message: errorMessage(error) } };
+    throw error;
+  } finally {
+    clearTimeout(hardStop);
+  }
+}
+
+function toPostgresParam(value: unknown): unknown {
+  // objects and arrays travel as JSON text (cast in SQL: $1::jsonb)
+  if (value !== null && typeof value === "object" && !(value instanceof Date) && !Buffer.isBuffer(value)) return JSON.stringify(value);
+  return value;
+}
+
+function toSqliteParam(value: unknown): unknown {
+  if (typeof value === "boolean") return value ? 1 : 0;
+  if (value instanceof Date) return value.toISOString();
+  if (value !== null && typeof value === "object" && !Buffer.isBuffer(value)) return JSON.stringify(value);
+  return value === undefined ? null : value;
+}
+
+function runSqliteTransaction(
+  db: any,
+  statements: DataTransactionStatement[],
+  classified: ClassifiedSql[],
+  readOnly: boolean,
+  timeoutMs: number,
+  blocked: Set<string>,
+): TxOutcome {
+  // SQLite cannot cancel a running statement: the timeout bounds lock waits and the transaction between statements
+  db.pragma(`busy_timeout = ${Math.floor(timeoutMs)}`);
+  const results: DataTransactionStatementResult[] = [];
+  const deadline = Date.now() + timeoutMs;
+  const budget = { left: DATA_TX_LIMITS.maxRowsTotal };
+  const run = db.transaction(() => {
+    for (let index = 0; index < statements.length; index++) {
+      if (Date.now() > deadline) throw new TransactionAbort(index, "timeout", `the transaction ran longer than ${timeoutMs} ms`);
+      const statement = statements[index]!;
+      const command = classified[index]!.command;
+      let rowCount: number;
+      let rows: Record<string, unknown>[] | undefined;
+      try {
+        const prepared = db.prepare(statement.sql);
+        const params = (statement.params ?? []).map(toSqliteParam);
+        if (prepared.reader) {
+          rows = prepared.all(...params) as Record<string, unknown>[];
+          rowCount = rows.length;
+        } else {
+          rowCount = Number(prepared.run(...params).changes ?? 0);
+        }
+      } catch (error) {
+        throw new TransactionAbort(index, /busy|locked/i.test(errorMessage(error)) ? "timeout" : "error", errorMessage(error));
+      }
+      const mismatch = expectRowsMismatch(statement.expectRows, rowCount);
+      if (mismatch) throw new TransactionAbort(index, "expect_rows", mismatch);
+      results.push({ index, command, rowCount, ...(rows ? boundRows(rows, budget, blocked) : {}) });
+    }
+  });
+  try {
+    // a read-only handle refuses writes; BEGIN DEFERRED there is fine, IMMEDIATE takes the write lock up front
+    if (readOnly) run.deferred(); else run.immediate();
+    return { status: "committed", statements: results };
+  } catch (error) {
+    if (error instanceof TransactionAbort) return { status: "rolled_back", statements: results, failed: { index: error.index, reason: error.reason, message: error.message } };
+    throw error;
+  }
 }
 
 function assertReadOnlySql(sql: string): void {

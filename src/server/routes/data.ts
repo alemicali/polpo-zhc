@@ -1,9 +1,9 @@
-import { OpenAPIHono } from "@hono/zod-openapi";
+import { OpenAPIHono, createRoute, z as oz } from "@hono/zod-openapi";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import type { VaultStore } from "../../core/vault-store.js";
 import { normalizeDataTags, type DataRegistryStore } from "@polpo-ai/core/data-registry";
-import type { DataRuntime } from "../data-runtime.js";
+import { DATA_TX_LIMITS, type DataRuntime } from "../data-runtime.js";
 
 const GrantSchema = z.object({
   id: z.string().optional(),
@@ -53,6 +53,57 @@ const QuerySchema = z.object({
   includeTotal: z.boolean().optional(),
 });
 
+const ExpectRowsSchema = oz.union([
+  oz.number().int().nonnegative(),
+  oz.object({ min: oz.number().int().nonnegative().optional(), max: oz.number().int().nonnegative().optional() }).strict(),
+]).openapi({ description: "Rows the statement must change (INSERT/UPDATE/DELETE) or return (SELECT): exactly n, or { min, max }. A mismatch rolls the transaction back." });
+
+export const TransactionSchema = oz.object({
+  statements: oz.array(oz.object({
+    sql: oz.string().min(1).max(DATA_TX_LIMITS.maxSqlLength).openapi({ description: "One statement; placeholders $1, $2 (PostgreSQL) or ? (SQLite)" }),
+    params: oz.array(oz.unknown()).max(DATA_TX_LIMITS.maxParams).optional().openapi({ description: "Bind parameters in placeholder order" }),
+    expectRows: ExpectRowsSchema.optional(),
+  }).strict()).min(1).max(DATA_TX_LIMITS.maxStatements),
+  settings: oz.record(oz.string(), oz.string().max(DATA_TX_LIMITS.maxSettingValueLength)).optional()
+    .openapi({ description: "PostgreSQL only: applied with set_config(key, value, true) (SET LOCAL). Keys namespace.name; built-in settings need the admin grant." }),
+  readOnly: oz.boolean().optional().openapi({ description: "Run READ ONLY: only SELECT-like statements" }),
+  timeoutMs: oz.number().int().min(DATA_TX_LIMITS.minTimeoutMs).max(DATA_TX_LIMITS.maxTimeoutMs).optional()
+    .openapi({ description: "Statement and lock timeout, and the longest the transaction may run (default 15000, max 60000)" }),
+}).strict();
+
+const TransactionResultSchema = oz.object({
+  sourceId: oz.string(),
+  status: oz.enum(["committed", "rolled_back"]),
+  readOnly: oz.boolean(),
+  durationMs: oz.number(),
+  statements: oz.array(oz.object({
+    index: oz.number().int(),
+    command: oz.string(),
+    rowCount: oz.number().int(),
+    rows: oz.array(oz.record(oz.string(), oz.unknown())).optional(),
+    truncated: oz.boolean().optional(),
+  })),
+  failed: oz.object({ index: oz.number().int(), reason: oz.enum(["error", "expect_rows", "timeout"]), message: oz.string() }).optional(),
+});
+
+const transactionRoute = createRoute({
+  method: "post",
+  path: "/{id}/transaction",
+  tags: ["Data"],
+  summary: "Run several SQL statements in one transaction",
+  description: "PostgreSQL and SQLite sources. BEGIN; settings (SET LOCAL); every statement with bind parameters; COMMIT. "
+    + "A failing statement or an expectRows mismatch rolls everything back: status \"rolled_back\" and failed say which statement and why. "
+    + "Transaction control, SET/RESET, SET ROLE, SESSION AUTHORIZATION, COPY ... PROGRAM and more than one statement per sql are refused.",
+  request: {
+    params: oz.object({ id: oz.string().openapi({ description: "Data source ID or slug" }) }),
+    body: { content: { "application/json": { schema: TransactionSchema } }, required: true },
+  },
+  responses: {
+    200: { content: { "application/json": { schema: oz.object({ ok: oz.boolean(), data: TransactionResultSchema }) } }, description: "Committed or rolled back" },
+    400: { content: { "application/json": { schema: oz.object({ ok: oz.boolean(), error: oz.string() }) } }, description: "Invalid or refused transaction" },
+  },
+});
+
 export function dataRoutes(getDeps: () => { runtime: DataRuntime; store: DataRegistryStore; vaultStore?: VaultStore }): OpenAPIHono {
   const app = new OpenAPIHono();
 
@@ -96,6 +147,18 @@ export function dataRoutes(getDeps: () => { runtime: DataRuntime; store: DataReg
     if (!parsed.success) return invalid(c, parsed.error.issues[0]?.message);
     try { return c.json({ ok: true, data: await getDeps().runtime.mutate(parsed.data, { admin: true }) }); }
     catch (error) { return failure(c, error); }
+  });
+
+  // Several statements in one transaction: all commit or none (status "rolled_back" says which statement failed and why)
+  app.openapi(transactionRoute, async (c) => {
+    const body = c.req.valid("json");
+    try { return c.json({ ok: true, data: await getDeps().runtime.transaction({ sourceId: c.req.valid("param").id, ...body }, { admin: true }) }, 200); }
+    catch (error) { return c.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 400); }
+  }, (result, c) => {
+    if (!result.success) {
+      const issue = result.error.issues[0];
+      return c.json({ ok: false, error: issue ? `${issue.path.join(".") || "body"}: ${issue.message}` : "Invalid request" }, 400);
+    }
   });
 
   app.get("/:id", async (c) => {

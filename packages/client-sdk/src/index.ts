@@ -336,6 +336,11 @@ export type {
 export type { StoreState, PolpoStats, AssessmentProgressEntry, AssessmentCheckStatus } from "./store/types.js";
 export type { TaskFilter } from "./store/selectors.js";
 
+// Structured data
+export type {
+  DataTransactionExpectRows, DataTransactionStatement, DataTransactionRequest, DataTransactionStatementResult, DataTransactionResult,
+} from "./client/data-types.js";
+
 // Agent suites (tests and evals with mocks)
 export type {
   AgentSuite, AgentSuiteInput, SuiteRun, SuiteRunRequest, SuiteDatasetImport, SuiteMockMode, ArgsMatchMode, ToolMock, ScriptedTurn, SuiteMocks, SuiteCaseInput, SuiteAssertion, SuiteAssertionType, SuiteScorer, SuiteBudgets, SuiteCase, SuiteDataset, SuiteVariantOverrides, SuiteRunStatus, SuiteCaseStatus, SuiteAssertionResult, SuiteTraceToolCall, SuiteTraceTurn, SuiteTrace, SuiteCaseResult, SuiteRunStats,

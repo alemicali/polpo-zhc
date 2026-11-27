@@ -1,5 +1,6 @@
 import type { ComputerControl, ComputerDesktopView, ComputerTakeoverRequest } from "./computer-types.js";
 import { PolpoApiError } from "./errors.js";
+import type { DataTransactionRequest, DataTransactionResult } from "./data-types.js";
 import type {
   AgentDeployGate, AgentSuite, AgentSuiteInput, CaseGenerationRequest, GeneratedCaseProposal, SuiteBaselineComparison, SuiteCase, SuiteCassette, SuiteCassetteEdit,
   SuiteCassetteSummary, SuiteDataset, SuiteRole, SuiteRun, SuiteRunRequest, SuiteDatasetImport, SuiteTargetKind, SuiteTrend,
@@ -1556,6 +1557,15 @@ export class PolpoClient {
 
   deleteAgentSuite(name: string, id: string): Promise<{ deleted: string }> {
     return this.del<{ deleted: string }>(`/agents/${encodeURIComponent(name)}/suites/${encodeURIComponent(id)}`);
+  }
+
+  /**
+   * Run several SQL statements in one transaction on a data source (PostgreSQL or SQLite): all
+   * commit, or a failing statement / expectRows mismatch rolls everything back
+   * (status "rolled_back", failed says which statement and why).
+   */
+  runDataTransaction(sourceId: string, req: DataTransactionRequest): Promise<DataTransactionResult> {
+    return this.post<DataTransactionResult>(`/data/${encodeURIComponent(sourceId)}/transaction`, req);
   }
 
   /** Import a dataset from CSV or JSON into a suite. */
