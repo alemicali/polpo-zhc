@@ -3,7 +3,7 @@
  * installed tools and browser profile between chats and tasks). List with live status, create or
  * change, start/stop/restart/reset, delete; a computer's live view (polpo_computer_desktop: status,
  * start, stop, the agents waiting for a person) and take control (polpo_computer_takeover,
- * polpo_computer_release); never the VNC password. Changes need polpo:computers (or polpo:admin) (they cost money and change
+ * polpo_computer_release); never a VNC password (it never leaves the server). Changes need polpo:computers (or polpo:admin) (they cost money and change
  * where agents run); reset and delete need confirm: true.
  */
 import { z } from "zod";
@@ -64,7 +64,7 @@ const line = (c: Computer) => {
 
 type TakeoverRequest = { id: string; computerId: string; agent: string; reason: string; url?: string; whatToDo?: string; createdAt: string; expiresAt: string; status: string; takenBy?: string; note?: string; taskId?: string };
 type ControlView = { computerId: string; holder: "agent" | "person"; person?: string; since?: string; lastNote?: string; requests: TakeoverRequest[]; open: TakeoverRequest[] };
-/** What the desktop routes answer (the viewer's password, if any, is never passed on). */
+/** What the desktop routes answer (never a password: the server answers the VM's VNC authentication itself). */
 type DesktopView = { desktop: { state: string; display: string; note?: string; error?: string; startedAt?: string; processes?: Record<string, boolean> }; control: ControlView };
 
 function desktopLine(id: string, d: DesktopView["desktop"]): string {
@@ -340,7 +340,8 @@ export function registerComputerTools(tool: Register, deps: McpDeps): void {
       + "who holds the desktop (the agent, or a person since when) and its agents' open takeover requests; never starts the computer. start: start the live "
       + "view (starts or wakes the computer: it costs money while it runs; packages missing on an older image are installed once). stop: stop the live view "
       + "(the display and browser windows stay). Without id: every agent waiting for a person (request_computer_takeover: a login, 2FA, a CAPTCHA), oldest first. "
-      + "The VNC password is never shown here: the person opens the live view in the dashboard.",
+      + "An agent's takeover request starts the live view by itself, and it survives a server restart. No VNC password ever leaves the server "
+      + "(it answers the VM's VNC authentication itself): the person opens the live view in the dashboard.",
     inputSchema: {
       id: z.string().min(1).optional().describe("The computer's id (polpo_computers_list); omit to list the agents waiting for a person on any computer"),
       action: z.enum(["status", "start", "stop"]).optional().describe("status (default), start or stop"),

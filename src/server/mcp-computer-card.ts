@@ -2,7 +2,8 @@
  * The computer card (MCP App, widgets/computer-card): a remote computer's live view status, who
  * holds its desktop (the agent, or a person since when) and its agents' takeover requests, with
  * Take control / Give back. Built from the REST shapes (GET /computers/:id and /desktop); the text
- * form is what hosts without apps (and the model) read. Never carries the VNC password.
+ * form is what hosts without apps (and the model) read. Never carries a VNC password (it never
+ * leaves the server: the server answers the VM's VNC authentication itself).
  */
 import type { CardAppearance } from "./mcp-server/card-appearance.js";
 

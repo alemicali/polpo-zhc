@@ -173,7 +173,7 @@ export const computersApi = {
   /** An agent's default computer ("host" or "" for this server) and the computers it may use. */
   assign: (agent: string, defaultComputer: string, computers?: string[]) =>
     request<unknown>(`/agents/${encodeURIComponent(agent)}`, json("PATCH", { defaultComputer: defaultComputer === "host" ? "" : defaultComputer, ...(computers ? { computers } : {}), publish: false })),
-  /** The live view and who holds the desktop; viewer: also this person's VNC password while it runs. Never starts it. */
+  /** The live view and who holds the desktop; viewer: also this person's role and the WS path while it runs. Never starts it. */
   desktop: (id: string, viewer = false) => request<ComputerDesktopView>(`/computers/${encodeURIComponent(id)}/desktop${viewer ? "?viewer=1" : ""}`),
   /** Start the live view (starts or wakes the computer) / stop it (the display stays). */
   desktopStart: (id: string) => request<ComputerDesktopView>(`/computers/${encodeURIComponent(id)}/desktop/start`, json("POST", {})),

@@ -926,7 +926,7 @@ export class PolpoClient {
 
   // ── Computers: live view and take control ──
 
-  /** A remote computer's live view and who holds its desktop; viewer: also this person's VNC password while it runs. Never starts it. */
+  /** A remote computer's live view and who holds its desktop; viewer: also this person's role and the WS path while it runs. Never starts it. */
   getComputerDesktop(id: string, o: { viewer?: boolean } = {}): Promise<ComputerDesktopView> {
     return this.get(`/computers/${encodeURIComponent(id)}/desktop${o.viewer ? "?viewer=1" : ""}`);
   }

@@ -1,6 +1,7 @@
 /**
  * A computer's live view and take control (src/sandbox/desktop.ts, computer-control.ts on the
- * server): who holds its desktop, agents' requests for a person, and a viewer's VNC access.
+ * server): who holds its desktop, agents' requests for a person, and a viewer's access (never a
+ * VNC password: the server answers the VM's VNC authentication itself).
  */
 
 /** Who holds a computer's desktop: the agent (default; people watch view-only) or a person. */
@@ -61,10 +62,11 @@ export interface ComputerDesktopView {
   desktop: ComputerDesktopStatus;
   control: ComputerControl;
   /**
-   * viewer=1 (and start/takeover/release), while the live view runs: this person's VNC password
-   * (full control only while they hold the computer) and the WebSocket path (noVNC).
+   * viewer=1 (and start/takeover/release), while the live view runs: this person's role (control
+   * only while they hold the computer: the server lets their input through, decided per message)
+   * and the WebSocket path for noVNC (security type None: no password ever reaches the browser).
    */
-  viewer?: { mode: "control" | "view"; password: string; path: string };
+  viewer?: { mode: "control" | "view"; path: string };
 }
 
 /** The computer:takeover event. */

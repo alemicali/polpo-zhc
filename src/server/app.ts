@@ -2124,7 +2124,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     emit: (payload) => o.emit("computer:changed", payload),
     emitTakeover: (payload) => o.emit("computer:takeover", payload),
     // live views (Daytona v2 computers' desktops) and take control
-    desktops: () => computerDesktopsFor(o.getPolpoDir(), { manager: computerDeps.manager, sandboxFor: computerDeps.sandboxFor }),
+    desktops: () => computerDesktopsFor(o.getPolpoDir(), { manager: computerDeps.manager, sandboxFor: computerDeps.sandboxFor, vault: () => o.getVaultStore() }),
     takeover: () => (orchestrator?.isInitialized ? o.getComputerTakeover() : undefined),
     member: (c) => c.get("polpoUserEmail" as never) as string | undefined,
   };

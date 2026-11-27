@@ -17,13 +17,14 @@
  *   POST   /computers/:id/reset       { confirm: true }: delete the machine (and its snapshots) and create a new one (its disk is lost)
  *   GET    /computers/:id/egress      a remote computer's egress through Tailscale: tailnet up/down, node, path (direct/DERP),
  *                                     proxy reachable, where its browser goes out now (looks inside only a running machine)
- *   GET    /computers/:id/desktop     its live view (desktop.ts: display, VNC, websockify; never starts it) and who holds it;
- *                                     ?viewer=1 also this person's VNC password (full control only while they hold it)
+ *   GET    /computers/:id/desktop     its live view (desktop.ts: display, VNC, websockify; never starts it, re-attaches after a
+ *                                     restart) and who holds it; ?viewer=1 also this person's role (control or view) and the WS path
  *   POST   /computers/:id/desktop/start   start the live view (starts or wakes the computer); /desktop/stop stops it
  *   GET    /computers/:id/control     who holds its desktop (agent, or a person since when) and its agents' takeover requests
  *   POST   /computers/:id/takeover    { force? }: the signed-in person takes control (the agent's browser waits)
  *   POST   /computers/:id/release     { note?, force? }: give control back to the agent, with a note it reads
- *   WS     /computers/:id/desktop/vnc the live view itself (computer-desktop-ws.ts), authorized like the terminal
+ *   WS     /computers/:id/desktop/vnc the live view itself (computer-desktop-ws.ts), authorized like the terminal; the server
+ *                                     answers the VM's VNC password and lets input through only for the person holding it
  *
  * "host" (this server) is listed as a built-in computer; it cannot be changed, started or stopped.
  * Machines are created on first use (an agent's chat or task) or on start, never on every call.
@@ -68,12 +69,16 @@ export interface ComputerRouteDeps {
   member?: (c: Context) => string | undefined;
 }
 
-/** GET /computers/:id/desktop: the live view, who holds it, and (viewer=1) this viewer's VNC password. */
+/** GET /computers/:id/desktop: the live view, who holds it, and (viewer=1) this viewer's access. */
 export interface ComputerDesktopView {
   desktop: DesktopStatus;
   control: ComputerControlView;
-  /** viewer=1, while the live view runs: the password for this person (full control only when they hold it). */
-  viewer?: { mode: "control" | "view"; password: string; path: string };
+  /**
+   * viewer=1, while the live view runs: this person's role (control only while they hold the
+   * computer; the server lets their input through) and the WebSocket path. Never a password: the
+   * server answers the VM's VNC authentication itself.
+   */
+  viewer?: { mode: "control" | "view"; path: string };
 }
 
 /** Runs listed in a computer's detail (newest first). */
@@ -386,8 +391,7 @@ export function computerRoutes(deps: ComputerRouteDeps): Hono {
     const out: ComputerDesktopView = { desktop, control };
     if (viewer && desktops && desktop.state === "running") {
       const mode = control.holder === "person" && control.person === personOf(c) ? "control" : "view";
-      const password = desktops.password(computer.id, mode);
-      if (password) out.viewer = { mode, password, path: `/api/v1/computers/${encodeURIComponent(computer.id)}/desktop/vnc` };
+      out.viewer = { mode, path: `/api/v1/computers/${encodeURIComponent(computer.id)}/desktop/vnc` };
     }
     return out;
   };

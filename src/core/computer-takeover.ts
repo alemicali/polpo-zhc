@@ -2,10 +2,12 @@
  * Take control of a computer's desktop, on the server: the one place that changes who holds it.
  *
  * - takeover / release (a person, from the dashboard, the REST API, MCP or Polpo's chat tools):
- *   the control state (computer-control.ts), a `computer:takeover` event, and new VNC passwords
- *   (desktop.ts: open viewers reconnect, with full control only for the person holding it);
+ *   the control state (computer-control.ts) and a `computer:takeover` event. Nothing restarts: the
+ *   server's RFB proxy (rfb-proxy.ts) lets input through only for the person holding it, deciding
+ *   per message, so open viewers switch at once;
  * - request (an agent's request_computer_takeover, from a chat in this process or a task run over
- *   the notification socket): recorded on the computer, announced, and the person notified: on the
+ *   the notification socket): recorded on the computer, announced, its live view started (so the
+ *   person finds it ready), and the person notified: on the
  *   agent's own notification channels when it has them (notifyChannels + send_notification), else
  *   through the instance's notification router (its rules on computer:takeover, or its channels).
  *
@@ -37,8 +39,8 @@ export interface ComputerTakeoverDeps {
   polpoDir: string;
   computers: () => readonly ComputerConfig[];
   emit: (payload: TakeoverEvent) => void;
-  /** Control changed hands: new VNC passwords for the live view (desktop.ts). */
-  rotate?: (computer: ComputerConfig) => Promise<void>;
+  /** Start the computer's live view (desktop.ts), idempotent: an agent asked for a person. */
+  startDesktop?: (computer: ComputerConfig) => Promise<unknown>;
   notifier?: () => AgentNotifier | undefined;
   router?: () => TakeoverNotifyRouter | undefined;
   /** Where the person opens the computer (a link in the notification). */
@@ -80,19 +82,9 @@ export class ComputerTakeoverService {
     try { this.deps.emit({ ...e, holder: e.holder ?? control.holder } as TakeoverEvent); } catch { /* listeners never change the operation */ }
   }
 
-  /**
-   * New live-view passwords, awaited BEFORE the change is announced or returned: viewers reload
-   * on the event and must get passwords the VNC server already uses (else "password check failed"
-   * and the take-control view never connects).
-   */
-  private async rotate(c: ComputerConfig): Promise<void> {
-    await this.deps.rotate?.(c).catch((err) => this.deps.log?.("warn", `Computer "${c.id}": new live-view passwords failed: ${(err as Error).message}`));
-  }
-
   async takeover(id: string, person: string | undefined, o: { force?: boolean } = {}): Promise<ComputerControlView> {
-    const c = this.computer(id);
+    this.computer(id);
     const r = await this.store.takeover(id, person ?? "someone", o);
-    await this.rotate(c);
     for (const req of r.requests) {
       this.announce({ id, action: "taken", person: r.control.person, requestId: req.id, agent: req.agent, ...(req.taskId ? { taskId: req.taskId } : {}) }, r.control);
     }
@@ -101,10 +93,9 @@ export class ComputerTakeoverService {
   }
 
   async release(id: string, person: string | undefined, note?: string, o: { force?: boolean } = {}): Promise<ComputerControlView> {
-    const c = this.computer(id);
+    this.computer(id);
     const before = this.store.get(id).person;
     const r = await this.store.release(id, person ?? "someone", note, o);
-    await this.rotate(c);
     const who = before ?? person;
     for (const req of r.requests) {
       this.announce({ id, action: "released", ...(who ? { person: who } : {}), requestId: req.id, agent: req.agent, ...(req.note ? { note: req.note } : {}), ...(req.taskId ? { taskId: req.taskId } : {}) }, r.control);
@@ -128,8 +119,23 @@ export class ComputerTakeoverService {
       id: c.id, action: "requested", requestId: r.id, agent: agent.name, reason: r.reason, ...(r.url ? { url: r.url } : {}),
       ...(r.taskId ? { taskId: r.taskId } : {}), ...(r.sessionId ? { sessionId: r.sessionId } : {}),
     }, control);
+    this.desktopStarting = this.startDesktop(c);
     void this.notify(agent, c, r, origin).catch((err) => this.deps.log?.("warn", `Computer "${c.id}": the takeover request could not be notified: ${(err as Error).message}`));
     return r;
+  }
+
+  /** The last automatic start of a live view (tests wait on it). */
+  desktopStarting: Promise<void> = Promise.resolve();
+
+  /** The live view, ready when the person opens the computer (in the background: the agent waits anyway). */
+  private async startDesktop(c: ComputerConfig): Promise<void> {
+    if (!this.deps.startDesktop) return;
+    try {
+      await this.deps.startDesktop(c);
+      this.announce({ id: c.id, action: "desktop-started" }, this.store.get(c.id));
+    } catch (err) {
+      this.deps.log?.("warn", `Computer "${c.id}": its live view could not be started for the takeover request: ${(err as Error).message}`);
+    }
   }
 
   /** The agent stopped waiting. */
