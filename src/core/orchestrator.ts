@@ -31,6 +31,7 @@ import type { DeadlockResolverPort, DeadlockFacade, MissionEdit } from "@polpo-a
 import { MISSION_EDIT, mayTalk } from "@polpo-ai/core";
 import { agentEngineProblem, HarnessConfigError, parseAgentEngine } from "@polpo-ai/core";
 import { agentHarnessBudgetUsd, computeMissionCost, plannedAgentsOf, summarizeMissionCost, tasksOfMission, type MissionCost, type MissionCostSummary } from "@polpo-ai/core";
+import { taskApprovals, type TaskApproval } from "@polpo-ai/core";
 import { daytonaApiVersion } from "@polpo-ai/core/sandbox";
 import { TypedEmitter, currentEventOrigin, withEventOrigin } from "./events.js";
 
@@ -1145,8 +1146,25 @@ export class Orchestrator extends TypedEmitter {
         // restart (closing the desktop app) and could never be resumed.
         checkpointStore: new FileCheckpointStore(this.polpoDir),
         delayStore: new FileDelayStore(this.polpoDir),
+        // one instance for the approval manager and the task runner (it caches the file in memory)
+        approvalStore: this.fileApprovalStore(),
       }),
     };
+  }
+
+  private fileApprovals?: FileApprovalStore;
+  /** The file approval store of this instance, one for everyone who reads or writes approvals. */
+  private fileApprovalStore(): FileApprovalStore {
+    return (this.fileApprovals ??= new FileApprovalStore(this.polpoDir));
+  }
+
+  /**
+   * The approval gate requests of a task and how they were resolved (outcome, note, who, when),
+   * oldest first, without their hook payload. Empty when the task never met a gate.
+   */
+  async getTaskApprovals(taskId: string): Promise<TaskApproval[]> {
+    const store = this.drizzleStores?.approvalStore ?? this.fileApprovalStore();
+    return taskApprovals(await store.listByTask(taskId));
   }
 
   /** Create manager instances with shared context. */
@@ -1250,7 +1268,7 @@ export class Orchestrator extends TypedEmitter {
 
     // Initialize approval gates if configured
     if (this.config.settings.approvalGates && this.config.settings.approvalGates.length > 0) {
-      const approvalStore = ctx.approvalStore ?? new FileApprovalStore(this.polpoDir);
+      const approvalStore = ctx.approvalStore ?? this.fileApprovalStore();
       this.approvalMgr = new ApprovalManager(ctx, approvalStore);
       this.approvalMgr.init();
     }
@@ -2655,7 +2673,7 @@ export class Orchestrator extends TypedEmitter {
 
     // Approval gates
     if (this.config.settings.approvalGates && this.config.settings.approvalGates.length > 0) {
-      const approvalStore = this.drizzleStores?.approvalStore ?? new FileApprovalStore(this.polpoDir);
+      const approvalStore = ctx.approvalStore ?? this.fileApprovalStore();
       this.approvalMgr = new ApprovalManager(ctx, approvalStore);
       this.approvalMgr.init();
     }

@@ -59,6 +59,8 @@ type FullTask = TaskRow & {
   toolScope?: TaskToolScope;
   /** What of the tool scope its agent no longer has. */
   toolScopeStale?: string[];
+  /** The approval gates it met and how they were resolved (GET /tasks/:id), oldest first. */
+  approvals?: Array<{ requestId: string; gateName: string; status: string; note?: string; resolvedBy?: string; requestedAt?: string; resolvedAt?: string }>;
 };
 
 /** A task's optional tool scope, as MCP arguments (they map to Task.toolScope). */
@@ -278,6 +280,8 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
         + `${res.assessment ? ` · assessment: ${res.assessment.passed ? "passed" : "not passed"}${res.assessment.globalScore !== undefined ? ` (${res.assessment.globalScore})` : ""}` : ""}`,
       ...(res.assessment?.feedback ? [`feedback: ${short(res.assessment.feedback, 600)}`] : []),
       ...(res.stdout ? [`output: ${short(res.stdout, 1500)}`] : [])] : []),
+      ...(t.approvals?.length ? ["", "approval gates (the latest resolution and its note reach the tasks that depend on it):",
+        ...t.approvals.map((a) => `- ${a.gateName}: ${a.status}${a.resolvedBy ? ` by ${a.resolvedBy}` : ""}${a.resolvedAt ? ` at ${a.resolvedAt}` : ""}${a.note ? ` — note: ${short(a.note, 1500)}` : ""}`)] : []),
       ...(t.outcomes?.length ? ["", "outcomes:", ...t.outcomes.map((o) => `- ${o.type ?? "?"}: ${o.label ?? ""} ${o.path ?? o.url ?? short(o.text, 120)}`)] : []),
       ...(t.runs?.length ? ["", describeTaskCost(cost), "", "runs (where and with what):", ...t.runs.map((r) => `- ${describeTaskRun(r)}`)] : []),
       ...(recent.length ? ["", "recent activity:", ...recent.map(activityLine)] : []),

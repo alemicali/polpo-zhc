@@ -12,7 +12,7 @@
  * Pure: no store, no Node API. The orchestrator (task-runner) and the agent tools
  * (src/tools/task-result-tools.ts) share it.
  */
-import type { Task, TaskOutcome } from "./types.js";
+import type { ApprovalRequest, ApprovalStatus, Task, TaskOutcome } from "./types.js";
 
 /** `settings.dependencyResults` in polpo.json. */
 export interface DependencyResultsSettings {
@@ -94,6 +94,65 @@ export function findTaskInScope(ref: string, scope: readonly Task[]): { task?: T
     if (found.length > 1) return { ambiguous: found };
   }
   return {};
+}
+
+// ── Approval gates ─────────────────────────────────────────────────────────
+
+/**
+ * An approval gate's request on a task and how it was resolved: outcome, the note the person
+ * wrote (an approval's decision, a rejection's feedback), who resolved it and when. The request
+ * without its hook payload: what GET /tasks/:id exposes as `approvals` and what a dependent task
+ * reads in its prompt.
+ */
+export interface TaskApproval {
+  requestId: string;
+  gateId: string;
+  gateName: string;
+  status: ApprovalStatus;
+  note?: string;
+  resolvedBy?: string;
+  requestedAt: string;
+  resolvedAt?: string;
+}
+
+/** Characters at most of an approval note in a prompt (the note is never cut by the results budget). */
+export const APPROVAL_NOTE_MAX_CHARS = 4_000;
+
+/** The approval requests of a task as TaskApproval, oldest first. */
+export function taskApprovals(requests: readonly ApprovalRequest[]): TaskApproval[] {
+  return [...requests]
+    .sort((a, b) => (a.requestedAt < b.requestedAt ? -1 : a.requestedAt > b.requestedAt ? 1 : 0))
+    .map((r) => ({
+      requestId: r.id,
+      gateId: r.gateId,
+      gateName: r.gateName,
+      status: r.status,
+      ...(r.note?.trim() ? { note: r.note.trim() } : {}),
+      ...(r.resolvedBy ? { resolvedBy: r.resolvedBy } : {}),
+      requestedAt: r.requestedAt,
+      ...(r.resolvedAt ? { resolvedAt: r.resolvedAt } : {}),
+    }));
+}
+
+/** The latest resolved approval (approved, rejected or timed out) of a task, if any. */
+export function latestApprovalResolution(approvals: readonly TaskApproval[] | undefined): TaskApproval | undefined {
+  const resolved = (approvals ?? []).filter((a) => a.status !== "pending");
+  if (resolved.length === 0) return undefined;
+  return resolved.reduce((a, b) => ((b.resolvedAt ?? b.requestedAt) >= (a.resolvedAt ?? a.requestedAt) ? b : a));
+}
+
+/**
+ * An approval resolution as prompt lines: the outcome, the gate, who and when, then the note
+ * (only when there is one: no empty "Note" line).
+ */
+export function describeApproval(a: TaskApproval, opts: { maxNoteChars?: number } = {}): string {
+  const who = a.resolvedBy ? ` by ${a.resolvedBy}` : "";
+  const when = a.resolvedAt ? ` at ${a.resolvedAt}` : "";
+  const line = `Approval gate "${a.gateName}": ${a.status}${who}${when}`;
+  if (!a.note) return line;
+  const max = opts.maxNoteChars ?? APPROVAL_NOTE_MAX_CHARS;
+  const label = a.status === "approved" ? "Approver's note (the human decision: follow it)" : "Note";
+  return `${line}\n${label}:\n${cut(a.note, max)}`;
 }
 
 /** The task's final result text: what its agent replied at the end of its last run. */
@@ -204,6 +263,11 @@ export interface RenderDependencyOptions {
   missing?: string[];
   /** The tool the agent reads full results with (default task_result); "" when it has none. */
   toolName?: string;
+  /**
+   * The approval gate requests of the dependencies, by task id. A dependency's latest resolution
+   * (outcome, note, who, when) is rendered under its heading, outside the budget: never cut away.
+   */
+  approvals?: ReadonlyMap<string, readonly TaskApproval[]>;
 }
 
 /** The heading line of a dependency: title, agent, status, id. */
@@ -229,7 +293,12 @@ export function renderDependencyResults(deps: readonly Task[], opts: RenderDepen
     `Files and media are references: their path is on the computer of the task that produced them.`,
   ].join("\n");
 
-  const headings = deps.map((t, i) => heading(i, t));
+  // a person's resolution of an approval gate is never cut: it goes with the heading, outside the budget
+  const approvalLines = deps.map((t) => {
+    const approval = latestApprovalResolution(opts.approvals?.get(t.id));
+    return approval ? describeApproval(approval) : "";
+  });
+  const headings = deps.map((t, i) => (approvalLines[i] ? `${heading(i, t)}\n${approvalLines[i]}` : heading(i, t)));
   const bodies = deps.map((t) => bodyParts(t));
   // the wrapper tags, the intro, each heading with its separators ("\n" after it, "\n\n" between blocks), and room for the tail blocks
   const fixed = 48 + intro.length + headings.reduce((a, h) => a + h.length + 3, 0) + 64 + missing.reduce((a, m) => a + m.length + 5, 0);
@@ -247,7 +316,7 @@ export function renderDependencyResults(deps: readonly Task[], opts: RenderDepen
     blocks.push(`${headings[i]}\n${text}`);
   }
   if (shown < deps.length) {
-    const rest = deps.slice(shown).map((t, j) => `- ${shown + j + 1}. "${t.title}" — ${t.status} — task id ${t.id}`);
+    const rest = deps.slice(shown).map((t, j) => `- ${shown + j + 1}. "${t.title}" — ${t.status} — task id ${t.id}${approvalLines[shown + j] ? `\n${approvalLines[shown + j]}` : ""}`);
     blocks.push(`### ${deps.length - shown} more (no room for their results here${tool ? `: read them with ${tool}` : ""})\n${rest.join("\n")}`);
   }
   if (missing.length) blocks.push(`### Not found\n${missing.map((m) => `- "${m}"`).join("\n")}`);
@@ -255,7 +324,7 @@ export function renderDependencyResults(deps: readonly Task[], opts: RenderDepen
 }
 
 /** One task in full for the task_result tool: status, agent, result (from `offset`, up to `maxChars`), outcomes, error. */
-export function renderTaskResult(task: Task, opts: { offset?: number; maxChars?: number } = {}): string {
+export function renderTaskResult(task: Task, opts: { offset?: number; maxChars?: number; approvals?: readonly TaskApproval[] } = {}): string {
   const result = taskResultText(task);
   const offset = Math.max(0, Math.floor(opts.offset ?? 0));
   const max = Math.max(1000, opts.maxChars ?? 50_000);
@@ -272,5 +341,7 @@ export function renderTaskResult(task: Task, opts: { offset?: number; maxChars?:
   if (outcomes.length) lines.push("", "Outcomes:", ...outcomes.map((o) => describeOutcome(o, task)));
   const error = taskErrorText(task);
   if (error) lines.push("", `Error:\n${error}`);
+  const approval = latestApprovalResolution(opts.approvals);
+  if (approval) lines.push("", describeApproval(approval, { maxNoteChars: max }));
   return lines.join("\n");
 }

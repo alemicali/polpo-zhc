@@ -3882,6 +3882,13 @@ async function execGetTask(polpo: Orchestrator, args: Record<string, unknown>): 
     const { tasks: deps, missing } = resolveDependencies(task, await store.getAllTasks());
     summary.push(`Depends on: ${[...deps.map((d) => `${d.title} [${taskSkip(d) ? "not reached" : d.status}] (${d.id})`), ...missing.map((m) => `${m} [missing]`)].join(", ")}`);
   }
+  try {
+    const approvals = await polpo.getTaskApprovals(task.id);
+    if (approvals.length) {
+      summary.push("Approval gates (the latest resolution and its note reach the tasks that depend on it):",
+        ...approvals.map((a) => `- ${a.gateName}: ${a.status}${a.resolvedBy ? ` by ${a.resolvedBy}` : ""}${a.resolvedAt ? ` at ${a.resolvedAt}` : ""}${a.note ? ` — note: ${a.note}` : ""}`));
+    }
+  } catch { /* no approval store */ }
   if (task.toolScope) {
     let connectors: Parameters<typeof describeTaskToolScope>[1] = [];
     try { connectors = connectorManagerFor(polpo).store.list(); } catch { /* no connectors file */ }
