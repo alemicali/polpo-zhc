@@ -90,6 +90,18 @@ export interface ExpectedOutcome {
   tags?: string[];
 }
 
+/** An approval gate's request on a task and its resolution (GET /tasks/:id `approvals`). */
+export interface TaskApprovalInfo {
+  requestId: string;
+  gateId: string;
+  gateName: string;
+  status: "pending" | "approved" | "rejected" | "timeout";
+  note?: string;
+  resolvedBy?: string;
+  requestedAt: string;
+  resolvedAt?: string;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -141,6 +153,11 @@ export interface Task {
   origin?: WorkOrigin;
   /** GET /tasks/:id: what of the tool scope the agent no longer has (connector removed, access revoked…). */
   toolScopeStale?: string[];
+  /**
+   * GET /tasks/:id: the approval gates the task met and how a person resolved them, oldest first.
+   * The latest resolution and its note also reach the prompt of the tasks that depend on it.
+   */
+  approvals?: TaskApprovalInfo[];
   /**
    * What every run cost in all (first run, retries, continuations, directions): the breakdown on
    * GET /tasks/:id, the compact total in slim lists. Absent on records from events (compute it from `runs`).

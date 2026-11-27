@@ -32,6 +32,19 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-27-approval-note-to-dependents",
+    date: "2026-11-27",
+    kind: "fixed",
+    title: "La nota di un'approvazione arriva alle attività che vengono dopo",
+    summary: "Quando approvi un'attività scrivendo una nota (la tua scelta), le attività che dipendono da quella la leggono: esito, nota, chi ha deciso e quando.",
+    body: [
+      "- **La tua decisione arriva a destinazione**: prima la nota scritta approvando un gate restava solo nella richiesta di approvazione, e l'attività successiva (per esempio \"applica la scelta scritta nella nota del gate\") non la trovava. Ora chi dipende dall'attività approvata riceve, insieme al suo risultato, l'esito del gate, la nota, chi l'ha approvata e quando. La nota non viene mai accorciata.",
+      "- **Senza nota**: arriva solo l'esito e chi ha deciso, senza sezioni vuote.",
+      "- **Anche sull'attività stessa**: nel dettaglio dell'attività (API, Polpo, connettore MCP) vedi i gate che ha incontrato e come sono stati risolti. Se un gate ferma un'attività prima che parta e la approvi con una nota, l'attività la legge quando riparte.",
+      "- **Rifiuti come prima**: il motivo di un rifiuto continua ad aggiungersi alla descrizione dell'attività, che viene rifatta.",
+    ].join("\n"),
+  },
+  {
     id: "2026-11-27-approval-gate-duplicates",
     date: "2026-11-27",
     kind: "fixed",

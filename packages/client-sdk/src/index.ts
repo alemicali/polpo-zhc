@@ -28,6 +28,7 @@ export {
 export type {
   Task,
   TaskSlim,
+  TaskApprovalInfo,
   TaskStatus,
   TaskResult,
   TaskExpectation,

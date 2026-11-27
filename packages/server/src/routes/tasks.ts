@@ -78,6 +78,8 @@ const getTaskRoute = createRoute({
         + "(kind: model_access, auth, budget, killed, assessment, error). `cost`: what every run of the task cost in all "
         + "(first run, retries, continuations, directions): `{ usd, harnessUsd, modelUsd, tokens, runs, lastRunUsd, byEngine, perRun, partial, recoveredUsd? }` "
         + "— `partial: true` when older runs were dropped (a task keeps its latest 20) and could not be recovered from the usage records. "
+        + "`approvals`: the approval gates the task met, oldest first: `{ requestId, gateId, gateName, status (pending, approved, rejected, timeout), note?, resolvedBy?, requestedAt, resolvedAt? }` "
+        + "— the latest resolution and its note also reach the prompt of every task that depends on it. "
         + "`notReached`: a mission decision node took another branch, so the task was closed (status `done`) without running: "
         + "`{ reason: \"decision\", node, branch, answer?, confidence?, decidedBy?, at? }` (also in `result.skipped`; tasks skipped before that field existed are recognised from their result text).",
     },
@@ -417,6 +419,8 @@ export function taskRoutes(getDeps: () => {
   taskToolScopeStale?: (task: any) => Promise<string[]>;
   /** The task's harness cost from the token-usage records (not capped): fills in runs dropped past the latest 20. */
   getTaskHarnessUsage?: (taskId: string) => Promise<{ usd: number; tokens: number } | undefined>;
+  /** The approval gate requests of a task and their resolution (outcome, note, who, when), oldest first. */
+  getTaskApprovals?: (taskId: string) => Promise<Array<Record<string, unknown>>>;
 }): OpenAPIHono {
   /** A tool scope asking for more than the agent has: 400 with the problems. */
   const toolScopeError = (err: unknown) =>
@@ -547,7 +551,9 @@ export function taskRoutes(getDeps: () => {
     // every run's cost in all; older runs dropped (latest 20 kept): their harness cost from the usage records
     const usage = taskMayHaveDroppedRuns(task) && deps.getTaskHarnessUsage ? await deps.getTaskHarnessUsage(taskId).catch(() => undefined) : undefined;
     const cost = computeTaskCost(task, usage ? { harnessUsage: usage } : {});
-    return c.json({ ok: true, data: { ...task, ...(stale.length ? { toolScopeStale: stale } : {}), ...withFailure(task), ...withNotReached(task), cost } }, 200);
+    // the approval gates it met and how a person resolved them (the note reaches the tasks that depend on it)
+    const approvals = deps.getTaskApprovals ? await deps.getTaskApprovals(taskId).catch(() => []) : [];
+    return c.json({ ok: true, data: { ...task, ...(stale.length ? { toolScopeStale: stale } : {}), ...withFailure(task), ...withNotReached(task), cost, ...(approvals.length ? { approvals } : {}) } }, 200);
   });
 
   // POST /tasks — create task

@@ -6,7 +6,10 @@ import { reachableAgents, resolveAgentLines } from "./agent-lines.js";
 import { agentEgressName, computerContext, tailnetEgressFor, normalizeSandboxSettings, resolveSandbox, SandboxVolumeGrantError, type ResolvedSandboxVolume, type SandboxSettings } from "./sandbox.js";
 import type { RunRecord } from "./run-store.js";
 import { buildRunContext, finishRunContext, mergeRunContext, upsertTaskRun } from "./run-context.js";
-import { normalizeDependencyResultsSettings, renderDependencyResults, resolveDependencies } from "./dependency-results.js";
+import {
+  describeApproval, latestApprovalResolution, normalizeDependencyResultsSettings, renderDependencyResults, resolveDependencies,
+  taskApprovals, type TaskApproval,
+} from "./dependency-results.js";
 
 // ── Pure path helpers (no node:path dependency) ─────────────────────────
 
@@ -44,6 +47,20 @@ export class TaskRunner {
   constructor(private ctx: OrchestratorContext) {}
 
   /** The run's communication lines: who the agent may reach (and its manager), for its talk tools. */
+  /** The approval gate requests of the given tasks, by task id (none without an approval store). */
+  private async loadApprovals(taskIds: readonly string[]): Promise<Map<string, TaskApproval[]>> {
+    const out = new Map<string, TaskApproval[]>();
+    const store = this.ctx.approvalStore;
+    if (!store) return out;
+    for (const id of taskIds) {
+      try {
+        const requests = await store.listByTask(id);
+        if (requests.length) out.set(id, taskApprovals(requests));
+      } catch { /* best effort */ }
+    }
+    return out;
+  }
+
   private async agentLinesFor(agentName: string): Promise<Pick<RunnerConfig, "agentLines">> {
     try {
       const agents = await this.ctx.agentStore.getAgents();
@@ -655,10 +672,22 @@ export class TaskRunner {
       try {
         const { tasks: deps, missing } = resolveDependencies(task, await this.ctx.registry.getAllTasks());
         const budget = normalizeDependencyResultsSettings(this.ctx.config.settings.dependencyResults);
-        const section = renderDependencyResults(deps, { ...budget, missing });
+        // how a human resolved an approval gate on a dependency (outcome, note, who, when): its input too
+        const approvals = await this.loadApprovals(deps.map((d) => d.id));
+        const section = renderDependencyResults(deps, { ...budget, missing, approvals });
         if (section) contextParts.push(section);
       } catch { /* best effort: the task still runs */ }
     }
+
+    // 4. This task's own approval gate, approved with a note (a gate before its run, or a re-run
+    // after approval): the person's decision reaches the run. Rejections already reach it as
+    // feedback appended to the description.
+    try {
+      const own = latestApprovalResolution((await this.loadApprovals([task.id])).get(task.id));
+      if (own?.status === "approved" && own.note) {
+        contextParts.push(`<approval>\nA person resolved an approval gate on this task.\n${describeApproval(own)}\n</approval>`);
+      }
+    } catch { /* best effort */ }
 
     if (contextParts.length > 0) {
       taskWithContext.description = contextParts.join("\n\n") + "\n\n" + task.description;

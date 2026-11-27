@@ -1553,6 +1553,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     updateTaskToolScope: (id: string, scope: unknown) => o.updateTaskToolScope(id, scope),
     taskToolScopeStale: (task: any) => o.taskToolScopeStale(task),
     getTaskHarnessUsage: async (id: string) => (await harnessUsageOf([id]))[id],
+    getTaskApprovals: async (id: string) => (await o.getTaskApprovals(id)) as unknown as Array<Record<string, unknown>>,
   })));
 
   authed.route("/missions", missionRoutes(() => ({
