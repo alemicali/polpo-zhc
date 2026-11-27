@@ -32,6 +32,24 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-27-computer-live-view",
+    date: "2026-11-27",
+    kind: "new",
+    title: "Guarda il computer dell'agente dal vivo e prendi il controllo",
+    summary: "Il browser di un agente può aprirsi in una finestra vera sul desktop del suo computer: lo guardi dal vivo, prendi il controllo per un login, un codice 2FA o un CAPTCHA e lo restituisci. L'agente aspetta e non vede mai cosa scrivi.",
+    body: [
+      "- **Browser con finestra** (`browserHeaded`): nella scheda Computer dell'agente attiva **Headed browser**; sul suo computer (Daytona v2) il browser si apre sul desktop virtuale, con lo stesso profilo, la stessa sessione e la stessa uscita di rete di prima.",
+      "- **Vista dal vivo**: nella pagina del computer, sezione **Live** (e nella scheda Computer dell'agente), avvii la vista e vedi il desktop, in sola lettura finché il controllo è dell'agente.",
+      "- **Prendi il controllo / Restituisci** (*Take control* / *Give back*): mentre hai il controllo la vista diventa interattiva e gli strumenti browser dell'agente aspettano; quando restituisci puoi lasciargli una nota (mai una password). Solo chi ha il controllo riceve la password VNC completa, e le password cambiano a ogni passaggio di mano.",
+      "- **L'agente ti chiama quando serve**: con `request_computer_takeover` chiede una persona per un login, un 2FA o un CAPTCHA; vedi un avviso sulla pagina del computer e ricevi una notifica (sui canali dell'agente, se li ha, altrimenti su quelli di Polpo). L'agente aspetta (30 minuti di default) e riparte con la tua nota.",
+      "- **`CDP_URL` nei comandi**: gli script dell'agente (per esempio un client CDP in Python di una skill) guidano lo stesso browser già connesso, senza aprirne un altro.",
+      "- **Sicurezza**: le connessioni WebSocket della vista dal vivo e di Browser Live ora richiedono il login (o la chiave API).",
+      "- Anche da API, MCP (`polpo_computer_desktop`, `polpo_computer_takeover`, `polpo_computer_release` e la scheda `polpo_computer_show`), nella chat con Polpo e nell'SDK React (`useComputerDesktop`). Nuova immagine `polpo-runner-vm-4` con il desktop già installato; sulle VM più vecchie i pacchetti si installano al primo uso. Guida: docs/computer-live-view.md.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i computer", to: "/computers" },
+  },
+  {
     id: "2026-11-27-agent-profile-polish",
     date: "2026-11-27",
     kind: "improved",

@@ -326,7 +326,12 @@ async function loadNodePty(): Promise<NodePtyModule> {
   return import("node-pty");
 }
 
-function isTerminalRequestAuthorized(
+/**
+ * A WebSocket upgrade from a signed-in person: an API key (x-api-key, Bearer, or ?api_key=), else
+ * the instance session cookie; open only without instance auth and without API keys. Every
+ * WebSocket of the server checks it (terminal, code-server, Browser Live, computers' live view).
+ */
+export function isTerminalRequestAuthorized(
   req: IncomingMessage,
   polpoDir: string,
   apiKeys: string[],
@@ -426,7 +431,7 @@ function parseAgentKind(value: string | undefined): AgentKind {
 }
 
 /** The signed-in member of a terminal request (instance sign-in cookie), if any. */
-function terminalMember(req: IncomingMessage, polpoDir: string): string | undefined {
+export function terminalMember(req: IncomingMessage, polpoDir: string): string | undefined {
   if (!isInstanceAuthEnabled()) return undefined;
   const token = parseCookie(req.headers.cookie ?? "")[AUTH_COOKIE_NAME];
   return validateSession(polpoDir, token)?.email?.toLowerCase();

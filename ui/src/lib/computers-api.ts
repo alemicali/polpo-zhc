@@ -7,7 +7,7 @@
  */
 import { apiUrl, config } from "@/lib/config";
 import type { HarnessSession } from "@/lib/harnesses-api";
-import type { ComputerWebhookEvent, ComputerWebhookEventPage, ComputerWebhookOutcome, ComputerWebhookStatus } from "@polpo-ai/react";
+import type { ComputerDesktopView, ComputerWebhookEvent, ComputerWebhookEventPage, ComputerWebhookOutcome, ComputerWebhookStatus } from "@polpo-ai/react";
 
 // ── Types (mirror @polpo-ai/core computers.ts and src/server/routes/computers.ts) ──
 
@@ -173,6 +173,17 @@ export const computersApi = {
   /** An agent's default computer ("host" or "" for this server) and the computers it may use. */
   assign: (agent: string, defaultComputer: string, computers?: string[]) =>
     request<unknown>(`/agents/${encodeURIComponent(agent)}`, json("PATCH", { defaultComputer: defaultComputer === "host" ? "" : defaultComputer, ...(computers ? { computers } : {}), publish: false })),
+  /** The live view and who holds the desktop; viewer: also this person's VNC password while it runs. Never starts it. */
+  desktop: (id: string, viewer = false) => request<ComputerDesktopView>(`/computers/${encodeURIComponent(id)}/desktop${viewer ? "?viewer=1" : ""}`),
+  /** Start the live view (starts or wakes the computer) / stop it (the display stays). */
+  desktopStart: (id: string) => request<ComputerDesktopView>(`/computers/${encodeURIComponent(id)}/desktop/start`, json("POST", {})),
+  desktopStop: (id: string) => request<ComputerDesktopView>(`/computers/${encodeURIComponent(id)}/desktop/stop`, json("POST", {})),
+  /** Take control (the agent's browser waits) / give it back with a note for the agent. */
+  takeover: (id: string, force = false) => request<ComputerDesktopView>(`/computers/${encodeURIComponent(id)}/takeover`, json("POST", force ? { force: true } : {})),
+  release: (id: string, note?: string) => request<ComputerDesktopView>(`/computers/${encodeURIComponent(id)}/release`, json("POST", note ? { note } : {})),
+  /** The agent's browser headed (a window on its computer's display, watchable live) or headless. */
+  setBrowserHeaded: (agent: string, browserHeaded: boolean) =>
+    request<unknown>(`/agents/${encodeURIComponent(agent)}`, json("PATCH", { browserHeaded, publish: false })),
 };
 
 // ── Presentation ──────────────────────────────────────────────────────────

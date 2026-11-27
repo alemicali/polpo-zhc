@@ -174,9 +174,9 @@ export const DAYTONA_V2_SANDBOX_CLASS = "linux-vm";
  * created from when `providers.daytona.image` is not set. The suffix is the recipe revision: it
  * changes only when the image contents change, not with every Polpo release.
  */
-export const DAYTONA_V2_RUNNER_IMAGE = "polpo-runner-vm-3";
+export const DAYTONA_V2_RUNNER_IMAGE = "polpo-runner-vm-4";
 /** The runner image before it: used when DAYTONA_V2_RUNNER_IMAGE is not built in the project yet. */
-export const DAYTONA_V2_PREVIOUS_RUNNER_IMAGE = "polpo-runner-vm-2";
+export const DAYTONA_V2_PREVIOUS_RUNNER_IMAGE = "polpo-runner-vm-3";
 
 /** Default (and the plans' usual maximum) wall-clock budget of a v2 sandbox: providers.daytona.maxTimeoutSeconds. */
 export const DAYTONA_V2_MAX_TIMEOUT_SECONDS = 86_400;

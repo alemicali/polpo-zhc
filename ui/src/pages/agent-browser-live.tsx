@@ -19,7 +19,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { apiUrl, websocketUrl } from "@/lib/config";
+import { apiUrl, config, websocketUrl } from "@/lib/config";
 import { cn } from "@/lib/utils";
 
 type DashboardStatus = { running: boolean; port: number };
@@ -154,7 +154,10 @@ export function AgentBrowserLivePage() {
         const { default: RFB } = await import("@novnc/novnc");
         if (disposed) return;
         screen.replaceChildren();
-        const client = new RFB(screen, websocketUrl("/api/v1/browser-dashboard/vnc"), {
+        // authorized like the terminal: the session cookie, or the API key
+        const vncUrl = new URL(websocketUrl("/api/v1/browser-dashboard/vnc"));
+        if (config.apiKey) vncUrl.searchParams.set("api_key", config.apiKey);
+        const client = new RFB(screen, vncUrl.toString(), {
           shared: true,
         }) as VncClient;
         client.scaleViewport = true;

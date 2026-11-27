@@ -48,6 +48,7 @@ import { registerChannelSetupTools } from "./mcp-server/channel-setup.js";
 import { registerSetupTools } from "./mcp-server/setup.js";
 import { registerTriggerTools } from "./mcp-server/triggers.js";
 import { registerTriggerCards } from "./mcp-server/trigger-cards.js";
+import { registerComputerCards } from "./mcp-server/computer-cards.js";
 import { registerDecisionTools } from "./mcp-server/decisions.js";
 import { registerDecisionCards } from "./mcp-server/decision-cards.js";
 import { registerMediaTools } from "./mcp-server/media.js";
@@ -99,6 +100,7 @@ const declareAll: Declare = (tool, app, deps) => {
   registerAutomationTools(tool, deps);
   registerTriggerTools(tool, deps);
   registerTriggerCards(app, deps);
+  registerComputerCards(app, deps);
   registerDecisionTools(tool, deps);
   registerDecisionCards(app, deps);
   registerMediaTools(tool, deps);

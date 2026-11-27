@@ -73,7 +73,9 @@ import { mobileDiagnosticsRoutes } from "./routes/mobile-diagnostics.js";
 import { preferencesRoutes } from "./routes/preferences.js";
 import { pushRoutes } from "./routes/push.js";
 import { expoPushRoutes } from "./routes/expo-push.js";
-import { agentEgressName, computerContext, tailnetEgressFor } from "@polpo-ai/core/sandbox";
+import { agentEgressName, computerContext, isRemoteComputer, tailnetEgressFor } from "@polpo-ai/core/sandbox";
+import { computerControlStore } from "../sandbox/computer-control.js";
+import { computerDesktopsFor } from "../sandbox/desktop.js";
 import { harnessUsageByTask } from "@polpo-ai/core/task-cost";
 import { computerRoutes, egressRoutes, type ComputerRouteDeps } from "./routes/computers.js";
 import { harnessRoutes } from "./routes/harnesses.js";
@@ -508,10 +510,21 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         const section = connectorsPromptSection(connectorManagerFor(o).store.list(), agentConfig.name, [], agentConfig.connectorTools);
         if (section) connectorsNote = `\n\n${section}`;
       } catch { /* no connectors file: nothing to say */ }
+      // its browser: CDP_URL in its commands, headed, take control on a remote computer
+      let browserNote = "";
+      if ((agentConfig.allowedTools ?? []).some((t: string) => t.toLowerCase().startsWith("browser_"))) {
+        const { browserPromptNote } = await import("../tools/browser-tools.js");
+        const { wantsComputerTakeoverTool } = await import("../tools/computer-takeover-tools.js");
+        const computer = sandbox?.computer;
+        browserNote = `\n${browserPromptNote({
+          headed: !!agentConfig.browserHeaded, session: agentConfig.name, ...(computer && remote ? { computer: { id: computer.id, name: computer.name } } : {}),
+          takeover: remote && !!o.getComputerTakeover() && wantsComputerTakeoverTool(agentConfig, computer),
+        })}`;
+      }
       return buildSystemPrompt(agentConfig, o.getAgentWorkDir(), o.getPolpoDir(), undefined, undefined, mailboxes)
         + sandboxPromptNote(sandbox, remote ? volumes.filter((v) => v.remote) : volumes.filter((v) => v.hostPath),
           remote ? { outputDir: o.chatOutputDir(agentConfig.name) } : {})
-        + connectorsNote;
+        + connectorsNote + browserNote;
     },
     resolveAgentTools: async (agentConfig: any, context?: { sessionId: () => string | undefined; origin?: import("@polpo-ai/core").ConversationCheckTarget; chain?: string[] }) => {
       // a suite role's turn (judge, simulated user, generator, reviewer): text only, no tools
@@ -604,6 +617,9 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         fs: chatFs,
         sandboxProvider: chatSandboxProvider,
         ...(context?.sessionId?.() ? { mediaContext: { sessionId: context.sessionId()! } } : {}),
+        ...(agentConfig.browserHeaded ? { browserHeaded: true } : {}),
+        // while a person holds the computer's desktop (take control), its browser waits
+        ...(chatComputer && isRemoteComputer(chatComputer) ? { browserControl: { computerId: chatComputer.id, store: computerControlStore(polpoDir) } } : {}),
       });
       const memoryStore = o.getMemoryStore();
       if (memoryStore) tools.push(...createMemoryTools(memoryStore, agentConfig.name));
@@ -651,6 +667,19 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
           const sessionId = () => context?.sessionId?.();
           tools.push(...createAgentNotifyTools(agentConfig, {
             send: (req) => notifier.send(agentConfig, req, sessionId() ? { sessionId: sessionId()! } : {}),
+          }));
+        }
+      }
+      // request_computer_takeover: a person takes control of its computer's desktop and gives it back
+      {
+        const takeover = o.getComputerTakeover();
+        if (takeover && chatComputer && isRemoteComputer(chatComputer)) {
+          const { createComputerTakeoverTools } = await import("../tools/computer-takeover-tools.js");
+          const sessionId = () => context?.sessionId?.();
+          tools.push(...createComputerTakeoverTools(agentConfig, chatComputer, {
+            request: (ask) => takeover.request(agentConfig, chatComputer.id, ask, sessionId() ? { sessionId: sessionId()! } : {}),
+            get: (id) => takeover.store.request(id),
+            close: (id, status) => takeover.close(id, status),
           }));
         }
       }
@@ -2093,8 +2122,15 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     harnessSessions: (computerId) => harnessSessionViews(o.getPolpoDir(), { computer: computerId }),
     instance: () => o.getConfig()?.project,
     emit: (payload) => o.emit("computer:changed", payload),
+    emitTakeover: (payload) => o.emit("computer:takeover", payload),
+    // live views (Daytona v2 computers' desktops) and take control
+    desktops: () => computerDesktopsFor(o.getPolpoDir(), { manager: computerDeps.manager, sandboxFor: computerDeps.sandboxFor }),
+    takeover: () => (orchestrator?.isInitialized ? o.getComputerTakeover() : undefined),
+    member: (c) => c.get("polpoUserEmail" as never) as string | undefined,
   };
   authed.route("/computers", computerRoutes(computerDeps));
+  // every open takeover request (an agent waiting for a person), all computers
+  authed.get("/computer-takeovers", (c) => c.json({ ok: true, data: { requests: (orchestrator?.isInitialized ? o.getComputerTakeover()?.pending() : undefined) ?? [] } }));
   authed.route("/computer-webhooks", computerWebhookAdminRoutes({ webhooks: computerWebhooks }));
   // Triggers: definitions, secrets (rotation, the HMAC secret in the vault), deliveries, test tools (no actions yet)
   authed.route("/triggers", triggerAdminRoutes({ service: triggerService }));

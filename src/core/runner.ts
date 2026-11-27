@@ -27,6 +27,8 @@ import type { RunnerConfig, TaskResult } from "./types.js";
 import { notifyRunComplete, notifyNetworkDenied, notifySandboxEvent } from "./notification.js";
 import { socketAgentTalk } from "./agent-talk-bridge.js";
 import { socketAgentNotify } from "./agent-notify-bridge.js";
+import { socketComputerTakeover } from "./computer-takeover.js";
+import { computerControlStore } from "../sandbox/computer-control.js";
 import { sanitizeTranscriptEntry } from "../server/security.js";
 import { EncryptedVaultStore } from "../vault/encrypted-store.js";
 import { registerRunnerProviders } from "./runner-providers.js";
@@ -374,6 +376,10 @@ async function main(): Promise<void> {
       } : {}),
       // send_notification: the orchestrator sends as this run's agent (allowlist, rate limit, origin)
       ...(config.notifySocket ? { agentNotify: socketAgentNotify(config.notifySocket, config.runId) } : {}),
+      // request_computer_takeover: the orchestrator records it as this run's agent and notifies the person
+      ...(config.notifySocket ? {
+        computerTakeover: (computerId: string) => socketComputerTakeover(config.notifySocket!, config.runId, computerId, computerControlStore(config.polpoDir)),
+      } : {}),
       vaultStore,
       whatsappStore: waStore,
       whatsappSendMessage: waSendMessage,

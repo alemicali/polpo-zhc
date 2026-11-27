@@ -17,6 +17,13 @@
  *   POST   /computers/:id/reset       { confirm: true }: delete the machine (and its snapshots) and create a new one (its disk is lost)
  *   GET    /computers/:id/egress      a remote computer's egress through Tailscale: tailnet up/down, node, path (direct/DERP),
  *                                     proxy reachable, where its browser goes out now (looks inside only a running machine)
+ *   GET    /computers/:id/desktop     its live view (desktop.ts: display, VNC, websockify; never starts it) and who holds it;
+ *                                     ?viewer=1 also this person's VNC password (full control only while they hold it)
+ *   POST   /computers/:id/desktop/start   start the live view (starts or wakes the computer); /desktop/stop stops it
+ *   GET    /computers/:id/control     who holds its desktop (agent, or a person since when) and its agents' takeover requests
+ *   POST   /computers/:id/takeover    { force? }: the signed-in person takes control (the agent's browser waits)
+ *   POST   /computers/:id/release     { note?, force? }: give control back to the agent, with a note it reads
+ *   WS     /computers/:id/desktop/vnc the live view itself (computer-desktop-ws.ts), authorized like the terminal
  *
  * "host" (this server) is listed as a built-in computer; it cannot be changed, started or stopped.
  * Machines are created on first use (an agent's chat or task) or on start, never on every call.
@@ -31,6 +38,9 @@ import type { HarnessSessionView } from "../../harness/control.js";
 import { ComputerDeletedError, ComputerResetIncompleteError, computerEgressStatus, type ComputerLive, type ComputerManager } from "../../sandbox/computers.js";
 import { computerChangeNote, computerNetworkProblem } from "../../sandbox/manager.js";
 import { SandboxNetworkConfigError } from "../../sandbox/remote-adapters.js";
+import { desktopUnsupported, type ComputerDesktops, type DesktopStatus } from "../../sandbox/desktop.js";
+import { ComputerControlError, type ComputerControlView } from "../../sandbox/computer-control.js";
+import type { ComputerTakeoverService } from "../../core/computer-takeover.js";
 
 export interface ComputerRouteDeps {
   computers: () => ComputerConfig[];
@@ -42,12 +52,28 @@ export interface ComputerRouteDeps {
   /** The sandbox a computer's machine is created with, or why it cannot be (no API key). */
   sandboxFor: (computer: ComputerConfig) => EffectiveSandbox | { error: string };
   emit: (payload: PolpoEventMap["computer:changed"]) => void;
+  /** The live view started or stopped (computer:takeover). */
+  emitTakeover?: (payload: PolpoEventMap["computer:takeover"]) => void;
   /** The instance's name (the project): part of the computers' node names in the tailnet. */
   instance?: () => string | undefined;
   /** Tasks (the detail's recent runs on a computer). */
   tasks?: () => Promise<Task[]>;
   /** The agent harness sessions (Claude Code, Codex, OpenCode) bound to a computer. */
   harnessSessions?: (computerId: string) => HarnessSessionView[];
+  /** The computers' live views (desktop.ts). */
+  desktops?: () => ComputerDesktops;
+  /** Who holds each computer's desktop, and agents' requests for a person (computer-takeover.ts). */
+  takeover?: () => ComputerTakeoverService | undefined;
+  /** The signed-in person (member email), when members sign in. */
+  member?: (c: Context) => string | undefined;
+}
+
+/** GET /computers/:id/desktop: the live view, who holds it, and (viewer=1) this viewer's VNC password. */
+export interface ComputerDesktopView {
+  desktop: DesktopStatus;
+  control: ComputerControlView;
+  /** viewer=1, while the live view runs: the password for this person (full control only when they hold it). */
+  viewer?: { mode: "control" | "view"; password: string; path: string };
 }
 
 /** Runs listed in a computer's detail (newest first). */
@@ -333,6 +359,104 @@ export function computerRoutes(deps: ComputerRouteDeps): Hono {
   app.post("/:id/stop", control("stop"));
   app.post("/:id/restart", control("restart"));
   app.post("/:id/reset", control("reset"));
+
+  // ── Live view and take control ────────────────────────────────────
+
+  const takeoverService = () => deps.takeover?.();
+  /** The person: their member email, or "someone" without member sign-in. */
+  const personOf = (c: Context) => deps.member?.(c)?.toLowerCase() || "someone";
+  const remoteOr = (c: Context, id: string): ComputerConfig | Response => {
+    const computer = find(id);
+    if (!computer) return fail(c, 404, `There is no computer "${id}"`, "NOT_FOUND");
+    const why = desktopUnsupported(computer);
+    if (why) return fail(c, 400, why, "VALIDATION_ERROR");
+    return computer;
+  };
+  const controlError = (c: Context, err: unknown) => {
+    if (err instanceof ComputerControlError) {
+      const status = err.code === "NOT_FOUND" ? 404 : err.code === "CONFLICT" || err.code === "NOT_HELD" ? 409 : 400;
+      return fail(c, status, err.message, err.code);
+    }
+    return fail(c, 500, err instanceof Error ? err.message : String(err));
+  };
+  const desktopView = async (c: Context, computer: ComputerConfig, viewer: boolean, status?: DesktopStatus): Promise<ComputerDesktopView> => {
+    const desktops = deps.desktops?.();
+    const desktop = status ?? (desktops ? await desktops.status(computer) : { computerId: computer.id, state: "unsupported" as const, display: ":99", note: "No live view on this server" });
+    const control = takeoverService()?.get(computer.id) ?? { computerId: computer.id, holder: "agent" as const, requests: [], open: [] };
+    const out: ComputerDesktopView = { desktop, control };
+    if (viewer && desktops && desktop.state === "running") {
+      const mode = control.holder === "person" && control.person === personOf(c) ? "control" : "view";
+      const password = desktops.password(computer.id, mode);
+      if (password) out.viewer = { mode, password, path: `/api/v1/computers/${encodeURIComponent(computer.id)}/desktop/vnc` };
+    }
+    return out;
+  };
+
+  app.get("/:id/desktop", async (c) => {
+    const computer = remoteOr(c, c.req.param("id"));
+    if (computer instanceof Response) return computer;
+    return c.json({ ok: true, data: await desktopView(c, computer, c.req.query("viewer") === "1") });
+  });
+
+  app.post("/:id/desktop/start", async (c) => {
+    const computer = remoteOr(c, c.req.param("id"));
+    if (computer instanceof Response) return computer;
+    const desktops = deps.desktops?.();
+    if (!desktops) return fail(c, 409, "No live view on this server", "NOT_AVAILABLE");
+    try {
+      const status = await desktops.start(computer);
+      deps.emitTakeover?.({ id: computer.id, action: "desktop-started", holder: takeoverService()?.get(computer.id).holder ?? "agent" });
+      return c.json({ ok: true, data: await desktopView(c, computer, true, status) });
+    } catch (err) {
+      return operationError(c, `Starting the live view of computer "${computer.id}"`, err);
+    }
+  });
+
+  app.post("/:id/desktop/stop", async (c) => {
+    const computer = remoteOr(c, c.req.param("id"));
+    if (computer instanceof Response) return computer;
+    const desktops = deps.desktops?.();
+    if (!desktops) return fail(c, 409, "No live view on this server", "NOT_AVAILABLE");
+    const status = await desktops.stop(computer);
+    deps.emitTakeover?.({ id: computer.id, action: "desktop-stopped", holder: takeoverService()?.get(computer.id).holder ?? "agent" });
+    return c.json({ ok: true, data: await desktopView(c, computer, false, status) });
+  });
+
+  /** Who holds it and its agents' requests (open first). */
+  app.get("/:id/control", async (c) => {
+    const computer = remoteOr(c, c.req.param("id"));
+    if (computer instanceof Response) return computer;
+    return c.json({ ok: true, data: takeoverService()?.get(computer.id) ?? { computerId: computer.id, holder: "agent", requests: [], open: [] } });
+  });
+
+  app.post("/:id/takeover", async (c) => {
+    const computer = remoteOr(c, c.req.param("id"));
+    if (computer instanceof Response) return computer;
+    const service = takeoverService();
+    if (!service) return fail(c, 409, "Take control is not available on this server", "NOT_AVAILABLE");
+    const body = await c.req.json().catch(() => ({})) as { force?: unknown };
+    try {
+      await service.takeover(computer.id, personOf(c), { force: body.force === true });
+      return c.json({ ok: true, data: await desktopView(c, computer, true) });
+    } catch (err) {
+      return controlError(c, err);
+    }
+  });
+
+  app.post("/:id/release", async (c) => {
+    const computer = remoteOr(c, c.req.param("id"));
+    if (computer instanceof Response) return computer;
+    const service = takeoverService();
+    if (!service) return fail(c, 409, "Take control is not available on this server", "NOT_AVAILABLE");
+    const body = await c.req.json().catch(() => ({})) as { note?: unknown; force?: unknown };
+    if (body.note !== undefined && typeof body.note !== "string") return fail(c, 400, "note must be text", "VALIDATION_ERROR");
+    try {
+      await service.release(computer.id, personOf(c), body.note as string | undefined, { force: body.force === true });
+      return c.json({ ok: true, data: await desktopView(c, computer, true) });
+    } catch (err) {
+      return controlError(c, err);
+    }
+  });
 
   app.get("/:id/egress", async (c) => {
     const id = c.req.param("id");

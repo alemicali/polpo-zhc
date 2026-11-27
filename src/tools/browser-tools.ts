@@ -19,6 +19,7 @@
  */
 
 import { execFileSync, spawn as spawnChild } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import type { FileSystem } from "@polpo-ai/core/filesystem";
@@ -33,6 +34,8 @@ import { browserProxyContext, proxyArgs, type BrowserNetworkGuard } from "./brow
 import type { ResolvedVault } from "../vault/index.js";
 import { createSecretMasker, formatVaultRef, resolveEnvFromVault } from "../vault/env-from-vault.js";
 import { decideEgress, decideRemoteEgress, shellHost, type BrowserEgressConfig } from "./browser-egress.js";
+import { DESKTOP_DISPLAY, DESKTOP_DISPLAY_COMMAND, ensureDesktopDisplay } from "../sandbox/desktop.js";
+import { waitForAgentControl, type ComputerControlStore } from "../sandbox/computer-control.js";
 
 /** Agent browser results above this are saved in full to a file (head + tail + path for the model). */
 const MAX_OUTPUT_BYTES = 50_000;
@@ -102,10 +105,12 @@ export function execBrowserAsync(
     proxy?: string;
     /** Keep only the last N chars of the raw output (default 50,000). Infinity keeps everything. */
     maxOutputBytes?: number;
+    /** Headed: a visible window on this X display (agent.browserHeaded). */
+    display?: string;
   } = {},
 ): Promise<{ success: boolean; data?: any; error?: string; raw: string }> {
   return new Promise((resolve) => {
-    const sessionArgs = options.session ? ["--session", options.session] : [];
+    const sessionArgs = [...(options.session ? ["--session", options.session] : []), ...(options.display && !options.cdp ? ["--headed"] : [])];
     // When attaching to an external Chrome via CDP, --profile is meaningless
     // (that Chrome already owns its user-data-dir) so it's dropped.
     const cdpArgs = options.cdp ? ["--cdp", String(options.cdp)] : [];
@@ -115,6 +120,7 @@ export function execBrowserAsync(
     const child = spawnChild("agent-browser", fullArgs, {
       cwd: options.cwd,
       stdio: ["ignore", "pipe", "pipe"],
+      ...(options.display && !options.cdp ? { env: { ...process.env, DISPLAY: options.display } } : {}),
     });
 
     const chunks: Buffer[] = [];
@@ -174,7 +180,7 @@ function browserResult(result: { success: boolean; data?: any; error?: string; r
 /** Agent-side CLI call: the raw output is kept whole so large results can be offloaded, not lost. */
 function execAgentBrowser(
   args: string[],
-  options: { session?: string; profileDir?: string; timeout?: number; cwd?: string; signal?: AbortSignal } = {},
+  options: { session?: string; profileDir?: string; timeout?: number; cwd?: string; signal?: AbortSignal; display?: string } = {},
 ): ReturnType<typeof execBrowserAsync> {
   return execBrowserAsync(args, { ...options, proxy: browserProxyContext.getStore()?.proxy, maxOutputBytes: Infinity });
 }
@@ -205,8 +211,12 @@ function shq(arg: string): string {
 export const SANDBOX_BROWSER_PROFILES = ".polpo/browser-profiles";
 
 /** The agent-browser command line run in a sandbox (exported for tests). */
-export function sandboxBrowserCommand(args: string[], options: { session?: string; profileName?: string; proxy?: string } = {}): string {
-  const parts = ["agent-browser"];
+export function sandboxBrowserCommand(args: string[], options: { session?: string; profileName?: string; proxy?: string; headed?: boolean } = {}): string {
+  // headed: a window on the computer's virtual display (started first when it is not up; its
+  // failure leaves agent-browser to say there is no display)
+  const parts = options.headed
+    ? [`(${DESKTOP_DISPLAY_COMMAND}) >/dev/null 2>&1;`, `DISPLAY=${DESKTOP_DISPLAY}`, "agent-browser", "--headed"]
+    : ["agent-browser"];
   if (options.session) parts.push("--session", shq(options.session));
   // the profile lives in the VM user's home: the host path means nothing there
   if (options.profileName) parts.push("--profile", `"$HOME"/${shq(`${SANDBOX_BROWSER_PROFILES}/${options.profileName}`)}`);
@@ -284,10 +294,14 @@ export function ensureSandboxBrowser(shell: Shell): Promise<string | undefined> 
 async function execSandboxBrowser(
   shell: Shell,
   args: string[],
-  options: { session?: string; profileName?: string; timeout?: number; cwd?: string; saves?: string; secret?: string; proxy?: string },
+  options: { session?: string; profileName?: string; timeout?: number; cwd?: string; saves?: string; secret?: string; proxy?: string; headed?: boolean },
 ): Promise<BrowserCallResult> {
   const missing = await ensureSandboxBrowser(shell);
   if (missing) return { success: false, error: missing, raw: missing };
+  if (options.headed) {
+    const noDisplay = await ensureSandboxDisplay(shell);
+    if (noDisplay) return { success: false, error: noDisplay, raw: noDisplay };
+  }
   try {
     // agent-browser does not create the folder of the file it saves
     const mkdir = options.saves ? `mkdir -p ${shq(dirname(options.saves))} && ` : "";
@@ -298,6 +312,111 @@ async function execSandboxBrowser(
     const message = err?.message ?? String(err);
     return { success: false, error: message, raw: message };
   }
+}
+
+const displayReady = new WeakMap<Shell, Promise<string | undefined>>();
+
+/**
+ * The virtual display's packages in the sandbox (Xvfb, openbox): in the runner image (vm-4);
+ * otherwise installed once per shell. Resolves to an error message when they cannot be.
+ */
+export function ensureSandboxDisplay(shell: Shell): Promise<string | undefined> {
+  let ready = displayReady.get(shell);
+  if (!ready) {
+    ready = ensureDesktopDisplay({
+      exec: async (command, o = {}) => {
+        const r = await shell.execute(command, { timeout: o.timeoutMs ?? 30_000, ...(o.env ? { env: o.env } : {}) });
+        return { exitCode: r.exitCode, stdout: r.stdout, stderr: r.stderr };
+      },
+    });
+    displayReady.set(shell, ready);
+    void ready.then((err) => { if (err) displayReady.delete(shell); });
+  }
+  return ready;
+}
+
+/** The X display a headed browser on this server opens on: $DISPLAY, else Polpo's virtual display. */
+export async function hostBrowserDisplay(): Promise<string> {
+  if (process.env.DISPLAY) return process.env.DISPLAY;
+  // Polpo's display is already up (the server's Browser Live, or an earlier run): share it, so a
+  // task runner does not start a display of its own nobody watches
+  if (existsSync("/tmp/.X11-unix/X99")) return ":99";
+  const { ensureBrowserDisplay } = await import("../server/routes/browser-dashboard.js");
+  return ensureBrowserDisplay();
+}
+
+/** agent-browser's CDP websocket (ws://127.0.0.1:PORT/devtools/browser/…) as the HTTP endpoint scripts use (/json/new…). */
+export function cdpHttpUrl(wsUrl: string | undefined): string | undefined {
+  if (!wsUrl) return undefined;
+  try {
+    const u = new URL(wsUrl);
+    if (!/^(ws|wss|http|https):$/.test(u.protocol) || !u.port) return undefined;
+    return `${u.protocol === "wss:" || u.protocol === "https:" ? "https" : "http"}://${u.hostname}:${u.port}`;
+  } catch {
+    return undefined;
+  }
+}
+
+/** One shell command: the session's CDP URL when the session exists (never launches a browser). */
+export function sandboxCdpUrlCommand(session: string): string {
+  return `if agent-browser session list --json 2>/dev/null | grep -qF ${shq(JSON.stringify(session))}; then agent-browser --session ${shq(session)} get cdp-url --json 2>/dev/null; fi; true`;
+}
+
+function parseCdpUrl(raw: string): string | undefined {
+  try {
+    const parsed = JSON.parse(raw.trim()) as { data?: { cdpUrl?: unknown } };
+    return typeof parsed?.data?.cdpUrl === "string" ? parsed.data.cdpUrl : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The environment an agent's commands get for its own browser: POLPO_BROWSER_SESSION always,
+ * CDP_URL (http://127.0.0.1:PORT) while its agent-browser session runs, so scripts drive the same
+ * signed-in browser (/json/new, /json/list…), and DISPLAY when it is headed. Looked up per call and
+ * never launching a browser: no session, no CDP_URL. Never fails a command (errors: what is known).
+ */
+export async function agentBrowserEnv(o: { session: string; shell?: Shell; headed?: boolean; remote?: boolean }): Promise<Record<string, string>> {
+  const env: Record<string, string> = { POLPO_BROWSER_SESSION: o.session };
+  try {
+    let ws: string | undefined;
+    if (o.remote && o.shell) {
+      const r = await o.shell.execute(sandboxCdpUrlCommand(o.session), { timeout: 10_000 });
+      ws = parseCdpUrl(r.stdout);
+      if (o.headed) env.DISPLAY = DESKTOP_DISPLAY;
+    } else {
+      const list = await execBrowserAsync(["session", "list"], { timeout: 10_000 });
+      const sessions = (list.data as { sessions?: unknown } | undefined)?.sessions;
+      if (Array.isArray(sessions) && sessions.includes(o.session)) {
+        const r = await execBrowserAsync(["get", "cdp-url"], { session: o.session, timeout: 10_000 });
+        ws = typeof (r.data as { cdpUrl?: unknown } | undefined)?.cdpUrl === "string" ? (r.data as { cdpUrl: string }).cdpUrl : undefined;
+      }
+      if (o.headed) env.DISPLAY = await hostBrowserDisplay();
+    }
+    const http = cdpHttpUrl(ws);
+    if (http) env.CDP_URL = http;
+  } catch { /* what is known */ }
+  return env;
+}
+
+/** What an agent's prompt says about its browser (headed, CDP_URL, take control). */
+export function browserPromptNote(o: { headed?: boolean; computer?: { id: string; name?: string }; takeover?: boolean; session?: string }): string {
+  const session = o.session ? `'${o.session}'` : "\"$POLPO_BROWSER_SESSION\"";
+  const lines = [
+    "",
+    "## Your browser",
+    "- Your bash commands get CDP_URL (http://127.0.0.1:PORT) while your browser session is open: it is YOUR browser (the one browser_* drives, "
+      + "with your profile and sign-ins). Scripts can drive it over CDP (GET $CDP_URL/json/list, PUT $CDP_URL/json/new?<url>), e.g. a skill's Python CDP client. "
+      + `Open the browser first (browser_navigate) if CDP_URL is not set; in a shell without it, \`agent-browser --session ${session} get cdp-url\` gives ws://127.0.0.1:PORT/…, whose http://127.0.0.1:PORT is the same endpoint.`,
+  ];
+  if (o.headed) lines.push(`- Your browser is headed: its window is on ${o.computer ? `computer "${o.computer.name ?? o.computer.id}"'s` : "this server's"} virtual display (DISPLAY is set in your commands), which a person can watch live.`);
+  if (o.takeover) {
+    lines.push("- When a site needs a person (a login with their password, a 2FA code, a CAPTCHA, a consent only they can give), do not ask for the password or the code: "
+      + "call request_computer_takeover with the reason, the page and what they should do. A person takes control of your computer's desktop, does it, and gives it back; "
+      + "you never see what they type. Then continue from where the page is (browser_snapshot first). While a person has control, your browser tools wait.");
+  }
+  return lines.join("\n");
 }
 
 /** True when the shell runs commands on another machine (a remote sandbox VM). */
@@ -859,21 +978,35 @@ export function createBrowserTools(
   toolOutputDir: string = resolveToolOutputDir({ agentName: session }),
   allowedPaths?: string[],
   network?: BrowserNetworkGuard,
-  runtime: { shell?: Shell; fs?: FileSystem; vault?: ResolvedVault; egress?: BrowserEgressConfig } = {},
+  runtime: {
+    shell?: Shell; fs?: FileSystem; vault?: ResolvedVault; egress?: BrowserEgressConfig;
+    /** agent.browserHeaded: a visible window (the computer's virtual display, or this server's). */
+    headed?: boolean;
+    /** The computer it runs on: while a person holds its desktop, the browser waits (computer-control.ts). */
+    control?: { computerId: string; store: Pick<ComputerControlStore, "heldByPerson">; pollMs?: number; maxWaitMs?: number };
+  } = {},
 ): AgentTool<any>[] {
-  const { shell, fs, vault, egress } = runtime;
+  const { shell, fs, vault, egress, headed, control } = runtime;
   const inSandbox = () => shellIsRemote(shell);
   const profileName = profileDir ? basename(profileDir).replace(/[^A-Za-z0-9._-]/g, "_") || "default" : undefined;
   const exec: BrowserExec = async (args, options = {}) => {
     const withProfile = options.profile !== false;
+    // a person holds the computer's desktop (take control): never act at the same time
+    if (control) {
+      const blocked = await waitForAgentControl(control.store, control.computerId, {
+        ...(options.signal ? { signal: options.signal } : {}), ...(control.pollMs ? { pollMs: control.pollMs } : {}), ...(control.maxWaitMs !== undefined ? { maxWaitMs: control.maxWaitMs } : {}),
+      });
+      if (blocked) return { success: false, error: blocked, raw: blocked };
+    }
     if (shell && await inSandbox()) {
       // a proxy here is the computer's egress (the tailnet forwarder in the VM); none: the VM's own network
       const proxy = browserProxyContext.getStore()?.proxy;
-      return execSandboxBrowser(shell, args, { session, profileName: withProfile ? profileName : undefined, timeout: options.timeout, cwd, saves: options.saves, secret: options.secret, ...(proxy ? { proxy } : {}) });
+      return execSandboxBrowser(shell, args, { session, profileName: withProfile ? profileName : undefined, timeout: options.timeout, cwd, saves: options.saves, secret: options.secret, ...(proxy ? { proxy } : {}), ...(headed ? { headed: true } : {}) });
     }
     // on the host the arguments go straight to the process (no shell, no log)
     if (options.secret !== undefined) args = args.map((a) => (a === BROWSER_SECRET_ARG ? options.secret! : a));
-    const hostOptions = { session, profileDir: withProfile ? profileDir : undefined, signal: options.signal, timeout: options.timeout };
+    const display = headed ? await hostBrowserDisplay().catch(() => undefined) : undefined;
+    const hostOptions = { session, profileDir: withProfile ? profileDir : undefined, signal: options.signal, timeout: options.timeout, ...(display ? { display } : {}) };
     // the browser runs here but the agent's files may not: save to a private file, then through fs
     if (options.saves && fs) {
       const target = options.saves;

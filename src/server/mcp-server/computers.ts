@@ -1,7 +1,9 @@
 /**
  * Computers: persistent machines agents work on (a Daytona or E2B machine that keeps its files,
  * installed tools and browser profile between chats and tasks). List with live status, create or
- * change, start/stop/restart/reset, delete. Changes need polpo:computers (or polpo:admin) (they cost money and change
+ * change, start/stop/restart/reset, delete; a computer's live view (polpo_computer_desktop: status,
+ * start, stop, the agents waiting for a person) and take control (polpo_computer_takeover,
+ * polpo_computer_release); never the VNC password. Changes need polpo:computers (or polpo:admin) (they cost money and change
  * where agents run); reset and delete need confirm: true.
  */
 import { z } from "zod";
@@ -59,6 +61,28 @@ const line = (c: Computer) => {
     + `${c.lastSnapshot ? `, ${snapshotLine(c.lastSnapshot)}` : ""}${c.notice ? `, note: ${c.notice}` : ""}`
     + `${c.lastError ? `, error: ${c.lastError}` : ""}${users ? ` · agents: ${users}` : ""}`;
 };
+
+type TakeoverRequest = { id: string; computerId: string; agent: string; reason: string; url?: string; whatToDo?: string; createdAt: string; expiresAt: string; status: string; takenBy?: string; note?: string; taskId?: string };
+type ControlView = { computerId: string; holder: "agent" | "person"; person?: string; since?: string; lastNote?: string; requests: TakeoverRequest[]; open: TakeoverRequest[] };
+/** What the desktop routes answer (the viewer's password, if any, is never passed on). */
+type DesktopView = { desktop: { state: string; display: string; note?: string; error?: string; startedAt?: string; processes?: Record<string, boolean> }; control: ControlView };
+
+function desktopLine(id: string, d: DesktopView["desktop"]): string {
+  const what = d.state === "running" ? `running${d.startedAt ? ` since ${d.startedAt}` : ""} (open it in the dashboard: Computers → ${id} → Live)`
+    : d.state === "machine-off" ? "off: its machine is not running (start starts it)" : d.state === "unsupported" ? "not available" : "stopped";
+  return `Live view of ${id}: ${what}${d.note ? `. ${d.note}` : ""}${d.error ? `. Error: ${d.error}` : ""}`;
+}
+
+function controlLine(c: ControlView): string {
+  return c.holder === "person"
+    ? `${c.person ?? "A person"} has control of ${c.computerId} since ${c.since ?? "?"} (its agents' browsers wait).`
+    : `The agent has control of ${c.computerId}${c.lastNote ? ` (last note from a person: ${c.lastNote})` : ""}.`;
+}
+
+function requestLines(reqs: TakeoverRequest[]): string[] {
+  return reqs.map((r) => `- [${r.id}] ${r.agent} on ${r.computerId}: ${r.status}${r.takenBy ? ` (${r.takenBy})` : ""} — ${r.reason}`
+    + `${r.url ? ` · page ${r.url}` : ""}${r.whatToDo ? ` · to do: ${r.whatToDo}` : ""}${r.status === "pending" || r.status === "in_control" ? ` · waits until ${r.expiresAt}` : ""}${r.note ? ` · note: ${r.note}` : ""}${r.taskId ? ` · task ${r.taskId}` : ""}`);
+}
 
 const notFound = (id: string) => fail(`There is no computer "${id}". List them with polpo_computers_list.`);
 
@@ -307,6 +331,72 @@ export function registerComputerTools(tool: Register, deps: McpDeps): void {
       ...(o.computers.length ? ["Remote computers (through Tailscale in their VM):", ...o.computers.map((s) => `- ${describeComputerEgress({ id: s!.computerId, kind: s!.kind as ComputerConfig["kind"] }, s!)}`)] : []),
     ];
     return ok(lines.join("\n"), o as unknown as Record<string, unknown>);
+  });
+
+  tool("computers", "polpo_computer_desktop", {
+    title: "A computer's live view",
+    description: "A remote computer's desktop (Daytona v2): the virtual display its agents' headed browsers open on (agent browserHeaded), "
+      + "watched live and taken control of from its page in the dashboard (Computers → the computer → Live). action status (default): whether the live view runs, "
+      + "who holds the desktop (the agent, or a person since when) and its agents' open takeover requests; never starts the computer. start: start the live "
+      + "view (starts or wakes the computer: it costs money while it runs; packages missing on an older image are installed once). stop: stop the live view "
+      + "(the display and browser windows stay). Without id: every agent waiting for a person (request_computer_takeover: a login, 2FA, a CAPTCHA), oldest first. "
+      + "The VNC password is never shown here: the person opens the live view in the dashboard.",
+    inputSchema: {
+      id: z.string().min(1).optional().describe("The computer's id (polpo_computers_list); omit to list the agents waiting for a person on any computer"),
+      action: z.enum(["status", "start", "stop"]).optional().describe("status (default), start or stop"),
+    },
+    outputSchema: { desktop: looseObject.optional(), control: looseObject.optional(), requests: z.array(looseObject).optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  }, async ({ id, action = "status" }) => {
+    if (!id) {
+      if (action !== "status") return fail("Say which computer to start or stop (id).");
+      const all = await apiGet(deps, "/computer-takeovers");
+      if (!all.ok) return apiError(all, "Reading the takeover requests");
+      const reqs = (all.data as { requests: TakeoverRequest[] }).requests;
+      return ok(reqs.length ? requestLines(reqs).join("\n") : "No agent is waiting for a person.", { requests: reqs as unknown as Record<string, unknown>[] });
+    }
+    const r = action === "status" ? await apiGet(deps, `/computers/${enc(id)}/desktop`) : await apiSend(deps, "POST", `/computers/${enc(id)}/desktop/${action}`);
+    if (!r.ok) return r.status === 404 ? notFound(id) : apiError(r, `${action === "status" ? "Reading" : action === "start" ? "Starting" : "Stopping"} the live view of ${id}`);
+    const v = r.data as DesktopView;
+    const recent = v.control.requests.filter((x) => x.status !== "pending" && x.status !== "in_control").slice(0, 5);
+    return ok([desktopLine(id, v.desktop), controlLine(v.control), ...requestLines(v.control.open), ...(recent.length ? ["Recent requests:", ...requestLines(recent)] : [])].join("\n"),
+      { desktop: v.desktop as unknown as Record<string, unknown>, control: v.control as unknown as Record<string, unknown>, requests: v.control.requests as unknown as Record<string, unknown>[] });
+  });
+
+  tool("computers", "polpo_computer_takeover", {
+    title: "Take control of a computer",
+    description: "The person takes control of a remote computer's desktop: from now on their live view (dashboard → the computer → Live) is interactive and "
+      + "the computer's agents' browser tools wait; an agent's open takeover request is now theirs. Use it when the person says they will do something there "
+      + "(a login, 2FA, a CAPTCHA). They type in the live view, never in chat. Give it back with polpo_computer_release. force: take it from another person.",
+    inputSchema: {
+      id: z.string().min(1).describe("The computer's id"),
+      force: z.boolean().optional().describe("Take it from another person who holds it"),
+    },
+    outputSchema: { control: looseObject },
+    annotations: UPDATE,
+  }, async ({ id, force }) => {
+    const r = await apiSend(deps, "POST", `/computers/${enc(id)}/takeover`, force ? { force: true } : {});
+    if (!r.ok) return r.status === 404 ? notFound(id) : apiError(r, `Taking control of ${id}`, r.status === 409 ? "Someone else has it: ask them, or call again with force: true." : undefined);
+    const v = r.data as DesktopView;
+    return ok(`${controlLine(v.control)}\nThe person works in the live view (dashboard → Computers → ${id} → Live); give control back with polpo_computer_release.`, { control: v.control as unknown as Record<string, unknown> });
+  });
+
+  tool("computers", "polpo_computer_release", {
+    title: "Give control back to the agent",
+    description: "The person gives a remote computer's desktop back to its agent, with an optional note the waiting agent reads (what was done, what to know: "
+      + "never a password or a code). The agent's request_computer_takeover returns with that note and its browser goes on. force: give it back for another person.",
+    inputSchema: {
+      id: z.string().min(1).describe("The computer's id"),
+      note: z.string().max(2000).optional().describe("For the agent: e.g. \"Signed in, 2FA done; you are on the feed\""),
+      force: z.boolean().optional().describe("Give it back although another person holds it"),
+    },
+    outputSchema: { control: looseObject },
+    annotations: UPDATE,
+  }, async ({ id, note, force }) => {
+    const r = await apiSend(deps, "POST", `/computers/${enc(id)}/release`, { ...(note ? { note } : {}), ...(force ? { force: true } : {}) });
+    if (!r.ok) return r.status === 404 ? notFound(id) : apiError(r, `Giving control of ${id} back`);
+    const v = r.data as DesktopView;
+    return ok(controlLine(v.control), { control: v.control as unknown as Record<string, unknown> });
   });
 
   tool("computers", "polpo_computer_delete", {

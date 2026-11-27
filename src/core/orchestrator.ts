@@ -84,6 +84,7 @@ import { refreshCustomProviderSecretStatus, setProviderSecretsSource } from "../
 import { readProviderSecrets } from "../llm/provider-secrets.js";
 import { startNotificationServer, getSocketPath } from "./notification.js";
 import { AgentNotifier, registerAgentNotifier } from "../notifications/agent-notify.js";
+import { ComputerTakeoverService, registerComputerTakeover } from "./computer-takeover.js";
 import { createBrowserNetworkGuard, type BrowserNetworkGuard } from "../tools/browser-network-guard.js";
 import { NetworkDeniedLog, type NetworkDeniedReport } from "../sandbox/denied-log.js";
 import { HookRegistry } from "./hooks.js";
@@ -217,6 +218,9 @@ export class Orchestrator extends TypedEmitter {
   /** Agents' send_notification (allowlist, rate limit, origin) over the notification router. */
   private agentNotifier?: AgentNotifier;
   private unregisterAgentNotifier?: () => void;
+  /** Take control of computers' desktops (people) and agents' requests for it. */
+  private computerTakeover?: ComputerTakeoverService;
+  private unregisterComputerTakeover?: () => void;
   private hookRegistry = new HookRegistry();
   private approvalMgr?: ApprovalManager;
   private notificationRouter?: NotificationRouter;
@@ -299,6 +303,8 @@ export class Orchestrator extends TypedEmitter {
   getNotificationRouter(): NotificationRouter | undefined { return this.notificationRouter; }
   /** Agents' send_notification sender (allowlist, rate limit, origin). */
   getAgentNotifier(): AgentNotifier | undefined { return this.agentNotifier; }
+  /** Take control of computers' desktops, and agents' requests for it. */
+  getComputerTakeover(): ComputerTakeoverService | undefined { return this.computerTakeover; }
 
   /**
    * The agent config a task run uses: the run's own (cloud runners keep it), else the version the
@@ -1181,11 +1187,43 @@ export class Orchestrator extends TypedEmitter {
           agentFor: (run, task) => this.runAgentConfig(run, task),
         });
       },
+      // a task run's agent asking a person to take control of its computer (request_computer_takeover)
+      async (msg) => {
+        const { handleTakeoverWire } = await import("./computer-takeover.js");
+        return handleTakeoverWire(msg, {
+          service: this.computerTakeover,
+          run: (runId) => this.runStore.getRun(runId),
+          task: (taskId) => this.registry.getTask(taskId),
+          agentFor: (run, task) => this.runAgentConfig(run, task),
+        });
+      },
     );
     // send_notification from agents (chats in this process, task runs over the socket above)
     this.agentNotifier = new AgentNotifier({ router: () => this.notificationRouter });
     this.unregisterAgentNotifier?.();
     this.unregisterAgentNotifier = registerAgentNotifier(this.polpoDir, this.agentNotifier);
+    // take control of a computer's desktop: people (dashboard, API, MCP, chat tools) and agents
+    // (request_computer_takeover: chats in this process, task runs over the socket above)
+    this.computerTakeover = new ComputerTakeoverService({
+      polpoDir: this.polpoDir,
+      computers: () => this.config?.settings?.computers ?? [],
+      emit: (payload) => this.emit("computer:takeover", payload),
+      rotate: async (computer) => {
+        const [{ computerDesktopsFor }, { computerManager }, { computerSandbox }] = await Promise.all([
+          import("../sandbox/desktop.js"), import("../sandbox/computers.js"), import("../sandbox/manager.js"),
+        ]);
+        await computerDesktopsFor(this.polpoDir, {
+          manager: () => computerManager(this.polpoDir),
+          sandboxFor: (c) => computerSandbox(c, this.config?.settings),
+        }).rotate(computer);
+      },
+      notifier: () => this.agentNotifier,
+      router: () => this.notificationRouter,
+      pageUrl: (id) => (process.env.POLPO_PUBLIC_URL ? `${process.env.POLPO_PUBLIC_URL.replace(/\/+$/, "")}/computers/${encodeURIComponent(id)}` : undefined),
+      log: (level, message) => this.emit("log", { level, message: `[computers] ${message}` }),
+    });
+    this.unregisterComputerTakeover?.();
+    this.unregisterComputerTakeover = registerComputerTakeover(this.polpoDir, this.computerTakeover);
 
     // Initialize approval gates if configured
     if (this.config.settings.approvalGates && this.config.settings.approvalGates.length > 0) {
@@ -2504,6 +2542,8 @@ export class Orchestrator extends TypedEmitter {
     this.notificationServer?.close();
     this.unregisterAgentNotifier?.();
     this.unregisterAgentNotifier = undefined;
+    this.unregisterComputerTakeover?.();
+    this.unregisterComputerTakeover = undefined;
     this.approvalMgr?.dispose();
     this.notificationRouter?.dispose();
     this.escalationMgr?.dispose();

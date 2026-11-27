@@ -634,6 +634,7 @@ export const AddAgentSchema = z.object({
   // Extended tool categories (browser, email, vault, image, video, audio, excel, pdf, docx, search — HTTP is always-on core)
   browserProfile: z.string().optional(),
   browserEgress: z.string().optional(),
+  browserHeaded: z.boolean().optional(),
   /** Computers (settings.computers ids) the agent may use; "host" is always allowed. */
   computers: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/)).optional(),
   /** Its default machine for chats and tasks: a computer id or "host"; "" (update) clears it. */
@@ -700,6 +701,7 @@ export const UpdateAgentSchema = z.object({
   pipeline: PipelineSchema.optional(),
   browserProfile: z.string().optional(),
   browserEgress: z.string().optional(),
+  browserHeaded: z.boolean().optional(),
   /** Computers (settings.computers ids) the agent may use; "host" is always allowed. */
   /** null or [] clears it: only "host" (and the default computer). */
   computers: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/)).nullable().optional(),

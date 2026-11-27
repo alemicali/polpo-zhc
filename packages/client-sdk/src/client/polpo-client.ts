@@ -1,3 +1,4 @@
+import type { ComputerControl, ComputerDesktopView, ComputerTakeoverRequest } from "./computer-types.js";
 import { PolpoApiError } from "./errors.js";
 import type {
   AgentDeployGate, AgentSuite, AgentSuiteInput, CaseGenerationRequest, GeneratedCaseProposal, SuiteBaselineComparison, SuiteCase, SuiteCassette, SuiteCassetteEdit,
@@ -921,6 +922,43 @@ export class PolpoClient {
   /** The connectors (external apps over MCP), with their status, account and who may use them. */
   getConnectors(): Promise<Connector[]> {
     return this.get<{ connectors: Connector[] }>("/connectors").then((d) => d.connectors);
+  }
+
+  // ── Computers: live view and take control ──
+
+  /** A remote computer's live view and who holds its desktop; viewer: also this person's VNC password while it runs. Never starts it. */
+  getComputerDesktop(id: string, o: { viewer?: boolean } = {}): Promise<ComputerDesktopView> {
+    return this.get(`/computers/${encodeURIComponent(id)}/desktop${o.viewer ? "?viewer=1" : ""}`);
+  }
+
+  /** Start the live view (starts or wakes the computer); the answer carries this person's viewer access. */
+  startComputerDesktop(id: string): Promise<ComputerDesktopView> {
+    return this.post(`/computers/${encodeURIComponent(id)}/desktop/start`);
+  }
+
+  /** Stop the live view (the display and the browser windows stay). */
+  stopComputerDesktop(id: string): Promise<ComputerDesktopView> {
+    return this.post(`/computers/${encodeURIComponent(id)}/desktop/stop`);
+  }
+
+  /** Who holds the computer's desktop and its agents' takeover requests (open first). */
+  getComputerControl(id: string): Promise<ComputerControl> {
+    return this.get(`/computers/${encodeURIComponent(id)}/control`);
+  }
+
+  /** The signed-in person takes control (the agent's browser waits); force: take it from another person. */
+  takeoverComputer(id: string, o: { force?: boolean } = {}): Promise<ComputerDesktopView> {
+    return this.post(`/computers/${encodeURIComponent(id)}/takeover`, o.force ? { force: true } : {});
+  }
+
+  /** Give control back to the agent, with an optional note it reads (never a password). */
+  releaseComputer(id: string, o: { note?: string; force?: boolean } = {}): Promise<ComputerDesktopView> {
+    return this.post(`/computers/${encodeURIComponent(id)}/release`, { ...(o.note ? { note: o.note } : {}), ...(o.force ? { force: true } : {}) });
+  }
+
+  /** Every agent waiting for a person (open takeover requests of all computers), oldest first. */
+  getComputerTakeovers(): Promise<ComputerTakeoverRequest[]> {
+    return this.get<{ requests: ComputerTakeoverRequest[] }>("/computer-takeovers").then((d) => d.requests);
   }
 
   // ── Decisions (decide(): typed judgments with probabilities from the decision model) ──

@@ -25,6 +25,8 @@ export { useSlackStatus, usePeers } from "./hooks/use-channels.js";
 export type { UseSlackStatusReturn, UsePeersReturn } from "./hooks/use-channels.js";
 export { useTriggers, useTriggerDeliveries, useTriggerDelivery } from "./hooks/use-triggers.js";
 export type { UseTriggersReturn, UseTriggerDeliveriesReturn, UseTriggerDeliveryReturn } from "./hooks/use-triggers.js";
+export { useComputerDesktop, useComputerTakeovers } from "./hooks/use-computer-desktop.js";
+export type { UseComputerDesktopReturn, UseComputerTakeoversReturn } from "./hooks/use-computer-desktop.js";
 export { useDecide, useDecisions, useDecisionNodes } from "./hooks/use-decisions.js";
 export type { UseDecideReturn, UseDecisionsReturn } from "./hooks/use-decisions.js";
 export { useGenerateImage, useMediaLog } from "./hooks/use-media.js";
@@ -397,6 +399,8 @@ export type {
   DecisionCallerKind, DecisionLogSummary, DecisionLogEntry, DecisionLogPage, DecisionStatus, DecisionNodeState, MissionDecision, TaskSkip,
   AgentTalksTo, AgentLinesMode, AgentLines, AgentLinesChart,
   AgentNotifyChannel, AgentNotifyChannels, NotificationOrigin,
+  ComputerControlHolder, ComputerTakeoverStatus, ComputerTakeoverRequest, ComputerControl, ComputerDesktopState, ComputerDesktopStatus,
+  ComputerDesktopView, ComputerTakeoverEvent,
   ImageInput, GenerateImageRequest, EditImageRequest, MediaAsset, MediaImage, MediaResult, MediaCallerKind, MediaCaller, MediaLogEntry, MediaLogPage,
   MediaStatus, MediaSettings, ImageNodeState, MissionImage,
   CodingChatKind, CodingChatStatus, CodingChatErrorKind, CodingRiskCategory, CodingChatToolCall, CodingChatSegment, CodingChatUsage, CodingChatMessage,

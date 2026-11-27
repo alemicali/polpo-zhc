@@ -6,7 +6,9 @@ import { loadPolpoConfig } from "../core/config.js";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
 import { SyncScheduler } from "./sync-scheduler.js";
-import { attachTerminalWebSocket, type TerminalWebSocketHandle } from "./terminal.js";
+import { attachTerminalWebSocket, isTerminalRequestAuthorized, type TerminalWebSocketHandle } from "./terminal.js";
+import { attachComputerDesktopWebSocket } from "./computer-desktop-ws.js";
+import { computerDesktopsFor } from "../sandbox/desktop.js";
 import { attachCodeServerWebSocket, CodeServerManager } from "./code-server.js";
 import { attachBrowserDashboardWebSocket } from "./routes/browser-dashboard.js";
 
@@ -48,6 +50,7 @@ export class PolpoServer {
   private codeServerManager: CodeServerManager | null = null;
   private codeServerWs: { close: () => void } | null = null;
   private browserDashboardWs: { close: () => void } | null = null;
+  private computerDesktopWs: { close: () => void } | null = null;
   private syncScheduler: SyncScheduler | null = null;
   private syncRunning = false;
   private shutdownHandlers: (() => void)[] = [];
@@ -254,7 +257,22 @@ export class PolpoServer {
     });
     // agent-browser dashboard WebSocket proxy. Path:
     //   /api/v1/browser-dashboard/view/... → ws://127.0.0.1:<dashboard-port>/...
-    this.browserDashboardWs = attachBrowserDashboardWebSocket(this.server);
+    // every WebSocket is authorized like the terminal (API key or the instance session cookie)
+    const authorizeWs = (req: import("node:http").IncomingMessage, query: Record<string, string | string[] | undefined>) => isTerminalRequestAuthorized(
+      req, this.orchestrator.isInitialized ? this.orchestrator.getPolpoDir() : getPolpoDir(workDir), this.config.apiKeys ?? [], query.api_key,
+    );
+    this.browserDashboardWs = attachBrowserDashboardWebSocket(this.server, { authorize: authorizeWs });
+    // a computer's live view (its desktop over VNC, take control):
+    //   /api/v1/computers/:id/desktop/vnc → the VM's websockify through the provider's preview link
+    this.computerDesktopWs = attachComputerDesktopWebSocket(this.server, {
+      authorize: authorizeWs,
+      ready: () => this.orchestrator.isInitialized,
+      computer: (id) => (this.orchestrator.getConfig()?.settings?.computers ?? []).find((c) => c.id === id),
+      desktops: () => computerDesktopsFor(this.orchestrator.getPolpoDir(), {
+        manager: () => computerManagerWithEvents(this.orchestrator.getPolpoDir(), (payload) => this.orchestrator.emit("computer:changed", payload)),
+        sandboxFor: (c) => computerSandbox(c, this.orchestrator.getConfig()?.settings),
+      }),
+    });
 
     const base = `http://${this.config.host}:${this.config.port}`;
 
@@ -289,6 +307,7 @@ export class PolpoServer {
     this.sseBridge?.dispose();
     this.terminalWs?.close();
     this.browserDashboardWs?.close();
+    this.computerDesktopWs?.close();
     this.terminalWs = null;
     this.codeServerWs?.close();
     this.codeServerWs = null;

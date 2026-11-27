@@ -515,6 +515,13 @@ export interface AgentConfig {
   /** Where its browser goes out to the internet: the name of a proxy in settings.egressProxies
    *  (e.g. "home", a residential line over Tailscale). Unset: directly from the server. */
   browserEgress?: string;
+  /**
+   * Run its browser headed (a visible window) instead of headless. On a remote computer the
+   * window opens on the computer's virtual display (:99), which a person can watch live and take
+   * control of (login, 2FA, CAPTCHA) from the computer's page; on this server, on Polpo's virtual
+   * display. Profile, session and egress proxy are unchanged. Default false (headless).
+   */
+  browserHeaded?: boolean;
   /** Allowed recipient email domains for email_send (e.g. ["acme.com", "partner.io"]).
    *  When set, emails can only be sent to addresses in these domains.
    *  When omitted, all domains are allowed (backwards compatible). */

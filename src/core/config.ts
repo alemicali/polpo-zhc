@@ -152,6 +152,9 @@ export function validateAgents(agents: any[]): void {
     if (agent.browserEgress !== undefined && (typeof agent.browserEgress !== "string" || !/^[A-Za-z0-9_-]*$/.test(agent.browserEgress))) {
       throw new Error(`Agent "${agent.name}": browserEgress must be the name of a proxy in settings.egressProxies`);
     }
+    if (agent.browserHeaded !== undefined && typeof agent.browserHeaded !== "boolean") {
+      throw new Error(`Agent "${agent.name}": browserHeaded must be true or false`);
+    }
     if (agent.computers !== undefined && (!Array.isArray(agent.computers) || agent.computers.some((c: unknown) => typeof c !== "string" || (c !== HOST_COMPUTER_ID && !COMPUTER_ID_PATTERN.test(c))))) {
       throw new Error(`Agent "${agent.name}": computers must be a list of computer ids (settings.computers)`);
     }

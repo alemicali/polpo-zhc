@@ -12766,6 +12766,9 @@
                   "browserEgress": {
                     "type": "string"
                   },
+                  "browserHeaded": {
+                    "type": "boolean"
+                  },
                   "computers": {
                     "type": "array",
                     "items": {
@@ -13532,6 +13535,9 @@
                   },
                   "browserEgress": {
                     "type": "string"
+                  },
+                  "browserHeaded": {
+                    "type": "boolean"
                   },
                   "computers": {
                     "type": "array",
