@@ -1,0 +1,1 @@
+ALTER TABLE `playbooks` ADD `mission_name` text;

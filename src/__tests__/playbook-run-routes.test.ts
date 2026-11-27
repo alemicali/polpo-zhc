@@ -83,3 +83,39 @@ describe("GET /missions/checkpoints and /missions/delays", () => {
     expect(await delays.json()).toEqual({ ok: true, data: [] });
   });
 });
+
+describe("playbook missionName over REST", () => {
+  const named = {
+    name: "zone",
+    description: "Zones of a province",
+    parameters: [{ name: "prov", description: "Province", required: true }],
+    missionName: "{{prov}} · zone e territori (00)",
+    mission: { tasks: [{ title: "Zones of {{prov}}", description: "d" }] },
+  };
+
+  it("names the mission a run creates from missionName", async () => {
+    const saveMission = vi.fn(async (opts: { name: string }) => ({ id: "m1", ...opts }));
+    const app = playbookRoutes(() => ({
+      playbookStore: { get: async () => named },
+      saveMission,
+      executeMission: async () => ({ tasks: [{}], group: "MI · zone e territori (00)" }),
+    }));
+    const res = await app.request("/zone/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ params: { prov: "MI" } }) });
+    expect(res.status).toBe(201);
+    expect(saveMission.mock.calls[0][0].name).toBe("MI · zone e territori (00)");
+  });
+
+  it("POST /playbooks keeps missionName and refuses an undeclared placeholder in it", async () => {
+    const save = vi.fn(async () => "db://playbooks/zone");
+    const app = playbookRoutes(() => ({ playbookStore: { save }, saveMission: vi.fn(), executeMission: vi.fn() }));
+    const post = (body: unknown) => app.request("/", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
+    expect((await post(named)).status).toBe(201);
+    expect((save.mock.calls[0] as unknown as [{ missionName?: string }])[0].missionName).toBe("{{prov}} · zone e territori (00)");
+
+    const bad = await post({ ...named, missionName: "{{prov}} · {{comuni}}" });
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).error).toContain("{{comuni}}");
+    expect(save).toHaveBeenCalledTimes(1);
+  });
+});

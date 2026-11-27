@@ -106,6 +106,7 @@ export function registerPlaybookCommands(program: Command): void {
 
           console.log(chalk.bold(`  Name:        `) + playbook.name);
           console.log(chalk.bold(`  Description: `) + playbook.description);
+          if (playbook.missionName) console.log(chalk.bold(`  Mission:     `) + playbook.missionName);
 
           if (playbook.parameters && playbook.parameters.length > 0) {
             console.log();

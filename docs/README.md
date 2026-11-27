@@ -43,3 +43,5 @@ Skills — the Agent Skills format, uploading `.skill` / `.zip` bundles (validat
 What a mission costs (every run of its tasks, by agent and engine) and its optional budget, which pauses it when spent, are documented in [missions.md](missions.md).
 
 How a task receives the results of the tasks it depends on (in its prompt, and with `task_result`), and how checkpoints pause a mission, are in [missions.md](missions.md#results-between-tasks).
+
+Mission names (unique, renaming a mission and its tasks following) and the playbook `missionName` template are in [missions.md](missions.md#mission-names).

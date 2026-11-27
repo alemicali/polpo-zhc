@@ -50,6 +50,23 @@ export class MissionImageNodes {
     } catch { return []; }
   }
 
+  /** A mission was renamed: its groups (`rename` maps each old group, undefined = not this mission's) follow. */
+  async renameGroups(rename: (group: string) => string | undefined): Promise<void> {
+    for (const [g, nodes] of [...this.byGroup]) {
+      const to = rename(g);
+      if (to !== undefined) { this.byGroup.delete(g); this.byGroup.set(to, nodes); }
+    }
+    let changed = false;
+    const next: Record<string, ImageNodeState> = {};
+    for (const [key, st] of Object.entries(this.state)) {
+      const to = rename(st.group);
+      if (to === undefined) { next[key] = st; continue; }
+      next[`${to}:${st.node}`] = { ...st, group: to };
+      changed = true;
+    }
+    if (changed) { this.state = next; await this.store.save(this.state); }
+  }
+
   list(): ImageNodeState[] {
     return Object.values(this.state).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
   }

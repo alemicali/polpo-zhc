@@ -32708,6 +32708,10 @@
                     },
                     "description": "Mission playbook body with {{placeholder}} syntax"
                   },
+                  "missionName": {
+                    "type": "string",
+                    "description": "Name of the mission a run creates, with the same {{placeholder}} syntax (default: the playbook name)"
+                  },
                   "parameters": {
                     "type": "array",
                     "items": {
@@ -33157,6 +33161,10 @@
                       "nullable": true
                     },
                     "description": "Mission playbook body with {{placeholder}} syntax"
+                  },
+                  "missionName": {
+                    "type": "string",
+                    "description": "Name of the mission a run creates, with the same {{placeholder}} syntax (default: the playbook name)"
                   },
                   "parameters": {
                     "type": "array",

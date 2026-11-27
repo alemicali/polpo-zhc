@@ -788,11 +788,112 @@ export class MissionExecutor {
       if (b !== undefined && b !== null && !isValidBudgetUsd(b)) throw new Error("budgetUsd must be a positive number of USD (null clears it)");
       next = { ...next, budgetUsd: b ?? undefined };
     }
+    const before = await this.getMission(missionId);
     if (updates.status !== undefined && updates.status !== "paused" && !("pauseReason" in updates)
-      && (await this.getMission(missionId))?.pauseReason) {
+      && before?.pauseReason) {
       next = { ...next, pauseReason: undefined };
     }
-    return this.ctx.registry.updateMission(missionId, next);
+    const updated = await this.ctx.registry.updateMission(missionId, next);
+    if (before && typeof updates.name === "string" && updated.name !== before.name) {
+      await this.renameMissionGroup(missionId, before.name, updated.name);
+    }
+    return updated;
+  }
+
+  /**
+   * A mission's name is its tasks' group (and the key of its checkpoints, delays, decision and
+   * image nodes, quality gates and volatile agents). When it is renamed, all of them follow: its
+   * tasks (by missionId, or legacy tasks without one by the old group), its numbered recurring
+   * runs ("old #2" → "new #2") and the persisted state, so the mission is still resumed after a
+   * restart and its pending tasks still start.
+   */
+  private async renameMissionGroup(missionId: string, from: string, to: string): Promise<void> {
+    const renameGroup = (g: string | undefined): string | undefined => {
+      if (g === undefined || !g.startsWith(from)) return undefined;
+      const rest = g.slice(from.length);
+      return rest === "" || /^ #\d+$/.test(rest) ? to + rest : undefined;
+    };
+    // "<group>:<node>" and "<group>\0<missionId>" keys
+    const renameKey = (key: string, sep: string): string | undefined => {
+      if (!key.startsWith(from)) return undefined;
+      const m = /^( #\d+)?/.exec(key.slice(from.length));
+      const suffix = m?.[1] ?? "";
+      const rest = key.slice(from.length + suffix.length);
+      return rest.startsWith(sep) ? to + suffix + rest : undefined;
+    };
+    const renameRecord = <V>(rec: Record<string, V>, sep = ":"): Record<string, V> =>
+      Object.fromEntries(Object.entries(rec).map(([k, v]) => [renameKey(k, sep) ?? k, v]));
+    const renameMap = <V>(map: Map<string, V>): void => {
+      for (const [k, v] of [...map]) {
+        const nk = renameGroup(k);
+        if (nk !== undefined) { map.delete(k); map.set(nk, v); }
+      }
+    };
+
+    // 1. Tasks
+    let moved = 0;
+    for (const t of await this.ctx.registry.getAllTasks()) {
+      if (t.missionId && t.missionId !== missionId) continue;
+      const g = renameGroup(t.group);
+      if (g === undefined) continue;
+      await this.ctx.registry.updateTask(t.id, { group: g });
+      moved++;
+    }
+
+    // 2. Checkpoints and delays (persisted, keyed by group)
+    if (this.cpState) {
+      this.cpState = {
+        definitions: Object.fromEntries(Object.entries(this.cpState.definitions).map(([g, v]) => [renameGroup(g) ?? g, v])),
+        active: renameRecord(this.cpState.active),
+        resumed: this.cpState.resumed.map((k) => renameKey(k, ":") ?? k),
+      };
+      await this.cpStore.save(this.cpState);
+    }
+    if (this.delayState) {
+      this.delayState = {
+        definitions: Object.fromEntries(Object.entries(this.delayState.definitions).map(([g, v]) => [renameGroup(g) ?? g, v])),
+        active: renameRecord(this.delayState.active),
+        expired: this.delayState.expired.map((k) => renameKey(k, ":") ?? k),
+      };
+      await this.delayStore.save(this.delayState);
+    }
+
+    // 3. Decision and image nodes
+    let nodesChanged = false;
+    const nodes: Record<string, DecisionNodeState> = {};
+    for (const [k, st] of Object.entries(this.nodeState)) {
+      const g = renameGroup(st.group);
+      if (g === undefined) { nodes[k] = st; continue; }
+      nodes[`${g}:${st.node}`] = { ...st, group: g };
+      nodesChanged = true;
+    }
+    if (nodesChanged) { this.nodeState = nodes; await this.nodeStore.save(this.nodeState); }
+    await this.images.renameGroups(renameGroup);
+
+    // 4. In-memory state keyed by group
+    renameMap(this.gatesByGroup);
+    renameMap(this.decisionsByGroup);
+    renameMap(this.scheduledOrigin);
+    for (const k of [...this.cleanedGroups]) {
+      const nk = renameKey(k, RUN_KEY_SEPARATOR);
+      if (nk !== undefined) { this.cleanedGroups.delete(k); this.cleanedGroups.add(nk); }
+    }
+    for (const k of [...this.registeredCheckpointRules]) {
+      const nk = renameKey(k, ":");
+      if (nk !== undefined) { this.registeredCheckpointRules.delete(k); this.registeredCheckpointRules.add(nk); }
+    }
+    for (const k of [...this.registeredDelayRules]) {
+      const nk = renameKey(k, ":");
+      if (nk !== undefined) { this.registeredDelayRules.delete(k); this.registeredDelayRules.add(nk); }
+    }
+
+    // 5. Volatile agents of the mission's team
+    for (const a of await this.ctx.agentStore.getAgents().catch(() => [])) {
+      const g = a.volatile ? renameGroup(a.missionGroup) : undefined;
+      if (g !== undefined) await this.ctx.agentStore.updateAgent(a.name, { missionGroup: g }).catch(() => undefined);
+    }
+
+    this.ctx.emitter.emit("log", { level: "info", message: `Mission "${from}" renamed to "${to}": ${moved} task(s) moved to the new group` });
   }
 
   async deleteMission(missionId: string): Promise<boolean> {
@@ -860,7 +961,8 @@ export class MissionExecutor {
       // completed (done), cancelled (aborted)
       if (m.status === "draft" || m.status === "scheduled" || m.status === "recurring" ||
           m.status === "completed" || m.status === "cancelled") return false;
-      const tasks = state.tasks.filter(t => t.group === m.name);
+      // missionId first: a renamed mission's tasks are its own even if a group was left behind
+      const tasks = state.tasks.filter(t => t.missionId === m.id || (!t.missionId && t.group === m.name));
       if (tasks.length === 0) return false;
       return tasks.some(t => t.status === "pending" || t.status === "failed");
     });
@@ -895,7 +997,7 @@ export class MissionExecutor {
     }
 
     const state = await this.ctx.registry.getState();
-    const tasks = state.tasks.filter(t => t.group === mission.name);
+    const tasks = state.tasks.filter(t => t.missionId === mission.id || (!t.missionId && t.group === mission.name));
     const failedTasks = tasks.filter(t => t.status === "failed");
     const pendingTasks = tasks.filter(t => t.status === "pending");
 

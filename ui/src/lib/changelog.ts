@@ -32,6 +32,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-27-playbook-mission-name",
+    date: "2026-11-27",
+    kind: "improved",
+    title: "Missioni dei playbook con un nome parlante",
+    summary: "Un playbook può dare alle sue missioni un nome con i parametri (per esempio \"MI · Milano · zone e territori (00)\") invece di \"nome-playbook (2)\"; e una missione rinominata si porta dietro i suoi task.",
+    body: [
+      "- **`missionName` nei playbook**: un modello di nome con gli stessi segnaposto `{{parametro}}` della missione, per esempio `{{prov}} · {{comuni}} · zone e territori (00)`. Ogni esecuzione crea una missione con i valori al posto dei segnaposto; senza `missionName` (o se resta vuoto) la missione si chiama come il playbook, come prima. I segnaposto devono essere parametri dichiarati. Lo vedi nella pagina del playbook.",
+      "- **Rinominare una missione**: prima i task restavano sul vecchio nome, e dopo un riavvio la missione rinominata non ripartiva. Ora i task, i checkpoint, le attese e i nodi di decisione seguono il nuovo nome.",
+    ].join("\n"),
+  },
+  {
     id: "2026-11-27-computer-xfce-desktop",
     date: "2026-11-27",
     kind: "improved",

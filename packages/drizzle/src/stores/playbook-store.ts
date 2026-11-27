@@ -23,6 +23,7 @@ export class DrizzlePlaybookStore implements PlaybookStore {
       name: row.name,
       description: row.description ?? "",
       parameters: deserializeJson<PlaybookInfo["parameters"]>(row.parameters, [], this.dialect),
+      ...(typeof row.missionName === "string" ? { missionName: row.missionName } : {}),
       path: `db://playbooks/${row.name}`,
     }));
   }
@@ -41,6 +42,7 @@ export class DrizzlePlaybookStore implements PlaybookStore {
       description: definition.description ?? "",
       mission: serializeJson(definition.mission, this.dialect),
       parameters: definition.parameters ? serializeJson(definition.parameters, this.dialect) : null,
+      missionName: definition.missionName ?? null,
       version: definition.version ?? null,
       author: definition.author ?? null,
       tags: definition.tags ? serializeJson(definition.tags, this.dialect) : null,
@@ -55,6 +57,7 @@ export class DrizzlePlaybookStore implements PlaybookStore {
           description: values.description,
           mission: values.mission,
           parameters: values.parameters,
+          missionName: values.missionName,
           version: values.version,
           author: values.author,
           tags: values.tags,
@@ -82,6 +85,7 @@ export class DrizzlePlaybookStore implements PlaybookStore {
     };
     const params = deserializeJson<PlaybookDefinition["parameters"]>(row.parameters, [] as any, this.dialect);
     if (params && Array.isArray(params) && params.length > 0) def.parameters = params;
+    if (typeof row.missionName === "string") def.missionName = row.missionName;
     if (row.version) def.version = row.version;
     if (row.author) def.author = row.author;
     const tags = deserializeJson<string[]>(row.tags, [] as string[], this.dialect);
