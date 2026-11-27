@@ -46,7 +46,8 @@ vi.mock("@novnc/novnc", () => ({
   },
 }));
 
-import { ComputerLivePanel, LIVE_QUALITY, desktopAspect } from "../src/components/computers/computer-live-panel";
+import { ComputerLivePanel, LIVE_QUALITY } from "../src/components/computers/computer-live-panel";
+import { desktopAspect } from "../src/lib/desktop-aspect";
 
 // ── Fake server ─────────────────────────────────────────────────────────────
 let server: { state: "running" | "stopped"; holder: "agent" | "person"; calls: string[]; size?: string };
@@ -136,7 +137,11 @@ test("full screen: the viewer goes full screen (Esc exits), noVNC fits it, the k
   let fullscreenElement: Element | null = null;
   Object.defineProperty(document, "fullscreenElement", { configurable: true, get: () => fullscreenElement });
   const change = () => document.dispatchEvent(new Event("fullscreenchange"));
-  const request = vi.fn(function (this: Element) { fullscreenElement = this; change(); return Promise.resolve(); });
+  const request = vi.fn(function (this: Element) {
+    // the element the browser makes full screen is the one requestFullscreen is called on
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    fullscreenElement = this; change(); return Promise.resolve();
+  });
   const exit = vi.fn(() => { fullscreenElement = null; change(); return Promise.resolve(); });
   Object.defineProperty(HTMLElement.prototype, "requestFullscreen", { configurable: true, value: request });
   Object.defineProperty(document, "exitFullscreen", { configurable: true, value: exit });
