@@ -554,7 +554,10 @@ function formatShortDuration(ms: number): string {
 
 // ── Active agents with narrative ──
 
-const ActiveAgents = memo(function ActiveAgents({ processes }: { processes: AgentProcess[] }) {
+type AgentLite = { name: string; identity?: { displayName?: string; avatar?: string; title?: string; color?: unknown } };
+
+/** Who is working (avatar and name from the agent's identity), on which task, and what it is doing; each row opens its task. */
+const ActiveAgents = memo(function ActiveAgents({ processes, agents, tasks }: { processes: AgentProcess[]; agents: AgentLite[]; tasks: Task[] }) {
   if (processes.length === 0) {
     return (
       <Card>
@@ -581,6 +584,8 @@ const ActiveAgents = memo(function ActiveAgents({ processes }: { processes: Agen
       <CardContent className="space-y-3">
         {processes.map((p) => {
           const activity = p.activity;
+          const agent = agents.find((a) => a.name === p.agentName);
+          const task = tasks.find((t) => t.id === p.taskId);
           const narrative = activity?.summary
             ? activity.summary
             : activity?.lastTool && activity?.lastFile
@@ -590,15 +595,21 @@ const ActiveAgents = memo(function ActiveAgents({ processes }: { processes: Agen
             : "Working...";
 
           return (
-            <div key={`${p.agentName}-${p.taskId}`} className="rounded-lg border border-border/40 bg-card/60 backdrop-blur-surface p-3">
+            <Link
+              key={`${p.agentName}-${p.taskId}`}
+              to={`/tasks/${encodeURIComponent(p.taskId)}`}
+              className="block rounded-lg border border-border/40 bg-card/60 backdrop-blur-surface p-3 transition-colors hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              data-testid={`active-agent-${p.agentName}`}
+            >
               <div className="flex items-center gap-3 mb-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-muted/50">
-                  <AgentAvatar name={p.agentName} size="md" />
-                </div>
+                <AgentAvatar avatar={agent?.identity?.avatar} name={p.agentName} color={agent?.identity?.color} size="md" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium">{p.agentName}</p>
+                  <p className="truncate text-sm font-medium">{agent?.identity?.displayName ?? p.agentName}</p>
+                  <p className="truncate text-caption text-muted-foreground" title={task?.title}>
+                    {task?.title ?? agent?.identity?.title ?? `@${p.agentName}`}
+                  </p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex shrink-0 items-center gap-2">
                   <Badge variant="secondary" className="text-micro">
                     {activity?.toolCalls ?? 0} calls
                   </Badge>
@@ -607,12 +618,13 @@ const ActiveAgents = memo(function ActiveAgents({ processes }: { processes: Agen
                       +{activity.filesCreated.length} files
                     </Badge>
                   )}
+                  <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
                 </div>
               </div>
-              <p className="text-xs text-muted-foreground">
+              <p className="line-clamp-3 text-xs text-muted-foreground">
                 {narrative}
               </p>
-            </div>
+            </Link>
           );
         })}
       </CardContent>
@@ -813,7 +825,7 @@ export function DashboardPage() {
         <RecentTasks tasks={filteredTasks} />
       </div>
 
-      <ActiveAgents processes={processes} />
+      <ActiveAgents processes={processes} agents={agents} tasks={tasks} />
     </div>
   );
 }

@@ -123,7 +123,7 @@ describe("Polpo MCP server", () => {
       "polpo_task_show", "polpo_mission_show",
       "polpo_artifacts_list", "polpo_artifact_get", "polpo_artifact_create", "polpo_artifact_update", "polpo_artifact_upload_prepare", "polpo_artifact_upload_finalize",
       "polpo_data_sources_list", "polpo_data_query", "polpo_data_source_get", "polpo_data_source_save", "polpo_data_source_test", "polpo_data_source_delete",
-      "polpo_data_activity", "polpo_data_sql", "polpo_data_mutate", "polpo_data_views_list", "polpo_data_view_get", "polpo_data_view_save", "polpo_data_view_delete",
+      "polpo_data_activity", "polpo_data_sql", "polpo_data_mutate", "polpo_data_transaction", "polpo_data_views_list", "polpo_data_view_get", "polpo_data_view_save", "polpo_data_view_delete",
       "polpo_files_list", "polpo_files_search", "polpo_file_read", "polpo_file_write", "polpo_file_manage",
       "polpo_agent_lines", "polpo_agent_get", "polpo_agent_create", "polpo_agent_update",
       "polpo_agent_versions", "polpo_agent_version_get", "polpo_agent_version_diff", "polpo_agent_draft", "polpo_agent_publish", "polpo_agent_deploy", "polpo_agent_deploy_gates", "polpo_agent_rollback", "polpo_agent_deploys", "polpo_agent_test",

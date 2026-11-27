@@ -16,6 +16,7 @@ import { join } from "node:path";
 import type { VaultEntry } from "../core/types.js";
 import type { VaultStore } from "../core/vault-store.js";
 import { resolveKey, encrypt, decrypt } from "@polpo-ai/vault-crypto";
+import { vaultMetadataAfterPatch, vaultEntryProvenanceView } from "@polpo-ai/core/vault-store";
 
 // ── Constants ──
 
@@ -83,6 +84,8 @@ export class EncryptedVaultStore implements VaultStore {
       ...(partial.allowedAgents !== undefined ? { allowedAgents: partial.allowedAgents } : existing?.allowedAgents ? { allowedAgents: existing.allowedAgents } : {}),
       credentials: { ...(existing?.credentials ?? {}), ...(partial.credentials ?? {}) },
     };
+    const metadata = vaultMetadataAfterPatch(existing?.metadata, partial.credentials);
+    if (metadata) merged.metadata = metadata;
     await this.set(agent, service, merged);
     return Object.keys(merged.credentials);
   }
@@ -106,7 +109,7 @@ export class EncryptedVaultStore implements VaultStore {
     sharedFrom?: string;
     readOnly?: boolean;
     keys: string[];
-  }>> {
+  } & ReturnType<typeof vaultEntryProvenanceView>>> {
     // Owned entries first (no sharedFrom). Then inherited shared from
     // other agents. Conflict policy: owned wins.
     const out: Array<any> = [];
@@ -119,6 +122,7 @@ export class EncryptedVaultStore implements VaultStore {
         account: entry.account,
         ...(entry.allowedAgents && entry.allowedAgents.length > 0 ? { allowedAgents: entry.allowedAgents } : {}),
         keys: Object.keys(entry.credentials),
+        ...vaultEntryProvenanceView(entry.metadata),
       });
       seen.add(service);
     }
@@ -136,6 +140,7 @@ export class EncryptedVaultStore implements VaultStore {
           sharedFrom: owner,
           readOnly: true,
           keys: Object.keys(entry.credentials),
+          ...vaultEntryProvenanceView(entry.metadata),
         });
       }
     }

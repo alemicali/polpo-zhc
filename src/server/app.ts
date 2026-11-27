@@ -513,11 +513,11 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       // its browser: CDP_URL in its commands, headed, take control on a remote computer
       let browserNote = "";
       if ((agentConfig.allowedTools ?? []).some((t: string) => t.toLowerCase().startsWith("browser_"))) {
-        const { browserPromptNote } = await import("../tools/browser-tools.js");
+        const { browserPromptNote, effectiveBrowserHeaded } = await import("../tools/browser-tools.js");
         const { wantsComputerTakeoverTool } = await import("../tools/computer-takeover-tools.js");
         const computer = sandbox?.computer;
         browserNote = `\n${browserPromptNote({
-          headed: !!agentConfig.browserHeaded, session: agentConfig.name, ...(computer && remote ? { computer: { id: computer.id, name: computer.name } } : {}),
+          headed: effectiveBrowserHeaded(agentConfig.browserHeaded, !!(computer && remote)), session: agentConfig.name, ...(computer && remote ? { computer: { id: computer.id, name: computer.name } } : {}),
           takeover: remote && !!o.getComputerTakeover() && wantsComputerTakeoverTool(agentConfig, computer),
         })}`;
       }
@@ -536,7 +536,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       const { createArtifactAgentTools, workspaceFileReader } = await import("../tools/artifact-tools.js");
       const { createCompanyBrainAgentTools } = await import("../tools/company-brain-tools.js");
       const { createStorageAgentTools } = await import("../tools/storage-tools.js");
-      const { resolveAgentVault } = await import("../vault/index.js");
+      const { resolveAgentVault, createRunSecrets } = await import("../vault/index.js");
       const {
         CLIENT_SIDE_CHAT_TOOLS,
         isClientSideChatTool,
@@ -617,7 +617,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         fs: chatFs,
         sandboxProvider: chatSandboxProvider,
         ...(context?.sessionId?.() ? { mediaContext: { sessionId: context.sessionId()! } } : {}),
-        ...(agentConfig.browserHeaded ? { browserHeaded: true } : {}),
+        // unset: headed on a remote computer, headless here
+        ...(typeof agentConfig.browserHeaded === "boolean" ? { browserHeaded: agentConfig.browserHeaded } : {}),
         // while a person holds the computer's desktop (take control), its browser waits
         ...(chatComputer && isRemoteComputer(chatComputer) ? { browserControl: { computerId: chatComputer.id, store: computerControlStore(polpoDir) } } : {}),
       });
@@ -668,6 +669,20 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
           tools.push(...createAgentNotifyTools(agentConfig, {
             send: (req) => notifier.send(agentConfig, req, sessionId() ? { sessionId: sessionId()! } : {}),
           }));
+        }
+      }
+      // vault_create_login: a login with a password Polpo generates, in this agent's own vault (allowedTools
+      // "vault_create_login" / "vault_*"). The value is never shown: it goes to this chat's masker and vault.
+      const chatSecrets = createRunSecrets();
+      {
+        const store = o.getVaultStore();
+        if (store) {
+          const { createVaultLoginTools, localVaultLoginAccess } = await import("../tools/vault-tools.js");
+          const sessionId = () => context?.sessionId?.();
+          const taken = new Set(tools.map((tool: any) => tool.name));
+          tools.push(...createVaultLoginTools(agentConfig, localVaultLoginAccess(store, agentConfig, () => (sessionId() ? { sessionId: sessionId()! } : {})), {
+            vault, secrets: chatSecrets,
+          }).filter((tool) => !taken.has(tool.name)));
         }
       }
       // request_computer_takeover: a person takes control of its computer's desktop and gives it back
@@ -818,10 +833,11 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         if (!tool) return `Error: Unknown tool "${name}"`;
         try {
           const result = await tool.execute(nanoid(), args as any);
-          if (isMcpToolName(name)) return toolResultText(result);
-          return result.content.map((c: any) => c.text ?? "").join("");
+          // a password generated in this chat (vault_create_login) never comes back through a tool's output
+          if (isMcpToolName(name)) return chatSecrets.mask(toolResultText(result));
+          return chatSecrets.mask(result.content.map((c: any) => c.text ?? "").join(""));
         } catch (err: any) {
-          return `Error: ${err.message}`;
+          return chatSecrets.mask(`Error: ${err.message}`);
         }
       };
       // Side-effect gate: in CHAT mode (real-time conversation) we
@@ -2059,6 +2075,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
 
   authed.route("/vault", vaultRoutes(() => ({
     vaultStore: o.getVaultStore(),
+    agentDisplayName: async (agent: string) => (await o.getAgents()).find((a) => a.name === agent)?.identity?.displayName,
   })));
 
   authed.route("/auth", authRoutes(() => ({

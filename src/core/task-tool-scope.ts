@@ -31,7 +31,7 @@ let knownTools: string[] | undefined;
 /** Every built-in tool name an agent can be given through allowedTools. */
 export async function knownBuiltinTools(): Promise<string[]> {
   if (knownTools) return knownTools;
-  const [system, data, artifacts, brain, storage, decisions, notify, takeover] = await Promise.all([
+  const [system, data, artifacts, brain, storage, decisions, notify, takeover, vault] = await Promise.all([
     import("../tools/system-tools.js"),
     import("../tools/data-tools.js"),
     import("../tools/artifact-tools.js"),
@@ -40,6 +40,7 @@ export async function knownBuiltinTools(): Promise<string[]> {
     import("../tools/decision-tools.js"),
     import("../tools/notify-tools.js"),
     import("../tools/computer-takeover-tools.js"),
+    import("../tools/vault-tools.js"),
   ]);
   knownTools = [...new Set([
     ...system.ALL_EXTENDED_TOOL_NAMES,
@@ -50,6 +51,7 @@ export async function knownBuiltinTools(): Promise<string[]> {
     ...decisions.DECISION_TOOL_NAMES,
     ...notify.AGENT_NOTIFY_TOOL_NAMES,
     ...takeover.COMPUTER_TAKEOVER_TOOL_NAMES,
+    ...vault.VAULT_LOGIN_TOOL_NAMES,
   ])];
   return knownTools;
 }

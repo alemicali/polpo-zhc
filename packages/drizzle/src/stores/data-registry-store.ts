@@ -134,7 +134,7 @@ export class DrizzleDataRegistryStore implements DataRegistryStore {
     const boundary: any[] = await this.db.select({ createdAt: t.createdAt }).from(t)
       .orderBy(desc(t.createdAt)).limit(1).offset(MAX_ACTIVITY - 1);
     if (boundary[0]) await this.db.delete(t).where(lt(t.createdAt, boundary[0].createdAt));
-    this.emitSource(input.sourceId, input.action === "mutate" && input.status === "succeeded" ? "data" : "activity");
+    this.emitSource(input.sourceId, (input.action === "mutate" || (input.action === "transaction" && !input.readOnly)) && input.status === "succeeded" ? "data" : "activity");
     return activity;
   }
 

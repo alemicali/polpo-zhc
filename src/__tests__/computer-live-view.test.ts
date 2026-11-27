@@ -21,6 +21,7 @@ import {
   agentBrowserEnv, browserPromptNote, cdpHttpUrl, createBrowserTools, sandboxBrowserCommand, sandboxCdpUrlCommand,
   AGENT_BROWSER_CHECK_COMMAND,
 } from "../tools/browser-tools.js";
+import { SANDBOX_CHROME_FLAGS } from "../tools/agent-chrome.js";
 import { createSystemTools } from "../tools/system-tools.js";
 import {
   ComputerDesktops, DESKTOP_DISPLAY_COMMAND, DESKTOP_INSPECT_COMMAND, DESKTOP_PASSWORD_ENV, DESKTOP_STOP_COMMAND, DESKTOP_VAULT_OWNER,
@@ -71,7 +72,7 @@ class FakeVmShell implements Shell {
 describe("headed browser in the VM", () => {
   it("adds the display and --headed; headless stays exactly as before", () => {
     const headless = sandboxBrowserCommand(["open", "https://x.test"], { session: "a", profileName: "a", proxy: "socks5://127.0.0.1:1081" });
-    expect(headless.startsWith(`agent-browser --session 'a' --profile "$HOME"/'.polpo/browser-profiles/a' '--proxy' 'socks5://127.0.0.1:1081'`)).toBe(true);
+    expect(headless.startsWith(`agent-browser ${SANDBOX_CHROME_FLAGS} --session 'a' --profile "$HOME"/'.polpo/browser-profiles/a' '--proxy' 'socks5://127.0.0.1:1081'`)).toBe(true);
     expect(headless).not.toContain("--headed");
     expect(headless).not.toContain("DISPLAY");
     const headed = sandboxBrowserCommand(["open", "https://x.test"], { session: "a", profileName: "a", proxy: "socks5://127.0.0.1:1081", headed: true });
@@ -109,7 +110,9 @@ describe("CDP_URL", () => {
     expect(await agentBrowserEnv({ session: "sitoinchat", shell: live, headed: true, remote: true }))
       .toEqual({ POLPO_BROWSER_SESSION: "sitoinchat", CDP_URL: "http://127.0.0.1:45555", DISPLAY: ":99" });
     const none = new FakeVmShell(() => ({ stdout: "" }));
-    expect(await agentBrowserEnv({ session: "sitoinchat", shell: none, remote: true })).toEqual({ POLPO_BROWSER_SESSION: "sitoinchat" });
+    // headed by default on a remote computer: DISPLAY even before the browser runs; false: none
+    expect(await agentBrowserEnv({ session: "sitoinchat", shell: none, remote: true })).toEqual({ POLPO_BROWSER_SESSION: "sitoinchat", DISPLAY: ":99" });
+    expect(await agentBrowserEnv({ session: "sitoinchat", shell: none, headed: false, remote: true })).toEqual({ POLPO_BROWSER_SESSION: "sitoinchat" });
   });
 
   it("bash gets the browser's environment per command; env_from_vault wins; a failure never stops the command", async () => {

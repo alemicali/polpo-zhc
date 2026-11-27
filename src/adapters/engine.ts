@@ -9,7 +9,8 @@
 import type { EffectiveSandbox, ResolvedSandboxVolume } from "@polpo-ai/core/sandbox";
 import type { AgentConfig, AgentActivity, Task, TaskResult, TaskOutcome, OutcomeType } from "../core/types.js";
 import type { AgentHandle, SpawnContext } from "../core/adapter.js";
-import { resolveAgentVault, loadAgentVaultEntries } from "../vault/index.js";
+import { resolveAgentVault, loadAgentVaultEntries, createRunSecrets, type RunSecrets } from "../vault/index.js";
+import { createVaultLoginTools, localVaultLoginAccess, agentHasVaultLoginTool } from "../tools/vault-tools.js";
 import {
   buildAgentSystemPrompt,
   buildSummaryPrompt,
@@ -66,7 +67,7 @@ import { createAgentNotifyTools } from "../tools/notify-tools.js";
 import { COMPUTER_TAKEOVER_TOOL, createComputerTakeoverTools } from "../tools/computer-takeover-tools.js";
 import { computerTakeoverFor } from "../core/computer-takeover.js";
 import { computerControlStore } from "../sandbox/computer-control.js";
-import { browserPromptNote } from "../tools/browser-tools.js";
+import { browserPromptNote, effectiveBrowserHeaded } from "../tools/browser-tools.js";
 import { agentNotifierFor } from "../notifications/agent-notify.js";
 import { createTaskResultTools, wantsTaskResultTools } from "../tools/task-result-tools.js";
 import { createAgentTalkTools } from "../tools/agent-talk-tools.js";
@@ -151,6 +152,9 @@ export function describeToolsForAgent(agent: AgentConfig): string {
     "- `register_outcome` — declare task deliverables (files, URLs, text, data)",
     "- `vault_get` — retrieve stored credentials/secrets",
     "- `vault_list` — list available vault entries",
+    ...(agentHasVaultLoginTool(agent)
+      ? ["- `vault_create_login` — create a login for a site in your vault with a password Polpo generates (you never see it): fill it with browser_fill { from_vault: \"<service>.password\" }"]
+      : []),
   );
 
   // --- Extended tools (only if configured in allowedTools) ---
@@ -162,7 +166,7 @@ export function describeToolsForAgent(agent: AgentConfig): string {
   if (hasPattern("browser_")) {
     extended.push(
       "",
-      "**Browser (agent-browser):**",
+      "**Browser (Polpo's real Google Chrome, via agent-browser):**",
       "- `browser_navigate` — open a URL",
       "- `browser_snapshot` — capture page accessibility snapshot",
       "- `browser_click` / `browser_fill` / `browser_select` — interact with page elements",
@@ -170,6 +174,7 @@ export function describeToolsForAgent(agent: AgentConfig): string {
       "- `browser_screenshot` — take a screenshot",
       "- Plus: browser_scroll, browser_back, browser_forward, browser_wait, browser_tabs, browser_tab_new, browser_tab_close, browser_tab_switch, browser_pdf, browser_drag, browser_hover, browser_keypress",
       "Use browser tools instead of curl/wget for pages that require JavaScript rendering or authentication.",
+      "Always use Polpo's browser (these browser_* tools, or $CDP_URL / `agent-browser --session <your session> get cdp-url` from scripts): never launch your own Chromium, Chrome or Playwright/Puppeteer browser — sites like Google Maps, Instagram and Facebook flag those as bots, and they have none of your sign-ins.",
     );
   }
 
@@ -298,6 +303,7 @@ export function describeToolsForAgent(agent: AgentConfig): string {
       "- `data_create_view` / `data_update_view` — compose native interactive views from live source bindings, bounded inline data, or both",
       "- `data_sql` — optional read-only SQL escape hatch",
       "- `data_mutate` — change records only when explicitly assigned and requested",
+      "- `data_transaction` — several SQL statements atomically in one transaction (PostgreSQL/SQLite): multi-row writes that must succeed together, `INSERT … ON CONFLICT DO NOTHING`, conditional updates with `expectRows` (e.g. `UPDATE … WHERE id = $1 AND state = $2` touching exactly 1 row), `settings` applied as SET LOCAL for triggers; values always in `params`, never in the SQL text; any failure rolls everything back",
       "Use data tools instead of shell/database clients so grants, audit, limits, and generated views remain enforced.",
     );
   }
@@ -1005,6 +1011,8 @@ export interface AgentToolset {
   connectorNote: string;
   connectorManager?: ConnectorManager;
   browserNetwork?: BrowserNetworkGuard;
+  /** The run's secrets learned while it runs (vault_create_login): mask output with them. */
+  secrets: RunSecrets;
 }
 
 /** The project's task store in this process: the database's, else the JSON files (read fresh each time). */
@@ -1077,7 +1085,8 @@ export async function buildAgentToolset(o: {
       sandboxProvider,
       agentName: agentConfig.name,
       ...(o.task ? { mediaContext: { taskId: o.task.id, ...(o.task.missionId ? { missionId: o.task.missionId } : {}) } } : {}),
-      ...(agentConfig.browserHeaded ? { browserHeaded: true } : {}),
+      // unset: headed on a remote computer, headless here
+      ...(typeof agentConfig.browserHeaded === "boolean" ? { browserHeaded: agentConfig.browserHeaded } : {}),
       // while a person holds the computer's desktop, its browser waits
       ...(remoteComputer && ctx?.polpoDir ? { browserControl: { computerId: remoteComputer.id, store: computerControlStore(ctx.polpoDir) } } : {}),
     });
@@ -1127,6 +1136,17 @@ export async function buildAgentToolset(o: {
     const access = ctx?.computerTakeover?.(remoteComputer.id) ?? local?.accessFor(agentConfig, remoteComputer.id, origin);
     allTools.push(...createComputerTakeoverTools(agentConfig, remoteComputer, access).filter((tool) => !taken.has(tool.name)));
   }
+  // vault_create_login: a login with a password Polpo generates, in the agent's own vault (allowedTools
+  // "vault_create_login" / "vault_*"). A task run asks the server over the socket (the agent comes from
+  // the run record); in the server process the vault store directly. The value goes to the run's
+  // masker and its resolved vault (browser_fill from_vault finds it at once). Every engine (host tool).
+  const runSecrets = ctx?.runSecrets ?? createRunSecrets();
+  {
+    const taken = new Set(allTools.map((tool) => tool.name));
+    const origin = o.task ? { taskId: o.task.id, ...(ctx?.runId ? { runId: ctx.runId } : {}) } : (o.notifyOrigin ?? {});
+    const access = ctx?.vaultLogin ?? (ctx?.vaultStore ? localVaultLoginAccess(ctx.vaultStore, agentConfig, origin) : undefined);
+    allTools.push(...createVaultLoginTools(agentConfig, access, { vault, secrets: runSecrets }).filter((tool) => !taken.has(tool.name)));
+  }
   // Talking to other agents while working the task (every engine: these become host tools for a
   // harness or a CLI), within the agent's communication lines: ask_agent and escalate wait for the
   // answer, message_agent hands off (the reply reaches the task)
@@ -1157,10 +1177,10 @@ export async function buildAgentToolset(o: {
   // what the prompt says about its browser: CDP_URL, headed, take control
   if (allTools.some((t) => t.name.startsWith("browser_"))) {
     const takeover = allTools.some((t) => t.name === COMPUTER_TAKEOVER_TOOL);
-    const note = browserPromptNote({ headed: !!agentConfig.browserHeaded, ...(remoteComputer ? { computer: { id: remoteComputer.id, name: remoteComputer.name } } : {}), takeover, session: agentConfig.name });
+    const note = browserPromptNote({ headed: effectiveBrowserHeaded(agentConfig.browserHeaded, !!remoteComputer), ...(remoteComputer ? { computer: { id: remoteComputer.id, name: remoteComputer.name } } : {}), takeover, session: agentConfig.name });
     connectorNote = connectorNote ? `${connectorNote}\n${note}` : note.trimStart();
   }
-  return { tools: allTools, vault, connectorNote, connectorManager, browserNetwork };
+  return { tools: allTools, vault, connectorNote, connectorManager, browserNetwork, secrets: runSecrets };
 }
 
 /**

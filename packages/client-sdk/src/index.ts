@@ -163,6 +163,9 @@ export type {
   WhatsAppPreviewPayload,
   EmailPreviewPayload,
   VaultEntryMeta,
+  VaultEntryProvenance,
+  GenerateVaultLoginRequest,
+  GenerateVaultLoginResult,
   VaultPreviewPayload,
   AuthProfileStatus,
   AuthProfileType,
@@ -335,6 +338,11 @@ export type {
 
 export type { StoreState, PolpoStats, AssessmentProgressEntry, AssessmentCheckStatus } from "./store/types.js";
 export type { TaskFilter } from "./store/selectors.js";
+
+// Structured data
+export type {
+  DataTransactionExpectRows, DataTransactionStatement, DataTransactionRequest, DataTransactionStatementResult, DataTransactionResult,
+} from "./client/data-types.js";
 
 // Agent suites (tests and evals with mocks)
 export type {

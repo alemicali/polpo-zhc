@@ -131,6 +131,7 @@ export const toolCategories: { prefix: string; label: string; tools: string; ico
   { prefix: "storage_", label: "Storage", tools: "storage_list, storage_read, storage_write, storage_delete, storage_presign (S3/R2 buckets granted to the agent)", icon: HardDrive, color: kind(6).color },
   { prefix: "send_notification", label: "Notifications", tools: "send_notification (post to the notification channels and targets set in the agent's Notifications section: Slack, Telegram, email, webhook, push…)", icon: BellRing, color: kind(1).color },
   { prefix: "request_computer_takeover", label: "Take control", tools: "request_computer_takeover (on a remote computer: a person takes control of the desktop for a login, 2FA or CAPTCHA and gives it back; on by default with a headed browser)", icon: Hand, color: kind(7).color },
+  { prefix: "vault_create_login", label: "Create logins", tools: "vault_create_login (sign up for a site: a login in its own vault with a password Polpo generates, filled with browser_fill from_vault; the agent never sees it)", icon: KeyRound, color: kind(5).color },
   { prefix: "decide", label: "Decisions", tools: "decide (typed judgments with probabilities from the decision model: yes/no, choice, score, rank)", icon: Scale, color: kind(8).color },
 ];
 

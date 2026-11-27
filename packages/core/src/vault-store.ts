@@ -1,4 +1,4 @@
-import type { VaultEntry } from "./types.js";
+import type { VaultEntry, VaultEntryProvenance } from "./types.js";
 
 /**
  * Vault owners starting with "$" are reserved system namespaces (e.g. "$data"
@@ -66,6 +66,13 @@ export interface VaultStore {
     sharedFrom?: string;
     readOnly?: boolean;
     keys: string[];
+    /** Non-secret provenance (VaultEntry.metadata, flattened). */
+    createdBy?: VaultEntryProvenance;
+    createdAt?: string;
+    rotatedAt?: string;
+    rotatedBy?: VaultEntryProvenance;
+    /** Keys whose values Polpo generated. */
+    generated?: string[];
   }>>;
 
   /** Check if an agent has any vault entries. */
@@ -84,3 +91,11 @@ export interface VaultStore {
    */
   migrateFromConfigs(agents: Array<{ name: string; vault?: Record<string, VaultEntry> }>): Promise<number>;
 }
+
+export {
+  generateVaultPassword, generateVaultLogin, vaultLoginRequestProblems, vaultLoginFillHint, vaultPasswordLengthProblem,
+  vaultMetadataAfterPatch, vaultEntryProvenanceView,
+  VAULT_PASSWORD_DEFAULT_LENGTH, VAULT_PASSWORD_MIN_LENGTH, VAULT_PASSWORD_MAX_LENGTH,
+  VAULT_PASSWORD_LOWER, VAULT_PASSWORD_UPPER, VAULT_PASSWORD_DIGITS, VAULT_PASSWORD_SYMBOLS, VAULT_SERVICE_PATTERN,
+  type VaultLoginRequest, type VaultLoginResult, type VaultPasswordOptions,
+} from "./vault-login.js";

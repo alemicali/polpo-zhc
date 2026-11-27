@@ -24,8 +24,9 @@ vi.mock("node:child_process", () => ({
 import { createBrowserTools, execBrowserAsync } from "../tools/browser-tools.js";
 
 let root: string;
-beforeEach(() => { root = mkdtempSync(join(tmpdir(), "polpo-browser-offload-")); });
-afterEach(() => { rmSync(root, { recursive: true, force: true }); });
+// Google Chrome on this machine: any executable stands for it (tests run where Chrome is missing)
+beforeEach(() => { root = mkdtempSync(join(tmpdir(), "polpo-browser-offload-")); vi.stubEnv("POLPO_AGENT_BROWSER_EXECUTABLE", process.execPath); });
+afterEach(() => { rmSync(root, { recursive: true, force: true }); vi.unstubAllEnvs(); });
 
 function snapshotTool(dir: string) {
   return createBrowserTools(root, "agent-x", ["browser_snapshot"], undefined, dir)[0];

@@ -1197,6 +1197,16 @@ export class Orchestrator extends TypedEmitter {
           agentFor: (run, task) => this.runAgentConfig(run, task),
         });
       },
+      // a task run's agent creating a login with a generated password in its own vault (vault_create_login)
+      async (msg) => {
+        const { handleVaultLoginWire } = await import("./vault-login-bridge.js");
+        return handleVaultLoginWire(msg, {
+          vaultStore: this.getVaultStore(),
+          run: (runId) => this.runStore.getRun(runId),
+          task: (taskId) => this.registry.getTask(taskId),
+          agentFor: (run, task) => this.runAgentConfig(run, task),
+        });
+      },
     );
     // send_notification from agents (chats in this process, task runs over the socket above)
     this.agentNotifier = new AgentNotifier({ router: () => this.notificationRouter });

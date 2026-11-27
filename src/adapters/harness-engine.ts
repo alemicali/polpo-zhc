@@ -194,6 +194,11 @@ export function buildHarnessInstructions(o: {
   if (o.hostTools.length) {
     parts.push("", "## Polpo tools",
       `Besides your own tools you have Polpo's tools (they run on the Polpo server with your permissions): ${o.hostTools.join(", ")}.`);
+    if (o.hostTools.some((t) => t.startsWith("browser_"))) {
+      parts.push("For anything in a browser use Polpo's browser: the browser_* tools above, or from scripts the same browser over $CDP_URL "
+        + "(`agent-browser --session <your session> get cdp-url` when it is not set). Never launch a Chromium, Chrome or Playwright/Puppeteer browser of your own "
+        + "(no `npx playwright install`, no browser launch() in scripts): sites flag those as bots, and they have none of your sign-ins.");
+    }
   }
   if (o.connectorNote) parts.push("", o.connectorNote);
   if (o.agentsMd && o.harness === "claude-code") parts.push("", "## Repository instructions (AGENTS.md)", o.agentsMd.slice(0, 40_000));
@@ -217,7 +222,12 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
   /** Set when the computer's VM went away under a running turn (forced rotation): re-attach and go on. */
   let interrupted: string | undefined;
   let secrets: string[] = [];
-  const scrub = (t: string) => scrubSecrets(t, secrets);
+  // and the secrets the run learns while it runs (a password vault_create_login generated)
+  let learned = ctx.runSecrets;
+  const scrub = (t: string) => {
+    const out = scrubSecrets(t, secrets);
+    return learned ? learned.mask(out) : out;
+  };
 
   const handle: AgentHandle = {
     agentName: agentConfig.name,
@@ -322,6 +332,7 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
         log: (line) => transcript({ type: "log", message: line }),
         task,
       });
+      learned = toolset.secrets;
       toolsetCleanup = [
         async () => toolset.connectorManager?.closeAll(),
         async () => toolset.browserNetwork?.close(),

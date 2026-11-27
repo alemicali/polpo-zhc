@@ -1,6 +1,6 @@
 /**
  * The Data area as direct tools: data sources (read, create, change, test, delete, who may use
- * them), their schema and activity, queries, read-only SQL, row changes, and data views.
+ * them), their schema and activity, queries, read-only SQL, row changes, transactions, and data views.
  *
  * Connection secrets (a database password, a REST API's Authorization header) never pass through
  * MCP: a source that needs one returns the hand-off (setup_url on the Data page, setup_id
@@ -451,6 +451,61 @@ export function registerDataTools(tool: Register, deps: McpDeps): void {
     if (!r.ok) return apiError({ ...r, error: maskSecretsInText(r.error) }, `The ${operation}`);
     const affected = (r.data as { affectedRows?: number }).affectedRows ?? 0;
     return ok(`${operation}: ${affected} row(s) in ${s.name} / ${dataset}.`, { source_id: s.id, dataset, operation, affected_rows: affected });
+  });
+
+  tool("data", "polpo_data_transaction", {
+    title: "Run a data transaction",
+    description: "Run several SQL statements in ONE transaction on a PostgreSQL or SQLite source: all commit, or any failing statement (or an expect_rows "
+      + "mismatch) rolls everything back and says which statement and why. For writes that must succeed together, idempotent inserts "
+      + "(INSERT ... ON CONFLICT DO NOTHING) and conditional updates (UPDATE ... WHERE id = $1 AND state = $2 with expect_rows: 1). Values go in params "
+      + "($1, $2 on PostgreSQL; ? on SQLite), never in the SQL text. One statement per sql; BEGIN/COMMIT/SAVEPOINT/SET are refused: settings are applied "
+      + "as SET LOCAL (PostgreSQL, keys namespace.name). Writes need confirm: true (read_only does not).",
+    inputSchema: {
+      sourceId: z.string().min(1).describe("The source's id, slug or name"),
+      statements: z.array(z.object({
+        sql: z.string().min(1).max(20_000).describe("One SQL statement with placeholders"),
+        params: z.array(z.unknown()).max(1000).optional().describe("Bind parameters in placeholder order"),
+        expect_rows: z.union([z.number().int().min(0), z.object({ min: z.number().int().min(0).optional(), max: z.number().int().min(0).optional() })]).optional()
+          .describe("Rows it must change or return: exactly n, or { min, max }; otherwise everything rolls back"),
+      })).min(1).max(50).describe("The statements, run in order"),
+      settings: z.record(z.string(), z.string().max(1000)).optional().describe("PostgreSQL: settings applied with SET LOCAL, e.g. { \"app.author\": \"Ada\" } for a trigger"),
+      read_only: z.boolean().optional().describe("Run READ ONLY (only SELECT-like statements)"),
+      timeout_ms: z.number().int().min(100).max(60_000).optional().describe("Statement and lock timeout, and the longest the transaction may run (default 15000, max 60000)"),
+      max_rows: z.number().int().min(1).max(MAX_DATA_ROWS).optional().describe(`Most rows to return per statement (default 200, max ${MAX_DATA_ROWS})`),
+      confirm: confirmParam("change rows"),
+    },
+    outputSchema: {
+      source_id: z.string(), status: z.enum(["committed", "rolled_back"]), read_only: z.boolean(),
+      statements: z.array(z.object({ index: z.number().int(), command: z.string(), row_count: z.number().int(), rows: z.array(looseObject).optional(), truncated: z.boolean().optional() })),
+      failed: z.object({ index: z.number().int(), reason: z.string(), message: z.string() }).optional(),
+    },
+    annotations: { ...DESTRUCTIVE, openWorldHint: true },
+  }, async ({ sourceId, statements, settings, read_only, timeout_ms, max_rows, confirm }) => {
+    const found = await findSource(deps, sourceId);
+    if (!found.ok) return found.result;
+    const s = found.source;
+    if (!read_only && confirm !== true) {
+      return fail(`This transaction runs ${statements.length} statement(s) on ${s.name} and may change rows. Ask the person, then call again with confirm: true `
+        + "(or read_only: true when it only reads).");
+    }
+    const r = await apiSend(deps, "POST", `/data/${enc(s.id)}/transaction`, {
+      statements: statements.map((st) => ({ sql: st.sql, ...(st.params ? { params: st.params } : {}), ...(st.expect_rows !== undefined ? { expectRows: st.expect_rows } : {}) })),
+      ...(settings ? { settings } : {}), ...(read_only ? { readOnly: true } : {}), ...(timeout_ms ? { timeoutMs: timeout_ms } : {}),
+    });
+    if (!r.ok) return apiError({ ...r, error: maskSecretsInText(r.error) }, "The transaction", "Fix the statements and try again; nothing was changed.");
+    const tx = r.data as { status: "committed" | "rolled_back"; readOnly: boolean; statements: Array<{ index: number; command: string; rowCount: number; rows?: Array<Record<string, unknown>>; truncated?: boolean }>; failed?: { index: number; reason: string; message: string } };
+    const out = tx.statements.map((st) => {
+      if (!st.rows) return { index: st.index, command: st.command, row_count: st.rowCount };
+      const capped = capRows(st.rows, max_rows ?? 200);
+      return { index: st.index, command: st.command, row_count: st.rowCount, rows: capped.rows, truncated: capped.cut || !!st.truncated };
+    });
+    const structured = { source_id: s.id, status: tx.status, read_only: !!tx.readOnly, statements: out, ...(tx.failed ? { failed: { ...tx.failed, message: maskSecretsInText(tx.failed.message) } } : {}) };
+    const lines = out.map((st) => `${st.index + 1}. ${st.command}: ${st.row_count} row(s)${st.rows ? `\n${clip(st.rows)}` : ""}`);
+    if (tx.status === "rolled_back") {
+      const f = structured.failed!;
+      return { ...fail(`Rolled back: statement ${f.index + 1} failed (${f.reason}): ${short(f.message, 400)}. Nothing was changed.${lines.length ? `\nBefore it:\n${lines.join("\n")}` : ""}`), structuredContent: structured };
+    }
+    return ok(`Committed ${out.length} statement(s) on ${s.name}.\n${lines.join("\n")}`, structured);
   });
 
   tool("data", "polpo_data_views_list", {

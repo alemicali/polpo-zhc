@@ -298,6 +298,32 @@ export interface VaultEntry {
   allowedAgents?: string[];
   /** Credential fields — values can be literals or ${ENV_VAR} references */
   credentials: Record<string, string>;
+  /** Non-secret provenance: who created the entry and when, rotations, which values Polpo generated. */
+  metadata?: VaultEntryMetadata;
+}
+
+/** Who made or changed a vault entry. The agent comes from the run or chat, never from a tool call. */
+export interface VaultEntryProvenance {
+  kind: "agent" | "person";
+  /** kind "agent": the agent that did it. */
+  agent?: string;
+  taskId?: string;
+  sessionId?: string;
+  runId?: string;
+  /** kind "person": who, when known (user id or email). */
+  by?: string;
+}
+
+/** Non-secret metadata of a vault entry (listings show it). */
+export interface VaultEntryMetadata {
+  createdBy?: VaultEntryProvenance;
+  /** ISO time the entry was created. */
+  createdAt?: string;
+  /** ISO time of the last generated-password rotation. */
+  rotatedAt?: string;
+  rotatedBy?: VaultEntryProvenance;
+  /** Credential keys whose values Polpo generated: never shown to a model (vault_get masks them). */
+  generated?: string[];
 }
 
 // === Loops ===
@@ -519,7 +545,8 @@ export interface AgentConfig {
    * Run its browser headed (a visible window) instead of headless. On a remote computer the
    * window opens on the computer's virtual display (:99), which a person can watch live and take
    * control of (login, 2FA, CAPTCHA) from the computer's page; on this server, on Polpo's virtual
-   * display. Profile, session and egress proxy are unchanged. Default false (headless).
+   * display. Profile, session and egress proxy are unchanged. false: headless. Unset: headed on a
+   * remote computer (Daytona, E2B), headless on this server. Always real Google Chrome.
    */
   browserHeaded?: boolean;
   /** Allowed recipient email domains for email_send (e.g. ["acme.com", "partner.io"]).

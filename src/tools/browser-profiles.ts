@@ -11,7 +11,7 @@
 import { existsSync } from "node:fs";
 import { lstat, readdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { execBrowserAsync } from "./browser-tools.js";
+import { execBrowserAsync, execChromeBrowserAsync } from "./browser-tools.js";
 import { assertWebUrl } from "./browser-url-guard.js";
 
 export const BROWSER_PROFILE_NAME = /^[A-Za-z0-9_-]+$/;
@@ -113,7 +113,8 @@ export async function startProfileLogin(polpoDir: string, name: string, url: str
   const target = assertWebUrl(url, "browser_profile_login");
   const profileDir = join(profilesDir(polpoDir), name);
   const session = loginSessionOf(name);
-  const result = await execBrowserAsync(["open", target], { session, profileDir, timeout: 60_000 });
+  // real Google Chrome, like the agents that use the profile (an error when this server has none)
+  const result = await execChromeBrowserAsync(["open", target], { session, profileDir, timeout: 60_000 });
   if (!result.success) throw new Error(`Could not open the browser: ${result.error ?? result.raw}`);
   return { session, profileDir };
 }
