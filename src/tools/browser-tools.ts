@@ -23,6 +23,7 @@
  * preventing cross-agent interference when multiple agents use browser tools.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { execFileSync, spawn as spawnChild } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
@@ -38,7 +39,7 @@ import { resolveToolOutputDir, withToolOutputOffload } from "./tool-output.js";
 import { browserProxyContext, proxyArgs, type BrowserNetworkGuard } from "./browser-network-guard.js";
 import type { ResolvedVault } from "../vault/index.js";
 import { createSecretMasker, formatVaultRef, resolveEnvFromVault } from "../vault/env-from-vault.js";
-import { decideEgress, decideRemoteEgress, shellHost, type BrowserEgressConfig } from "./browser-egress.js";
+import { decideEgress, decideRemoteEgress, execWithin, shellHost, type BrowserEgressConfig } from "./browser-egress.js";
 import { DESKTOP_DISPLAY, DESKTOP_DISPLAY_COMMAND, DESKTOP_SCREEN, ensureDesktopDisplay } from "../sandbox/desktop.js";
 import { waitForAgentControl, type ComputerControlStore } from "../sandbox/computer-control.js";
 import {
@@ -49,6 +50,65 @@ import {
 /** Agent browser results above this are saved in full to a file (head + tail + path for the model). */
 const MAX_OUTPUT_BYTES = 50_000;
 const DEFAULT_TIMEOUT = 30_000;
+
+// ─── Timing ───
+
+/** One step of a browser call and how long it took. */
+export type BrowserTimingStep = { step: string; ms: number };
+
+/** The steps of the browser call running now (createBrowserTools opens one per tool call). */
+const browserTiming = new AsyncLocalStorage<{ steps: BrowserTimingStep[] }>();
+
+/** A browser call slower than this says where its time went (tool result details, the run's log, stderr). */
+export const BROWSER_SLOW_CALL_MS = 10_000;
+
+/** Run `fn` as a timed step of the current browser call (no call: just run it). */
+export async function timedBrowserStep<T>(step: string, fn: () => Promise<T>): Promise<T> {
+  const timing = browserTiming.getStore();
+  if (!timing) return fn();
+  const t0 = Date.now();
+  try {
+    return await fn();
+  } finally {
+    timing.steps.push({ step, ms: Date.now() - t0 });
+  }
+}
+
+/** "egress 290.1 s, preflight 0.4 s, command 4.2 s" (steps of 50 ms or more, merged by name). */
+export function formatBrowserTiming(steps: BrowserTimingStep[]): string {
+  const merged = new Map<string, number>();
+  for (const s of steps) merged.set(s.step, (merged.get(s.step) ?? 0) + s.ms);
+  return [...merged].filter(([, ms]) => ms >= 50).map(([step, ms]) => `${step} ${(ms / 1000).toFixed(1)} s`).join(", ");
+}
+
+/**
+ * A browser tool whose calls are timed step by step: a slow call (BROWSER_SLOW_CALL_MS) gets
+ * `details.timing` and a last line in its result (so the run's log shows where the time went),
+ * and a line on stderr.
+ */
+function timedBrowserTool(tool: AgentTool<any>): AgentTool<any> {
+  return {
+    ...tool,
+    async execute(id, params: any, signal, ...rest) {
+      const timing = { steps: [] as BrowserTimingStep[] };
+      const t0 = Date.now();
+      const result = await browserTiming.run(timing, () => tool.execute(id, params, signal, ...rest));
+      const totalMs = Date.now() - t0;
+      if (totalMs < BROWSER_SLOW_CALL_MS) return result;
+      const breakdown = formatBrowserTiming(timing.steps);
+      const line = `[${tool.name} took ${(totalMs / 1000).toFixed(1)} s${breakdown ? `: ${breakdown}` : ""}]`;
+      console.warn(`[browser] ${line}`);
+      const details = result.details && typeof result.details === "object" && !Array.isArray(result.details)
+        ? { ...(result.details as Record<string, unknown>), timing: { totalMs, steps: timing.steps } }
+        : { ...(result.details !== undefined ? { data: result.details } : {}), timing: { totalMs, steps: timing.steps } };
+      const content = [...(result.content ?? [])];
+      const last = content.length - 1;
+      if (last >= 0 && content[last]!.type === "text") content[last] = { ...content[last]!, text: `${(content[last] as { text: string }).text}\n${line}` } as typeof content[number];
+      else content.push({ type: "text", text: line });
+      return { ...result, content, details };
+    },
+  };
+}
 
 /**
  * Cleanup an agent-browser session: close the session.
@@ -315,6 +375,8 @@ export const AGENT_BROWSER_INSTALL_COMMAND =
   ` && (${SANDBOX_CHROME_INSTALL_COMMAND})`;
 
 const browserReady = new WeakMap<Shell, Promise<string | undefined>>();
+/** The browser check's timeout (one `command -v` each: the install only runs when it says missing). */
+const BROWSER_CHECK_TIMEOUT_MS = 15_000;
 
 /**
  * agent-browser and Google Chrome in the sandbox: present in the runner image; otherwise installed
@@ -324,9 +386,11 @@ export function ensureSandboxBrowser(shell: Shell): Promise<string | undefined> 
   let ready = browserReady.get(shell);
   if (!ready) {
     ready = (async () => {
-      const found = await shell.execute(AGENT_BROWSER_CHECK_COMMAND, { timeout: 20_000 }).catch(() => undefined);
-      if (found?.exitCode === 0) return undefined;
-      const installed = await shell.execute(AGENT_BROWSER_INSTALL_COMMAND, { timeout: 600_000 }).catch((err) => ({ exitCode: 1, stdout: "", stderr: String(err?.message ?? err) }));
+      const found = await execWithin(shell, AGENT_BROWSER_CHECK_COMMAND, { timeoutMs: BROWSER_CHECK_TIMEOUT_MS }).catch((err) => ({ exitCode: 1, stdout: "", stderr: String(err?.message ?? err), timedOut: false }));
+      if (found.exitCode === 0) return undefined;
+      // a check that did not answer is not a missing browser: an error now (retried next call), never a long install
+      if (found.timedOut || found.exitCode === 124) return `The computer did not answer the browser check within ${BROWSER_CHECK_TIMEOUT_MS / 1000} s: try again`;
+      const installed = await execWithin(shell, AGENT_BROWSER_INSTALL_COMMAND, { timeoutMs: 600_000 }).catch((err) => ({ exitCode: 1, stdout: "", stderr: String(err?.message ?? err) }));
       if (installed.exitCode === 0) return undefined;
       return "agent-browser and Google Chrome are not both installed in the sandbox and could not be installed there " +
         `(${(installed.stderr || installed.stdout || `exit ${installed.exitCode}`).trim().slice(0, 300)}). ` +
@@ -353,12 +417,17 @@ async function execSandboxBrowser(
     headed?: boolean | "default";
   },
 ): Promise<BrowserCallResult> {
-  const missing = await ensureSandboxBrowser(shell);
+  const launches = !NO_LAUNCH_COMMANDS.has(args[0] ?? "");
+  const wantsDisplay = launches && (options.headed === true || (options.headed === "default" && !noDefaultDisplay.has(shell)));
+  // the independent preflights at the same time (both cached per shell: one command each per run)
+  const [missing, display] = await Promise.all([
+    timedBrowserStep("browser check", () => ensureSandboxBrowser(shell)),
+    wantsDisplay ? timedBrowserStep("display", () => ensureSandboxDisplay(shell)) : Promise.resolve(undefined),
+  ]);
   if (missing) return { success: false, error: missing, raw: missing };
   let headed = false;
-  const launches = !NO_LAUNCH_COMMANDS.has(args[0] ?? "");
-  if (launches && (options.headed === true || (options.headed === "default" && !noDefaultDisplay.has(shell)))) {
-    const noDisplay = await ensureSandboxDisplay(shell);
+  if (wantsDisplay) {
+    const noDisplay = display;
     // an agent that asked for a headed browser is told; by default it runs headless (and the
     // display is not tried again on this shell)
     if (noDisplay && options.headed === true) return { success: false, error: noDisplay, raw: noDisplay };
@@ -368,8 +437,12 @@ async function execSandboxBrowser(
   try {
     // agent-browser does not create the folder of the file it saves
     const mkdir = options.saves ? `mkdir -p ${shq(dirname(options.saves))} && ` : "";
-    const env = options.secret !== undefined ? { env: { [BROWSER_SECRET_ENV]: options.secret } } : {};
-    const result = await shell.execute(mkdir + sandboxBrowserCommand(args, { ...options, headed }), { cwd: options.cwd, timeout: options.timeout ?? DEFAULT_TIMEOUT, ...env });
+    const env: Record<string, string> | undefined = options.secret !== undefined ? { [BROWSER_SECRET_ENV]: options.secret } : undefined;
+    const timeoutMs = options.timeout ?? DEFAULT_TIMEOUT;
+    const result = await timedBrowserStep(launches ? "command" : args[0] ?? "command", () => execWithin(shell, mkdir + sandboxBrowserCommand(args, { ...options, headed }), {
+      // launching the agent's Chrome first (agentChromeEnsureScript) takes up to ~15 s more
+      timeoutMs: timeoutMs + (launches ? 15_000 : 0), ...(options.cwd ? { cwd: options.cwd } : {}), ...(env ? { env } : {}),
+    }));
     return parseShellBrowserResult(result);
   } catch (err: any) {
     const message = err?.message ?? String(err);
@@ -388,7 +461,7 @@ export function ensureSandboxDisplay(shell: Shell): Promise<string | undefined> 
   if (!ready) {
     ready = ensureDesktopDisplay({
       exec: async (command, o = {}) => {
-        const r = await shell.execute(command, { timeout: o.timeoutMs ?? 30_000, ...(o.env ? { env: o.env } : {}) });
+        const r = await execWithin(shell, command, { timeoutMs: o.timeoutMs ?? 30_000, ...(o.env ? { env: o.env } : {}) });
         return { exitCode: r.exitCode, stdout: r.stdout, stderr: r.stderr };
       },
     });
@@ -805,6 +878,16 @@ function createBrowserWaitTool(exec: BrowserExec): AgentTool<typeof BrowserWaitS
 
 // ─── Tool: browser_eval ───
 
+/**
+ * agent-browser's arguments for evaluating `javascript`: base64 (quotes, braces, newlines and
+ * non-ASCII travel as [A-Za-z0-9+/=], safe on a command line and through a shell) with `-b`
+ * BEFORE the script. agent-browser 0.26 reads `eval <script> -b` as the script itself, so the
+ * flag after it evaluated the base64 text (or "-b") as JavaScript: "ReferenceError: b is not defined".
+ */
+export function browserEvalArgs(javascript: string): string[] {
+  return ["eval", "-b", Buffer.from(javascript, "utf8").toString("base64")];
+}
+
 const BrowserEvalSchema = Type.Object({
   javascript: Type.String({ description: "JavaScript code to execute in the browser page context" }),
 });
@@ -817,9 +900,7 @@ function createBrowserEvalTool(exec: BrowserExec): AgentTool<typeof BrowserEvalS
       "Use for reading DOM properties, manipulating the page, or extracting data not available via snapshot.",
     parameters: BrowserEvalSchema,
     async execute(_id, params, signal) {
-      // Use base64 encoding for safe transport of complex JS
-      const b64 = Buffer.from(params.javascript).toString("base64");
-      const result = await exec(["eval", b64, "-b"], { signal });
+      const result = await exec(browserEvalArgs(params.javascript), { signal });
       return browserResult(result);
     },
   };
@@ -998,7 +1079,7 @@ export function resetBrowserEgressSessions(): void {
 function withEgress(
   tool: AgentTool<any>, egress: BrowserEgressConfig | undefined, network: BrowserNetworkGuard | undefined,
   inSandbox: () => Promise<boolean>, session: string, profileDir: string | undefined,
-  remote: { host?: () => ReturnType<typeof shellHost> | undefined; profilePath?: string; close: () => Promise<unknown> },
+  remote: { host?: () => ReturnType<typeof shellHost> | undefined; profilePath?: string; close: () => Promise<unknown>; prewarm?: (tool: string) => void },
 ): AgentTool<any> {
   if (!egress) return tool;
   return {
@@ -1009,15 +1090,19 @@ function withEgress(
       if (!vm && (network || egress.tailnet)) return tool.execute(id, params, signal, ...rest);
       const host = vm ? remote.host?.() : undefined;
       if (vm && !host) return tool.execute(id, params, signal, ...rest);
-      const decision = vm
-        ? await decideRemoteEgress(egress as BrowserEgressConfig & { tailnet: NonNullable<BrowserEgressConfig["tailnet"]> }, host!, remote.profilePath)
-        : await decideEgress(egress, profileDir);
+      // the VM's preflights (agent-browser and Chrome there, the display) run while the egress is decided
+      if (vm) remote.prewarm?.(tool.name);
+      const decision = await timedBrowserStep("egress", () => (vm
+        ? decideRemoteEgress(egress as BrowserEgressConfig & { tailnet: NonNullable<BrowserEgressConfig["tailnet"]> }, host!, remote.profilePath)
+        : decideEgress(egress, profileDir)));
       if (decision.refusal) return { content: [{ type: "text", text: `Browser error: ${decision.refusal}` }], details: { error: decision.refusal, egress: decision.label } };
-      // the proxy is fixed when the browser starts: switching means a fresh browser on the same profile
+      // the proxy is fixed when the browser starts: switching means a fresh browser on the same
+      // profile. In a VM the agent's own Chrome does that itself (agentChromeEnsureScript relaunches
+      // it when its proxy changed and re-attaches the session): nothing to close first.
       const key = `${vm ? "vm" : "host"}:${session}`;
-      if (!sessionEgress.has(key) ? decision.proxy !== undefined : sessionEgress.get(key) !== decision.proxy) {
+      if (!vm && (!sessionEgress.has(key) ? decision.proxy !== undefined : sessionEgress.get(key) !== decision.proxy)) {
         if (tool.name !== "browser_close") {
-          await (vm ? remote.close() : execAgentBrowser(["close"], { session, timeout: 15_000 })).catch(() => undefined);
+          await timedBrowserStep("restart", () => execAgentBrowser(["close"], { session, timeout: 15_000 })).catch(() => undefined);
         }
       }
       sessionEgress.set(key, decision.proxy);
@@ -1077,9 +1162,9 @@ export function createBrowserTools(
     const withProfile = options.profile !== false;
     // a person holds the computer's desktop (take control): never act at the same time
     if (control) {
-      const blocked = await waitForAgentControl(control.store, control.computerId, {
+      const blocked = await timedBrowserStep("control", () => waitForAgentControl(control.store, control.computerId, {
         ...(options.signal ? { signal: options.signal } : {}), ...(control.pollMs ? { pollMs: control.pollMs } : {}), ...(control.maxWaitMs !== undefined ? { maxWaitMs: control.maxWaitMs } : {}),
-      });
+      }));
       if (blocked) return { success: false, error: blocked, raw: blocked };
     }
     if (shell && await inSandbox()) {
@@ -1144,9 +1229,15 @@ export function createBrowserTools(
     host: () => (shell ? (host ??= shellHost(shell, fs)) : undefined),
     profilePath: profileName ? `${SANDBOX_BROWSER_PROFILES}/${profileName}` : undefined,
     close: () => exec(["close"], { profile: false, timeout: 15_000 }),
+    // cached per shell: the later awaits in execSandboxBrowser get the same checks
+    prewarm: (tool: string) => {
+      if (!shell || tool === "browser_close") return;
+      void ensureSandboxBrowser(shell).catch(() => undefined);
+      if (headed !== false && !noDefaultDisplay.has(shell)) void ensureSandboxDisplay(shell).catch(() => undefined);
+    },
   };
-  return names.map(n => withToolOutputOffload(
+  return names.map(n => timedBrowserTool(withToolOutputOffload(
     withEgress(guardedByNetwork(factories[n](), network, inSandbox), egress, network, inSandbox, session, profileDir, remote),
     { dir: toolOutputDir, maxChars: MAX_OUTPUT_BYTES, fs },
-  ));
+  )));
 }

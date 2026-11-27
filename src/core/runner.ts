@@ -260,9 +260,14 @@ async function main(): Promise<void> {
       // (the run's config carries only its reference)
       const tailnet = config.browserEgress?.tailnet;
       if (tailnet) {
-        const { configureTailnetEgress } = await import("../sandbox/tailnet-egress.js");
+        const { TAILNET_STATE_FILE, configureTailnetEgress } = await import("../sandbox/tailnet-egress.js");
         const egress = config.browserEgress;
-        configureTailnetEgress({ vaultStore, egressFor: (computer) => (computer.id === tailnet.computerId ? egress : undefined) });
+        // a fresh healthy check by the server (or an earlier run) is trusted; a tailscaled alive
+        // after a resume is restarted from a run only when the proxy does not answer through it
+        configureTailnetEgress({
+          vaultStore, egressFor: (computer) => (computer.id === tailnet.computerId ? egress : undefined),
+          stateFile: join(config.polpoDir, TAILNET_STATE_FILE), restoredRestart: "when-probe-fails",
+        });
       }
     }
 

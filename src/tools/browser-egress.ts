@@ -131,14 +131,51 @@ export async function decideEgress(egress: BrowserEgressConfig, profileDir: stri
   });
 }
 
-/** A run's shell and files in a remote VM, as a host for the tailnet runtime. */
+/** How much longer than its own timeout a call into a remote VM is waited for on this side. */
+export const REMOTE_DEADLINE_GRACE_MS = 5_000;
+/** A file upload into a remote VM (the tailnet's forwarder script, its key file). */
+const REMOTE_WRITE_DEADLINE_MS = 30_000;
+/**
+ * The longest a browser call waits for its egress decision (the tailnet check): a bootstrap that
+ * takes longer goes on in the background and the call decides without it (the next use waits for
+ * the same check, never a second one).
+ */
+export const EGRESS_DECISION_DEADLINE_MS = 45_000;
+
+/**
+ * `promise`, or `onTimeout()` (its value, or what it throws) when it has not settled within `ms`:
+ * this side's deadline, so a provider call that never returns, whatever timeout it was given, no
+ * longer holds a tool call for minutes.
+ */
+export function withDeadline<T>(promise: Promise<T>, ms: number, onTimeout: () => T): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<T>((resolve, reject) => {
+    timer = setTimeout(() => { try { resolve(onTimeout()); } catch (err) { reject(err); } }, ms);
+    timer.unref?.();
+  });
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+}
+
+/** A command in a remote VM, waited for at most its timeout plus a grace on this side (exit 124 after). */
+export function execWithin(
+  shell: Shell, command: string, o: { timeoutMs: number; env?: Record<string, string>; cwd?: string },
+): Promise<{ exitCode: number; stdout: string; stderr: string; timedOut?: boolean }> {
+  return withDeadline(
+    shell.execute(command, { timeout: o.timeoutMs, ...(o.env ? { env: o.env } : {}), ...(o.cwd ? { cwd: o.cwd } : {}) }),
+    o.timeoutMs + REMOTE_DEADLINE_GRACE_MS,
+    () => ({ exitCode: 124, stdout: "", stderr: `no answer from the computer within ${Math.round((o.timeoutMs + REMOTE_DEADLINE_GRACE_MS) / 1000)} s`, timedOut: true }),
+  );
+}
+
+/** A run's shell and files in a remote VM, as a host for the tailnet runtime (every call bounded on this side). */
 export function shellHost(shell: Shell, fs: FileSystem | undefined): TailnetHost {
   return {
-    exec: async (command, o = {}) => shell.execute(command, { ...(o.timeoutMs ? { timeout: o.timeoutMs } : {}), ...(o.env ? { env: o.env } : {}) }),
+    exec: async (command, o = {}) => execWithin(shell, command, { timeoutMs: o.timeoutMs ?? 30_000, ...(o.env ? { env: o.env } : {}) }),
     writeFile: async (path, data) => {
+      const bounded = (p: Promise<void>) => withDeadline(p, REMOTE_WRITE_DEADLINE_MS, () => { throw new Error(`Could not write ${path} in the VM: no answer within ${REMOTE_WRITE_DEADLINE_MS / 1000} s`); });
       // through the provider's file API: contents never go through a command line
-      if (fs?.writeFileBuffer) return fs.writeFileBuffer(path, data);
-      if (fs) return fs.writeFile(path, new TextDecoder().decode(data));
+      if (fs?.writeFileBuffer) return bounded(fs.writeFileBuffer(path, data));
+      if (fs) return bounded(fs.writeFile(path, new TextDecoder().decode(data)));
       // no file API: the bytes come from the command's environment (never its command line)
       const r = await shell.execute(`umask 077; printf '%s' "$POLPO_TAILNET_FILE" > '${path.replace(/'/g, `'\\''`)}'`, { env: { POLPO_TAILNET_FILE: new TextDecoder().decode(data) }, timeout: 30_000 });
       if (r.exitCode !== 0) throw new Error(`Could not write ${path} in the VM`);
@@ -166,7 +203,11 @@ export async function decideRemoteEgress(
   const decision = await decideEgressWith(egress, {
     proxy: TAILNET_BROWSER_PROXY,
     reachable: async () => {
-      status = await tailnetEgress.ensure(host, egress.tailnet);
+      // bounded: a bootstrap that takes longer goes on (shared with the next use); this call decides without it
+      status = await withDeadline(tailnetEgress.ensure(host, egress.tailnet), EGRESS_DECISION_DEADLINE_MS, () => ({
+        computerId: egress.tailnet.computerId, tailnet: "starting", proxyReachable: false, checkedAt: new Date().toISOString(),
+        error: `The tailnet check of computer "${egress.tailnet.computerId}" is taking longer than ${EGRESS_DECISION_DEADLINE_MS / 1000} s (it goes on; the next browser call uses it)`,
+      }));
       onStatus?.(status);
       return status.tailnet === "up" && status.proxyReachable;
     },

@@ -23,7 +23,7 @@ import {
 } from "../tools/browser-tools.js";
 import { createSystemTools } from "../tools/system-tools.js";
 import {
-  ComputerDesktops, DESKTOP_DISPLAY_COMMAND, DESKTOP_INSPECT_COMMAND, DESKTOP_PASSWORD_ENV, DESKTOP_STOP_COMMAND, DESKTOP_VAULT_OWNER,
+  ComputerDesktops, DESKTOP_DISPLAY_COMMAND, DESKTOP_DISPLAY_QUICK_COMMAND, DESKTOP_INSPECT_COMMAND, DESKTOP_PASSWORD_ENV, DESKTOP_STOP_COMMAND, DESKTOP_VAULT_OWNER,
   DESKTOP_VNC_OPTIONS, desktopInstallCommand, desktopUnsupported, desktopViewCommand, parseDesktopInspect, vncPassword,
 } from "../sandbox/desktop.js";
 import { ComputerControlError, ComputerControlStore, waitForAgentControl } from "../sandbox/computer-control.js";
@@ -93,7 +93,9 @@ describe("headed browser in the VM", () => {
     await nav.execute("1", { url: "https://example.com" });
     await nav.execute("2", { url: "https://example.com/2" });
     const cmds = shell.calls.map((c) => c.command);
-    expect(cmds.filter((c) => c === desktopInstallCommand("display"))).toHaveLength(1);
+    // installed (the runner image): one quick command, once per shell; the long install never runs
+    expect(cmds.filter((c) => c === DESKTOP_DISPLAY_QUICK_COMMAND)).toHaveLength(1);
+    expect(cmds.filter((c) => c === desktopInstallCommand("display"))).toHaveLength(0);
     expect(cmds.filter((c) => c.includes("DISPLAY=':99' $S nohup") && c.includes(`--cdp "$P"`))).toHaveLength(2);
   });
 });

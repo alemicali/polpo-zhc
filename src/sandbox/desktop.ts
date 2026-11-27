@@ -138,9 +138,25 @@ export interface DesktopHost {
 }
 
 const INSTALL_TIMEOUT_MS = 10 * 60_000;
+/** The fast path's timeout (one command when everything is installed). */
+const DISPLAY_QUICK_TIMEOUT_MS = 20_000;
 
-/** The display up in the VM (installing Xvfb/openbox when missing): undefined, else why not. */
+/**
+ * The fast path: exit 3 when Xvfb or openbox is missing (the slow path installs them), otherwise
+ * the display started when it is not up (DESKTOP_DISPLAY_COMMAND). One command on the runner image.
+ */
+export const DESKTOP_DISPLAY_QUICK_COMMAND =
+  `{ ${Object.keys(DESKTOP_DISPLAY_PACKAGES).map((bin) => `command -v ${bin} >/dev/null 2>&1`).join(" && ")}; } || exit 3; (${DESKTOP_DISPLAY_COMMAND})`;
+
+/**
+ * The display up in the VM (installing Xvfb/openbox when missing): undefined, else why not. The
+ * installed case is one short command; the long install timeout applies only when something is
+ * missing (a quick check that does not answer in time is an error, never a 10-minute wait).
+ */
 export async function ensureDesktopDisplay(host: DesktopHost): Promise<string | undefined> {
+  const quick = await host.exec(DESKTOP_DISPLAY_QUICK_COMMAND, { timeoutMs: DISPLAY_QUICK_TIMEOUT_MS }).catch((err) => ({ exitCode: 1, stdout: "", stderr: String((err as Error)?.message ?? err) }));
+  if (quick.exitCode === 0) return undefined;
+  if (quick.exitCode !== 3) return `The virtual display did not start: ${(quick.stderr || quick.stdout).trim().slice(0, 400) || `exit ${quick.exitCode}`}`;
   const installed = await host.exec(desktopInstallCommand("display"), { timeoutMs: INSTALL_TIMEOUT_MS }).catch((err) => ({ exitCode: 1, stdout: "", stderr: String((err as Error)?.message ?? err) }));
   if (installed.exitCode !== 0) return `The virtual display cannot be installed: ${(installed.stderr || installed.stdout).trim().slice(0, 400)}`;
   const up = await host.exec(DESKTOP_DISPLAY_COMMAND, { timeoutMs: 30_000 }).catch((err) => ({ exitCode: 1, stdout: "", stderr: String((err as Error)?.message ?? err) }));

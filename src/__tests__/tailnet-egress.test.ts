@@ -621,11 +621,12 @@ describe("the browser of a remote computer going out through the tailnet", () =>
     const tools = createBrowserTools("/vm/work", "growth", ["browser_navigate"], "/host/.polpo/browser-profiles/growth", "/vm/out", undefined, undefined, { shell: new VmShell(vm), fs: fs(vm), egress });
     await tool(tools, "browser_navigate").execute("1", { url: "https://example.com" });
     const calls = browserCalls(vm);
-    expect(calls[0]).toBe("agent-browser --session 'growth' 'close' --json");
+    // nothing closed first: the agent's own Chrome is relaunched by its ensure script when its proxy changes
+    expect(calls).toHaveLength(1);
     // the agent's own Chrome gets the forwarder as its proxy (agent-browser attaches over CDP)
-    expect(calls[1]).toContain(`'--proxy-server=${TAILNET_BROWSER_PROXY}' '--proxy-bypass-list=<-loopback>'`);
-    expect(calls[1]).toContain(`--cdp "$P"`);
-    expect(calls[1]).toContain("'open' 'https://example.com'");
+    expect(calls[0]).toContain(`'--proxy-server=${TAILNET_BROWSER_PROXY}' '--proxy-bypass-list=<-loopback>'`);
+    expect(calls[0]).toContain(`--cdp "$P"`);
+    expect(calls[0]).toContain("'open' 'https://example.com'");
     expect(vm.marker).toBe(true);
     expect(vm.calls.find((c) => c.kind === "marker-write")!.command).toContain(`"$HOME"/'.polpo/browser-profiles/growth'/.polpo-egress`);
     expect(vm.leaked()).toBe(false);
@@ -658,9 +659,10 @@ describe("the browser of a remote computer going out through the tailnet", () =>
     vm2.proxyUp = false;
     tailnetEgress.invalidate();
     await tool(direct, "browser_navigate").execute("2", { url: "https://example.com" });
-    const [close, open] = browserCalls(vm2).slice(-2);
-    expect(close).toBe("agent-browser --session 'growth3' 'close' --json");
+    // the ensure script sees another proxy in Chrome's settings and relaunches it (no close first)
+    const open = browserCalls(vm2).at(-1)!;
     expect(open).not.toContain("--proxy-server");
+    expect(open).toContain(`[ "$(cat "$CF" 2>/dev/null)" = "$CONF" ]`);
   });
 
   test("a remote computer without a tailnet egress: the browser in the VM goes out from the VM", async () => {
@@ -798,4 +800,130 @@ describe("the forwarder (node, in the VM)", () => {
       tsd.server.close();
     }
   }, 20_000);
+});
+
+// ── Task runs: the shared state file, no restart of a healthy node ─────────
+
+describe("task runs share the last healthy check (first browser call of a run)", () => {
+  const stateFile = () => join(tmp("polpo-tailnet-state-"), ".polpo", "tailnet-egress.json");
+  const healthyVm = () => { const vm = new FakeTailnetVm(); vm.selfOnline = true; return vm; };
+
+  test("a fresh healthy check by the server: a new runner process runs nothing in the VM", async () => {
+    const file = stateFile();
+    const clock = { now: 1_000_000 };
+    const server = new TailnetEgress({ vaultStore, now: () => clock.now, stateFile: file });
+    const vm = healthyVm();
+    expect((await server.ensure(vm, ref())).proxyReachable).toBe(true);
+    // a task run: its own process, its caches empty
+    clock.now += 20_000;
+    const runner = new TailnetEgress({ vaultStore, now: () => clock.now, stateFile: file, restoredRestart: "when-probe-fails" });
+    const before = vm.events.length;
+    const status = await runner.ensure(vm, ref());
+    expect(status).toMatchObject({ tailnet: "up", proxyReachable: true });
+    expect(vm.events.slice(before)).toEqual([]);
+  });
+
+  test("stale (older than the shared TTL), another proxy, or not healthy: looked at once, then cached", async () => {
+    const file = stateFile();
+    const clock = { now: 1_000_000 };
+    const server = new TailnetEgress({ vaultStore, now: () => clock.now, stateFile: file });
+    const vm = healthyVm();
+    await server.ensure(vm, ref());
+    clock.now += 121_000;
+    const runner = new TailnetEgress({ vaultStore, now: () => clock.now, stateFile: file, restoredRestart: "when-probe-fails" });
+    let before = vm.events.length;
+    expect((await runner.ensure(vm, ref())).proxyReachable).toBe(true);
+    expect(vm.events.slice(before)).toEqual(["inspect"]);
+    before = vm.events.length;
+    await runner.ensure(vm, ref());
+    expect(vm.events.slice(before)).toEqual([]);
+    // the runner's own check was shared: the next run trusts it
+    clock.now += 10_000;
+    const next = new TailnetEgress({ vaultStore, now: () => clock.now, stateFile: file, restoredRestart: "when-probe-fails" });
+    before = vm.events.length;
+    await next.ensure(vm, ref());
+    expect(vm.events.slice(before)).toEqual([]);
+    // another proxy: the shared check is not for it
+    before = vm.events.length;
+    await new TailnetEgress({ vaultStore, now: () => clock.now, stateFile: file }).ensure(vm, { ...ref(), proxyHost: "100.101.55.8" });
+    expect(vm.events.slice(before)[0]).toBe("inspect");
+    // an unhealthy check is never trusted
+    const down = healthyVm();
+    down.proxyUp = false;
+    const downFile = stateFile();
+    await new TailnetEgress({ vaultStore, now: () => clock.now, stateFile: downFile }).ensure(down, ref());
+    before = down.events.length;
+    await new TailnetEgress({ vaultStore, now: () => clock.now, stateFile: downFile }).ensure(down, ref());
+    expect(down.events.slice(before)[0]).toBe("inspect");
+  });
+
+  test("a resume seen by the server voids the shared check until the server checked again after it", async () => {
+    const file = stateFile();
+    const clock = { now: 1_000_000 };
+    const server = new TailnetEgress({ vaultStore, now: () => clock.now, stateFile: file });
+    const vm = healthyVm();
+    await server.ensure(vm, ref());
+    clock.now += 1_000;
+    server.invalidate("nina", { restored: true });
+    const runner = new TailnetEgress({ vaultStore, now: () => clock.now, stateFile: file, restoredRestart: "when-probe-fails" });
+    let before = vm.events.length;
+    await runner.ensure(vm, ref());
+    expect(vm.events.slice(before)).toEqual(["inspect"]);
+    // the server's re-join after the resume is shared: the next run trusts it
+    clock.now += 1_000;
+    await server.ensure(vm, ref());
+    clock.now += 1_000;
+    const later = new TailnetEgress({ vaultStore, now: () => clock.now, stateFile: file, restoredRestart: "when-probe-fails" });
+    before = vm.events.length;
+    await later.ensure(vm, ref());
+    expect(vm.events.slice(before)).toEqual([]);
+  });
+
+  test("a runner never restarts a healthy tailscaled after a resume; it does when the probe fails", async () => {
+    const clock = { now: 1_000_000 };
+    const runner = new TailnetEgress({ vaultStore, now: () => clock.now, restoredRestart: "when-probe-fails" });
+    const vm = healthyVm();
+    await runner.ensure(vm, ref());
+    // the runner itself saw the computer start (it woke it): the node still answers end to end
+    runner.invalidate("nina", { restored: true });
+    let before = vm.events.length;
+    expect((await runner.ensure(vm, ref())).proxyReachable).toBe(true);
+    expect(vm.events.slice(before)).toEqual(["inspect"]);
+    // the node came back from the snapshot removed from the tailnet: nothing answers, restart
+    vm.removed = true;
+    runner.invalidate("nina", { restored: true });
+    before = vm.events.length;
+    expect((await runner.ensure(vm, ref())).proxyReachable).toBe(true);
+    expect(vm.events.slice(before)).toContain("restart");
+    // the server (default "always") keeps restarting a tailscaled back from a snapshot
+    const server = new TailnetEgress({ vaultStore, now: () => clock.now });
+    await server.ensure(vm, ref());
+    server.invalidate("nina", { restored: true });
+    before = vm.events.length;
+    await server.ensure(vm, ref());
+    expect(vm.events.slice(before)).toContain("restart");
+  });
+
+  test("a runner's first browser call with a fresh healthy state file: no tailnet command, only the browser's own", async () => {
+    const file = stateFile();
+    const egress = { name: "home", url: proxies.home, tailnet: ref("first-call") };
+    const vm = healthyVm();
+    await new TailnetEgress({ vaultStore, stateFile: file }).ensure(vm, egress.tailnet);
+    // this process's runtime reads the same state file (a task run configures it from its .polpo)
+    configureTailnetEgress({ vaultStore, stateFile: file });
+    tailnetEgress.invalidate();
+    resetBrowserEgressSessions();
+    try {
+      vm.marker = true;
+      const tools = createBrowserTools("/vm/work", "first", ["browser_navigate"], "/host/.polpo/browser-profiles/first", "/vm/out", undefined, undefined, { shell: new VmShell(vm), fs: { writeFileBuffer: (p: string, d: Uint8Array) => vm.writeFile(p, d) } as any, egress, headed: false });
+      const before = vm.calls.length;
+      await tools[0]!.execute("1", { url: "https://example.com" });
+      const kinds = vm.calls.slice(before).map((c) => c.kind);
+      expect(kinds).not.toContain("inspect");
+      expect(kinds).not.toContain("restart");
+      expect(kinds.filter((k) => k === "browser")).toHaveLength(1);
+    } finally {
+      configureTailnetEgress({ stateFile: null });
+    }
+  });
 });

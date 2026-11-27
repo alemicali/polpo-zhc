@@ -112,7 +112,8 @@ describe("browser in a remote sandbox", () => {
     const shell = new FakeVmShell(false, true);
     const tools = createBrowserTools(CWD, "a", ["browser_get"], undefined, "/vm/out", undefined, undefined, { shell });
     const r = await tool(tools, "browser_get").execute("1", { what: "title" });
-    expect(shell.commands.slice(0, 2)).toEqual([AGENT_BROWSER_CHECK_COMMAND, AGENT_BROWSER_INSTALL_COMMAND]);
+    // the display's check runs alongside (headed by default on a remote computer)
+    expect(shell.commands.filter((c) => c === AGENT_BROWSER_CHECK_COMMAND || c === AGENT_BROWSER_INSTALL_COMMAND)).toEqual([AGENT_BROWSER_CHECK_COMMAND, AGENT_BROWSER_INSTALL_COMMAND]);
     expect(r.details).toEqual({ ran: expect.stringContaining("'get' 'title'") });
   });
 
