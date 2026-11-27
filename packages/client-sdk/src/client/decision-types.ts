@@ -80,7 +80,7 @@ export type DecisionCallerKind = "api" | "mcp" | "chat" | "agent" | "mission" | 
 export interface DecisionLogSummary {
   id: string;
   at: string;
-  caller: { kind: DecisionCallerKind; id?: string; label?: string; by?: string };
+  caller: { kind: DecisionCallerKind; id?: string; label?: string; by?: string; taskId?: string; runId?: string };
   status: "ok" | "error";
   error?: string;
   model: string;

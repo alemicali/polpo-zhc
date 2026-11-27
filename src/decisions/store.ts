@@ -20,6 +20,9 @@ export interface DecisionCaller {
   label?: string;
   /** The person, when known. */
   by?: string;
+  /** An agent's decide in a task run: the task and the run (from the run record). */
+  taskId?: string;
+  runId?: string;
 }
 
 export interface DecisionLogEntry {

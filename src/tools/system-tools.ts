@@ -747,8 +747,9 @@ export function createSystemTools(cwd: string, allowedTools?: string[], allowedP
 
   const tools = names.map(n => factories[n]());
 
-  // register_outcome is always included — agents must always be able to declare artifacts
-  tools.push(...createOutcomeToolsCore(cwd, allowedPaths, allowedTools, outputDir, _fs));
+  // register_outcome is always included — agents must always be able to declare artifacts.
+  // A given fs is a remote computer's workspace: registered files are copied to outputDir here.
+  tools.push(...createOutcomeToolsCore(cwd, allowedPaths, allowedTools, outputDir, _fs, { remote: !!fs }));
 
   // http_fetch + http_download are always included — core tools with SSRF protection
   tools.push(...createHttpToolsCore(cwd, allowedPaths, allowedTools, toolOutputDir, _fs));

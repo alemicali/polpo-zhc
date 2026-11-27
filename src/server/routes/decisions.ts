@@ -64,6 +64,7 @@ const resultSchema = z.object({
 }).openapi("DecideResult");
 const callerSchema = z.object({
   kind: z.enum(["api", "mcp", "chat", "agent", "mission", "suite", "playground"]), id: z.string().optional(), label: z.string().optional(), by: z.string().optional(),
+  taskId: z.string().optional(), runId: z.string().optional(),
 });
 const summaryShape = {
   id: z.string(), at: z.string(), caller: callerSchema, status: z.enum(["ok", "error"]), error: z.string().optional(),

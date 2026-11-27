@@ -1207,6 +1207,16 @@ export class Orchestrator extends TypedEmitter {
           agentFor: (run, task) => this.runAgentConfig(run, task),
         });
       },
+      // a task run's agent taking a decision (decide): the server's decision service, as the run's agent
+      async (msg) => {
+        const [{ handleDecideWire }, { decisionServiceFor }] = await Promise.all([import("./decision-bridge.js"), import("../decisions/service.js")]);
+        return handleDecideWire(msg, {
+          service: decisionServiceFor(this.polpoDir),
+          run: (runId) => this.runStore.getRun(runId),
+          task: (taskId) => this.registry.getTask(taskId),
+          agentFor: (run, task) => this.runAgentConfig(run, task),
+        });
+      },
     );
     // send_notification from agents (chats in this process, task runs over the socket above)
     this.agentNotifier = new AgentNotifier({ router: () => this.notificationRouter });

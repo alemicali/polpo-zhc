@@ -12,6 +12,7 @@
 
 import type { ComputerTakeoverWireReply, ComputerTakeoverWireRequest } from "./computer-takeover.js";
 import type { VaultLoginWireReply, VaultLoginWireRequest } from "./vault-login-bridge.js";
+import type { DecideWireReply, DecideWireRequest } from "./decision-bridge.js";
 import { createServer, createConnection, type Server } from "node:net";
 import { createHash } from "node:crypto";
 import { existsSync, unlinkSync } from "node:fs";
@@ -79,11 +80,12 @@ export interface AgentNotifyWireRequest {
 
 export type AgentNotifyWireReply = { ok: true; id: string; channel: string; to?: string } | { ok: false; error: string };
 
-type WireRequest = AgentTalkWireRequest | AgentNotifyWireRequest | ComputerTakeoverWireRequest | VaultLoginWireRequest;
+type WireRequest = AgentTalkWireRequest | AgentNotifyWireRequest | ComputerTakeoverWireRequest | VaultLoginWireRequest | DecideWireRequest;
 type WireReply<R extends WireRequest> = R extends AgentNotifyWireRequest ? AgentNotifyWireReply
   : R extends ComputerTakeoverWireRequest ? ComputerTakeoverWireReply
-  : R extends VaultLoginWireRequest ? VaultLoginWireReply : AgentTalkWireReply;
-type AnyWireReply = AgentTalkWireReply | AgentNotifyWireReply | ComputerTakeoverWireReply | VaultLoginWireReply;
+  : R extends VaultLoginWireRequest ? VaultLoginWireReply
+  : R extends DecideWireRequest ? DecideWireReply : AgentTalkWireReply;
+type AnyWireReply = AgentTalkWireReply | AgentNotifyWireReply | ComputerTakeoverWireReply | VaultLoginWireReply | DecideWireReply;
 
 /** Server-side: orchestrator listens for runner completion notifications. */
 export function startNotificationServer(
@@ -99,6 +101,8 @@ export function startNotificationServer(
   onComputerTakeover?: (msg: ComputerTakeoverWireRequest) => Promise<ComputerTakeoverWireReply>,
   /** A task run's agent creating a login with a generated password in its own vault (vault_create_login). */
   onVaultLogin?: (msg: VaultLoginWireRequest) => Promise<VaultLoginWireReply>,
+  /** A task run's agent taking a decision with the instance's decision service (decide). */
+  onDecide?: (msg: DecideWireRequest) => Promise<DecideWireReply>,
 ): Server {
   const socketPath = getSocketPath(polpoDir);
 
@@ -118,10 +122,14 @@ export function startNotificationServer(
       if (answered || newline < 0) return;
       let msg: { type?: string } | undefined;
       try { msg = JSON.parse(buffer.slice(0, newline)); } catch { return; }
-      if (msg?.type !== "agent_talk" && msg?.type !== "agent_notify" && msg?.type !== "computer_takeover" && msg?.type !== "vault_login") return;
+      if (msg?.type !== "agent_talk" && msg?.type !== "agent_notify" && msg?.type !== "computer_takeover" && msg?.type !== "vault_login" && msg?.type !== "decide") return;
       answered = true;
       const failed = (err: unknown) => ({ ok: false as const, error: err instanceof Error ? err.message : String(err) });
-      const reply: Promise<AnyWireReply> = msg.type === "vault_login"
+      const reply: Promise<AnyWireReply> = msg.type === "decide"
+        ? (onDecide
+          ? onDecide(msg as DecideWireRequest).catch(failed)
+          : Promise.resolve({ ok: false as const, error: "decisions are not available from here" }))
+        : msg.type === "vault_login"
         ? (onVaultLogin
           ? onVaultLogin(msg as VaultLoginWireRequest).catch((err) => ({ ...failed(err), code: "invalid" as const }))
           : Promise.resolve({ ok: false as const, code: "invalid" as const, error: "the vault cannot be written from here" }))
