@@ -1089,6 +1089,10 @@ export async function buildAgentToolset(o: {
       ...(typeof agentConfig.browserHeaded === "boolean" ? { browserHeaded: agentConfig.browserHeaded } : {}),
       // while a person holds the computer's desktop, its browser waits
       ...(remoteComputer && ctx?.polpoDir ? { browserControl: { computerId: remoteComputer.id, store: computerControlStore(ctx.polpoDir) } } : {}),
+      // its own Chrome's language and timezone on a remote computer
+      ...(agentConfig.identity?.locale || agentConfig.identity?.timezone
+        ? { browserIdentity: { ...(agentConfig.identity.locale ? { locale: agentConfig.identity.locale } : {}), ...(agentConfig.identity.timezone ? { timezone: agentConfig.identity.timezone } : {}) } }
+        : {}),
     });
   }
   if (ctx?.polpoDir) {

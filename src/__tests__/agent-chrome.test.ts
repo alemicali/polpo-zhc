@@ -35,7 +35,7 @@ vi.mock("node:child_process", async (importOriginal) => {
 
 import { execFileSync } from "node:child_process";
 import {
-  AGENT_BROWSER_EXECUTABLE_ENV, SANDBOX_CHROME_DEB_URL, SANDBOX_CHROME_FLAGS, SANDBOX_CHROME_INSTALL_COMMAND, SANDBOX_CHROME_PATH,
+  AGENT_BROWSER_EXECUTABLE_ENV, SANDBOX_CHROME_DEB_URL, SANDBOX_CHROME_INSTALL_COMMAND, SANDBOX_CHROME_PATH,
   hostChromeArgs, hostChromeCandidates, hostChromeExecutable, resetHostChromeCache,
 } from "../tools/agent-chrome.js";
 import {
@@ -144,18 +144,14 @@ const navigate = async (shell: FakeVmShell, headed?: boolean) => {
 };
 
 describe("Google Chrome in a remote computer", () => {
-  it("every launching command uses /usr/bin/google-chrome, --no-sandbox when root; close does not", () => {
+  it("every launching command runs the agent's own /usr/bin/google-chrome (--no-sandbox when root), then attaches; close does not", () => {
     expect(SANDBOX_CHROME_PATH).toBe("/usr/bin/google-chrome");
-    expect(sandboxBrowserCommand(["open", "https://x.test"], { session: "a" }))
-      .toBe(`agent-browser --executable-path /usr/bin/google-chrome $([ "$(id -u)" = 0 ] && echo '--args --no-sandbox') --session 'a' 'open' 'https://x.test' --json`);
-    expect(sandboxBrowserCommand(["open", "https://x.test"], { session: "a", headed: true })).toContain(`DISPLAY=:99 agent-browser --headed ${SANDBOX_CHROME_FLAGS} --session 'a'`);
+    const open = sandboxBrowserCommand(["open", "https://x.test"], { session: "a" });
+    expect(open).toContain(`$S nohup '/usr/bin/google-chrome' --user-data-dir="$PROF"`);
+    expect(open).toContain(`NS=""; [ "$(id -u)" = 0 ] && NS=--no-sandbox;`);
+    expect(open.endsWith(`agent-browser --session 'a' --cdp "$P" 'open' 'https://x.test' --json`)).toBe(true);
+    expect(sandboxBrowserCommand(["open", "https://x.test"], { session: "a", headed: true })).toContain(`DISPLAY=':99' $S nohup '/usr/bin/google-chrome'`);
     expect(sandboxBrowserCommand(["close"], { session: "a", headed: true })).toBe("agent-browser --session 'a' 'close' --json");
-  });
-
-  it("--no-sandbox only as root (the flags as a shell expands them)", () => {
-    const words = (uid: string) => execFileSync("/bin/sh", ["-c", `id() { echo ${uid}; }; set -- ${SANDBOX_CHROME_FLAGS}; printf '%s\\n' "$@"`], { encoding: "utf8" }).trim().split("\n");
-    expect(words("0")).toEqual(["--executable-path", "/usr/bin/google-chrome", "--args", "--no-sandbox"]);
-    expect(words("1000")).toEqual(["--executable-path", "/usr/bin/google-chrome"]);
   });
 
   it("the check wants Chrome (never Chromium); the install adds it, once per shell", async () => {
@@ -239,14 +235,17 @@ describe("headed by default on a remote computer", () => {
     const shell = new FakeVmShell();
     await navigate(shell);
     expect(shell.commands).toContain(desktopInstallCommand("display"));
-    expect(shell.commands.at(-1)).toContain(`DISPLAY=:99 agent-browser --headed ${SANDBOX_CHROME_FLAGS}`);
+    expect(shell.commands.at(-1)).toContain(`DISPLAY=':99' $S nohup '/usr/bin/google-chrome'`);
+    expect(shell.commands.at(-1)).not.toContain("--headless");
   });
 
   it("browserHeaded: false keeps it headless (no display)", async () => {
     const shell = new FakeVmShell();
     await navigate(shell, false);
     expect(shell.commands).not.toContain(desktopInstallCommand("display"));
-    expect(shell.commands.at(-1)).toMatch(/^agent-browser --executable-path \/usr\/bin\/google-chrome /);
+    expect(shell.commands.at(-1)).toMatch(/^P=\$\(unset POLPO_BROWSER_SECRET; /);
+    expect(shell.commands.at(-1)).toContain("'--headless=new'");
+    expect(shell.commands.at(-1)).not.toContain("DISPLAY=");
   });
 
   it("no display to be had: headless by default (tried once), an error when headed was asked for", async () => {

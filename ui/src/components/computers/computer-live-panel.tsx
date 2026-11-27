@@ -14,11 +14,14 @@
  * - Agents waiting for a person (request_computer_takeover) show as a banner: reason, page, what
  *   to do, until when they wait.
  *
+ * - Full screen (Fullscreen API on the viewer; Esc exits): noVNC scales the desktop to fit, and
+ *   the keyboard stays on the desktop while you hold control.
+ *
  * Passwords and codes are typed in the live view, never in Polpo. Live: computer:takeover.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { useEvents, type ComputerDesktopView, type ComputerTakeoverRequest } from "@polpo-ai/react";
-import { Hand, Loader2, MonitorPlay, MonitorStop, TriangleAlert, Undo2, WifiOff } from "lucide-react";
+import { Hand, Loader2, Maximize2, Minimize2, MonitorPlay, MonitorStop, TriangleAlert, Undo2, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { config, websocketUrl } from "@/lib/config";
@@ -85,6 +88,24 @@ function useDesktopView(computerId: string) {
   };
 }
 
+/** Whether `el` is the document's full-screen element now (kept in sync with fullscreenchange). */
+function useFullscreen(ref: RefObject<HTMLElement | null>) {
+  const [fullscreen, setFullscreen] = useState(false);
+  useEffect(() => {
+    const sync = () => setFullscreen(!!ref.current && document.fullscreenElement === ref.current);
+    document.addEventListener("fullscreenchange", sync);
+    return () => document.removeEventListener("fullscreenchange", sync);
+  }, [ref]);
+  const toggle = useCallback(async () => {
+    const el = ref.current;
+    if (!el) return;
+    if (document.fullscreenElement === el) { await document.exitFullscreen?.(); return; }
+    if (typeof el.requestFullscreen !== "function") throw new Error("Full screen is not available in this browser");
+    await el.requestFullscreen({ navigationUI: "hide" });
+  }, [ref]);
+  return { fullscreen, toggle };
+}
+
 /** The viewer's role on a live connection: input, focus, cursor and quality (no reconnect). */
 function applyRole(client: VncClient, viewOnly: boolean): void {
   const q = viewOnly ? LIVE_QUALITY.view : LIVE_QUALITY.control;
@@ -103,7 +124,9 @@ export function ComputerLivePanel({ computerId, className }: { computerId: strin
   const [note, setNote] = useState("");
   const [stream, setStream] = useState<StreamState>("idle");
   const screenRef = useRef<HTMLDivElement | null>(null);
+  const viewerRef = useRef<HTMLDivElement | null>(null);
   const clientRef = useRef<VncClient | null>(null);
+  const { fullscreen, toggle: toggleFullscreen } = useFullscreen(viewerRef);
 
   const desktop = view?.desktop;
   const control = view?.control;
@@ -171,6 +194,13 @@ export function ComputerLivePanel({ computerId, className }: { computerId: strin
     if (clientRef.current) applyRole(clientRef.current, viewOnly);
   }, [viewOnly]);
 
+  // in and out of full screen: the keyboard stays on the desktop while you hold control
+  useEffect(() => {
+    if (!viewOnly) clientRef.current?.focus({ preventScroll: true });
+  }, [fullscreen, viewOnly]);
+
+  const fullscreenFailed = (e: unknown) => setActionError((e as Error).message || "Full screen is not available in this browser");
+
   if (isLoading && !view) {
     return <p className={cn("flex items-center gap-2 text-xs text-muted-foreground", className)}><Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading the live view…</p>;
   }
@@ -202,6 +232,10 @@ export function ComputerLivePanel({ computerId, className }: { computerId: strin
                 {busy === "takeover" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Hand className="h-3.5 w-3.5" />} Take control
               </Button>
             )}
+            <Button size="sm" variant="ghost" className="h-7 gap-1.5 px-2.5 text-xs" onClick={() => void toggleFullscreen().catch(fullscreenFailed)}
+              title="Show the desktop full screen (Esc exits)" aria-pressed={fullscreen}>
+              <Maximize2 className="h-3.5 w-3.5" /> Full screen
+            </Button>
             <Button size="sm" variant="ghost" className="h-7 gap-1.5 px-2.5 text-xs" disabled={busy !== null} onClick={() => void act("stop", stop)}>
               {busy === "stop" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MonitorStop className="h-3.5 w-3.5" />} Stop live view
             </Button>
@@ -224,12 +258,23 @@ export function ComputerLivePanel({ computerId, className }: { computerId: strin
 
       {running && (
         <div
-          className={cn("relative aspect-[16/10] w-full overflow-hidden rounded-control bg-muted ring-1 ring-inset", mine ? "ring-primary" : "ring-border")}
+          ref={viewerRef}
+          className={cn(
+            "relative w-full overflow-hidden bg-muted",
+            fullscreen ? "h-full" : cn("aspect-[16/10] rounded-control ring-1 ring-inset", mine ? "ring-primary" : "ring-border"),
+          )}
           role="application"
           aria-label={mine ? "Computer desktop (you have control)" : "Computer desktop (view-only)"}
+          data-fullscreen={fullscreen || undefined}
           onPointerDown={() => { if (mine) clientRef.current?.focus({ preventScroll: true }); }}
         >
           <div ref={screenRef} className="absolute inset-0 flex items-center justify-center overflow-hidden [&_canvas]:outline-none" />
+          {fullscreen && (
+            <Button size="sm" variant="secondary" className="absolute right-2 top-2 z-10 h-7 gap-1.5 px-2.5 text-xs opacity-80 hover:opacity-100"
+              onClick={() => void toggleFullscreen().catch(fullscreenFailed)} title="Exit full screen (Esc)">
+              <Minimize2 className="h-3.5 w-3.5" /> Exit full screen
+            </Button>
+          )}
           {stream !== "live" && (
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 bg-muted text-xs text-muted-foreground">
               {stream === "error" ? <WifiOff className="h-5 w-5 opacity-70" /> : <Loader2 className="h-5 w-5 animate-spin" />}

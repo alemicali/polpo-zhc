@@ -5,7 +5,9 @@
  * with --json output for structured results. Where it runs follows the agent's sandbox:
  *   - remote sandbox (Daytona, E2B): through the workspace shell, inside the VM (the runner
  *     image ships agent-browser + Google Chrome; otherwise they are installed on first use). There
- *     the browser is headed by default, on the computer's desktop (agent.browserHeaded: false: headless);
+ *     Polpo launches the agent's Chrome itself (no automation flags: agent-chrome.ts), one per
+ *     profile, and agent-browser attaches to it with --cdp. Headed by default, on the computer's
+ *     desktop (agent.browserHeaded: false: headless). It survives task runs;
  *   - this machine (no sandbox, bubblewrap, docker): as a child process, behind the sandbox
  *     network proxy (browser-network-guard.ts). Headed only with agent.browserHeaded: true.
  *
@@ -37,9 +39,12 @@ import { browserProxyContext, proxyArgs, type BrowserNetworkGuard } from "./brow
 import type { ResolvedVault } from "../vault/index.js";
 import { createSecretMasker, formatVaultRef, resolveEnvFromVault } from "../vault/env-from-vault.js";
 import { decideEgress, decideRemoteEgress, shellHost, type BrowserEgressConfig } from "./browser-egress.js";
-import { DESKTOP_DISPLAY, DESKTOP_DISPLAY_COMMAND, ensureDesktopDisplay } from "../sandbox/desktop.js";
+import { DESKTOP_DISPLAY, DESKTOP_DISPLAY_COMMAND, DESKTOP_SCREEN, ensureDesktopDisplay } from "../sandbox/desktop.js";
 import { waitForAgentControl, type ComputerControlStore } from "../sandbox/computer-control.js";
-import { hostChromeArgs, SANDBOX_CHROME_FLAGS, SANDBOX_CHROME_INSTALL_COMMAND } from "./agent-chrome.js";
+import {
+  AGENT_CHROME_PROFILES_DIR, agentChromeEnsureScript, agentChromeLocale, agentChromePortCommand, agentChromeProfileName, hostChromeArgs,
+  SANDBOX_CHROME_INSTALL_COMMAND,
+} from "./agent-chrome.js";
 
 /** Agent browser results above this are saved in full to a file (head + tail + path for the model). */
 const MAX_OUTPUT_BYTES = 50_000;
@@ -48,7 +53,9 @@ const DEFAULT_TIMEOUT = 30_000;
 /**
  * Cleanup an agent-browser session: close the session.
  * Profile data is automatically persisted by agent-browser when --profile is used.
- * Called by the engine on agent exit.
+ * Called by the engine on agent exit. On a remote computer this only detaches agent-browser from
+ * the agent's own Chrome (attached over CDP): Chrome and its pages stay open between runs (a page a
+ * person left open during take control is not lost); they go away with the computer.
  */
 export async function cleanupAgentBrowserSession(session: string, shell?: Shell): Promise<void> {
   // a browser in a remote sandbox is closed there
@@ -234,22 +241,41 @@ function shq(arg: string): string {
 }
 
 /** Where agent profiles live inside a sandbox VM (persistent across runs on a reused VM). */
-export const SANDBOX_BROWSER_PROFILES = ".polpo/browser-profiles";
+export const SANDBOX_BROWSER_PROFILES = AGENT_CHROME_PROFILES_DIR;
 
-/** The agent-browser command line run in a sandbox (exported for tests). */
-export function sandboxBrowserCommand(args: string[], options: { session?: string; profileName?: string; proxy?: string; headed?: boolean } = {}): string {
-  // headed: a window on the computer's virtual display (started first when it is not up; its
-  // failure leaves agent-browser to say there is no display). Always Google Chrome (--no-sandbox as root).
-  // (a command that never launches a browser, like close, needs neither)
+/** The desktop's size ("1280x800x24") as Chrome's window size. */
+export function desktopWindowSize(screen: string = DESKTOP_SCREEN): [number, number] {
+  const m = /^(\d+)x(\d+)/.exec(screen);
+  return m ? [Number(m[1]), Number(m[2])] : [1280, 800];
+}
+
+/** The agent's browser language and timezone (identity.locale / identity.timezone). */
+export type BrowserIdentity = { locale?: string; timezone?: string };
+
+/**
+ * The agent-browser command line run in a sandbox (exported for tests). A command that launches a
+ * browser first makes sure the agent's own Chrome runs (agentChromeEnsureScript: launched by Polpo,
+ * no automation flags) and attaches to it with `--cdp <port>`: no --profile, --executable-path,
+ * --headed or proxy flags for agent-browser then, Chrome has them. A command that never launches
+ * one (close) is agent-browser alone.
+ */
+export function sandboxBrowserCommand(args: string[], options: { session?: string; profileName?: string; proxy?: string; headed?: boolean; identity?: BrowserIdentity; chromePath?: string } = {}): string {
   const launches = !NO_LAUNCH_COMMANDS.has(args[0] ?? "");
-  const parts = options.headed && launches
-    ? [`(${DESKTOP_DISPLAY_COMMAND}) >/dev/null 2>&1;`, `DISPLAY=${DESKTOP_DISPLAY}`, "agent-browser", "--headed", SANDBOX_CHROME_FLAGS]
-    : launches ? ["agent-browser", SANDBOX_CHROME_FLAGS] : ["agent-browser"];
+  const parts: string[] = [];
+  if (launches) {
+    // headed: a window on the computer's virtual display (started first when it is not up)
+    if (options.headed) parts.push(`(${DESKTOP_DISPLAY_COMMAND}) >/dev/null 2>&1;`);
+    const session = options.session ?? "default";
+    const ensure = agentChromeEnsureScript({
+      profileName: agentChromeProfileName(options.profileName ?? session), session,
+      ...(options.proxy ? { proxy: options.proxy } : {}), ...(options.headed ? { display: DESKTOP_DISPLAY } : {}),
+      windowSize: desktopWindowSize(), ...agentChromeLocale(options.identity), ...(options.chromePath ? { chromePath: options.chromePath } : {}),
+    });
+    parts.push(`P=$(${ensure}) || exit 1;`);
+  }
+  parts.push("agent-browser");
   if (options.session) parts.push("--session", shq(options.session));
-  // the profile lives in the VM user's home: the host path means nothing there
-  if (options.profileName) parts.push("--profile", `"$HOME"/${shq(`${SANDBOX_BROWSER_PROFILES}/${options.profileName}`)}`);
-  // the egress proxy inside the VM (the tailnet forwarder, see sandbox/tailnet-egress.ts)
-  for (const a of proxyArgs(options.proxy)) parts.push(shq(a));
+  if (launches) parts.push("--cdp", `"$P"`);
   // a secret comes from the command's environment, so the command line (which sandboxes log) never holds it
   for (const a of args) parts.push(a === BROWSER_SECRET_ARG ? `"$${BROWSER_SECRET_ENV}"` : shq(a));
   parts.push("--json");
@@ -322,6 +348,7 @@ async function execSandboxBrowser(
   args: string[],
   options: {
     session?: string; profileName?: string; timeout?: number; cwd?: string; saves?: string; secret?: string; proxy?: string;
+    identity?: BrowserIdentity;
     /** true: headed (the computer's desktop), an error without a display; "default": headed when the display can be had, else headless. */
     headed?: boolean | "default";
   },
@@ -398,28 +425,26 @@ export function sandboxCdpUrlCommand(session: string): string {
   return `if agent-browser session list --json 2>/dev/null | grep -qF ${shq(JSON.stringify(session))}; then agent-browser --session ${shq(session)} get cdp-url --json 2>/dev/null; fi; true`;
 }
 
-function parseCdpUrl(raw: string): string | undefined {
-  try {
-    const parsed = JSON.parse(raw.trim()) as { data?: { cdpUrl?: unknown } };
-    return typeof parsed?.data?.cdpUrl === "string" ? parsed.data.cdpUrl : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 /**
  * The environment an agent's commands get for its own browser: POLPO_BROWSER_SESSION always,
- * CDP_URL (http://127.0.0.1:PORT) while its agent-browser session runs, so scripts drive the same
+ * CDP_URL (http://127.0.0.1:PORT) while its browser runs (on a remote computer: the agent's own
+ * Chrome, launched by Polpo; here: its agent-browser session), so scripts drive the same
  * signed-in browser (/json/new, /json/list…), and DISPLAY when it is headed. Looked up per call and
  * never launching a browser: no session, no CDP_URL. Never fails a command (errors: what is known).
  */
-export async function agentBrowserEnv(o: { session: string; shell?: Shell; /** agent.browserHeaded (unset: headed on a remote computer) */ headed?: boolean; remote?: boolean }): Promise<Record<string, string>> {
+export async function agentBrowserEnv(o: {
+  session: string; shell?: Shell; /** agent.browserHeaded (unset: headed on a remote computer) */ headed?: boolean; remote?: boolean;
+  /** The agent's profile name (remote: its own Chrome's state); default the session. */
+  profileName?: string;
+}): Promise<Record<string, string>> {
   const env: Record<string, string> = { POLPO_BROWSER_SESSION: o.session };
   try {
     let ws: string | undefined;
     if (o.remote && o.shell) {
-      const r = await o.shell.execute(sandboxCdpUrlCommand(o.session), { timeout: 10_000 });
-      ws = parseCdpUrl(r.stdout);
+      // the agent's own Chrome (launched by Polpo): its DevTools port, while it runs
+      const r = await o.shell.execute(agentChromePortCommand(agentChromeProfileName(o.profileName ?? o.session)), { timeout: 10_000 });
+      const port = /^\s*(\d{2,5})\s*$/.exec(r.stdout)?.[1];
+      ws = port ? `http://127.0.0.1:${port}` : undefined;
       if (effectiveBrowserHeaded(o.headed, true)) env.DISPLAY = DESKTOP_DISPLAY;
     } else {
       const list = await execBrowserAsync(["session", "list"], { timeout: 10_000 });
@@ -1003,6 +1028,11 @@ function withEgress(
   };
 }
 
+/** The profile name of a profile dir (its own Chrome's state and the VM-side profile folder). */
+export function browserProfileName(profileDir: string): string {
+  return basename(profileDir).replace(/[^A-Za-z0-9._-]/g, "_") || "default";
+}
+
 /**
  * Create browser automation tools powered by agent-browser CLI.
  *
@@ -1036,11 +1066,13 @@ export function createBrowserTools(
     headed?: boolean;
     /** The computer it runs on: while a person holds its desktop, the browser waits (computer-control.ts). */
     control?: { computerId: string; store: Pick<ComputerControlStore, "heldByPerson">; pollMs?: number; maxWaitMs?: number };
+    /** identity.locale / identity.timezone: the language and timezone of its Chrome on a remote computer (default it-IT, Europe/Rome). */
+    identity?: BrowserIdentity;
   } = {},
 ): AgentTool<any>[] {
-  const { shell, fs, vault, egress, headed, control } = runtime;
+  const { shell, fs, vault, egress, headed, control, identity } = runtime;
   const inSandbox = () => shellIsRemote(shell);
-  const profileName = profileDir ? basename(profileDir).replace(/[^A-Za-z0-9._-]/g, "_") || "default" : undefined;
+  const profileName = profileDir ? browserProfileName(profileDir) : undefined;
   const exec: BrowserExec = async (args, options = {}) => {
     const withProfile = options.profile !== false;
     // a person holds the computer's desktop (take control): never act at the same time
@@ -1055,7 +1087,8 @@ export function createBrowserTools(
       const proxy = browserProxyContext.getStore()?.proxy;
       // headed by default on a remote computer (its desktop); false: headless
       const sandboxHeaded = headed === undefined ? "default" as const : headed;
-      return execSandboxBrowser(shell, args, { session, profileName: withProfile ? profileName : undefined, timeout: options.timeout, cwd, saves: options.saves, secret: options.secret, ...(proxy ? { proxy } : {}), headed: sandboxHeaded });
+      // its own Chrome's profile: the agent's (else one per session); close never launches anything
+      return execSandboxBrowser(shell, args, { session, profileName: withProfile ? (profileName ?? agentChromeProfileName(session)) : undefined, timeout: options.timeout, cwd, saves: options.saves, secret: options.secret, ...(proxy ? { proxy } : {}), headed: sandboxHeaded, ...(identity ? { identity } : {}) });
     }
     // on the host the arguments go straight to the process (no shell, no log)
     if (options.secret !== undefined) args = args.map((a) => (a === BROWSER_SECRET_ARG ? options.secret! : a));

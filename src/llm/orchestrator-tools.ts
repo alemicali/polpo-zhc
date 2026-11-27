@@ -1257,7 +1257,8 @@ const setIdentityTool: Tool = {
     company: Type.Optional(Type.String({ description: "Company name" })),
     email: Type.Optional(Type.String({ description: "Email address (also used as default SMTP sender)" })),
     bio: Type.Optional(Type.String({ description: "Brief persona description" })),
-    timezone: Type.Optional(Type.String({ description: "Timezone (e.g. 'Europe/Rome')" })),
+    timezone: Type.Optional(Type.String({ description: "Timezone (e.g. 'Europe/Rome'): also its browser's timezone on a remote computer" })),
+    locale: Type.Optional(Type.String({ description: "Language as a BCP 47 tag (e.g. 'it-IT', 'en-US'): its browser's language on a remote computer (default it-IT)" })),
     tone: Type.Optional(Type.String({ description: "Communication tone — HOW the agent communicates (e.g. 'Professional but warm', 'Concise and data-driven')" })),
     personality: Type.Optional(Type.String({ description: "Personality traits — WHO the agent IS (e.g. 'Detail-oriented and empathetic')" })),
     avatar: Type.Optional(Type.String({ description: "Avatar image path relative to project root (e.g. '.polpo/avatars/alice.png'). Upload via POST /agents/:name/avatar endpoint." })),
@@ -5502,6 +5503,7 @@ async function execSetIdentity(polpo: Orchestrator, args: Record<string, unknown
   if (args.email !== undefined) updated.email = args.email as string;
   if (args.bio !== undefined) updated.bio = args.bio as string;
   if (args.timezone !== undefined) updated.timezone = args.timezone as string;
+  if (args.locale !== undefined) updated.locale = args.locale as string;
   if (args.tone !== undefined) updated.tone = args.tone as string;
   if (args.personality !== undefined) updated.personality = args.personality as string;
   if (args.avatar !== undefined) updated.avatar = args.avatar as string;

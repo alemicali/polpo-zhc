@@ -30,7 +30,7 @@ vi.mock("node:child_process", () => ({
 }));
 
 import { cleanupAgentBrowserSession, createBrowserTools, sandboxBrowserCommand, AGENT_BROWSER_CHECK_COMMAND, AGENT_BROWSER_INSTALL_COMMAND } from "../tools/browser-tools.js";
-import { AGENT_BROWSER_EXECUTABLE_ENV, SANDBOX_CHROME_FLAGS } from "../tools/agent-chrome.js";
+import { AGENT_BROWSER_EXECUTABLE_ENV } from "../tools/agent-chrome.js";
 import type { BrowserNetworkGuard } from "../tools/browser-network-guard.js";
 
 /** A remote VM's shell: records commands, answers like agent-browser would. */
@@ -61,8 +61,8 @@ const CWD = "/vm/work";
 // run where Chrome is not installed
 beforeEach(() => { vi.stubEnv(AGENT_BROWSER_EXECUTABLE_ENV, process.execPath); });
 afterEach(() => { spawned.length = 0; vi.unstubAllEnvs(); });
-/** Google Chrome in the VM (always: never Chromium), --no-sandbox as root. */
-const CHROME = SANDBOX_CHROME_FLAGS;
+/** The agent's own Chrome in the VM (launched by Polpo), then agent-browser attached to it over CDP. */
+const OWN_CHROME = /^P=\$\(unset POLPO_BROWSER_SECRET; .*'\/usr\/bin\/google-chrome' .*\) \|\| exit 1; /s;
 
 describe("browser in a remote sandbox", () => {
   test("commands go through the VM's shell with the session and a VM-side profile", async () => {
@@ -72,7 +72,10 @@ describe("browser in a remote sandbox", () => {
     const r = await tool(tools, "browser_navigate").execute("1", { url: "https://example.com" });
     expect(r.details).toEqual({ ran: expect.stringContaining("'open' 'https://example.com'") });
     expect(shell.commands[0]).toBe(AGENT_BROWSER_CHECK_COMMAND);
-    expect(shell.commands[1]).toBe(`agent-browser ${CHROME} --session 'agent-a' --profile "$HOME"/'.polpo/browser-profiles/agent-a' 'open' 'https://example.com' --json`);
+    expect(shell.commands[1]).toMatch(OWN_CHROME);
+    expect(shell.commands[1]).toContain(`N='agent-a'; PROF="$HOME"/.polpo/browser-profiles/"$N"`);
+    expect(shell.commands[1].endsWith(`agent-browser --session 'agent-a' --cdp "$P" 'open' 'https://example.com' --json`)).toBe(true);
+    expect(shell.commands[1]).not.toMatch(/--profile|--executable-path|--headed|'--proxy'/);
     await tool(tools, "browser_snapshot").execute("2", { interactive_only: true });
     expect(shell.commands.at(-1)).toContain("'snapshot' '-i' --json");
     await tool(tools, "browser_close").execute("3", {});
@@ -94,13 +97,15 @@ describe("browser in a remote sandbox", () => {
     const shell = new FakeVmShell();
     const tools = createBrowserTools(CWD, "a", ["browser_screenshot"], undefined, "/vm/out", undefined, undefined, { shell, headed: false });
     await tool(tools, "browser_screenshot").execute("1", { path: "shots/home.png", full_page: true });
-    expect(shell.commands.at(-1)).toBe(`mkdir -p '/vm/work/shots' && agent-browser ${CHROME} --session 'a' 'screenshot' '/vm/work/shots/home.png' '--full' --json`);
+    expect(shell.commands.at(-1)!.startsWith("mkdir -p '/vm/work/shots' && P=$(")).toBe(true);
+    expect(shell.commands.at(-1)!.endsWith(`agent-browser --session 'a' --cdp "$P" 'screenshot' '/vm/work/shots/home.png' '--full' --json`)).toBe(true);
     await expect(tool(tools, "browser_screenshot").execute("2", { path: "/etc/evil.png" })).rejects.toThrow();
   });
 
   test("arguments are quoted for the shell", () => {
-    expect(sandboxBrowserCommand(["fill", "@e1", "it's $(rm -rf /)"], { session: "s" }))
-      .toBe(`agent-browser ${CHROME} --session 's' 'fill' '@e1' 'it'\\''s $(rm -rf /)' --json`);
+    const cmd = sandboxBrowserCommand(["fill", "@e1", "it's $(rm -rf /)"], { session: "s" });
+    expect(cmd).toMatch(OWN_CHROME);
+    expect(cmd.endsWith(`agent-browser --session 's' --cdp "$P" 'fill' '@e1' 'it'\\''s $(rm -rf /)' --json`)).toBe(true);
   });
 
   test("agent-browser missing in the VM: installed on first use", async () => {
@@ -118,7 +123,7 @@ describe("browser in a remote sandbox", () => {
     expect(r.content[0].text).toMatch(/agent-browser and Google Chrome are not both installed in the sandbox.*runner image/s);
   });
 
-  test("cleanup closes the session in the VM", async () => {
+  test("cleanup only closes the session in the VM: the agent's own Chrome is never stopped", async () => {
     const shell = new FakeVmShell();
     await cleanupAgentBrowserSession("agent-a", shell);
     expect(shell.commands).toEqual(["agent-browser --session 'agent-a' 'close' --json"]);

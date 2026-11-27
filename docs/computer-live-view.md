@@ -24,7 +24,7 @@ agent's **Computer** tab, which shows the default while the field is unset):
 
 | Field | Meaning |
 |---|---|
-| `browserHeaded` | `true`: agent-browser runs with `--headed`. On a remote computer the window opens on its virtual display (`DISPLAY=:99` in the VM, started on first use); on this server on Polpo's virtual display (Browser Live). `false`: headless. **Unset**: headed on a remote computer (Daytona, E2B; when the computer cannot get a display, it quietly runs headless instead, while an explicit `true` reports the error), headless on this server. The browser profile (`$HOME/.polpo/browser-profiles/<name>` in the VM), the session (the agent's name) and the egress proxy (Tailscale, `socks5://127.0.0.1:1081` in the VM) are unchanged. |
+| `browserHeaded` | `true`: a visible browser window. On a remote computer the agent's own Chrome (below) opens on its virtual display (`DISPLAY=:99` in the VM, started on first use); on this server on Polpo's virtual display (Browser Live). `false`: headless. **Unset**: headed on a remote computer (Daytona, E2B; when the computer cannot get a display, it quietly runs headless instead, while an explicit `true` reports the error), headless on this server. The browser profile (`$HOME/.polpo/browser-profiles/<name>` in the VM), the session (the agent's name) and the egress proxy (Tailscale, `socks5://127.0.0.1:1081` in the VM) are unchanged. |
 
 The agent gets the `request_computer_takeover` tool on a remote computer when its browser is
 headed: `browserHeaded: true`, or unset with browser tools (`browser_*`) in its `allowedTools`; or
@@ -32,15 +32,16 @@ when `request_computer_takeover` is in its `allowedTools`.
 
 ## Google Chrome, never Chromium
 
-Agents' browsers are always **real Google Chrome**: agent-browser gets `--executable-path` to the
-installed Chrome, never its bundled Chrome for Testing nor Playwright's Chromium. Chromium and
-headless browsers get flagged as bots by sites like Google Maps, Instagram and Facebook.
+Agents' browsers are always **real Google Chrome**, never agent-browser's bundled Chrome for Testing
+nor Playwright's Chromium. Chromium and headless browsers get flagged as bots by sites like Google
+Maps, Instagram and Facebook.
 
 - **Remote computer**: `/usr/bin/google-chrome`. A VM without it installs it once, before the first
   browser command, from Google's package
   (`https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb`, with `apt-get`, only
   when `command -v google-chrome` fails; amd64 only). The runner image `polpo-runner-vm-4` ships it.
-  As root (Daytona VMs) Chrome gets `--no-sandbox`, which it needs to start as root.
+  As root (Daytona VMs) Chrome gets `--no-sandbox`, which it needs to start as root. Polpo
+  launches it itself and agent-browser attaches over CDP: see the next section.
 - **This server**: the installed Chrome (`google-chrome-stable` / `google-chrome` on `PATH`,
   `/opt/google/chrome/chrome`, or `/Applications/Google Chrome.app` on macOS), found once.
   `POLPO_AGENT_BROWSER_EXECUTABLE=/path/to/chrome` overrides it. Without Chrome the browser tools
@@ -52,6 +53,54 @@ headless browsers get flagged as bots by sites like Google Maps, Instagram and F
   Polpo's browser only, the `browser_*` tools or `$CDP_URL` from scripts (Playwright
   `connectOverCDP`, Puppeteer `connect`), and never to launch a Chromium, Chrome or Playwright
   browser of its own.
+
+## The agent's own Chrome (remote computers)
+
+agent-browser launches Chrome through Playwright, with automation flags (`--enable-automation`
+and others): `navigator.webdriver` is `true` and Google sign-in answers **"This browser or app may
+not be secure"**, even with real Google Chrome and a residential IP. So on a remote computer Polpo
+**launches the agent's Chrome itself, like a person would**, and agent-browser only attaches to it
+(`agent-browser --session <agent> --cdp <port>`). `navigator.webdriver` is `false`, the user agent is
+Chrome's normal one, there are no automation flags. It is how other agent computers do it (a normal
+Chrome per desktop, driven over loopback CDP).
+
+Before every browser command that can open a page (the same shell command, so nothing extra to wait
+for when it runs), Polpo makes sure **one Chrome per agent profile** runs in the VM:
+
+```sh
+TZ=Europe/Rome LANGUAGE=it_IT DISPLAY=:99 setsid nohup /usr/bin/google-chrome \
+  --user-data-dir="$HOME/.polpo/browser-profiles/<profile>" \
+  --remote-debugging-port=<port> --remote-debugging-address=127.0.0.1 \
+  --no-first-run --no-default-browser-check --lang=it-IT --accept-lang=it-IT,it \
+  --window-size=1280,800 --window-position=0,0 \
+  [--proxy-server=socks5://127.0.0.1:1081 --proxy-bypass-list='<-loopback>'] [--no-sandbox] about:blank
+```
+
+- **Headed** on the computer's desktop (`DISPLAY=:99`, the desktop's size) by default; with
+  `browserHeaded: false`, or no display to be had, it runs with `--headless=new`.
+- **The DevTools port** is bound to `127.0.0.1` in the VM, one per profile (from 9300 to 9899,
+  stable per profile name, the next free one when taken).
+- **Egress proxy**: the same decision as before (the computer's Tailscale egress, the forwarder
+  `socks5://127.0.0.1:1081`; none: the VM's own network) becomes `--proxy-server`.
+- **Language and timezone**: the agent's identity, `identity.locale` (a BCP 47 tag, e.g. `en-US`:
+  `--lang` and `--accept-lang`, so `navigator.language` and the `Accept-Language` header) and
+  `identity.timezone` (an IANA zone, e.g. `Europe/Rome`: `TZ` in Chrome's environment). Defaults
+  **`it-IT`** and **`Europe/Rome`** (`AGENT_CHROME_DEFAULT_LOCALE`, `AGENT_CHROME_DEFAULT_TIMEZONE` in
+  `src/tools/agent-chrome.ts`).
+- **`--no-sandbox` only as root**, never an automation flag. A vault secret a `browser_fill` carries
+  in the command's environment is unset before Chrome starts.
+- **State** in `$HOME/.polpo/browser-chrome/<profile>.{pid,port,conf,log}`: a Chrome that died is
+  launched again on the next command; one started with other settings (proxy, language, timezone,
+  display) is stopped and launched again. Before a launch, the agent-browser session is closed (so it
+  attaches afresh) and a process still holding the profile (`SingletonLock`, e.g. a Chrome
+  agent-browser launched before this change) is stopped first.
+- **It survives task runs**: at the end of a run Polpo only closes the agent-browser session, which
+  detaches from Chrome; Chrome and its pages stay open, so a page a person left open during take
+  control is not lost. It goes away with the computer (stop, hibernation) and is launched again on
+  the next browser command.
+
+On **this server** (agents without a remote computer) nothing changes: agent-browser launches Google
+Chrome with `--executable-path` and `--profile`, headless unless `browserHeaded: true`.
 
 ## The desktop in the VM
 
@@ -122,6 +171,12 @@ On the computer's page (**Computers → the computer → Live**) and in the agen
 Without member sign-in every viewer is "someone" (one person). With members, only the person
 holding the computer can give it back (or anyone with `force`).
 
+**Full screen**: the **Full screen** button shows the viewer alone on your screen (the browser's
+Fullscreen API on the viewer); **Esc** or **Exit full screen** (top right) leaves it. noVNC scales the
+desktop to fit (`scaleViewport`), and while you hold control the keyboard stays on the desktop
+(focused when you enter or leave full screen, and on every click). Esc itself is kept by the browser
+to leave full screen: it does not reach the desktop.
+
 **Quality follows your role**: while you hold control the viewer asks for sharper, less
 compressed frames (noVNC `qualityLevel` 8, `compressionLevel` 2) for responsiveness; while you
 watch, lighter ones (5 and 7) to save bandwidth. It switches on the fly, without reconnecting.
@@ -154,7 +209,7 @@ An agent with browser tools gets, in every bash command:
 
 | Variable | Value |
 |---|---|
-| `CDP_URL` | `http://127.0.0.1:PORT`, the HTTP CDP endpoint of **its own** agent-browser session (from `agent-browser --session <name> get cdp-url`), while that session runs. Never set by launching a browser: open it first (`browser_navigate`). |
+| `CDP_URL` | `http://127.0.0.1:PORT`, the HTTP CDP endpoint of **its own** browser while it runs: on a remote computer the agent's own Chrome (the port Polpo recorded when it launched it), on this server its agent-browser session (`agent-browser --session <name> get cdp-url`). Never set by launching a browser: open it first (`browser_navigate`). |
 | `POLPO_BROWSER_SESSION` | Its session name (its agent name): `agent-browser --session "$POLPO_BROWSER_SESSION" …`. |
 | `DISPLAY` | `:99` (or this server's display) when the browser is headed (by default on a remote computer). |
 
