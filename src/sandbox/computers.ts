@@ -1459,7 +1459,11 @@ export async function computerEgressStatus(
     const error = computerEgressProblem(c, settings) ?? "Tailscale is not set up (settings.tailscale)";
     return { computerId: c.id, proxy, tailnet: "unknown", proxyReachable: false, effective: `direct (${proxy} not usable)`, machine, error };
   }
-  const label = (s: { tailnet: string; proxyReachable: boolean }) => (s.tailnet === "up" && s.proxyReachable ? `via ${proxy}` : `direct (${proxy} unreachable; profiles signed in through it pause)`);
+  const label = (s: { tailnet: string; proxyReachable: boolean; rejoining?: boolean }) => (s.tailnet === "up" && s.proxyReachable
+    ? `via ${proxy}`
+    : s.rejoining
+      ? `via ${proxy} once it has re-joined (re-joining the tailnet now; if that fails, directly, and profiles signed in through ${proxy} pause)`
+      : `direct (${proxy} unreachable; profiles signed in through it pause)`);
   let live: TailnetStatus | undefined;
   try {
     live = await manager.whenRunning(c, (d) => tailnetEgress.inspect(driverHost(d), egress.tailnet));

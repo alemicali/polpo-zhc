@@ -186,5 +186,7 @@ export async function decideRemoteEgress(
     },
   });
   if (!decision.proxy && !decision.refusal && status?.error) return { ...decision, label: `${decision.label}: ${status.error}` };
+  // a paused profile: the agent sees why (e.g. re-joining the tailnet failed, tried again on the next use)
+  if (decision.refusal && status?.error) return { ...decision, refusal: `${decision.refusal} (${status.error})` };
   return decision;
 }

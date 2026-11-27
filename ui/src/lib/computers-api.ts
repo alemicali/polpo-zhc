@@ -121,6 +121,8 @@ export interface ComputerEgress {
   machine?: string;
   checkedAt?: string;
   error?: string;
+  /** A stale tailnet node is re-joining (effective and error say so). */
+  rejoining?: boolean;
   note?: string;
 }
 
