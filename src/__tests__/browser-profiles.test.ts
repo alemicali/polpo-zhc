@@ -5,14 +5,15 @@ import { join } from "node:path";
 
 const calls: Array<{ args: string[]; session?: string; profileDir?: string }> = [];
 let openSessions: string[] = [];
-vi.mock("../tools/browser-tools.js", () => ({
-  execBrowserAsync: vi.fn(async (args: string[], options: { session?: string; profileDir?: string } = {}) => {
+vi.mock("../tools/browser-tools.js", () => {
+  const exec = vi.fn(async (args: string[], options: { session?: string; profileDir?: string } = {}) => {
     calls.push({ args, session: options.session, profileDir: options.profileDir });
     if (args[0] === "session") return { success: true, data: { sessions: openSessions }, raw: "" };
     if (args[0] === "close") return { success: openSessions.includes(options.session ?? ""), raw: "" };
     return { success: true, data: {}, raw: "" };
-  }),
-}));
+  });
+  return { execBrowserAsync: exec, execChromeBrowserAsync: exec };
+});
 
 import { clearBrowserProfile, finishProfileLogin, listBrowserProfiles, startProfileLogin } from "../tools/browser-profiles.js";
 import { browserProfileRoutes } from "../server/routes/browser-profiles.js";

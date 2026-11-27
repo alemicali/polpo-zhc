@@ -287,10 +287,12 @@ event log: 7 ignored, 1 rejected — no details" (the card, the sheet, MCP `polp
 
 ## Live view and take control
 
-A Daytona v2 computer has a desktop you can watch live from its page, where agents with a headed
-browser (`browserHeaded: true`) open their window; take control for a login, a 2FA code or a
+A Daytona v2 computer has a desktop you can watch live from its page, where agents' browsers open
+their window (headed by default on a remote computer; `browserHeaded: false` keeps one headless); take control for a login, a 2FA code or a
 CAPTCHA and give it back, and agents ask for it with `request_computer_takeover`. Their commands get
-`CDP_URL`, the CDP endpoint of their own browser. See [computer-live-view.md](computer-live-view.md).
+`CDP_URL`, the CDP endpoint of their own browser. The browser is always real Google Chrome
+(`/usr/bin/google-chrome`, installed once on a VM without it), never Chromium, which sites flag as a
+bot. See [computer-live-view.md](computer-live-view.md).
 
 ## API, tools, events
 

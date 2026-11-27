@@ -106,12 +106,12 @@ is a one-line change.
    # optional: DAYTONA_V2_REGION=<region id>; --force rebuilds
    ```
 
-   It builds `polpo-runner-vm-4` (the same tools as the v0 runner: agent-browser + Chromium,
+   It builds `polpo-runner-vm-4` (the same tools as the v0 runner: agent-browser + Google Chrome (agents' browsers) + Chromium (pdf_create),
    playwright-core, rclone, mount-s3, FUSE, git, python3, node 22, pnpm 10.30.1 for agent harnesses, and the desktop of the
    live view: Xvfb, openbox, x11vnc, websockify, xdotool, see [computer-live-view.md](computer-live-view.md)) and waits until it is ready
    (several minutes). Running it again does nothing when the image exists. Until it is built, Polpo
    creates VMs from the previous runner image `polpo-runner-vm-3` (with a warning) and installs the desktop's
-   packages on first use of the live view or of a headed browser.
+   packages and Google Chrome on first use of the live view or of the browser.
 4. **Switch the provider.** Settings → Sandbox → Daytona: set **API** to *v2 · new service*, choose
    the vault entry from step 2, leave **Image** empty (the runner image) or name another image of
    the project, optionally a **Region**, then **Save** and **Test** (creates a throwaway VM and runs

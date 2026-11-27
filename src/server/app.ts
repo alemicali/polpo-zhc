@@ -513,11 +513,11 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       // its browser: CDP_URL in its commands, headed, take control on a remote computer
       let browserNote = "";
       if ((agentConfig.allowedTools ?? []).some((t: string) => t.toLowerCase().startsWith("browser_"))) {
-        const { browserPromptNote } = await import("../tools/browser-tools.js");
+        const { browserPromptNote, effectiveBrowserHeaded } = await import("../tools/browser-tools.js");
         const { wantsComputerTakeoverTool } = await import("../tools/computer-takeover-tools.js");
         const computer = sandbox?.computer;
         browserNote = `\n${browserPromptNote({
-          headed: !!agentConfig.browserHeaded, session: agentConfig.name, ...(computer && remote ? { computer: { id: computer.id, name: computer.name } } : {}),
+          headed: effectiveBrowserHeaded(agentConfig.browserHeaded, !!(computer && remote)), session: agentConfig.name, ...(computer && remote ? { computer: { id: computer.id, name: computer.name } } : {}),
           takeover: remote && !!o.getComputerTakeover() && wantsComputerTakeoverTool(agentConfig, computer),
         })}`;
       }
@@ -617,7 +617,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         fs: chatFs,
         sandboxProvider: chatSandboxProvider,
         ...(context?.sessionId?.() ? { mediaContext: { sessionId: context.sessionId()! } } : {}),
-        ...(agentConfig.browserHeaded ? { browserHeaded: true } : {}),
+        // unset: headed on a remote computer, headless here
+        ...(typeof agentConfig.browserHeaded === "boolean" ? { browserHeaded: agentConfig.browserHeaded } : {}),
         // while a person holds the computer's desktop (take control), its browser waits
         ...(chatComputer && isRemoteComputer(chatComputer) ? { browserControl: { computerId: chatComputer.id, store: computerControlStore(polpoDir) } } : {}),
       });

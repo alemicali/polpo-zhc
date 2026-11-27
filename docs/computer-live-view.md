@@ -1,15 +1,17 @@
 # A computer's live view and take control
 
-An agent that works on a **remote computer** ([computers.md](computers.md), Daytona v2) can run its
-browser **headed**: a real window on the computer's virtual desktop. You watch that desktop live
+An agent that works on a **remote computer** ([computers.md](computers.md), Daytona v2) runs its
+browser **headed** by default: a real Google Chrome window on the computer's virtual desktop. You watch that desktop live
 from the computer's page, and when the agent needs something only you can do (sign in with your
 password, enter a 2FA code, solve a CAPTCHA, approve a consent) you **take control**, do it in the
 live view, and **give it back**. The agent waits meanwhile and never sees what you type.
 
-## Turning it on for an agent
+## Headed or headless
 
-`browserHeaded` in the agent's configuration (`.polpo/polpo.json`, the API, `polpo_agent_update`,
-Polpo's `update_agent`, or the switch in the agent's **Computer** tab):
+On a remote computer the browser is headed unless `browserHeaded` is `false`; on this server it is
+headless unless `browserHeaded` is `true`. Set it in the agent's configuration (`.polpo/polpo.json`,
+the API, `polpo_agent_update`, Polpo's `update_agent`, or the **Headed browser** switch in the
+agent's **Computer** tab, which shows the default while the field is unset):
 
 ```json
 {
@@ -22,10 +24,34 @@ Polpo's `update_agent`, or the switch in the agent's **Computer** tab):
 
 | Field | Meaning |
 |---|---|
-| `browserHeaded` | `true`: agent-browser runs with `--headed`. On a remote computer the window opens on its virtual display (`DISPLAY=:99` in the VM, started on first use); on this server on Polpo's virtual display (Browser Live). Default `false`: headless, as before. The browser profile (`$HOME/.polpo/browser-profiles/<name>` in the VM), the session (the agent's name) and the egress proxy (Tailscale, `socks5://127.0.0.1:1081` in the VM) are unchanged. |
+| `browserHeaded` | `true`: agent-browser runs with `--headed`. On a remote computer the window opens on its virtual display (`DISPLAY=:99` in the VM, started on first use); on this server on Polpo's virtual display (Browser Live). `false`: headless. **Unset**: headed on a remote computer (Daytona, E2B; when the computer cannot get a display, it quietly runs headless instead, while an explicit `true` reports the error), headless on this server. The browser profile (`$HOME/.polpo/browser-profiles/<name>` in the VM), the session (the agent's name) and the egress proxy (Tailscale, `socks5://127.0.0.1:1081` in the VM) are unchanged. |
 
-The agent gets the `request_computer_takeover` tool on a remote computer when `browserHeaded` is
-`true` (or when `request_computer_takeover` is in its `allowedTools`).
+The agent gets the `request_computer_takeover` tool on a remote computer when its browser is
+headed: `browserHeaded: true`, or unset with browser tools (`browser_*`) in its `allowedTools`; or
+when `request_computer_takeover` is in its `allowedTools`.
+
+## Google Chrome, never Chromium
+
+Agents' browsers are always **real Google Chrome**: agent-browser gets `--executable-path` to the
+installed Chrome, never its bundled Chrome for Testing nor Playwright's Chromium. Chromium and
+headless browsers get flagged as bots by sites like Google Maps, Instagram and Facebook.
+
+- **Remote computer**: `/usr/bin/google-chrome`. A VM without it installs it once, before the first
+  browser command, from Google's package
+  (`https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb`, with `apt-get`, only
+  when `command -v google-chrome` fails; amd64 only). The runner image `polpo-runner-vm-4` ships it.
+  As root (Daytona VMs) Chrome gets `--no-sandbox`, which it needs to start as root.
+- **This server**: the installed Chrome (`google-chrome-stable` / `google-chrome` on `PATH`,
+  `/opt/google/chrome/chrome`, or `/Applications/Google Chrome.app` on macOS), found once.
+  `POLPO_AGENT_BROWSER_EXECUTABLE=/path/to/chrome` overrides it. Without Chrome the browser tools
+  fail with an error saying Google Chrome must be installed: there is no Chromium fallback.
+  The same applies to profile logins (`POST /browser-profiles/:name/login`, `polpo browser login`)
+  and to Polpo's own browser when it is not attached to your Chrome over CDP (Browser Live's
+  "Launch my Chrome" is unchanged).
+- **The agent is told** (its prompt, the `browser_navigate` description, harness instructions) to use
+  Polpo's browser only, the `browser_*` tools or `$CDP_URL` from scripts (Playwright
+  `connectOverCDP`, Puppeteer `connect`), and never to launch a Chromium, Chrome or Playwright
+  browser of its own.
 
 ## The desktop in the VM
 
@@ -39,15 +65,15 @@ Started on demand, idempotently, everything under `/tmp/polpo-desktop` (`0700`):
 - **websockify** on `0.0.0.0:6080` → the VNC port: what Daytona's signed preview link reaches.
 
 The runner image `polpo-runner-vm-4` ships these packages (`xvfb`, `x11vnc`, `openbox`,
-`websockify`, `xdotool`). A VM from an older image installs what is missing once with `apt-get`
+`websockify`, `xdotool`) and Google Chrome. A VM from an older image installs what is missing once with `apt-get`
 (a minute the first time). Build the new image in your Daytona v2 project with:
 
 ```bash
 DAYTONA_V2_API_KEY=dtn_... node scripts/build-sandbox-images.mjs --provider daytona-v2
 ```
 
-Until it is built, VMs are created from `polpo-runner-vm-3` (with a warning) and the packages are
-installed on first use.
+Until it is built, VMs are created from `polpo-runner-vm-3` (with a warning) and the packages and
+Google Chrome are installed on first use.
 
 ## Watching and taking control
 
@@ -94,7 +120,7 @@ An agent with browser tools gets, in every bash command:
 |---|---|
 | `CDP_URL` | `http://127.0.0.1:PORT`, the HTTP CDP endpoint of **its own** agent-browser session (from `agent-browser --session <name> get cdp-url`), while that session runs. Never set by launching a browser: open it first (`browser_navigate`). |
 | `POLPO_BROWSER_SESSION` | Its session name (its agent name): `agent-browser --session "$POLPO_BROWSER_SESSION" …`. |
-| `DISPLAY` | `:99` (or this server's display) when the browser is headed. |
+| `DISPLAY` | `:99` (or this server's display) when the browser is headed (by default on a remote computer). |
 
 So a skill's script (a Python CDP client using `/json/new`, `/json/list`) drives the same signed-in
 browser the agent's `browser_*` tools use. The agent's prompt says so. These variables come with

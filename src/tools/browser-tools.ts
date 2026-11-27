@@ -4,15 +4,18 @@
  * Uses the agent-browser CLI (https://github.com/vercel-labs/agent-browser)
  * with --json output for structured results. Where it runs follows the agent's sandbox:
  *   - remote sandbox (Daytona, E2B): through the workspace shell, inside the VM (the runner
- *     image ships agent-browser + Chromium; otherwise it is installed on first use);
+ *     image ships agent-browser + Google Chrome; otherwise they are installed on first use). There
+ *     the browser is headed by default, on the computer's desktop (agent.browserHeaded: false: headless);
  *   - this machine (no sandbox, bubblewrap, docker): as a child process, behind the sandbox
- *     network proxy (browser-network-guard.ts).
+ *     network proxy (browser-network-guard.ts). Headed only with agent.browserHeaded: true.
+ *
+ * The browser is always real Google Chrome (agent-chrome.ts), never Chromium: sites flag Chromium
+ * as a bot. A server without Chrome gets a clear error, not a Chromium fallback.
  *
  * The agent-browser CLI manages a daemon process that keeps the browser alive
  * between commands, making sequential tool calls fast (no cold-start per command).
  *
- * Requires `agent-browser` to be installed globally or in PATH.
- * Install: `npm install -g agent-browser && agent-browser install`
+ * Requires `agent-browser` in PATH (`npm install -g agent-browser`) and Google Chrome.
  *
  * Session isolation: Each agent gets its own browser session via --session flag,
  * preventing cross-agent interference when multiple agents use browser tools.
@@ -36,6 +39,7 @@ import { createSecretMasker, formatVaultRef, resolveEnvFromVault } from "../vaul
 import { decideEgress, decideRemoteEgress, shellHost, type BrowserEgressConfig } from "./browser-egress.js";
 import { DESKTOP_DISPLAY, DESKTOP_DISPLAY_COMMAND, ensureDesktopDisplay } from "../sandbox/desktop.js";
 import { waitForAgentControl, type ComputerControlStore } from "../sandbox/computer-control.js";
+import { hostChromeArgs, SANDBOX_CHROME_FLAGS, SANDBOX_CHROME_INSTALL_COMMAND } from "./agent-chrome.js";
 
 /** Agent browser results above this are saved in full to a file (head + tail + path for the model). */
 const MAX_OUTPUT_BYTES = 50_000;
@@ -107,6 +111,8 @@ export function execBrowserAsync(
     maxOutputBytes?: number;
     /** Headed: a visible window on this X display (agent.browserHeaded). */
     display?: string;
+    /** The browser agent-browser launches (Google Chrome, agent-chrome.ts); ignored when attached over CDP. */
+    executablePath?: string;
   } = {},
 ): Promise<{ success: boolean; data?: any; error?: string; raw: string }> {
   return new Promise((resolve) => {
@@ -115,7 +121,8 @@ export function execBrowserAsync(
     // (that Chrome already owns its user-data-dir) so it's dropped.
     const cdpArgs = options.cdp ? ["--cdp", String(options.cdp)] : [];
     const profileArgs = options.cdp || !options.profileDir ? [] : ["--profile", options.profileDir];
-    const fullArgs = [...sessionArgs, ...cdpArgs, ...profileArgs, ...(options.cdp ? [] : proxyArgs(options.proxy)), ...args, "--json"];
+    const chromeArgs = options.cdp || !options.executablePath ? [] : ["--executable-path", options.executablePath];
+    const fullArgs = [...sessionArgs, ...cdpArgs, ...chromeArgs, ...profileArgs, ...(options.cdp ? [] : proxyArgs(options.proxy)), ...args, "--json"];
 
     const child = spawnChild("agent-browser", fullArgs, {
       cwd: options.cwd,
@@ -177,12 +184,31 @@ function browserResult(result: { success: boolean; data?: any; error?: string; r
   };
 }
 
+/**
+ * Commands that never launch a browser: they run without Google Chrome (closing a session works
+ * on a server whose Chrome was removed).
+ */
+const NO_LAUNCH_COMMANDS = new Set(["close", "session"]);
+
+/**
+ * agent-browser on this server with Google Chrome (`--executable-path`): an error result, not a
+ * Chromium fallback, when Chrome is not installed. Exported for tests and Polpo's own browser.
+ */
+export function execChromeBrowserAsync(args: string[], options: Parameters<typeof execBrowserAsync>[1] = {}): ReturnType<typeof execBrowserAsync> {
+  if (options.cdp || NO_LAUNCH_COMMANDS.has(args[0] ?? "")) return execBrowserAsync(args, options);
+  const chrome = hostChromeArgs();
+  if (!chrome.ok) {
+    return Promise.resolve({ success: false, error: chrome.error, raw: chrome.error });
+  }
+  return execBrowserAsync(args, { ...options, executablePath: chrome.path });
+}
+
 /** Agent-side CLI call: the raw output is kept whole so large results can be offloaded, not lost. */
 function execAgentBrowser(
   args: string[],
   options: { session?: string; profileDir?: string; timeout?: number; cwd?: string; signal?: AbortSignal; display?: string } = {},
 ): ReturnType<typeof execBrowserAsync> {
-  return execBrowserAsync(args, { ...options, proxy: browserProxyContext.getStore()?.proxy, maxOutputBytes: Infinity });
+  return execChromeBrowserAsync(args, { ...options, proxy: browserProxyContext.getStore()?.proxy, maxOutputBytes: Infinity });
 }
 
 type BrowserCallResult = { success: boolean; data?: any; error?: string; raw: string };
@@ -213,10 +239,12 @@ export const SANDBOX_BROWSER_PROFILES = ".polpo/browser-profiles";
 /** The agent-browser command line run in a sandbox (exported for tests). */
 export function sandboxBrowserCommand(args: string[], options: { session?: string; profileName?: string; proxy?: string; headed?: boolean } = {}): string {
   // headed: a window on the computer's virtual display (started first when it is not up; its
-  // failure leaves agent-browser to say there is no display)
-  const parts = options.headed
-    ? [`(${DESKTOP_DISPLAY_COMMAND}) >/dev/null 2>&1;`, `DISPLAY=${DESKTOP_DISPLAY}`, "agent-browser", "--headed"]
-    : ["agent-browser"];
+  // failure leaves agent-browser to say there is no display). Always Google Chrome (--no-sandbox as root).
+  // (a command that never launches a browser, like close, needs neither)
+  const launches = !NO_LAUNCH_COMMANDS.has(args[0] ?? "");
+  const parts = options.headed && launches
+    ? [`(${DESKTOP_DISPLAY_COMMAND}) >/dev/null 2>&1;`, `DISPLAY=${DESKTOP_DISPLAY}`, "agent-browser", "--headed", SANDBOX_CHROME_FLAGS]
+    : launches ? ["agent-browser", SANDBOX_CHROME_FLAGS] : ["agent-browser"];
   if (options.session) parts.push("--session", shq(options.session));
   // the profile lives in the VM user's home: the host path means nothing there
   if (options.profileName) parts.push("--profile", `"$HOME"/${shq(`${SANDBOX_BROWSER_PROFILES}/${options.profileName}`)}`);
@@ -247,29 +275,24 @@ function parseShellBrowserResult(result: { stdout: string; stderr: string; exitC
   }
 }
 
-/** Libraries agent-browser's Chromium links against (Debian names; the runner image has them). */
-const CHROMIUM_LIBS = "libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 " +
-  "libxss1 libasound2 libpangocairo-1.0-0 libpango-1.0-0 libcairo2 libwayland-client0 libxshmfence1 libxfixes3 libxext6 libxcursor1 " +
-  "libxi6 libxtst6 libxrender1 libxinerama1 libdbus-1-3 libatspi2.0-0 libdrm2 libx11-xcb1 fonts-liberation";
-
-/** True when agent-browser and a Chromium for it are there (its own download, or a system Chrome). */
-export const AGENT_BROWSER_CHECK_COMMAND =
-  "command -v agent-browser >/dev/null && { ls -d \"$HOME\"/.agent-browser/browsers/*/ >/dev/null 2>&1 || command -v chromium google-chrome chromium-browser >/dev/null; }";
+/** True when agent-browser and Google Chrome are there (never Chromium: sites flag it as a bot). */
+export const AGENT_BROWSER_CHECK_COMMAND = "command -v agent-browser >/dev/null && command -v google-chrome >/dev/null";
 
 /**
  * Installs what is missing in a VM without the runner image: the CLI (global npm, with sudo when
- * needed), Chromium's libraries (apt, best effort) and Chromium itself, in the VM user's home.
+ * needed) and Google Chrome (Google's .deb with apt-get, which brings its libraries: only when
+ * `command -v google-chrome` fails).
  */
 export const AGENT_BROWSER_INSTALL_COMMAND =
   "(command -v agent-browser >/dev/null || npm i -g agent-browser >/dev/null 2>&1 || sudo -n npm i -g agent-browser >/dev/null 2>&1)" +
-  ` && (sudo -n sh -c 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends ${CHROMIUM_LIBS}' >/dev/null 2>&1 || true)` +
-  " && agent-browser install >/dev/null 2>&1 && command -v agent-browser";
+  " && command -v agent-browser >/dev/null" +
+  ` && (${SANDBOX_CHROME_INSTALL_COMMAND})`;
 
 const browserReady = new WeakMap<Shell, Promise<string | undefined>>();
 
 /**
- * agent-browser in the sandbox: present in the runner image; otherwise installed on first use
- * (once per shell). Resolves to an error message when it cannot be made available.
+ * agent-browser and Google Chrome in the sandbox: present in the runner image; otherwise installed
+ * on first use (once per shell). Resolves to an error message when they cannot be made available.
  */
 export function ensureSandboxBrowser(shell: Shell): Promise<string | undefined> {
   let ready = browserReady.get(shell);
@@ -279,7 +302,7 @@ export function ensureSandboxBrowser(shell: Shell): Promise<string | undefined> 
       if (found?.exitCode === 0) return undefined;
       const installed = await shell.execute(AGENT_BROWSER_INSTALL_COMMAND, { timeout: 600_000 }).catch((err) => ({ exitCode: 1, stdout: "", stderr: String(err?.message ?? err) }));
       if (installed.exitCode === 0) return undefined;
-      return "agent-browser is not installed in the sandbox and could not be installed there " +
+      return "agent-browser and Google Chrome are not both installed in the sandbox and could not be installed there " +
         `(${(installed.stderr || installed.stdout || `exit ${installed.exitCode}`).trim().slice(0, 300)}). ` +
         "Use the Polpo runner image for this provider (settings.sandbox.providers.<provider>.snapshot or .template).";
     })();
@@ -290,23 +313,36 @@ export function ensureSandboxBrowser(shell: Shell): Promise<string | undefined> 
   return ready;
 }
 
+/** Shells whose computer has no display to offer: a default-headed browser runs headless there. */
+const noDefaultDisplay = new WeakSet<Shell>();
+
 /** Run agent-browser in the sandbox through its shell (the browser lives where the agent's files live). */
 async function execSandboxBrowser(
   shell: Shell,
   args: string[],
-  options: { session?: string; profileName?: string; timeout?: number; cwd?: string; saves?: string; secret?: string; proxy?: string; headed?: boolean },
+  options: {
+    session?: string; profileName?: string; timeout?: number; cwd?: string; saves?: string; secret?: string; proxy?: string;
+    /** true: headed (the computer's desktop), an error without a display; "default": headed when the display can be had, else headless. */
+    headed?: boolean | "default";
+  },
 ): Promise<BrowserCallResult> {
   const missing = await ensureSandboxBrowser(shell);
   if (missing) return { success: false, error: missing, raw: missing };
-  if (options.headed) {
+  let headed = false;
+  const launches = !NO_LAUNCH_COMMANDS.has(args[0] ?? "");
+  if (launches && (options.headed === true || (options.headed === "default" && !noDefaultDisplay.has(shell)))) {
     const noDisplay = await ensureSandboxDisplay(shell);
-    if (noDisplay) return { success: false, error: noDisplay, raw: noDisplay };
+    // an agent that asked for a headed browser is told; by default it runs headless (and the
+    // display is not tried again on this shell)
+    if (noDisplay && options.headed === true) return { success: false, error: noDisplay, raw: noDisplay };
+    if (noDisplay) noDefaultDisplay.add(shell);
+    headed = !noDisplay;
   }
   try {
     // agent-browser does not create the folder of the file it saves
     const mkdir = options.saves ? `mkdir -p ${shq(dirname(options.saves))} && ` : "";
     const env = options.secret !== undefined ? { env: { [BROWSER_SECRET_ENV]: options.secret } } : {};
-    const result = await shell.execute(mkdir + sandboxBrowserCommand(args, options), { cwd: options.cwd, timeout: options.timeout ?? DEFAULT_TIMEOUT, ...env });
+    const result = await shell.execute(mkdir + sandboxBrowserCommand(args, { ...options, headed }), { cwd: options.cwd, timeout: options.timeout ?? DEFAULT_TIMEOUT, ...env });
     return parseShellBrowserResult(result);
   } catch (err: any) {
     const message = err?.message ?? String(err);
@@ -377,14 +413,14 @@ function parseCdpUrl(raw: string): string | undefined {
  * signed-in browser (/json/new, /json/list…), and DISPLAY when it is headed. Looked up per call and
  * never launching a browser: no session, no CDP_URL. Never fails a command (errors: what is known).
  */
-export async function agentBrowserEnv(o: { session: string; shell?: Shell; headed?: boolean; remote?: boolean }): Promise<Record<string, string>> {
+export async function agentBrowserEnv(o: { session: string; shell?: Shell; /** agent.browserHeaded (unset: headed on a remote computer) */ headed?: boolean; remote?: boolean }): Promise<Record<string, string>> {
   const env: Record<string, string> = { POLPO_BROWSER_SESSION: o.session };
   try {
     let ws: string | undefined;
     if (o.remote && o.shell) {
       const r = await o.shell.execute(sandboxCdpUrlCommand(o.session), { timeout: 10_000 });
       ws = parseCdpUrl(r.stdout);
-      if (o.headed) env.DISPLAY = DESKTOP_DISPLAY;
+      if (effectiveBrowserHeaded(o.headed, true)) env.DISPLAY = DESKTOP_DISPLAY;
     } else {
       const list = await execBrowserAsync(["session", "list"], { timeout: 10_000 });
       const sessions = (list.data as { sessions?: unknown } | undefined)?.sessions;
@@ -392,7 +428,7 @@ export async function agentBrowserEnv(o: { session: string; shell?: Shell; heade
         const r = await execBrowserAsync(["get", "cdp-url"], { session: o.session, timeout: 10_000 });
         ws = typeof (r.data as { cdpUrl?: unknown } | undefined)?.cdpUrl === "string" ? (r.data as { cdpUrl: string }).cdpUrl : undefined;
       }
-      if (o.headed) env.DISPLAY = await hostBrowserDisplay();
+      if (effectiveBrowserHeaded(o.headed, false)) env.DISPLAY = await hostBrowserDisplay();
     }
     const http = cdpHttpUrl(ws);
     if (http) env.CDP_URL = http;
@@ -400,12 +436,24 @@ export async function agentBrowserEnv(o: { session: string; shell?: Shell; heade
   return env;
 }
 
-/** What an agent's prompt says about its browser (headed, CDP_URL, take control). */
+/**
+ * Whether an agent's browser is headed: on a remote computer (a desktop to show it on) unless
+ * agent.browserHeaded is false; on this server only when it is true.
+ */
+export function effectiveBrowserHeaded(setting: boolean | undefined, remote: boolean): boolean {
+  return remote ? setting !== false : setting === true;
+}
+
+/** What an agent's prompt says about its browser (Polpo's Chrome only, headed, CDP_URL, take control). */
 export function browserPromptNote(o: { headed?: boolean; computer?: { id: string; name?: string }; takeover?: boolean; session?: string }): string {
   const session = o.session ? `'${o.session}'` : "\"$POLPO_BROWSER_SESSION\"";
   const lines = [
     "",
     "## Your browser",
+    "- Use Polpo's browser only: the browser_* tools, or for scripts the same browser over CDP (below). It is real Google Chrome with your profile and sign-ins. "
+      + "Never launch a browser of your own (no Playwright/Puppeteer launch(), no `chromium`/`google-chrome`/`npx playwright install`, no `agent-browser` without your session): "
+      + "Chromium and headless browsers get flagged as bots by sites like Google Maps, Instagram and Facebook, and they have none of your sign-ins. "
+      + "Scripts connect to $CDP_URL (Playwright connectOverCDP, Puppeteer connect({ browserURL }), a CDP client) instead of launching.",
     "- Your bash commands get CDP_URL (http://127.0.0.1:PORT) while your browser session is open: it is YOUR browser (the one browser_* drives, "
       + "with your profile and sign-ins). Scripts can drive it over CDP (GET $CDP_URL/json/list, PUT $CDP_URL/json/new?<url>), e.g. a skill's Python CDP client. "
       + `Open the browser first (browser_navigate) if CDP_URL is not set; in a shell without it, \`agent-browser --session ${session} get cdp-url\` gives ws://127.0.0.1:PORT/…, whose http://127.0.0.1:PORT is the same endpoint.`,
@@ -439,7 +487,8 @@ function createBrowserNavigateTool(exec: BrowserExec): AgentTool<typeof BrowserN
   return {
     name: "browser_navigate",
     label: "Browser Navigate",
-    description: "Open a URL in the browser. Launches the browser if not already running.",
+    description: "Open a URL in your browser (Polpo's real Google Chrome, with your profile and sign-ins). Launches it if not already running. "
+      + "Always browse with these browser_* tools (or $CDP_URL from scripts): never launch a Chromium/Chrome/Playwright browser of your own.",
     parameters: BrowserNavigateSchema,
     async execute(_id, params, signal) {
       const result = await exec(["open", assertWebUrl(params.url, "browser_navigate")], { signal });
@@ -980,7 +1029,10 @@ export function createBrowserTools(
   network?: BrowserNetworkGuard,
   runtime: {
     shell?: Shell; fs?: FileSystem; vault?: ResolvedVault; egress?: BrowserEgressConfig;
-    /** agent.browserHeaded: a visible window (the computer's virtual display, or this server's). */
+    /**
+     * agent.browserHeaded: a visible window (the computer's virtual display, or this server's).
+     * Unset: headed on a remote computer (when its display can be had), headless on this server.
+     */
     headed?: boolean;
     /** The computer it runs on: while a person holds its desktop, the browser waits (computer-control.ts). */
     control?: { computerId: string; store: Pick<ComputerControlStore, "heldByPerson">; pollMs?: number; maxWaitMs?: number };
@@ -1001,11 +1053,13 @@ export function createBrowserTools(
     if (shell && await inSandbox()) {
       // a proxy here is the computer's egress (the tailnet forwarder in the VM); none: the VM's own network
       const proxy = browserProxyContext.getStore()?.proxy;
-      return execSandboxBrowser(shell, args, { session, profileName: withProfile ? profileName : undefined, timeout: options.timeout, cwd, saves: options.saves, secret: options.secret, ...(proxy ? { proxy } : {}), ...(headed ? { headed: true } : {}) });
+      // headed by default on a remote computer (its desktop); false: headless
+      const sandboxHeaded = headed === undefined ? "default" as const : headed;
+      return execSandboxBrowser(shell, args, { session, profileName: withProfile ? profileName : undefined, timeout: options.timeout, cwd, saves: options.saves, secret: options.secret, ...(proxy ? { proxy } : {}), headed: sandboxHeaded });
     }
     // on the host the arguments go straight to the process (no shell, no log)
     if (options.secret !== undefined) args = args.map((a) => (a === BROWSER_SECRET_ARG ? options.secret! : a));
-    const display = headed ? await hostBrowserDisplay().catch(() => undefined) : undefined;
+    const display = headed === true ? await hostBrowserDisplay().catch(() => undefined) : undefined;
     const hostOptions = { session, profileDir: withProfile ? profileDir : undefined, signal: options.signal, timeout: options.timeout, ...(display ? { display } : {}) };
     // the browser runs here but the agent's files may not: save to a private file, then through fs
     if (options.saves && fs) {

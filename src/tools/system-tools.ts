@@ -887,7 +887,10 @@ export interface CreateAllToolsOptions {
   sandboxProvider?: string;
   /** Where the run comes from, for the media log's provenance (image tools): its task, mission or chat. */
   mediaContext?: { taskId?: string; missionId?: string; sessionId?: string };
-  /** agent.browserHeaded: the browser opens a visible window (the computer's virtual display, or this server's). */
+  /**
+   * agent.browserHeaded: the browser opens a visible window (the computer's virtual display, or this
+   * server's). Unset: headed on a remote computer, headless on this server.
+   */
   browserHeaded?: boolean;
   /** The computer the run is on: while a person holds its desktop (take control), the browser waits. */
   browserControl?: { computerId: string; store: Pick<import("../sandbox/computer-control.js").ComputerControlStore, "heldByPerson"> };
@@ -930,7 +933,7 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
   const browserRequested = categoryRequested(ALL_BROWSER_TOOL_NAMES);
   const session = browserSession ?? "default";
   const commandEnv = browserRequested
-    ? async () => agentBrowserEnv({ session, ...(options.shell ? { shell: options.shell } : {}), headed: !!options.browserHeaded, remote: await shellIsRemote(options.shell) })
+    ? async () => agentBrowserEnv({ session, ...(options.shell ? { shell: options.shell } : {}), ...(typeof options.browserHeaded === "boolean" ? { headed: options.browserHeaded } : {}), remote: await shellIsRemote(options.shell) })
     : undefined;
   tools.push(...createSystemTools(cwd, allowedTools, allowedPaths, options.outputDir, options.vault, options.fs, options.shell, { toolOutputDir, sandboxProvider: options.sandboxProvider, ...(commandEnv ? { commandEnv } : {}) }));
 
@@ -943,7 +946,7 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
   if (browserRequested) {
     tools.push(...createBrowserTools(cwd, browserSession, allowedTools, options.browserProfileDir, toolOutputDir, allowedPaths, options.browserNetwork, {
       shell: options.shell, fs: options.fs, vault: options.vault, egress: options.browserEgress,
-      ...(options.browserHeaded ? { headed: true } : {}), ...(options.browserControl ? { control: options.browserControl } : {}),
+      ...(typeof options.browserHeaded === "boolean" ? { headed: options.browserHeaded } : {}), ...(options.browserControl ? { control: options.browserControl } : {}),
     }));
   }
 
