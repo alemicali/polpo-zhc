@@ -85,8 +85,9 @@ In the VM (all under `/tmp/polpo-tailnet`, mode 0700):
   v0 snapshot, E2B template, and the Daytona v2 image `polpo-runner-vm-4`); otherwise downloaded on
   first use from `pkgs.tailscale.com` and checked against a pinned SHA-256. Computers run on Daytona
   v0 (containers), E2B and Daytona v2 (Linux VMs that hibernate: their memory snapshot keeps
-  tailscaled running, and every wake checks the tailnet again: when the ephemeral node was removed
-  meanwhile, `tailscale up` runs again with the key).
+  tailscaled running, but its ephemeral node is usually removed from the tailnet while the VM sleeps,
+  and right after the wake it can still look fine: so a tailscaled found alive after any start or
+  resume is restarted with fresh in-memory state and joins again with the key, see below).
 - `tailscaled --tun=userspace-networking --socks5-server=127.0.0.1:1055 --state=mem:`: no TUN device,
   no root; the state is in memory, so the node leaves with the VM (ephemeral key).
 - `tailscale up --auth-key=file:… --hostname=<prefix>-<project>-<computer> --advertise-tags=… --accept-dns=false`.
@@ -96,10 +97,33 @@ In the VM (all under `/tmp/polpo-tailnet`, mode 0700):
 - A small Node forwarder on `127.0.0.1:1081`: every connection becomes a SOCKS5 CONNECT to the proxy
   through tailscaled, then plain bytes, so `1081` behaves as the proxy itself and the browser runs with
   `--proxy socks5://127.0.0.1:1081`.
+- Reachability is checked end to end, twice: a SOCKS5 greeting through the forwarder (relayed only once
+  tailscaled connected it to the proxy) and one straight through tailscaled's `127.0.0.1:1055` to the
+  proxy (`forwarder.mjs probe-via`); both must be answered by the proxy at home. A forwarder that only
+  listens does not count; a forwarder that does not relay while the tunnel works is restarted alone.
 
 It comes up when the computer starts or resumes (in the background) and, in any case, before the
 browser's next command; one command checks it while everything runs (cached 30 s). After a resume or a
-container restart the daemons are started again if they died. Resetting or deleting the computer runs
+container restart the daemons are started again if they died.
+
+**Stale nodes are re-joined.** tailscaled keeps its state in memory and the key is ephemeral, so a
+node that slept (a memory snapshot) is typically gone from the tailnet while its tailscaled still says
+`BackendState: Running`. The node is restarted cleanly (best-effort `tailscale logout`, stop the
+forwarder and tailscaled, remove the socket, start tailscaled with fresh state, `tailscale up` with the
+key, start the forwarder, probe again) when:
+
+- the computer was just started or resumed and tailscaled is alive (it came back from a snapshot:
+  always restarted, because right after the wake it may still look healthy; a few seconds);
+- or the proxy does not answer end to end and `tailscale status --json` shows the node stale:
+  `Self.Online: false`, a health warning that no network map came from the coordination server for
+  more than 10 minutes, or that it cannot reach the coordination server;
+- or `tailscale up` fails on a tailscaled that was already running.
+
+At most one restart per check; when it still fails the error says so ("Re-joining the tailnet (…)
+failed: tailscale up failed: …") and the next browser command tries again. A node that is healthy while
+the proxy is merely off is never restarted. While it re-joins, the status says `tailnet: starting`,
+`rejoining: true` and "re-joining the tailnet", the browser waits for it, and a profile signed in
+through the proxy pauses rather than going out directly if it fails. Resetting or deleting the computer runs
 `tailscale logout` first (best effort; an ephemeral node also disappears by itself). The rules above
 apply as on the server: proxy unreachable → directly from the VM, except a profile signed in through the
 proxy, which pauses; the browser restarts when the proxy it should use changes.
@@ -183,7 +207,8 @@ for remote computers yet. The VM needs to reach Tailscale's coordination and DER
 
 - `GET /api/v1/computers/nina/egress`: `tailnet` (`up`, `down`, `starting`, or `off` when the computer is
   not running: it never starts it to look), `node`, `tailnetIp`, `path` (`direct` or `derp`, with `relay`,
-  the DERP region), `proxyReachable`, `effective` (where its browser goes out now), `error`.
+  the DERP region), `proxyReachable`, `effective` (where its browser goes out now), `error`, and
+  `rejoining: true` while a stale node re-joins the tailnet (a status check that finds one starts that).
 - Polpo's `egress_status` lists the same for every remote computer with an egress.
 
 ### Latency
@@ -203,5 +228,7 @@ allows it, or UPnP/NAT-PMP is on).
 | `tailnet up`, `proxyReachable: false` | The home machine or `microsocks` is off, or the ACL lacks `tag:polpo-sandbox → ahp0:1080`. From the VM: `/tmp/polpo-tailnet/bin/tailscale --socket=/tmp/polpo-tailnet/tailscaled.sock ping 100.101.55.7` (or `tailscale` if in PATH). |
 | `Tailscale could not be installed in the VM` | The VM has no network to `pkgs.tailscale.com` (network rule), or an unsupported architecture. Rebuild the runner image so it is preinstalled. |
 | `tailscaled could not start` | `/tmp/polpo-tailnet/tailscaled.log` in the VM. |
+| After a hibernation or resume: `proxyReachable: false`, `effective: direct (home unreachable…)`; in the VM `tailscale status` shows Self offline and "Unable to connect to the Tailscale coordination server" / "hasn't received a network map … in 63h" | The node from before the snapshot was removed from the tailnet (ephemeral key, state in memory). Polpo now restarts tailscaled and joins again by itself (status "re-joining the tailnet"). If it does not come back: the error after "Re-joining the tailnet (…) failed:" says why (expired or single-use key, tags or ACL); by hand, `kill $(cat /tmp/polpo-tailnet/tailscaled.pid) $(cat /tmp/polpo-tailnet/fwd.pid)` in the VM and the browser's next command joins again. |
+| `Re-joining the tailnet (…) failed: tailscale up failed: …` | As for `tailscale up failed` above: the key must be **reusable** (every re-join uses it again), not expired, pre-approved (no `NeedsMachineAuth`), with tags the ACL's `tagOwners` allows. |
 | Several nodes `polpo-sbx-…-nina-1`, `-2` in the admin console | Earlier nodes of the same computer that have not expired yet (ephemeral nodes go after being offline a while); harmless. |
 | The browser keeps saying "paused" | Its profile was used through the proxy and the proxy is unreachable: bring the home machine back, or clear the profile (`browser_profile_clear`) to let it go out directly. |

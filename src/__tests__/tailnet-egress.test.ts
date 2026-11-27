@@ -18,8 +18,9 @@ import {
 import type { Shell, ShellOptions, ShellResult } from "@polpo-ai/core/shell";
 import {
   TAILNET_AUTH_KEY_FILE, TAILNET_BROWSER_PROXY, TAILNET_DAEMON_COMMAND, TAILNET_FORWARDER_FILE, TAILNET_FORWARDER_SCRIPT,
-  TAILNET_INSPECT_COMMAND, TAILNET_INSTALL_COMMAND, TAILNET_LOGOUT_COMMAND, TAILSCALE_SHA256, TAILSCALE_VERSION,
-  TailnetEgress, configureTailnetEgress, describeTailnet, tailnetEgress, type TailnetHost,
+  TAILNET_FORWARDER_STOP_COMMAND, TAILNET_INSPECT_COMMAND, TAILNET_INSTALL_COMMAND, TAILNET_LOGOUT_COMMAND, TAILNET_RESTART_COMMAND,
+  TAILSCALE_SHA256, TAILSCALE_VERSION,
+  TailnetEgress, configureTailnetEgress, describeTailnet, goDurationMs, onComputerStarted, tailnetEgress, tailnetStaleReason, type TailnetHost,
 } from "../sandbox/tailnet-egress.js";
 import { ComputerManager } from "../sandbox/computers.js";
 import type { RemoteAdapter, RemoteDriver, RemoteVmSummary } from "../sandbox/remote-adapters.js";
@@ -40,7 +41,7 @@ const ref = (computerId = "nina"): TailnetEgressRef => ({
   proxyHost: "100.101.55.7", proxyPort: 1080,
 });
 
-type Kind = "inspect" | "install" | "daemon" | "up" | "rm-key" | "forwarder" | "logout" | "marker-test" | "marker-write" | "browser" | "other";
+type Kind = "inspect" | "install" | "daemon" | "up" | "rm-key" | "forwarder" | "logout" | "restart" | "fwd-stop" | "marker-test" | "marker-write" | "browser" | "other";
 
 /** A VM with Tailscale's moving parts as flags: commands change them as they would. */
 class FakeTailnetVm implements TailnetHost {
@@ -57,12 +58,23 @@ class FakeTailnetVm implements TailnetHost {
   keyAtUp?: string;
   marker = false;
   profileExists = true;
+  /** The node was removed from the tailnet (ephemeral, while the VM slept): nothing goes through it. */
+  removed = false;
+  /** Self.Online in `tailscale status --json` (left out when undefined). */
+  selfOnline?: boolean;
+  health: string[] = [];
+  /** The forwarder runs but does not relay (the tunnel itself works). */
+  forwarderBroken = false;
+  /** A `tailscale up` that fails only on a daemon from before a restart. */
+  upFailsUntilRestart = false;
 
   kindOf(command: string): Kind {
     if (command === TAILNET_INSPECT_COMMAND) return "inspect";
     if (command === TAILNET_INSTALL_COMMAND) return "install";
     if (command === TAILNET_DAEMON_COMMAND) return "daemon";
     if (command === TAILNET_LOGOUT_COMMAND) return "logout";
+    if (command === TAILNET_RESTART_COMMAND) return "restart";
+    if (command === TAILNET_FORWARDER_STOP_COMMAND) return "fwd-stop";
     if (command === `rm -f ${TAILNET_AUTH_KEY_FILE}`) return "rm-key";
     if (command.includes(" up --reset ")) return "up";
     if (command.includes(`forwarder.mjs" serve`)) return "forwarder";
@@ -86,12 +98,19 @@ class FakeTailnetVm implements TailnetHost {
         this.files.delete(TAILNET_AUTH_KEY_FILE);
         // a failing up whose output (wrongly) echoes the key: it must be masked
         if (this.upError) return { exitCode: 1, stdout: "", stderr: `${this.upError} ${this.keyAtUp}` };
+        if (this.upFailsUntilRestart) return { exitCode: 1, stdout: "", stderr: "context deadline exceeded" };
         this.backend = "Running";
+        this.removed = false; this.selfOnline = this.selfOnline === undefined ? undefined : true; this.health = [];
         return ok();
       }
       case "rm-key": this.files.delete(TAILNET_AUTH_KEY_FILE); return ok();
       case "forwarder": this.forwarder = true; this.target = /T='([^']+)'/.exec(command)?.[1] ?? ""; return ok();
       case "logout": this.backend = "NeedsLogin"; this.daemon = false; this.forwarder = false; return ok();
+      case "restart":
+        this.daemon = false; this.forwarder = false; this.forwarderBroken = false; this.target = ""; this.backend = "NoState";
+        this.upFailsUntilRestart = false;
+        return ok();
+      case "fwd-stop": this.forwarder = false; this.forwarderBroken = false; this.target = ""; return ok();
       case "marker-test": return { exitCode: this.marker ? 0 : 1, stdout: "", stderr: "" };
       case "marker-write": if (this.profileExists) { this.marker = true; return ok("marked\n"); } return ok();
       case "browser": return ok(JSON.stringify({ success: true, data: { ran: command } }));
@@ -106,12 +125,21 @@ class FakeTailnetVm implements TailnetHost {
 
   inspection(): string {
     const lines = [`bin=${this.bin ? 1 : 0}`, `daemon=${this.daemon ? 1 : 0}`, `forwarder=${this.forwarder ? 1 : 0}`, `target=${this.target}`];
-    if (this.forwarder) lines.push(`probe=${this.proxyUp && this.backend === "Running" ? 1 : 0}`);
+    const script = this.files.get(TAILNET_FORWARDER_FILE);
+    if (script !== undefined) lines.push(`fwdv2=${script.includes("probe-via") ? 1 : 0}`);
+    // end to end: the proxy at home answers only through a node the tailnet still knows
+    const through = this.proxyUp && this.backend === "Running" && !this.removed;
+    if (this.forwarder) lines.push(`probe=${through && !this.forwarderBroken ? 1 : 0}`);
+    if (this.target && this.daemon && script?.includes("probe-via")) lines.push(`tunnel=${through ? 1 : 0}`);
     lines.push("---status---");
     if (this.daemon) {
       lines.push(JSON.stringify({
         BackendState: this.backend,
-        Self: { HostName: "polpo-sbx-p-nina", DNSName: this.backend === "Running" ? "polpo-sbx-p-nina.tail1234.ts.net." : "", TailscaleIPs: this.backend === "Running" ? ["100.80.1.2"] : null },
+        ...(this.health.length ? { Health: this.health } : {}),
+        Self: {
+          HostName: "polpo-sbx-p-nina", DNSName: this.backend === "Running" ? "polpo-sbx-p-nina.tail1234.ts.net." : "", TailscaleIPs: this.backend === "Running" ? ["100.80.1.2"] : null,
+          ...(this.selfOnline !== undefined ? { Online: this.selfOnline } : {}),
+        },
         Peer: { k1: { HostName: "ahp0", DNSName: "ahp0.tail1234.ts.net.", TailscaleIPs: ["100.101.55.7"], CurAddr: "", Relay: "fra" } },
       }, null, 2));
     }
@@ -366,6 +394,204 @@ describe("Tailscale in the VM", () => {
   });
 });
 
+// ── A stale node (restored from a snapshot, removed from the tailnet) ─────
+
+describe("a stale tailnet node is re-joined", () => {
+  /** The live incident: tailscaled back from a memory snapshot says Running, but its ephemeral node is gone. */
+  const goStale = (vm: FakeTailnetVm) => {
+    vm.removed = true;
+    vm.selfOnline = false;
+    vm.health = [
+      "Unable to connect to the Tailscale coordination server to synchronize the state of your tailnet. Peer reachability might degrade over time.",
+      "Tailscale hasn't received a network map from the coordination server in 63h.",
+    ];
+  };
+  const healthy = async (rt: TailnetEgress) => {
+    const vm = new FakeTailnetVm();
+    vm.selfOnline = true;
+    expect((await rt.ensure(vm, ref())).proxyReachable).toBe(true);
+    return vm;
+  };
+
+  test("stale detection from tailscale status --json; Go durations", () => {
+    expect(goDurationMs("63h")).toBe(63 * 3_600_000);
+    expect(goDurationMs("1h2m3.5s")).toBe(3_723_500);
+    expect(goDurationMs("250ms")).toBe(250);
+    expect(goDurationMs("soon")).toBeUndefined();
+    expect(tailnetStaleReason({ BackendState: "Running", Self: { Online: true } })).toBeUndefined();
+    expect(tailnetStaleReason({ BackendState: "Running", Self: { Online: false } })).toMatch(/offline in the tailnet/);
+    expect(tailnetStaleReason({ BackendState: "Running", Health: ["Tailscale hasn't received a network map from the coordination server in 63h."] })).toBe("no network map from the coordination server for 63h");
+    // a short gap is not stale; a coordination server that does not answer is
+    expect(tailnetStaleReason({ BackendState: "Running", Health: ["Tailscale hasn't received a network map from the coordination server in 2m0s."] })).toBeUndefined();
+    expect(tailnetStaleReason({ BackendState: "Running", Health: ["Unable to connect to the Tailscale coordination server to synchronize the state of your tailnet."] })).toMatch(/cannot reach the Tailscale coordination server/);
+    // other states go through `tailscale up` anyway
+    expect(tailnetStaleReason({ BackendState: "NeedsLogin", Self: { Online: false } })).toBeUndefined();
+  });
+
+  test("Self offline and no network map, the proxy unreachable: restart tailscaled, up again, forwarder, probe", async () => {
+    const progress: string[] = [];
+    const rt = new TailnetEgress({ vaultStore, onProgress: (m) => progress.push(m) });
+    const vm = await healthy(rt);
+    goStale(vm);
+    rt.invalidate("nina");
+    const before = vm.events.length;
+    const status = await rt.ensure(vm, ref());
+    expect(vm.events.slice(before)).toEqual([
+      "inspect", "restart", "inspect", "daemon", "inspect",
+      "write:key", "up", "rm-key", "inspect",
+      "write:forwarder", "forwarder", "inspect",
+    ]);
+    expect(status).toMatchObject({ tailnet: "up", proxyReachable: true });
+    expect(status.error).toBeUndefined();
+    expect(progress.join("\n")).toMatch(/re-joining the tailnet \(the node is offline in the tailnet.*no network map from the coordination server for 63h\)/);
+    expect(vm.leaked()).toBe(false);
+  });
+
+  test("a healthy node is never restarted (nor one whose proxy is merely off)", async () => {
+    const clock = { now: 1_000_000 };
+    const egress = new TailnetEgress({ vaultStore, now: () => clock.now });
+    const vm = await healthy(egress);
+    clock.now += 31_000;
+    expect((await egress.ensure(vm, ref())).proxyReachable).toBe(true);
+    // the machine at home off: the node is fine, nothing to re-join
+    vm.proxyUp = false;
+    clock.now += 31_000;
+    const off = await egress.ensure(vm, ref());
+    expect(off).toMatchObject({ tailnet: "up", proxyReachable: false });
+    expect(off.error).toMatch(/does not answer through the tailnet/);
+    expect(vm.events).not.toContain("restart");
+  });
+
+  test("up fails after the restart: a clear error (key masked), one restart only", async () => {
+    const rt = new TailnetEgress({ vaultStore });
+    const vm = await healthy(rt);
+    goStale(vm);
+    vm.upError = "requested tags [tag:polpo-sandbox] are invalid or not permitted";
+    rt.invalidate("nina");
+    const status = await rt.ensure(vm, ref());
+    expect(status).toMatchObject({ tailnet: "down", proxyReachable: false });
+    expect(status.error).toMatch(/^Re-joining the tailnet \(the node is offline.*\) failed: tailscale up failed: requested tags .* not permitted \*\*\*.*ACL lets tag:polpo-sandbox join.*tried again on the browser's next use/s);
+    expect(JSON.stringify(status)).not.toContain(KEY);
+    expect(vm.events.filter((e) => e === "restart")).toHaveLength(1);
+    expect(vm.files.has(TAILNET_AUTH_KEY_FILE)).toBe(false);
+  });
+
+  test("up fails on a daemon from before: one clean restart, then it joins", async () => {
+    const rt = new TailnetEgress({ vaultStore });
+    const vm = await healthy(rt);
+    // a daemon that lost its login and cannot log in again in its old state
+    vm.backend = "NeedsLogin"; vm.upFailsUntilRestart = true;
+    rt.invalidate("nina");
+    const before = vm.events.length;
+    const status = await rt.ensure(vm, ref());
+    expect(vm.events.slice(before)).toEqual([
+      "inspect", "write:key", "up", "rm-key",
+      "restart", "inspect", "daemon", "inspect", "write:key", "up", "rm-key", "inspect",
+      "write:forwarder", "forwarder", "inspect",
+    ]);
+    expect(status.proxyReachable).toBe(true);
+  });
+
+  test("a resume: always looked at again (never the cached steady state), and a tailscaled back from the snapshot is restarted", async () => {
+    const clock = { now: 1_000_000 };
+    const rt = new TailnetEgress({ vaultStore, now: () => clock.now });
+    const vm = await healthy(rt);
+    // right after a resume from a memory snapshot everything still looks fine (old netmap)
+    rt.invalidate("nina", { restored: true });
+    const before = vm.events.length;
+    const status = await rt.ensure(vm, ref());
+    expect(vm.events.slice(before)).toEqual([
+      "inspect", "restart", "inspect", "daemon", "inspect", "write:key", "up", "rm-key", "inspect", "write:forwarder", "forwarder", "inspect",
+    ]);
+    expect(status.proxyReachable).toBe(true);
+    // once only: the next check (after the cache) does not restart again
+    clock.now += 31_000;
+    const after = vm.events.length;
+    await rt.ensure(vm, ref());
+    expect(vm.events.slice(after)).toEqual(["inspect"]);
+    // a fresh start (no tailscaled alive yet): nothing to restart
+    const fresh = new FakeTailnetVm();
+    rt.invalidate("fresh", { restored: true });
+    await rt.ensure(fresh, ref("fresh"));
+    expect(fresh.events).not.toContain("restart");
+  });
+
+  test("onComputerStarted marks the computer restored: the background check restarts the daemon from the snapshot", async () => {
+    configureTailnetEgress({ vaultStore, egressFor: (c) => tailnetEgressFor(c, { egressProxies: proxies, tailscale }, "p") });
+    tailnetEgress.invalidate();
+    const vm = new FakeTailnetVm();
+    vm.selfOnline = true;
+    const egressRef = tailnetEgressFor({ id: "woken", kind: "daytona", egress: "home" }, { egressProxies: proxies, tailscale }, "p")!.tailnet!;
+    expect((await tailnetEgress.ensure(vm, egressRef)).proxyReachable).toBe(true);
+    const before = vm.events.length;
+    onComputerStarted({ id: "woken", kind: "daytona", egress: "home" }, vm);
+    // the check in the background is shared with the browser's next use
+    const status = await tailnetEgress.ensure(vm, egressRef);
+    expect(vm.events.slice(before)).toContain("restart");
+    expect(status.proxyReachable).toBe(true);
+  });
+
+  test("end to end: a forwarder that listens is not enough; a broken forwarder alone is restarted", async () => {
+    const rt = new TailnetEgress({ vaultStore });
+    const vm = await healthy(rt);
+    // the forwarder listens and the tunnel works, but nothing is relayed: only the forwarder restarts
+    vm.forwarderBroken = true;
+    rt.invalidate("nina");
+    let before = vm.events.length;
+    expect((await rt.ensure(vm, ref())).proxyReachable).toBe(true);
+    expect(vm.events.slice(before)).toEqual(["inspect", "fwd-stop", "write:forwarder", "forwarder", "inspect"]);
+    // the proxy does not answer through the tunnel either: not reachable, whatever listens locally
+    vm.proxyUp = false;
+    const inspected = await rt.inspect(vm, ref());
+    expect(inspected).toMatchObject({ tailnet: "up", proxyReachable: false });
+    expect(inspected.rejoining).toBeUndefined();
+    // an older forwarder.mjs in the VM (no tunnel probe) is replaced, even in the steady state
+    vm.proxyUp = true;
+    vm.files.set(TAILNET_FORWARDER_FILE, "// old forwarder");
+    rt.invalidate("nina");
+    before = vm.events.length;
+    expect((await rt.ensure(vm, ref())).proxyReachable).toBe(true);
+    expect(vm.events.slice(before)).toEqual(["inspect", "write:forwarder"]);
+    expect(vm.files.get(TAILNET_FORWARDER_FILE)).toBe(TAILNET_FORWARDER_SCRIPT);
+  });
+
+  test("the status of a stale node says re-joining the tailnet, and re-joins it", async () => {
+    const rt = new TailnetEgress({ vaultStore });
+    const vm = await healthy(rt);
+    goStale(vm);
+    const status = await rt.inspect(vm, ref());
+    expect(status).toMatchObject({ tailnet: "starting", proxyReachable: false, rejoining: true });
+    expect(status.error).toMatch(/stale .*: re-joining the tailnet/);
+    // while it runs, last() says so too
+    expect(rt.last("nina")).toMatchObject({ rejoining: true, proxyReachable: false });
+    // the background re-join ends with the proxy answering
+    const done = await rt.ensure(vm, ref());
+    expect(done.proxyReachable).toBe(true);
+    expect(vm.events).toContain("restart");
+    expect(rt.last("nina")?.rejoining).toBeUndefined();
+  });
+
+  test("a profile signed in through home pauses (never goes out directly) when re-joining fails, and says why", async () => {
+    configureTailnetEgress({ vaultStore });
+    tailnetEgress.invalidate();
+    resetBrowserEgressSessions();
+    const vm = new FakeTailnetVm();
+    vm.selfOnline = true;
+    const egress = { name: "home", url: proxies.home, tailnet: ref("stale-pc") };
+    const tools = createBrowserTools("/vm/work", "growth-stale", ["browser_navigate"], "/host/.polpo/browser-profiles/growth-stale", "/vm/out", undefined, undefined, { shell: new VmShell(vm), fs: { writeFileBuffer: (p: string, d: Uint8Array) => vm.writeFile(p, d) } as any, egress });
+    const navigate = tools.find((t) => t.name === "browser_navigate")!;
+    await navigate.execute("1", { url: "https://example.com" });
+    expect(vm.marker).toBe(true);
+    goStale(vm);
+    vm.upError = "auth key expired";
+    tailnetEgress.invalidate("stale-pc", { restored: true });
+    const before = vm.calls.filter((c) => c.kind === "browser").length;
+    const paused = await navigate.execute("2", { url: "https://example.com" });
+    expect(paused.content[0].text).toMatch(/"home" connection is unreachable.*stays paused.*Re-joining the tailnet \(.*\) failed: tailscale up failed: auth key expired/s);
+    expect(vm.calls.filter((c) => c.kind === "browser").length).toBe(before);
+  });
+});
+
 // ── The browser in the VM ───────────────────────────────────────────────
 
 /** The run's shell in the VM: tailnet and marker commands go to the fake VM; agent-browser answers. */
@@ -552,9 +778,19 @@ describe("the forwarder (node, in the VM)", () => {
       expect(await run([script, "probe", "127.0.0.1", String(port)])).toBe(0);
       // CONNECT 100.101.55.7:1080 (IPv4 form)
       expect([...asked[0]!]).toEqual([5, 1, 0, 1, 100, 101, 55, 7, 1080 >> 8, 1080 & 255]);
-      // the home proxy off: the probe fails
+      // straight through "tailscaled" to the proxy (no forwarder): the tunnel probe
+      expect(await run([script, "probe-via", String(tsd.port), "100.101.55.7", "1080"])).toBe(0);
+      // the home proxy off: both probes fail
       await new Promise((r) => home.server.close(r));
       expect(await run([script, "probe", "127.0.0.1", String(port)])).not.toBe(0);
+      expect(await run([script, "probe-via", String(tsd.port), "100.101.55.7", "1080"])).not.toBe(0);
+      // a SOCKS5 server that refuses the CONNECT (a node the tailnet removed): the tunnel probe fails
+      const refusing = await listen((s) => {
+        let stage = 0;
+        s.on("data", () => { if (stage++ === 0) s.write(Buffer.from([5, 0])); else s.write(Buffer.from([5, 4, 0, 1, 0, 0, 0, 0, 0, 0])); });
+      });
+      expect(await run([script, "probe-via", String(refusing.port), "100.101.55.7", "1080"])).not.toBe(0);
+      refusing.server.close();
     } finally {
       child.kill();
       tsd.server.close();
