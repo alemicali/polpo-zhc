@@ -1,6 +1,7 @@
 import { eq, and, like, ne } from "drizzle-orm";
 import type { VaultStore } from "@polpo-ai/core/vault-store";
-import type { VaultEntry } from "@polpo-ai/core/types";
+import type { VaultEntry, VaultEntryMetadata } from "@polpo-ai/core/types";
+import { vaultMetadataAfterPatch, vaultEntryProvenanceView } from "@polpo-ai/core/vault-store";
 import { resolveKey, encryptJson, decryptJson } from "@polpo-ai/vault-crypto";
 import { affectedRows } from "../utils.js";
 
@@ -27,6 +28,35 @@ function serializeAllowedAgents(list?: string[]): string | null {
   const unique = Array.from(new Set(list.filter(s => typeof s === "string" && s.length > 0)));
   unique.sort();
   return unique.length > 0 ? JSON.stringify(unique) : null;
+}
+
+/**
+ * The entry's non-secret metadata travels inside the encrypted credentials JSON under this
+ * reserved key (no schema change, no migration): written by set(), split off on every read.
+ */
+const META_KEY = "$meta";
+
+function packCredentials(entry: VaultEntry): Record<string, string> {
+  const { [META_KEY]: _drop, ...creds } = entry.credentials;
+  return entry.metadata && Object.keys(entry.metadata).length > 0 ? { ...creds, [META_KEY]: JSON.stringify(entry.metadata) } : creds;
+}
+
+function unpackCredentials(raw: Record<string, string>): { credentials: Record<string, string>; metadata?: VaultEntryMetadata } {
+  if (!raw || typeof raw !== "object" || !Object.hasOwn(raw, META_KEY)) return { credentials: raw ?? {} };
+  const { [META_KEY]: meta, ...credentials } = raw;
+  try {
+    const parsed = JSON.parse(String(meta));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? { credentials, metadata: parsed as VaultEntryMetadata } : { credentials };
+  } catch {
+    return { credentials };
+  }
+}
+
+/** Metadata of a row (from the encrypted JSON), with the row's created_at when none was recorded. */
+function rowMetadata(row: any, metadata: VaultEntryMetadata | undefined): VaultEntryMetadata | undefined {
+  const createdAt = metadata?.createdAt ?? (typeof row.createdAt === "string" ? row.createdAt : typeof row.created_at === "string" ? row.created_at : undefined);
+  if (!metadata && !createdAt) return undefined;
+  return { ...(metadata ?? {}), ...(createdAt ? { createdAt } : {}) };
 }
 
 /**
@@ -89,7 +119,7 @@ export class DrizzleVaultStore implements VaultStore {
 
   async set(agent: string, service: string, entry: VaultEntry): Promise<void> {
     const now = new Date().toISOString();
-    const encCreds = encryptJson(entry.credentials, this.key);
+    const encCreds = encryptJson(packCredentials(entry), this.key);
     const allowedAgentsJson = serializeAllowedAgents(entry.allowedAgents);
     const values = {
       agent,
@@ -133,6 +163,8 @@ export class DrizzleVaultStore implements VaultStore {
       ...(partial.allowedAgents !== undefined ? { allowedAgents: partial.allowedAgents } : existing?.allowedAgents ? { allowedAgents: existing.allowedAgents } : {}),
       credentials: { ...(existing?.credentials ?? {}), ...(partial.credentials ?? {}) },
     };
+    const metadata = vaultMetadataAfterPatch(existing?.metadata, partial.credentials);
+    if (metadata) merged.metadata = metadata;
     await this.set(agent, service, merged);
     return Object.keys(merged.credentials);
   }
@@ -168,7 +200,7 @@ export class DrizzleVaultStore implements VaultStore {
     const seen = new Set<string>();
     const out: Array<any> = [];
     for (const row of ownedRows) {
-      const creds = decryptJson<Record<string, string>>(row.credentials as string, this.key, {});
+      const { credentials: creds, metadata } = unpackCredentials(decryptJson<Record<string, string>>(row.credentials as string, this.key, {}));
       const allowed = parseAllowedAgents(row.allowed_agents ?? row.allowedAgents);
       out.push({
         service: row.service,
@@ -177,6 +209,7 @@ export class DrizzleVaultStore implements VaultStore {
         account: row.account ?? undefined,
         ...(allowed.length > 0 ? { allowedAgents: allowed } : {}),
         keys: Object.keys(creds),
+        ...vaultEntryProvenanceView(rowMetadata(row, metadata)),
       });
       seen.add(row.service);
     }
@@ -184,7 +217,7 @@ export class DrizzleVaultStore implements VaultStore {
       const allowed = parseAllowedAgents(row.allowed_agents ?? row.allowedAgents);
       if (!allowed.includes(agent)) continue;
       if (seen.has(row.service)) continue; // owned wins
-      const creds = decryptJson<Record<string, string>>(row.credentials as string, this.key, {});
+      const { credentials: creds, metadata } = unpackCredentials(decryptJson<Record<string, string>>(row.credentials as string, this.key, {}));
       out.push({
         service: row.service,
         type: row.type as VaultEntry["type"],
@@ -194,6 +227,7 @@ export class DrizzleVaultStore implements VaultStore {
         sharedFrom: row.agent,
         readOnly: true,
         keys: Object.keys(creds),
+        ...vaultEntryProvenanceView(rowMetadata(row, metadata)),
       });
     }
     return out;
@@ -273,14 +307,15 @@ export class DrizzleVaultStore implements VaultStore {
   // ── Internal ──
 
   private rowToEntry(row: any): VaultEntry {
-    const creds = decryptJson<Record<string, string>>(row.credentials as string, this.key, {});
+    const { credentials, metadata } = unpackCredentials(decryptJson<Record<string, string>>(row.credentials as string, this.key, {}));
     const allowed = parseAllowedAgents(row.allowed_agents ?? row.allowedAgents);
     return {
       type: row.type as VaultEntry["type"],
       ...(row.label ? { label: row.label } : {}),
       ...(row.account ? { account: row.account } : {}),
       ...(allowed.length > 0 ? { allowedAgents: allowed } : {}),
-      credentials: creds,
+      credentials,
+      ...(metadata ? { metadata } : {}),
     };
   }
 }

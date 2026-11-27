@@ -222,7 +222,12 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
   /** Set when the computer's VM went away under a running turn (forced rotation): re-attach and go on. */
   let interrupted: string | undefined;
   let secrets: string[] = [];
-  const scrub = (t: string) => scrubSecrets(t, secrets);
+  // and the secrets the run learns while it runs (a password vault_create_login generated)
+  let learned = ctx.runSecrets;
+  const scrub = (t: string) => {
+    const out = scrubSecrets(t, secrets);
+    return learned ? learned.mask(out) : out;
+  };
 
   const handle: AgentHandle = {
     agentName: agentConfig.name,
@@ -327,6 +332,7 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
         log: (line) => transcript({ type: "log", message: line }),
         task,
       });
+      learned = toolset.secrets;
       toolsetCleanup = [
         async () => toolset.connectorManager?.closeAll(),
         async () => toolset.browserNetwork?.close(),

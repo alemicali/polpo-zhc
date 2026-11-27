@@ -83,6 +83,13 @@ export interface ResolvedVault {
   has(service: string): boolean;
   /** List all available services with their types and credential keys (values masked) */
   list(): Array<{ service: string; type: string; keys: string[]; label?: string }>;
+  /**
+   * Add or replace an entry for the rest of the run (an entry the agent just created with
+   * vault_create_login): browser_fill / env_from_vault see it at once, without re-reading the store.
+   */
+  upsert?(service: string, entry: VaultEntry): void;
+  /** The keys of an entry whose values Polpo generated (never shown to the model). */
+  generatedKeys?(service: string): string[];
 }
 
 /**
@@ -98,17 +105,20 @@ export function resolveAgentVault(vault?: Record<string, VaultEntry>): ResolvedV
     account: string;
     label?: string;
     creds: Record<string, string>;
+    generated?: string[];
   }>();
 
+  const put = (service: string, entry: VaultEntry) => {
+    resolved.set(service, {
+      type: entry.type,
+      account: entry.account ?? service,
+      label: entry.label,
+      creds: resolveVaultCredentials(entry),
+      ...(entry.metadata?.generated?.length ? { generated: [...entry.metadata.generated] } : {}),
+    });
+  };
   if (vault) {
-    for (const [service, entry] of Object.entries(vault)) {
-      resolved.set(service, {
-        type: entry.type,
-        account: entry.account ?? service,
-        label: entry.label,
-        creds: resolveVaultCredentials(entry),
-      });
-    }
+    for (const [service, entry] of Object.entries(vault)) put(service, entry);
   }
 
   /** Find the first entry of `type` matching the given account. When
@@ -196,6 +206,14 @@ export function resolveAgentVault(vault?: Record<string, VaultEntry>): ResolvedV
         keys: Object.keys(entry.creds),
         ...(entry.label ? { label: entry.label } : {}),
       }));
+    },
+
+    upsert(service: string, entry: VaultEntry) {
+      put(service, entry);
+    },
+
+    generatedKeys(service: string) {
+      return resolved.get(service)?.generated ?? [];
     },
   };
 }

@@ -378,6 +378,7 @@ export const MCP_EQUIVALENTS: Record<string, string> = {
   polpo_notification_rule_delete: "remove_notification_rule",
   polpo_vault_list: "list_vault",
   polpo_vault_delete: "remove_vault_entry",
+  polpo_vault_generate: "generate_vault_login",
   polpo_computers_list: "computers_list",
   polpo_computer_show: "computer_get",
   polpo_egress_status: "egress_status",
