@@ -42,7 +42,7 @@ import {
   AGENT_BROWSER_CHECK_COMMAND, AGENT_BROWSER_INSTALL_COMMAND, agentBrowserEnv, browserPromptNote, createBrowserTools, effectiveBrowserHeaded,
   ensureSandboxBrowser, execChromeBrowserAsync, sandboxBrowserCommand,
 } from "../tools/browser-tools.js";
-import { desktopInstallCommand } from "../sandbox/desktop.js";
+import { DESKTOP_DISPLAY_QUICK_COMMAND, desktopInstallCommand } from "../sandbox/desktop.js";
 import { wantsComputerTakeoverTool } from "../tools/computer-takeover-tools.js";
 import { buildHarnessInstructions } from "../adapters/harness-engine.js";
 
@@ -134,6 +134,7 @@ class FakeVmShell implements Shell {
     this.commands.push(command);
     if (command === AGENT_BROWSER_CHECK_COMMAND) return { stdout: "", stderr: "", exitCode: this.o.chrome === false ? 1 : 0 };
     if (command === AGENT_BROWSER_INSTALL_COMMAND) { this.o.chrome = true; return { stdout: "", stderr: "", exitCode: 0 }; }
+    if (command === DESKTOP_DISPLAY_QUICK_COMMAND && this.o.noDisplay) return { stdout: "", stderr: "", exitCode: 3 };
     if (command === desktopInstallCommand("display") && this.o.noDisplay) return { stdout: "", stderr: "could not install xvfb", exitCode: 1 };
     return { stdout: JSON.stringify({ success: true, data: {} }), stderr: "", exitCode: 0 };
   }
@@ -234,7 +235,7 @@ describe("headed by default on a remote computer", () => {
   it("unset: headed on the computer's desktop", async () => {
     const shell = new FakeVmShell();
     await navigate(shell);
-    expect(shell.commands).toContain(desktopInstallCommand("display"));
+    expect(shell.commands).toContain(DESKTOP_DISPLAY_QUICK_COMMAND);
     expect(shell.commands.at(-1)).toContain(`DISPLAY=':99' $S nohup '/usr/bin/google-chrome'`);
     expect(shell.commands.at(-1)).not.toContain("--headless");
   });

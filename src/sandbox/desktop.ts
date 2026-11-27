@@ -284,8 +284,41 @@ const INSTALL_TIMEOUT_MS = 10 * 60_000;
 /** Starting the display and its session (a locale may be generated the first time). */
 const DISPLAY_TIMEOUT_MS = 60_000;
 
-/** The display up in the VM (installing Xvfb and XFCE when missing): undefined, else why not. */
+/**
+ * Everything the display needs is installed: Xvfb and its tools, and XFCE with its package-only
+ * companions; or openbox where XFCE could not be installed (the install log says so), so a VM
+ * without XFCE does not try the long install again on every run.
+ */
+const DISPLAY_INSTALLED_CHECK =
+  `{ ${Object.keys(DESKTOP_DISPLAY_PACKAGES).map((bin) => `command -v ${bin} >/dev/null 2>&1`).join(" && ")}; } && `
+  + `{ { ok=0; ${Object.keys(DESKTOP_XFCE_PACKAGES).map((bin) => `command -v ${bin} >/dev/null 2>&1`).join(" && ")} && ok=1; `
+  + `for p in ${DESKTOP_XFCE_EXTRA_PACKAGES.join(" ")}; do dpkg-query -W -f='\${Status}' "$p" 2>/dev/null | grep -q 'ok installed' || ok=0; done; [ "$ok" = 1 ]; } `
+  + `|| { command -v openbox >/dev/null 2>&1 && grep -q 'XFCE could not be installed' ${DESKTOP_DIR}/install.log 2>/dev/null; }; }`;
+
+/**
+ * The fast path, one command on the runner image: exit 3 when something is missing (the slow path
+ * installs it), otherwise the display and its session started when they are not up
+ * (desktopDisplayCommand), then a check that the XFCE session runs where XFCE is installed.
+ */
+export function desktopDisplayQuickCommand(o: DesktopOptions = {}): string {
+  return `( ${DISPLAY_INSTALLED_CHECK} ) || exit 3; (${desktopDisplayCommand(o)}) || exit $?; `
+    + `if command -v startxfce4 >/dev/null 2>&1 && command -v dbus-launch >/dev/null 2>&1; then `
+    + `D=${DESKTOP_DIR}; [ "$(cat "$D/wm.kind" 2>/dev/null)" = xfce ] && [ -f "$D/wm.pid" ] && kill -0 "$(cat "$D/wm.pid" 2>/dev/null)" 2>/dev/null `
+    + `|| { echo "the XFCE session did not start: $(tail -c 300 "$D/wm.log" 2>/dev/null)" >&2; exit 1; }; fi; true`;
+}
+
+/** The fast path with the default options (1280x800, it-IT, Europe/Rome). */
+export const DESKTOP_DISPLAY_QUICK_COMMAND = desktopDisplayQuickCommand();
+
+/**
+ * The display up in the VM (installing Xvfb and XFCE when missing): undefined, else why not. The
+ * installed case is one short command; the long install timeout applies only when something is
+ * missing (a quick check that does not answer in time is an error, never a 10-minute wait).
+ */
 export async function ensureDesktopDisplay(host: DesktopHost, o: DesktopOptions = {}): Promise<string | undefined> {
+  const quick = await host.exec(desktopDisplayQuickCommand(o), { timeoutMs: DISPLAY_TIMEOUT_MS }).catch((err) => ({ exitCode: 1, stdout: "", stderr: String((err as Error)?.message ?? err) }));
+  if (quick.exitCode === 0) return undefined;
+  if (quick.exitCode !== 3) return `The virtual display did not start: ${(quick.stderr || quick.stdout).trim().slice(0, 400) || `exit ${quick.exitCode}`}`;
   const installed = await host.exec(desktopInstallCommand("display"), { timeoutMs: INSTALL_TIMEOUT_MS }).catch((err) => ({ exitCode: 1, stdout: "", stderr: String((err as Error)?.message ?? err) }));
   if (installed.exitCode !== 0) return `The virtual display cannot be installed: ${(installed.stderr || installed.stdout).trim().slice(0, 400)}`;
   const up = await host.exec(desktopDisplayCommand(o), { timeoutMs: DISPLAY_TIMEOUT_MS }).catch((err) => ({ exitCode: 1, stdout: "", stderr: String((err as Error)?.message ?? err) }));

@@ -19,7 +19,7 @@ import type { ServerConfig } from "./types.js";
 import { withEventOrigin } from "../core/events.js";
 import { getStorageRuntime, type StorageRuntime } from "../storage/runtime.js";
 import { configureRemoteProviders } from "../sandbox/remote-providers.js";
-import { configureTailnetEgress } from "../sandbox/tailnet-egress.js";
+import { TAILNET_STATE_FILE, configureTailnetEgress } from "../sandbox/tailnet-egress.js";
 import { tailnetEgressFor } from "@polpo-ai/core/sandbox";
 import { SandboxReaper } from "../sandbox/reaper.js";
 import { ComputerUpkeep, RECONCILE_EVERY_MS, RECONCILE_WITH_WEBHOOKS_MS, computerManagerWithEvents } from "../sandbox/computers.js";
@@ -98,9 +98,11 @@ export class PolpoServer {
     configureRemoteProviders(o.getVaultStore(), () => o.getConfig()?.settings?.sandbox?.providers as Record<string, unknown> | undefined);
     // Tailscale in remote computers (egress through a tailnet-only proxy): the auth key's vault, and
     // each computer's tailnet egress from the current settings (brought up when it starts or resumes)
+    // (healthy checks are shared with the task runners through .polpo/tailnet-egress.json)
     configureTailnetEgress({
       vaultStore: o.getVaultStore() ?? undefined,
       egressFor: (computer) => tailnetEgressFor(computer, o.getConfig()?.settings, o.getConfig()?.project),
+      stateFile: join(polpoDir, TAILNET_STATE_FILE),
     });
 
     // Remote VM pool upkeep: expired and orphaned VMs, warm VMs (server process only)

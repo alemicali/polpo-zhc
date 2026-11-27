@@ -104,7 +104,11 @@ In the VM (all under `/tmp/polpo-tailnet`, mode 0700):
 
 It comes up when the computer starts or resumes (in the background) and, in any case, before the
 browser's next command; one command checks it while everything runs (cached 30 s). After a resume or a
-container restart the daemons are started again if they died.
+container restart the daemons are started again if they died. Task runs are separate processes: the
+server and its runs share the last check per computer in `.polpo/tailnet-egress.json`, and a healthy
+check younger than 2 minutes (same proxy, newer than any start or resume) is trusted, so a run's first
+browser call runs no tailnet command. Every call into the VM is bounded on Polpo's side (its timeout
+plus 5 s; the whole egress decision 45 s, a longer bootstrap going on in the background).
 
 **Stale nodes are re-joined.** tailscaled keeps its state in memory and the key is ephemeral, so a
 node that slept (a memory snapshot) is typically gone from the tailnet while its tailscaled still says
@@ -113,7 +117,9 @@ forwarder and tailscaled, remove the socket, start tailscaled with fresh state, 
 key, start the forwarder, probe again) when:
 
 - the computer was just started or resumed and tailscaled is alive (it came back from a snapshot:
-  always restarted, because right after the wake it may still look healthy; a few seconds);
+  always restarted by the server, because right after the wake it may still look healthy; a few
+  seconds). A task run that saw the start or resume restarts it only when the proxy does not answer
+  end to end through it;
 - or the proxy does not answer end to end and `tailscale status --json` shows the node stale:
   `Self.Online: false`, a health warning that no network map came from the coordination server for
   more than 10 minutes, or that it cannot reach the coordination server;

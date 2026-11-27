@@ -25,6 +25,8 @@
  * (browser-egress.ts): directly from the VM, except a profile signed in through the proxy, which
  * pauses.
  */
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import type { VaultStore } from "@polpo-ai/core";
 import { TAILSCALE_AUTH_KEY_NAMES, type TailnetEgressRef } from "@polpo-ai/core/sandbox";
 import { pickCredential, resolveVaultRef } from "@polpo-ai/core/vault-ref";
@@ -49,6 +51,14 @@ export const TAILNET_FORWARD_PORT = 1081;
 export const TAILNET_BROWSER_PROXY = `socks5://127.0.0.1:${TAILNET_FORWARD_PORT}`;
 /** How long a check of a computer's tailnet is trusted. */
 export const TAILNET_STATUS_TTL_MS = 30_000;
+/**
+ * How long a healthy check recorded by another process (the shared state file: the server, an
+ * earlier task run) is trusted. Task runs are separate processes: without it each run's first
+ * browser call looked at the tailnet again from scratch.
+ */
+export const TAILNET_SHARED_TTL_MS = 120_000;
+/** The shared state file, under the project's .polpo directory. */
+export const TAILNET_STATE_FILE = "tailnet-egress.json";
 /** Without a network map from the coordination server for longer than this, a node is stale. */
 export const TAILNET_NETMAP_STALE_MS = 10 * 60_000;
 
@@ -386,17 +396,67 @@ const answers = (ins: Inspection) => ins.probe === true && ins.tunnel !== false;
 
 let vaultStore: VaultStore | undefined;
 let egressFor: ((computer: { id: string; kind: string; egress?: string }) => { name: string; url: string; tailnet?: TailnetEgressRef } | undefined) | undefined;
+let sharedStateFile: string | undefined;
+let restoredRestart: RestoredRestart = "always";
+
+/**
+ * What a tailscaled found alive right after a start or resume gets:
+ *   - "always": restarted (it came back from a memory snapshot; the process that woke the computer);
+ *   - "when-probe-fails": restarted only when the proxy does not answer end to end through it
+ *     (task runners: the server, or the run that woke it, already re-joined it; restarting a
+ *     healthy node from every run costs a full re-join).
+ */
+export type RestoredRestart = "always" | "when-probe-fails";
 
 /**
  * Where to read auth keys (the vault) and, for computers starting or resuming, their tailnet
- * egress (the server: from the settings; a task runner: from its run). Called once per process.
+ * egress (the server: from the settings; a task runner: from its run), the state file the server
+ * and the task runners share (healthy checks, resumes) and the restart policy after a resume.
+ * Called once per process.
  */
 export function configureTailnetEgress(opts: {
   vaultStore?: VaultStore;
   egressFor?: (computer: { id: string; kind: string; egress?: string }) => { name: string; url: string; tailnet?: TailnetEgressRef } | undefined;
+  /** .polpo/tailnet-egress.json: shared by the server and its task runners (null: none, tests). */
+  stateFile?: string | null;
+  restoredRestart?: RestoredRestart;
 }): void {
   if (opts.vaultStore) vaultStore = opts.vaultStore;
   if (opts.egressFor) egressFor = opts.egressFor;
+  if (opts.stateFile !== undefined) sharedStateFile = opts.stateFile ?? undefined;
+  if (opts.restoredRestart) restoredRestart = opts.restoredRestart;
+}
+
+/** One computer in the shared state file. */
+interface SharedTailnetEntry {
+  target: string;
+  /** When a check found the proxy answering end to end (epoch ms), and what it found. */
+  healthyAt?: number;
+  status?: TailnetStatus;
+  /** When a process saw the computer start or resume (its daemons may be from a snapshot). */
+  restoredAt?: number;
+}
+
+type SharedTailnetState = { version: 1; computers: Record<string, SharedTailnetEntry> };
+
+function readSharedState(file: string): SharedTailnetState {
+  try {
+    const parsed = JSON.parse(readFileSync(file, "utf8")) as SharedTailnetState;
+    if (parsed && typeof parsed === "object" && parsed.computers && typeof parsed.computers === "object") return parsed;
+  } catch { /* none yet, or unreadable: nothing shared */ }
+  return { version: 1, computers: {} };
+}
+
+/** Read, change and write the shared state (best effort: a failure only loses the sharing). */
+function updateSharedState(file: string, fn: (state: SharedTailnetState) => void): void {
+  try {
+    const state = readSharedState(file);
+    fn(state);
+    mkdirSync(dirname(file), { recursive: true });
+    const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(tmp, JSON.stringify(state), { mode: 0o600 });
+    renameSync(tmp, file);
+  } catch { /* best effort */ }
 }
 
 /** The auth key from its vault entry (only in memory, on its way to the VM's 0600 file). */
@@ -410,6 +470,10 @@ export interface TailnetEgressOptions {
   /** Tests: the vault, the clock. */
   vaultStore?: VaultStore;
   now?: () => number;
+  /** The shared state file (default: configureTailnetEgress's). */
+  stateFile?: string;
+  /** After a start or resume (default: configureTailnetEgress's, else "always"). */
+  restoredRestart?: RestoredRestart;
   /** Progress for the agent or the logs ("joining the tailnet…"); never holds a secret. */
   onProgress?: (message: string) => void;
 }
@@ -419,14 +483,47 @@ const enc = (s: string) => new TextEncoder().encode(s);
 export class TailnetEgress {
   private readonly cache = new Map<string, { status: TailnetStatus; at: number; target: string }>();
   private readonly inflight = new Map<string, Promise<TailnetStatus>>();
-  /** Computers started or resumed since their last check: a tailscaled still alive there came back from a memory snapshot. */
-  private readonly restored = new Set<string>();
+  /** Computers started or resumed since their last check (and when): a tailscaled still alive there came back from a memory snapshot. */
+  private readonly restored = new Map<string, number>();
   /** Computers re-joining the tailnet now, and why. */
   private readonly rejoining = new Map<string, string>();
 
   constructor(private readonly opts: TailnetEgressOptions = {}) {}
 
   private now(): number { return (this.opts.now ?? Date.now)(); }
+
+  private stateFile(): string | undefined { return this.opts.stateFile ?? sharedStateFile; }
+
+  private restoredRestart(): RestoredRestart { return this.opts.restoredRestart ?? restoredRestart; }
+
+  /**
+   * A healthy check of the computer another process (or this one) recorded in the shared state
+   * file: fresh (TAILNET_SHARED_TTL_MS), for the same proxy, and newer than any start or resume
+   * seen since (by any process). Undefined otherwise: the computer is looked at.
+   */
+  private sharedHealthy(computerId: string, target: string): TailnetStatus | undefined {
+    const file = this.stateFile();
+    if (!file) return undefined;
+    const entry = readSharedState(file).computers[computerId];
+    if (!entry?.healthyAt || !entry.status?.proxyReachable || entry.target !== target) return undefined;
+    const now = this.now();
+    if (now - entry.healthyAt >= TAILNET_SHARED_TTL_MS || entry.healthyAt > now + 5_000) return undefined;
+    if (entry.restoredAt && entry.restoredAt >= entry.healthyAt) return undefined;
+    const local = this.restored.get(computerId);
+    if (local !== undefined && local >= entry.healthyAt) return undefined;
+    return entry.status;
+  }
+
+  /** Record a check in the shared state file: healthy (trusted by other processes for a while) or not. */
+  private share(computerId: string, target: string, status: TailnetStatus): void {
+    const file = this.stateFile();
+    if (!file) return;
+    updateSharedState(file, (state) => {
+      const cur = state.computers[computerId];
+      if (status.proxyReachable) state.computers[computerId] = { ...cur, target, healthyAt: this.now(), status };
+      else if (cur) { delete cur.healthyAt; delete cur.status; cur.target = target; }
+    });
+  }
 
   /** The last check of a computer (no command run); while it re-joins, says so. */
   last(computerId: string): TailnetStatus | undefined {
@@ -444,7 +541,18 @@ export class TailnetEgress {
   invalidate(computerId?: string, o: { restored?: boolean } = {}): void {
     if (computerId) {
       this.cache.delete(computerId);
-      if (o.restored) this.restored.add(computerId);
+      const at = this.now();
+      if (o.restored) this.restored.set(computerId, at);
+      // every process forgets its healthy check too (the VM went, or came back from a snapshot)
+      const file = this.stateFile();
+      if (file) {
+        updateSharedState(file, (state) => {
+          const cur = state.computers[computerId];
+          if (!cur && !o.restored) return;
+          const next: SharedTailnetEntry = { target: cur?.target ?? "", ...(o.restored ? { restoredAt: at } : cur?.restoredAt ? { restoredAt: cur.restoredAt } : {}) };
+          state.computers[computerId] = next;
+        });
+      }
     } else this.cache.clear();
   }
 
@@ -461,8 +569,16 @@ export class TailnetEgress {
     const hit = this.cache.get(ref.computerId);
     // a restored computer is always looked at again (never the cached steady state)
     if (!o.force && !this.restored.has(ref.computerId) && hit && hit.target === target && this.now() - hit.at < TAILNET_STATUS_TTL_MS) return Promise.resolve(hit.status);
+    // a fresh healthy check by another process (the server, an earlier run), newer than any resume
+    const shared = o.force ? undefined : this.sharedHealthy(ref.computerId, target);
+    if (shared) {
+      this.restored.delete(ref.computerId);
+      this.cache.set(ref.computerId, { status: shared, at: this.now(), target });
+      return Promise.resolve(shared);
+    }
     const run = this.ensureNow(host, ref).then((status) => {
       this.cache.set(ref.computerId, { status, at: this.now(), target });
+      this.share(ref.computerId, target, status);
       return status;
     }).finally(() => {
       this.inflight.delete(ref.computerId);
@@ -501,6 +617,7 @@ export class TailnetEgress {
         return { ...status, tailnet: "starting", proxyReachable: false, rejoining: true, error: `The tailnet node is stale (${stale}): re-joining the tailnet` };
       }
       this.cache.set(ref.computerId, { status, at: this.now(), target: `${ref.proxyHost}:${ref.proxyPort}` });
+      if (status.proxyReachable) this.share(ref.computerId, `${ref.proxyHost}:${ref.proxyPort}`, status);
       return status;
     } catch (err) {
       return { computerId: ref.computerId, tailnet: "down", proxyReachable: false, checkedAt, error: (err as Error).message ?? String(err) };
@@ -542,8 +659,10 @@ export class TailnetEgress {
       const target = `${ref.proxyHost}:${ref.proxyPort}`;
       // a tailscaled alive right after a start or resume came back from a memory snapshot: its
       // in-memory state and ephemeral node are from before the sleep (the node is likely gone from
-      // the tailnet, and right after the resume it may still look fine): always restarted
-      let stale = ins.daemon && restored ? "the computer was restored from a memory snapshot" : undefined;
+      // the tailnet, and right after the resume it may still look fine): restarted ("always", the
+      // process that woke it), or only when the proxy does not answer through it (task runners)
+      const restartRestored = restored && (this.restoredRestart() === "always" || !answers(ins));
+      let stale = ins.daemon && restartRestored ? "the computer was restored from a memory snapshot" : undefined;
       if (!stale && ins.daemon && !answers(ins)) stale = tailnetStaleReason(ins.status);
       // steady state: everything runs and the proxy answers end to end
       if (!stale && ins.daemon && ins.forwarder && ins.target === target && answers(ins) && ins.status?.BackendState === "Running") {
