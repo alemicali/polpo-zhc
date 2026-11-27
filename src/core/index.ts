@@ -53,7 +53,7 @@ export { parseCron, matchesCron, nextCronOccurrence, isCronExpression } from "..
 export { TaskWatcherManager } from "./task-watcher.js";
 
 // Playbooks
-export { discoverPlaybooks, loadPlaybook, validateParams, instantiatePlaybook, validatePlaybookDefinition, savePlaybook, deletePlaybook } from "./playbook.js";
+export { discoverPlaybooks, loadPlaybook, validateParams, instantiatePlaybook, resolveMissionName, missionNameErrors, validatePlaybookDefinition, savePlaybook, deletePlaybook } from "./playbook.js";
 export type { PlaybookParameter, PlaybookDefinition, PlaybookInfo, ValidationResult } from "./playbook.js";
 export type { PlaybookStore } from "./playbook-store.js";
 

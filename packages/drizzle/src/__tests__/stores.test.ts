@@ -1820,6 +1820,15 @@ describe.each(DIALECTS)("%s", (dialect) => {
       expect(await stores.playbookStore.delete("ghost")).toBe(false);
     });
 
+    it("keeps missionName (get and list), and clears it when saved without", async () => {
+      await stores.playbookStore.save(makePlaybook("named", { missionName: "{{prov}} · zone (00)" }));
+      expect((await stores.playbookStore.get("named"))!.missionName).toBe("{{prov}} · zone (00)");
+      expect((await stores.playbookStore.list()).find(p => p.name === "named")!.missionName).toBe("{{prov}} · zone (00)");
+
+      await stores.playbookStore.save(makePlaybook("named"));
+      expect((await stores.playbookStore.get("named"))!.missionName).toBeUndefined();
+    });
+
     it("preserves optional fields: version, author, tags", async () => {
       await stores.playbookStore.save(makePlaybook("rich", {
         version: "1.2.0",

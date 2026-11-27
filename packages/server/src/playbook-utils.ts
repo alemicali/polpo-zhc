@@ -19,6 +19,8 @@ export interface PlaybookDefinition {
   description: string;
   mission: Record<string, unknown>;
   parameters?: PlaybookParameter[];
+  /** Name of the mission a run creates, with {{param}} placeholders (default: the playbook's name). */
+  missionName?: string;
   version?: string;
   author?: string;
   tags?: string[];
@@ -95,5 +97,33 @@ export function instantiatePlaybook(
     throw new Error(`Playbook "${playbook.name}" produced invalid JSON: ${err instanceof Error ? err.message : String(err)}`);
   }
   const paramDesc = Object.entries(resolved).map(([k, v]) => `${k}=${v}`).join(", ");
-  return { name: playbook.name, data: json, prompt: `playbook:${playbook.name}${paramDesc ? ` (${paramDesc})` : ""}` };
+  return { name: resolveMissionName(playbook, resolved), data: json, prompt: `playbook:${playbook.name}${paramDesc ? ` (${paramDesc})` : ""}` };
+}
+
+/**
+ * The name of the mission a playbook run creates: `missionName` with its {{param}} placeholders
+ * replaced (unknown ones dropped), trimmed; the playbook's name when absent or empty.
+ */
+export function resolveMissionName(
+  playbook: Pick<PlaybookDefinition, "name" | "missionName">,
+  resolved: Record<string, string | number | boolean>,
+): string {
+  if (typeof playbook.missionName !== "string") return playbook.name;
+  const name = playbook.missionName
+    .replace(/\{\{([^}]+)\}\}/g, (_m, key: string) => {
+      const value = resolved[key.trim()];
+      return value === undefined ? "" : String(value);
+    })
+    .trim();
+  return name || playbook.name;
+}
+
+/** Errors in a playbook's `missionName`: not a string, or a {{placeholder}} that is not a declared parameter. */
+export function missionNameErrors(def: Pick<PlaybookDefinition, "missionName" | "parameters">): string[] {
+  if (def.missionName === undefined) return [];
+  if (typeof def.missionName !== "string") return ["'missionName' must be a string if provided."];
+  const declared = new Set((def.parameters ?? []).map((p) => p.name));
+  const used = new Set((def.missionName.match(/\{\{([^}]+)\}\}/g) ?? []).map((m) => m.slice(2, -2).trim()));
+  return [...used].filter((n) => !declared.has(n))
+    .map((n) => `Placeholder "{{${n}}}" in missionName has no matching parameter declaration.`);
 }

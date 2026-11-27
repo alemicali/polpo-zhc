@@ -1134,6 +1134,8 @@ export interface PlaybookInfo {
   name: string;
   description: string;
   parameters: PlaybookParameter[];
+  /** Template for the name of the mission a run creates. */
+  missionName?: string;
   /** Absolute path to the playbook directory. */
   path: string;
 }
@@ -1144,6 +1146,8 @@ export interface PlaybookDefinition {
   description: string;
   mission: Record<string, unknown>;
   parameters?: PlaybookParameter[];
+  /** Name of the mission a run creates, with {{param}} placeholders (default: the playbook's name). */
+  missionName?: string;
 }
 
 /** Result of running a playbook. */

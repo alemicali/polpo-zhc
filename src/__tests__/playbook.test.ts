@@ -8,6 +8,10 @@ import {
   instantiatePlaybook,
   validatePlaybookDefinition,
 } from "../core/playbook.js";
+import {
+  instantiatePlaybook as instantiatePlaybookEdge,
+  missionNameErrors as missionNameErrorsEdge,
+} from "../../packages/server/src/playbook-utils.js";
 import type { PlaybookDefinition } from "../core/playbook.js";
 
 const TMP = "/tmp/polpo-playbook-test";
@@ -286,6 +290,49 @@ describe("instantiatePlaybook", () => {
     expect(result.prompt).toBe("playbook:test-playbook");
     const mission = JSON.parse(result.data);
     expect(mission.tasks[0].title).toBe("Simple task");
+  });
+});
+
+// ── missionName ─────────────────────────────────────────────────────────
+
+describe("missionName", () => {
+  for (const [label, instantiate] of [["core", instantiatePlaybook], ["server (edge)", instantiatePlaybookEdge]] as const) {
+    it(`${label}: names the mission from missionName with the params substituted, trimmed`, () => {
+      const pb = makePlaybook({ missionName: "  {{module}} · {{depth}} · analisi ({{retries}}) " });
+      const result = instantiate(pb, { module: "src/core", depth: "deep", retries: 3 });
+      expect(result.name).toBe("src/core · deep · analisi (3)");
+      // the prompt still names the playbook
+      expect(result.prompt).toContain("playbook:test-playbook");
+    });
+
+    it(`${label}: falls back to the playbook name without missionName`, () => {
+      const result = instantiate(makePlaybook(), { module: "src/core", depth: "deep", retries: 3 });
+      expect(result.name).toBe("test-playbook");
+    });
+
+    it(`${label}: falls back to the playbook name when missionName substitutes to an empty string`, () => {
+      const pb = makePlaybook({ missionName: " {{module}} " });
+      expect(instantiate(pb, { module: "", depth: "deep", retries: 3 }).name).toBe("test-playbook");
+      expect(instantiate(makePlaybook({ missionName: "   " }), { module: "x", depth: "deep", retries: 3 }).name).toBe("test-playbook");
+    });
+  }
+
+  it("rejects a placeholder in missionName that is not a declared parameter", () => {
+    const errors = validatePlaybookDefinition(makePlaybook({ missionName: "{{module}} · {{prov}}" }));
+    expect(errors).toEqual([expect.stringContaining('"{{prov}}" in missionName')]);
+    expect(missionNameErrorsEdge(makePlaybook({ missionName: "{{prov}}" }))).toEqual([expect.stringContaining('"{{prov}}" in missionName')]);
+  });
+
+  it("accepts a missionName using declared parameters, and rejects a non-string", () => {
+    expect(validatePlaybookDefinition(makePlaybook({ missionName: "{{module}} ({{depth}})" }))).toHaveLength(0);
+    const errors = validatePlaybookDefinition(makePlaybook({ missionName: 42 as unknown as string }));
+    expect(errors.some(e => e.includes("'missionName' must be a string"))).toBe(true);
+  });
+
+  it("is kept on disk and listed by discovery", () => {
+    writePlaybook("named", { ...makePlaybook({ name: "named" }), missionName: "{{module}} run" });
+    expect(loadPlaybook(TMP, POLPO_DIR, "named")?.missionName).toBe("{{module}} run");
+    expect(discoverPlaybooks(TMP, POLPO_DIR).find(p => p.name === "named")?.missionName).toBe("{{module}} run");
   });
 });
 
