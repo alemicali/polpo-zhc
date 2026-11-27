@@ -1698,6 +1698,24 @@ describe.each(DIALECTS)("%s", (dialect) => {
       expect(fetched!.credentials.host).toBe("mail.test"); // preserved
     });
 
+    it("keeps provenance metadata inside the encrypted JSON, out of the credential keys", async () => {
+      const metadata = { createdBy: { kind: "agent" as const, agent: "claude", taskId: "t1" }, createdAt: "2026-11-27T10:00:00.000Z", generated: ["password"] };
+      await stores.vaultStore.set("claude", "site", { type: "login" as const, credentials: { username: "ada", password: "Gen3rated!Passw0rd" }, metadata });
+      const fetched = await stores.vaultStore.get("claude", "site");
+      expect(fetched!.credentials).toEqual({ username: "ada", password: "Gen3rated!Passw0rd" });
+      expect(fetched!.metadata).toEqual(metadata);
+      const listed = (await stores.vaultStore.list("claude")).find((e: any) => e.service === "site") as any;
+      expect(listed.keys).toEqual(["username", "password"]);
+      expect(listed.createdBy).toEqual(metadata.createdBy);
+      expect(listed.createdAt).toBe(metadata.createdAt);
+      expect(listed.generated).toEqual(["password"]);
+      // a patch keeps it; a key replaced by hand is no longer generated
+      await stores.vaultStore.patch("claude", "site", { credentials: { password: "typed-by-a-person" } });
+      const patched = await stores.vaultStore.get("claude", "site");
+      expect(patched!.metadata).toEqual({ createdBy: metadata.createdBy, createdAt: metadata.createdAt });
+      expect(patched!.credentials.password).toBe("typed-by-a-person");
+    });
+
     it("remove deletes entry", async () => {
       await stores.vaultStore.set("claude", "openai", { type: "api_key" as const, credentials: { key: "k" } });
       const ok = await stores.vaultStore.remove("claude", "openai");

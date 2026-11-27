@@ -178,3 +178,45 @@ export function isNonSecretVaultField(key: string, value: string): boolean {
   if ((k === "url" || k === "endpoint") && URL_WITH_CREDENTIALS_RE.test(value)) return false;
   return true;
 }
+
+// ─── Run secrets ─────────────────────────────────────
+
+/**
+ * The secrets a run learned while it runs (a password vault_create_login just generated): its
+ * transcript, logs and harness output are masked with them. Values only grow; never log them.
+ */
+export interface RunSecrets {
+  add(value: string): void;
+  values(): readonly string[];
+  /** Mask every known secret in a text. */
+  mask(text: string): string;
+  /** Mask every string inside a value (transcript entries, tool details): a copy, same shape. */
+  maskDeep<T>(value: T): T;
+}
+
+export function createRunSecrets(initial: readonly string[] = []): RunSecrets {
+  const known: string[] = [];
+  let masker: (text: string) => string = (t) => t;
+  const add = (value: string) => {
+    if (typeof value !== "string" || value.length < MIN_MASKED_SECRET_LENGTH || known.includes(value)) return;
+    known.push(value);
+    masker = createSecretMasker(known);
+  };
+  for (const v of initial) add(v);
+  const maskDeep = (value: unknown, depth = 0): unknown => {
+    if (known.length === 0) return value;
+    if (typeof value === "string") return masker(value);
+    if (depth > 20 || value === null || typeof value !== "object") return value;
+    if (Array.isArray(value)) return value.map((v) => maskDeep(v, depth + 1));
+    if (Object.getPrototypeOf(value) !== Object.prototype) return value;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = maskDeep(v, depth + 1);
+    return out;
+  };
+  return {
+    add,
+    values: () => known,
+    mask: (text) => masker(text),
+    maskDeep: <T>(value: T) => maskDeep(value) as T,
+  };
+}

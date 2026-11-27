@@ -298,6 +298,32 @@ export interface VaultEntry {
   allowedAgents?: string[];
   /** Credential fields — values can be literals or ${ENV_VAR} references */
   credentials: Record<string, string>;
+  /** Non-secret provenance: who created the entry and when, rotations, which values Polpo generated. */
+  metadata?: VaultEntryMetadata;
+}
+
+/** Who made or changed a vault entry. The agent comes from the run or chat, never from a tool call. */
+export interface VaultEntryProvenance {
+  kind: "agent" | "person";
+  /** kind "agent": the agent that did it. */
+  agent?: string;
+  taskId?: string;
+  sessionId?: string;
+  runId?: string;
+  /** kind "person": who, when known (user id or email). */
+  by?: string;
+}
+
+/** Non-secret metadata of a vault entry (listings show it). */
+export interface VaultEntryMetadata {
+  createdBy?: VaultEntryProvenance;
+  /** ISO time the entry was created. */
+  createdAt?: string;
+  /** ISO time of the last generated-password rotation. */
+  rotatedAt?: string;
+  rotatedBy?: VaultEntryProvenance;
+  /** Credential keys whose values Polpo generated: never shown to a model (vault_get masks them). */
+  generated?: string[];
 }
 
 // === Loops ===

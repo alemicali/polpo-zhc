@@ -23,6 +23,8 @@ import type {
   SearchAskOptions,
   SearchAskResult,
   VaultEntryMeta,
+  GenerateVaultLoginRequest,
+  GenerateVaultLoginResult,
   Task,
   Mission,
   AgentConfig,
@@ -801,6 +803,17 @@ export class PolpoClient {
     return this.patch<{ agent: string; service: string; type: string; keys: string[] }>(
       `/vault/entries/${encodeURIComponent(agent)}/${encodeURIComponent(service)}`,
       patch,
+    );
+  }
+
+  /**
+   * Create a login in an agent's vault with a password Polpo generates. The password is never
+   * returned: the agent fills it with browser_fill { from_vault: "<service>.password" }.
+   */
+  generateVaultLogin(agent: string, service: string, req: GenerateVaultLoginRequest = {}): Promise<GenerateVaultLoginResult> {
+    return this.post<GenerateVaultLoginResult>(
+      `/vault/entries/${encodeURIComponent(agent)}/${encodeURIComponent(service)}/generate`,
+      req,
     );
   }
 

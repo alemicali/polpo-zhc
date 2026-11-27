@@ -28,6 +28,8 @@ Slack (an app over Socket Mode: DMs, mentions and threads as conversations with 
 
 Agents posting to notification channels (`send_notification`: Slack as the Polpo bot, Telegram, email, webhook, push), restricted per agent to the channels and targets its owner allows (`notifyChannels`, `notifyRateLimit`), on every engine, are documented in [agent-notifications.md](agent-notifications.md).
 
+Agents creating their own logins with a password Polpo generates and the model never sees (`vault_create_login`, `browser_fill` from the vault), and the provenance of vault entries (who created each, when, rotations), are documented in [agent-vault-logins.md](agent-vault-logins.md).
+
 Communication lines between agents — who may talk to whom (`talksTo`: org chart, a list, anyone, nobody), how `ask_agent`, `message_agent`, `escalate` and rooms enforce them, and agents working a task talking to other agents — are documented in [agent-lines.md](agent-lines.md).
 
 Agent versions — drafts, semver versions, deploying to production, rollback, the deploy history with diffs, pinning a task or chat to a version (`writer@1.2.0`) and the API compatibility setting — are documented in [agent-versions.md](agent-versions.md).

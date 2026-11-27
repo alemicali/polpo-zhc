@@ -9,7 +9,8 @@
 import type { EffectiveSandbox, ResolvedSandboxVolume } from "@polpo-ai/core/sandbox";
 import type { AgentConfig, AgentActivity, Task, TaskResult, TaskOutcome, OutcomeType } from "../core/types.js";
 import type { AgentHandle, SpawnContext } from "../core/adapter.js";
-import { resolveAgentVault, loadAgentVaultEntries } from "../vault/index.js";
+import { resolveAgentVault, loadAgentVaultEntries, createRunSecrets, type RunSecrets } from "../vault/index.js";
+import { createVaultLoginTools, localVaultLoginAccess, agentHasVaultLoginTool } from "../tools/vault-tools.js";
 import {
   buildAgentSystemPrompt,
   buildSummaryPrompt,
@@ -151,6 +152,9 @@ export function describeToolsForAgent(agent: AgentConfig): string {
     "- `register_outcome` — declare task deliverables (files, URLs, text, data)",
     "- `vault_get` — retrieve stored credentials/secrets",
     "- `vault_list` — list available vault entries",
+    ...(agentHasVaultLoginTool(agent)
+      ? ["- `vault_create_login` — create a login for a site in your vault with a password Polpo generates (you never see it): fill it with browser_fill { from_vault: \"<service>.password\" }"]
+      : []),
   );
 
   // --- Extended tools (only if configured in allowedTools) ---
@@ -1005,6 +1009,8 @@ export interface AgentToolset {
   connectorNote: string;
   connectorManager?: ConnectorManager;
   browserNetwork?: BrowserNetworkGuard;
+  /** The run's secrets learned while it runs (vault_create_login): mask output with them. */
+  secrets: RunSecrets;
 }
 
 /** The project's task store in this process: the database's, else the JSON files (read fresh each time). */
@@ -1127,6 +1133,17 @@ export async function buildAgentToolset(o: {
     const access = ctx?.computerTakeover?.(remoteComputer.id) ?? local?.accessFor(agentConfig, remoteComputer.id, origin);
     allTools.push(...createComputerTakeoverTools(agentConfig, remoteComputer, access).filter((tool) => !taken.has(tool.name)));
   }
+  // vault_create_login: a login with a password Polpo generates, in the agent's own vault (allowedTools
+  // "vault_create_login" / "vault_*"). A task run asks the server over the socket (the agent comes from
+  // the run record); in the server process the vault store directly. The value goes to the run's
+  // masker and its resolved vault (browser_fill from_vault finds it at once). Every engine (host tool).
+  const runSecrets = ctx?.runSecrets ?? createRunSecrets();
+  {
+    const taken = new Set(allTools.map((tool) => tool.name));
+    const origin = o.task ? { taskId: o.task.id, ...(ctx?.runId ? { runId: ctx.runId } : {}) } : (o.notifyOrigin ?? {});
+    const access = ctx?.vaultLogin ?? (ctx?.vaultStore ? localVaultLoginAccess(ctx.vaultStore, agentConfig, origin) : undefined);
+    allTools.push(...createVaultLoginTools(agentConfig, access, { vault, secrets: runSecrets }).filter((tool) => !taken.has(tool.name)));
+  }
   // Talking to other agents while working the task (every engine: these become host tools for a
   // harness or a CLI), within the agent's communication lines: ask_agent and escalate wait for the
   // answer, message_agent hands off (the reply reaches the task)
@@ -1160,7 +1177,7 @@ export async function buildAgentToolset(o: {
     const note = browserPromptNote({ headed: !!agentConfig.browserHeaded, ...(remoteComputer ? { computer: { id: remoteComputer.id, name: remoteComputer.name } } : {}), takeover, session: agentConfig.name });
     connectorNote = connectorNote ? `${connectorNote}\n${note}` : note.trimStart();
   }
-  return { tools: allTools, vault, connectorNote, connectorManager, browserNetwork };
+  return { tools: allTools, vault, connectorNote, connectorManager, browserNetwork, secrets: runSecrets };
 }
 
 /**

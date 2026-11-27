@@ -276,23 +276,48 @@ export function registerChannelTools(tool: Register, deps: McpDeps): void {
   });
 }
 
-type VaultEntry = { service: string; type: string; label?: string; account?: string; keys?: string[]; sharedFrom?: string; readOnly?: boolean; allowedAgents?: string[] };
+type Provenance = { kind: "agent" | "person"; agent?: string; taskId?: string; sessionId?: string; runId?: string; by?: string };
+type VaultEntry = {
+  service: string; type: string; label?: string; account?: string; keys?: string[]; sharedFrom?: string; readOnly?: boolean; allowedAgents?: string[];
+  createdBy?: Provenance; createdAt?: string; rotatedAt?: string;
+};
+
+/** "created by agent coach (task t1)" / "added by a person" — the provenance in a line. */
+function provenanceLine(e: { createdBy?: Provenance; createdAt?: string; rotatedAt?: string }): string {
+  const who = e.createdBy?.kind === "agent" ? `created by agent ${e.createdBy.agent ?? "?"}${e.createdBy.taskId ? ` (task ${e.createdBy.taskId})` : ""}`
+    : e.createdBy?.kind === "person" ? `added by ${e.createdBy.by ?? "a person"}` : "";
+  const parts = [who && `${who}${e.createdAt ? ` on ${e.createdAt.slice(0, 10)}` : ""}`, e.rotatedAt ? `rotated ${e.rotatedAt.slice(0, 10)}` : ""].filter(Boolean);
+  return parts.join(", ");
+}
 
 export function registerVaultTools(tool: Register, deps: McpDeps): void {
   const entryItem = z.object({
     agent: z.string(), service: z.string(), type: z.string(), label: z.string().optional(), account: z.string().optional(),
     fields: z.array(z.string()).describe("The names of its fields, never their values"), shared_from: z.string().optional(),
+    created_by: z.object({
+      kind: z.enum(["agent", "person"]), agent: z.string().optional(), task_id: z.string().optional(), session_id: z.string().optional(), by: z.string().optional(),
+    }).optional().describe("Who created it: an agent (vault_create_login) or a person"),
+    created_at: z.string().optional(), rotated_at: z.string().optional(),
   });
   /** Only names and metadata: whatever the API returns, values are never copied. */
   const view = (agent: string, e: VaultEntry) => ({
     agent, service: e.service, type: e.type, ...(e.label ? { label: e.label } : {}), ...(e.account ? { account: e.account } : {}),
     fields: Array.isArray(e.keys) ? e.keys.filter((k) => typeof k === "string") : [], ...(e.sharedFrom ? { shared_from: e.sharedFrom } : {}),
+    ...(e.createdBy && (e.createdBy.kind === "agent" || e.createdBy.kind === "person") ? {
+      created_by: {
+        kind: e.createdBy.kind, ...(e.createdBy.agent ? { agent: e.createdBy.agent } : {}), ...(e.createdBy.taskId ? { task_id: e.createdBy.taskId } : {}),
+        ...(e.createdBy.sessionId ? { session_id: e.createdBy.sessionId } : {}), ...(e.createdBy.by ? { by: e.createdBy.by } : {}),
+      },
+    } : {}),
+    ...(typeof e.createdAt === "string" ? { created_at: e.createdAt } : {}),
+    ...(typeof e.rotatedAt === "string" ? { rotated_at: e.rotatedAt } : {}),
   });
 
   tool("vault", "polpo_vault_list", {
     title: "List vault entries",
     description: "The credentials agents have in the vault (mail accounts, API keys, logins…): service, type, label and the names of the fields, "
-      + "never their values. Secrets are added or changed only in the dashboard (setup_url), never through this connector.",
+      + "who created each (an agent or a person) and when, never their values. Secret values are added or changed only in the dashboard (setup_url), "
+      + "never through this connector; polpo_vault_generate makes a login whose password nobody here sees.",
     inputSchema: {
       agent: z.string().optional().describe("One agent's entries (default: every agent's)"),
       limit: limitParam(50, 200),
@@ -320,8 +345,48 @@ export function registerVaultTools(tool: Register, deps: McpDeps): void {
     const p = page(all, limit ?? 50, cursor);
     if (!p) return fail(BAD_CURSOR);
     const setup = dashboardLink(deps, agent ? `/agents/${enc(agent)}?tab=credentials` : "/agents");
-    return ok(`${p.items.map((e) => `- ${e.agent}/${e.service} (${e.type}${e.label ? `, ${e.label}` : ""}): ${e.fields.join(", ") || "no fields"}${e.shared_from ? ` (shared from ${e.shared_from})` : ""}`).join("\n") || "No vault entries."}`
+    const prov = (e: ReturnType<typeof view>) => provenanceLine({
+      ...(e.created_by ? { createdBy: { kind: e.created_by.kind, agent: e.created_by.agent, taskId: e.created_by.task_id, by: e.created_by.by } } : {}),
+      createdAt: e.created_at, rotatedAt: e.rotated_at,
+    });
+    return ok(`${p.items.map((e) => `- ${e.agent}/${e.service} (${e.type}${e.label ? `, ${e.label}` : ""}): ${e.fields.join(", ") || "no fields"}${e.shared_from ? ` (shared from ${e.shared_from})` : ""}${prov(e) ? ` · ${prov(e)}` : ""}`).join("\n") || "No vault entries."}`
       + `${p.next_cursor ? `\n(more: cursor ${p.next_cursor})` : ""}\nTo add or change a secret: ${setup}`, { ...p, setup_url: setup });
+  });
+
+  tool("vault", "polpo_vault_generate", {
+    title: "Generate a login",
+    description: "Create a login in an agent's vault with a strong password Polpo generates, for an account the agent will use on a site. "
+      + "The password is never returned (not to you, not to the agent): the agent fills it with browser_fill { from_vault: \"<service>.password\" }; "
+      + "a person reads it only in the dashboard. An existing entry is refused unless rotate: true (then only the password changes).",
+    inputSchema: {
+      agent: z.string().min(1).describe("The agent whose vault gets the login"),
+      service: z.string().min(1).describe("A slug for the site (letters, digits, _ or -), e.g. \"sitoinchat\""),
+      username: z.string().optional(),
+      email: z.string().optional(),
+      url: z.string().optional().describe("The site (https://…)"),
+      label: z.string().optional().describe("Default: \"<Service> – <agent display name>\""),
+      length: z.number().int().min(16).max(64).optional().describe("Default 24"),
+      symbols: z.boolean().optional().describe("Include symbols (default true); false for sites that reject them"),
+      rotate: z.boolean().optional().describe("Replace the password of an existing login"),
+    },
+    outputSchema: {
+      agent: z.string(), service: z.string(), action: z.enum(["created", "rotated"]), fields: z.array(z.string()).describe("Field names, never values"),
+      fill: z.string(), setup_url: z.string(),
+    },
+    annotations: UPDATE,
+  }, async ({ agent, service, ...rest }) => {
+    const body = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined));
+    const r = await apiSend(deps, "POST", `/vault/entries/${enc(agent)}/${enc(service)}/generate`, body);
+    if (!r.ok) {
+      if (r.status === 503) return fail("The vault is not available on this instance.");
+      if (r.status === 409) return fail(`${agent} already has a vault entry "${service}". Pick another service name, or pass rotate: true to replace its password.`);
+      return apiError(r, `Generating ${agent}'s ${service} login`);
+    }
+    const d = r.data as { service: string; action: "created" | "rotated"; keys: string[]; fill: string };
+    const setup = dashboardLink(deps, `/agents/${enc(agent)}?tab=credentials`);
+    return ok(`${d.action === "rotated" ? "Rotated the password of" : "Created"} ${agent}'s ${d.service} login (${d.keys.join(", ")}). `
+      + `The password is not shown: ${agent} fills it with ${d.fill}. In the dashboard: ${setup}`,
+    { agent, service: d.service, action: d.action, fields: d.keys, fill: d.fill, setup_url: setup });
   });
 
   tool("vault", "polpo_vault_delete", {

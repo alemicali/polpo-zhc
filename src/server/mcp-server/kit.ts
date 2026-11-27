@@ -143,7 +143,7 @@ export const SCOPES = {
   "polpo:messages": { label: "Messages", description: "Send messages on any channel (Telegram, WhatsApp, email, Slack, WhatsApp Business, webhooks, push), as Polpo or an agent" },
   "polpo:connectors": { label: "Connectors", description: "Add, change, connect, disconnect and remove connectors (the services agents use)" },
   "polpo:computers": { label: "Computers", description: "Create, start, stop, reset and delete computers (they may cost money)" },
-  "polpo:vault": { label: "Vault", description: "See the names of vault entries (never their values) and delete them" },
+  "polpo:vault": { label: "Vault", description: "See the names of vault entries (never their values), generate logins and delete entries" },
   "polpo:admin": { label: "Admin", description: "Change the instance itself: agents and teams, settings and branding, data sources and who may use them, skills, channels and their rules, learning, the read-only REST fallback; includes every scope above" },
 } as const;
 

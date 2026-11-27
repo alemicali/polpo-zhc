@@ -32,6 +32,22 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-27-agent-vault-create-login",
+    date: "2026-11-27",
+    kind: "new",
+    title: "Gli agenti si creano i propri account, senza vedere la password",
+    summary: "Con vault_create_login un agente che si registra su un sito fa generare a Polpo una password robusta e la salva nel proprio vault: la inserisce nei moduli dal vault e non la vede mai.",
+    body: [
+      "- **Nuovo strumento `vault_create_login`** (si aggiunge agli strumenti dell'agente: `vault_create_login` o `vault_*` in `allowedTools`): l'agente indica il servizio (per esempio `sitoinchat`), il nome utente o l'email e il sito; Polpo genera la password (24 caratteri di default, da 16 a 64, simboli disattivabili per i siti che non li accettano) e la salva nel vault dell'agente.",
+      "- **Mai vista dal modello**: l'agente riceve solo i nomi dei campi e come usarla, `browser_fill { from_vault: \"sitoinchat.password\" }`; la password viene mascherata nei transcript e nei log, e `vault_get` non la mostra.",
+      "- **Non sovrascrive**: se la voce esiste già la rifiuta, a meno di `rotate: true`, che cambia solo la password e tiene utente, email e sito.",
+      "- **Chi l'ha creata**: nella scheda Credentials dell'agente ogni voce mostra *Created by <agente>* o *Added by a person* con la data, e i campi generati da Polpo sono segnati.",
+      "- **Genera tu**: in Credentials il pulsante **Generate password** crea un nuovo login con una password generata, senza mostrarla.",
+      "- Funziona su tutti i motori (Polpo, harness, CLI), nei task e nelle chat. Anche da API (`POST /vault/entries/{agent}/{service}/generate`), MCP (`polpo_vault_generate`), chat con Polpo (`generate_vault_login`) e SDK (`generateVaultLogin`).",
+    ].join("\n"),
+    highlight: true,
+  },
+  {
     id: "2026-11-27-computer-live-view",
     date: "2026-11-27",
     kind: "new",

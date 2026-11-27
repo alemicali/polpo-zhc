@@ -28,6 +28,8 @@ import { notifyRunComplete, notifyNetworkDenied, notifySandboxEvent } from "./no
 import { socketAgentTalk } from "./agent-talk-bridge.js";
 import { socketAgentNotify } from "./agent-notify-bridge.js";
 import { socketComputerTakeover } from "./computer-takeover.js";
+import { socketVaultLogin } from "./vault-login-bridge.js";
+import { createRunSecrets } from "../vault/env-from-vault.js";
 import { computerControlStore } from "../sandbox/computer-control.js";
 import { sanitizeTranscriptEntry } from "../server/security.js";
 import { EncryptedVaultStore } from "../vault/encrypted-store.js";
@@ -234,6 +236,8 @@ async function main(): Promise<void> {
   actLog.logEvent("spawning", { task: config.task.title });
 
   let handle;
+  // secrets the run learns while it runs (vault_create_login): masked in its transcript and result
+  const runSecrets = createRunSecrets();
   let initialDirections: TaskDirection[] = [];
   let checkpointWrites: Promise<void> = Promise.resolve();
   try {
@@ -380,6 +384,9 @@ async function main(): Promise<void> {
       ...(config.notifySocket ? {
         computerTakeover: (computerId: string) => socketComputerTakeover(config.notifySocket!, config.runId, computerId, computerControlStore(config.polpoDir)),
       } : {}),
+      // vault_create_login: the orchestrator writes the login into the vault of this run's agent
+      ...(config.notifySocket ? { vaultLogin: socketVaultLogin(config.notifySocket, config.runId) } : {}),
+      runSecrets,
       vaultStore,
       whatsappStore: waStore,
       whatsappSendMessage: waSendMessage,
@@ -398,7 +405,8 @@ async function main(): Promise<void> {
       ? spawnHarnessEngine(runAgent, config.task, config.cwd, spawnCtx)
       : spawnEngine(runAgent, config.task, config.cwd, spawnCtx);
     // Wire transcript persistence — every agent message gets written to the run log
-    handle.onTranscript = (entry) => {
+    handle.onTranscript = (raw) => {
+      const entry = runSecrets.maskDeep(raw);
       actLog.logTranscript(entry);
       // Persist transcript to DB when LogStore is available (cloud mode)
       if (logStore && logSessionId) {
@@ -512,7 +520,8 @@ async function main(): Promise<void> {
   });
 
   try {
-    const result = await handle.done;
+    // the result's text (stdout, stderr) goes through the run's masker too
+    const result = runSecrets.maskDeep(await handle.done);
     clearInterval(poll);
     clearInterval(controlPoll);
     await checkpointWrites;
