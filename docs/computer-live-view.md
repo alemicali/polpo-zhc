@@ -72,7 +72,7 @@ TZ=Europe/Rome LANGUAGE=it_IT DISPLAY=:99 setsid nohup /usr/bin/google-chrome \
   --user-data-dir="$HOME/.polpo/browser-profiles/<profile>" \
   --remote-debugging-port=<port> --remote-debugging-address=127.0.0.1 \
   --no-first-run --no-default-browser-check --lang=it-IT --accept-lang=it-IT,it \
-  --window-size=1280,800 --window-position=0,0 \
+  --window-size=<desktop size, 1280,800 by default> --window-position=0,0 \
   [--proxy-server=socks5://127.0.0.1:1081 --proxy-bypass-list='<-loopback>'] [--no-sandbox] about:blank
 ```
 
@@ -102,12 +102,51 @@ TZ=Europe/Rome LANGUAGE=it_IT DISPLAY=:99 setsid nohup /usr/bin/google-chrome \
 On **this server** (agents without a remote computer) nothing changes: agent-browser launches Google
 Chrome with `--executable-path` and `--profile`, headless unless `browserHeaded: true`.
 
+### "Chrome di <agent>" on the desktop
+
+With a headed browser, the same command also writes (only when they changed, so the desktop does not
+flicker):
+
+- `$HOME/.polpo/browser-chrome/<profile>.launch.sh` (`0700`): the ensure script above, then the
+  agent's Chrome window brought to the front (`xdotool windowactivate`);
+- a launcher **"Chrome di <agent display name>"** (`identity.displayName`, else the agent's name) in
+  `~/Desktop` and in the XFCE menu (`~/.local/share/applications/polpo-chrome-<profile>.desktop`,
+  category Internet), running that script. On the desktop it is marked trusted for XFCE when it can
+  be (`gio` and the session's bus); otherwise XFCE asks once whether to launch it.
+
+So a person on the live view who closed the agent's Chrome reopens the **same clean Chrome**: its
+profile and sign-ins, egress proxy, language, timezone and DevTools port, no automation flags,
+never a plain `google-chrome`. A Chrome already running is just brought to the front. If nobody
+reopens it, the agent's next `browser_*` call launches it again (its recorded pid is dead).
+
 ## The desktop in the VM
 
-Started on demand, idempotently, everything under `/tmp/polpo-desktop` (`0700`):
+A real PC desktop, not a bare window manager. Started on demand, idempotently, everything under
+`/tmp/polpo-desktop` (`0700`):
 
-- **Xvfb** on `:99` (no TCP) and **openbox**: what headed browsers open on. A headed browser
-  starts it itself; the live view starts it too.
+- **Xvfb** on `:99` (no TCP), `1280x800x24` or the computer's **`desktop.size`** (below): what
+  headed browsers open on. A headed browser starts it itself; the live view starts it too.
+- **XFCE** on it: `dbus-launch --exit-with-session startxfce4`, its pid recorded
+  (`wm.pid`, `wm.kind` = `xfce`) and started again when it died. Panel, applications menu, Thunar
+  (files), xfce4-terminal, Mousepad (text editor), the task manager; installed without
+  recommends, no `xfce4-goodies`. Set up on the first start (a person's later changes are kept):
+  - no screensaver, screen locker or power manager (their autostart entries are hidden:
+    `xfce4-screensaver`, `light-locker`, `xscreensaver`, `xfce4-power-manager`; `xset s off -dpms`);
+  - no compositing (`xfwm4` `use_compositing=false`): VNC sends less;
+  - the default panel, so XFCE never asks which one on the first start;
+  - the **language, timezone and keyboard** of the computer's agent: `LANG` from
+    `identity.locale` (`it-IT` → `it_IT.UTF-8`, generated with `locale-gen` when missing, else
+    `C.UTF-8`), `TZ` from `identity.timezone` (default `Europe/Rome`), the keyboard layout
+    (`setxkbmap it` by default; `en-US` → `us`, `en-GB` → `gb`, `de` → `de`…). The browser tools
+    use the agent's identity; the live view the identity of the computer's default agent. The
+    session keeps the settings it started with.
+  - **openbox** only as a fallback: when XFCE cannot be installed, openbox runs instead (`wm.kind`
+    = `openbox`); once XFCE is there, it replaces openbox at the next start.
+- **Clipboard**: x11vnc carries it both ways (and `xclip`/`xsel` are installed for scripts). The
+  live view's **Clipboard** button shows what was copied on the desktop (**Copy** puts it on your
+  device's clipboard) and, while you hold control, sends text to the desktop's clipboard (paste
+  it there with Ctrl+V). The desktop's clipboard reaches every viewer; a viewer's only the
+  person in control (the server drops it for the others).
 - **x11vnc** on `127.0.0.1:5900` only, with **one** password, set when it starts, given through
   the command's environment and read from a file x11vnc deletes at once: never on a command line,
   never left on disk. It does not change when control changes hands: nothing restarts.
@@ -141,9 +180,14 @@ belongs to. After a server restart, a live view still running on the same VM is 
 with it (the server looks without starting a stopped machine): no "Start live view" needed. A new
 VM, or a password the VNC server refuses, gets a new one at the next start.
 
-The runner image `polpo-runner-vm-4` ships these packages (`xvfb`, `x11vnc`, `openbox`,
-`websockify`, `xdotool`) and Google Chrome. A VM from an older image installs what is missing once with `apt-get`
-(a minute the first time). Build the new image in your Daytona v2 project with:
+The runner image `polpo-runner-vm-4` ships these packages (`DESKTOP_IMAGE_PACKAGES` in
+`src/sandbox/desktop.ts`: `xvfb`, `x11-xkb-utils`, `x11-xserver-utils`, `xclip`, `xsel`, `x11vnc`,
+`websockify`, `xdotool`, `xfce4`, `xfce4-terminal`, `thunar`, `mousepad`, `xfce4-taskmanager`,
+`dbus-x11`, `at-spi2-core`, `fonts-dejavu`, `fonts-liberation`, `tango-icon-theme`,
+`adwaita-icon-theme`, `librsvg2-common`, `locales`, `tzdata`; `it_IT.UTF-8` and `en_US.UTF-8`
+generated) and Google Chrome. A VM from an older image installs what is missing once with
+`apt-get --no-install-recommends` (a few minutes the first time, for XFCE); if XFCE cannot be
+installed, openbox is. Build the new image in your Daytona v2 project with:
 
 ```bash
 DAYTONA_V2_API_KEY=dtn_... node scripts/build-sandbox-images.mjs --provider daytona-v2
@@ -151,6 +195,20 @@ DAYTONA_V2_API_KEY=dtn_... node scripts/build-sandbox-images.mjs --provider dayt
 
 Until it is built, VMs are created from `polpo-runner-vm-3` (with a warning) and the packages and
 Google Chrome are installed on first use.
+
+### Desktop size
+
+`settings.computers[].desktop.size` (`"WIDTHxHEIGHT"`, from `800x600` to `3840x2160`, default
+`1280x800`) sets the display's size and the agents' Chrome window size, and the live view keeps
+its proportions. Set it in the computer's form (**Desktop size**), with REST (`POST`/`PATCH
+/computers/:id` `{ "desktop": { "size": "1600x900" } }`, `null` clears it), MCP
+`polpo_computer_save` or Polpo's `computer_save`. A display already running keeps its size: the new
+one applies when the machine starts again (stop and start, or a wake from hibernation onto a new
+display). Chrome takes the new window size at its next launch.
+
+**Footprint**: XFCE adds roughly 120–180 MB of memory to the VM (xfwm4, panel, xfdesktop,
+xfsettingsd, xfce4-session, xfconfd, D-Bus, the accessibility bus) over openbox's ~15 MB, and
+about 250–350 MB to the image.
 
 ## Watching and taking control
 
@@ -222,7 +280,7 @@ agent to run `agent-browser --session <name> get cdp-url` (the same endpoint).
 
 | Surface | What |
 |---|---|
-| REST | `GET /computers/:id/desktop` (`?viewer=1`: your role, `control` or `view`, and the WebSocket path while it runs; never a password), `POST /computers/:id/desktop/start`, `POST /computers/:id/desktop/stop`, `GET /computers/:id/control`, `POST /computers/:id/takeover` `{ force? }`, `POST /computers/:id/release` `{ note?, force? }`, `GET /computer-takeovers` |
+| REST | `GET /computers/:id/desktop` (`size`, `processes.session` `xfce`/`openbox`; `?viewer=1`: your role, `control` or `view`, and the WebSocket path while it runs; never a password), `POST /computers/:id/desktop/start`, `POST /computers/:id/desktop/stop`, `GET /computers/:id/control`, `POST /computers/:id/takeover` `{ force? }`, `POST /computers/:id/release` `{ note?, force? }`, `GET /computer-takeovers` |
 | WebSocket | `/api/v1/computers/:id/desktop/vnc`: the live view (noVNC), authorized like the terminal (the session cookie or `?api_key=`), only while the live view runs; security type None towards the browser (the server answers the VM's VNC authentication), input only from the person holding the computer |
 | MCP | `polpo_computer_desktop` (status, start, stop; without `id`: every agent waiting for a person), `polpo_computer_takeover`, `polpo_computer_release`, and the card `polpo_computer_show` (an MCP App with Take control / Give back and a link to the live view). No VNC password exists outside the server. |
 | Polpo (chat) | `computer_desktop`, `computer_takeover`, `computer_release` (group "computers") |

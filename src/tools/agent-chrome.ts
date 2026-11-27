@@ -233,3 +233,58 @@ export function agentChromePortCommand(profileName: string): string {
   return `F="$HOME"/${AGENT_CHROME_STATE_DIR}/${q(profileName)}; `
     + `if [ -f "$F.pid" ] && kill -0 "$(cat "$F.pid" 2>/dev/null)" 2>/dev/null; then cat "$F.port" 2>/dev/null; fi; true`;
 }
+
+// ─── "Chrome di <agent>" on the computer's desktop ───
+//
+// A person on the live view reopens the agent's Chrome from the desktop or the menu: the launcher
+// runs the same ensure script the browser tools run (written to <profile>.launch.sh), so it is the
+// CLEAN Chrome Polpo launches (same profile and sign-ins, proxy, language, timezone, DevTools port;
+// no automation flags), never a plain google-chrome. A Chrome that already runs is brought to the
+// front. A Chrome a person closed is launched again by the next browser_* call too (its pid is dead).
+
+/** The launcher's file name (in ~/Desktop and ~/.local/share/applications). */
+export function agentChromeLauncherFile(profileName: string): string {
+  return `polpo-chrome-${profileName}.desktop`;
+}
+
+/** The launcher's name: "Chrome di <agent display name>" (one line, no control characters). */
+export function agentChromeLauncherName(label: string): string {
+  const clean = label.replace(/[\u0000-\u001f\u007f\\]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 60);
+  return `Chrome di ${clean || "agente"}`;
+}
+
+/** The launch script (<profile>.launch.sh): the ensure script, then the window to the front. */
+export function agentChromeLaunchScript(o: AgentChromeLaunch & { label: string }): string {
+  return [
+    "#!/bin/sh",
+    `# Polpo: ${agentChromeLauncherName(o.label)}. The agent's own Chrome (profile ${o.profileName}), as its browser tools launch it:`,
+    "# same profile and sign-ins, proxy, language, timezone and DevTools port. Written by Polpo: changes are overwritten.",
+    `P=$(${agentChromeEnsureScript(o)}) || exit 1`,
+    `command -v xdotool >/dev/null 2>&1 || exit 0`,
+    `W=$(DISPLAY=${q(o.display ?? ":99")} xdotool search --onlyvisible --pid "$(cat "$HOME"/${AGENT_CHROME_STATE_DIR}/${q(o.profileName)}.pid 2>/dev/null)" 2>/dev/null | tail -n 1)`,
+    `[ -n "$W" ] && DISPLAY=${q(o.display ?? ":99")} xdotool windowactivate "$W" >/dev/null 2>&1`,
+    "exit 0",
+  ].join("\n");
+}
+
+/**
+ * Shell command (VM, the desktop's user): write the agent's launch script and its launcher in
+ * ~/Desktop and ~/.local/share/applications (the XFCE menu), only when they changed (no flicker
+ * on the desktop), and mark the desktop one trusted for XFCE when it can (gio, the session's bus).
+ */
+export function agentChromeLauncherCommand(o: AgentChromeLaunch & { label: string }): string {
+  const name = agentChromeLauncherName(o.label);
+  const file = agentChromeLauncherFile(o.profileName);
+  const before = ["[Desktop Entry]", "Version=1.0", "Type=Application", `Name=${name}`,
+    `Comment=Il Chrome di ${name.slice("Chrome di ".length)} con il suo profilo e i suoi accessi (Polpo)`,
+    "Icon=google-chrome", "Terminal=false", "StartupNotify=true", "Categories=Network;WebBrowser;", "Exec=/bin/sh \""].join("\n");
+  const after = `/${AGENT_CHROME_STATE_DIR}/${o.profileName}.launch.sh"`;
+  return `D="$HOME"/${AGENT_CHROME_STATE_DIR}; mkdir -p "$D" "$HOME/Desktop" "$HOME/.local/share/applications" && chmod 700 "$D"; `
+    + `put() { [ "$(cat "$1" 2>/dev/null)" = "$2" ] && return 1; printf '%s\\n' "$2" >"$1"; chmod "$3" "$1"; }; `
+    + `put "$D"/${q(`${o.profileName}.launch.sh`)} ${q(agentChromeLaunchScript(o))} 700; `
+    + `E=${q(before)}"$HOME"${q(after)}; `
+    + `put "$HOME/.local/share/applications/"${q(file)} "$E" 644; `
+    + `F="$HOME/Desktop/"${q(file)}; if put "$F" "$E" 755 && command -v gio >/dev/null 2>&1; then `
+    + `SP=$(pgrep -n -x xfce4-session 2>/dev/null); A=$([ -n "$SP" ] && tr '\\0' '\\n' <"/proc/$SP/environ" 2>/dev/null | sed -n 's/^DBUS_SESSION_BUS_ADDRESS=//p'); `
+    + `[ -n "$A" ] && DBUS_SESSION_BUS_ADDRESS="$A" gio set "$F" metadata::xfce-exe-checksum "$(sha256sum "$F" | cut -d' ' -f1)" >/dev/null 2>&1; fi; true`;
+}

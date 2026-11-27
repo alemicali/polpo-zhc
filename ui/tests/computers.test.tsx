@@ -44,7 +44,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { ComputersPage } from "../src/pages/computers";
 import { ComputerDetailPage } from "../src/pages/computer-detail";
 import {
-  EMPTY_COMPUTER_FORM, availableActions, computerInput, formatLastUsed, formatSnapshot, formatSnapshotSummary, formatUptime, kindLabel,
+  EMPTY_COMPUTER_FORM, availableActions, computerInput, formFromComputer, formatLastUsed, formatSnapshot, formatSnapshotSummary, formatUptime, kindLabel,
   matchesComputer, sortComputers, stopLabel, validateComputerForm,
   type Computer, type ComputerDetail,
 } from "../src/lib/computers-api";
@@ -217,12 +217,19 @@ test("actions by status, labels, sort and search, form validation and body", () 
     .toEqual({ id: "nina", name: "Nina", kind: "daytona", snapshot: "polpo-runner-1", lifecycle: { idleStopMinutes: 15, autoArchiveDays: 7 }, start: true });
   // editing clears what was emptied
   expect(computerInput({ ...EMPTY_COMPUTER_FORM, id: "nina", name: "Nina" }, true))
-    .toEqual({ name: "Nina", snapshot: null, image: null, egress: null, lifecycle: { idleStopMinutes: 15 }, network: null, resources: null });
+    .toEqual({ name: "Nina", snapshot: null, image: null, egress: null, lifecycle: { idleStopMinutes: 15 }, network: null, resources: null, desktop: null });
   // network and size
   expect(computerInput({ ...EMPTY_COMPUTER_FORM, id: "nina", name: "Nina", networkMode: "allowlist", networkAllow: "github.com\n*.npmjs.org, github.com", cpus: "2", memoryGb: "4" }, true))
     .toMatchObject({ network: { mode: "allowlist", allow: ["github.com", "*.npmjs.org"] }, resources: { cpus: 2, memoryMb: 4096 } });
   // a remote computer may go out through an egress proxy (Tailscale in its VM)
   expect(computerInput({ ...EMPTY_COMPUTER_FORM, id: "nina", name: "Nina", egress: " home " }, true)).toMatchObject({ egress: "home" });
+  // the desktop's size: WIDTHxHEIGHT in range, a remote computer's only
+  expect(computerInput({ ...EMPTY_COMPUTER_FORM, id: "nina", name: "Nina", desktopSize: " 1600X900 " })).toMatchObject({ desktop: { size: "1600x900" } });
+  expect(computerInput({ ...EMPTY_COMPUTER_FORM, id: "nina", name: "Nina" })).not.toHaveProperty("desktop");
+  expect(computerInput({ ...EMPTY_COMPUTER_FORM, id: "srv", name: "Srv", kind: "host", desktopSize: "1600x900" })).not.toHaveProperty("desktop");
+  expect(validateComputerForm({ ...EMPTY_COMPUTER_FORM, id: "x", desktopSize: "640x480" })).toHaveProperty("desktopSize");
+  expect(validateComputerForm({ ...EMPTY_COMPUTER_FORM, id: "x", desktopSize: "1920x1080" })).not.toHaveProperty("desktopSize");
+  expect(formFromComputer(nina({ desktop: { size: "1440x900" } })).desktopSize).toBe("1440x900");
 });
 
 // ── List ────────────────────────────────────────────────────────────────────

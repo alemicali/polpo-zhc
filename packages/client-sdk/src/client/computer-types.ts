@@ -51,7 +51,15 @@ export interface ComputerDesktopStatus {
   state: ComputerDesktopState;
   /** The X display headed browsers open on (":99"). */
   display: string;
-  processes?: { display: boolean; wm: boolean; vnc: boolean; ws: boolean; installed: boolean };
+  /** Its screen, "WIDTHxHEIGHT": the running display's, else the computer's desktop.size (default "1280x800"). */
+  size?: string;
+  processes?: {
+    display: boolean; wm: boolean; vnc: boolean; ws: boolean; installed: boolean;
+    /** The desktop session: XFCE, or openbox when XFCE could not be installed. */
+    session?: "xfce" | "openbox";
+    /** The running display's size. */
+    size?: string;
+  };
   note?: string;
   error?: string;
   startedAt?: string;

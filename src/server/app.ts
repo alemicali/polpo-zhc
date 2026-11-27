@@ -73,7 +73,7 @@ import { mobileDiagnosticsRoutes } from "./routes/mobile-diagnostics.js";
 import { preferencesRoutes } from "./routes/preferences.js";
 import { pushRoutes } from "./routes/push.js";
 import { expoPushRoutes } from "./routes/expo-push.js";
-import { agentEgressName, computerContext, isRemoteComputer, tailnetEgressFor } from "@polpo-ai/core/sandbox";
+import { agentEgressName, computerContext, computerDesktopSize, isRemoteComputer, tailnetEgressFor } from "@polpo-ai/core/sandbox";
 import { computerControlStore } from "../sandbox/computer-control.js";
 import { computerDesktopsFor } from "../sandbox/desktop.js";
 import { harnessUsageByTask } from "@polpo-ai/core/task-cost";
@@ -621,6 +621,11 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
         ...(typeof agentConfig.browserHeaded === "boolean" ? { browserHeaded: agentConfig.browserHeaded } : {}),
         // while a person holds the computer's desktop (take control), its browser waits
         ...(chatComputer && isRemoteComputer(chatComputer) ? { browserControl: { computerId: chatComputer.id, store: computerControlStore(polpoDir) } } : {}),
+        // its Chrome's language and timezone, and its computer's desktop (size, "Chrome di <name>" launcher)
+        ...(agentConfig.identity?.locale || agentConfig.identity?.timezone
+          ? { browserIdentity: { ...(agentConfig.identity.locale ? { locale: agentConfig.identity.locale } : {}), ...(agentConfig.identity.timezone ? { timezone: agentConfig.identity.timezone } : {}) } }
+          : {}),
+        ...(chatComputer && isRemoteComputer(chatComputer) ? { browserDesktop: { size: computerDesktopSize(chatComputer), label: agentConfig.identity?.displayName?.trim() || agentConfig.name } } : {}),
       });
       const memoryStore = o.getMemoryStore();
       if (memoryStore) tools.push(...createMemoryTools(memoryStore, agentConfig.name));
@@ -2141,7 +2146,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     emit: (payload) => o.emit("computer:changed", payload),
     emitTakeover: (payload) => o.emit("computer:takeover", payload),
     // live views (Daytona v2 computers' desktops) and take control
-    desktops: () => computerDesktopsFor(o.getPolpoDir(), { manager: computerDeps.manager, sandboxFor: computerDeps.sandboxFor, vault: () => o.getVaultStore() }),
+    desktops: () => computerDesktopsFor(o.getPolpoDir(), { manager: computerDeps.manager, sandboxFor: computerDeps.sandboxFor, vault: () => o.getVaultStore(), agents: () => o.getAgents() }),
     takeover: () => (orchestrator?.isInitialized ? o.getComputerTakeover() : undefined),
     member: (c) => c.get("polpoUserEmail" as never) as string | undefined,
   };

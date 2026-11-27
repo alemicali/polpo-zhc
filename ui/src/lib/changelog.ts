@@ -32,6 +32,22 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-27-computer-xfce-desktop",
+    date: "2026-11-27",
+    kind: "improved",
+    title: "Il computer dell'agente è un vero PC: desktop XFCE, il suo Chrome a portata di clic",
+    summary: "Nella vista dal vivo ora c'è un desktop completo (pannello, menu, file, terminale, editor) in italiano, con l'icona \"Chrome di …\" che riapre il Chrome dell'agente, appunti tra il tuo dispositivo e il computer e una risoluzione a scelta.",
+    body: [
+      "- **Un desktop vero**: sul computer remoto non c'è più solo una finestra di Chrome su uno sfondo nero, ma un desktop XFCE con pannello, menu delle applicazioni, gestore dei file (Thunar), terminale, editor di testo (Mousepad) e gestione attività. Senza salvaschermo, blocco dello schermo né risparmio energetico, e senza effetti grafici, così la vista dal vivo resta fluida.",
+      "- **In italiano**: tastiera italiana, lingua e fuso orario dell'agente (`identity.locale` e `identity.timezone`; se non sono impostati, italiano e `Europe/Rome`).",
+      "- **\"Chrome di …\" sul desktop e nel menu**: un'icona con il nome dell'agente riapre il **suo** Chrome, con il suo profilo e i suoi accessi, la stessa connessione in uscita e la stessa lingua: mai un Chrome qualsiasi. Se lo chiudi per sbaglio, puoi riaprirlo da lì; comunque riparte da solo al comando del browser successivo dell'agente.",
+      "- **Appunti**: il pulsante *Clipboard* nella vista dal vivo mostra il testo copiato sul computer (con *Copy* lo porti sul tuo dispositivo) e, mentre hai il controllo, manda al computer un testo da incollare con Ctrl+V.",
+      "- **Risoluzione a scelta**: nelle impostazioni del computer, *Desktop size* (per esempio `1600x900`; predefinita `1280x800`), anche da API e MCP (`desktop.size`). Vale dal prossimo avvio della macchina; anche le finestre di Chrome dell'agente si adattano.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i computer", to: "/computers" },
+  },
+  {
     id: "2026-11-27-agent-own-chrome",
     date: "2026-11-27",
     kind: "improved",

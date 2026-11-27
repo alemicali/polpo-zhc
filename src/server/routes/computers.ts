@@ -5,10 +5,10 @@
  *   GET    /computers                 list, with live status (?live=0: the last known status; the providers' answers are
  *                                     reused for 15 s, ?fresh=1 asks again) and the agents using each. Status "deleted":
  *                                     its machine (and snapshots) were deleted at the provider, outside Polpo
- *   POST   /computers                 create { id, name, kind, image?, snapshot?, template?, resources?, lifecycle?, network?, egress?, volumes?, start? }
+ *   POST   /computers                 create { id, name, kind, image?, snapshot?, template?, resources?, lifecycle?, network?, egress?, volumes?, desktop?, start? }
  *   GET    /computers/:id             one computer (?detail=1: also its snapshots, activity, harness sessions, recent
  *                                     task runs on it and their cost, the image and region a new machine gets)
- *   PATCH  /computers/:id             change name, description, image/snapshot/template, resources, lifecycle, network, egress, volumes (id and kind stay)
+ *   PATCH  /computers/:id             change name, description, image/snapshot/template, resources, lifecycle, network, egress, volumes, desktop { size } (id and kind stay)
  *   DELETE /computers/:id             { confirm: true }: deletes the machine and its disk (Daytona v2: and its snapshots), and the computer
  *   POST   /computers/:id/start       start, resume, or wake it from its snapshot (Daytona v2); created if it has no machine yet
  *   POST   /computers/:id/stop        stop (Daytona v0 container), pause (E2B, Daytona v0 VM) or hibernate (Daytona v2:
@@ -34,7 +34,7 @@ import {
   ComputerConfigError, HOST_COMPUTER, HOST_COMPUTER_ID, agentEgressName, computerEgressProblem, computerUsers, isRemoteComputer, parseComputer,
   type AgentConfig, type ComputerConfig, type EffectiveSandbox, type PolpoEventMap, type PolpoSettings, type Task,
 } from "@polpo-ai/core";
-import { daytonaV2HibernateSettings, type DaytonaV2HibernateSettings } from "@polpo-ai/core/sandbox";
+import { computerDesktopSize, daytonaV2HibernateSettings, type DaytonaV2HibernateSettings } from "@polpo-ai/core/sandbox";
 import type { HarnessSessionView } from "../../harness/control.js";
 import { ComputerDeletedError, ComputerResetIncompleteError, computerEgressStatus, type ComputerLive, type ComputerManager } from "../../sandbox/computers.js";
 import { computerChangeNote, computerNetworkProblem } from "../../sandbox/manager.js";
@@ -386,7 +386,7 @@ export function computerRoutes(deps: ComputerRouteDeps): Hono {
   };
   const desktopView = async (c: Context, computer: ComputerConfig, viewer: boolean, status?: DesktopStatus): Promise<ComputerDesktopView> => {
     const desktops = deps.desktops?.();
-    const desktop = status ?? (desktops ? await desktops.status(computer) : { computerId: computer.id, state: "unsupported" as const, display: ":99", note: "No live view on this server" });
+    const desktop = status ?? (desktops ? await desktops.status(computer) : { computerId: computer.id, state: "unsupported" as const, display: ":99", size: computerDesktopSize(computer), note: "No live view on this server" });
     const control = takeoverService()?.get(computer.id) ?? { computerId: computer.id, holder: "agent" as const, requests: [], open: [] };
     const out: ComputerDesktopView = { desktop, control };
     if (viewer && desktops && desktop.state === "running") {

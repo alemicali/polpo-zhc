@@ -40,6 +40,7 @@ Every agent has the implicit computer **`host`**: this server, with the sandbox 
 | `network` | `{ mode, allow }` as in the sandbox settings. Default: the instance's. Daytona v0 and E2B: fixed when the machine is created. Daytona v2: applied again whenever a VM is made (create, wake, rotation), so a changed rule takes effect on the next wake. |
 | `egress` | The egress proxy (`settings.egressProxies`) the browser of its agents goes out through. A remote computer (Daytona, E2B) reaches it through **Tailscale inside its VM**: it needs `settings.tailscale` (an auth key in the vault), a SOCKS5 proxy on a tailnet address, and a network that is not `deny` — see [Remote computers through Tailscale](residential-egress.md#remote-computers-daytona-e2b-through-tailscale). |
 | `volumes` | Volumes attached to runs on the computer (names granted to the agent, as in the sandbox settings). |
+| `desktop` | Remote computers: `{ "size": "1600x900" }`, the size of its XFCE desktop (`WIDTHxHEIGHT`, 800x600 to 3840x2160; default `1280x800`) and of its agents' Chrome windows. A running display keeps its size until the machine starts again. Not for `host`. |
 
 Agents:
 
@@ -287,8 +288,10 @@ event log: 7 ignored, 1 rejected — no details" (the card, the sheet, MCP `polp
 
 ## Live view and take control
 
-A Daytona v2 computer has a desktop you can watch live from its page, where agents' browsers open
-their window (headed by default on a remote computer; `browserHeaded: false` keeps one headless); take control for a login, a 2FA code or a
+A Daytona v2 computer has a real desktop (**XFCE**: panel, menu, files, terminal, editor, task
+manager; the agent's language, timezone and keyboard layout, Italian by default; no screensaver,
+locking or compositing) you can watch live from its page, with a clipboard box to copy text from
+and to it, where agents' browsers open their window (headed by default on a remote computer; `browserHeaded: false` keeps one headless); take control for a login, a 2FA code or a
 CAPTCHA and give it back, and agents ask for it with `request_computer_takeover`. Their commands get
 `CDP_URL`, the CDP endpoint of their own browser. The browser is always real Google Chrome
 (`/usr/bin/google-chrome`, installed once on a VM without it), never Chromium, which sites flag as a
@@ -313,6 +316,9 @@ automation flags; headed on the desktop (`:99`) unless `browserHeaded: false`.
 - **Lifecycle**: pid and port in `$HOME/.polpo/browser-chrome/`; relaunched when it died or its
   settings changed; never stopped at the end of a run (a page a person left open stays), gone with
   the computer (stop, hibernation).
+- **"Chrome di <agent>"**: a launcher on the desktop and in the XFCE menu reopens that same Chrome
+  (`$HOME/.polpo/browser-chrome/<profile>.launch.sh`: the same profile, proxy, language and DevTools
+  port), never a plain `google-chrome`; a closed Chrome also comes back at the next `browser_*` call.
 - **On this server** (no remote computer) agent-browser still launches Chrome itself
   (`--executable-path`, `--profile`).
 
