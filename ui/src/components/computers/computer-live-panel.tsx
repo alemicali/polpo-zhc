@@ -17,13 +17,19 @@
  * - Full screen (Fullscreen API on the viewer; Esc exits): noVNC scales the desktop to fit, and
  *   the keyboard stays on the desktop while you hold control.
  *
+ * - Clipboard: what is copied on the desktop shows in the Clipboard box (Copy puts it on this
+ *   device's clipboard); while you hold control, text sent from the box lands on the desktop's
+ *   clipboard (paste it there with Ctrl+V). noVNC has no automatic clipboard sync.
+ * - The viewer keeps the desktop's proportions (its size: the computer's desktop.size).
+ *
  * Passwords and codes are typed in the live view, never in Polpo. Live: computer:takeover.
  */
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { useEvents, type ComputerDesktopView, type ComputerTakeoverRequest } from "@polpo-ai/react";
-import { Hand, Loader2, Maximize2, Minimize2, MonitorPlay, MonitorStop, TriangleAlert, Undo2, WifiOff } from "lucide-react";
+import { ClipboardCopy, ClipboardList, ClipboardPaste, Hand, Loader2, Maximize2, Minimize2, MonitorPlay, MonitorStop, TriangleAlert, Undo2, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { config, websocketUrl } from "@/lib/config";
 import { computersApi, formatLastUsed } from "@/lib/computers-api";
 import { cn } from "@/lib/utils";
@@ -106,6 +112,53 @@ function useFullscreen(ref: RefObject<HTMLElement | null>) {
   return { fullscreen, toggle };
 }
 
+/** The desktop's proportions for the viewer ("1600x900" → "1600 / 900"); undefined: the default 16/10. */
+export function desktopAspect(size: string | undefined): string | undefined {
+  const m = /^(\d{3,4})x(\d{3,4})$/.exec(size ?? "");
+  return m ? `${m[1]} / ${m[2]}` : undefined;
+}
+
+/** The largest text sent to the desktop's clipboard (the server's limit for a viewer's message is larger). */
+export const CLIPBOARD_MAX_CHARS = 100_000;
+
+/**
+ * The desktop's clipboard and this device's: the latest text copied on the desktop (Copy puts it
+ * on this device's clipboard) and, while you hold control, a box whose text goes to the desktop's.
+ */
+function ClipboardBox({ fromDesktop, canSend, onSend }: { fromDesktop: string; canSend: boolean; onSend: (text: string) => void }) {
+  const [draft, setDraft] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [sent, setSent] = useState(false);
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(fromDesktop); setCopied(true); window.setTimeout(() => setCopied(false), 1500); } catch { setCopied(false); }
+  };
+  return (
+    <div className="grid gap-2 rounded-control border border-border bg-muted/30 p-2 text-xs sm:grid-cols-2" data-testid="computer-clipboard">
+      <div className="min-w-0 space-y-1">
+        <div className="flex items-center gap-2">
+          <span className="font-medium">Copied on the desktop</span>
+          <Button size="sm" variant="ghost" className="ml-auto h-6 gap-1 px-2 text-xs" disabled={!fromDesktop} onClick={() => void copy()} title="Put it on this device's clipboard">
+            <ClipboardCopy className="h-3.5 w-3.5" /> {copied ? "Copied" : "Copy"}
+          </Button>
+        </div>
+        <Textarea readOnly rows={3} value={fromDesktop} placeholder="Copy text on the desktop (Ctrl+C): it shows here" aria-label="Copied on the desktop" className="text-xs" data-testid="clipboard-from-desktop" />
+      </div>
+      <div className="min-w-0 space-y-1">
+        <div className="flex items-center gap-2">
+          <span className="font-medium">Send to the desktop</span>
+          <Button size="sm" variant="ghost" className="ml-auto h-6 gap-1 px-2 text-xs" disabled={!canSend || !draft}
+            onClick={() => { onSend(draft.slice(0, CLIPBOARD_MAX_CHARS)); setSent(true); window.setTimeout(() => setSent(false), 1500); }}
+            title={canSend ? "Put it on the desktop's clipboard, then paste there with Ctrl+V" : "Take control to send text to the desktop"}>
+            <ClipboardPaste className="h-3.5 w-3.5" /> {sent ? "Sent" : "Send"}
+          </Button>
+        </div>
+        <Textarea rows={3} value={draft} onChange={(e) => setDraft(e.target.value)} maxLength={CLIPBOARD_MAX_CHARS} disabled={!canSend}
+          placeholder={canSend ? "Paste here, send, then Ctrl+V on the desktop" : "Take control to send text to the desktop"} aria-label="Send to the desktop" className="text-xs" data-testid="clipboard-to-desktop" />
+      </div>
+    </div>
+  );
+}
+
 /** The viewer's role on a live connection: input, focus, cursor and quality (no reconnect). */
 function applyRole(client: VncClient, viewOnly: boolean): void {
   const q = viewOnly ? LIVE_QUALITY.view : LIVE_QUALITY.control;
@@ -123,6 +176,8 @@ export function ComputerLivePanel({ computerId, className }: { computerId: strin
   const [actionError, setActionError] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [stream, setStream] = useState<StreamState>("idle");
+  const [showClipboard, setShowClipboard] = useState(false);
+  const [desktopClipboard, setDesktopClipboard] = useState("");
   const screenRef = useRef<HTMLDivElement | null>(null);
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const clientRef = useRef<VncClient | null>(null);
@@ -134,6 +189,7 @@ export function ComputerLivePanel({ computerId, className }: { computerId: strin
   const running = desktop?.state === "running";
   const mine = viewer?.mode === "control";
   const heldByOther = control?.holder === "person" && !mine;
+  const aspect = desktopAspect(desktop?.size);
 
   const act = async (what: string, fn: () => Promise<unknown>) => {
     setBusy(what);
@@ -170,6 +226,8 @@ export function ComputerLivePanel({ computerId, className }: { computerId: strin
       applyRole(client, viewOnlyRef.current);
       client.addEventListener("connect", () => { if (!disposed) { attempt = 0; setStream("live"); } });
       client.addEventListener("securityfailure", () => { if (!disposed) setStream("error"); });
+      // what is copied on the desktop (ServerCutText: every viewer gets it)
+      client.addEventListener("clipboard", (e) => { if (!disposed) setDesktopClipboard(e.detail.text); });
       client.addEventListener("disconnect", () => {
         if (disposed) return;
         clientRef.current = null;
@@ -232,6 +290,10 @@ export function ComputerLivePanel({ computerId, className }: { computerId: strin
                 {busy === "takeover" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Hand className="h-3.5 w-3.5" />} Take control
               </Button>
             )}
+            <Button size="sm" variant="ghost" className="h-7 gap-1.5 px-2.5 text-xs" onClick={() => setShowClipboard((v) => !v)}
+              title="Text copied on the desktop, and text to send to it" aria-pressed={showClipboard} data-testid="clipboard-toggle">
+              <ClipboardList className="h-3.5 w-3.5" /> Clipboard
+            </Button>
             <Button size="sm" variant="ghost" className="h-7 gap-1.5 px-2.5 text-xs" onClick={() => void toggleFullscreen().catch(fullscreenFailed)}
               title="Show the desktop full screen (Esc exits)" aria-pressed={fullscreen}>
               <Maximize2 className="h-3.5 w-3.5" /> Full screen
@@ -252,6 +314,10 @@ export function ComputerLivePanel({ computerId, className }: { computerId: strin
           placeholder="Note for the agent when you give it back (what you did; never a password)" aria-label="Note for the agent" />
       )}
 
+      {running && showClipboard && (
+        <ClipboardBox fromDesktop={desktopClipboard} canSend={mine && stream === "live"} onSend={(text) => clientRef.current?.clipboardPasteFrom(text)} />
+      )}
+
       {(actionError || error || desktop?.error) && (
         <p className="flex items-start gap-1.5 text-xs text-destructive" role="alert"><TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />{actionError ?? error?.message ?? desktop?.error}</p>
       )}
@@ -261,8 +327,10 @@ export function ComputerLivePanel({ computerId, className }: { computerId: strin
           ref={viewerRef}
           className={cn(
             "relative w-full overflow-hidden bg-muted",
-            fullscreen ? "h-full" : cn("aspect-[16/10] rounded-control ring-1 ring-inset", mine ? "ring-primary" : "ring-border"),
+            fullscreen ? "h-full" : cn("rounded-control ring-1 ring-inset", aspect ? "" : "aspect-[16/10]", mine ? "ring-primary" : "ring-border"),
           )}
+          style={!fullscreen && aspect ? { aspectRatio: aspect } : undefined}
+          data-size={desktop?.size}
           role="application"
           aria-label={mine ? "Computer desktop (you have control)" : "Computer desktop (view-only)"}
           data-fullscreen={fullscreen || undefined}

@@ -11,7 +11,9 @@
  *   - tailscale + tailscaled (a pinned release, checksum checked): computers whose browser goes out
  *     through a tailnet-only egress proxy join the tailnet from inside the VM
  *   - git, curl, python3 (+ edge-tts), poppler-utils, sudo, node 22
- *   - a desktop for the live view and "take control" (vm-4): Xvfb, openbox, x11vnc, websockify, xdotool
+ *   - a desktop for the live view and "take control" (vm-4): Xvfb + an XFCE session (panel, menu,
+ *     Thunar, xfce4-terminal, Mousepad, task manager; no goodies, no screensaver, no power manager),
+ *     x11vnc, websockify, xdotool, xclip/xsel, locales it_IT.UTF-8 and en_US.UTF-8, tzdata
  *   - pnpm (PNPM_VERSION, activated with corepack): agent harnesses (Claude Code, Codex) install
  *     their bridge with `pnpm install --frozen-lockfile` (lockfile v9 + allowBuilds: pnpm 10). Polpo
  *     activates it at run time when an older image lacks it (src/adapters/harness-engine.ts).
@@ -55,6 +57,16 @@ export const DAYTONA_V2_IMAGE = "polpo-runner-vm-4";
 export const PNPM_VERSION = "10.30.1";
 export const E2B_TEMPLATE = `polpo-runner-${version.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
 
+/**
+ * The desktop (src/sandbox/desktop.ts: DESKTOP_VIEW_PACKAGES, DESKTOP_XFCE_PACKAGES and
+ * DESKTOP_XFCE_EXTRA_PACKAGES; openbox is only the fallback of VMs where XFCE cannot be installed).
+ */
+export const DESKTOP_PACKAGES = [
+  "xvfb", "x11-xkb-utils", "x11-xserver-utils", "xclip", "xsel", "x11vnc", "websockify", "xdotool",
+  "xfce4", "xfce4-terminal", "thunar", "mousepad", "xfce4-taskmanager", "dbus-x11",
+  "at-spi2-core", "fonts-dejavu", "fonts-liberation", "tango-icon-theme", "adwaita-icon-theme", "librsvg2-common", "locales", "tzdata",
+];
+
 /** Debian packages: baseline tools, PDF text, python for edge-tts, FUSE, every library agent-browser's Chromium links against, fonts. */
 const APT_PACKAGES = [
   "git", "curl", "ca-certificates", "sudo", "unzip", "procps", "fuse3", "libfuse2",
@@ -64,9 +76,10 @@ const APT_PACKAGES = [
   "libcairo2", "libwayland-client0", "libxshmfence1", "libxfixes3", "libxext6", "libxcursor1", "libxi6",
   "libxtst6", "libxrender1", "libxinerama1", "libdbus-1-3", "libatspi2.0-0", "libdrm2", "libx11-xcb1",
   "fonts-liberation", "fonts-dejavu-core", "fonts-noto-color-emoji",
-  // the computer's desktop (src/sandbox/desktop.ts): a virtual display, a light window manager, a VNC
-  // server (password-protected, local only) and websockify (what the preview link reaches)
-  "xvfb", "x11vnc", "openbox", "websockify", "xdotool",
+  // the computer's desktop (src/sandbox/desktop.ts DESKTOP_IMAGE_PACKAGES; a test checks they match):
+  // a virtual display, a VNC server (password-protected, local only), websockify (what the preview
+  // link reaches), the keyboard layout and clipboard tools, and XFCE without recommends
+  ...DESKTOP_PACKAGES,
 ];
 
 /**
@@ -110,6 +123,8 @@ export const ROOT_STEPS = [
   // pnpm 10 for agent harness bootstraps (corepack ships with node 22; pinned, no download prompt)
   `COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack prepare pnpm@${PNPM_VERSION} --activate && corepack enable pnpm && pnpm --version`,
   "sed -i 's/^# *user_allow_other/user_allow_other/' /etc/fuse.conf || true",
+  // the desktop's languages (Italian by default, English): generated once, not at every start
+  "sed -i 's/^# *\\(it_IT.UTF-8 UTF-8\\)/\\1/; s/^# *\\(en_US.UTF-8 UTF-8\\)/\\1/' /etc/locale.gen && locale-gen",
 ];
 
 /** agent-browser's Chromium (pdf_create renders with it; agents' browsers use Google Chrome), in the home of the user commands run as. */

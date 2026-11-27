@@ -1237,6 +1237,7 @@ export class Orchestrator extends TypedEmitter {
           manager: () => computerManager(this.polpoDir),
           sandboxFor: (c) => computerSandbox(c, this.config?.settings),
           vault: () => this.vaultStore,
+          agents: () => this.getAgents(),
         }).start(computer);
       },
       notifier: () => this.agentNotifier,

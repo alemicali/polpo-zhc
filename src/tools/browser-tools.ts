@@ -39,10 +39,10 @@ import { browserProxyContext, proxyArgs, type BrowserNetworkGuard } from "./brow
 import type { ResolvedVault } from "../vault/index.js";
 import { createSecretMasker, formatVaultRef, resolveEnvFromVault } from "../vault/env-from-vault.js";
 import { decideEgress, decideRemoteEgress, shellHost, type BrowserEgressConfig } from "./browser-egress.js";
-import { DESKTOP_DISPLAY, DESKTOP_DISPLAY_COMMAND, DESKTOP_SCREEN, ensureDesktopDisplay } from "../sandbox/desktop.js";
+import { DESKTOP_DISPLAY, DESKTOP_SCREEN, desktopDisplayCommand, ensureDesktopDisplay, type DesktopOptions } from "../sandbox/desktop.js";
 import { waitForAgentControl, type ComputerControlStore } from "../sandbox/computer-control.js";
 import {
-  AGENT_CHROME_PROFILES_DIR, agentChromeEnsureScript, agentChromeLocale, agentChromePortCommand, agentChromeProfileName, hostChromeArgs,
+  AGENT_CHROME_PROFILES_DIR, agentChromeEnsureScript, agentChromeLauncherCommand, agentChromeLocale, agentChromePortCommand, agentChromeProfileName, hostChromeArgs,
   SANDBOX_CHROME_INSTALL_COMMAND,
 } from "./agent-chrome.js";
 
@@ -243,7 +243,7 @@ function shq(arg: string): string {
 /** Where agent profiles live inside a sandbox VM (persistent across runs on a reused VM). */
 export const SANDBOX_BROWSER_PROFILES = AGENT_CHROME_PROFILES_DIR;
 
-/** The desktop's size ("1280x800x24") as Chrome's window size. */
+/** The desktop's size ("1280x800x24", or a computer's desktop.size "1600x900") as Chrome's window size. */
 export function desktopWindowSize(screen: string = DESKTOP_SCREEN): [number, number] {
   const m = /^(\d+)x(\d+)/.exec(screen);
   return m ? [Number(m[1]), Number(m[2])] : [1280, 800];
@@ -252,6 +252,19 @@ export function desktopWindowSize(screen: string = DESKTOP_SCREEN): [number, num
 /** The agent's browser language and timezone (identity.locale / identity.timezone). */
 export type BrowserIdentity = { locale?: string; timezone?: string };
 
+/** The computer's desktop as the agent's browser sees it: its size, and the agent's launcher label. */
+export type BrowserDesktop = {
+  /** computer.desktop.size ("1600x900"; default 1280x800): the display's and Chrome's window size. */
+  size?: string;
+  /** The "Chrome di <label>" launcher on the desktop: the agent's display name (identity.displayName, else its name). */
+  label?: string;
+};
+
+/** The desktop options (size, language, timezone) of an agent's display. */
+function desktopOptionsOf(identity: BrowserIdentity | undefined, desktop: BrowserDesktop | undefined): DesktopOptions {
+  return { ...(desktop?.size ? { size: desktop.size } : {}), ...(identity?.locale ? { locale: identity.locale } : {}), ...(identity?.timezone ? { timezone: identity.timezone } : {}) };
+}
+
 /**
  * The agent-browser command line run in a sandbox (exported for tests). A command that launches a
  * browser first makes sure the agent's own Chrome runs (agentChromeEnsureScript: launched by Polpo,
@@ -259,19 +272,21 @@ export type BrowserIdentity = { locale?: string; timezone?: string };
  * --headed or proxy flags for agent-browser then, Chrome has them. A command that never launches
  * one (close) is agent-browser alone.
  */
-export function sandboxBrowserCommand(args: string[], options: { session?: string; profileName?: string; proxy?: string; headed?: boolean; identity?: BrowserIdentity; chromePath?: string } = {}): string {
+export function sandboxBrowserCommand(args: string[], options: { session?: string; profileName?: string; proxy?: string; headed?: boolean; identity?: BrowserIdentity; chromePath?: string; desktop?: BrowserDesktop } = {}): string {
   const launches = !NO_LAUNCH_COMMANDS.has(args[0] ?? "");
   const parts: string[] = [];
   if (launches) {
-    // headed: a window on the computer's virtual display (started first when it is not up)
-    if (options.headed) parts.push(`(${DESKTOP_DISPLAY_COMMAND}) >/dev/null 2>&1;`);
+    // headed: a window on the computer's desktop (started first when it is not up)
+    if (options.headed) parts.push(`(${desktopDisplayCommand(desktopOptionsOf(options.identity, options.desktop))}) >/dev/null 2>&1;`);
     const session = options.session ?? "default";
-    const ensure = agentChromeEnsureScript({
+    const launch = {
       profileName: agentChromeProfileName(options.profileName ?? session), session,
       ...(options.proxy ? { proxy: options.proxy } : {}), ...(options.headed ? { display: DESKTOP_DISPLAY } : {}),
-      windowSize: desktopWindowSize(), ...agentChromeLocale(options.identity), ...(options.chromePath ? { chromePath: options.chromePath } : {}),
-    });
-    parts.push(`P=$(${ensure}) || exit 1;`);
+      windowSize: desktopWindowSize(options.desktop?.size), ...agentChromeLocale(options.identity), ...(options.chromePath ? { chromePath: options.chromePath } : {}),
+    };
+    // "Chrome di <agent>" on the desktop and in its menu: the same Chrome, reopened by a person
+    if (options.headed) parts.push(`(${agentChromeLauncherCommand({ ...launch, label: options.desktop?.label || session })}) >/dev/null 2>&1;`);
+    parts.push(`P=$(${agentChromeEnsureScript(launch)}) || exit 1;`);
   }
   parts.push("agent-browser");
   if (options.session) parts.push("--session", shq(options.session));
@@ -348,7 +363,7 @@ async function execSandboxBrowser(
   args: string[],
   options: {
     session?: string; profileName?: string; timeout?: number; cwd?: string; saves?: string; secret?: string; proxy?: string;
-    identity?: BrowserIdentity;
+    identity?: BrowserIdentity; desktop?: BrowserDesktop;
     /** true: headed (the computer's desktop), an error without a display; "default": headed when the display can be had, else headless. */
     headed?: boolean | "default";
   },
@@ -358,7 +373,7 @@ async function execSandboxBrowser(
   let headed = false;
   const launches = !NO_LAUNCH_COMMANDS.has(args[0] ?? "");
   if (launches && (options.headed === true || (options.headed === "default" && !noDefaultDisplay.has(shell)))) {
-    const noDisplay = await ensureSandboxDisplay(shell);
+    const noDisplay = await ensureSandboxDisplay(shell, desktopOptionsOf(options.identity, options.desktop));
     // an agent that asked for a headed browser is told; by default it runs headless (and the
     // display is not tried again on this shell)
     if (noDisplay && options.headed === true) return { success: false, error: noDisplay, raw: noDisplay };
@@ -380,10 +395,11 @@ async function execSandboxBrowser(
 const displayReady = new WeakMap<Shell, Promise<string | undefined>>();
 
 /**
- * The virtual display's packages in the sandbox (Xvfb, openbox): in the runner image (vm-4);
- * otherwise installed once per shell. Resolves to an error message when they cannot be.
+ * The desktop's packages in the sandbox (Xvfb, XFCE; openbox when XFCE cannot be installed): in
+ * the runner image (vm-4); otherwise installed once per shell, then the display and its session
+ * started. Resolves to an error message when they cannot be.
  */
-export function ensureSandboxDisplay(shell: Shell): Promise<string | undefined> {
+export function ensureSandboxDisplay(shell: Shell, desktop: DesktopOptions = {}): Promise<string | undefined> {
   let ready = displayReady.get(shell);
   if (!ready) {
     ready = ensureDesktopDisplay({
@@ -391,7 +407,7 @@ export function ensureSandboxDisplay(shell: Shell): Promise<string | undefined> 
         const r = await shell.execute(command, { timeout: o.timeoutMs ?? 30_000, ...(o.env ? { env: o.env } : {}) });
         return { exitCode: r.exitCode, stdout: r.stdout, stderr: r.stderr };
       },
-    });
+    }, desktop);
     displayReady.set(shell, ready);
     void ready.then((err) => { if (err) displayReady.delete(shell); });
   }
@@ -1068,9 +1084,11 @@ export function createBrowserTools(
     control?: { computerId: string; store: Pick<ComputerControlStore, "heldByPerson">; pollMs?: number; maxWaitMs?: number };
     /** identity.locale / identity.timezone: the language and timezone of its Chrome on a remote computer (default it-IT, Europe/Rome). */
     identity?: BrowserIdentity;
+    /** The remote computer's desktop: its size (Chrome's window) and the agent's launcher label. */
+    desktop?: BrowserDesktop;
   } = {},
 ): AgentTool<any>[] {
-  const { shell, fs, vault, egress, headed, control, identity } = runtime;
+  const { shell, fs, vault, egress, headed, control, identity, desktop } = runtime;
   const inSandbox = () => shellIsRemote(shell);
   const profileName = profileDir ? browserProfileName(profileDir) : undefined;
   const exec: BrowserExec = async (args, options = {}) => {
@@ -1088,7 +1106,7 @@ export function createBrowserTools(
       // headed by default on a remote computer (its desktop); false: headless
       const sandboxHeaded = headed === undefined ? "default" as const : headed;
       // its own Chrome's profile: the agent's (else one per session); close never launches anything
-      return execSandboxBrowser(shell, args, { session, profileName: withProfile ? (profileName ?? agentChromeProfileName(session)) : undefined, timeout: options.timeout, cwd, saves: options.saves, secret: options.secret, ...(proxy ? { proxy } : {}), headed: sandboxHeaded, ...(identity ? { identity } : {}) });
+      return execSandboxBrowser(shell, args, { session, profileName: withProfile ? (profileName ?? agentChromeProfileName(session)) : undefined, timeout: options.timeout, cwd, saves: options.saves, secret: options.secret, ...(proxy ? { proxy } : {}), headed: sandboxHeaded, ...(identity ? { identity } : {}), ...(desktop ? { desktop } : {}) });
     }
     // on the host the arguments go straight to the process (no shell, no log)
     if (options.secret !== undefined) args = args.map((a) => (a === BROWSER_SECRET_ARG ? options.secret! : a));

@@ -269,6 +269,15 @@ describe("MCP computer tools", () => {
     expect(changed.structuredContent).toMatchObject({ created: false });
     expect(t.state.computers[0]!.lifecycle).toEqual({ idleStopMinutes: 30 });
     expect((await call("polpo_computer_save", { id: "zed" })).content[0].text).toMatch(/give kind/);
+    // the desktop's size (REST PATCH through MCP; null clears it)
+    await call("polpo_computer_save", { id: "nina", desktop: { size: "1600x900" } });
+    expect(t.state.computers[0]!.desktop).toEqual({ size: "1600x900" });
+    const badSize = await call("polpo_computer_save", { id: "nina", desktop: { size: "9999x9999" } });
+    expect(badSize.isError).toBe(true);
+    expect(badSize.content[0].text).toMatch(/800x600 to 3840x2160/);
+    expect((await call("polpo_computer_get", { id: "nina" })).content[0].text).toContain("Desktop: 1600x900 (XFCE)");
+    await call("polpo_computer_save", { id: "nina", desktop: null });
+    expect(t.state.computers[0]!.desktop).toBeUndefined();
 
     expect((await call("polpo_computer_control", { id: "nina", action: "start" })).structuredContent.computer.status).toBe("running");
     expect((await call("polpo_computer_control", { id: "nina", action: "stop" })).structuredContent.computer.status).toBe("stopped");

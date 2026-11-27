@@ -38,18 +38,20 @@ vi.mock("@novnc/novnc", () => ({
       this.options = options;
       vnc.clients.push(this as never);
     }
+    pasted: string[] = [];
     disconnect() { this.disconnected = true; }
     focus() {}
+    clipboardPasteFrom(text: string) { this.pasted.push(text); }
     sendCredentials() { throw new Error("the browser never has a VNC password"); }
   },
 }));
 
-import { ComputerLivePanel, LIVE_QUALITY } from "../src/components/computers/computer-live-panel";
+import { ComputerLivePanel, LIVE_QUALITY, desktopAspect } from "../src/components/computers/computer-live-panel";
 
 // ── Fake server ─────────────────────────────────────────────────────────────
-let server: { state: "running" | "stopped"; holder: "agent" | "person"; calls: string[] };
+let server: { state: "running" | "stopped"; holder: "agent" | "person"; calls: string[]; size?: string };
 const view = () => ({
-  desktop: { computerId: "nina", state: server.state, display: ":99" },
+  desktop: { computerId: "nina", state: server.state, display: ":99", ...(server.size ? { size: server.size } : {}) },
   control: { computerId: "nina", holder: server.holder, ...(server.holder === "person" ? { person: "ale@x.it", since: new Date().toISOString() } : {}), requests: [], open: [] },
   ...(server.state === "running" ? { viewer: { mode: server.holder === "person" ? "control" : "view", path: "/api/v1/computers/nina/desktop/vnc" } } : {}),
 });
@@ -179,4 +181,59 @@ test("full screen without the Fullscreen API: a clear error, nothing else change
   await click(byText("Full screen"));
   expect(document.querySelector('[role="alert"]')?.textContent).toMatch(/Full screen is not available in this browser/);
   expect(vnc.clients).toHaveLength(1);
+});
+
+/** Type into a React-controlled textarea. */
+async function typeInto(el: HTMLTextAreaElement, value: string) {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(el, value);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+test("clipboard: what is copied on the desktop shows for every viewer; text goes to the desktop only in control", async () => {
+  server = { state: "running", holder: "agent", calls: [] };
+  installFetch();
+  const writeText = vi.fn(() => Promise.resolve());
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+  try {
+    await render();
+    const rfb = vnc.clients[0]! as unknown as EventTarget & { pasted: string[] };
+    expect(document.querySelector('[data-testid="computer-clipboard"]')).toBeNull();
+    await click(byText("Clipboard"));
+    expect(document.querySelector('[data-testid="computer-clipboard"]')).toBeTruthy();
+    // ServerCutText: noVNC's clipboard event
+    await act(async () => { rfb.dispatchEvent(new CustomEvent("clipboard", { detail: { text: "codice 1234" } })); });
+    const from = document.querySelector<HTMLTextAreaElement>('[data-testid="clipboard-from-desktop"]')!;
+    expect(from.value).toBe("codice 1234");
+    await click(byText("Copy"));
+    expect(writeText).toHaveBeenCalledWith("codice 1234");
+    // view-only: nothing can be sent
+    const to = document.querySelector<HTMLTextAreaElement>('[data-testid="clipboard-to-desktop"]')!;
+    expect(to.disabled).toBe(true);
+    expect(byText("Send")?.disabled).toBe(true);
+
+    await click(byText("Take control"));
+    await act(async () => { rfb.dispatchEvent(new Event("connect")); });
+    await flush();
+    expect(to.disabled).toBe(false);
+    await typeInto(to, "https://example.com/login");
+    await click(byText("Send"));
+    expect(rfb.pasted).toEqual(["https://example.com/login"]);
+  } finally {
+    delete (navigator as { clipboard?: unknown }).clipboard;
+  }
+});
+
+test("the viewer keeps the desktop's proportions (its size)", async () => {
+  expect(desktopAspect("1600x900")).toBe("1600 / 900");
+  expect(desktopAspect(undefined)).toBeUndefined();
+  expect(desktopAspect("big")).toBeUndefined();
+  server = { state: "running", holder: "agent", calls: [], size: "1600x900" };
+  installFetch();
+  await render();
+  const viewer = document.querySelector<HTMLElement>('[role="application"]')!;
+  expect(viewer.style.aspectRatio).toBe("1600 / 900");
+  expect(viewer.dataset.size).toBe("1600x900");
+  expect(viewer.className).not.toMatch(/aspect-\[16\/10\]/);
 });

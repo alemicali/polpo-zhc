@@ -36,7 +36,7 @@ import type { HarnessSession } from "@/lib/harnesses-api";
 import { agentEngineId, computerBrand, formatMs, formatUsd } from "@/lib/run-context";
 import { NETWORK_MODES } from "@/lib/sandbox-api";
 import {
-  STATUS_SHORT_LABELS, availableActions, computersApi, formatBytes, formatLastUsed, formatUptime, kindLabel, stopLabel,
+  DEFAULT_DESKTOP_SIZE, STATUS_SHORT_LABELS, availableActions, computersApi, formatBytes, formatLastUsed, formatUptime, kindLabel, stopLabel,
   type Computer, type ComputerDetail, type ComputerEgress,
 } from "@/lib/computers-api";
 import { cn } from "@/lib/utils";
@@ -420,6 +420,7 @@ export function ComputerDetailPage() {
                 ["Size", c.machine?.resources && (c.machine.resources.cpus || c.machine.resources.memoryMb || c.machine.resources.diskMb)
                   ? [c.machine.resources.cpus ? `${c.machine.resources.cpus} CPU` : "", c.machine.resources.memoryMb ? `${size(c.machine.resources.memoryMb)} memory` : "", c.machine.resources.diskMb ? `${size(c.machine.resources.diskMb)} disk` : ""].filter(Boolean).join(" · ")
                   : "the image's or the provider's"],
+                c.kind !== "host" && ["Desktop", `${c.desktop?.size ?? DEFAULT_DESKTOP_SIZE} · XFCE`],
                 ["Machine id", c.remoteId ? <span className="font-mono">{c.remoteId}</span> : c.status === "hibernated" ? "none while it hibernates" : "none yet"],
                 !!c.createdAt && ["Created", date(c.createdAt)],
                 !!c.updatedAt && ["Updated", date(c.updatedAt)],

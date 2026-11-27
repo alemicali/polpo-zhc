@@ -121,6 +121,21 @@ describe("the RFB proxy", () => {
     expect(sent()).toEqual(provide);
   });
 
+  it("clipboard both ways: the desktop's (ServerCutText) reaches every viewer; a viewer's only in control", () => {
+    let control = false;
+    const { proxy, sent, toClient } = handshaken({ control: () => control });
+    // copied on the desktop: x11vnc sends ServerCutText (type 3), relayed as is, view-only or not
+    const serverCut = Buffer.concat([Buffer.from([3, 0, 0, 0]), u32(5), Buffer.from("ciao!")]);
+    proxy.fromServer(serverCut);
+    expect(Buffer.concat(toClient.splice(0))).toEqual(serverCut);
+    // the viewer's paste box: dropped while watching, sent while in control
+    proxy.fromClient(cutText("incolla"));
+    expect(sent()).toEqual(Buffer.alloc(0));
+    control = true;
+    proxy.fromClient(cutText("incolla"));
+    expect(sent()).toEqual(cutText("incolla"));
+  });
+
   it("an extended PointerEvent (7 bytes) once the viewer asked for extended mouse buttons", () => {
     const { proxy, sent } = handshaken({ control: () => true });
     const enc = setEncodings([7, -316]);

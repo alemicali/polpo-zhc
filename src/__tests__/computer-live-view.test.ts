@@ -74,7 +74,10 @@ describe("headed browser in the VM", () => {
     expect(headless).toContain("'--headless=new'");
     expect(headless).not.toContain("DISPLAY");
     const headed = sandboxBrowserCommand(["open", "https://x.test"], { session: "a", profileName: "a", proxy: "socks5://127.0.0.1:1081", headed: true });
-    expect(headed.startsWith(`(${DESKTOP_DISPLAY_COMMAND}) >/dev/null 2>&1; P=$(`)).toBe(true);
+    // the desktop first (XFCE on the display), then the "Chrome di <agent>" launcher, then the agent's Chrome
+    expect(headed.startsWith(`(${DESKTOP_DISPLAY_COMMAND}) >/dev/null 2>&1; (`)).toBe(true);
+    expect(headed).toContain("polpo-chrome-a.desktop");
+    expect(headed.indexOf("polpo-chrome-a.desktop")).toBeLessThan(headed.lastIndexOf(">/dev/null 2>&1; P=$("));
     expect(headed).toContain("DISPLAY=':99' $S nohup");
     expect(headed).not.toContain("--headless");
     for (const c of [headed, headless]) {
@@ -161,7 +164,7 @@ describe("the desktop in the VM", () => {
     expect(desktopViewCommand({ restart: true })).toContain(`if [ "1" = 1 ]`);
     expect(keep).toContain(`"$${DESKTOP_PASSWORD_ENV}"`);
     expect(desktopInstallCommand("view")).toContain("command -v x11vnc >/dev/null 2>&1 || need=\"$need x11vnc\"");
-    expect(desktopInstallCommand("view")).toContain("[ -z \"$need\" ] && exit 0");
+    expect(desktopInstallCommand("view")).toContain("[ -z \"$need$desk\" ] && exit 0");
     expect(desktopInstallCommand("display")).not.toContain("x11vnc");
     expect(DESKTOP_STOP_COMMAND).not.toContain("xvfb");
     expect(parseDesktopInspect("display=1\nwm=0\nvnc=1\nws=1\ninstalled=1\n")).toEqual({ display: true, wm: false, vnc: true, ws: true, installed: true });
