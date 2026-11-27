@@ -10,7 +10,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils";
 import { AGENT_COLOR_TOKENS, agentColor, agentColorClasses, agentColorIndexFromName, parseAgentColor } from "@/lib/agent-colors";
 
-export function AgentColorPicker({ agent, onChanged }: { agent: AgentConfig; onChanged?: () => void | Promise<void> }) {
+/** `compact`: the trigger is the colour dot alone (next to the agent's name). */
+export function AgentColorPicker({ agent, onChanged, compact = false }: { agent: AgentConfig; onChanged?: () => void | Promise<void>; compact?: boolean }) {
   const { updateAgent } = useAgents();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -39,9 +40,10 @@ export function AgentColorPicker({ agent, onChanged }: { agent: AgentConfig; onC
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button type="button" aria-label="Agent colour" data-testid="agent-color-trigger"
-          className="ml-auto inline-flex items-center gap-1.5 rounded-control px-1 py-0.5 hover:bg-accent/40">
-          <span className={cn("size-3.5 rounded-pill", current.dot)} />
-          <span className="text-foreground">{chosen ? `Colour ${current.index}` : "Auto"}</span>
+          title={compact ? `Colour: ${chosen ? current.index : "auto"} (change)` : undefined}
+          className={cn("inline-flex shrink-0 items-center gap-1.5 rounded-control hover:bg-accent/40", compact ? "p-1" : "ml-auto px-1 py-0.5")}>
+          <span className={cn("rounded-pill", compact ? "size-2.5" : "size-3.5", current.dot)} />
+          {!compact && <span className="text-foreground">{chosen ? `Colour ${current.index}` : "Auto"}</span>}
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-64 p-3">

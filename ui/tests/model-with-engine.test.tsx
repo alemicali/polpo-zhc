@@ -134,24 +134,24 @@ describe("resolution and tooltip", () => {
 });
 
 describe("spot checks", () => {
-  test("the agent hero card: model · engine in the header and the Model row", () => {
+  test("the agent hero card: the harness and the model on two rows (not repeated in the header)", () => {
     heroAgent.agent = { name: "dev", model: "anthropic:claude-opus-4-5", engine: { harness: "opencode", model: "kimi-k3.1" }, identity: {} };
     wrap(<AgentHeroCard />);
-    const head = screen.getByTestId("agent-hero-model");
-    expect(head.textContent).toContain("kimi-k3.1");
-    expect(mark(head).textContent).toBe("OpenCode Harness");
+    expect(screen.queryByTestId("agent-hero-model")).toBeNull();
     const row = screen.getByTestId("agent-hero-model-row");
     expect(row.textContent).toContain("kimi-k3.1");
-    expect(mark(row).getAttribute("data-engine")).toBe("opencode");
+    expect(row.getAttribute("data-engine")).toBe("opencode");
+    expect(row.querySelector('[data-testid="engine-mark"]')).toBeNull();
+    const marks = screen.getAllByTestId("engine-mark");
+    expect(marks.map((m) => m.textContent)).toContain("OpenCode Harness");
   });
 
-  test("the agent hero card on Polpo's engine: its model · Polpo", () => {
+  test("the agent hero card on Polpo's engine: its model, and Polpo as the harness", () => {
     heroAgent.agent = { name: "dev", model: "openai:gpt-6", identity: {} };
     wrap(<AgentHeroCard />);
-    const head = screen.getByTestId("agent-hero-model");
-    expect(head.textContent).toContain("openai:gpt-6");
-    expect(mark(head).getAttribute("data-engine")).toBe("polpo");
-    expect(mark(head).textContent).toContain("Polpo");
+    expect(screen.getByTestId("agent-hero-model-row").textContent).toContain("openai:gpt-6");
+    const marks = screen.getAllByTestId("engine-mark");
+    expect(marks.some((m) => m.getAttribute("data-engine") === "polpo" && (m.textContent ?? "").includes("Polpo"))).toBe(true);
   });
 
   test("the chat header: the agent's model with its engine's mark", () => {
