@@ -396,7 +396,9 @@ describe("the browser of a remote computer going out through the tailnet", () =>
     await tool(tools, "browser_navigate").execute("1", { url: "https://example.com" });
     const calls = browserCalls(vm);
     expect(calls[0]).toBe("agent-browser --session 'growth' 'close' --json");
-    expect(calls[1]).toContain(`'--proxy' '${TAILNET_BROWSER_PROXY}' '--proxy-bypass' '<-loopback>'`);
+    // the agent's own Chrome gets the forwarder as its proxy (agent-browser attaches over CDP)
+    expect(calls[1]).toContain(`'--proxy-server=${TAILNET_BROWSER_PROXY}' '--proxy-bypass-list=<-loopback>'`);
+    expect(calls[1]).toContain(`--cdp "$P"`);
     expect(calls[1]).toContain("'open' 'https://example.com'");
     expect(vm.marker).toBe(true);
     expect(vm.calls.find((c) => c.kind === "marker-write")!.command).toContain(`"$HOME"/'.polpo/browser-profiles/growth'/.polpo-egress`);
@@ -426,13 +428,13 @@ describe("the browser of a remote computer going out through the tailnet", () =>
     vm2.profileExists = false;
     const direct = createBrowserTools("/vm/work", "growth3", ["browser_navigate"], "/host/.polpo/browser-profiles/growth3", "/vm/out", undefined, undefined, { shell: new VmShell(vm2), fs: fs(vm2), egress: { ...egress, tailnet: ref("browser-pc-2") } });
     await tool(direct, "browser_navigate").execute("1", { url: "https://example.com" });
-    expect(browserCalls(vm2).at(-1)).toContain("'--proxy'");
+    expect(browserCalls(vm2).at(-1)).toContain("--proxy-server=");
     vm2.proxyUp = false;
     tailnetEgress.invalidate();
     await tool(direct, "browser_navigate").execute("2", { url: "https://example.com" });
     const [close, open] = browserCalls(vm2).slice(-2);
     expect(close).toBe("agent-browser --session 'growth3' 'close' --json");
-    expect(open).not.toContain("--proxy");
+    expect(open).not.toContain("--proxy-server");
   });
 
   test("a remote computer without a tailnet egress: the browser in the VM goes out from the VM", async () => {
@@ -441,7 +443,7 @@ describe("the browser of a remote computer going out through the tailnet", () =>
     const tools = createBrowserTools("/vm/work", "growth4", ["browser_navigate"], undefined, "/vm/out", undefined, undefined, { shell: new VmShell(vm), egress: { name: "home", url: proxies.home }, headed: false });
     await tool(tools, "browser_navigate").execute("1", { url: "https://example.com" });
     expect(vm.calls.map((c) => c.kind)).toEqual(["browser"]);
-    expect(browserCalls(vm)[0]).not.toContain("--proxy");
+    expect(browserCalls(vm)[0]).not.toContain("--proxy-server");
   });
 });
 

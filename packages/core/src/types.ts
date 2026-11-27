@@ -250,6 +250,9 @@ export interface AgentIdentity {
   email?: string;            // Primary email address (also default SMTP from)
   bio?: string;              // Brief persona description
   timezone?: string;         // "Europe/Rome"
+  /** Its language as a BCP 47 tag ("it-IT", "en-US"): the language of its browser on a remote
+   *  computer (Chrome --lang / Accept-Language). Default "it-IT" (agent-chrome.ts). */
+  locale?: string;
 
   /** Avatar image path relative to project root (e.g. ".polpo/avatars/alice.png").
    *  Served via GET /api/v1/files/read?path=<avatar> */

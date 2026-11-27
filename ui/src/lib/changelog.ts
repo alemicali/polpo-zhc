@@ -32,6 +32,21 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-27-agent-own-chrome",
+    date: "2026-11-27",
+    kind: "improved",
+    title: "Il Chrome dell'agente come quello di una persona: l'accesso a Google funziona",
+    summary: "Sui computer remoti Polpo avvia da sé il Google Chrome dell'agente, senza i segni dell'automazione: Google non lo blocca più come \"browser non sicuro\". E la vista dal vivo va a schermo intero.",
+    body: [
+      "- **Niente più \"Questo browser o app potrebbe non essere sicuro\"**: prima il browser dell'agente veniva avviato con i flag di automazione (`navigator.webdriver` vero) e Google rifiutava l'accesso anche con Chrome vero e una connessione di casa. Ora sul computer remoto Polpo avvia Google Chrome come lo avvierebbe una persona, con il profilo dell'agente, e gli strumenti del browser ci si collegano dall'interno del computer (CDP su 127.0.0.1).",
+      "- **Lingua e fuso orario dell'agente**: il browser parla la lingua dell'identità dell'agente (`identity.locale`, per esempio `en-US`) e ne usa il fuso orario (`identity.timezone`); se non sono impostati, italiano (`it-IT`) e `Europe/Rome`.",
+      "- **Resta aperto tra un lavoro e l'altro**: alla fine di un'attività il Chrome dell'agente non viene chiuso, così una pagina lasciata aperta durante la presa di controllo non si perde. Si chiude con il computer (spegnimento o ibernazione) e riparte da solo al comando successivo; se si è chiuso o cambia la connessione in uscita, viene riavviato.",
+      "- **Vista dal vivo a schermo intero**: il pulsante *Full screen* mostra solo il desktop del computer a tutto schermo, adattato alla finestra; *Esc* o *Exit full screen* per uscire. Mentre hai il controllo la tastiera resta sul desktop.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i computer", to: "/computers" },
+  },
+  {
     id: "2026-11-27-live-view-instant-control",
     date: "2026-11-27",
     kind: "improved",

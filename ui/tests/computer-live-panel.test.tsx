@@ -126,3 +126,57 @@ test("connects by itself as soon as the desktop runs (an agent's takeover reques
   expect(vnc.clients).toHaveLength(1);
   expect(server.calls.filter((c) => c.startsWith("POST"))).toEqual([]);
 });
+
+test("full screen: the viewer goes full screen (Esc exits), noVNC fits it, the keyboard stays on the desktop in control", async () => {
+  server = { state: "running", holder: "person", calls: [] };
+  installFetch();
+  // jsdom has no Fullscreen API: a stand-in that behaves like the browser's
+  let fullscreenElement: Element | null = null;
+  Object.defineProperty(document, "fullscreenElement", { configurable: true, get: () => fullscreenElement });
+  const change = () => document.dispatchEvent(new Event("fullscreenchange"));
+  const request = vi.fn(function (this: Element) { fullscreenElement = this; change(); return Promise.resolve(); });
+  const exit = vi.fn(() => { fullscreenElement = null; change(); return Promise.resolve(); });
+  Object.defineProperty(HTMLElement.prototype, "requestFullscreen", { configurable: true, value: request });
+  Object.defineProperty(document, "exitFullscreen", { configurable: true, value: exit });
+  try {
+    await render();
+    const rfb = vnc.clients[0]! as unknown as { focus: () => void; scaleViewport: boolean };
+    const focus = vi.spyOn(rfb, "focus");
+    expect(rfb.scaleViewport).toBe(true);
+    const viewer = document.querySelector<HTMLElement>('[role="application"]')!;
+    expect(viewer.dataset.fullscreen).toBeUndefined();
+
+    await click(byText("Full screen"));
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.contexts[0]).toBe(viewer);
+    expect(viewer.dataset.fullscreen).toBe("true");
+    expect(viewer.className).not.toMatch(/aspect-/);
+    // you hold control: the keyboard goes to the desktop in full screen
+    expect(focus).toHaveBeenCalled();
+
+    // the exit button inside the full-screen viewer (Esc does the same in a browser)
+    await click(byText("Exit full screen"));
+    expect(exit).toHaveBeenCalledTimes(1);
+    expect(viewer.dataset.fullscreen).toBeUndefined();
+    expect(byText("Exit full screen")).toBeUndefined();
+
+    // Esc: the browser leaves full screen by itself, the panel follows
+    await click(byText("Full screen"));
+    fullscreenElement = null;
+    await act(async () => change());
+    expect(viewer.dataset.fullscreen).toBeUndefined();
+  } finally {
+    delete (HTMLElement.prototype as { requestFullscreen?: unknown }).requestFullscreen;
+    delete (document as { exitFullscreen?: unknown }).exitFullscreen;
+    delete (document as { fullscreenElement?: unknown }).fullscreenElement;
+  }
+});
+
+test("full screen without the Fullscreen API: a clear error, nothing else changes", async () => {
+  server = { state: "running", holder: "agent", calls: [] };
+  installFetch();
+  await render();
+  await click(byText("Full screen"));
+  expect(document.querySelector('[role="alert"]')?.textContent).toMatch(/Full screen is not available in this browser/);
+  expect(vnc.clients).toHaveLength(1);
+});

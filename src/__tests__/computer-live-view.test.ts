@@ -21,7 +21,6 @@ import {
   agentBrowserEnv, browserPromptNote, cdpHttpUrl, createBrowserTools, sandboxBrowserCommand, sandboxCdpUrlCommand,
   AGENT_BROWSER_CHECK_COMMAND,
 } from "../tools/browser-tools.js";
-import { SANDBOX_CHROME_FLAGS } from "../tools/agent-chrome.js";
 import { createSystemTools } from "../tools/system-tools.js";
 import {
   ComputerDesktops, DESKTOP_DISPLAY_COMMAND, DESKTOP_INSPECT_COMMAND, DESKTOP_PASSWORD_ENV, DESKTOP_STOP_COMMAND, DESKTOP_VAULT_OWNER,
@@ -70,14 +69,21 @@ class FakeVmShell implements Shell {
 }
 
 describe("headed browser in the VM", () => {
-  it("adds the display and --headed; headless stays exactly as before", () => {
+  it("headed: the display first, the agent's Chrome on it; headless: --headless=new; same profile and egress proxy", () => {
     const headless = sandboxBrowserCommand(["open", "https://x.test"], { session: "a", profileName: "a", proxy: "socks5://127.0.0.1:1081" });
-    expect(headless.startsWith(`agent-browser ${SANDBOX_CHROME_FLAGS} --session 'a' --profile "$HOME"/'.polpo/browser-profiles/a' '--proxy' 'socks5://127.0.0.1:1081'`)).toBe(true);
-    expect(headless).not.toContain("--headed");
+    expect(headless).toContain("'--headless=new'");
     expect(headless).not.toContain("DISPLAY");
     const headed = sandboxBrowserCommand(["open", "https://x.test"], { session: "a", profileName: "a", proxy: "socks5://127.0.0.1:1081", headed: true });
-    // the display first, then exactly the headless command with --headed: the same profile and egress proxy
-    expect(headed).toBe(`(${DESKTOP_DISPLAY_COMMAND}) >/dev/null 2>&1; DISPLAY=:99 agent-browser --headed${headless.slice("agent-browser".length)}`);
+    expect(headed.startsWith(`(${DESKTOP_DISPLAY_COMMAND}) >/dev/null 2>&1; P=$(`)).toBe(true);
+    expect(headed).toContain("DISPLAY=':99' $S nohup");
+    expect(headed).not.toContain("--headless");
+    for (const c of [headed, headless]) {
+      expect(c).toContain(`N='a'; PROF="$HOME"/.polpo/browser-profiles/"$N"`);
+      expect(c).toContain("'--proxy-server=socks5://127.0.0.1:1081' '--proxy-bypass-list=<-loopback>'");
+      expect(c).toContain("'--window-size=1280,800'");
+      expect(c.endsWith(`agent-browser --session 'a' --cdp "$P" 'open' 'https://x.test' --json`)).toBe(true);
+      expect(c).not.toMatch(/--headed|--profile |--executable-path/);
+    }
   });
 
   it("a headed agent's browser tools install the display once and run headed", async () => {
@@ -88,7 +94,7 @@ describe("headed browser in the VM", () => {
     await nav.execute("2", { url: "https://example.com/2" });
     const cmds = shell.calls.map((c) => c.command);
     expect(cmds.filter((c) => c === desktopInstallCommand("display"))).toHaveLength(1);
-    expect(cmds.filter((c) => c.includes("DISPLAY=:99 agent-browser --headed"))).toHaveLength(2);
+    expect(cmds.filter((c) => c.includes("DISPLAY=':99' $S nohup") && c.includes(`--cdp "$P"`))).toHaveLength(2);
   });
 });
 
@@ -106,7 +112,8 @@ describe("CDP_URL", () => {
   });
 
   it("remote: CDP_URL, DISPLAY and the session in the environment; no session, no CDP_URL", async () => {
-    const live = new FakeVmShell((c) => (c.includes("get cdp-url") ? { stdout: JSON.stringify({ success: true, data: { cdpUrl: "ws://127.0.0.1:45555/devtools/browser/abc" } }) } : {}));
+    // the agent's own Chrome: its DevTools port while it runs (recorded by Polpo when it launched it)
+    const live = new FakeVmShell((c) => (c.includes(".polpo/browser-chrome/'sitoinchat'") ? { stdout: "45555\n" } : {}));
     expect(await agentBrowserEnv({ session: "sitoinchat", shell: live, headed: true, remote: true }))
       .toEqual({ POLPO_BROWSER_SESSION: "sitoinchat", CDP_URL: "http://127.0.0.1:45555", DISPLAY: ":99" });
     const none = new FakeVmShell(() => ({ stdout: "" }));

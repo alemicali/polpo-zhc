@@ -294,6 +294,30 @@ CAPTCHA and give it back, and agents ask for it with `request_computer_takeover`
 (`/usr/bin/google-chrome`, installed once on a VM without it), never Chromium, which sites flag as a
 bot. See [computer-live-view.md](computer-live-view.md).
 
+### The agent's Chrome on a remote computer
+
+Polpo **launches the agent's Chrome itself** in the VM, one per agent profile, and agent-browser
+attaches to it over CDP (`--cdp <port>`). A Chrome launched by agent-browser (through Playwright)
+carries automation flags: `navigator.webdriver` is `true` and Google sign-in refuses it ("This
+browser or app may not be secure") even with real Chrome on a residential IP. Ours is launched like a
+person would launch it: `--user-data-dir=$HOME/.polpo/browser-profiles/<profile>`,
+`--remote-debugging-port=<port>` on `127.0.0.1`, `--no-first-run --no-default-browser-check`, the
+desktop's window size, the egress proxy as `--proxy-server`, `--no-sandbox` only as root, no
+automation flags; headed on the desktop (`:99`) unless `browserHeaded: false`.
+
+- **Language and timezone**: from the agent's identity, `identity.locale` (BCP 47, e.g. `"en-US"`)
+  and `identity.timezone` (IANA, e.g. `"Europe/Rome"`); default **`it-IT`** and **`Europe/Rome`**.
+  `--lang`/`--accept-lang` set `navigator.language` and `Accept-Language`, `TZ` the timezone.
+  `identity.locale` is set like the other identity fields (`.polpo/polpo.json`, REST agent update,
+  Polpo's `set_identity`).
+- **Lifecycle**: pid and port in `$HOME/.polpo/browser-chrome/`; relaunched when it died or its
+  settings changed; never stopped at the end of a run (a page a person left open stays), gone with
+  the computer (stop, hibernation).
+- **On this server** (no remote computer) agent-browser still launches Chrome itself
+  (`--executable-path`, `--profile`).
+
+Details: [computer-live-view.md](computer-live-view.md#the-agents-own-chrome-remote-computers).
+
 ## API, tools, events
 
 - REST: `GET/POST /api/v1/computers` (`?live=0`: the last known status; `?fresh=1`: skip the 15 s

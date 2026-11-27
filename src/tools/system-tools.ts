@@ -763,7 +763,7 @@ export function createSystemTools(cwd: string, allowedTools?: string[], allowedP
 
 // === Extended Tools Factory ===
 
-import { createBrowserTools, ALL_BROWSER_TOOL_NAMES, agentBrowserEnv, shellIsRemote } from "./browser-tools.js";
+import { createBrowserTools, ALL_BROWSER_TOOL_NAMES, agentBrowserEnv, browserProfileName, shellIsRemote, type BrowserIdentity } from "./browser-tools.js";
 import { ALL_HTTP_TOOL_NAMES } from "./http-tools.js";
 import { createEmailTools, ALL_EMAIL_TOOL_NAMES } from "./email-tools.js";
 import { createVaultTools, ALL_VAULT_TOOL_NAMES } from "./vault-tools.js";
@@ -894,6 +894,8 @@ export interface CreateAllToolsOptions {
   browserHeaded?: boolean;
   /** The computer the run is on: while a person holds its desktop (take control), the browser waits. */
   browserControl?: { computerId: string; store: Pick<import("../sandbox/computer-control.js").ComputerControlStore, "heldByPerson"> };
+  /** identity.locale / identity.timezone: its Chrome's language and timezone on a remote computer (default it-IT, Europe/Rome). */
+  browserIdentity?: BrowserIdentity;
 }
 
 /**
@@ -933,7 +935,10 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
   const browserRequested = categoryRequested(ALL_BROWSER_TOOL_NAMES);
   const session = browserSession ?? "default";
   const commandEnv = browserRequested
-    ? async () => agentBrowserEnv({ session, ...(options.shell ? { shell: options.shell } : {}), ...(typeof options.browserHeaded === "boolean" ? { headed: options.browserHeaded } : {}), remote: await shellIsRemote(options.shell) })
+    ? async () => agentBrowserEnv({
+      session, ...(options.shell ? { shell: options.shell } : {}), ...(typeof options.browserHeaded === "boolean" ? { headed: options.browserHeaded } : {}),
+      ...(options.browserProfileDir ? { profileName: browserProfileName(options.browserProfileDir) } : {}), remote: await shellIsRemote(options.shell),
+    })
     : undefined;
   tools.push(...createSystemTools(cwd, allowedTools, allowedPaths, options.outputDir, options.vault, options.fs, options.shell, { toolOutputDir, sandboxProvider: options.sandboxProvider, ...(commandEnv ? { commandEnv } : {}) }));
 
@@ -947,6 +952,7 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
     tools.push(...createBrowserTools(cwd, browserSession, allowedTools, options.browserProfileDir, toolOutputDir, allowedPaths, options.browserNetwork, {
       shell: options.shell, fs: options.fs, vault: options.vault, egress: options.browserEgress,
       ...(typeof options.browserHeaded === "boolean" ? { headed: options.browserHeaded } : {}), ...(options.browserControl ? { control: options.browserControl } : {}),
+      ...(options.browserIdentity ? { identity: options.browserIdentity } : {}),
     }));
   }
 

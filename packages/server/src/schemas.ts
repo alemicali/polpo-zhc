@@ -480,6 +480,7 @@ const AgentIdentitySchema = z.object({
   email: z.string().optional(),
   bio: z.string().optional(),
   timezone: z.string().optional(),
+  locale: z.string().regex(/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/, "a BCP 47 language tag, e.g. it-IT").optional(),
   avatar: z.string().optional(),
   color: z.string().regex(/^agent(?:[1-9]|10)$/, "an agent colour token: agent1 … agent10").optional(),
   responsibilities: z.array(z.union([z.string(), AgentResponsibilitySchema])).optional(),
