@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Dashboard → Active Agents**: what the agent is doing is rendered as markdown (no raw `**`).
+
 ### Changed
 - **Agents' Chrome on a remote computer is launched by Polpo, attached over CDP** (docs/computer-live-view.md, docs/computers.md). agent-browser launched Chrome through Playwright with automation flags (`--enable-automation`…), so `navigator.webdriver` was `true` and Google sign-in answered "This browser or app may not be secure" even with real Google Chrome and a residential IP. Now, before every browser command that can open a page, the VM gets ONE Chrome per agent profile launched by Polpo's own command (`src/tools/agent-chrome.ts`, `agentChromeEnsureScript`): `--user-data-dir=$HOME/.polpo/browser-profiles/<profile>`, `--remote-debugging-port=<port>` on `127.0.0.1` (9300–9899, stable per profile), `--no-first-run --no-default-browser-check`, the desktop's window size, the egress proxy (the same decision as before: the tailnet forwarder) as `--proxy-server`, `--no-sandbox` only as root, headed on the desktop (`:99`) unless `browserHeaded: false` (`--headless=new`), no automation flags. agent-browser then runs with `--cdp <port>` (no `--profile`, `--executable-path`, `--headed` or proxy flags); `CDP_URL` points to that Chrome.
   - **Language and timezone**: new `identity.locale` (BCP 47; core type, REST agent schema, Polpo's `set_identity`) and `identity.timezone` give `--lang`/`--accept-lang` and `TZ`; defaults `it-IT` and `Europe/Rome`.

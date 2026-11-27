@@ -43,6 +43,7 @@ import { Eyebrow } from "@/components/shared/eyebrow";
 import { StatValue, type StatTone } from "@/components/shared/stat-value";
 import { useTokenUsage, type TokenUsageRange } from "@/hooks/use-token-usage";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
+import { MessageResponse } from "@/components/ai-elements/message";
 
 const DASHBOARD_RANGES: { value: TokenUsageRange; label: string; shortLabel: string }[] = [
   { value: "today", label: "Today", shortLabel: "Today" },
@@ -621,9 +622,9 @@ const ActiveAgents = memo(function ActiveAgents({ processes, agents, tasks }: { 
                   <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
                 </div>
               </div>
-              <p className="line-clamp-3 text-xs text-muted-foreground">
-                {narrative}
-              </p>
+              <div className="line-clamp-3 text-xs text-muted-foreground [&_p]:m-0 [&_p]:inline" data-testid="active-agent-narrative">
+                <MessageResponse>{narrative}</MessageResponse>
+              </div>
             </Link>
           );
         })}
