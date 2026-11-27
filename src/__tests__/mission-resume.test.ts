@@ -80,6 +80,42 @@ describe("Mission resume (Orchestrator)", () => {
       expect(run.group).toBe("report (2)");
       expect(run.tasks.every(t => t.group === "report (2)")).toBe(true);
     });
+
+    it("renaming a mission moves its tasks and checkpoints to the new name, so it is still resumed after a restart", async () => {
+      const data = JSON.stringify({
+        tasks: [
+          { title: "Draft", description: "d", assignTo: "dev" },
+          { title: "Publish", description: "p", assignTo: "dev", dependsOn: ["Draft"] },
+        ],
+        checkpoints: [{ name: "review", afterTasks: ["Draft"], blocksTasks: ["Publish"] }],
+      });
+      const mission = await orchestrator.saveMission({ name: "factory-00", data });
+      const other = await orchestrator.saveMission({ name: "factory-00 bis", data });
+      await orchestrator.executeMission(mission.id);
+      await orchestrator.executeMission(other.id);
+
+      const renamed = await orchestrator.updateMission(mission.id, { name: "MI · Milano · zone (00)" });
+      expect(renamed.name).toBe("MI · Milano · zone (00)");
+
+      const tasks = (await store.getState()).tasks;
+      const own = tasks.filter(t => t.missionId === mission.id);
+      expect(own).toHaveLength(2);
+      expect(own.every(t => t.group === "MI · Milano · zone (00)")).toBe(true);
+      // another mission whose name starts with the old one is untouched
+      expect(tasks.filter(t => t.missionId === other.id).every(t => t.group === "factory-00 bis")).toBe(true);
+
+      const missionExec = (orchestrator as any).engine.missionExec;
+      expect(missionExec.getCheckpoints("MI · Milano · zone (00)").map((c: { name: string }) => c.name)).toEqual(["review"]);
+      expect(missionExec.getCheckpoints("factory-00")).toEqual([]);
+
+      // a restart: a new orchestrator over the same store
+      const restarted = new Orchestrator({ workDir: TEST_DIR, store, runStore, assessFn: async () => ({ passed: true, checks: [], metrics: [], timestamp: new Date().toISOString() }) });
+      await restarted.initInteractive("test-project", { name: "test-team", agents: [createTestAgent({ name: "dev" })] });
+      const resumable = await restarted.getResumableMissions();
+      expect(resumable.map(m => m.id)).toContain(mission.id);
+      const resumed = await restarted.resumeMission(mission.id);
+      expect(resumed.pending).toBe(2);
+    });
   });
 
   describe("getResumableMissions", () => {

@@ -59,5 +59,5 @@ export type {
 } from "./deps.js";
 
 // Playbook utilities (pure logic, edge-compatible)
-export { validateParams, instantiatePlaybook } from "./playbook-utils.js";
+export { validateParams, instantiatePlaybook, resolveMissionName, missionNameErrors } from "./playbook-utils.js";
 export type { PlaybookParameter, PlaybookDefinition, ValidationResult } from "./playbook-utils.js";

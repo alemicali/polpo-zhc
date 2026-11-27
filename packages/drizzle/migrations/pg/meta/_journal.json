@@ -162,6 +162,13 @@
       "when": 1795728473313,
       "tag": "0022_notification_origin",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1795764448283,
+      "tag": "0023_playbook_mission_name",
+      "breakpoints": true
     }
   ]
 }

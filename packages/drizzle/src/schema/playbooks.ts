@@ -8,6 +8,7 @@ export const playbooksSqlite = sqliteTable("playbooks", {
   description: text("description").notNull(),
   mission: text("mission").notNull(),       // JSON-serialized mission object
   parameters: text("parameters"),           // JSON-serialized PlaybookParameter[]
+  missionName: text("mission_name"),        // template for the name of the mission a run creates
   version: text("version"),
   author: text("author"),
   tags: text("tags"),                       // JSON-serialized string[]
@@ -22,6 +23,7 @@ export const playbooksPg = pgTable("playbooks", {
   description: pgText("description").notNull(),
   mission: jsonb("mission").notNull(),      // mission object as JSONB
   parameters: jsonb("parameters"),          // PlaybookParameter[] as JSONB
+  missionName: pgText("mission_name"),      // template for the name of the mission a run creates
   version: pgText("version"),
   author: pgText("author"),
   tags: jsonb("tags"),                      // string[] as JSONB

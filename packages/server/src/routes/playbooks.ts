@@ -2,6 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import {
   validateParams,
   instantiatePlaybook,
+  missionNameErrors,
   type PlaybookParameter,
   type PlaybookDefinition,
 } from "../playbook-utils.js";
@@ -218,6 +219,7 @@ export function playbookRoutes(getDeps: () => PlaybookRunDeps): OpenAPIHono {
               name: z.string().describe("Playbook name (kebab-case)"),
               description: z.string().describe("Human-readable description"),
               mission: z.record(z.string(), z.any()).describe("Mission playbook body with {{placeholder}} syntax"),
+              missionName: z.string().optional().describe("Name of the mission a run creates, with the same {{placeholder}} syntax (default: the playbook name)"),
               parameters: z.array(z.object({
                 name: z.string(),
                 description: z.string(),
@@ -252,7 +254,13 @@ export function playbookRoutes(getDeps: () => PlaybookRunDeps): OpenAPIHono {
       description: body.description,
       mission: body.mission,
       parameters: body.parameters as PlaybookParameter[] | undefined,
+      ...(body.missionName !== undefined ? { missionName: body.missionName } : {}),
     };
+
+    const nameErrors = missionNameErrors(definition);
+    if (nameErrors.length > 0) {
+      return c.json({ ok: false, error: `Invalid playbook definition: ${nameErrors.join(" ")}`, code: "VALIDATION_ERROR" }, 400);
+    }
 
     try {
       const dir = await deps.playbookStore.save(definition);

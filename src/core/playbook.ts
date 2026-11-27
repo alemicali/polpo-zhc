@@ -51,6 +51,12 @@ export interface PlaybookDefinition {
   mission: Record<string, unknown>;
   /** Declared parameters. */
   parameters?: PlaybookParameter[];
+  /**
+   * Name of the mission a run creates: a template using the same {{param}} placeholders as the
+   * mission body (e.g. "{{prov}} · {{comuni}} · zone (00)"). Absent or empty after substitution:
+   * the mission is named after the playbook.
+   */
+  missionName?: string;
 
   // ── Ink registry metadata (optional) ──
 
@@ -67,6 +73,8 @@ export interface PlaybookInfo {
   name: string;
   description: string;
   parameters: PlaybookParameter[];
+  /** Template for the name of the mission a run creates (see PlaybookDefinition.missionName). */
+  missionName?: string;
   /** Absolute path to the playbook directory. */
   path: string;
 }
@@ -129,6 +137,7 @@ function scanPlaybookDir(dir: string): PlaybookInfo[] {
         name: def.name,
         description: def.description,
         parameters: def.parameters ?? [],
+        ...(typeof def.missionName === "string" ? { missionName: def.missionName } : {}),
         path: realPath,
       });
     } catch {
@@ -339,7 +348,39 @@ export function instantiatePlaybook(
     .join(", ");
   const prompt = `playbook:${playbook.name}${paramDesc ? ` (${paramDesc})` : ""}`;
 
-  return { name: playbook.name, data: json, prompt };
+  return { name: resolveMissionName(playbook, resolved), data: json, prompt };
+}
+
+/**
+ * The name of the mission a playbook run creates: `missionName` with its {{param}} placeholders
+ * replaced (unknown ones dropped), trimmed; the playbook's name when absent or empty.
+ */
+export function resolveMissionName(
+  playbook: Pick<PlaybookDefinition, "name" | "missionName">,
+  resolved: Record<string, string | number | boolean>,
+): string {
+  if (typeof playbook.missionName !== "string") return playbook.name;
+  const name = playbook.missionName
+    .replace(/\{\{([^}]+)\}\}/g, (_m, key: string) => {
+      const value = resolved[key.trim()];
+      return value === undefined ? "" : String(value);
+    })
+    .trim();
+  return name || playbook.name;
+}
+
+/**
+ * Errors in a playbook's `missionName`: not a string, or a {{placeholder}} that is not a declared
+ * parameter (the same rule as the mission body; {{tasks.*}} has no value when the mission is created).
+ */
+export function missionNameErrors(def: Pick<Partial<PlaybookDefinition>, "missionName" | "parameters">): string[] {
+  if (def.missionName === undefined) return [];
+  if (typeof def.missionName !== "string") return ["'missionName' must be a string if provided."];
+  const declared = new Set(Array.isArray(def.parameters) ? def.parameters.map(p => p.name) : []);
+  const used = new Set((def.missionName.match(/\{\{([^}]+)\}\}/g) ?? []).map(m => m.slice(2, -2).trim()));
+  return [...used]
+    .filter(n => !declared.has(n))
+    .map(n => `Placeholder "{{${n}}}" in missionName has no matching parameter declaration.`);
 }
 
 // ── Persistence ────────────────────────────────────────────────────────
@@ -382,6 +423,8 @@ export function validatePlaybookDefinition(def: Partial<PlaybookDefinition>): st
       }
     }
   }
+
+  errors.push(...missionNameErrors(def));
 
   // Check that all placeholders in the mission have matching parameter declarations
   if (def.mission && typeof def.mission === "object" && def.parameters) {

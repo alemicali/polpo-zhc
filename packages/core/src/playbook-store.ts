@@ -25,6 +25,8 @@ export interface PlaybookDefinition {
   description: string;
   mission: Record<string, unknown>;
   parameters?: PlaybookParameter[];
+  /** Name of the mission a run creates, with {{param}} placeholders (default: the playbook's name). */
+  missionName?: string;
   version?: string;
   author?: string;
   tags?: string[];
@@ -34,6 +36,8 @@ export interface PlaybookInfo {
   name: string;
   description: string;
   parameters: PlaybookParameter[];
+  /** Template for the name of the mission a run creates. */
+  missionName?: string;
   /** Absolute path (file backend) or opaque location identifier. */
   path: string;
 }

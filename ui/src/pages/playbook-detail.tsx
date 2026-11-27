@@ -171,6 +171,11 @@ export function PlaybookDetailPage() {
             </Badge>
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">{playbook.description}</p>
+          {playbook.missionName && (
+            <p className="text-xs text-muted-foreground mt-0.5" title="Name of the mission each run creates">
+              Mission name: <span className="font-mono text-foreground">{playbook.missionName}</span>
+            </p>
+          )}
         </div>
 
         <Button

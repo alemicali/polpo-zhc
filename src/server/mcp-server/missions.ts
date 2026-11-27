@@ -457,7 +457,7 @@ export function registerMissionTools(tool: Register, deps: McpDeps): void {
 
   // ── Playbooks: reusable mission templates ──
 
-  const playbookItem = z.object({ name: z.string(), description: z.string().optional(), parameters: z.array(looseObject).optional() }).passthrough();
+  const playbookItem = z.object({ name: z.string(), description: z.string().optional(), missionName: z.string().optional(), parameters: z.array(looseObject).optional() }).passthrough();
 
   tool("missions", "polpo_playbooks_list", {
     title: "List playbooks",
@@ -468,11 +468,11 @@ export function registerMissionTools(tool: Register, deps: McpDeps): void {
   }, async ({ limit, cursor }) => {
     const r = await apiGet(deps, "/playbooks");
     if (!r.ok) return apiError(r, "Listing playbooks");
-    const all = ((r.data as Array<{ name: string; description?: string; parameters?: Array<Record<string, unknown>> }>) ?? [])
-      .map((p) => ({ name: p.name, ...(p.description ? { description: p.description } : {}), parameters: (p.parameters ?? []).map(({ name, description, type, required, default: def, enum: values }) => ({ name, description, type, required, default: def, enum: values })) }));
+    const all = ((r.data as Array<{ name: string; description?: string; missionName?: string; parameters?: Array<Record<string, unknown>> }>) ?? [])
+      .map((p) => ({ name: p.name, ...(p.description ? { description: p.description } : {}), ...(p.missionName ? { missionName: p.missionName } : {}), parameters: (p.parameters ?? []).map(({ name, description, type, required, default: def, enum: values }) => ({ name, description, type, required, default: def, enum: values })) }));
     const p = page(all, limit ?? 20, cursor);
     if (!p) return fail(BAD_CURSOR);
-    const lines = p.items.map((pb) => `- ${pb.name}${pb.description ? `: ${short(pb.description, 160)}` : ""}${pb.parameters.length ? `\n  params: ${pb.parameters.map((x) => `${String(x.name)}${x.required ? "*" : ""}`).join(", ")}` : ""}`);
+    const lines = p.items.map((pb) => `- ${pb.name}${pb.description ? `: ${short(pb.description, 160)}` : ""}${pb.missionName ? `\n  mission name: ${pb.missionName}` : ""}${pb.parameters.length ? `\n  params: ${pb.parameters.map((x) => `${String(x.name)}${x.required ? "*" : ""}`).join(", ")}` : ""}`);
     return ok(`${lines.join("\n") || "No playbooks."}${p.next_cursor ? `\n(more: cursor ${p.next_cursor})` : ""}`, p);
   });
 

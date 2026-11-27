@@ -227,3 +227,53 @@ in missions and playbooks".
   "images": [{ "name": "cover", "afterTasks": ["Write"], "prompt": "A cover for: {{tasks.Write}}", "forTasks": ["Send"] }]
 }
 ```
+
+# Mission names
+
+A mission's name is also its tasks' **group**: the key of its checkpoints, delays, decision and
+image nodes, quality gates and volatile team. Names are unique: a new mission whose name is taken
+gets `name (2)`, `name (3)`…
+
+## Renaming a mission
+
+`PATCH /api/v1/missions/:id` with `{ "name": "…" }` (MCP `polpo_mission_update`,
+Polpo's tools) moves everything keyed by the old name to the new one in the same operation:
+
+- its tasks (those with its `missionId`, and legacy tasks without one in the old group), including
+  the numbered runs of a recurring mission (`old #2` → `new #2`);
+- persisted checkpoints, delays, decision and image node state, quality gates and the
+  `missionGroup` of its volatile agents.
+
+Resuming after a restart (`getResumableMissions`, `resumeMission`) finds a mission's tasks by
+`missionId` first, so a renamed mission is resumed and its pending tasks start.
+
+## Playbooks: `missionName`
+
+A mission created by running a playbook is named after the playbook (`factory-00`, then
+`factory-00 (2)`…). A playbook can name its missions with `missionName`: a template using the same
+`{{param}}` placeholders as the mission body.
+
+```json
+{
+  "name": "factory-00-zone-citta",
+  "description": "Zones and territories of a province",
+  "missionName": "{{prov}} · {{comuni}} · zone e territori (00)",
+  "parameters": [
+    { "name": "prov", "description": "Province code", "required": true },
+    { "name": "comuni", "description": "Municipalities", "required": true }
+  ],
+  "mission": { "tasks": ["…"] }
+}
+```
+
+- When the playbook runs (REST `POST /api/v1/playbooks/:name/run`, MCP `polpo_playbook_run`,
+  Polpo's `run_playbook` / `instantiate_playbook`, triggers, CLI `polpo playbook run`), the mission
+  is named with the parameters substituted (defaults applied), trimmed. Absent, or empty after
+  substitution: the playbook's name, as before. A taken name still gets ` (2)`, ` (3)`….
+- Validation: `missionName` must be a string, and every `{{placeholder}}` in it must be a declared
+  parameter (same rule as the mission body; `{{tasks.*}}` has no value when the mission is created).
+  An optional parameter without a default that is not given becomes an empty string.
+- Saved by `POST /api/v1/playbooks`, Polpo's `create_playbook`, the file and database stores
+  (column `playbooks.mission_name`); returned by `GET /api/v1/playbooks` and
+  `GET /api/v1/playbooks/:name`, shown by `polpo_playbooks_list`, `polpo playbook show` and the
+  playbook page in the dashboard.

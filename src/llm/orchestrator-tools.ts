@@ -27,7 +27,7 @@ import {
 import { parseMissionDocument } from "../core/schemas.js";
 import {
   validateParams, instantiatePlaybook,
-  validatePlaybookDefinition,
+  validatePlaybookDefinition, missionNameErrors,
 } from "../core/playbook.js";
 import type { PlaybookDefinition, PlaybookParameter } from "../core/playbook.js";
 import {
@@ -1859,6 +1859,7 @@ const createPlaybookTool: Tool = {
     name: Type.String({ description: "Playbook name (kebab-case, e.g. 'bug-fix', 'code-review')" }),
     description: Type.String({ description: "Human-readable description of what this playbook does" }),
     mission: Type.Object({}, { additionalProperties: true, description: "The mission playbook body — same shape as a MissionDocument. Use {{paramName}} placeholders for dynamic values." }),
+    missionName: Type.Optional(Type.String({ description: "Name of the mission each run creates, with the same {{paramName}} placeholders (e.g. '{{city}} · weekly report'). Default: the playbook name." })),
     parameters: Type.Optional(Type.Array(
       Type.Object({
         name: Type.String({ description: "Parameter name (used as {{name}} in the mission)" }),
@@ -7426,12 +7427,15 @@ async function execCreatePlaybook(polpo: Orchestrator, args: Record<string, unkn
   const description = args.description as string;
   const mission = args.mission as Record<string, unknown>;
   const parameters = args.parameters as PlaybookParameter[] | undefined;
+  const missionName = args.missionName as string | undefined;
 
   if (!name) return "Error: 'name' is required.";
   if (!description) return "Error: 'description' is required.";
   if (!mission) return "Error: 'mission' is required.";
 
-  const definition: PlaybookDefinition = { name, description, mission, parameters };
+  const definition: PlaybookDefinition = { name, description, mission, parameters, ...(missionName !== undefined ? { missionName } : {}) };
+  const nameErrors = missionNameErrors(definition);
+  if (nameErrors.length > 0) return `Error: ${nameErrors.join(" ")}`;
 
   try {
     const dir = await polpo.getPlaybookStore().save(definition);
