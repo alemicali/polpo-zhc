@@ -348,6 +348,10 @@ export type {
   DiffSegment, BenchmarkCompareColumn, BenchmarkCaseComparison, BenchmarkProgressEvent, PlaygroundMocks, PlaygroundPane, PlaygroundPaneInput, PlaygroundExchange, PlaygroundSession, PlaygroundStreamEvent,
 } from "./client/agent-suite-types.js";
 export type {
+  ComputerControlHolder, ComputerTakeoverStatus, ComputerTakeoverRequest, ComputerControl, ComputerDesktopState, ComputerDesktopStatus,
+  ComputerDesktopView, ComputerTakeoverEvent,
+} from "./client/computer-types.js";
+export type {
   DecisionQuestionType, DecisionQuestion, DecisionFallbackModel, DecisionModelSetting, DecisionSettings, DecideRequest, DecisionAnswer, DecisionUsage, DecideResult,
   DecisionCallerKind, DecisionLogSummary, DecisionLogEntry, DecisionLogPage, DecisionStatus, DecisionNodeState, MissionDecision,
 } from "./client/decision-types.js";

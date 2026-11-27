@@ -26,7 +26,7 @@ vi.mock("@polpo-ai/react", async () => {
 });
 
 // ── Agent detail mock: the agent lives on the fake server; refetch re-reads it ──
-type Agent = { name: string; identity?: { displayName?: string }; defaultComputer?: string; computers?: string[] };
+type Agent = { name: string; identity?: { displayName?: string }; defaultComputer?: string; computers?: string[]; browserHeaded?: boolean };
 const agentStore = vi.hoisted(() => ({
   agent: { name: "sitoinchat" } as Agent,
   listeners: new Set<() => void>(),
@@ -80,12 +80,15 @@ function installFetch() {
       return ok(created, 201);
     }
     if (path.startsWith("/agents/") && method === "PATCH") {
-      server.agent = { ...server.agent, computers: body.computers ?? server.agent.computers, defaultComputer: body.defaultComputer || undefined };
+      server.agent = body.browserHeaded !== undefined
+        ? { ...server.agent, browserHeaded: body.browserHeaded }
+        : { ...server.agent, computers: body.computers ?? server.agent.computers, defaultComputer: body.defaultComputer || undefined };
       return ok(server.agent);
     }
     const [, , id, action] = path.split("/");
     const current = server.computers.find((c) => c.id === id)!;
     const save = (next: Computer) => { server.computers = server.computers.map((c) => (c.id === id ? next : c)); return next; };
+    if (action === "desktop") return ok({ desktop: { computerId: id, state: "stopped", display: ":99" }, control: { computerId: id, holder: "agent", requests: [], open: [] } });
     if (action === "start" || action === "restart" || action === "reset") return ok(save({ ...current, status: "running" }));
     if (action === "stop") return ok(save({ ...current, status: "stopped" }));
     throw new Error(`unexpected ${method} ${path}`);
@@ -180,6 +183,19 @@ test("Make default PATCHes the agent and moves the badge", async () => {
   expect(card("nina")!.querySelector('[data-testid="computer-default"]')).toBeNull();
   // the computers' agent lists are reloaded from the cached state
   expect(server.calls.at(-1)!.path).toBe("/computers?live=0");
+});
+
+test("its browser: the headed switch PATCHes browserHeaded; a Daytona default computer shows its live view", async () => {
+  setup({ name: "sitoinchat", defaultComputer: "nina", computers: ["nina"] }, [HOST, machine("nina", { status: "running", providerApi: "v2" })]);
+  await render();
+  expect($('[data-testid="agent-browser-card"]')!.textContent).toMatch(/opens a real window on Nina's desktop/);
+  expect($('[data-testid="computer-live"]')).toBeTruthy();
+  expect(server.calls.some((c) => c.path === "/computers/nina/desktop?viewer=1")).toBe(true);
+  const sw = $<HTMLButtonElement>('button[aria-label="Headed browser"]')!;
+  expect(sw.getAttribute("aria-checked")).toBe("false");
+  await click(sw);
+  expect(patches()).toEqual([{ browserHeaded: true, publish: false }]);
+  expect($<HTMLButtonElement>('button[aria-label="Headed browser"]')!.getAttribute("aria-checked")).toBe("true");
 });
 
 test("the default-computer picker lives here", async () => {

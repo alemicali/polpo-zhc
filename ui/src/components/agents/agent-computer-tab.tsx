@@ -9,16 +9,21 @@
  * - Add one: an existing computer of the instance, or a new one (the Computers page's dialog,
  *   prefilled with the agent's name), assigned right after and optionally made the default.
  *
+ * - Its browser: headed (a window on its computer's desktop, watched live with take control in
+ *   the Live panel) or headless (`PATCH /agents/:name { browserHeaded }`).
+ *
  * Assignments are `PATCH /agents/:name { defaultComputer, computers }`. Live: `computer:changed`.
  */
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { Loader2, Monitor, Plus, RefreshCw, Save, Server, Star, X } from "lucide-react";
+import { Globe, Loader2, Monitor, Plus, RefreshCw, Save, Server, Star, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ComputerCard } from "@/components/computers/computer-card";
+import { ComputerLivePanel } from "@/components/computers/computer-live-panel";
+import { Switch } from "@/components/ui/switch";
 import { ComputerConfirmDialog } from "@/components/computers/computer-confirm-dialog";
 import { ComputerDialog } from "@/components/computers/computer-dialog";
 import { StatusBadge } from "@/components/computers/status-badge";
@@ -56,6 +61,20 @@ export function AgentComputerTab() {
   const [defaultChoice, setDefaultChoice] = useState<string | null>(null);
   const selectedDefault = defaultChoice ?? defaultId;
   const [creating, setCreating] = useState(false);
+  const headed = (agent as { browserHeaded?: boolean }).browserHeaded === true;
+  const [savingHeaded, setSavingHeaded] = useState(false);
+  const saveHeaded = async (next: boolean) => {
+    setSavingHeaded(true);
+    try {
+      await computersApi.setBrowserHeaded(agentName, next);
+      await refetch();
+      toast.success(next ? `${displayName}'s browser is headed` : `${displayName}'s browser is headless`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSavingHeaded(false);
+    }
+  };
 
   /** PATCH the agent, then reload it and the computers' agent lists. */
   const assign = async (nextDefault: string, nextList: string[], message: string) => {
@@ -158,6 +177,26 @@ export function AgentComputerTab() {
                 </Button>
               </div>
             )}
+          </CardContent>
+        </Card>
+
+        {/* Its browser: headed (watchable, take control) or headless */}
+        <Card className="gap-0 py-0" data-testid="agent-browser-card">
+          <CardContent className="space-y-3 px-4 py-3 text-xs">
+            <div className="flex items-center gap-1.5 text-label text-muted-foreground"><Globe className="h-3 w-3" /> Its browser</div>
+            <label className="flex items-start gap-3">
+              <Switch checked={headed} disabled={savingHeaded} onCheckedChange={(v) => void saveHeaded(v)} aria-label="Headed browser" className="mt-0.5" />
+              <span className="space-y-0.5">
+                <span className="block text-sm font-medium">Headed browser</span>
+                <span className="block text-muted-foreground">
+                  {current?.kind === "daytona" && current.providerApi === "v2"
+                    ? `Its browser opens a real window on ${current.name}'s desktop: you watch it live below and take control for a login, a 2FA code or a CAPTCHA (it asks with request_computer_takeover).`
+                    : "Its browser opens a real window (on this server's virtual display, Browser Live) instead of running headless."}
+                  {" "}Its scripts reach the same browser through CDP_URL.
+                </span>
+              </span>
+            </label>
+            {current?.kind === "daytona" && current.providerApi === "v2" && <ComputerLivePanel computerId={current.id} />}
           </CardContent>
         </Card>
 

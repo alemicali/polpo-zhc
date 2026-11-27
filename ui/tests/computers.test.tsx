@@ -27,6 +27,19 @@ vi.mock("@polpo-ai/react", async () => {
   };
 });
 
+// ── noVNC mock: records how the live view connects (never opens a socket) ────
+const vnc = vi.hoisted(() => ({ clients: [] as Array<{ url: string; options: { credentials?: { password?: string } }; viewOnly: boolean }> }));
+vi.mock("@novnc/novnc", () => ({
+  default: class {
+    viewOnly = false; scaleViewport = false; resizeSession = false; focusOnClick = false; showDotCursor = false; qualityLevel = 0; compressionLevel = 0; background = "";
+    constructor(_el: HTMLElement, url: string, options: { credentials?: { password?: string } }) { vnc.clients.push(Object.assign(this, { url, options }) as never); }
+    addEventListener() {}
+    sendCredentials() {}
+    disconnect() {}
+    focus() {}
+  },
+}));
+
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { ComputersPage } from "../src/pages/computers";
 import { ComputerDetailPage } from "../src/pages/computer-detail";
@@ -46,7 +59,11 @@ const box = (extra: Partial<Computer> = {}): Computer => ({
   id: "box", name: "Box", kind: "e2b", status: "running", uptimeMinutes: 5, lastUsedAt: new Date(Date.now() - 60_000).toISOString(), agents: [], ...extra,
 });
 
-let server: { computers: Computer[]; calls: Array<{ method: string; path: string; body?: unknown }>; detail: Partial<ComputerDetail> };
+type FakeRequest = { id: string; computerId: string; agent: string; reason: string; url?: string; whatToDo?: string; createdAt: string; expiresAt: string; status: string; takenBy?: string; note?: string };
+let server: {
+  computers: Computer[]; calls: Array<{ method: string; path: string; body?: unknown }>; detail: Partial<ComputerDetail>;
+  desktop: { state: string; holder: "agent" | "person"; person?: string; requests: FakeRequest[] };
+};
 
 function ok(data: unknown, status = 200) {
   return Promise.resolve(new Response(JSON.stringify({ ok: true, data }), { status }));
@@ -78,6 +95,20 @@ function installFetch() {
         ? { snapshots: [], activity: [], sessions: [], runs: [], cost: { runsUsd: 0, chatSessionsUsd: 0, totalUsd: 0 }, ...server.detail, ...current }
         : current);
     }
+    if (action === "desktop" || action === "takeover" || action === "release" || action === "control") {
+      const d = server.desktop;
+      const sub = path.split("/")[4];
+      if (action === "desktop" && sub === "start") d.state = "running";
+      if (action === "desktop" && sub === "stop") d.state = "stopped";
+      if (action === "takeover") { d.holder = "person"; d.person = "ale@x.it"; d.requests = d.requests.map((r) => ({ ...r, status: "in_control", takenBy: "ale@x.it" })); }
+      if (action === "release") { d.holder = "agent"; d.person = undefined; d.requests = d.requests.map((r) => ({ ...r, status: "released", ...(body?.note ? { note: body.note } : {}) })); }
+      const open = d.requests.filter((r) => r.status === "pending" || r.status === "in_control");
+      const control = { computerId: id, holder: d.holder, ...(d.person ? { person: d.person, since: new Date().toISOString() } : {}), requests: d.requests, open };
+      const mode = d.holder === "person" ? "control" : "view";
+      const viewer = d.state === "running" && (url.searchParams.get("viewer") === "1" || method === "POST")
+        ? { viewer: { mode, password: mode === "control" ? "FULLPASS" : "viewpass", path: `/api/v1/computers/${id}/desktop/vnc` } } : {};
+      return ok({ desktop: { computerId: id, state: d.state, display: ":99" }, control, ...viewer });
+    }
     if (action === "egress") return ok({ computerId: id, proxy: current.egress, tailnet: "up", node: "polpo-nina", path: "direct", proxyReachable: true, effective: `via ${current.egress}`, machine: "running" });
     if (!action && method === "PATCH") return ok(save({ ...current, ...body }));
     if (!action && method === "DELETE") { server.computers = server.computers.filter((c) => c.id !== id); return ok({ deleted: id }); }
@@ -99,7 +130,8 @@ beforeEach(() => {
   document.body.append(container);
   root = createRoot(container);
   sse.events = [];
-  server = { computers: [HOST, nina()], calls: [], detail: {} };
+  server = { computers: [HOST, nina()], calls: [], detail: {}, desktop: { state: "stopped", holder: "agent", requests: [] } };
+  vnc.clients.length = 0;
 });
 afterEach(async () => {
   await act(async () => root.unmount());
@@ -425,6 +457,46 @@ test("a computer deleted at the provider: its page says so, offers Recreate and 
   await click(inDialog("Recreate"));
   await flush();
   expect(server.calls.find((c) => c.path === "/computers/nina/reset")!.body).toEqual({ confirm: true });
+});
+
+test("the computer's live view: start it, view-only while the agent holds it, take control (full access), give back with a note", async () => {
+  installFetch();
+  server.computers = [HOST, nina({ status: "running", providerApi: "v2" })];
+  server.desktop.requests = [{
+    id: "tko_1", computerId: "nina", agent: "sitoinchat", reason: "LinkedIn asks for a 2FA code", url: "https://linkedin.com/checkpoint", whatToDo: "Sign in and stop at the feed",
+    createdAt: ago(1), expiresAt: new Date(Date.now() + 29 * 60_000).toISOString(), status: "pending",
+  }];
+  await render("/computers/nina");
+  const live = $('[data-testid="computer-live-section"]')!;
+  expect(live).toBeTruthy();
+  // the agent waiting for a person, as a banner
+  expect($('[data-testid="takeover-requests"]')!.textContent).toMatch(/sitoinchat needs you to take control.*LinkedIn asks for a 2FA code.*Page: https:\/\/linkedin.com\/checkpoint.*To do: Sign in and stop at the feed/);
+  expect(vnc.clients).toHaveLength(0);
+  await click(byText("Start live view"));
+  await flush();
+  expect(server.calls.some((c) => c.method === "POST" && c.path === "/computers/nina/desktop/start")).toBe(true);
+  // view-only, with the view-only password, on the authorized WebSocket path
+  expect(vnc.clients.at(-1)).toMatchObject({ viewOnly: true, options: { credentials: { password: "viewpass" } } });
+  expect(vnc.clients.at(-1)!.url).toMatch(/\/api\/v1\/computers\/nina\/desktop\/vnc$/);
+  expect($('[data-testid="computer-control-holder"]')!.textContent).toMatch(/The agent has control/);
+  await click(byText("Take control"));
+  await flush();
+  expect(server.calls.some((c) => c.method === "POST" && c.path === "/computers/nina/takeover")).toBe(true);
+  expect(vnc.clients.at(-1)).toMatchObject({ viewOnly: false, options: { credentials: { password: "FULLPASS" } } });
+  expect($('[data-testid="computer-control-holder"]')!.textContent).toMatch(/You have control/);
+  await type($<HTMLInputElement>('input[aria-label="Note for the agent"]')!, "Signed in, you are on the feed");
+  await click(byText("Give back"));
+  await flush();
+  expect(server.calls.find((c) => c.path === "/computers/nina/release")!.body).toEqual({ note: "Signed in, you are on the feed" });
+  expect(vnc.clients.at(-1)).toMatchObject({ viewOnly: true, options: { credentials: { password: "viewpass" } } });
+  expect($('[data-testid="takeover-requests"]')).toBeNull();
+});
+
+test("an E2B computer's page has no live view", async () => {
+  installFetch();
+  server.computers = [HOST, box()];
+  await render("/computers/box");
+  expect($('[data-testid="computer-live-section"]')).toBeNull();
 });
 
 test("an unknown computer's page says so", async () => {

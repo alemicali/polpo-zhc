@@ -70,6 +70,8 @@ const agentFields = {
   notifyRateLimit: z.number().int().min(1).max(60).optional().describe("send_notification messages per minute (default 5)"),
   browserEgress: z.string().regex(/^[A-Za-z0-9_-]*$/, "the name of an egress proxy").optional()
     .describe("Where its browser goes out to the internet: the name of a proxy in the settings' egress proxies (polpo_config_get); '' for direct"),
+  browserHeaded: z.boolean().optional()
+    .describe("true: its browser runs headed (a visible window on its computer's virtual display), so a person can watch it live and take control (login, 2FA, CAPTCHA) from the computer's page; false: headless (default)"),
   computers: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/)).optional()
     .describe("Computers it may use (ids from polpo_computers_list); \"host\" (this server) always"),
   defaultComputer: z.string().regex(/^([a-z0-9][a-z0-9-]{0,39})?$/).optional()
@@ -269,7 +271,7 @@ export function registerTeamTools(tool: Register, deps: McpDeps): void {
     const before = await loadAgent(deps, name);
     if (!before.ok) return before.status === 404 ? fail(`There is no agent "${name}". Find the name with polpo_agents_list.`) : apiError(before, `Reading agent ${name}`);
     const body = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined));
-    if (Object.keys(body).length === 0) return fail("Nothing to change: give at least one field (role, model, systemPrompt, allowedTools, connector_tools, notifyChannels, notifyRateLimit, skills, identity, reportsTo, talksTo, maxTurns, browserEgress, defaultComputer, engine).");
+    if (Object.keys(body).length === 0) return fail("Nothing to change: give at least one field (role, model, systemPrompt, allowedTools, connector_tools, notifyChannels, notifyRateLimit, skills, identity, reportsTo, talksTo, maxTurns, browserEgress, browserHeaded, defaultComputer, engine).");
     const egress = await unknownEgress(deps, patch.browserEgress as string | undefined);
     if (egress) return fail(egress);
     const r = await apiSend(deps, "PATCH", `/agents/${enc(name)}`, { ...body, ...flags });

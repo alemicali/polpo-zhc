@@ -18,6 +18,7 @@ import {
   estimateContextTokens,
   isContextOverflowError,
   parseSummary,
+  isRemoteComputer,
   type CompactionInfo,
 } from "@polpo-ai/core";
 import {
@@ -62,6 +63,10 @@ import { createStorageAgentTools } from "../tools/storage-tools.js";
 import { createCompanyBrainAgentTools } from "../tools/company-brain-tools.js";
 import { createDecisionTools } from "../tools/decision-tools.js";
 import { createAgentNotifyTools } from "../tools/notify-tools.js";
+import { COMPUTER_TAKEOVER_TOOL, createComputerTakeoverTools } from "../tools/computer-takeover-tools.js";
+import { computerTakeoverFor } from "../core/computer-takeover.js";
+import { computerControlStore } from "../sandbox/computer-control.js";
+import { browserPromptNote } from "../tools/browser-tools.js";
 import { agentNotifierFor } from "../notifications/agent-notify.js";
 import { createTaskResultTools, wantsTaskResultTools } from "../tools/task-result-tools.js";
 import { createAgentTalkTools } from "../tools/agent-talk-tools.js";
@@ -1045,6 +1050,9 @@ export async function buildAgentToolset(o: {
     allTools.push(...createInkToolsFn(ctx.polpoDir, agentConfig.allowedTools));
   }
 
+  // the computer the run is on: a remote one has a desktop a person can watch and take control of
+  const runComputer = ctx?.sandbox?.computer;
+  const remoteComputer = runComputer && isRemoteComputer(runComputer) ? runComputer : undefined;
   if (o.hasExtendedTools) {
     // a browser on this machine follows the sandbox network rule; in a remote VM, the VM's network
     browserNetwork = createBrowserNetworkGuard({ sandbox: ctx?.sandbox, session: agentConfig.name, onDenied: ctx?.onNetworkDenied });
@@ -1069,6 +1077,9 @@ export async function buildAgentToolset(o: {
       sandboxProvider,
       agentName: agentConfig.name,
       ...(o.task ? { mediaContext: { taskId: o.task.id, ...(o.task.missionId ? { missionId: o.task.missionId } : {}) } } : {}),
+      ...(agentConfig.browserHeaded ? { browserHeaded: true } : {}),
+      // while a person holds the computer's desktop, its browser waits
+      ...(remoteComputer && ctx?.polpoDir ? { browserControl: { computerId: remoteComputer.id, store: computerControlStore(ctx.polpoDir) } } : {}),
     });
   }
   if (ctx?.polpoDir) {
@@ -1106,6 +1117,16 @@ export async function buildAgentToolset(o: {
     const access = ctx?.agentNotify ?? (local ? { send: (req: Parameters<typeof local.send>[1]) => local.send(agentConfig, req, origin) } : undefined);
     allTools.push(...createAgentNotifyTools(agentConfig, access).filter((tool) => !taken.has(tool.name)));
   }
+  // request_computer_takeover: a person takes control of the computer's desktop (a login, 2FA, a
+  // CAPTCHA) and gives it back. A task run asks the server over the socket; in the server process
+  // (chats, agent tests) the instance's service directly. Every engine (host tool for harnesses).
+  if (remoteComputer) {
+    const taken = new Set(allTools.map((tool) => tool.name));
+    const local = computerTakeoverFor(ctx?.polpoDir);
+    const origin = o.task ? { taskId: o.task.id, ...(o.task.missionId ? { missionId: o.task.missionId } : {}) } : (o.notifyOrigin ?? {});
+    const access = ctx?.computerTakeover?.(remoteComputer.id) ?? local?.accessFor(agentConfig, remoteComputer.id, origin);
+    allTools.push(...createComputerTakeoverTools(agentConfig, remoteComputer, access).filter((tool) => !taken.has(tool.name)));
+  }
   // Talking to other agents while working the task (every engine: these become host tools for a
   // harness or a CLI), within the agent's communication lines: ask_agent and escalate wait for the
   // answer, message_agent hands off (the reply reaches the task)
@@ -1132,6 +1153,12 @@ export async function buildAgentToolset(o: {
       allTools.push(...connectorTools.filter((tool) => !taken.has(tool.name)));
       connectorNote = connectorsPromptSection(connectorManager.store.list(), agentConfig.name, notes, agentConfig.connectorTools);
     } catch { /* no connectors */ }
+  }
+  // what the prompt says about its browser: CDP_URL, headed, take control
+  if (allTools.some((t) => t.name.startsWith("browser_"))) {
+    const takeover = allTools.some((t) => t.name === COMPUTER_TAKEOVER_TOOL);
+    const note = browserPromptNote({ headed: !!agentConfig.browserHeaded, ...(remoteComputer ? { computer: { id: remoteComputer.id, name: remoteComputer.name } } : {}), takeover, session: agentConfig.name });
+    connectorNote = connectorNote ? `${connectorNote}\n${note}` : note.trimStart();
   }
   return { tools: allTools, vault, connectorNote, connectorManager, browserNetwork };
 }

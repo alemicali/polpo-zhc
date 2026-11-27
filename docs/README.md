@@ -10,7 +10,7 @@ Connectors (Polpo as an MCP client: Linear, Notion, Gmail, custom servers) are d
 
 Hosted MCP servers — MCP servers Polpo builds (from an API, a description or a template such as Printful) and serves itself, each becoming a connector; HTTP and sandboxed code tools, vault-referenced credentials, tests, versions and deploys, private or public exposure — are documented in [custom-mcp-servers.md](custom-mcp-servers.md).
 
-Computers (a persistent machine per agent) are documented in [computers.md](computers.md); running sandboxes and computers on Daytona's new service (Linux VMs) in [daytona-v2.md](daytona-v2.md).
+Computers (a persistent machine per agent) are documented in [computers.md](computers.md); running sandboxes and computers on Daytona's new service (Linux VMs) in [daytona-v2.md](daytona-v2.md); watching a computer's desktop live, the headed browser (`browserHeaded`), taking control for a login / 2FA / CAPTCHA (`request_computer_takeover`) and `CDP_URL` in [computer-live-view.md](computer-live-view.md).
 
 The dashboard's look (instance default, per-browser customization, design tokens, the no-flash boot) is documented in [appearance.md](appearance.md); the MCP connector and its tools, every Configuration section included, in [mcp.md](mcp.md).
 

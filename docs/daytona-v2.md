@@ -7,7 +7,7 @@ Daytona has two services. Polpo talks to either, per instance, with
 |---|---|---|
 | Endpoint | `https://app.daytona.io/api`, or a custom `apiUrl` (self-hosted) | `https://api.daytona.com` (Daytona Cloud only: no `apiUrl`) |
 | Key | organization API key | **project** API key (`dtn_…`) |
-| Machines from | a **snapshot** (`providers.daytona.snapshot`, e.g. `polpo-runner-0.3.13`) or a Docker image | an **image** of the project (`providers.daytona.image`, default `polpo-runner-vm-3`) |
+| Machines from | a **snapshot** (`providers.daytona.snapshot`, e.g. `polpo-runner-0.3.13`) or a Docker image | an **image** of the project (`providers.daytona.image`, default `polpo-runner-vm-4`) |
 | Class | container or linux-vm, as the snapshot was built | always a **Linux VM** (`linux-vm`) |
 | Idle | container: stopped (disk kept); linux-vm: paused | **not persistent** on the plans seen so far: pause, stop and fork are refused (409); an idle pooled VM is deleted |
 | Computers | yes (stop / pause) | yes: they **hibernate** (memory and disk snapshot, VM deleted; wakes in ~3 s) |
@@ -106,11 +106,12 @@ is a one-line change.
    # optional: DAYTONA_V2_REGION=<region id>; --force rebuilds
    ```
 
-   It builds `polpo-runner-vm-3` (the same tools as the v0 runner: agent-browser + Chromium,
-   playwright-core, rclone, mount-s3, FUSE, git, python3, node 22, and pnpm 10.30.1 for agent harnesses) and waits until it is ready
+   It builds `polpo-runner-vm-4` (the same tools as the v0 runner: agent-browser + Chromium,
+   playwright-core, rclone, mount-s3, FUSE, git, python3, node 22, pnpm 10.30.1 for agent harnesses, and the desktop of the
+   live view: Xvfb, openbox, x11vnc, websockify, xdotool, see [computer-live-view.md](computer-live-view.md)) and waits until it is ready
    (several minutes). Running it again does nothing when the image exists. Until it is built, Polpo
-   creates VMs from the previous runner image `polpo-runner-vm-2` (with a warning) and activates pnpm at run
-   time when an agent harness needs it.
+   creates VMs from the previous runner image `polpo-runner-vm-3` (with a warning) and installs the desktop's
+   packages on first use of the live view or of a headed browser.
 4. **Switch the provider.** Settings → Sandbox → Daytona: set **API** to *v2 · new service*, choose
    the vault entry from step 2, leave **Image** empty (the runner image) or name another image of
    the project, optionally a **Region**, then **Save** and **Test** (creates a throwaway VM and runs

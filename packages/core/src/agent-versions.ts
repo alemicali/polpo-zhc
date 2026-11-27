@@ -70,6 +70,7 @@ export const AGENT_FIELD_CLASSIFICATION: Record<keyof Required<AgentConfig>, Age
   defaultComputer: "versioned",
   browserProfile: "versioned",
   browserEgress: "versioned",
+  browserHeaded: "versioned",
   // Ink registry metadata (author and tags travel with the config)
   author: "versioned",
   tags: "versioned",

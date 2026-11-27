@@ -65,6 +65,11 @@ export interface SpawnContext {
    * the instance's sender is used directly.
    */
   agentNotify?: import("../tools/notify-tools.js").AgentNotifyAccess;
+  /**
+   * request_computer_takeover on the run's computer: task runs ask over the notification socket;
+   * unset in the server process, where the instance's service is used directly.
+   */
+  computerTakeover?: (computerId: string) => import("../tools/computer-takeover-tools.js").ComputerTakeoverAccess;
   /** Instance compaction settings; the agent's own settings apply on top. */
   compaction?: import("@polpo-ai/core").CompactionSettings;
   /** Absolute path to the .polpo directory. Used for skill loading, logs, etc. */

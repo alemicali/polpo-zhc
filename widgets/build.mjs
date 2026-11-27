@@ -27,6 +27,7 @@ const WIDGETS = {
   "media-card": { constant: "MEDIA_CARD_HTML", css: ["agent-card/style.css", "media-card/style.css"] },
   "coding-card": { constant: "CODING_CARD_HTML", css: ["agent-card/style.css", "coding-card/style.css"] },
   "wabiz-card": { constant: "WABIZ_CARD_HTML", css: ["agent-card/style.css", "wabiz-card/style.css"] },
+  "computer-card": { constant: "COMPUTER_CARD_HTML", css: ["agent-card/style.css", "computer-card/style.css"] },
 };
 
 async function widgetHtml(name, sheets) {

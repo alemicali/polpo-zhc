@@ -372,8 +372,8 @@ describe("providers.daytona.api", () => {
     });
     try {
       await remoteAdapter("daytona").create(spec(sandbox(), { onWarning: (m: string) => warnings.push(m) }));
-      expect(v2.creates.at(-1)!.image).toBe("polpo-runner-vm-2");
-      expect(warnings[0]).toMatch(/not built in this project yet: using "polpo-runner-vm-2"/);
+      expect(v2.creates.at(-1)!.image).toBe("polpo-runner-vm-3");
+      expect(warnings[0]).toMatch(/not built in this project yet: using "polpo-runner-vm-3"/);
     } finally {
       spy.mockRestore();
       v2.createError = realCreate;

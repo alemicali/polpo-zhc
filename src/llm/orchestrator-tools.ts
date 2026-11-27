@@ -1016,6 +1016,7 @@ const addAgentTool: Tool = {
     maxConcurrency: Type.Optional(Type.Number({ description: "Max concurrent tasks this agent can run. Default: 1" })),
     browserProfile: Type.Optional(Type.String({ description: "Persistent browser profile name (shares cookies/state across tasks). Requires browser_* in allowedTools." })),
     browserEgress: Type.Optional(Type.String({ description: "Name of an egress proxy (settings.egressProxies, e.g. \"home\": a residential line) its browser goes out through, for sites that block datacenter IPs" })),
+    browserHeaded: Type.Optional(Type.Boolean({ description: "Headed browser: a visible window on its computer's virtual display, so a person can watch it live and take control (login, 2FA, CAPTCHA). Default false (headless)" })),
     emailAllowedDomains: Type.Optional(Type.Array(Type.String(), { description: "Restrict email sending to these domains only (e.g. ['company.com'])" })),
     engine: agentEngineParam,
     computers: agentComputersParam,
@@ -1101,6 +1102,7 @@ const updateAgentTool: Tool = {
     maxConcurrency: Type.Optional(Type.Number({ description: "Max concurrent tasks" })),
     browserProfile: Type.Optional(Type.String({ description: "Persistent browser profile name" })),
     browserEgress: Type.Optional(Type.String({ description: "Name of an egress proxy (settings.egressProxies, e.g. \"home\") its browser goes out through; empty string: directly" })),
+    browserHeaded: Type.Optional(Type.Boolean({ description: "true: headed browser (a visible window on its computer's display, watchable and controllable live); false: headless" })),
     emailAllowedDomains: Type.Optional(Type.Array(Type.String(), { description: "Restrict email to these domains" })),
     engine: agentEngineParam,
     computers: agentComputersParam,
@@ -4484,6 +4486,7 @@ async function execAddAgent(polpo: Orchestrator, args: Record<string, unknown>):
     maxConcurrency: args.maxConcurrency as number | undefined,
     browserProfile: args.browserProfile as string | undefined,
     browserEgress: args.browserEgress as string | undefined,
+    ...(typeof args.browserHeaded === "boolean" ? { browserHeaded: args.browserHeaded } : {}),
     emailAllowedDomains: args.emailAllowedDomains as string[] | undefined,
     learning: args.learning as AgentConfig["learning"] | undefined,
     voiceReplies: args.voiceReplies as AgentConfig["voiceReplies"] | undefined,
@@ -4549,6 +4552,7 @@ async function execUpdateAgent(polpo: Orchestrator, args: Record<string, unknown
   if (args.maxConcurrency !== undefined) updates.maxConcurrency = args.maxConcurrency as number;
   if (args.browserProfile !== undefined) updates.browserProfile = args.browserProfile as string;
   if (args.browserEgress !== undefined) updates.browserEgress = (args.browserEgress as string) || undefined;
+  if (typeof args.browserHeaded === "boolean") updates.browserHeaded = args.browserHeaded;
   if (args.emailAllowedDomains !== undefined) updates.emailAllowedDomains = args.emailAllowedDomains as string[];
   if (args.team !== undefined) updates.team = args.team as string;
   if (args.learning !== undefined) updates.learning = args.learning as AgentConfig["learning"];

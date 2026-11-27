@@ -86,6 +86,9 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_computer_save", name: "computer_save", group: "computers" },
   { mcp: "polpo_computer_control", name: "computer_control", group: "computers" },
   { mcp: "polpo_computer_delete", name: "computer_delete", group: "computers" },
+  { mcp: "polpo_computer_desktop", name: "computer_desktop", group: "computers" },
+  { mcp: "polpo_computer_takeover", name: "computer_takeover", group: "computers" },
+  { mcp: "polpo_computer_release", name: "computer_release", group: "computers" },
   // Appearance
   { mcp: "polpo_branding_get", name: "branding_get", group: "appearance" },
   { mcp: "polpo_branding_update", name: "branding_update", group: "appearance" },
@@ -375,6 +378,7 @@ export const MCP_EQUIVALENTS: Record<string, string> = {
   polpo_vault_list: "list_vault",
   polpo_vault_delete: "remove_vault_entry",
   polpo_computers_list: "computers_list",
+  polpo_computer_show: "computer_get",
   polpo_egress_status: "egress_status",
   polpo_apps_list: "list_apps",
   polpo_app_control: "control_app",

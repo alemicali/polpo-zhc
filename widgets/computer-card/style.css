@@ -1,0 +1,7 @@
+/* The computer card: on top of the cards' common look (agent-card/style.css); tokens only. */
+.danger-text { color: var(--w-danger); }
+.requests { display: flex; flex-direction: column; }
+.req-reason { overflow-wrap: anywhere; }
+.note-input { width: 100%; box-sizing: border-box; min-height: 36px; padding: 6px 10px; border-radius: var(--r-sm); border: var(--bw) solid var(--line2); background: var(--fill); color: var(--fg); font: inherit; font-size: var(--t-xs); }
+.note-input:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.link { color: var(--fg); font-weight: var(--w-medium); text-decoration: underline; text-decoration-color: var(--line2); overflow-wrap: anywhere; }

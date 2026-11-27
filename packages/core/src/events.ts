@@ -289,6 +289,28 @@ export interface PolpoEventMap {
     notice?: string;
   } & EventOrigin;
   /**
+   * Who holds a computer's desktop (its live view): a person took control or gave it back, an
+   * agent asked a person to take over (request_computer_takeover: a login, 2FA, CAPTCHA), the
+   * request timed out or was cancelled, the desktop started or stopped. Never carries the VNC
+   * password or anything the person typed.
+   */
+  "computer:takeover": {
+    id: string;
+    action: "requested" | "taken" | "released" | "timeout" | "cancelled" | "desktop-started" | "desktop-stopped";
+    /** Who holds control now. */
+    holder: "agent" | "person";
+    /** The person (member email, or "someone" without member sign-in). */
+    person?: string;
+    requestId?: string;
+    agent?: string;
+    reason?: string;
+    url?: string;
+    /** The person's note to the agent (release). */
+    note?: string;
+    taskId?: string;
+    sessionId?: string;
+  } & EventOrigin;
+  /**
    * A computer provider's webhook delivery (Daytona, E2B) was recorded in its event log
    * (`action: "recorded"`), or Polpo finished applying it (`"updated"`: the computer's status change).
    */

@@ -17,9 +17,9 @@ versions are pinned exactly and only `src/harness/sdk.ts` imports them).
    E2B and Daytona v0 computers cannot run harnesses yet. On this server (no remote computer) only
    when `settings.harnesses.allowHost` is true, and then with an **isolated HOME**
    (`.polpo/harness/<agent>/home`): never the server's `~/.claude`, `~/.codex` or environment.
-2. **The runner image `polpo-runner-vm-3`** in the Daytona project (it adds pnpm 10.30.1, which the
-   harness bootstrap needs): `DAYTONA_V2_API_KEY=… node scripts/build-sandbox-images.mjs --provider daytona-v2`.
-   Without it Polpo uses `polpo-runner-vm-2` and activates pnpm with corepack at run time (about 1 s).
+2. **The runner image `polpo-runner-vm-4`** in the Daytona project (pnpm 10.30.1, which the harness
+   bootstrap needs, since vm-3; the live view's desktop since vm-4): `DAYTONA_V2_API_KEY=… node scripts/build-sandbox-images.mjs --provider daytona-v2`.
+   Without it Polpo uses `polpo-runner-vm-3` (with pnpm); an older image gets pnpm activated with corepack at run time (about 1 s).
 3. **A credential in the vault**, chosen in Settings → Harnesses (a vault reference: owner + service;
    the key itself is added in that agent's Credentials tab and never stored in the settings).
 

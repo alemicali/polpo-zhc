@@ -126,7 +126,8 @@ async function waitFor(
   return false;
 }
 
-async function ensureBrowserDisplay(): Promise<string> {
+/** The X display Browser Live and headed agent browsers on this server use: $DISPLAY, else a virtual one (Xvfb). */
+export async function ensureBrowserDisplay(): Promise<string> {
   if (process.env.DISPLAY) {
     browserDisplay = process.env.DISPLAY;
     return browserDisplay;
@@ -1172,12 +1173,27 @@ function pipeWebSocket(
   });
 }
 
-export function attachBrowserDashboardWebSocket(server: UpgradeServer): { close: () => void } {
+export function attachBrowserDashboardWebSocket(
+  server: UpgradeServer,
+  opts: {
+    /**
+     * The upgrade comes from a signed-in person (API key or the instance session cookie, like the
+     * terminal). Every path here reaches a browser (VNC with full control, CDP, the dashboard):
+     * without it nothing is proxied.
+     */
+    authorize: (req: IncomingMessage, query: Record<string, string | string[] | undefined>) => boolean;
+  },
+): { close: () => void } {
   const wss = new WebSocketServer({ noServer: true });
 
   const onUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     const url = parseUrl(req.url ?? "", true);
     const pathname = url.pathname ?? "";
+    if (!pathname.startsWith("/api/v1/browser-dashboard/")) return;
+    if (!opts.authorize(req, url.query)) {
+      rejectUpgrade(socket, 401, "Login required");
+      return;
+    }
 
     if (pathname === "/api/v1/browser-dashboard/vnc") {
       void probeTcp("127.0.0.1", VNC_PORT).then((reachable) => {

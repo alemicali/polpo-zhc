@@ -504,6 +504,8 @@ export interface AgentConfig {
   browserProfile?: string;
   /** Name of an egress proxy (settings.egressProxies) its browser goes out through. */
   browserEgress?: string;
+  /** Headed browser (a visible window on its computer's display, watchable and controllable live); default headless. */
+  browserHeaded?: boolean;
   /** Computers (settings.computers ids) it may use; "host" (this server) always. */
   computers?: string[];
   /** Its default machine for chats and tasks: a computer id or "host" (unset: this server). */
@@ -1652,6 +1654,8 @@ export interface UpdateAgentRequest {
   browserProfile?: string;
   /** Name of an egress proxy (settings.egressProxies) its browser goes out through. */
   browserEgress?: string;
+  /** Headed browser (a visible window on its computer's display); false: headless. */
+  browserHeaded?: boolean;
   /** Computers (settings.computers ids) it may use; "host" always. */
   computers?: string[];
   /** Its default machine for chats and tasks (a computer id, or "host"); "" clears it. */

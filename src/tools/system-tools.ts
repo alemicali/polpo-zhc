@@ -396,6 +396,11 @@ export interface BashToolOptions {
   vault?: ResolvedVault;
   /** Where large outputs are saved (the run's FileSystem: the VM in a remote sandbox). */
   fs?: FileSystem;
+  /**
+   * Extra environment for every command, looked up per call (the agent's own browser: CDP_URL,
+   * DISPLAY, POLPO_BROWSER_SESSION). A failure never stops the command; env_from_vault wins.
+   */
+  commandEnv?: () => Promise<Record<string, string>>;
 }
 
 function createBashTool(cwd: string, shell: Shell, toolOutputDir: string, opts: BashToolOptions = {}): AgentTool<typeof BashSchema> {
@@ -423,8 +428,10 @@ function createBashTool(cwd: string, shell: Shell, toolOutputDir: string, opts: 
       const mask = createSecretMasker(fromVault.secrets);
       const started = Date.now();
       try {
+        const extra = opts.commandEnv ? await opts.commandEnv().catch(() => ({} as Record<string, string>)) : {};
+        const env = { ...extra, ...fromVault.env };
         const result = await shell.execute(params.command, {
-          cwd, timeout, ...(signal ? { signal } : {}), ...(Object.keys(fromVault.env).length > 0 ? { env: fromVault.env } : {}),
+          cwd, timeout, ...(signal ? { signal } : {}), ...(Object.keys(env).length > 0 ? { env } : {}),
         });
         const timedOut = result.timedOut === true
           || (result.exitCode !== 0 && Date.now() - started >= timeout && /timed? ?out/i.test(result.stderr));
@@ -696,6 +703,8 @@ export interface SystemToolsOptions {
    * Undefined = no sandbox.
    */
   sandboxProvider?: string;
+  /** Extra environment for bash commands, per call (the agent's browser: CDP_URL, DISPLAY). */
+  commandEnv?: () => Promise<Record<string, string>>;
 }
 
 /**
@@ -726,7 +735,7 @@ export function createSystemTools(cwd: string, allowedTools?: string[], allowedP
     read: () => createReadTool(cwd, readSandbox, _fs),
     write: () => createWriteTool(cwd, sandbox, _fs),
     edit: () => createEditTool(cwd, sandbox, _fs),
-    bash: () => createBashTool(cwd, _shell, toolOutputDir, { vault, fs: _fs }),
+    bash: () => createBashTool(cwd, _shell, toolOutputDir, { vault, fs: _fs, ...(options.commandEnv ? { commandEnv: options.commandEnv } : {}) }),
     glob: () => createGlobTool(cwd, readSandbox, _fs),
     grep: () => createGrepTool(cwd, readSandbox, _shell, toolOutputDir, _fs),
     ls: () => createLsTool(cwd, readSandbox, _fs),
@@ -754,7 +763,7 @@ export function createSystemTools(cwd: string, allowedTools?: string[], allowedP
 
 // === Extended Tools Factory ===
 
-import { createBrowserTools, ALL_BROWSER_TOOL_NAMES } from "./browser-tools.js";
+import { createBrowserTools, ALL_BROWSER_TOOL_NAMES, agentBrowserEnv, shellIsRemote } from "./browser-tools.js";
 import { ALL_HTTP_TOOL_NAMES } from "./http-tools.js";
 import { createEmailTools, ALL_EMAIL_TOOL_NAMES } from "./email-tools.js";
 import { createVaultTools, ALL_VAULT_TOOL_NAMES } from "./vault-tools.js";
@@ -878,6 +887,10 @@ export interface CreateAllToolsOptions {
   sandboxProvider?: string;
   /** Where the run comes from, for the media log's provenance (image tools): its task, mission or chat. */
   mediaContext?: { taskId?: string; missionId?: string; sessionId?: string };
+  /** agent.browserHeaded: the browser opens a visible window (the computer's virtual display, or this server's). */
+  browserHeaded?: boolean;
+  /** The computer the run is on: while a person holds its desktop (take control), the browser waits. */
+  browserControl?: { computerId: string; store: Pick<import("../sandbox/computer-control.js").ComputerControlStore, "heldByPerson"> };
 }
 
 /**
@@ -913,7 +926,13 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
     polpoDir: options.polpoDir,
     agentName: options.agentName ?? browserSession,
   });
-  tools.push(...createSystemTools(cwd, allowedTools, allowedPaths, options.outputDir, options.vault, options.fs, options.shell, { toolOutputDir, sandboxProvider: options.sandboxProvider }));
+  // an agent with a browser: its commands get CDP_URL (its own session), DISPLAY when headed
+  const browserRequested = categoryRequested(ALL_BROWSER_TOOL_NAMES);
+  const session = browserSession ?? "default";
+  const commandEnv = browserRequested
+    ? async () => agentBrowserEnv({ session, ...(options.shell ? { shell: options.shell } : {}), headed: !!options.browserHeaded, remote: await shellIsRemote(options.shell) })
+    : undefined;
+  tools.push(...createSystemTools(cwd, allowedTools, allowedPaths, options.outputDir, options.vault, options.fs, options.shell, { toolOutputDir, sandboxProvider: options.sandboxProvider, ...(commandEnv ? { commandEnv } : {}) }));
 
   // Ink tools (always included when polpoDir is available)
   if (options.polpoDir) {
@@ -921,8 +940,11 @@ export async function createAllTools(options: CreateAllToolsOptions): Promise<Ag
   }
 
   // Browser tools — activated when any browser_* tool is in allowedTools
-  if (categoryRequested(ALL_BROWSER_TOOL_NAMES)) {
-    tools.push(...createBrowserTools(cwd, browserSession, allowedTools, options.browserProfileDir, toolOutputDir, allowedPaths, options.browserNetwork, { shell: options.shell, fs: options.fs, vault: options.vault, egress: options.browserEgress }));
+  if (browserRequested) {
+    tools.push(...createBrowserTools(cwd, browserSession, allowedTools, options.browserProfileDir, toolOutputDir, allowedPaths, options.browserNetwork, {
+      shell: options.shell, fs: options.fs, vault: options.vault, egress: options.browserEgress,
+      ...(options.browserHeaded ? { headed: true } : {}), ...(options.browserControl ? { control: options.browserControl } : {}),
+    }));
   }
 
   // Email tools — activated when any email_* tool is in allowedTools

@@ -10,6 +10,7 @@
  *   - tailscale + tailscaled (a pinned release, checksum checked): computers whose browser goes out
  *     through a tailnet-only egress proxy join the tailnet from inside the VM
  *   - git, curl, python3 (+ edge-tts), poppler-utils, sudo, node 22
+ *   - a desktop for the live view and "take control" (vm-4): Xvfb, openbox, x11vnc, websockify, xdotool
  *   - pnpm (PNPM_VERSION, activated with corepack): agent harnesses (Claude Code, Codex) install
  *     their bridge with `pnpm install --frozen-lockfile` (lockfile v9 + allowBuilds: pnpm 10). Polpo
  *     activates it at run time when an older image lacks it (src/adapters/harness-engine.ts).
@@ -48,7 +49,7 @@ export const DAYTONA_SNAPSHOT = `polpo-runner-${version}`;
  * DAYTONA_V2_RUNNER_IMAGE in packages/core/src/sandbox.ts must match; a test checks it). A named
  * v2 image with other contents cannot be rebuilt under the same name.
  */
-export const DAYTONA_V2_IMAGE = "polpo-runner-vm-3";
+export const DAYTONA_V2_IMAGE = "polpo-runner-vm-4";
 /** pnpm for agent harness bootstraps (src/adapters/harness-engine.ts HARNESS_PNPM_VERSION must match; a test checks it). */
 export const PNPM_VERSION = "10.30.1";
 export const E2B_TEMPLATE = `polpo-runner-${version.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
@@ -62,6 +63,9 @@ const APT_PACKAGES = [
   "libcairo2", "libwayland-client0", "libxshmfence1", "libxfixes3", "libxext6", "libxcursor1", "libxi6",
   "libxtst6", "libxrender1", "libxinerama1", "libdbus-1-3", "libatspi2.0-0", "libdrm2", "libx11-xcb1",
   "fonts-liberation", "fonts-dejavu-core", "fonts-noto-color-emoji",
+  // the computer's desktop (src/sandbox/desktop.ts): a virtual display, a light window manager, a VNC
+  // server (password-protected, local only) and websockify (what the preview link reaches)
+  "xvfb", "x11vnc", "openbox", "websockify", "xdotool",
 ];
 
 /**

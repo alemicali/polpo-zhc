@@ -261,6 +261,7 @@ export function agentRoutes(getDeps: () => {
         ...(body.talksTo ? { talksTo: normalizeTalksTo(body.talksTo) } : {}),
         browserProfile: body.browserProfile,
         browserEgress: body.browserEgress,
+        browserHeaded: body.browserHeaded,
         ...(body.computers !== undefined && { computers: body.computers }),
         ...(body.defaultComputer ? { defaultComputer: body.defaultComputer } : {}),
         ...(body.engine && body.engine !== "polpo" ? { engine: body.engine } : {}),
@@ -601,6 +602,7 @@ export function agentRoutes(getDeps: () => {
       ...(body.pipeline !== undefined && { pipeline: body.pipeline }),
       ...(body.browserProfile !== undefined && { browserProfile: body.browserProfile }),
       ...(body.browserEgress !== undefined && { browserEgress: body.browserEgress }),
+      ...(body.browserHeaded !== undefined && { browserHeaded: body.browserHeaded }),
       // null or [] clears the list (the field goes: only "host" and its default)
       ...(body.computers !== undefined && { computers: body.computers?.length ? body.computers : undefined }),
       // "" clears it (back to this server)

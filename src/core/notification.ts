@@ -10,6 +10,7 @@
  * polling fallback will pick up the result.
  */
 
+import type { ComputerTakeoverWireReply, ComputerTakeoverWireRequest } from "./computer-takeover.js";
 import { createServer, createConnection, type Server } from "node:net";
 import { createHash } from "node:crypto";
 import { existsSync, unlinkSync } from "node:fs";
@@ -77,8 +78,10 @@ export interface AgentNotifyWireRequest {
 
 export type AgentNotifyWireReply = { ok: true; id: string; channel: string; to?: string } | { ok: false; error: string };
 
-type WireRequest = AgentTalkWireRequest | AgentNotifyWireRequest;
-type WireReply<R extends WireRequest> = R extends AgentNotifyWireRequest ? AgentNotifyWireReply : AgentTalkWireReply;
+type WireRequest = AgentTalkWireRequest | AgentNotifyWireRequest | ComputerTakeoverWireRequest;
+type WireReply<R extends WireRequest> = R extends AgentNotifyWireRequest ? AgentNotifyWireReply
+  : R extends ComputerTakeoverWireRequest ? ComputerTakeoverWireReply : AgentTalkWireReply;
+type AnyWireReply = AgentTalkWireReply | AgentNotifyWireReply | ComputerTakeoverWireReply;
 
 /** Server-side: orchestrator listens for runner completion notifications. */
 export function startNotificationServer(
@@ -90,6 +93,8 @@ export function startNotificationServer(
   onAgentTalk?: (msg: AgentTalkWireRequest) => Promise<AgentTalkWireReply>,
   /** A task run's agent posting to a notification channel (a request: the reply is written back). */
   onAgentNotify?: (msg: AgentNotifyWireRequest) => Promise<AgentNotifyWireReply>,
+  /** A task run's agent asking a person to take control of its computer (request_computer_takeover). */
+  onComputerTakeover?: (msg: ComputerTakeoverWireRequest) => Promise<ComputerTakeoverWireReply>,
 ): Server {
   const socketPath = getSocketPath(polpoDir);
 
@@ -109,10 +114,14 @@ export function startNotificationServer(
       if (answered || newline < 0) return;
       let msg: { type?: string } | undefined;
       try { msg = JSON.parse(buffer.slice(0, newline)); } catch { return; }
-      if (msg?.type !== "agent_talk" && msg?.type !== "agent_notify") return;
+      if (msg?.type !== "agent_talk" && msg?.type !== "agent_notify" && msg?.type !== "computer_takeover") return;
       answered = true;
       const failed = (err: unknown) => ({ ok: false as const, error: err instanceof Error ? err.message : String(err) });
-      const reply: Promise<AgentTalkWireReply | AgentNotifyWireReply> = msg.type === "agent_notify"
+      const reply: Promise<AnyWireReply> = msg.type === "computer_takeover"
+        ? (onComputerTakeover
+          ? onComputerTakeover(msg as ComputerTakeoverWireRequest).catch(failed)
+          : Promise.resolve({ ok: false as const, error: "take control is not available from here" }))
+        : msg.type === "agent_notify"
         ? (onAgentNotify
           ? onAgentNotify(msg as AgentNotifyWireRequest).catch(failed)
           : Promise.resolve({ ok: false as const, error: "notifications cannot be sent from here" }))
@@ -182,7 +191,7 @@ export function requestOverSocket<R extends WireRequest>(socketPath: string, msg
   return new Promise((resolvePromise) => {
     let buffer = "";
     let settled = false;
-    const done = (reply: AgentTalkWireReply | AgentNotifyWireReply) => {
+    const done = (reply: AnyWireReply) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);

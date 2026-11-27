@@ -11,6 +11,8 @@
  * - Aside: the agents using it; lifecycle; snapshots (Daytona v2); machine (image, region, size,
  *   ids, dates); network and egress (live Tailscale status of a remote computer's egress).
  *   Lifecycle, network, egress and size are edited with the computer's form.
+ * - Live (Daytona computers): its desktop over VNC (the agents' headed browsers), view-only while
+ *   the agent holds it; Take control / Give back, and the agents waiting for a person.
  * Live: `computer:changed` for this computer reloads it (from the cached state).
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
@@ -22,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { ACTION_META, actionLabel } from "@/components/computers/computer-actions";
 import { ComputerConfirmDialog } from "@/components/computers/computer-confirm-dialog";
 import { ComputerDialog } from "@/components/computers/computer-dialog";
+import { ComputerLivePanel } from "@/components/computers/computer-live-panel";
 import { StatusBadge } from "@/components/computers/status-badge";
 import { BrandIcon } from "@/components/shared/brand-icon";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
@@ -339,6 +342,12 @@ export function ComputerDetailPage() {
 
       <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
         <div className="flex min-w-0 flex-col gap-4">
+          {c.kind === "daytona" && c.providerApi === "v2" && c.status !== "deleted" && (
+            <Section title="Live" testId="computer-live-section"
+              action={<span className="text-caption text-muted-foreground">its desktop: watch, take control</span>}>
+              <ComputerLivePanel computerId={c.id} />
+            </Section>
+          )}
           <Section title="Harness sessions" testId="computer-sessions-section"
             action={<Badge variant="secondary" className="text-micro">{c.sessions.length}</Badge>}>
             <SessionsList sessions={c.sessions} />
