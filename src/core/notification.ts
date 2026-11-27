@@ -11,6 +11,7 @@
  */
 
 import type { ComputerTakeoverWireReply, ComputerTakeoverWireRequest } from "./computer-takeover.js";
+import type { VaultLoginWireReply, VaultLoginWireRequest } from "./vault-login-bridge.js";
 import { createServer, createConnection, type Server } from "node:net";
 import { createHash } from "node:crypto";
 import { existsSync, unlinkSync } from "node:fs";
@@ -78,10 +79,11 @@ export interface AgentNotifyWireRequest {
 
 export type AgentNotifyWireReply = { ok: true; id: string; channel: string; to?: string } | { ok: false; error: string };
 
-type WireRequest = AgentTalkWireRequest | AgentNotifyWireRequest | ComputerTakeoverWireRequest;
+type WireRequest = AgentTalkWireRequest | AgentNotifyWireRequest | ComputerTakeoverWireRequest | VaultLoginWireRequest;
 type WireReply<R extends WireRequest> = R extends AgentNotifyWireRequest ? AgentNotifyWireReply
-  : R extends ComputerTakeoverWireRequest ? ComputerTakeoverWireReply : AgentTalkWireReply;
-type AnyWireReply = AgentTalkWireReply | AgentNotifyWireReply | ComputerTakeoverWireReply;
+  : R extends ComputerTakeoverWireRequest ? ComputerTakeoverWireReply
+  : R extends VaultLoginWireRequest ? VaultLoginWireReply : AgentTalkWireReply;
+type AnyWireReply = AgentTalkWireReply | AgentNotifyWireReply | ComputerTakeoverWireReply | VaultLoginWireReply;
 
 /** Server-side: orchestrator listens for runner completion notifications. */
 export function startNotificationServer(
@@ -95,6 +97,8 @@ export function startNotificationServer(
   onAgentNotify?: (msg: AgentNotifyWireRequest) => Promise<AgentNotifyWireReply>,
   /** A task run's agent asking a person to take control of its computer (request_computer_takeover). */
   onComputerTakeover?: (msg: ComputerTakeoverWireRequest) => Promise<ComputerTakeoverWireReply>,
+  /** A task run's agent creating a login with a generated password in its own vault (vault_create_login). */
+  onVaultLogin?: (msg: VaultLoginWireRequest) => Promise<VaultLoginWireReply>,
 ): Server {
   const socketPath = getSocketPath(polpoDir);
 
@@ -114,10 +118,14 @@ export function startNotificationServer(
       if (answered || newline < 0) return;
       let msg: { type?: string } | undefined;
       try { msg = JSON.parse(buffer.slice(0, newline)); } catch { return; }
-      if (msg?.type !== "agent_talk" && msg?.type !== "agent_notify" && msg?.type !== "computer_takeover") return;
+      if (msg?.type !== "agent_talk" && msg?.type !== "agent_notify" && msg?.type !== "computer_takeover" && msg?.type !== "vault_login") return;
       answered = true;
       const failed = (err: unknown) => ({ ok: false as const, error: err instanceof Error ? err.message : String(err) });
-      const reply: Promise<AnyWireReply> = msg.type === "computer_takeover"
+      const reply: Promise<AnyWireReply> = msg.type === "vault_login"
+        ? (onVaultLogin
+          ? onVaultLogin(msg as VaultLoginWireRequest).catch((err) => ({ ...failed(err), code: "invalid" as const }))
+          : Promise.resolve({ ok: false as const, code: "invalid" as const, error: "the vault cannot be written from here" }))
+        : msg.type === "computer_takeover"
         ? (onComputerTakeover
           ? onComputerTakeover(msg as ComputerTakeoverWireRequest).catch(failed)
           : Promise.resolve({ ok: false as const, error: "take control is not available from here" }))

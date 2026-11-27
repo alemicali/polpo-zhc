@@ -70,6 +70,16 @@ export interface SpawnContext {
    * unset in the server process, where the instance's service is used directly.
    */
   computerTakeover?: (computerId: string) => import("../tools/computer-takeover-tools.js").ComputerTakeoverAccess;
+  /**
+   * vault_create_login: task runs ask over the notification socket (the server writes the vault of
+   * the run's agent); unset in the server process, where the vault store is written directly.
+   */
+  vaultLogin?: import("../tools/vault-tools.js").VaultLoginAccess;
+  /**
+   * Secrets the run learns while it runs (a generated password): the transcript, logs and harness
+   * output are masked with them. Created by the runner; an engine without one makes its own.
+   */
+  runSecrets?: import("../vault/env-from-vault.js").RunSecrets;
   /** Instance compaction settings; the agent's own settings apply on top. */
   compaction?: import("@polpo-ai/core").CompactionSettings;
   /** Absolute path to the .polpo directory. Used for skill loading, logs, etc. */

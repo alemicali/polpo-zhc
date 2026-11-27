@@ -2493,6 +2493,54 @@ export interface VaultEntryMeta {
   readOnly?: boolean;
   /** Credential field names (e.g. ["host", "port", "user", "pass"]) — values are NOT exposed */
   keys: string[];
+  /** Who created the entry: an agent (vault_create_login) or a person. Absent on older entries. */
+  createdBy?: VaultEntryProvenance;
+  /** When it was created (ISO). */
+  createdAt?: string;
+  /** When its generated password was last rotated (ISO). */
+  rotatedAt?: string;
+  rotatedBy?: VaultEntryProvenance;
+  /** Keys whose values Polpo generated (never shown to a model). */
+  generated?: string[];
+}
+
+/** Who made or changed a vault entry (non-secret). */
+export interface VaultEntryProvenance {
+  kind: "agent" | "person";
+  agent?: string;
+  taskId?: string;
+  sessionId?: string;
+  runId?: string;
+  /** kind "person": who, when known. */
+  by?: string;
+}
+
+/** Options for a login whose password Polpo generates (POST /vault/entries/{agent}/{service}/generate). */
+export interface GenerateVaultLoginRequest {
+  username?: string;
+  email?: string;
+  url?: string;
+  label?: string;
+  /** 16–64, default 24. */
+  length?: number;
+  /** Default true. */
+  symbols?: boolean;
+  /** Replace the password of an existing login (keeps username, email, url). */
+  rotate?: boolean;
+}
+
+/** The result: names and provenance only — never the password. */
+export interface GenerateVaultLoginResult {
+  agent: string;
+  service: string;
+  action: "created" | "rotated";
+  keys: string[];
+  label?: string;
+  /** How the agent uses it, e.g. browser_fill { from_vault: "site.password" }. */
+  fill: string;
+  createdBy?: VaultEntryProvenance;
+  createdAt?: string;
+  rotatedAt?: string;
 }
 
 // === Auth Profile Metadata (safe — no tokens exposed) ===

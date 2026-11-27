@@ -60,6 +60,13 @@ export * from "./agent-tests.js";
 export * from "./agent-suites.js";
 export type { VaultStore } from "./vault-store.js";
 export { isReservedVaultOwner, RESERVED_VAULT_OWNER_PREFIX } from "./vault-store.js";
+export {
+  generateVaultPassword, generateVaultLogin, vaultLoginRequestProblems, vaultLoginFillHint, vaultPasswordLengthProblem,
+  vaultMetadataAfterPatch, vaultEntryProvenanceView,
+  VAULT_PASSWORD_DEFAULT_LENGTH, VAULT_PASSWORD_MIN_LENGTH, VAULT_PASSWORD_MAX_LENGTH,
+  VAULT_PASSWORD_LOWER, VAULT_PASSWORD_UPPER, VAULT_PASSWORD_DIGITS, VAULT_PASSWORD_SYMBOLS, VAULT_SERVICE_PATTERN,
+} from "./vault-login.js";
+export type { VaultLoginRequest, VaultLoginResult, VaultPasswordOptions } from "./vault-login.js";
 export type { PlaybookStore } from "./playbook-store.js";
 export type { AttachmentStore, Attachment } from "./attachment-store.js";
 

@@ -11,6 +11,7 @@ export {
 export {
   resolveEnvFromVault,
   createSecretMasker,
+  createRunSecrets,
   secretVariants,
   invalidEnvVarName,
   suggestedEnvVarName,
@@ -21,6 +22,7 @@ export {
   SECRET_MASK,
   type VaultRef,
   type EnvFromVaultResult,
+  type RunSecrets,
 } from "./env-from-vault.js";
 
 export { EncryptedVaultStore } from "./encrypted-store.js";

@@ -38,7 +38,7 @@ import {
 } from "../core/ink.js";
 import type { InkPackage, InkLockEntry } from "../core/ink.js";
 import { gitClone, gitPullFastForward, gitHeadCommit, sourceCacheKey } from "../core/git-source.js";
-import { isReservedVaultOwner } from "@polpo-ai/core/vault-store";
+import { isReservedVaultOwner, generateVaultLogin, vaultLoginFillHint } from "@polpo-ai/core/vault-store";
 import { redactSecrets } from "@polpo-ai/core/secret-redaction";
 import { describeMissionCost, isValidBudgetUsd, type MissionCostSummary } from "@polpo-ai/core/mission-cost";
 import { agentEffectiveModel, agentEngineIdOf, modelWithEngineText } from "@polpo-ai/core/engine-label";
@@ -1214,6 +1214,24 @@ const shareVaultEntryTool: Tool = {
     service: Type.String({ description: "Service name (vault key)" }),
     action: Type.Union([Type.Literal("add"), Type.Literal("remove"), Type.Literal("replace")], { description: "What to do with `withAgents`." }),
     withAgents: Type.Array(Type.String(), { description: "Other agent names. The owner cannot share with themselves." }),
+  }),
+};
+
+const generateVaultLoginTool: Tool = {
+  name: "generate_vault_login",
+  description: "Create a login in an agent's vault with a strong password Polpo generates, for an account the agent will use on a site (sign-up). "
+    + "Nobody sees the password, you included: the agent fills it with browser_fill { from_vault: \"<service>.password\" }; the person reads it only in the dashboard. "
+    + "Refuses an existing entry unless rotate is true (then only the password changes, username/email/url stay).",
+  parameters: Type.Object({
+    agent: Type.String({ description: "Agent name (owner of the entry)" }),
+    service: Type.String({ description: "A slug for the site (letters, digits, _ or -), e.g. 'sitoinchat'" }),
+    username: Type.Optional(Type.String()),
+    email: Type.Optional(Type.String()),
+    url: Type.Optional(Type.String({ description: "The site (https://…)" })),
+    label: Type.Optional(Type.String({ description: "Default: '<Service> – <agent display name>'" })),
+    length: Type.Optional(Type.Integer({ minimum: 16, maximum: 64, description: "Password length (default 24)" })),
+    symbols: Type.Optional(Type.Boolean({ description: "Include symbols (default true); false for sites that reject them" })),
+    rotate: Type.Optional(Type.Boolean({ description: "Replace the password of an existing login" })),
   }),
 };
 
@@ -2410,7 +2428,7 @@ export const WRITE_TOOLS = new Set([
   // Team
   "add_agent", "remove_agent", "update_agent", "rename_team", "add_team", "remove_team",
   // Vault & Identity
-  "set_vault_entry", "update_vault_credentials", "remove_vault_entry", "share_vault_entry", "set_identity",
+  "set_vault_entry", "update_vault_credentials", "remove_vault_entry", "share_vault_entry", "generate_vault_login", "set_identity",
   // Approvals & Checkpoints
   "approve_request", "reject_request", "resume_checkpoint",
   // Scheduling
@@ -2547,7 +2565,7 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   // Team (7)
   listTeamsTool, addAgentTool, removeAgentTool, updateAgentTool, renameTeamTool, addTeamTool, removeTeamTool, sandboxStatusTool,
   // Vault (5)
-  setVaultEntryTool, updateVaultCredentialsTool, removeVaultEntryTool, listVaultTool, shareVaultEntryTool,
+  setVaultEntryTool, updateVaultCredentialsTool, removeVaultEntryTool, listVaultTool, shareVaultEntryTool, generateVaultLoginTool,
   // Identity (2)
   setIdentityTool, getIdentityTool,
   // Approvals & Checkpoints (3)
@@ -2721,6 +2739,7 @@ const TOOL_LABELS: Record<string, string> = {
   update_vault_credentials: "Update Vault Credentials",
   remove_vault_entry: "Remove Vault Entry",
   share_vault_entry: "Share Vault Entry",
+  generate_vault_login: "Generate Vault Login",
   set_identity: "Set Agent Identity",
   approve_request: "Approve Request",
   reject_request: "Reject Request",
@@ -3017,6 +3036,7 @@ export async function executeOrchestratorTool(
       case "remove_vault_entry":       return execRemoveVaultEntry(polpo, args);
       case "share_vault_entry":        return execShareVaultEntry(polpo, args);
       case "list_vault":               return execListVault(polpo, args);
+      case "generate_vault_login":     return execGenerateVaultLogin(polpo, args);
 
       // ── Identity ──
       case "set_identity":       return execSetIdentity(polpo, args);
@@ -3215,6 +3235,7 @@ async function resolveTargetName(
   if (toolName === "update_vault_credentials" && args.agent) return `"${String(args.agent)}" → ${String(args.service)}`;
   if (toolName === "remove_vault_entry" && args.agent) return `"${String(args.agent)}" → ${String(args.service)}`;
   if (toolName === "list_vault" && args.agent) return `"${String(args.agent)}"`;
+  if (toolName === "generate_vault_login" && args.agent) return `"${String(args.agent)}" → ${String(args.service)}`;
   if (toolName === "set_identity" && args.agent) return `"${String(args.agent)}"`;
   if (toolName === "get_identity" && args.agent) return `"${String(args.agent)}"`;
   if (toolName === "rename_team" && args.name) return `"${String(args.name)}"`;
@@ -5409,6 +5430,27 @@ async function execRemoveVaultEntry(polpo: Orchestrator, args: Record<string, un
   return `Vault entry "${service}" removed from agent "${agentName}".`;
 }
 
+async function execGenerateVaultLogin(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const agents = await polpo.getAgents();
+  const resolved = resolveAgentName(agents, args.agent as string);
+  if ("error" in resolved) return resolved.error;
+  const agentName = resolved.name;
+  if (isReservedVaultOwner(agentName)) return RESERVED_VAULT_OWNER_ERROR;
+  const vaultStore = polpo.getVaultStore();
+  if (!vaultStore) return `Error: Vault store not available.`;
+  const agent = agents.find((a) => a.name === agentName);
+  const pick = <T,>(k: string, type: string) => (typeof args[k] === type ? { [k]: args[k] as T } : {});
+  const r = await generateVaultLogin(vaultStore, agentName, {
+    service: typeof args.service === "string" ? args.service : "",
+    ...pick<string>("username", "string"), ...pick<string>("email", "string"), ...pick<string>("url", "string"), ...pick<string>("label", "string"),
+    ...pick<number>("length", "number"), ...pick<boolean>("symbols", "boolean"), ...pick<boolean>("rotate", "boolean"),
+  }, { kind: "person" }, { ...(agent?.identity?.displayName ? { ownerDisplayName: agent.identity.displayName } : {}) });
+  if (!r.ok) return `Error: ${r.error}`;
+  // only names: NEVER the password
+  return `Login "${r.service}" ${r.action} in ${agentName}'s vault (fields: ${r.keys.join(", ")}). `
+    + `The password was generated by Polpo and is not shown: ${agentName} fills it with ${vaultLoginFillHint(r.service)}.`;
+}
+
 async function execListVault(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   const agents = await polpo.getAgents();
   const resolved = resolveAgentName(agents, args.agent as string);
@@ -5428,6 +5470,9 @@ async function execListVault(polpo: Orchestrator, args: Record<string, unknown>)
     let line = `  - ${e.service} [${e.type}]`;
     if (e.label) line += ` — ${e.label}`;
     line += `: { ${maskedCreds} }`;
+    if (e.createdBy?.kind === "agent") line += ` · created by agent ${e.createdBy.agent ?? "?"}${e.createdAt ? ` on ${e.createdAt.slice(0, 10)}` : ""}`;
+    else if (e.createdBy?.kind === "person") line += ` · added by ${e.createdBy.by ?? "a person"}${e.createdAt ? ` on ${e.createdAt.slice(0, 10)}` : ""}`;
+    if (e.rotatedAt) line += `, rotated ${e.rotatedAt.slice(0, 10)}`;
     lines.push(line);
   }
   return lines.join("\n");

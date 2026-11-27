@@ -39722,6 +39722,86 @@
                             "items": {
                               "type": "string"
                             }
+                          },
+                          "createdBy": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "agent",
+                                  "person"
+                                ],
+                                "description": "agent: the agent made it (vault_create_login); person: someone through the dashboard or the API"
+                              },
+                              "agent": {
+                                "type": "string"
+                              },
+                              "taskId": {
+                                "type": "string"
+                              },
+                              "sessionId": {
+                                "type": "string"
+                              },
+                              "runId": {
+                                "type": "string"
+                              },
+                              "by": {
+                                "type": "string",
+                                "description": "The person, when known"
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ],
+                            "description": "Who created the entry (absent on entries older than provenance)"
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "description": "When it was created (ISO)"
+                          },
+                          "rotatedAt": {
+                            "type": "string",
+                            "description": "When its generated password was last rotated (ISO)"
+                          },
+                          "rotatedBy": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "agent",
+                                  "person"
+                                ],
+                                "description": "agent: the agent made it (vault_create_login); person: someone through the dashboard or the API"
+                              },
+                              "agent": {
+                                "type": "string"
+                              },
+                              "taskId": {
+                                "type": "string"
+                              },
+                              "sessionId": {
+                                "type": "string"
+                              },
+                              "runId": {
+                                "type": "string"
+                              },
+                              "by": {
+                                "type": "string",
+                                "description": "The person, when known"
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ]
+                          },
+                          "generated": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "description": "Keys whose values Polpo generated (never shown to a model)"
                           }
                         },
                         "required": [
@@ -39742,6 +39822,258 @@
           },
           "400": {
             "description": "Reserved vault owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Vault store not available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/vault/entries/{agent}/{service}/generate": {
+      "post": {
+        "tags": [
+          "Vault"
+        ],
+        "summary": "Generate a login",
+        "description": "Create a login entry in an agent's vault with a password Polpo generates (CSPRNG; at least one lowercase, uppercase, digit and, with symbols, one symbol without quotes, backslashes or spaces). The password is never returned: the agent fills it with browser_fill { from_vault: \"<service>.password\" }. An existing entry is refused unless rotate is true (then only the password changes and rotatedAt is recorded).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "agent",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "service",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "username": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string",
+                    "description": "The site (http/https)"
+                  },
+                  "label": {
+                    "type": "string",
+                    "description": "Default: \"<Service> – <agent display name>\""
+                  },
+                  "length": {
+                    "type": "integer",
+                    "minimum": 16,
+                    "maximum": 64,
+                    "description": "Default 24"
+                  },
+                  "symbols": {
+                    "type": "boolean",
+                    "description": "Include symbols (default true)"
+                  },
+                  "rotate": {
+                    "type": "boolean",
+                    "description": "Replace the password of an existing login (keeps username, email and url)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Login generated (the password is not in the response)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "agent": {
+                          "type": "string"
+                        },
+                        "service": {
+                          "type": "string"
+                        },
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "created",
+                            "rotated"
+                          ]
+                        },
+                        "keys": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Credential key names (never values)"
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "fill": {
+                          "type": "string",
+                          "description": "How the agent uses the password"
+                        },
+                        "createdBy": {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "agent",
+                                "person"
+                              ],
+                              "description": "agent: the agent made it (vault_create_login); person: someone through the dashboard or the API"
+                            },
+                            "agent": {
+                              "type": "string"
+                            },
+                            "taskId": {
+                              "type": "string"
+                            },
+                            "sessionId": {
+                              "type": "string"
+                            },
+                            "runId": {
+                              "type": "string"
+                            },
+                            "by": {
+                              "type": "string",
+                              "description": "The person, when known"
+                            }
+                          },
+                          "required": [
+                            "kind"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "rotatedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "agent",
+                        "service",
+                        "action",
+                        "keys",
+                        "fill"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or reserved vault owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing to rotate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The entry exists (pass rotate: true)",
             "content": {
               "application/json": {
                 "schema": {
