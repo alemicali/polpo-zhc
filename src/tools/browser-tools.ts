@@ -32,7 +32,7 @@ import type { FileSystem } from "@polpo-ai/core/filesystem";
 import type { Shell } from "@polpo-ai/core/shell";
 import { withHostTempDir, writeBytes } from "./tool-fs.js";
 import { assertWebUrl } from "./browser-url-guard.js";
-import { assertPathAllowed, resolveAllowedPaths } from "./path-sandbox.js";
+import { assertPathAllowed, resolveAllowedPaths, TOOL_PATH_HINT } from "./path-sandbox.js";
 import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { resolveToolOutputDir, withToolOutputOffload } from "./tool-output.js";
@@ -742,7 +742,7 @@ function createBrowserPressTool(exec: BrowserExec): AgentTool<typeof BrowserPres
 // ─── Tool: browser_screenshot ───
 
 const BrowserScreenshotSchema = Type.Object({
-  path: Type.Optional(Type.String({ description: "File path to save screenshot (default: auto-generated temp path)" })),
+  path: Type.Optional(Type.String({ description: "File path to save the screenshot (default: an auto-generated temporary path). On a remote computer: a path of that computer (working directory, home, /tmp or a mounted /volumes/<name>)." })),
   full_page: Type.Optional(Type.Boolean({ description: "Capture full page, not just viewport" })),
 });
 
@@ -750,7 +750,7 @@ function createBrowserScreenshotTool(exec: BrowserExec, cwd: string, allowedPath
   return {
     name: "browser_screenshot",
     label: "Browser Screenshot",
-    description: "Take a screenshot of the current page. Returns the file path of the saved image.",
+    description: "Take a screenshot of the current page. Returns the file path of the saved image. " + TOOL_PATH_HINT,
     parameters: BrowserScreenshotSchema,
     async execute(_id, params, signal) {
       const args = ["screenshot"];

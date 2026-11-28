@@ -20,7 +20,7 @@ import type { FileSystem } from "@polpo-ai/core/filesystem";
 import { sniffImageMime, type ImageInput, type MediaCaller } from "@polpo-ai/core/media";
 import { Type } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
-import { resolveAllowedPaths, assertPathAllowed } from "./path-sandbox.js";
+import { resolveAllowedPaths, assertPathAllowed, TOOL_PATH_HINT } from "./path-sandbox.js";
 import { readBytes, toolFs, writeBytes } from "./tool-fs.js";
 import type { ResolvedVault } from "../vault/index.js";
 import { mediaServiceFor, type MediaResult, type MediaService } from "../media/service.js";
@@ -127,7 +127,7 @@ function createGenerateTool(cwd: string, sandbox: string[], fs: FileSystem, ctx:
     label: "Generate Image",
     description: "Generate images from a text prompt with the instance's image model (Settings → Media). "
       + "The images are kept as assets with their provenance (Media page) and saved to `path` in your workspace. "
-      + "Optional reference_images (workspace files) guide style or subject.",
+      + "Optional reference_images (workspace files) guide style or subject. " + TOOL_PATH_HINT,
     parameters: ImageGenerateSchema,
     async execute(_id, params) {
       const filePath = resolve(cwd, params.path);
@@ -171,7 +171,7 @@ function createEditTool(cwd: string, sandbox: string[], fs: FileSystem, ctx: Ima
     name: "image_edit",
     label: "Edit Image",
     description: "Change an image of your workspace with a prompt (or compose several images), optionally inside a mask, with the instance's image model "
-      + "(it must take image inputs, e.g. openai/gpt-image-2). The result is kept as an asset (Media page) and saved to `path`.",
+      + "(it must take image inputs, e.g. openai/gpt-image-2). The result is kept as an asset (Media page) and saved to `path`. " + TOOL_PATH_HINT,
     parameters: ImageEditSchema,
     async execute(_id, params) {
       const filePath = resolve(cwd, params.path);
@@ -198,7 +198,7 @@ function createEditTool(cwd: string, sandbox: string[], fs: FileSystem, ctx: Ima
 // ─── Tool: image_analyze ───
 
 const ImageAnalyzeSchema = Type.Object({
-  path: Type.String({ description: "Path to the image file to analyze" }),
+  path: Type.String({ description: "Path to the image file to analyze (on a remote computer: a file of that computer, e.g. /home/…, /tmp/…, /volumes/<name>/…)" }),
   prompt: Type.Optional(Type.String({ description: "Question or instruction about the image (default: 'Describe this image in detail')" })),
   provider: Type.Optional(Type.String({ description: "With model: the model's provider (e.g. openai, anthropic). Default: your own model." })),
   model: Type.Optional(Type.String({ description: "A vision-capable model to look with ('provider:model', or a model of `provider`). Default: your own model." })),
@@ -210,7 +210,7 @@ function createAnalyzeTool(cwd: string, sandbox: string[], fs: FileSystem, ctx: 
     name: "image_analyze",
     label: "Analyze Image",
     description: "Look at an image of your workspace and answer about it: describe it, read its text (OCR), answer questions, read charts. "
-      + "It is a chat turn with the image attached, with your own model by default (it must see images) or a vision model you name.",
+      + "It is a chat turn with the image attached, with your own model by default (it must see images) or a vision model you name. " + TOOL_PATH_HINT,
     parameters: ImageAnalyzeSchema,
     async execute(_id, params) {
       const filePath = resolve(cwd, params.path);

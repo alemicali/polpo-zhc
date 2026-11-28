@@ -21,7 +21,7 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 
 import type { FileSystem } from "@polpo-ai/core/filesystem";
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { resolveAllowedPaths, isPathAllowed } from "./path-sandbox.js";
+import { resolveAllowedPaths, isPathAllowed, isRemoteRoots, withAllowedPaths } from "./path-sandbox.js";
 import { fileSize as sizeOf, readBytes, toolFs } from "./tool-fs.js";
 
 /** The largest file a remote computer's outcome may be (copied to this server). */
@@ -48,7 +48,7 @@ const RegisterOutcomeSchema = Type.Object({
     Type.Literal("json"),
   ], { description: "Outcome type. 'file' for documents (PDF, Excel, DOCX, HTML, archives). 'media' for images/audio/video. 'text' for inline text content. 'url' for links. 'json' for structured data." }),
   label: Type.String({ description: "Human-readable label for this outcome (e.g. 'Q4 Sales Report', 'Architecture Diagram', 'API Response')" }),
-  path: Type.Optional(Type.String({ description: "File path (required for type 'file' or 'media'). Relative paths resolved from cwd." })),
+  path: Type.Optional(Type.String({ description: "File path (required for type 'file' or 'media'). Relative paths resolved from your working directory. On a remote computer: a file of that computer (its working directory, home, /tmp or a mounted /volumes/<name>), copied into the task output." })),
   text: Type.Optional(Type.String({ description: "Text content (for type 'text'). The actual content to include in the outcome." })),
   url: Type.Optional(Type.String({ description: "URL (for type 'url'). Link to external resource." })),
   data: Type.Optional(Type.Unknown({ description: "Structured data (for type 'json'). Any JSON-serializable value." })),
@@ -85,9 +85,11 @@ function createRegisterOutcomeTool(cwd: string, sandbox: string[], fs: FileSyste
   // Use outputDir in examples when available so the agent naturally writes there
   const exampleDir = outputDir ? outputDir.replace(/\/$/, "") : "output";
   // the task's output directory is always a place deliverables may be registered from
-  const allowed = outputDir && !isPathAllowed(resolve(outputDir), sandbox) ? [...sandbox, resolve(outputDir)] : sandbox;
+  const allowed = outputDir && !isPathAllowed(resolve(outputDir), sandbox) ? withAllowedPaths(sandbox, resolve(outputDir)) : sandbox;
   const maxBytes = opts.maxBytes ?? OUTCOME_FILE_MAX_BYTES;
   const where = opts.remote ? "in your computer" : "on disk";
+  // a remote computer: any file of its own folders (home, /tmp, mounted volumes…), copied here
+  const remoteRoots = isRemoteRoots(allowed);
   /** What this run registered already (type + path or content): repeats are not added again. */
   const registered = new Map<string, string>();
   /** Remote file → its copy on this server. */
@@ -100,6 +102,8 @@ function createRegisterOutcomeTool(cwd: string, sandbox: string[], fs: FileSyste
       "deliverables — producing files does NOT auto-register them. You MUST call this tool for " +
       "every artifact that should appear in notifications and the task record.\n\n" +
       (outputDir ? `Your task output directory is: ${outputDir}\nWrite deliverable files there before registering them.\n\n` : "") +
+      (remoteRoots ? `You work on a remote computer: a path is a file of that computer, under ${allowed.join(", ")} (mounted volumes included). `
+        + "The file is copied into the task output on the Polpo server: no need to copy it yourself.\n\n" : "") +
       "Examples:\n" +
       `- After creating a PDF: register_outcome({type: 'file', label: 'Sales Report', path: '${exampleDir}/report.pdf'})\n` +
       `- After generating an image: register_outcome({type: 'media', label: 'Revenue Chart', path: '${exampleDir}/revenue.png'})\n` +
@@ -145,6 +149,11 @@ function createRegisterOutcomeTool(cwd: string, sandbox: string[], fs: FileSyste
       if (params.path) {
         const requested = resolve(cwd, params.path);
         if (!isPathAllowed(requested, allowed)) {
+          if (remoteRoots) {
+            return fail(`Error: cannot register ${requested}: it is outside the folders deliverables can come from on your computer (${allowed.join(", ")}: `
+              + `your working directory, your output directory, your home, /tmp and the volumes mounted for this run). Put the file under one of them and register that path.`,
+            { error: "path_not_allowed", path: requested, allowedRoots: [...allowed] });
+          }
           const dirs = [...new Set([cwd, ...(outputDir ? [outputDir] : [])])].join(", ");
           return fail(`Error: cannot register ${requested}: it is outside the folders deliverables can come from (${dirs}).`
             + (outputDir ? ` Write the file to ${outputDir} and register that path.` : ""), { error: "path_not_allowed", path: requested });
