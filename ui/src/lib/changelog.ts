@@ -32,6 +32,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-28-takeover-soft-hard",
+    date: "2026-11-28",
+    kind: "improved",
+    title: "Se un agente è bloccato da un CAPTCHA o da una verifica, l'attività si mette in pausa e ti aspetta",
+    summary: "Le richieste di prendere il controllo del computer ora sono facoltative o bloccanti: se nessuno arriva in tempo, una bloccante mette in pausa l'attività invece di farla finire, e riparte quando hai fatto tu.",
+    body: [
+      "- **Prima**: se un agente chiedeva aiuto (per esempio un codice SMS durante l'iscrizione a TikTok) e nessuno prendeva il controllo in tempo, la richiesta scadeva e l'attività finiva senza aver fatto quel passo.",
+      "- **Richiesta bloccante**: per CAPTCHA, verifiche via telefono, SMS, email o app e pagine di accesso o iscrizione l'agente chiede in modo **bloccante**. Se nessuno arriva entro il tempo (15 minuti di base), l'attività va **in pausa** con il motivo \"waiting for takeover\" e la richiesta resta aperta. Quando prendi il controllo, fai il passo e restituisci il computer, l'attività **riparte da dove era** e l'agente sa chi l'ha fatto e legge la tua nota.",
+      "- **Richiesta facoltativa**: per un aiuto di cui può fare a meno, se nessuno arriva l'agente va avanti, finisce l'attività e scrive nel risultato cosa non ha potuto fare.",
+      "- **Lo vedi subito**: nella scheda della richiesta sul computer c'è il segno **Blocking** o **Optional**, il tempo che resta e cosa succede dopo; se l'attività è già in pausa te lo dice. Anche le notifiche dicono se è bloccante e fino a quando aspetta, e ti avvisano di nuovo quando l'attività va in pausa.",
+      "- **Puoi anche riprenderla tu**: con **Resume** sull'attività la richiesta viene chiusa e l'agente sa che nessuno ha fatto il passo.",
+      "- **Niente più attese interrotte**: mentre aspetta una persona l'agente non viene più fermato come se fosse bloccato.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i computer", to: "/computers" },
+  },
+  {
     id: "2026-11-28-task-pause",
     date: "2026-11-28",
     kind: "new",

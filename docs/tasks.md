@@ -38,7 +38,9 @@ The task records the pause in `Task.pause`:
 
 `by` is the signed-in member who asked (the API with a member's session, Polpo's chat on their
 behalf, the MCP connector's user), `Polpo` for Polpo's own tools, or the agent for a blocking computer
-takeover (`takeover: { requestId, computerId }`, see [computer-live-view.md](computer-live-view.md)).
+takeover nobody took in time (reason `waiting for takeover`, `takeover: { requestId, computerId }`:
+completing the takeover resumes the task, resuming it by hand cancels the request; see
+[computer-live-view.md](computer-live-view.md#soft-and-hard-requests)).
 The record stays after resume, with who resumed it; `status === "paused"` is what says the task is
 paused now.
 

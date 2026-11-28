@@ -19,6 +19,10 @@ export const STRINGS = {
     error: "Could not load the card", superseded: "There is a newer card for this below",
     typeHere: "Type passwords and codes in the live view, never in the chat.",
     askAbout: (name: string) => `What is the computer "${name}" doing, and is an agent waiting for me?`,
+    level: { hard: "Blocking", soft: "Optional" } as Record<string, string>,
+    left: (min: number) => (min <= 0 ? "time is up" : min < 60 ? `${min} min left` : `${Math.floor(min / 60)} h ${min % 60} min left`),
+    thenHard: "then its task pauses until you do it", thenSoft: "then the agent goes on without it",
+    parked: "Nobody came in time: its task is paused until you take control and give it back",
   },
   it: {
     open: "Apri", refresh: "Aggiorna", ask: "Chiedi", openLive: "Apri la vista dal vivo", take: "Prendi il controllo", give: "Restituisci",
@@ -30,6 +34,10 @@ export const STRINGS = {
     error: "Non riesco a caricare la scheda", superseded: "C'è una scheda più recente più sotto",
     typeHere: "Password e codici si scrivono nella vista dal vivo, mai in chat.",
     askAbout: (name: string) => `Cosa sta facendo il computer "${name}", e c'è un agente che mi aspetta?`,
+    level: { hard: "Bloccante", soft: "Facoltativa" } as Record<string, string>,
+    left: (min: number) => (min <= 0 ? "tempo scaduto" : min < 60 ? `mancano ${min} min` : `mancano ${Math.floor(min / 60)} h ${min % 60} min`),
+    thenHard: "poi il suo task va in pausa finché non lo fai tu", thenSoft: "poi l'agente va avanti senza",
+    parked: "Nessuno è arrivato in tempo: il suo task è in pausa finché non prendi il controllo e lo restituisci",
   },
 };
 export type Strings = typeof STRINGS.en;
@@ -82,9 +90,13 @@ export function computerView(c: ComputerCard, str: Strings): HTMLElement {
       h("div", { class: "small req-reason" }, h("strong", {}, r.agent), `: ${r.reason}`),
       r.url ? h("div", { class: "muted small" }, `${str.page}: ${r.url}`) : null,
       r.whatToDo ? h("div", { class: "muted small" }, `${str.todo}: ${r.whatToDo}`) : null,
-      OPEN.has(r.status) ? h("div", { class: "muted small" }, str.until(when(r.expiresAt, env.locale))) : null,
+      OPEN.has(r.status) && r.parkedAt ? h("div", { class: "small warning-text", "data-parked": "true" }, str.parked) : null,
+      OPEN.has(r.status) && !r.parkedAt ? h("div", { class: "muted small", "data-countdown": r.expiresAt },
+        `${str.until(when(r.expiresAt, env.locale))} (${str.left(Math.ceil((Date.parse(r.expiresAt) - Date.now()) / 60_000))}), ${r.level === "hard" ? str.thenHard : str.thenSoft}`) : null,
       r.note ? h("div", { class: "muted small" }, `${str.lastNote}: ${r.note}`) : null),
-    h("span", { class: `chip chip-sm chip-${tone(r.status)}`, "data-status": r.status }, str.status[r.status] ?? r.status));
+    h("span", { class: "chips" },
+      h("span", { class: `chip chip-sm chip-${r.level === "hard" ? "danger" : "neutral"}`, "data-level": r.level ?? "soft" }, str.level[r.level ?? "soft"] ?? r.level ?? "soft"),
+      h("span", { class: `chip chip-sm chip-${tone(r.status)}`, "data-status": r.status }, str.status[r.status] ?? r.status)));
   return h("div", { class: env.full ? "full" : "card", "data-computer": c.computer.id },
     h("div", { class: "head" },
       h("div", { class: "who" }, h("div", { class: "name" }, c.computer.name), h("div", { class: "role" }, `${c.computer.kind} · ${c.computer.status}`)),

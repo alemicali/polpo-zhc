@@ -1,5 +1,6 @@
 /* The computer card: on top of the cards' common look (agent-card/style.css); tokens only. */
 .danger-text { color: var(--w-danger); }
+.warning-text { color: var(--w-warning); }
 .requests { display: flex; flex-direction: column; }
 .req-reason { overflow-wrap: anywhere; }
 .note-input { width: 100%; box-sizing: border-box; min-height: 36px; padding: 6px 10px; border-radius: var(--r-sm); border: var(--bw) solid var(--line2); background: var(--fill); color: var(--fg); font: inherit; font-size: var(--t-xs); }

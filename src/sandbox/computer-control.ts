@@ -21,6 +21,16 @@ export type ComputerControlHolder = "agent" | "person";
 
 export type TakeoverRequestStatus = "pending" | "in_control" | "released" | "timeout" | "cancelled";
 
+/**
+ * How much the agent needs the person:
+ * - soft (default): optional help; if nobody takes over in time the agent goes on without it and
+ *   says in its result what it could not do;
+ * - hard: blocking (a CAPTCHA, a phone or app verification, a login wall); if nobody takes over in
+ *   time its task is paused ("waiting for takeover") and the request stays open: completing the
+ *   takeover resumes the task.
+ */
+export type TakeoverLevel = "soft" | "hard";
+
 /** An agent asking a person to take control of its computer for a moment. */
 export interface ComputerTakeoverRequest {
   id: string;
@@ -33,9 +43,17 @@ export interface ComputerTakeoverRequest {
   /** What the person should do before giving control back. */
   whatToDo?: string;
   createdAt: string;
-  /** When the agent stops waiting (timeout). */
+  /** When the agent stops waiting (timeout); for a hard request of a task, when its task pauses. */
   expiresAt: string;
   status: TakeoverRequestStatus;
+  /** soft (absent: soft) or hard: see TakeoverLevel. */
+  level?: TakeoverLevel;
+  /**
+   * A hard request nobody took in time: its task was paused ("waiting for takeover") and the request
+   * stays open (it never expires) until a person completes it (the task resumes) or the task is
+   * resumed or stopped by someone (the request is cancelled).
+   */
+  parkedAt?: string;
   taskId?: string;
   runId?: string;
   sessionId?: string;
@@ -75,7 +93,14 @@ interface StateFile { version: 1; computers: Record<string, Entry> }
 const KEEP_REQUESTS = 20;
 /** The longest an agent may wait for a person. */
 export const TAKEOVER_MAX_MINUTES = 24 * 60;
+/** How long an agent waits by default: optional help (soft), and a blocking step (hard: its task pauses after). */
 export const TAKEOVER_DEFAULT_MINUTES = 30;
+export const TAKEOVER_HARD_DEFAULT_MINUTES = 15;
+/**
+ * A hard request of a task is not expired by the store when its wait ends: the agent's run parks it
+ * (pausing the task). If the run is gone and never does, it expires this long after its wait.
+ */
+export const TAKEOVER_HARD_GRACE_MS = 2 * 60_000;
 const MAX_TEXT = 2000;
 
 export class ComputerControlError extends Error {
@@ -86,6 +111,9 @@ export class ComputerControlError extends Error {
 }
 
 const isOpen = (r: ComputerTakeoverRequest) => r.status === "pending" || r.status === "in_control";
+/** An open request whose wait is over: never a parked one; a hard one of a task gets a grace (its run parks it). */
+const isExpired = (r: ComputerTakeoverRequest, now: number) => isOpen(r) && !r.parkedAt
+  && Date.parse(r.expiresAt) + (r.level === "hard" && r.taskId ? TAKEOVER_HARD_GRACE_MS : 0) <= now;
 const clip = (s: string | undefined, max = MAX_TEXT) => (typeof s === "string" && s.trim() ? s.trim().slice(0, max) : undefined);
 
 /** The control state of the computers of one .polpo directory (file-backed, shared by every process). */
@@ -141,7 +169,7 @@ export class ComputerControlStore {
     const now = this.clock();
     const expired: ComputerTakeoverRequest[] = [];
     for (const r of e.requests) {
-      if (isOpen(r) && Date.parse(r.expiresAt) <= now) {
+      if (isExpired(r, now)) {
         r.status = "timeout";
         r.endedAt = new Date(now).toISOString();
         expired.push(r);
@@ -154,7 +182,7 @@ export class ComputerControlStore {
   get(id: string): ComputerControlView {
     const e = this.entry(this.readAll(), id);
     const now = this.clock();
-    const requests = e.requests.map((r) => (isOpen(r) && Date.parse(r.expiresAt) <= now ? { ...r, status: "timeout" as const } : r));
+    const requests = e.requests.map((r) => (isExpired(r, now) ? { ...r, status: "timeout" as const } : r));
     const open = requests.filter(isOpen);
     return { ...e.control, requests: [...open, ...requests.filter((r) => !isOpen(r)).reverse()], open };
   }
@@ -168,7 +196,7 @@ export class ComputerControlStore {
   request(requestId: string): ComputerTakeoverRequest | undefined {
     for (const e of Object.values(this.readAll())) {
       const r = e.requests.find((x) => x.id === requestId);
-      if (r) return isOpen(r) && Date.parse(r.expiresAt) <= this.clock() ? { ...r, status: "timeout" } : r;
+      if (r) return isExpired(r, this.clock()) ? { ...r, status: "timeout" } : r;
     }
     return undefined;
   }
@@ -235,11 +263,12 @@ export class ComputerControlStore {
   /** An agent asks a person to take over. While a person already holds control it is theirs at once. */
   async open(req: {
     computerId: string; agent: string; reason: string; url?: string; whatToDo?: string; timeoutMinutes?: number;
-    taskId?: string; runId?: string; sessionId?: string;
+    level?: TakeoverLevel; taskId?: string; runId?: string; sessionId?: string;
   }): Promise<ComputerTakeoverRequest> {
     const reason = clip(req.reason);
     if (!reason) throw new ComputerControlError("Say why a person should take over (reason)", "INVALID");
-    const minutes = Math.min(TAKEOVER_MAX_MINUTES, Math.max(1, Math.round(req.timeoutMinutes ?? TAKEOVER_DEFAULT_MINUTES)));
+    const level: TakeoverLevel = req.level === "hard" ? "hard" : "soft";
+    const minutes = Math.min(TAKEOVER_MAX_MINUTES, Math.max(1, Math.round(req.timeoutMinutes ?? (level === "hard" ? TAKEOVER_HARD_DEFAULT_MINUTES : TAKEOVER_DEFAULT_MINUTES))));
     return this.change(req.computerId, (e) => {
       const now = this.clock();
       const held = e.control.holder === "person";
@@ -251,6 +280,7 @@ export class ComputerControlStore {
         createdAt: new Date(now).toISOString(),
         expiresAt: new Date(now + minutes * 60_000).toISOString(),
         status: held ? "in_control" : "pending",
+        level,
         ...(held ? { takenBy: e.control.person, takenAt: new Date(now).toISOString() } : {}),
         ...(req.taskId ? { taskId: req.taskId } : {}),
         ...(req.runId ? { runId: req.runId } : {}),
@@ -261,20 +291,59 @@ export class ComputerControlStore {
     });
   }
 
-  /** The agent stops waiting: timeout, or cancelled (its run ended). A closed request is left as it is. */
-  async close(requestId: string, status: "timeout" | "cancelled"): Promise<ComputerTakeoverRequest | undefined> {
+  /**
+   * A hard request's wait ended with nobody done: it stays open, never expiring, while its task is
+   * paused. Only an open request is parked (the returned request says whether it was).
+   */
+  async park(requestId: string): Promise<ComputerTakeoverRequest | undefined> {
     const found = Object.entries(this.readAll()).find(([, e]) => e.requests.some((r) => r.id === requestId));
     if (!found) return undefined;
     return this.change(found[0], (e) => {
       const r = e.requests.find((x) => x.id === requestId);
       if (!r) return undefined;
-      if (isOpen(r)) {
+      // a hard request of a task is still open in its grace (change() expired the others)
+      if (isOpen(r) && !r.parkedAt) r.parkedAt = this.iso();
+      return { ...r };
+    });
+  }
+
+  /**
+   * The agent stops waiting: timeout, or cancelled (its run ended). A closed request is left as it
+   * is; so is a parked one (its run was stopped by the pause), unless `parked` (its task was resumed
+   * or stopped by someone: the request is cancelled).
+   */
+  async close(requestId: string, status: "timeout" | "cancelled", o: { parked?: boolean } = {}): Promise<ComputerTakeoverRequest | undefined> {
+    const found = Object.entries(this.readAll()).find(([, e]) => e.requests.some((r) => r.id === requestId));
+    if (!found) return undefined;
+    return this.change(found[0], (e) => {
+      const r = e.requests.find((x) => x.id === requestId);
+      if (!r) return undefined;
+      if (isOpen(r) && (!r.parkedAt || o.parked)) {
         r.status = status;
         r.endedAt = this.iso();
       }
       return { ...r };
     });
   }
+}
+
+/** "12 min left", "1 h 5 min left", "time is up". */
+export function minutesLeft(expiresAt: string, now = Date.now()): string {
+  const ms = Date.parse(expiresAt) - now;
+  if (!Number.isFinite(ms) || ms <= 0) return "time is up";
+  const min = Math.ceil(ms / 60_000);
+  return min < 60 ? `${min} min left` : `${Math.floor(min / 60)} h ${min % 60} min left`;
+}
+
+/**
+ * How an open request waits, in a line (MCP, Polpo's chat, notifications): its level, until when
+ * and what happens then; a parked one says its task is paused until a person completes it.
+ */
+export function describeTakeoverWait(r: Pick<ComputerTakeoverRequest, "level" | "expiresAt" | "parkedAt" | "taskId"> & { status: string }, now = Date.now()): string {
+  if (r.status !== "pending" && r.status !== "in_control") return r.level === "hard" ? "blocking" : "optional";
+  if (r.parkedAt) return `blocking · nobody took over in time: its task is paused (waiting for takeover) since ${r.parkedAt}; completing the takeover resumes it`;
+  if (r.level === "hard") return `blocking · waits until ${r.expiresAt} (${minutesLeft(r.expiresAt, now)}), then ${r.taskId ? "its task pauses until a person does it" : "the agent stops and reports it is blocked"}`;
+  return `optional · waits until ${r.expiresAt} (${minutesLeft(r.expiresAt, now)}), then the agent goes on without it`;
 }
 
 const stores = new Map<string, ComputerControlStore>();

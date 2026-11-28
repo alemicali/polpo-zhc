@@ -360,7 +360,8 @@ export type {
   DiffSegment, BenchmarkCompareColumn, BenchmarkCaseComparison, BenchmarkProgressEvent, PlaygroundMocks, PlaygroundPane, PlaygroundPaneInput, PlaygroundExchange, PlaygroundSession, PlaygroundStreamEvent,
 } from "./client/agent-suite-types.js";
 export type {
-  ComputerControlHolder, ComputerTakeoverStatus, ComputerTakeoverRequest, ComputerControl, ComputerDesktopState, ComputerDesktopStatus,
+  ComputerControlHolder, ComputerTakeoverStatus,
+  ComputerTakeoverLevel, ComputerTakeoverRequest, ComputerControl, ComputerDesktopState, ComputerDesktopStatus,
   ComputerDesktopView, ComputerTakeoverEvent, ComputerBusy, ComputerControlResult,
 } from "./client/computer-types.js";
 export type {

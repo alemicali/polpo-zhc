@@ -34,6 +34,7 @@ import { config, websocketUrl } from "@/lib/config";
 import { computersApi, formatLastUsed } from "@/lib/computers-api";
 import { cn } from "@/lib/utils";
 import { desktopAspect } from "@/lib/desktop-aspect";
+import { takeoverTimeLeft } from "@/lib/takeover";
 
 type VncClient = import("@novnc/novnc").default;
 type StreamState = "idle" | "connecting" | "live" | "reconnecting" | "error";
@@ -41,16 +42,41 @@ type StreamState = "idle" | "connecting" | "live" | "reconnecting" | "error";
 /** "until 14:05" */
 const until = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
+/** Re-render every 15 s while something counts down. */
+function useNow(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const t = setInterval(() => setNow(Date.now()), 15_000);
+    return () => clearInterval(t);
+  }, [active]);
+  return now;
+}
+
 export function TakeoverRequestBanner({ requests, className }: { requests: ComputerTakeoverRequest[]; className?: string }) {
+  const now = useNow(requests.length > 0);
   if (!requests.length) return null;
   return (
     <div className={cn("space-y-1.5 rounded-control border border-warning/30 bg-warning/10 p-3 text-xs", className)} role="status" data-testid="takeover-requests">
       {requests.map((r) => (
-        <div key={r.id} className="min-w-0 space-y-0.5" data-request={r.id}>
+        <div key={r.id} className="min-w-0 space-y-0.5" data-request={r.id} data-level={r.level ?? "soft"}>
           <p className="flex flex-wrap items-center gap-1.5 font-medium text-warning">
             <Hand className="h-3.5 w-3.5" />
             {r.status === "in_control" ? `${r.agent} is waiting for you to give control back` : `${r.agent} needs you to take control`}
-            <span className="font-normal text-muted-foreground">· waits until {until(r.expiresAt)}</span>
+            <span
+              className={cn("rounded-sm px-1.5 py-0.5 text-micro font-semibold leading-none", r.level === "hard" ? "bg-destructive/15 text-destructive" : "bg-muted text-muted-foreground")}
+              title={r.level === "hard" ? "Blocking: the agent cannot go on without it" : "Optional: the agent can go on without it"}
+              data-testid="takeover-level"
+            >
+              {r.level === "hard" ? "Blocking" : "Optional"}
+            </span>
+            {r.parkedAt
+              ? <span className="font-normal text-destructive" data-testid="takeover-parked">· nobody came in time: its task is paused until you take control and give it back</span>
+              : (
+                <span className="font-normal text-muted-foreground" data-testid="takeover-countdown">
+                  · waits until {until(r.expiresAt)} ({takeoverTimeLeft(r.expiresAt, now)}), {r.level === "hard" ? (r.taskId ? "then its task pauses until you do it" : "then the agent stops") : "then the agent goes on without it"}
+                </span>
+              )}
           </p>
           <p className="break-words text-foreground">{r.reason}</p>
           {r.url && <p className="break-all text-muted-foreground">Page: {r.url}</p>}
