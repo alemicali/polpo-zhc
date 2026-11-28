@@ -36,6 +36,8 @@ Agent versions — drafts, semver versions, deploying to production, rollback, t
 
 Agent suites — tests and evals of an agent with tool mocks and scripted models, datasets, assertions, runs against a version with a trace per case, and the per-engine mock support —, benchmarks (suites × variants × repetitions: leaderboard, Pareto front, case × variant matrix, side by side) and the Playground (chat with several variants at once) are documented in [agent-suites.md](agent-suites.md).
 
+Pausing a single task (status `paused`: a running one's run stops and continues on resume; who, why and when are recorded; REST, MCP, chat, SDK, dashboard) is documented in [tasks.md](tasks.md#pausing-a-task).
+
 Agent harnesses (Claude Code and Codex as an agent's engine, inside its computer) are documented in [harnesses.md](harnesses.md).
 
 Skills — the Agent Skills format, uploading `.skill` / `.zip` bundles (validation, limits, conflicts), browsing a skill's files, and how agents read bundled references and run scripts — are documented in [skills.md](skills.md).

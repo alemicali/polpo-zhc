@@ -195,6 +195,51 @@ const killTaskRoute = createRoute({
   },
 });
 
+const ErrorSchema = z.object({ ok: z.boolean(), error: z.string(), code: z.string() });
+
+const pauseTaskRoute = createRoute({
+  method: "post",
+  path: "/{taskId}/pause",
+  tags: ["Tasks"],
+  summary: "Pause task",
+  description: "Pause a pending, assigned or in-progress task: it is not scheduled until resumed. A running task's run is stopped "
+    + "(it ends as paused, not failed) and resuming continues it in the same session. Its mission stays active and does not "
+    + "complete meanwhile; tasks that depend on it wait. The reason, who paused it and when are recorded on the task (`pause`).",
+  request: {
+    params: z.object({ taskId: z.string() }),
+    body: { required: false, content: { "application/json": { schema: z.object({ reason: z.string().trim().max(2_000).optional() }) } } },
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ paused: z.boolean(), task: z.any() }) }) } },
+      description: "Task paused",
+    },
+    404: { content: { "application/json": { schema: ErrorSchema } }, description: "Task not found" },
+    409: { content: { "application/json": { schema: ErrorSchema } }, description: "The task cannot be paused in its state (already paused, review, done, failed, draft, awaiting approval)" },
+  },
+});
+
+const resumeTaskRoute = createRoute({
+  method: "post",
+  path: "/{taskId}/resume",
+  tags: ["Tasks"],
+  summary: "Resume task",
+  description: "Resume a paused task: it is pending again. When its pause stopped a run, the next run continues it (same session and "
+    + "transcript) and the agent is told it was paused, by whom and why, plus the optional message.",
+  request: {
+    params: z.object({ taskId: z.string() }),
+    body: { required: false, content: { "application/json": { schema: z.object({ message: z.string().trim().max(2_000).optional() }) } } },
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ resumed: z.boolean(), continued: z.boolean(), task: z.any(), direction: z.any().optional() }) }) } },
+      description: "Task resumed (continued: its stopped run goes on as a continuation)",
+    },
+    404: { content: { "application/json": { schema: ErrorSchema } }, description: "Task not found" },
+    409: { content: { "application/json": { schema: ErrorSchema } }, description: "The task is not paused, or its run is still stopping" },
+  },
+});
+
 const TaskDirectionBodySchema = z.object({
   message: z.string().trim().min(1).max(8_000),
   mode: z.enum(["auto", "steer", "follow_up", "continue"]).default("auto"),
@@ -366,6 +411,8 @@ function projectSlim(t: any): any {
     ...withNotReached(t),
     // its runs get only part of the agent's tools (a badge in lists)
     ...(t.toolScope ? { toolScope: t.toolScope } : {}),
+    // paused: why, by whom, when (the paused badge in lists)
+    ...(t.status === "paused" && t.pause ? { pause: t.pause } : {}),
   };
 }
 /** The signed-in member (instance sign-in sets it on the context), if any. */
@@ -406,6 +453,10 @@ export function taskRoutes(getDeps: () => {
   deleteTask: (taskId: string) => Promise<any>;
   retryTask: (taskId: string) => Promise<any>;
   killTask: (taskId: string) => Promise<any>;
+  /** Pause a task (absent on runtimes without it: 400 NOT_SUPPORTED). */
+  pauseTask?: (taskId: string, opts: { reason?: string }) => Promise<any>;
+  /** Resume a paused task. */
+  resumeTask?: (taskId: string, opts: { message?: string }) => Promise<{ task: any; continued: boolean; direction?: any }>;
   sendDirection: (taskId: string, message: string, opts?: any) => Promise<any>;
   listDirections: (taskId: string) => Promise<any[]>;
   reassessTask: (taskId: string) => Promise<any>;
@@ -439,6 +490,13 @@ export function taskRoutes(getDeps: () => {
     err instanceof Error && (err.name === "TaskComputerError" || (err as { code?: string }).code === "INVALID_COMPUTER")
       ? { ok: false as const, error: err.message, code: "INVALID_COMPUTER", allowed: (err as { allowed?: string[] }).allowed ?? [] }
       : undefined;
+
+  /** A pause/resume error as 404 (no task) or 409 (its state does not allow it). */
+  const pauseError = (c: any, error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message === "Task not found") return c.json({ ok: false, error: message, code: "NOT_FOUND" }, 404);
+    return c.json({ ok: false, error: message, code: "INVALID_STATE" }, 409);
+  };
 
   const app = new OpenAPIHono();
 
@@ -626,7 +684,13 @@ export function taskRoutes(getDeps: () => {
       return c.json({ ok: false, error: "Task not found", code: "NOT_FOUND" }, 404);
     }
 
-    if (body.status !== undefined) {
+    // paused / back from paused: the real pause and resume (the run stopped and continued)
+    if (body.status === "paused" && task.status !== "paused" && deps.pauseTask) {
+      try { await deps.pauseTask(taskId, {}); } catch (error) { return pauseError(c, error) as any; }
+    } else if (task.status === "paused" && body.status === "pending" && deps.resumeTask) {
+      try { await deps.resumeTask(taskId, {}); } catch (error) { return pauseError(c, error) as any; }
+      deps.wakeSupervisor?.();
+    } else if (body.status !== undefined) {
       await deps.taskStore.unsafeSetStatus(taskId, body.status as any, "manual status update via API");
       if (body.status === "pending") deps.wakeSupervisor?.();
     }
@@ -702,6 +766,37 @@ export function taskRoutes(getDeps: () => {
       return c.json({ ok: false, error: "Task not found", code: "NOT_FOUND" }, 404);
     }
     return c.json({ ok: true, data: { killed: true } }, 200);
+  });
+
+  // POST /tasks/:taskId/pause — pause (a running one's run is stopped, continued on resume)
+  app.openapi(pauseTaskRoute, async (c) => {
+    const deps = getDeps();
+    const { taskId } = c.req.valid("param");
+    if (!deps.pauseTask) return c.json({ ok: false, error: "Pausing tasks is not available on this server", code: "NOT_SUPPORTED" }, 409);
+    const body = (await c.req.json().catch(() => ({}))) as { reason?: unknown };
+    const reason = typeof body?.reason === "string" ? body.reason.trim().slice(0, 2_000) : undefined;
+    try {
+      const task = await deps.pauseTask(taskId, { ...(reason ? { reason } : {}) });
+      return c.json({ ok: true, data: { paused: true, task } }, 200);
+    } catch (error) {
+      return pauseError(c, error);
+    }
+  });
+
+  // POST /tasks/:taskId/resume — resume a paused task (continued when its run was stopped)
+  app.openapi(resumeTaskRoute, async (c) => {
+    const deps = getDeps();
+    const { taskId } = c.req.valid("param");
+    if (!deps.resumeTask) return c.json({ ok: false, error: "Resuming tasks is not available on this server", code: "NOT_SUPPORTED" }, 409);
+    const body = (await c.req.json().catch(() => ({}))) as { message?: unknown };
+    const message = typeof body?.message === "string" ? body.message.trim().slice(0, 2_000) : undefined;
+    try {
+      const r = await deps.resumeTask(taskId, { ...(message ? { message } : {}) });
+      deps.wakeSupervisor?.();
+      return c.json({ ok: true, data: { resumed: true, continued: r.continued, task: r.task, ...(r.direction ? { direction: r.direction } : {}) } }, 200);
+    } catch (error) {
+      return pauseError(c, error);
+    }
   });
 
   app.openapi(sendTaskDirectionRoute, async (c) => {

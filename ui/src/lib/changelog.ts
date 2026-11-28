@@ -32,6 +32,22 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-28-task-pause",
+    date: "2026-11-28",
+    kind: "new",
+    title: "Puoi mettere in pausa una singola attività",
+    summary: "Metti in pausa un'attività (anche mentre l'agente lavora) con il motivo, e riprendila quando vuoi: l'agente continua da dove era.",
+    body: [
+      "- **Pausa**: dalla pagina dell'attività scegli **Pause** e scrivi il motivo (facoltativo). Un'attività in coda non parte; se l'agente sta lavorando si ferma subito, ma l'attività **non fallisce** e non viene rifatta da capo.",
+      "- **Riprendi**: con **Resume** l'attività torna in coda. Se era stata fermata mentre lavorava, l'agente **continua da dove era** e sa che era in pausa, chi l'aveva messa e perché; puoi aggiungere un messaggio per lui.",
+      "- **Chi, quando, perché**: nella pagina dell'attività un riquadro dice chi l'ha messa in pausa, quando e il motivo; nelle liste c'è il segno **Paused** (passaci sopra per il motivo), la scheda Paused e la colonna Paused.",
+      "- **Missioni**: le attività che dipendono da quella in pausa aspettano e la missione resta attiva senza chiudersi; la pausa della missione funziona come prima ed è indipendente.",
+      "- **Ovunque**: anche chiedendo a Polpo in chat (\"metti in pausa quell'attività\"), dall'API, dal connettore MCP (con i pulsanti Pause e Resume nella scheda dell'attività) e dall'SDK. Le notifiche possono avvisarti di pausa e ripresa.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i task", to: "/tasks" },
+  },
+  {
     id: "2026-11-28-continue-reopens-mission",
     date: "2026-11-28",
     kind: "fixed",

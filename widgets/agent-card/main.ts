@@ -39,7 +39,7 @@ const STRINGS = {
     confirm: "Confirm", cancel: "Cancel", recurring: "Repeats", once: "Once", refresh: "Refresh", updated: "Updated",
     superseded: "There is a newer card for this agent below",
     horizon: { long: "6–12 months", quarter: "Quarter", month: "Month", week: "Week", day: "Today" } as Record<string, string>,
-    status: { pending: "Pending", assigned: "Assigned", in_progress: "In progress", review: "In review", done: "Done", failed: "Failed", awaiting_approval: "To approve", draft: "Draft" } as Record<string, string>,
+    status: { pending: "Pending", assigned: "Assigned", in_progress: "In progress", review: "In review", done: "Done", failed: "Failed", awaiting_approval: "To approve", draft: "Draft", paused: "Paused" } as Record<string, string>,
     error: "Could not load the agent",
     on: "on", connectors: "Connectors", allTools: "all tools", tools: (n: number) => `${n} tool${n === 1 ? "" : "s"}`,
     notRetried: "not retried", failedBecause: "Failed", toolsRestricted: "Tools restricted",
@@ -59,7 +59,7 @@ const STRINGS = {
     confirm: "Conferma", cancel: "Annulla", recurring: "Si ripete", once: "Una volta", refresh: "Aggiorna", updated: "Aggiornato",
     superseded: "C'è una scheda più recente di questo agente più sotto",
     horizon: { long: "6–12 mesi", quarter: "Trimestre", month: "Mese", week: "Settimana", day: "Oggi" } as Record<string, string>,
-    status: { pending: "In coda", assigned: "Assegnato", in_progress: "In corso", review: "In verifica", done: "Fatto", failed: "Fallito", awaiting_approval: "Da approvare", draft: "Bozza" } as Record<string, string>,
+    status: { pending: "In coda", assigned: "Assegnato", in_progress: "In corso", review: "In verifica", done: "Fatto", failed: "Fallito", awaiting_approval: "Da approvare", draft: "Bozza", paused: "In pausa" } as Record<string, string>,
     error: "Non riesco a caricare l'agente",
     on: "su", connectors: "Connettori", allTools: "tutti gli strumenti", tools: (n: number) => `${n} strument${n === 1 ? "o" : "i"}`,
     notRetried: "non ritentato", failedBecause: "Fallito", toolsRestricted: "Strumenti ristretti",
@@ -128,7 +128,7 @@ function initials(name: string): string {
   return ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase() || "?";
 }
 
-const statusTone = (s: string) => (s === "done" ? "success" : s === "failed" ? "danger" : s === "awaiting_approval" ? "warning" : s === "in_progress" || s === "assigned" || s === "review" ? "info" : "neutral");
+const statusTone = (s: string) => (s === "done" ? "success" : s === "failed" ? "danger" : s === "awaiting_approval" || s === "paused" ? "warning" : s === "in_progress" || s === "assigned" || s === "review" ? "info" : "neutral");
 
 function progressBar(value: number | undefined, label: string): HTMLElement {
   if (value === undefined) return h("span");
@@ -229,7 +229,7 @@ function inlineFacts(c: AgentCard, s: Strings): HTMLElement {
 
 function tasksTab(c: AgentCard, s: Strings): HTMLElement {
   const filters: Array<[TaskFilter, string]> = [["all", s.all], ["active", s.active], ["done", s.doneF], ["failed", s.failedF]];
-  const shown = c.tasks.filter((x) => taskFilter === "all" || (taskFilter === "active" ? ["assigned", "in_progress", "review", "pending", "awaiting_approval"].includes(x.status) : x.status === taskFilter));
+  const shown = c.tasks.filter((x) => taskFilter === "all" || (taskFilter === "active" ? ["assigned", "in_progress", "review", "pending", "awaiting_approval", "paused"].includes(x.status) : x.status === taskFilter));
   return h("div", { class: "stack" },
     h("div", { class: "chips" }, ...filters.map(([id, label]) => h("button", { class: `chip-btn${taskFilter === id ? " on" : ""}`, "aria-pressed": taskFilter === id ? "true" : "false", onclick: () => { taskFilter = id; render(); } }, label))),
     shown.length ? h("div", {}, ...shown.map((x) => h("div", { class: "row" },

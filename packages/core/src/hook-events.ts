@@ -201,6 +201,8 @@ const EVENT_CATALOG: { [K in PolpoEvent]: Omit<HookEventDef, "name"> } = {
   "file:changed": { label: "File changed", description: "A file was created, modified, deleted or renamed.", category: "file", placeholders: ["path", "dir", "action", "source"] },
   "task:retried": { label: "Task retried", description: "Someone asked to run a failed task again.", category: "task", placeholders: ["taskId", "title", "source", "by"] },
   "task:killed": { label: "Task killed", description: "A running or waiting task was stopped on request.", category: "task", placeholders: ["taskId", "title", "runId", "source", "by"] },
+  "task:paused": { label: "Task paused", description: "A task was paused: it is not scheduled until someone resumes it (a running one was stopped and will continue).", category: "task", placeholders: ["taskId", "title", "from", "reason", "pausedBy", "runId", "source", "by"] },
+  "task:resumed": { label: "Task resumed", description: "A paused task was resumed: pending again, its stopped run continues.", category: "task", placeholders: ["taskId", "title", "continued", "resumedBy", "message", "reason", "source", "by"] },
   "task:force-failed": { label: "Task force-failed", description: "A task was failed on purpose (deadlock, manual force-fail).", category: "task", placeholders: ["taskId", "title", "reason", "source"] },
   "task:outcome": { label: "Task outcome", description: "The agent produced new outcomes (files, text, media) for a task.", category: "task", placeholders: ["taskId", "outcomes"] },
   "task:complete-blocked": { label: "Completion blocked", description: "A lifecycle hook refused to mark the task done.", category: "task", placeholders: ["taskId", "reason"] },

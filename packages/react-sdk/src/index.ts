@@ -202,6 +202,8 @@ export type {
   TaskRunContext,
   TaskToolScope,
   TaskSandbox,
+  TaskPause,
+  ResumeTaskResult,
   TaskRunEngine,
   AgentCliEngine,
   CliAccount,

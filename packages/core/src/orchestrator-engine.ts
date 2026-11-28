@@ -13,7 +13,7 @@
 
 import type { PolpoEvent, PolpoEventMap } from "./events.js";
 import type { OrchestratorContext } from "./orchestrator-context.js";
-import type { TaskManager } from "./task-manager.js";
+import type { TaskManager, ResumedTask } from "./task-manager.js";
 import type { AgentManager } from "./agent-manager.js";
 import type { ApprovalManager } from "./approval-manager.js";
 import type { Scheduler } from "./scheduler.js";
@@ -310,6 +310,8 @@ export class OrchestratorEngine {
     const pending = tasks.filter(t => t.status === "pending");
     const awaitingApproval = tasks.filter(t => t.status === "awaiting_approval");
     const inProgress = tasks.filter(t => t.status === "in_progress" || t.status === "assigned" || t.status === "review");
+    // paused tasks wait for a person: not scheduled, not finished (their mission does not complete)
+    const paused = tasks.filter(t => t.status === "paused");
 
     // Check if all active tasks are terminal (done or failed)
     // draft tasks are excluded — they don't participate in orchestration
@@ -451,7 +453,8 @@ export class OrchestratorEngine {
     // Don't consider it a deadlock if tasks are awaiting approval, blocked by checkpoints, or waiting on delays
     const hasActiveCheckpoints = this.missionExec.getActiveCheckpoints().length > 0;
     const hasActiveDelays = this.missionExec.getActiveDelays().length > 0 || !!this.missionExec.hasPendingDecisions?.() || !!this.missionExec.hasPendingImages?.();
-    if (ready.length === 0 && inProgress.length === 0 && pending.length > 0 && awaitingApproval.length === 0 && !hasActiveCheckpoints && !hasActiveDelays && !waitingOnPausedMission) {
+    // A paused task is not a deadlock either: its dependents wait until it is resumed.
+    if (ready.length === 0 && inProgress.length === 0 && pending.length > 0 && awaitingApproval.length === 0 && paused.length === 0 && !hasActiveCheckpoints && !hasActiveDelays && !waitingOnPausedMission) {
       if (this.deadlockResolver) {
         // Async resolution already in progress — wait for next tick
         if (this.deadlockResolver.isResolving()) return false;
@@ -530,6 +533,7 @@ export class OrchestratorEngine {
       done,
       failed,
       queued,
+      paused: paused.length,
     });
 
     // Clean up volatile agents for completed mission groups.
@@ -611,6 +615,8 @@ export class OrchestratorEngine {
   async listDirections(taskId: string) { return this.taskMgr.listDirections(taskId); }
   reassessTask(taskId: string): Promise<void> { return this.taskMgr.reassessTask(taskId); }
   async killTask(taskId: string): Promise<boolean> { return this.taskMgr.killTask(taskId); }
+  async pauseTask(taskId: string, opts?: Parameters<TaskManager["pauseTask"]>[1]): Promise<Task> { return this.taskMgr.pauseTask(taskId, opts); }
+  async resumeTask(taskId: string, opts?: Parameters<TaskManager["resumeTask"]>[1]): Promise<ResumedTask> { return this.taskMgr.resumeTask(taskId, opts); }
   async deleteTask(taskId: string): Promise<boolean> { return this.ctx.registry.removeTask(taskId); }
 
   async abortGroup(group: string, missionId?: string): Promise<number> {

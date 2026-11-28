@@ -8,7 +8,7 @@ export * from "./events.js";
 export * from "./hook-events.js";
 
 // ── State Machine ────────────────────────────────────────────────────────
-export { VALID_TRANSITIONS, isValidTransition, assertValidTransition } from "./state-machine.js";
+export { VALID_TRANSITIONS, PAUSABLE_STATUSES, isValidTransition, assertValidTransition } from "./state-machine.js";
 
 // ── Schemas (Zod validation) ─────────────────────────────────────────────
 export * from "./schemas.js";
@@ -196,7 +196,8 @@ export { parseCron, matchesCron, nextCronOccurrence, isCronExpression, scheduleE
 
 // ── Core Managers ───────────────────────────────────────────────────────
 export { TaskManager } from "./task-manager.js";
-export type { ReopenedMission } from "./task-manager.js";
+export type { ReopenedMission, ResumedTask } from "./task-manager.js";
+export { resumeMessage } from "./task-manager.js";
 export { AgentManager } from "./agent-manager.js";
 export { ApprovalManager } from "./approval-manager.js";
 export { EscalationManager } from "./escalation-manager.js";

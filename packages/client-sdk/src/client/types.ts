@@ -14,7 +14,34 @@ export type TaskStatus =
   | "in_progress"
   | "review"
   | "done"
-  | "failed";
+  | "failed"
+  /** Held by a person (or a blocking computer takeover) until resumed: not scheduled, not finished. */
+  | "paused";
+
+/** Why and by whom a task is (status "paused") or was last paused (with resumedAt). */
+export interface TaskPause {
+  at: string;
+  /** Who paused it: a member's email, "Polpo", or the agent of a blocking takeover. */
+  by?: string;
+  reason?: string;
+  /** The status it was paused from. */
+  from: TaskStatus;
+  /** The run the pause stopped: resuming continues it. */
+  runId?: string;
+  /** A blocking (hard) computer takeover nobody took paused it: completing the takeover resumes it. */
+  takeover?: { requestId: string; computerId: string };
+  resumedAt?: string;
+  resumedBy?: string;
+}
+
+/** POST /tasks/:id/resume. */
+export interface ResumeTaskResult {
+  resumed: boolean;
+  /** Its pause stopped a run: the next run continues it (same session). */
+  continued: boolean;
+  task: Task;
+  direction?: TaskDirection;
+}
 
 export interface EvalDimension {
   name: string;
@@ -153,6 +180,8 @@ export interface Task {
   requestedBy?: string;
   /** What started it, when not a person: a trigger's delivery (open it from the task). */
   origin?: WorkOrigin;
+  /** The current pause (status "paused") or the last one (resumedAt set). */
+  pause?: TaskPause;
   /** GET /tasks/:id: what of the tool scope the agent no longer has (connector removed, access revoked…). */
   toolScopeStale?: string[];
   /**
@@ -245,7 +274,8 @@ export interface TaskRunContext {
   runId: string;
   startedAt: string;
   endedAt?: string;
-  status: "running" | "completed" | "failed" | "killed";
+  /** paused: stopped by a pause of its task (resuming continues it). */
+  status: "running" | "completed" | "failed" | "killed" | "paused";
   /** The run continued the previous one (a "continue" direction). */
   continuation?: boolean;
   /** The agent that ran it. */

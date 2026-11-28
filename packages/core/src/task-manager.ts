@@ -2,7 +2,8 @@ import { isProductionRef, isSemver, parseAgentRef } from "./agent-versions.js";
 import { normalizeTaskToolScope, type TaskToolScope } from "./task-tool-scope.js";
 import type { TaskStore } from "./task-store.js";
 import type { OrchestratorContext } from "./orchestrator-context.js";
-import type { Mission, MissionStatus, Task, TaskExpectation, ExpectedOutcome, RetryPolicy, ReviewContext, ScopedNotificationRules, WorkOrigin } from "./types.js";
+import type { Mission, MissionStatus, Task, TaskExpectation, TaskPause, ExpectedOutcome, RetryPolicy, ReviewContext, ScopedNotificationRules, WorkOrigin } from "./types.js";
+import { PAUSABLE_STATUSES } from "./state-machine.js";
 import { setAssessment } from "./types.js";
 import { sanitizeExpectations } from "./schemas.js";
 import type { TaskDirection } from "./task-control-store.js";
@@ -18,6 +19,33 @@ export interface ReopenedMission {
   id: string;
   name: string;
   prevStatus: MissionStatus;
+}
+
+/** What a resume did: the task is pending again; `continued`: its stopped run goes on (a continuation). */
+export interface ResumedTask {
+  task: Task;
+  continued: boolean;
+  direction?: TaskDirection;
+}
+
+/** Longest pause reason or resume message kept. */
+const PAUSE_TEXT_MAX = 2_000;
+/** How long a resume waits for the run its pause stopped to end. */
+const RESUME_WAIT_MS = 10_000;
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** What the agent is told when its paused task is resumed (the continuation's message). */
+export function resumeMessage(pause: TaskPause | undefined, o: { by?: string; message?: string } = {}): string {
+  const paused = pause
+    ? `Your task was paused${pause.by ? ` by ${pause.by}` : ""}${pause.reason ? ` (${pause.reason})` : ""} at ${pause.at}`
+    : "Your task was paused";
+  const lines = [
+    `${paused} and has now been resumed${o.by ? ` by ${o.by}` : ""}.`,
+    "Continue where you left off. The pause stopped you mid-step: check the current state first (a step you were doing may be half done) before going on.",
+  ];
+  if (o.message?.trim()) lines.push("", `Message${o.by ? ` from ${o.by}` : ""}: ${o.message.trim()}`);
+  return lines.join("\n");
 }
 
 /** Mission states a human continuation or retry reopens: the mission runs again while its task does. */
@@ -320,6 +348,106 @@ export class TaskManager {
     }
     this.ctx.emitter.emit("task:direction", { taskId, action: "continue", direction });
     return { action: "continue", direction, ...(reopenedMission ? { reopenedMission } : {}) };
+  }
+
+  /**
+   * Pause a task (pending, assigned or in_progress): it is not scheduled until resumed. A running
+   * task's run is stopped (SIGTERM, like kill) but ends as "paused", not failed: its session,
+   * transcript and conversation checkpoint stay, and resuming continues it. Its mission stays
+   * active and does not complete meanwhile; dependents wait.
+   */
+  async pauseTask(taskId: string, opts: { reason?: string; by?: string; takeover?: TaskPause["takeover"] } = {}): Promise<Task> {
+    const task = await this.ctx.registry.getTask(taskId);
+    if (!task) throw new Error("Task not found");
+    if (task.status === "paused") throw new Error("Task is already paused");
+    if (!PAUSABLE_STATUSES.includes(task.status)) {
+      throw new Error(`Cannot pause a task that is ${task.status}: only pending, assigned or in-progress tasks can be paused`);
+    }
+    // stores may hand out live objects: keep what it was before changing it
+    const from = task.status;
+    const title = task.title;
+    const run = await this.ctx.runStore.getRunByTaskId(taskId);
+    const active = run?.status === "running" ? run : undefined;
+    const reason = opts.reason?.trim().slice(0, PAUSE_TEXT_MAX);
+    const pause: TaskPause = {
+      at: new Date().toISOString(),
+      from,
+      ...(opts.by ? { by: opts.by } : {}),
+      ...(reason ? { reason } : {}),
+      ...(active ? { runId: active.id } : {}),
+      ...(opts.takeover ? { takeover: opts.takeover } : {}),
+    };
+    // the record first (task:transition carries it), then the status: the tick no longer starts,
+    // assesses or retries it; then the run is stopped
+    await this.ctx.registry.updateTask(taskId, { pause });
+    let paused: Task;
+    try {
+      paused = await this.ctx.registry.transition(taskId, "paused");
+    } catch {
+      paused = await this.ctx.registry.unsafeSetStatus(taskId, "paused", "pause transition race fallback");
+    }
+    if (active && active.pid > 0 && this.ctx.killProcess) {
+      try { this.ctx.killProcess(active.pid, "SIGTERM"); } catch { /* already gone */ }
+    }
+    this.ctx.emitter.emit("task:paused", {
+      taskId, title, from,
+      ...(reason ? { reason } : {}), ...(opts.by ? { pausedBy: opts.by } : {}),
+      ...(active ? { runId: active.id } : {}), ...(opts.takeover ? { takeover: opts.takeover } : {}),
+    });
+    return { ...paused, pause };
+  }
+
+  /**
+   * Resume a paused task: back to pending; when its pause stopped a run, the next run continues it
+   * (a "continue" direction: same session and transcript) and is told it was paused, by whom and
+   * why, with the optional message.
+   */
+  async resumeTask(taskId: string, opts: { by?: string; message?: string } = {}): Promise<ResumedTask> {
+    const task = await this.ctx.registry.getTask(taskId);
+    if (!task) throw new Error("Task not found");
+    if (task.status !== "paused") throw new Error(`Task is ${task.status}, not paused`);
+    const before = task.pause ? { ...task.pause } : undefined;
+    const message = opts.message?.trim().slice(0, PAUSE_TEXT_MAX);
+
+    // the run the pause stopped must have ended: its continuation could otherwise go to it
+    const deadline = Date.now() + RESUME_WAIT_MS;
+    for (;;) {
+      const run = await this.ctx.runStore.getRunByTaskId(taskId);
+      if (run?.status !== "running") break;
+      if (Date.now() >= deadline) throw new Error("The paused run is still stopping: resume it again in a moment");
+      await sleep(250);
+    }
+
+    const store = this.ctx.taskControlStore;
+    const continued = !!before?.runId && !!store;
+    let direction: TaskDirection | undefined;
+    if (continued) {
+      direction = await store!.enqueueDirection({ taskId, mode: "continue", message: resumeMessage(before, { ...(opts.by ? { by: opts.by } : {}), ...(message ? { message } : {}) }) });
+    }
+    const pause: TaskPause | undefined = before
+      ? { ...before, resumedAt: new Date().toISOString(), ...(opts.by ? { resumedBy: opts.by } : {}) }
+      : undefined;
+    try {
+      await this.ctx.registry.updateTask(taskId, { ...(pause ? { pause } : {}), ...(continued ? { phase: "execution" as const } : {}) });
+      try {
+        await this.ctx.registry.transition(taskId, "pending");
+      } catch {
+        await this.ctx.registry.unsafeSetStatus(taskId, "pending", "resume transition race fallback");
+      }
+    } catch (error) {
+      if (direction) await store!.failDirection(direction.id, error instanceof Error ? error.message : String(error)).catch(() => undefined);
+      throw error;
+    }
+    const resumed = (await this.ctx.registry.getTask(taskId)) ?? { ...task, status: "pending" as const, ...(pause ? { pause } : {}) };
+    this.ctx.emitter.emit("task:resumed", {
+      taskId, title: task.title, continued,
+      ...(opts.by ? { resumedBy: opts.by } : {}), ...(message ? { message } : {}),
+      ...(before?.reason ? { reason: before.reason } : {}),
+      ...(before ? { pausedMs: Math.max(0, Date.now() - Date.parse(before.at)) } : {}),
+      ...(before?.takeover ? { takeover: before.takeover } : {}),
+    });
+    if (direction) this.ctx.emitter.emit("task:direction", { taskId, action: "continue", direction });
+    return { task: resumed, continued, ...(direction ? { direction } : {}) };
   }
 
   async listDirections(taskId: string): Promise<TaskDirection[]> {

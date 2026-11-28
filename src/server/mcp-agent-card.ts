@@ -143,7 +143,7 @@ export interface AgentCardInput {
 }
 
 const ACTIVE = new Set(["assigned", "in_progress", "review"]);
-const WAITING = new Set(["awaiting_approval"]);
+const WAITING = new Set(["awaiting_approval", "paused"]);
 const HORIZON_ORDER = ["long", "quarter", "month", "week", "day"];
 
 /** The calendar day of a time in a timezone (YYYY-MM-DD). */

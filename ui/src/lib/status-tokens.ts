@@ -93,6 +93,7 @@ export const taskStatusStyles: Record<TaskStatus, TaskStatusStyle> = {
   review:            style("warning",     { icon: Eye,           label: "Review",            short: "Review" }),
   done:              style("success",     { icon: CheckCircle2,  label: "Done",              short: "Done" }),
   failed:            style("destructive", { icon: AlertTriangle, label: "Failed",            short: "Failed" }),
+  paused:            style("warning",     { icon: Pause,         label: "Paused",            short: "Paused" }),
 };
 
 /**

@@ -169,6 +169,13 @@
       "when": 1795836723740,
       "tag": "0023_task_sandbox",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1795852696863,
+      "tag": "0024_task_pause",
+      "breakpoints": true
     }
   ]
 }

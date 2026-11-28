@@ -6,7 +6,7 @@ import {
 } from "../core/state-machine.js";
 import type { TaskStatus } from "../core/types.js";
 
-const ALL_STATUSES: TaskStatus[] = ["pending", "awaiting_approval", "assigned", "in_progress", "review", "done", "failed"];
+const ALL_STATUSES: TaskStatus[] = ["pending", "awaiting_approval", "assigned", "in_progress", "review", "done", "failed", "paused"];
 
 describe("state-machine", () => {
   describe("VALID_TRANSITIONS", () => {
@@ -16,20 +16,20 @@ describe("state-machine", () => {
       }
     });
 
-    it("pending can go to assigned or awaiting_approval", () => {
-      expect(VALID_TRANSITIONS.pending).toEqual(["assigned", "awaiting_approval"]);
+    it("pending can go to assigned, awaiting_approval or paused", () => {
+      expect(VALID_TRANSITIONS.pending).toEqual(["assigned", "awaiting_approval", "paused"]);
     });
 
     it("awaiting_approval can go to assigned, failed, done, or pending", () => {
       expect(VALID_TRANSITIONS.awaiting_approval).toEqual(["assigned", "failed", "done", "pending"]);
     });
 
-    it("assigned can go to in_progress or awaiting_approval", () => {
-      expect(VALID_TRANSITIONS.assigned).toEqual(["in_progress", "awaiting_approval"]);
+    it("assigned can go to in_progress, awaiting_approval or paused", () => {
+      expect(VALID_TRANSITIONS.assigned).toEqual(["in_progress", "awaiting_approval", "paused"]);
     });
 
-    it("in_progress can go to review, failed, or awaiting_approval", () => {
-      expect(VALID_TRANSITIONS.in_progress).toEqual(["review", "failed", "awaiting_approval"]);
+    it("in_progress can go to review, failed, awaiting_approval or paused", () => {
+      expect(VALID_TRANSITIONS.in_progress).toEqual(["review", "failed", "awaiting_approval", "paused"]);
     });
 
     it("review can go to done, failed, or awaiting_approval", () => {
@@ -42,6 +42,13 @@ describe("state-machine", () => {
 
     it("failed can go back to pending (retry)", () => {
       expect(VALID_TRANSITIONS.failed).toEqual(["pending"]);
+    });
+
+    it("paused goes back to pending (resume) or fails (kill); review and done cannot be paused", () => {
+      expect(VALID_TRANSITIONS.paused).toEqual(["pending", "failed"]);
+      expect(isValidTransition("review", "paused")).toBe(false);
+      expect(isValidTransition("done", "paused")).toBe(false);
+      expect(isValidTransition("paused", "in_progress")).toBe(false);
     });
   });
 
@@ -90,7 +97,7 @@ describe("state-machine", () => {
 
     it("throws for invalid transitions with descriptive message", () => {
       expect(() => assertValidTransition("pending", "done"))
-        .toThrow("Invalid transition: pending → done (allowed: assigned, awaiting_approval)");
+        .toThrow("Invalid transition: pending → done (allowed: assigned, awaiting_approval, paused)");
     });
 
     it("throws for terminal state transitions with empty allowed list", () => {

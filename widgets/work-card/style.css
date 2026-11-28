@@ -3,6 +3,8 @@
 .failure-head { display: flex; gap: 6px; flex-wrap: wrap; }
 .failure-head .chip-sm { margin-inline-start: 0; }
 .failure-text { margin: 0; color: var(--w-danger); overflow-wrap: anywhere; }
+.paused { border-radius: var(--r-sm); padding: 10px 12px; background: var(--w-warning-bg); display: flex; flex-direction: column; gap: 4px; }
+.paused .prose { margin: 0; overflow-wrap: anywhere; }
 .danger-text { color: var(--w-danger); }
 .run { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
 .run-engine { font-weight: var(--w-medium); }
