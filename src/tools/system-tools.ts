@@ -13,7 +13,7 @@ import { NodeFileSystem } from "../adapters/node-filesystem.js";
 import { NodeShell } from "../adapters/node-shell.js";
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { resolveAllowedPaths, assertPathAllowed, isPathAllowed } from "./path-sandbox.js";
+import { resolveAllowedPaths, assertPathAllowed, isPathAllowed, withAllowedPaths } from "./path-sandbox.js";
 import { offloadToolOutput, offloadHint, resolveToolOutputDir, saveToolOutput } from "./tool-output.js";
 import { createOutcomeTools as createOutcomeToolsCore } from "./outcome-tools.js";
 import { createHttpTools as createHttpToolsCore, ALL_HTTP_TOOL_NAMES as CORE_HTTP_TOOL_NAMES } from "./http-tools.js";
@@ -729,7 +729,7 @@ export function createSystemTools(cwd: string, allowedTools?: string[], allowedP
     ?? resolveToolOutputDir({ outputDir, polpoDir: options.polpoDir, agentName: options.agentName });
   // Offloaded outputs must be readable by read/grep/glob/ls even when the
   // offload dir sits outside the sandbox (read-only: write/edit are unchanged).
-  const readSandbox = isPathAllowed(toolOutputDir, sandbox) ? sandbox : [...sandbox, toolOutputDir];
+  const readSandbox = isPathAllowed(toolOutputDir, sandbox) ? sandbox : withAllowedPaths(sandbox, toolOutputDir);
 
   const factories: Record<SystemToolName, () => AgentTool<any>> = {
     read: () => createReadTool(cwd, readSandbox, _fs),

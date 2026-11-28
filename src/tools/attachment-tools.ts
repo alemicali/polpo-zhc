@@ -16,7 +16,7 @@ import { readFile } from "node:fs/promises";
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { FileSystem } from "@polpo-ai/core/filesystem";
-import { assertPathAllowed } from "./path-sandbox.js";
+import { assertPathAllowed, isPathAllowed, isRemoteRoots } from "./path-sandbox.js";
 import { readBytes, toolFs } from "./tool-fs.js";
 
 const MAX_TEXT_OUTPUT = 50_000;
@@ -87,10 +87,11 @@ function readText(bytes: Buffer, maxChars: number): string {
  * sandbox). Chat attachments are saved by this server: one uploaded after the sandbox started is
  * only on this machine, so it is read here when the FileSystem does not have it.
  */
-async function readAttachmentBytes(fs: FileSystem, filePath: string): Promise<Buffer> {
+async function readAttachmentBytes(fs: FileSystem, filePath: string, localFallback = true): Promise<Buffer> {
   try {
     return await readBytes(fs, filePath);
   } catch (err) {
+    if (!localFallback) throw err;
     try { return await readFile(filePath); } catch { throw err; }
   }
 }
@@ -111,7 +112,8 @@ function createReadAttachmentTool(cwd: string, sandbox: string[], fs: FileSystem
       const ext = extname(filePath).toLowerCase();
 
       try {
-        const data = await readAttachmentBytes(fs, filePath);
+        // a remote computer's roots (home, /tmp…) are its own: this server is read only inside the working directory
+        const data = await readAttachmentBytes(fs, filePath, !isRemoteRoots(sandbox) || isPathAllowed(filePath, [cwd]));
         // Images → return as ImageContent for multimodal models
         if (IMAGE_EXTS.has(ext)) {
           const base64 = data.toString("base64");

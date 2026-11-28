@@ -53,7 +53,7 @@ import type { AgentEvent, AgentMessage, AgentTool } from "@earendil-works/pi-age
 import { join, sep } from "node:path";
 import { resolveModel, resolveSummaryModel, streamSimpleWithAuth, completeSimpleWithAuth, enforceModelAllowlist } from "../llm/pi-client.js";
 import { createSystemTools, createAllTools, expandToolWildcards, ALL_EXTENDED_TOOL_NAMES } from "../tools/system-tools.js";
-import { canonicalPath } from "../tools/path-sandbox.js";
+import { canonicalPath, isRemoteRoots, remoteAllowedRoots, withAllowedPaths } from "../tools/path-sandbox.js";
 import { getGlobalPolpoDir } from "../core/constants.js";
 import { createInkTools as createInkToolsFn } from "../tools/ink-tools.js";
 import { loadAgentSkills, buildSkillPrompt } from "../llm/skills.js";
@@ -452,6 +452,17 @@ export function buildSystemPrompt(agent: AgentConfig, cwd: string, polpoDir?: st
   // Sandbox boundaries — tell the agent exactly where it can read/write.
   // Without this, agents waste tokens trying /tmp, /home, etc. and hitting sandbox errors.
   const sandboxDirs = allowedPaths ?? [cwd];
+  if (isRemoteRoots(sandboxDirs)) {
+    // a remote computer: the tools work on its files, in its own folders
+    parts.push(
+      "",
+      "## File Access",
+      "You work on a remote computer: every path you give a tool (read, write, browser_screenshot, image_analyze, register_outcome…) is a path of that computer, within:",
+      ...sandboxDirs.map((p) => `- ${p}`),
+      "Paths elsewhere are rejected. register_outcome copies a file of these folders (volumes included) into the task output on the Polpo server: no need to copy it there yourself.",
+    );
+    return parts.join("\n");
+  }
   parts.push(
     "",
     "## File Access Sandbox",
@@ -649,6 +660,12 @@ export function spawnEngine(agentConfig: AgentConfig, task: Task, cwd: string, c
   // Remote sandboxes keep the agent's files in the VM: every tool that touches the agent's files
   // (read/write/edit, pdf, excel, docx, images, audio, downloads, outcomes…) reads and writes there.
   const remoteFs = isRemoteWorkspace(workspace) ? new WorkspaceFileSystem(workspace!) : undefined;
+  // ...and their path arguments are the VM's paths: its working and output directories, home,
+  // /tmp and the run's volumes (plus the global skills, copied in readable), not this server's.
+  if (remoteFs) {
+    const roots = remoteRunRoots(cwd, outputDir, ctx);
+    effectiveAllowedPaths = globalSkillsDir ? withAllowedPaths(roots, globalSkillsDir) : roots;
+  }
 
   // Vault resolution is async — will be resolved in handle.done before tools are used.
   // Start with core coding tools WITHOUT vault; vault tools are added in the async phase.
@@ -1014,6 +1031,17 @@ export interface AgentToolset {
   browserNetwork?: BrowserNetworkGuard;
   /** The run's secrets learned while it runs (vault_create_login): mask output with them. */
   secrets: RunSecrets;
+  /** A run on a remote computer: the computer's folders its tools' paths may point to. */
+  remoteRoots?: string[];
+}
+
+/**
+ * The folders of a remote computer Polpo's tools may use for a run there (remoteAllowedRoots):
+ * the working directory, the output directory, home, /tmp and the volumes attached to the run.
+ */
+export function remoteRunRoots(cwd: string, outputDir: string | undefined, ctx: Pick<SpawnContext, "volumes"> | undefined, given?: string[]): string[] {
+  if (given && isRemoteRoots(given)) return given;
+  return remoteAllowedRoots({ cwd, ...(outputDir ? { outputDir } : {}), volumes: (ctx?.volumes ?? []).filter((v) => v.remote) });
 }
 
 /** The project's task store in this process: the database's, else the JSON files (read fresh each time). */
@@ -1044,7 +1072,10 @@ export async function buildAgentToolset(o: {
   /** Without a task (a chat): where send_notification records it came from. */
   notifyOrigin?: { sessionId?: string };
 }): Promise<AgentToolset> {
-  const { agentConfig, cwd, ctx, effectiveAllowedPaths, outputDir, remoteFs, shell, browserProfileDir } = o;
+  const { agentConfig, cwd, ctx, outputDir, remoteFs, shell, browserProfileDir } = o;
+  // A remote computer: the tools' path arguments are the computer's paths (their I/O goes through
+  // its workspace), within its own folders rather than this server's working directory.
+  const effectiveAllowedPaths = remoteFs ? remoteRunRoots(cwd, outputDir, ctx, o.effectiveAllowedPaths) : o.effectiveAllowedPaths;
   const sandboxProvider = o.sandboxProvider as any;
   let browserNetwork: BrowserNetworkGuard | undefined;
   let connectorManager: ConnectorManager | undefined;
@@ -1189,7 +1220,10 @@ export async function buildAgentToolset(o: {
     const note = browserPromptNote({ headed: effectiveBrowserHeaded(agentConfig.browserHeaded, !!remoteComputer), ...(remoteComputer ? { computer: { id: remoteComputer.id, name: remoteComputer.name } } : {}), takeover, session: agentConfig.name });
     connectorNote = connectorNote ? `${connectorNote}\n${note}` : note.trimStart();
   }
-  return { tools: allTools, vault, connectorNote, connectorManager, browserNetwork, secrets: runSecrets };
+  return {
+    tools: allTools, vault, connectorNote, connectorManager, browserNetwork, secrets: runSecrets,
+    ...(effectiveAllowedPaths && isRemoteRoots(effectiveAllowedPaths) ? { remoteRoots: [...effectiveAllowedPaths] } : {}),
+  };
 }
 
 /**

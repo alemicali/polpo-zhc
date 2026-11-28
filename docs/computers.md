@@ -190,6 +190,12 @@ Everywhere:
   deleted only once its snapshot is ready).
 - The working directory is **not wiped** between runs, and mounted volumes stay mounted.
   Deliverables still go to the run's output directory, copied back as for sandboxes.
+- Polpo's tools that take a file path (`browser_screenshot`, `image_analyze`, `image_edit`,
+  `register_outcome`, `pdf_*`, `excel_*`…) take **the computer's paths**, whatever the engine
+  (Polpo's, an agent harness, a CLI): its working directory, the output directory, `/home`, `/tmp`
+  and the volumes attached to the run (`/volumes/<name>`). Their files are read and written on the
+  computer; `register_outcome` copies a registered file (one on a volume too) into the task output
+  on the server. Other paths are refused with these folders listed.
 - The browser profile lives in the machine's home (`~/.polpo/browser-profiles/<agent>`): it survives
   stops, pauses and archiving.
 - Runtime state (status, machine id, last use, uptime) is cached in `.polpo/computers-state.json`;

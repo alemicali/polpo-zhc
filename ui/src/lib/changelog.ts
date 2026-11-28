@@ -32,6 +32,19 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-28-remote-computer-tool-paths",
+    date: "2026-11-28",
+    kind: "fixed",
+    title: "Gli agenti sui computer remoti usano i propri file con gli strumenti di Polpo",
+    summary: "Screenshot, analisi delle immagini e risultati registrati ora usano i percorsi del computer dell'agente, volumi compresi: niente più copie a mano nella cartella dell'attività.",
+    body: [
+      "- **Prima**: un agente che lavora su un computer remoto (per esempio con Claude Code o Codex) poteva usare `browser_screenshot`, `image_analyze` e `register_outcome` solo con file nella cartella di lavoro del server. Salvava altrove e copiava i file a mano, e i file su un volume non si potevano registrare come risultato.",
+      "- **Ora** i percorsi sono quelli del computer dell'agente: la sua cartella di lavoro, la sua home, `/tmp` e i volumi collegati all'attività (`/volumes/<nome>`). Lo screenshot viene salvato lì, le immagini si leggono da lì e un file registrato come risultato viene copiato da solo nei risultati dell'attività.",
+      "- **Fuori da queste cartelle** lo strumento rifiuta e dice all'agente quali cartelle può usare.",
+      "- **Sul server** non cambia niente.",
+    ].join("\n"),
+  },
+  {
     id: "2026-11-28-takeover-soft-hard",
     date: "2026-11-28",
     kind: "improved",

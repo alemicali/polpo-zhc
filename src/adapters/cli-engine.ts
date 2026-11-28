@@ -54,7 +54,7 @@ export interface CliEngineDeps {
   /** A remote computer's machine (tests inject one). */
   openRemote?: (o: { agent: AgentConfig; cwd: string; ctx: SpawnContext }) => Promise<OpenedCliMachine>;
   /** The agent's Polpo tools (default: buildAgentToolset, as the harness engine). */
-  hostTools?: (o: { agent: AgentConfig; task: Task; cwd: string; ctx: SpawnContext; onOutcome: (toolName: string, details: Record<string, unknown>) => void }) => Promise<{ tools: HarnessHostTool[]; connectorNote?: string; cleanup?: () => Promise<void> }>;
+  hostTools?: (o: { agent: AgentConfig; task: Task; cwd: string; ctx: SpawnContext; onOutcome: (toolName: string, details: Record<string, unknown>) => void }) => Promise<{ tools: HarnessHostTool[]; connectorNote?: string; remoteRoots?: string[]; cleanup?: () => Promise<void> }>;
   /** Polpo's public URL, for remote computers to reach the run's tools (default: POLPO_PUBLIC_URL). */
   publicUrl?: () => string | undefined;
   store?: HarnessSessionStore;
@@ -136,7 +136,7 @@ export async function cliRunHostTools(o: {
   log: (line: string) => void; onOutcome?: (toolName: string, details: Record<string, unknown>) => void;
   /** A chat: its session, recorded on what send_notification sends. */
   notifyOrigin?: { sessionId?: string };
-}): Promise<{ tools: HarnessHostTool[]; connectorNote?: string; cleanup: () => Promise<void> }> {
+}): Promise<{ tools: HarnessHostTool[]; connectorNote?: string; remoteRoots?: string[]; cleanup: () => Promise<void> }> {
   const { WorkspaceShell, isRemoteWorkspace } = await import("../sandbox/manager.js");
   const { WorkspaceFileSystem } = await import("../sandbox/workspace-fs.js");
   const remote = isRemoteWorkspace(o.workspace);
@@ -160,6 +160,7 @@ export async function cliRunHostTools(o: {
   return {
     tools,
     ...(toolset.connectorNote ? { connectorNote: toolset.connectorNote } : {}),
+    ...(toolset.remoteRoots ? { remoteRoots: toolset.remoteRoots } : {}),
     cleanup: async () => {
       await toolset.connectorManager?.closeAll().catch(() => undefined);
       await toolset.browserNetwork?.close().catch(() => undefined);
@@ -281,7 +282,7 @@ export function spawnCliEngine(agentConfig: AgentConfig, task: Task, cwd: string
         instructions: (toolNames) => {
           const text = buildHarnessInstructions({
             agent: agentConfig, cwd, outputDir: ctx.outputDir, agentsMd, connectorNote: toolNames.length ? host.connectorNote : undefined, hostTools: toolNames,
-            harness: engine!.cli === "claude" ? "claude-code" : "codex",
+            harness: engine!.cli === "claude" ? "claude-code" : "codex", ...(host.remoteRoots ? { remoteRoots: host.remoteRoots } : {}),
           });
           // without Polpo's tools there is no register_outcome to name
           return toolNames.includes("register_outcome") ? text : text.replace(", and register each one with the register_outcome tool.", ".");

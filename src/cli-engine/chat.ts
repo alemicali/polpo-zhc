@@ -55,7 +55,7 @@ export interface CliChatRunnerDeps {
   instanceAuth: () => boolean;
   /** Tests: fake CLIs, injected tools, a fake remote computer. */
   launch?: CliLauncher;
-  hostTools?: (agent: AgentConfig) => Promise<{ tools: HarnessHostTool[]; connectorNote?: string; cleanup?: () => Promise<void> }>;
+  hostTools?: (agent: AgentConfig) => Promise<{ tools: HarnessHostTool[]; connectorNote?: string; remoteRoots?: string[]; cleanup?: () => Promise<void> }>;
   openRemote?: (o: { agent: AgentConfig; cwd: string; ctx: SpawnContext }) => Promise<OpenedCliMachine>;
   publicUrl?: () => string | undefined;
   /** How often steers are looked for while the program works (ms). */
@@ -133,7 +133,7 @@ export function cliChatRunner(agent: AgentConfig, deps: CliChatRunnerDeps) {
           agent, engine, account, computerId, cwd, polpoDir: deps.polpoDir, ...(opened ? { machine: opened.machine } : {}),
           instructions: (toolNames) => `${buildHarnessInstructions({
             agent, cwd, outputDir: ctx.outputDir, connectorNote: toolNames.length ? host.connectorNote : undefined, hostTools: toolNames,
-            harness: engine.cli === "claude" ? "claude-code" : "codex",
+            harness: engine.cli === "claude" ? "claude-code" : "codex", ...(host.remoteRoots ? { remoteRoots: host.remoteRoots } : {}),
           })}\n\n${CHAT_NOTE}`,
           ...(resume ? { resume } : {}),
           tools: host.tools,

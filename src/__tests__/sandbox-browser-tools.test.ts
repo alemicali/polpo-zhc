@@ -32,6 +32,7 @@ vi.mock("node:child_process", () => ({
 import { cleanupAgentBrowserSession, createBrowserTools, sandboxBrowserCommand, AGENT_BROWSER_CHECK_COMMAND, AGENT_BROWSER_INSTALL_COMMAND } from "../tools/browser-tools.js";
 import { AGENT_BROWSER_EXECUTABLE_ENV } from "../tools/agent-chrome.js";
 import type { BrowserNetworkGuard } from "../tools/browser-network-guard.js";
+import { remoteAllowedRoots } from "../tools/path-sandbox.js";
 
 /** A remote VM's shell: records commands, answers like agent-browser would. */
 class FakeVmShell implements Shell {
@@ -100,6 +101,22 @@ describe("browser in a remote sandbox", () => {
     expect(shell.commands.at(-1)!.startsWith("mkdir -p '/vm/work/shots' && P=$(")).toBe(true);
     expect(shell.commands.at(-1)!.endsWith(`agent-browser --session 'a' --cdp "$P" 'screenshot' '/vm/work/shots/home.png' '--full' --json`)).toBe(true);
     await expect(tool(tools, "browser_screenshot").execute("2", { path: "/etc/evil.png" })).rejects.toThrow();
+  });
+
+  test("on a remote computer the screenshot is saved at a path of the computer (home, a mounted volume), others are refused with the folders listed", async () => {
+    const shell = new FakeVmShell();
+    const roots = remoteAllowedRoots({ cwd: "/data/inst", outputDir: "/data/inst/.polpo/output/t1", volumes: [{ mountPath: "/volumes/research" }] });
+    const tools = createBrowserTools("/data/inst", "nina", ["browser_screenshot"], undefined, "/vm/out", roots, undefined, { shell, headed: false });
+    await tool(tools, "browser_screenshot").execute("1", { path: "/home/daytona/shots/home.png" });
+    expect(shell.commands.at(-1)!.startsWith("mkdir -p '/home/daytona/shots' && P=$(")).toBe(true);
+    expect(shell.commands.at(-1)!.endsWith(`'screenshot' '/home/daytona/shots/home.png' --json`)).toBe(true);
+    await tool(tools, "browser_screenshot").execute("2", { path: "/volumes/research/site.png" });
+    expect(shell.commands.at(-1)!.endsWith(`'screenshot' '/volumes/research/site.png' --json`)).toBe(true);
+    const n = shell.commands.length;
+    await expect(tool(tools, "browser_screenshot").execute("3", { path: "/volumes/other/x.png" }))
+      .rejects.toThrow(/outside the folders Polpo's tools can use on your computer.*\/data\/inst, \/data\/inst\/\.polpo\/output\/t1, \/home, \/tmp, \/volumes\/research/);
+    await expect(tool(tools, "browser_screenshot").execute("4", { path: "/etc/evil.png" })).rejects.toThrow(/\/home, \/tmp/);
+    expect(shell.commands.length).toBe(n);
   });
 
   test("arguments are quoted for the shell", () => {

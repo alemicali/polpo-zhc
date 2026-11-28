@@ -245,6 +245,8 @@ async function defaultRecordUsage(polpoDir: string, r: TokenUsageRecord): Promis
  */
 export function buildHarnessInstructions(o: {
   agent: AgentConfig; cwd: string; outputDir?: string; agentsMd?: string; connectorNote?: string; hostTools: string[]; harness: AgentHarnessEngine["harness"];
+  /** A remote computer: the folders of it Polpo's tools take paths in (see remoteAllowedRoots). */
+  remoteRoots?: string[];
 }): string {
   const parts = [buildAgentSystemPrompt(o.agent, { skills: [] })];
   parts.push("", "## Working Directory", `Your working directory is ${o.cwd}. Work there; use relative paths.`);
@@ -255,6 +257,7 @@ export function buildHarnessInstructions(o: {
   if (o.hostTools.length) {
     parts.push("", "## Polpo tools",
       `Besides your own tools you have Polpo's tools (they run on the Polpo server with your permissions): ${o.hostTools.join(", ")}.`);
+    if (o.remoteRoots?.length) parts.push(remoteToolPathsNote(o.remoteRoots));
     if (o.hostTools.some((t) => t.startsWith("browser_"))) {
       parts.push("For anything in a browser use Polpo's browser: the browser_* tools above, or from scripts the same browser over $CDP_URL "
         + "(`agent-browser --session <your session> get cdp-url` when it is not set). Never launch a Chromium, Chrome or Playwright/Puppeteer browser of your own "
@@ -264,6 +267,17 @@ export function buildHarnessInstructions(o: {
   if (o.connectorNote) parts.push("", o.connectorNote);
   if (o.agentsMd && o.harness === "claude-code") parts.push("", "## Repository instructions (AGENTS.md)", o.agentsMd.slice(0, 40_000));
   return parts.join("\n");
+}
+
+/**
+ * For an agent on a remote computer: Polpo's tools take paths of the computer (their files are
+ * read and written there), not of the Polpo server.
+ */
+export function remoteToolPathsNote(roots: readonly string[]): string {
+  return "File paths you give Polpo's tools (browser_screenshot, image_analyze, image_edit, register_outcome, pdf_*, excel_*…) are paths of your computer, "
+    + `the same files you see: anything under ${roots.join(", ")} (mounted volumes included). `
+    + "Screenshots are saved there, images are read from there, and register_outcome copies the file into the task output on the Polpo server by itself: "
+    + "do not copy files around for Polpo's tools. Paths outside these folders are rejected.";
 }
 
 /** Spawn a task run on the agent's harness (same contract as spawnEngine). */
@@ -522,7 +536,7 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
         .map((s) => harnessSkill(s));
       const agentsMd = await machine.readFile(join(cwd, "AGENTS.md")).then((b) => (b ? Buffer.from(b).toString("utf8") : undefined), () => undefined);
       const instructions = buildHarnessInstructions({
-        agent: agentConfig, cwd, outputDir, agentsMd, connectorNote: toolset.connectorNote, hostTools: hostTools.map((t) => t.name), harness: engine.harness,
+        agent: agentConfig, cwd, outputDir, agentsMd, connectorNote: toolset.connectorNote, hostTools: hostTools.map((t) => t.name), harness: engine.harness, ...(toolset.remoteRoots ? { remoteRoots: toolset.remoteRoots } : {}),
       });
 
       const runtime = await (deps.runtimeFactory ?? defaultRuntimeFactory)({
