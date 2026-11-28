@@ -635,7 +635,8 @@ const ActiveAgents = memo(function ActiveAgents({ processes, agents, tasks }: { 
 
 // ── Recent tasks with richer info ──
 
-const RecentTasks = memo(function RecentTasks({ tasks }: { tasks: Task[] }) {
+/** Latest task updates: each row opens its task; the assignee shows with a small inline avatar. */
+export const RecentTasks = memo(function RecentTasks({ tasks, agents = [] }: { tasks: Task[]; agents?: AgentLite[] }) {
   const recent = [...tasks]
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
     .slice(0, 6);
@@ -664,11 +665,14 @@ const RecentTasks = memo(function RecentTasks({ tasks }: { tasks: Task[] }) {
           <div className="space-y-1.5">
             {recent.map((task) => {
               const cfg = taskStatusStyles[task.status] ?? { icon: Clock, color: "text-muted-foreground" };
+              const agent = task.assignTo ? agents.find((a) => a.name === task.assignTo) : undefined;
 
               return (
-                <div
+                <Link
                   key={task.id}
-                  className="flex items-center gap-3 rounded-md px-3 py-2 transition-colors hover:bg-accent/30"
+                  to={`/tasks/${encodeURIComponent(task.id)}`}
+                  className="flex items-center gap-3 rounded-md px-3 py-2 transition-colors hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  data-testid={`recent-task-${task.id}`}
                 >
                   <cfg.icon className={cn("h-4 w-4 shrink-0", cfg.color, task.status === "in_progress" && "animate-spin")} />
                   <div className="flex-1 min-w-0">
@@ -676,10 +680,23 @@ const RecentTasks = memo(function RecentTasks({ tasks }: { tasks: Task[] }) {
                       <p className="text-sm font-medium truncate">{task.title}</p>
                       <PhaseIcon phase={task.phase} />
                     </div>
-                    <p className="text-micro text-muted-foreground">
-                      {task.assignTo}
-                      {task.group && ` / ${task.group}`}
-                    </p>
+                    <div className="flex min-w-0 items-center gap-1 text-micro text-muted-foreground" data-testid="recent-task-agent">
+                      {task.assignTo && (
+                        <AgentAvatar
+                          avatar={agent?.identity?.avatar}
+                          name={task.assignTo}
+                          color={agent?.identity?.color}
+                          size="2xs"
+                          shape="circle"
+                          fallbackVariant="circle"
+                          className="shrink-0"
+                        />
+                      )}
+                      <span className="truncate">
+                        {task.assignTo}
+                        {task.group && ` / ${task.group}`}
+                      </span>
+                    </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {task.result?.assessment?.globalScore != null && (
@@ -709,7 +726,7 @@ const RecentTasks = memo(function RecentTasks({ tasks }: { tasks: Task[] }) {
                       </span>
                     )}
                   </div>
-                </div>
+                </Link>
               );
             })}
           </div>
@@ -823,7 +840,7 @@ export function DashboardPage() {
           Recent Activity gets a more comfortable column. */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         <TaskProgress tasks={filteredTasks} range={range} now={rangeNow} />
-        <RecentTasks tasks={filteredTasks} />
+        <RecentTasks tasks={filteredTasks} agents={agents} />
       </div>
 
       <ActiveAgents processes={processes} agents={agents} tasks={tasks} />

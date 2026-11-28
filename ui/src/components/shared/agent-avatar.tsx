@@ -12,9 +12,11 @@ function avatarUrl(avatarPath: string): string {
   return `${base}/api/v1/files/read?path=${encodeURIComponent(avatarPath)}`;
 }
 
-type AvatarSize = "xs" | "sm" | "md" | "lg" | "xl";
+type AvatarSize = "2xs" | "xs" | "sm" | "md" | "lg" | "xl";
 
 const sizeMap: Record<AvatarSize, { avatar: string; icon: string }> = {
+  /** inline, one text line tall: next to a name in a list row */
+  "2xs": { avatar: "size-4", icon: "h-2.5 w-2.5" },
   xs: { avatar: "size-5", icon: "h-2.5 w-2.5" },
   sm: { avatar: "size-6", icon: "h-3 w-3" },
   md: { avatar: "size-8", icon: "h-4 w-4" },
@@ -74,7 +76,7 @@ export function AgentAvatar({
           radius,
           tone.solid, "flex items-center justify-center font-semibold tabular-nums select-none",
           // Pick a font size that matches the avatar size — initials only.
-          size === "xs" && "text-micro",
+          (size === "2xs" || size === "xs") && "text-micro",
           size === "sm" && "text-micro",
           size === "md" && "text-micro",
           size === "lg" && "text-xs",
