@@ -3,6 +3,12 @@
  * or a remote URL, choose who may use them and which tools, test, authorize with OAuth (the person
  * opens the link), disconnect and remove. Secrets never pass through here: API tokens, header values
  * and OAuth app client secrets are entered in the dashboard (setup_url). Changes need polpo:connectors (or polpo:admin).
+ *
+ * Per-identity connectors (one app for the organization, each agent / person connects its own
+ * accounts): polpo_connector_add with per_identity, then polpo_connector_account_add per account
+ * (the person signs in from the link), polpo_connector_accounts to list them, _update to rename or
+ * make one the default, _connect / _disconnect to sign in or out, _remove, and _import to turn a
+ * separate connector of the same app (gmail-2, mail-nina…) into an account.
  */
 import { z } from "zod";
 import {
@@ -12,10 +18,17 @@ import {
 } from "./kit.js";
 import { setupHandoff } from "./setup.js";
 import { unknownAgents } from "./tasks.js";
+import { currentConnectorPerson } from "../../mcp/runtime.js";
+
+type Account = {
+  id: string; identity: string; identityLabel?: string; label: string; default?: boolean; account?: string; status?: string; lastError?: string; toolCount?: number;
+  importedFrom?: string; secrets?: { bearerToken: boolean; headers: string[]; oauth: { authorized: boolean } };
+};
 
 type Connector = {
   id: string; name: string; account?: string; description?: string; transport: { type: string; url?: string }; auth: { type: string; oauth?: { app?: string } };
-  access: { agents: string[] | "*"; polpo: boolean }; scope?: { kind: "org" } | { kind: "agent"; agent: string }; enabled: boolean; catalogId?: string; status?: string; lastError?: string; toolCount?: number;
+  access: { agents: string[] | "*"; polpo: boolean }; scope?: { kind: "org" } | { kind: "agent"; agent: string } | { kind: "identity"; fallback?: boolean }; enabled: boolean;
+  accounts?: Account[]; catalogId?: string; status?: string; lastError?: string; toolCount?: number;
   lastConnectedAt?: string; toolPolicy?: Record<string, string>; iconUrl?: string; iconAsset?: { source?: string };
   secrets?: { bearerToken: boolean; headers: string[]; clientSecret: boolean; values: string[]; oauth: { authorized: boolean } };
 };
@@ -27,8 +40,14 @@ type CatalogEntry = {
 const connectorItem = z.object({
   id: z.string(), name: z.string(), account: z.string().optional().describe("The signed-in account, when known"), status: z.string(), enabled: z.boolean(), url: z.string().optional(), auth: z.string(),
   agents: z.union([z.array(z.string()), z.literal("*")]), polpo: z.boolean(),
-  scope: z.enum(["org", "agent"]).describe("org: the organization's (its agents list decides who uses it); agent: one agent's own (owner), only that agent can ever use it"),
+  scope: z.enum(["org", "agent", "identity"]).describe("org: the organization's (its agents list decides who uses it); agent: one agent's own (owner), only that agent can ever use it; "
+    + "identity: per identity, each agent / person uses its own accounts (accounts)"),
   owner: z.string().optional().describe("scope agent: the agent it belongs to"),
+  fallback: z.boolean().optional().describe("scope identity: identities without an account use the organization's shared account"),
+  accounts: z.array(z.object({
+    id: z.string(), identity: z.string().describe("agent:<name>, person:<email> or org (the fallback account)"), label: z.string(), default: z.boolean(),
+    status: z.string(), account: z.string().optional(), authorized: z.boolean().optional(), last_error: z.string().optional(),
+  })).optional().describe("scope identity: the connected accounts (with agent: only that agent's, plus the fallback)"),
   tool_count: z.number().int().optional(),
   authorized: z.boolean().optional(), credentials_set: z.boolean().optional(), last_error: z.string().optional(), catalog_id: z.string().optional(),
   tool_policy: z.record(z.string(), z.string()).optional(),
@@ -38,6 +57,15 @@ const connectorItem = z.object({
 
 /** The agent an agent-scoped connector belongs to. */
 const ownerOf = (c: Connector) => (c.scope?.kind === "agent" ? c.scope.agent : undefined);
+const perIdentity = (c: Connector) => c.scope?.kind === "identity";
+const fallbackOn = (c: Connector) => c.scope?.kind === "identity" && c.scope.fallback === true;
+/** An account for the model (no secrets). */
+const accountItem = (a: Account) => ({
+  id: a.id, identity: a.identity, label: a.label, default: !!a.default, status: a.status ?? "disconnected",
+  ...(a.account ? { account: a.account } : {}), ...(a.secrets ? { authorized: !!(a.secrets.oauth.authorized || a.secrets.bearerToken || a.secrets.headers.length) } : {}),
+  ...(a.lastError ? { last_error: a.lastError } : {}),
+});
+const accountLine = (a: Account) => `- ${a.label} [${a.id}] of ${a.identityLabel ?? a.identity}${a.default ? " (default)" : ""}${a.account && a.account !== a.label ? ` = ${a.account}` : ""}: ${a.status ?? "disconnected"}${a.lastError ? ` (${short(a.lastError, 100)})` : ""}`;
 /** Another agent's own connector: never offered to `agent`. */
 const visibleTo = (c: Connector, agent: string) => { const o = ownerOf(c); return o === undefined || o === agent; };
 /** Whether the connector's access lets `agent` use it (the API's connectorGrants, on the view). */
@@ -61,7 +89,8 @@ const relative: Bases = { api: (p) => p, dashboard: (p) => p };
 const baseView = (c: Connector, bases: Bases = relative) => ({
   id: c.id, name: c.name, ...(c.account ? { account: c.account } : {}), status: c.enabled ? c.status ?? "disconnected" : "disabled", enabled: c.enabled,
   ...(c.transport.url ? { url: safeUrl(c.transport.url) } : {}), auth: c.auth.type, agents: c.access.agents, polpo: c.access.polpo,
-  scope: ownerOf(c) ? "agent" as const : "org" as const, ...(ownerOf(c) ? { owner: ownerOf(c) } : {}),
+  scope: perIdentity(c) ? "identity" as const : ownerOf(c) ? "agent" as const : "org" as const, ...(ownerOf(c) ? { owner: ownerOf(c) } : {}),
+  ...(perIdentity(c) ? { fallback: fallbackOn(c), accounts: (c.accounts ?? []).map(accountItem) } : {}),
   ...(c.toolCount !== undefined ? { tool_count: c.toolCount } : {}),
   ...(c.auth.type === "oauth" ? { authorized: !!c.secrets?.oauth.authorized } : {}),
   ...(c.auth.type === "bearer" || c.auth.type === "headers" ? { credentials_set: !!(c.secrets?.bearerToken || c.secrets?.headers.length) } : {}),
@@ -70,7 +99,7 @@ const baseView = (c: Connector, bases: Bases = relative) => ({
   ...(c.iconUrl ? { icon_url: c.iconUrl.startsWith("/api/") ? bases.api(c.iconUrl) : bases.dashboard(c.iconUrl) } : {}),
 });
 const line = (c: ReturnType<typeof baseView>) => `- ${c.id} "${c.name}"${c.account && !c.name.includes(c.account) ? ` (${c.account})` : ""}${c.catalog_id && c.catalog_id !== c.id ? ` (another ${c.catalog_id} account)` : ""} [${c.status}] ${c.auth}${c.authorized === false ? " (not authorized)" : ""}${c.credentials_set === false ? " (no token)" : ""}`
-  + `${c.tool_count !== undefined ? `, ${c.tool_count} tools` : ""}${c.owner ? ` · ${c.owner}'s own (personal)` : " · org"} · agents: ${c.agents === "*" ? "all" : c.agents.join(", ") || "none"}${c.polpo ? " + Polpo" : ""}${c.last_error ? ` · error: ${short(c.last_error, 100)}` : ""}`;
+  + `${c.tool_count !== undefined ? `, ${c.tool_count} tools` : ""}${c.scope === "identity" ? ` · per identity (${c.accounts?.length ?? 0} accounts${c.fallback ? ", org fallback on" : ""})` : c.owner ? ` · ${c.owner}'s own (personal)` : " · org"} · agents: ${c.agents === "*" ? "all" : c.agents.join(", ") || "none"}${c.polpo ? " + Polpo" : ""}${c.last_error ? ` · error: ${short(c.last_error, 100)}` : ""}`;
 
 async function loadConnector(deps: McpDeps, id: string) {
   const r = await apiGet(deps, `/connectors/${enc(id)}`);
@@ -116,7 +145,10 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
       if (!a.ok) return a.status === 404 ? fail(`There is no agent "${agent}". Find the name with polpo_agents_list.`) : apiError(a, `Reading agent ${agent}`);
       selection = (a.data as { connectorTools?: Record<string, "*" | string[]> })?.connectorTools ?? {};
     }
-    const agentView = (c: Connector) => ({ ...view(c), ...(agent ? { agent_tools: selection?.[c.id] ?? "*" as const } : {}) });
+    // per identity, for an agent: only its own accounts (and the org fallback when on)
+    const mine = (c: Connector): Connector => (agent && perIdentity(c)
+      ? { ...c, accounts: (c.accounts ?? []).filter((a) => a.identity === `agent:${agent}` || (fallbackOn(c) && a.identity === "org")) } : c);
+    const agentView = (c: Connector) => ({ ...view(mine(c)), ...(agent ? { agent_tools: selection?.[c.id] ?? "*" as const } : {}) });
     const agentNote = (v: ReturnType<typeof agentView>) => (v.agent_tools === undefined ? ""
       : ` · ${agent} gets: ${v.agent_tools === "*" ? "all tools" : v.agent_tools.length ? v.agent_tools.join(", ") : "no tools"}`);
     if (id) {
@@ -138,7 +170,9 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
       const stale = tools && Array.isArray(picked) ? picked.filter((name) => !tools.some((x) => x.name === name)) : [];
       const v = agentView(c.connector);
       const toolLine = (x: NonNullable<typeof tools>[number]) => `- ${x.name} [${x.policy}${x.agent_gets === undefined ? "" : x.agent_gets ? ", on" : ", not for this agent"}]${x.description ? `: ${short(x.description, 100)}` : ""}`;
-      return ok(`${line(v).slice(2)}${agentNote(v)}${tools ? `\ntools:\n${tools.map(toolLine).join("\n") || "(none)"}` : `\n(tools not available: ${t.ok ? "" : t.error})`}`
+      const accounts = perIdentity(c.connector) ? (mine(c.connector).accounts ?? []) : undefined;
+      const accountsText = accounts ? `\naccounts${agent ? ` of ${agent}` : ""}:\n${accounts.map(accountLine).join("\n") || (agent ? `(none: ${agent} has no account yet; a person adds one with polpo_connector_account_add)` : "(none yet: polpo_connector_account_add)")}` : "";
+      return ok(`${line(v).slice(2)}${agentNote(v)}${accountsText}${tools ? `\ntools:\n${tools.map(toolLine).join("\n") || "(none)"}` : `\n(tools not available: ${t.ok ? "" : t.error})`}`
         + `${stale.length ? `\nstale (selected, no longer listed by the connector): ${stale.join(", ")}` : ""}`,
         { items: [v], next_cursor: null, total: 1, ...(tools ? { tools } : {}), ...(stale.length ? { stale_tools: stale } : {}) });
     }
@@ -254,7 +288,9 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
       + "account (\"Gmail – info@acme.com\"); it gets its own id (gmail-2, gmail-3…), sign-in and tools (mcp__gmail-2__…). "
       + "A custom URL is probed first (read only), like a custom connector dialog: the transport (Streamable HTTP or legacy SSE), the sign-in "
       + "(none; OAuth with a client metadata document or dynamic registration; OAuth with a pre-registered client id; a token), the scopes, the name. "
-      + "detect_only: true only reports that (detected), without adding anything.",
+      + "detect_only: true only reports that (detected), without adding anything. "
+      + "per_identity: true makes one connector for the app whose accounts each agent / person connects for itself (polpo_connector_account_add): "
+      + "tool names stay the same for everyone (mcp__<id>__<tool>) and each caller uses its own default account, or account: \"<label>\" for another of its own.",
     inputSchema: {
       catalog_id: z.string().optional().describe("A catalog id (polpo_connector_catalog)"),
       url: z.string().url().optional().describe("A remote MCP server's URL, or your account's URL for catalog entries with a url_template"),
@@ -267,6 +303,9 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
       polpo: z.boolean().optional().describe("Polpo may use its tools (default true; false with owner)"),
       owner: z.string().optional().describe("An agent's name: the connector is that agent's own (scope agent: a personal mailbox, its own account). "
         + "Only that agent can ever use it; it is never offered to other agents. Omit for an organization connector (scope org, the default)"),
+      per_identity: z.boolean().optional().describe("A per-identity connector (scope identity): each agent in agents (and each person, with polpo) connects its own accounts; "
+        + "no sign-in happens now. Not with owner"),
+      fallback: z.boolean().optional().describe("per_identity: identities without an account of their own use the organization's shared account (default false)"),
     },
     outputSchema: {
       connector: connectorItem.optional(), authorization_url: z.string().optional(), setup_url: z.string().optional(),
@@ -274,8 +313,10 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
       next: z.string().describe("What to do next"),
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-  }, async ({ catalog_id, url, name, id, transport, auth, detect_only, agents, polpo, owner }) => {
+  }, async ({ catalog_id, url, name, id, transport, auth, detect_only, agents, polpo, owner, per_identity, fallback }) => {
     if (!catalog_id && !url) return fail("Give catalog_id (polpo_connector_catalog) or the url of a remote MCP server.");
+    if (per_identity && owner) return fail("per_identity and owner do not go together: a per-identity connector belongs to the organization, and each identity connects its own accounts.");
+    if (fallback && !per_identity) return fail("fallback is for per-identity connectors (per_identity: true).");
     if (detect_only) {
       if (catalog_id || !url) return fail("detect_only is for a custom url: a catalog entry already knows how it connects.");
       const d = await probe(url, true);
@@ -318,12 +359,18 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
       ...(auth ? { auth: { type: auth } }
         : detectedAuth ? { auth: { type: detectedAuth, ...(detectedAuth === "oauth" && detected?.scopes.length ? { oauth: { scopes: detected.scopes } } : {}) } } : {}),
       access: { ...(agents !== undefined ? { agents } : {}), ...(polpo !== undefined ? { polpo } : {}) },
-      ...(owner ? { scope: { kind: "agent", agent: owner } } : {}),
+      ...(owner ? { scope: { kind: "agent", agent: owner } } : per_identity ? { scope: { kind: "identity", ...(fallback ? { fallback: true } : {}) } } : {}),
     });
     if (!r.ok) return apiError(r, "Adding the connector", /url|private|https/i.test(r.error) ? "Give a public https URL of a remote MCP server." : undefined);
     const c = r.data as Connector;
     const v = view(c);
     const setup = setupUrl(c.id);
+    if (perIdentity(c)) {
+      return ok(`Added ${c.name} [${c.id}], per identity: nobody is signed in yet. Each agent (and person) connects its own accounts: `
+        + `polpo_connector_account_add { id: "${c.id}", identity: "agent:<name>" | "person:<email>" | "me"${fallback ? " | \"org\" (the shared fallback)" : ""}, label: "<name of the account>" }, `
+        + `then the person signs in from the link it returns. Tools: mcp__${c.id}__<tool> for everyone (each uses its own default account; account: "<label>" for another).`,
+        { connector: v, next: "polpo_connector_account_add for each identity's account" });
+    }
     if (c.auth.type === "bearer" || c.auth.type === "headers") {
       const h = setupHandoff(deps, { kind: "connector", item: c.id, field: c.auth.type === "bearer" ? "bearerToken" : "headers" }, "token");
       return ok(`Added ${c.name} [${c.id}]. It needs a token (secrets never go through this connector). ${h.next_step}`,
@@ -363,14 +410,18 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
       remove_agents: z.array(z.string()).optional().describe("Agents to take it from"),
       polpo: z.boolean().optional().describe("Polpo may use its tools"),
       tool_policy: z.record(z.string(), z.enum(["allow", "ask", "off"])).optional().describe("Per tool (the server's tool name): allow, ask or off; merged with the current policy"),
-      owner: z.string().nullable().optional().describe("Scope: an agent's name makes it that agent's own (scope agent; other agents lose it); null makes it the organization's (scope org; who has it stays the same)"),
+      owner: z.string().nullable().optional().describe("Scope: an agent's name makes it that agent's own (scope agent; other agents lose it); null makes it the organization's (scope org; who has it stays the same). "
+        + "Not for per-identity connectors (their scope cannot change; import a connector as an account instead: polpo_connector_account_import)"),
+      fallback: z.boolean().optional().describe("Per-identity connectors: true lets identities without an account of their own use the organization's shared account (identity org); false turns that off"),
     },
     outputSchema: { connector: connectorItem, changed: z.array(z.string()), dropped_agents: z.array(z.string()).optional() },
     annotations: UPDATE,
-  }, async ({ id, name, description, enabled, agents, add_agents, remove_agents, polpo, tool_policy, owner }) => {
+  }, async ({ id, name, description, enabled, agents, add_agents, remove_agents, polpo, tool_policy, owner, fallback }) => {
     const cur = await loadConnector(deps, id);
     if (!cur.ok) return cur.status === 404 ? notFound(id) : apiError(cur, `Reading connector ${id}`);
     const c = cur.connector;
+    if (fallback !== undefined && !perIdentity(c)) return fail(`${id} is not per identity: fallback is only for per-identity connectors.`);
+    if (owner !== undefined && perIdentity(c)) return fail(`${id} is per identity: its scope cannot change. To turn another connector into one of its accounts use polpo_connector_account_import.`);
     let nextAgents: string[] | "*" | undefined = agents;
     if (add_agents?.length || remove_agents?.length) {
       const base = agents ?? c.access.agents;
@@ -383,11 +434,12 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
     }
     const body = {
       ...(owner !== undefined ? { scope: owner ? { kind: "agent", agent: owner } : { kind: "org" } } : {}),
+      ...(fallback !== undefined ? { scope: { kind: "identity", fallback } } : {}),
       ...(name !== undefined ? { name } : {}), ...(description !== undefined ? { description } : {}), ...(enabled !== undefined ? { enabled } : {}),
       ...(nextAgents !== undefined || polpo !== undefined ? { access: { ...(nextAgents !== undefined ? { agents: nextAgents } : {}), ...(polpo !== undefined ? { polpo } : {}) } } : {}),
       ...(tool_policy ? { toolPolicy: { ...(c.toolPolicy ?? {}), ...tool_policy } } : {}),
     };
-    if (Object.keys(body).length === 0) return fail("Nothing to change: give name, description, enabled, agents, add_agents, remove_agents, polpo, tool_policy or owner.");
+    if (Object.keys(body).length === 0) return fail("Nothing to change: give name, description, enabled, agents, add_agents, remove_agents, polpo, tool_policy, owner or fallback.");
     const r = await apiSend(deps, "PATCH", `/connectors/${enc(id)}`, body);
     if (!r.ok) return apiError(r, `Updating connector ${id}`);
     const after = r.data as Connector;
@@ -397,6 +449,7 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
       ...(JSON.stringify(after.access.agents) !== JSON.stringify(c.access.agents) ? ["agents"] : []), ...(after.access.polpo !== c.access.polpo ? ["polpo"] : []),
       ...(tool_policy && JSON.stringify(after.toolPolicy ?? {}) !== JSON.stringify(c.toolPolicy ?? {}) ? ["tool_policy"] : []),
       ...(ownerOf(after) !== ownerOf(c) ? ["scope"] : []),
+      ...(fallbackOn(after) !== fallbackOn(c) ? ["fallback"] : []),
     ];
     // org → an agent's own: the other agents it was enabled for lose it
     const newOwner = ownerOf(after);
@@ -415,6 +468,7 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
     outputSchema: { ok: z.boolean(), status: z.string(), error: z.string().optional(), tools: z.array(z.string()), connector: connectorItem.optional() },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, async ({ id }) => {
+    // a per-identity connector tests one of its accounts (polpo_connector_account_connect tests a given one)
     const r = await apiSend(deps, "POST", `/connectors/${enc(id)}/test`);
     if (!r.ok) return r.status === 404 ? notFound(id) : apiError(r, `Testing connector ${id}`);
     const d = r.data as { ok: boolean; status: string; error?: string; tools?: Array<{ name: string }>; connector?: Connector };
@@ -435,6 +489,9 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
     const cur = await loadConnector(deps, id);
     if (!cur.ok) return cur.status === 404 ? notFound(id) : apiError(cur, `Reading connector ${id}`);
     const setup = setupUrl(id);
+    if (perIdentity(cur.connector)) {
+      return fail(`${id} is per identity: each account signs in on its own. Use polpo_connector_account_connect { id: "${id}", account } (or polpo_connector_account_add for a new one).`);
+    }
     if (cur.connector.auth.type !== "oauth") {
       return ok(`${id} signs in with ${cur.connector.auth.type === "none" ? "nothing (test it with polpo_connector_test)" : `a token, entered in the dashboard: ${setup}`}.`, { authorized: false, setup_url: setup });
     }
@@ -462,6 +519,7 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
   }, async ({ id, confirm }) => {
     const cur = await loadConnector(deps, id);
     if (!cur.ok) return cur.status === 404 ? notFound(id) : apiError(cur, `Reading connector ${id}`);
+    if (perIdentity(cur.connector)) return fail(`${id} is per identity: sign one account out with polpo_connector_account_disconnect { id: "${id}", account }.`);
     if (confirm !== true) return fail(`Disconnecting ${cur.connector.name} signs it out: agents lose its tools until someone signs in again. Ask the person, then call again with confirm: true.`);
     const r = await apiSend(deps, "POST", `/connectors/${enc(id)}/disconnect`);
     if (!r.ok) return apiError(r, `Disconnecting ${id}`);
@@ -481,5 +539,215 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
     const r = await apiSend(deps, "DELETE", `/connectors/${enc(id)}`);
     if (!r.ok) return apiError(r, `Removing ${id}`);
     return ok(`Removed connector ${id}.`, { id, removed: true });
+  });
+
+  // ── per-identity connectors: accounts ──
+
+  /** Who "me" is: the person chatting with Polpo (in process), else the signed-in person behind this MCP connection. */
+  const meEmail = (): string | undefined => {
+    const p = deps.principal;
+    if (p?.kind === "open" && p.actor === "polpo") return currentConnectorPerson();
+    return p?.subject?.includes("@") ? p.subject.toLowerCase() : undefined;
+  };
+  const identityOf = (identity: string) => (identity === "me" ? `person:${meEmail() ?? "_shared"}` : identity);
+  const identityParam = z.string().min(1).describe("Whose account: \"agent:<name>\", \"person:<email>\", \"me\" (the person talking) or \"org\" (the shared fallback account)");
+  const accountParam = z.string().min(1).describe("The account: its id (acc-…) or its label (with identity when several identities use that label)");
+
+  /** A per-identity connector, or the failure to return. */
+  async function identityConnector(id: string) {
+    const cur = await loadConnector(deps, id);
+    if (!cur.ok) return { error: cur.status === 404 ? notFound(id) : apiError(cur, `Reading connector ${id}`) };
+    if (!perIdentity(cur.connector)) return { error: fail(`${id} is not per identity: it has no accounts. Add a per-identity connector (polpo_connector_add with per_identity) and import ${id} into it (polpo_connector_account_import).`) };
+    return { connector: cur.connector };
+  }
+
+  /** The account named by id or label (and identity), or the failure to return. */
+  function findAccount(c: Connector, account: string, identity?: string): { account: Account } | { error: ReturnType<typeof fail> } {
+    const accounts = c.accounts ?? [];
+    const who = identity ? identityOf(identity) : undefined;
+    const byId = accounts.find((a) => a.id === account);
+    if (byId && (!who || byId.identity === who)) return { account: byId };
+    const byLabel = accounts.filter((a) => a.label.toLowerCase() === account.toLowerCase() && (!who || a.identity === who));
+    if (byLabel.length === 1) return { account: byLabel[0]! };
+    if (byLabel.length > 1) return { error: fail(`Several identities have an account "${account}" on ${c.id}: pass identity (${byLabel.map((a) => a.identity).join(", ")}).`) };
+    return { error: fail(`${c.id} has no account "${account}"${who ? ` of ${who}` : ""}. List them with polpo_connector_accounts { id: "${c.id}" }.`) };
+  }
+
+  /** How an account signs in next: the OAuth link, the dashboard for a token, or a test. */
+  async function signIn(c: Connector, a: Account): Promise<{ text: string; data: Record<string, unknown> }> {
+    if (c.auth.type === "oauth") {
+      const r = await apiSend(deps, "POST", `/connectors/${enc(c.id)}/accounts/${enc(a.id)}/oauth/start`);
+      if (!r.ok) return { text: `It cannot be authorized from here: ${r.error}. The person finishes the setup in the dashboard: ${setupUrl(c.id, `account:${a.id}`)}`, data: { setup_url: setupUrl(c.id, `account:${a.id}`) } };
+      const d = r.data as { authorizationUrl?: string; authorized?: boolean };
+      if (d.authorized) return { text: "It is signed in already.", data: { authorized: true } };
+      return { text: `The person (the account's owner) opens this link to sign in to the account "${a.label}" (valid 10 minutes):\n${d.authorizationUrl}`, data: { authorized: false, ...(d.authorizationUrl ? { authorization_url: d.authorizationUrl } : {}) } };
+    }
+    if (c.auth.type === "bearer" || c.auth.type === "headers") {
+      const h = setupHandoff(deps, { kind: "connector", item: c.id, field: `account:${a.id}` }, "account's token");
+      return { text: `It needs the account's token (secrets never go through this connector). ${h.next_step}`, data: { authorized: false, ...h } };
+    }
+    const t = await apiSend(deps, "POST", `/connectors/${enc(c.id)}/accounts/${enc(a.id)}/test`);
+    const d = t.ok ? t.data as { ok: boolean; error?: string; tools?: unknown[] } : undefined;
+    return { text: d?.ok ? `Connected: ${d.tools?.length ?? 0} tools.` : `The first connection failed: ${d?.error ?? (t.ok ? "unknown" : t.error)}.`, data: { authorized: !!d?.ok } };
+  }
+
+  const accountOut = z.object({
+    id: z.string(), identity: z.string(), label: z.string(), default: z.boolean(), status: z.string(),
+    account: z.string().optional(), authorized: z.boolean().optional(), last_error: z.string().optional(),
+  });
+
+  tool("connectors", "polpo_connector_accounts", {
+    title: "List a per-identity connector's accounts",
+    description: "The accounts connected to a per-identity connector: whose each is (agent:<name>, person:<email>, org = the shared fallback), its label, "
+      + "whether it is that identity's default, signed-in account and status. With identity, only that identity's (\"me\": the person talking).",
+    inputSchema: { id: z.string().min(1).describe("The per-identity connector's id"), identity: identityParam.optional() },
+    outputSchema: { accounts: z.array(accountOut), fallback: z.boolean() },
+    annotations: READ,
+  }, async ({ id, identity }) => {
+    const found = await identityConnector(id);
+    if ("error" in found) return found.error!;
+    const c = found.connector;
+    const who = identity ? identityOf(identity) : undefined;
+    const accounts = (c.accounts ?? []).filter((a) => !who || a.identity === who);
+    const empty = who ? `${who} has no account on ${id}: add one with polpo_connector_account_add.` : `No account on ${id} yet: add one with polpo_connector_account_add.`;
+    return ok(`${accounts.map(accountLine).join("\n") || empty}\nOrg fallback: ${fallbackOn(c) ? "on (identities without an account use the org account)" : "off"}.`,
+      { accounts: accounts.map(accountItem), fallback: fallbackOn(c) });
+  });
+
+  tool("connectors", "polpo_connector_account_add", {
+    title: "Add an account to a per-identity connector",
+    description: "Connect an account of an agent, a person (\"me\": the person talking) or the organization (the shared fallback) to a per-identity connector, "
+      + "with a label its owner picks it by (\"sitoinchat\", \"personale\"). Returns authorization_url for OAuth apps (the account's owner, or the person "
+      + "connecting it for an agent, opens it and signs in) or setup_url for token-based ones (secrets never go through here). "
+      + "The identity's first account becomes its default. An agent must be among the connector's agents; people need polpo: true.",
+    inputSchema: {
+      id: z.string().min(1).describe("The per-identity connector's id"),
+      identity: identityParam,
+      label: z.string().min(1).max(64).describe("The account's name, e.g. sitoinchat, personale, info@acme.com"),
+      default: z.boolean().optional().describe("Make it the identity's default account"),
+    },
+    outputSchema: { account: accountOut, authorization_url: z.string().optional(), setup_url: z.string().optional(), next: z.string() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, async ({ id, identity, label, default: makeDefault }) => {
+    const found = await identityConnector(id);
+    if ("error" in found) return found.error!;
+    const who = identityOf(identity);
+    if (who.startsWith("agent:")) {
+      const missing = await unknownAgents(deps, [who.slice("agent:".length)]);
+      if (missing) return fail(missing);
+    }
+    const r = await apiSend(deps, "POST", `/connectors/${enc(id)}/accounts`, { identity: who, label, ...(makeDefault ? { default: true } : {}) });
+    if (!r.ok) return apiError(r, `Adding the account to ${id}`);
+    const d = r.data as { account: Account; connector: Connector };
+    const next = await signIn(d.connector, d.account);
+    return ok(`Added the account "${d.account.label}" of ${d.account.identityLabel ?? who} to ${d.connector.name} [${id}]${d.account.default ? " (its default)" : ""}. ${next.text}`,
+      { account: accountItem(d.account), ...next.data, next: next.data.authorization_url ? "Open authorization_url and sign in, then polpo_connector_accounts" : next.data.setup_url ? "Enter the token in the dashboard, then polpo_setup_wait" : "Use it" });
+  });
+
+  tool("connectors", "polpo_connector_account_update", {
+    title: "Change a per-identity connector's account",
+    description: "Rename an account (label) or make it its identity's default (default: true; the previous default stops being it).",
+    inputSchema: {
+      id: z.string().min(1).describe("The per-identity connector's id"),
+      account: accountParam,
+      identity: identityParam.optional(),
+      label: z.string().min(1).max(64).optional().describe("A new label"),
+      default: z.literal(true).optional().describe("Make it the identity's default account"),
+    },
+    outputSchema: { account: accountOut },
+    annotations: UPDATE,
+  }, async ({ id, account, identity, label, default: makeDefault }) => {
+    const found = await identityConnector(id);
+    if ("error" in found) return found.error!;
+    const a = findAccount(found.connector!, account, identity);
+    if ("error" in a) return a.error;
+    if (label === undefined && !makeDefault) return fail("Nothing to change: give label or default: true.");
+    const r = await apiSend(deps, "PATCH", `/connectors/${enc(id)}/accounts/${enc(a.account.id)}`, { ...(label ? { label } : {}), ...(makeDefault ? { default: true } : {}) });
+    if (!r.ok) return apiError(r, `Updating the account ${account}`);
+    const after = (r.data as { account: Account }).account;
+    return ok(`Updated:\n${accountLine(after)}`, { account: accountItem(after) });
+  });
+
+  tool("connectors", "polpo_connector_account_connect", {
+    title: "Sign in a per-identity connector's account",
+    description: "Sign an account in (again): authorization_url for OAuth apps (needs_auth / needs_reauth), setup_url for a token, else a connection test.",
+    inputSchema: { id: z.string().min(1).describe("The per-identity connector's id"), account: accountParam, identity: identityParam.optional() },
+    outputSchema: { authorized: z.boolean(), authorization_url: z.string().optional(), setup_url: z.string().optional() },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, async ({ id, account, identity }) => {
+    const found = await identityConnector(id);
+    if ("error" in found) return found.error!;
+    const a = findAccount(found.connector!, account, identity);
+    if ("error" in a) return a.error;
+    const next = await signIn(found.connector!, a.account);
+    return ok(`${found.connector!.name} – ${a.account.label}: ${next.text}`, { authorized: false, ...next.data });
+  });
+
+  tool("connectors", "polpo_connector_account_disconnect", {
+    title: "Sign a per-identity connector's account out",
+    description: "Sign one account out: its OAuth tokens are revoked and forgotten (the account stays; polpo_connector_account_connect signs it in again). Needs confirm: true.",
+    inputSchema: { id: z.string().min(1).describe("The per-identity connector's id"), account: accountParam, identity: identityParam.optional(), confirm: confirmParam("sign the account out") },
+    outputSchema: { account: accountOut.optional() },
+    annotations: DESTRUCTIVE,
+  }, async ({ id, account, identity, confirm }) => {
+    const found = await identityConnector(id);
+    if ("error" in found) return found.error!;
+    const a = findAccount(found.connector!, account, identity);
+    if ("error" in a) return a.error;
+    if (confirm !== true) return fail(`Signing out "${a.account.label}" of ${a.account.identityLabel ?? a.account.identity}: it stops working for its owner until someone signs in again. Ask the person, then call again with confirm: true.`);
+    const r = await apiSend(deps, "POST", `/connectors/${enc(id)}/accounts/${enc(a.account.id)}/disconnect`);
+    if (!r.ok) return apiError(r, `Signing out ${account}`);
+    const after = (r.data as Connector).accounts?.find((x) => x.id === a.account.id);
+    return ok(`Signed out "${a.account.label}".`, { ...(after ? { account: accountItem(after) } : {}) });
+  });
+
+  tool("connectors", "polpo_connector_account_remove", {
+    title: "Remove a per-identity connector's account",
+    description: "Remove one account: its tokens are revoked and its secrets deleted; its owner's next account becomes the default. Needs confirm: true.",
+    inputSchema: { id: z.string().min(1).describe("The per-identity connector's id"), account: accountParam, identity: identityParam.optional(), confirm: confirmParam("remove the account") },
+    outputSchema: { id: z.string(), removed: z.boolean() },
+    annotations: DESTRUCTIVE,
+  }, async ({ id, account, identity, confirm }) => {
+    const found = await identityConnector(id);
+    if ("error" in found) return found.error!;
+    const a = findAccount(found.connector!, account, identity);
+    if ("error" in a) return a.error;
+    if (confirm !== true) return fail(`Removing "${a.account.label}" of ${a.account.identityLabel ?? a.account.identity} deletes its sign-in for good: ask the person, then call again with confirm: true.`);
+    const r = await apiSend(deps, "DELETE", `/connectors/${enc(id)}/accounts/${enc(a.account.id)}`);
+    if (!r.ok) return apiError(r, `Removing ${account}`);
+    return ok(`Removed the account "${a.account.label}" from ${id}.`, { id: a.account.id, removed: true });
+  });
+
+  tool("connectors", "polpo_connector_account_import", {
+    title: "Import a connector as an account",
+    description: "Turn a separate connector of the same app (gmail-2, mail-nina…) into an account of a per-identity connector: its sign-in moves to the new account "
+      + "(nobody signs in again), its owner's identity and label are kept or given, and the source connector is removed (keep_source: turned off instead). "
+      + "Its tools change name: mcp__<source>__… become mcp__<id>__… with that account. Explicit, never automatic. Needs confirm: true.",
+    inputSchema: {
+      id: z.string().min(1).describe("The per-identity connector's id"),
+      from: z.string().min(1).describe("The connector to import"),
+      identity: identityParam.optional().describe("Whose account it becomes; default: the source's owner (an agent's own connector)"),
+      label: z.string().min(1).max(64).optional().describe("Default: the source's signed-in account, else its name"),
+      default: z.boolean().optional().describe("Make it the identity's default account"),
+      keep_source: z.boolean().optional().describe("Turn the source off instead of removing it"),
+      confirm: confirmParam("import it (the source connector goes away)"),
+    },
+    outputSchema: { account: accountOut, source_removed: z.boolean(), renamed: z.object({ from: z.string(), to: z.string() }) },
+    annotations: DESTRUCTIVE,
+  }, async ({ id, from, identity, label, default: makeDefault, keep_source, confirm }) => {
+    const found = await identityConnector(id);
+    if ("error" in found) return found.error!;
+    if (confirm !== true) {
+      return fail(`Importing ${from} into ${id} moves its sign-in to an account of ${id} and ${keep_source ? "turns it off" : "removes it"}; `
+        + `skills and playbooks naming mcp__${from}__… must use mcp__${id}__… then. Ask the person, then call again with confirm: true.`);
+    }
+    const r = await apiSend(deps, "POST", `/connectors/${enc(id)}/accounts/import`, {
+      from, ...(identity ? { identity: identityOf(identity) } : {}), ...(label ? { label } : {}), ...(makeDefault ? { default: true } : {}), ...(keep_source ? { removeSource: false } : {}),
+    });
+    if (!r.ok) return apiError(r, `Importing ${from} into ${id}`);
+    const d = r.data as { account: Account; source: { removed: boolean }; renamed: { from: string; to: string } };
+    return ok(`${from} is now the account "${d.account.label}" of ${d.account.identityLabel ?? d.account.identity} on ${id}${d.account.default ? " (its default)" : ""}; `
+      + `${d.source.removed ? `${from} was removed` : `${from} was turned off`}. Tools: ${d.renamed.from} → ${d.renamed.to}.`,
+      { account: accountItem(d.account), source_removed: d.source.removed, renamed: d.renamed });
   });
 }

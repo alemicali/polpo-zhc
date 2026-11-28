@@ -128,8 +128,30 @@ export interface McpAgentToolDetails {
   isError: boolean;
 }
 
-/** Bridge one MCP tool into an AgentTool. */
-export function bridgeMcpTool(connectorId: string, connectorName: string, tool: McpToolInfo, call: McpToolCaller): AgentTool<TSchema, McpAgentToolDetails> {
+/**
+ * The argument a per-identity connector's tools take to pick one of the caller's accounts: "account",
+ * or "polpo_account" when the server's tool already has an "account" parameter of its own.
+ */
+export function accountParamName(inputSchema: Record<string, unknown> | undefined): string {
+  const props = (inputSchema as { properties?: Record<string, unknown> } | undefined)?.properties;
+  return props && typeof props === "object" && "account" in props ? "polpo_account" : "account";
+}
+
+/** The parameters with an extra optional string argument (a per-identity connector's account). */
+export function withAccountParam(inputSchema: Record<string, unknown> | undefined, param: { name: string; description: string }): Record<string, unknown> {
+  const schema = inputSchema && typeof inputSchema === "object" ? { ...inputSchema } : {};
+  const properties = { ...((schema.properties as Record<string, unknown> | undefined) ?? {}) };
+  properties[param.name] = { type: "string", description: param.description };
+  return { ...schema, type: "object", properties };
+}
+
+/**
+ * Bridge one MCP tool into an AgentTool. `accountParam` (per-identity connectors) adds an optional
+ * argument the caller picks one of its accounts with (the bridged `call` strips and resolves it).
+ */
+export function bridgeMcpTool(
+  connectorId: string, connectorName: string, tool: McpToolInfo, call: McpToolCaller, accountParam?: { name: string; description: string },
+): AgentTool<TSchema, McpAgentToolDetails> {
   const name = mcpToolName(connectorId, tool.name);
   const label = `${connectorName}: ${tool.title ?? tool.name}`;
   const description = `[${connectorName}] ${tool.description?.trim() || tool.title || tool.name}`.slice(0, 1024);
@@ -137,7 +159,7 @@ export function bridgeMcpTool(connectorId: string, connectorName: string, tool: 
     name,
     label,
     description,
-    parameters: toolParameters(tool.inputSchema),
+    parameters: toolParameters(accountParam ? withAccountParam(tool.inputSchema, accountParam) : tool.inputSchema),
     async execute(_id, params, signal) {
       const raw = await call(tool.name, (params ?? {}) as Record<string, unknown>, signal);
       const { content, isError } = convertToolResult(raw, label);

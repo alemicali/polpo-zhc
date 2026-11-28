@@ -103,8 +103,41 @@ export interface ConnectorAccess {
  * Who a connector belongs to. "org" (the default, also when missing): the organization's; its
  * access decides which agents may use it. "agent": one agent's own (a personal mailbox): only that
  * agent may ever use its tools, whatever its access says (access.agents is [owner] or [], never "*").
+ * "identity": defined once for the organization (app, OAuth client, tools, rules), and every
+ * identity (an agent, or a person chatting with Polpo) connects its own accounts to it
+ * (`ConnectorConfig.accounts`); a caller only ever uses its own accounts (default one, or
+ * `account: "<label>"`), plus the org fallback account when `fallback` is on (off by default).
  */
-export type ConnectorScope = { kind: "org" } | { kind: "agent"; agent: string };
+export type ConnectorScope = { kind: "org" } | { kind: "agent"; agent: string } | { kind: "identity"; fallback?: boolean };
+
+/**
+ * Who a per-identity connector's account belongs to: "agent:<name>", "person:<email>" (a member of
+ * the instance, lowercased; "person:_shared" when there is no sign-in) or "org" (the fallback account).
+ */
+export type ConnectorIdentity = string;
+
+/** One account connected to a per-identity connector: its own credentials (vault) and connection state. */
+export interface ConnectorAccount {
+  /** Stable id ("acc-" + 10 hex): the vault service is `<connector id>~<account id>`. */
+  id: string;
+  /** Whose it is. */
+  identity: ConnectorIdentity;
+  /** The name the identity picks it by (`account: "sitoinchat"`), unique per identity (case-insensitive). */
+  label: string;
+  /** The identity's default account (exactly one per identity that has accounts). */
+  default?: boolean;
+  /** The signed-in account (e.g. an email), when known. */
+  account?: string;
+  /** The connector this account was imported from (conversion of separate connectors). */
+  importedFrom?: string;
+  createdAt: string;
+  updatedAt?: string;
+  /** Cached state (written by the connection manager). */
+  status?: ConnectorStatus;
+  lastError?: string;
+  toolCount?: number;
+  lastConnectedAt?: string;
+}
 
 /** Per-tool policy: "off" hides the tool, "ask" needs the person's approval before it runs (chat), "allow" (default) runs it. */
 export type ConnectorToolPolicy = "allow" | "ask" | "off";
@@ -133,6 +166,8 @@ export interface ConnectorConfig {
   access: ConnectorAccess;
   /** Who it belongs to: missing = { kind: "org" } (every connector made before scopes existed). */
   scope?: ConnectorScope;
+  /** scope "identity": the accounts the identities connected (no secrets: they are in the vault, per account). */
+  accounts?: ConnectorAccount[];
   enabled: boolean;
   /** Catalog entry it was created from, if any. */
   catalogId?: string;
@@ -213,6 +248,8 @@ export interface ConnectorCatalogEntry {
 /** Event payload for `connector:changed`. */
 export interface ConnectorChangedEvent {
   id: string;
+  /** A per-identity connector's account whose state changed. */
+  account?: string;
   status: ConnectorStatus;
   action?: "created" | "updated" | "deleted" | "status";
   toolCount?: number;
@@ -224,7 +261,12 @@ export const CONNECTOR_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,39}$/;
 export const CONNECTORS_VAULT_OWNER = "$connectors";
 export const DEFAULT_CONNECTOR_TOOL_TIMEOUT_MS = 60_000;
 
-/** The agent an agent-scoped connector belongs to; undefined for an org connector. */
+/** Whether the connector is per identity (each agent / person connects its own accounts). */
+export function isIdentityConnector(connector: Pick<ConnectorConfig, "scope">): boolean {
+  return connector.scope?.kind === "identity";
+}
+
+/** The agent an agent-scoped connector belongs to; undefined for an org or per-identity connector. */
 export function connectorOwner(connector: Pick<ConnectorConfig, "scope">): string | undefined {
   return connector.scope?.kind === "agent" && connector.scope.agent ? connector.scope.agent : undefined;
 }
@@ -308,4 +350,119 @@ export function normalizeConnectorTools(value: AgentConnectorTools | undefined |
 export function connectorSlug(name: string): string {
   const slug = name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/, "");
   return slug || "connector";
+}
+
+// ── Per-identity connectors: accounts ──
+
+/** An account label: what an identity picks an account by ("sitoinchat", "personale", "info@acme.com"). */
+export const CONNECTOR_ACCOUNT_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 ._@+-]{0,63}$/;
+/** The fallback account's identity (an account of the organization, used by identities that have none). */
+export const ORG_CONNECTOR_IDENTITY = "org";
+/** A person without a sign-in (single-user installs, API keys). */
+export const SHARED_PERSON = "_shared";
+
+export function agentConnectorIdentity(agent: string): ConnectorIdentity {
+  return `agent:${agent}`;
+}
+
+/** A person's identity from their email (undefined / empty / not an email: the shared person of an instance without sign-in). */
+export function personConnectorIdentity(email: string | undefined | null): ConnectorIdentity {
+  const e = email?.trim().toLowerCase();
+  return `person:${e && e.includes("@") ? e : SHARED_PERSON}`;
+}
+
+/** The caller's identity: an agent's, else the person's (Polpo chat). */
+export function callerConnectorIdentity(agent: string | undefined, person?: string | null): ConnectorIdentity {
+  return agent !== undefined ? agentConnectorIdentity(agent) : personConnectorIdentity(person);
+}
+
+export type ParsedConnectorIdentity = { kind: "agent"; agent: string } | { kind: "person"; email: string } | { kind: "org" };
+
+/** "agent:nina" → { kind: "agent", agent: "nina" }; undefined when not an identity. */
+export function parseConnectorIdentity(value: unknown): ParsedConnectorIdentity | undefined {
+  if (typeof value !== "string") return undefined;
+  if (value === ORG_CONNECTOR_IDENTITY) return { kind: "org" };
+  const m = /^(agent|person):(.+)$/.exec(value);
+  if (!m || !m[2]!.trim() || m[2]!.startsWith("$")) return undefined;
+  if (m[1] === "agent") return { kind: "agent", agent: m[2]! };
+  const email = m[2]!.trim().toLowerCase();
+  return email === SHARED_PERSON || email.includes("@") ? { kind: "person", email } : undefined;
+}
+
+/** How an identity reads: "agent nina", "ada@acme.com", "the person (no sign-in)", "the organization (fallback)". */
+export function connectorIdentityLabel(identity: ConnectorIdentity): string {
+  const p = parseConnectorIdentity(identity);
+  if (!p) return identity;
+  if (p.kind === "org") return "the organization (fallback)";
+  if (p.kind === "agent") return `agent ${p.agent}`;
+  return p.email === SHARED_PERSON ? "the person (no sign-in)" : p.email;
+}
+
+/** The vault service (owner `$connectors`) of one account's secrets. */
+export function connectorAccountService(connectorId: string, accountId: string): string {
+  return `${connectorId}~${accountId}`;
+}
+
+/** An identity's own accounts on the connector, the default first. */
+export function connectorAccountsOf(connector: Pick<ConnectorConfig, "accounts">, identity: ConnectorIdentity): ConnectorAccount[] {
+  const own = (connector.accounts ?? []).filter((a) => a.identity === identity);
+  return [...own.filter((a) => a.default), ...own.filter((a) => !a.default)];
+}
+
+/** Whether the org fallback account is on for this connector. */
+export function connectorFallbackOn(connector: Pick<ConnectorConfig, "scope">): boolean {
+  return connector.scope?.kind === "identity" && connector.scope.fallback === true;
+}
+
+/**
+ * Whether `identity` may connect an account to the per-identity connector: an agent the connector's
+ * access lists (or every agent with "*"), a person when Polpo may use it (access.polpo), and the
+ * organization (the fallback account) always.
+ */
+export function connectorAccountAllowed(connector: Pick<ConnectorConfig, "access" | "scope">, identity: ConnectorIdentity): boolean {
+  if (connector.scope?.kind !== "identity") return false;
+  const p = parseConnectorIdentity(identity);
+  if (!p) return false;
+  if (p.kind === "org") return true;
+  if (p.kind === "person") return !!connector.access?.polpo;
+  const agents = connector.access?.agents;
+  return agents === "*" || (Array.isArray(agents) && agents.includes(p.agent));
+}
+
+export type ConnectorAccountResolution =
+  | { ok: true; account: ConnectorAccount; fallback: boolean }
+  | { ok: false; reason: "no_account" | "unknown_account"; error: string; labels: string[] };
+
+/**
+ * Which account a call of `identity` uses on a per-identity connector: `label` when given (one of the
+ * identity's own accounts, case-insensitive; the fallback account by its label when the fallback is
+ * on), else the identity's default account, else the fallback account when it is on. An identity
+ * never reaches another identity's account, whatever label it passes.
+ */
+export function resolveConnectorAccount(
+  connector: Pick<ConnectorConfig, "id" | "name" | "scope" | "accounts">, identity: ConnectorIdentity, label?: string | null,
+): ConnectorAccountResolution {
+  const own = connectorAccountsOf(connector, identity);
+  const fallback = connectorFallbackOn(connector) && identity !== ORG_CONNECTOR_IDENTITY ? connectorAccountsOf(connector, ORG_CONNECTOR_IDENTITY) : [];
+  const labels = [...own, ...fallback].map((a) => a.label);
+  const who = connectorIdentityLabel(identity);
+  const wanted = typeof label === "string" ? label.trim().toLowerCase() : "";
+  if (wanted) {
+    const mine = own.find((a) => a.label.toLowerCase() === wanted);
+    if (mine) return { ok: true, account: mine, fallback: false };
+    const shared = fallback.find((a) => a.label.toLowerCase() === wanted);
+    if (shared) return { ok: true, account: shared, fallback: true };
+    return {
+      ok: false, reason: "unknown_account", labels,
+      error: `${connector.name} (${connector.id}): ${who} has no account "${label!.trim()}". `
+        + (labels.length ? `Its accounts: ${labels.map((l) => `"${l}"`).join(", ")}.` : "It has no account on it: a person connects one in Settings → Connectors."),
+    };
+  }
+  if (own[0]) return { ok: true, account: own[0], fallback: false };
+  if (fallback[0]) return { ok: true, account: fallback[0], fallback: true };
+  return {
+    ok: false, reason: "no_account", labels,
+    error: `${connector.name} (${connector.id}) is per identity and ${who} has no account on it. `
+      + `A person connects one in Settings → Connectors → ${connector.name} → Accounts (or on the agent's page); then try again.`,
+  };
 }

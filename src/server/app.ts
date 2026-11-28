@@ -110,7 +110,7 @@ import { hostedDeps } from "../mcp-servers/host.js";
 import { queryOrchestratorText } from "../llm/query.js";
 import { effectiveOrchestratorModel, requireOrchestratorModel } from "../llm/orchestrator-model.js";
 import {
-  connectorManagerFor, connectorsPromptSection, notePublicOrigin, clientMetadataDocument, connectorDashboardBase, connectorPublicBase,
+  connectorManagerFor, connectorsPromptSection, currentConnectorPerson, notePublicOrigin, clientMetadataDocument, connectorDashboardBase, connectorPublicBase,
   CONNECTOR_CLIENT_METADATA_PATH, CONNECTOR_OAUTH_CALLBACK_PATH, knownPublicOrigin,
 } from "../mcp/runtime.js";
 import { triggerServiceFor, TRIGGER_PUBLIC_PATH } from "../triggers/service.js";
@@ -888,11 +888,13 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
       const m = resolveModel(modelSpec);
       // Connectors granted to Polpo (access.polpo): their tools are appended to Polpo's static ones
       const connectorManager = connectorManagerFor(o);
-      const connectorTools = await connectorManager.toolsFor(undefined).catch((err) => {
+      // per-identity connectors: the accounts of the person chatting (signed-in member; none: the shared person)
+      const person = currentConnectorPerson();
+      const connectorTools = await connectorManager.toolsFor(undefined, undefined, undefined, { person }).catch((err) => {
         console.warn(`[connectors] polpo: ${err instanceof Error ? err.message : String(err)}`);
         return { tools: [], notes: [] };
       });
-      const connectorSection = connectorsPromptSection(connectorManager.store.list(), undefined, connectorTools.notes);
+      const connectorSection = connectorsPromptSection(connectorManager.store.list(), undefined, connectorTools.notes, undefined, person);
       if (connectorSection) systemPrompt += `\n\n${connectorSection}`;
       const connectorToolMap = new Map(connectorTools.tools.map((tool) => [tool.name, tool]));
       const runTool = async (name: string, args: Record<string, unknown>, context: any): Promise<string> => {
@@ -2122,6 +2124,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     agentNames: async () => (await o.getAgents()).map((a) => a.name),
     // what the provider must reach: POLPO_PUBLIC_URL when set, even when the dashboard calls the API on another port
     redirectUri: (c) => `${connectorPublicBase(publicOrigin(c))}${CONNECTOR_OAUTH_CALLBACK_PATH}`,
+    member: (c) => c.get("polpoUserEmail" as never) as string | undefined,
   }));
   // Hosted MCP servers: build, test, publish, deploy; each becomes a connector (docs/custom-mcp-servers.md)
   authed.route("/mcp-servers", mcpServerRoutes({

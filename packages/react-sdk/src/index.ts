@@ -16,7 +16,7 @@ export type { UseMissionsReturn } from "./hooks/use-missions.js";
 export { useMission } from "./hooks/use-mission.js";
 export { useMissionCost } from "./hooks/use-mission-cost.js";
 export type { UseMissionCostReturn } from "./hooks/use-mission-cost.js";
-export { useConnectors, connectorLabel, connectorOwner, connectorEnabledFor } from "./hooks/use-connectors.js";
+export { useConnectors, useConnectorAccounts, connectorLabel, connectorOwner, connectorEnabledFor, isIdentityConnector, connectorAccountsFor } from "./hooks/use-connectors.js";
 export {
   useWaBusinessStatus, useWaTemplates, useWaConversation, useWaContacts, useWaPending, useWaBusinessProfile, useWaBlocked, useWaAnalytics,
   useWaAccountEvents, useWaPhone, useWaBusinessEvents, useWaMedia,
@@ -37,7 +37,7 @@ export type {
   UseWaBusinessStatusReturn, UseWaTemplatesReturn, UseWaConversationReturn, UseWaContactsReturn, UseWaPendingReturn, UseWaBusinessProfileReturn,
   UseWaBlockedReturn, UseWaAnalyticsReturn, UseWaAccountEventsReturn, UseWaPhoneReturn, UseWaBusinessEventsReturn, UseWaMediaReturn,
 } from "./hooks/use-whatsapp-business.js";
-export type { UseConnectorsReturn } from "./hooks/use-connectors.js";
+export type { UseConnectorsReturn, UseConnectorAccountsReturn } from "./hooks/use-connectors.js";
 export { useAgents } from "./hooks/use-agents.js";
 export type { UseAgentsReturn } from "./hooks/use-agents.js";
 export { useAgent } from "./hooks/use-agent.js";

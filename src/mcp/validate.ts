@@ -35,7 +35,10 @@ export interface ConnectorInput {
   transport?: Partial<ConnectorTransport>;
   auth?: { type?: ConnectorAuthType; headerNames?: string[]; oauth?: Partial<ConnectorOAuthSettings> };
   access?: Partial<ConnectorAccess>;
-  /** Who it belongs to: { kind: "org" } (default) or { kind: "agent", agent } (only that agent may use it); null = org. */
+  /**
+   * Who it belongs to: { kind: "org" } (default), { kind: "agent", agent } (only that agent may use it)
+   * or { kind: "identity", fallback? } (each agent / person connects its own accounts); null = org.
+   */
   scope?: ConnectorScope | null;
   enabled?: boolean;
   toolTimeoutMs?: number;
@@ -83,13 +86,17 @@ function normalizeAccess(input: Partial<ConnectorAccess> | undefined, base: Conn
   return { agents, polpo: input.polpo === undefined ? base.polpo : input.polpo === true };
 }
 
-/** A scope from input: the agent-scoped one, or undefined for org (the default, stored as no field). */
-function normalizeScope(input: unknown, ctx: Pick<ValidateContext, "agentNames">): Extract<ConnectorScope, { kind: "agent" }> | undefined {
+/** A scope from input: the agent-scoped or per-identity one, or undefined for org (the default, stored as no field). */
+function normalizeScope(input: unknown, ctx: Pick<ValidateContext, "agentNames">): Exclude<ConnectorScope, { kind: "org" }> | undefined {
   if (input === undefined || input === null) return undefined;
-  if (typeof input !== "object" || Array.isArray(input)) throw new ConnectorInputError('scope must be { kind: "org" } or { kind: "agent", agent: "<name>" }');
-  const v = input as { kind?: unknown; agent?: unknown };
+  if (typeof input !== "object" || Array.isArray(input)) throw new ConnectorInputError('scope must be { kind: "org" }, { kind: "agent", agent: "<name>" } or { kind: "identity", fallback?: boolean }');
+  const v = input as { kind?: unknown; agent?: unknown; fallback?: unknown };
   if (v.kind === "org") return undefined;
-  if (v.kind !== "agent") throw new ConnectorInputError('scope.kind must be "org" or "agent"');
+  if (v.kind === "identity") {
+    if (v.fallback !== undefined && typeof v.fallback !== "boolean") throw new ConnectorInputError("scope.fallback must be true or false");
+    return { kind: "identity", ...(v.fallback === true ? { fallback: true } : {}) };
+  }
+  if (v.kind !== "agent") throw new ConnectorInputError('scope.kind must be "org", "agent" or "identity"');
   const agent = typeof v.agent === "string" ? v.agent.trim() : "";
   if (!agent || agent.startsWith("$")) throw new ConnectorInputError("scope.agent: the agent the connector belongs to is required");
   if (ctx.agentNames && !ctx.agentNames.includes(agent)) throw new ConnectorInputError(`scope.agent: there is no agent "${agent}"`);
@@ -231,8 +238,9 @@ export async function buildConnector(input: ConnectorInput, ctx: ValidateContext
     if (oauth && Object.keys(oauth).length) auth.oauth = oauth;
   }
   const scope = normalizeScope(input.scope, ctx);
+  if (scope?.kind === "identity" && transport.type === "stdio") throw new ConnectorInputError("A local (stdio) connector cannot be per identity");
   // default: Polpo may use it, agents are granted explicitly; an agent's own: that agent, not Polpo
-  const access = normalizeAccess(input.access, scope ? { agents: [scope.agent], polpo: false } : { agents: [], polpo: true });
+  const access = normalizeAccess(input.access, scope?.kind === "agent" ? { agents: [scope.agent], polpo: false } : { agents: [], polpo: true });
   checkScopeAccess(scope, access);
   const connector: ConnectorConfig = {
     id, name, kind: "mcp",
@@ -247,8 +255,12 @@ export async function buildConnector(input: ConnectorInput, ctx: ValidateContext
     ...(input.toolTimeoutMs !== undefined ? { toolTimeoutMs: timeout(input.toolTimeoutMs) } : {}),
     ...(input.toolPolicy !== undefined ? { toolPolicy: normalizeToolPolicy(input.toolPolicy) } : {}),
     createdAt: new Date().toISOString(),
-    status: authType === "oauth" ? "needs_auth" : "disconnected",
+    status: authType === "oauth" && scope?.kind !== "identity" ? "needs_auth" : "disconnected",
   };
+  // a per-identity connector signs in per account: its token / header values go with each account
+  if (scope?.kind === "identity" && Object.keys(values).some((k) => k === SECRET_KEYS.bearer || k.startsWith("header:"))) {
+    throw new ConnectorInputError("A per-identity connector has no token of its own: each account sets its own when it is added");
+  }
   return { connector, secrets: values };
 }
 
@@ -276,11 +288,19 @@ export async function applyConnectorPatch(
   if (input.enabled !== undefined) { patch.enabled = input.enabled === true; reconnect = true; }
   // scope: org → agent keeps only the owner in access (the others are dropped and reported); agent → org keeps access
   let droppedAgents: string[] | undefined;
-  let scope = current.scope?.kind === "agent" ? current.scope : undefined;
+  let scope: ConnectorScope | undefined = current.scope?.kind === "org" ? undefined : current.scope;
   let access = current.access;
   if (input.scope !== undefined) {
     const next = normalizeScope(input.scope, ctx);
-    if (next?.agent !== connectorOwner(current)) {
+    const wasIdentity = current.scope?.kind === "identity";
+    if (wasIdentity !== (next?.kind === "identity")) {
+      throw new ConnectorInputError(wasIdentity
+        ? "A per-identity connector cannot become an org or agent connector: its accounts would have nowhere to go"
+        : "An org or agent connector cannot become per identity in place: add a per-identity connector and import this one as an account (POST /connectors/{id}/accounts/import)");
+    }
+    if (next?.kind === "identity") {
+      if ((next.fallback === true) !== (current.scope?.kind === "identity" && current.scope.fallback === true)) patch.scope = scope = next;
+    } else if (next?.agent !== connectorOwner(current)) {
       patch.scope = next; // undefined: back to org (the field is dropped)
       scope = next;
       if (next) {
@@ -294,6 +314,9 @@ export async function applyConnectorPatch(
   }
   if (input.access !== undefined) patch.access = access = normalizeAccess(input.access, access);
   if (input.scope !== undefined || input.access !== undefined) checkScopeAccess(scope, access);
+  if (current.scope?.kind === "identity" && Object.keys(secretValues(input.secrets).values).some((k) => k === SECRET_KEYS.bearer || k.startsWith("header:"))) {
+    throw new ConnectorInputError("A per-identity connector has no token of its own: set it on each account");
+  }
   if (input.toolTimeoutMs !== undefined) patch.toolTimeoutMs = timeout(input.toolTimeoutMs);
   if (input.toolPolicy !== undefined) patch.toolPolicy = normalizeToolPolicy(input.toolPolicy);
   if (input.transport !== undefined || input.url !== undefined) {

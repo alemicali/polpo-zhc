@@ -133,6 +133,13 @@ export async function setupDone(deps: McpDeps, t: SetupTarget): Promise<boolean 
     case "connector": {
       const r = await apiGet(deps, `/connectors/${enc(t.item ?? "")}`);
       if (!r.ok) return r.status === 404 ? false : null;
+      // a per-identity connector's account (field account:<account id>): its token, headers or sign-in
+      if (t.field?.startsWith("account:")) {
+        const accounts = (r.data as { accounts?: Array<{ id: string; secrets?: { bearerToken?: boolean; headers?: string[]; oauth?: { authorized?: boolean } } }> }).accounts;
+        const a = accounts?.find((x) => x.id === t.field!.slice("account:".length));
+        if (!a) return false;
+        return !!a.secrets?.bearerToken || (a.secrets?.headers ?? []).length > 0 || !!a.secrets?.oauth?.authorized;
+      }
       const s = (r.data as { secrets?: { bearerToken?: boolean; headers?: string[]; clientSecret?: boolean; oauth?: { authorized?: boolean } } }).secrets;
       if (!s) return null;
       if (t.field === "bearerToken") return !!s.bearerToken;

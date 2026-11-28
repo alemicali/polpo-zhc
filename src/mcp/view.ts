@@ -2,12 +2,21 @@
  * What the API and Polpo show of a connector: its configuration (never a secret) plus which
  * secrets are set (names and booleans only).
  */
-import type { ConnectorConfig } from "@polpo-ai/core";
+import { connectorIdentityLabel, type ConnectorAccount, type ConnectorConfig } from "@polpo-ai/core";
 import { CATALOG_ICON_FILES } from "./catalog-icons.generated.js";
 import { hostedServerIconUrls } from "../mcp-servers/icons.js";
 import { SECRET_KEYS } from "./secrets.js";
 
-export interface PublicConnector extends ConnectorConfig {
+/** A per-identity connector's account as the API shows it: which of its secrets are set (never their values). */
+export interface PublicConnectorAccount extends ConnectorAccount {
+  /** How its identity reads ("agent nina", "ada@acme.com", "the organization (fallback)"). */
+  identityLabel: string;
+  secrets: { bearerToken: boolean; headers: string[]; oauth: { authorized: boolean; pending: boolean } };
+}
+
+export interface PublicConnector extends Omit<ConnectorConfig, "accounts"> {
+  /** scope "identity": every account, with which secrets are set. */
+  accounts?: PublicConnectorAccount[];
   /**
    * The connector's icon, relative to the instance: a catalog connector's bundled official icon
    * (/connector-icons/<catalogId>.<ext>, a public dashboard asset), else a custom connector's stored one
@@ -25,10 +34,27 @@ export interface PublicConnector extends ConnectorConfig {
   };
 }
 
-export function publicConnector(connector: ConnectorConfig, secretKeys: string[]): PublicConnector {
+/** An account for the API: its configuration and state, and which secrets are set. */
+export function publicConnectorAccount(account: ConnectorAccount, secretKeys: string[]): PublicConnectorAccount {
   const has = (k: string) => secretKeys.includes(k);
   return {
-    ...connector,
+    ...account,
+    identityLabel: connectorIdentityLabel(account.identity),
+    secrets: {
+      bearerToken: has(SECRET_KEYS.bearer),
+      headers: secretKeys.filter((k) => k.startsWith("header:")).map((k) => k.slice("header:".length)),
+      oauth: { authorized: has(SECRET_KEYS.tokens), pending: has(SECRET_KEYS.state) },
+    },
+  };
+}
+
+/** `accountKeys`: per account id, the secret keys set for it (per-identity connectors). */
+export function publicConnector(connector: ConnectorConfig, secretKeys: string[], accountKeys: Record<string, string[]> = {}): PublicConnector {
+  const has = (k: string) => secretKeys.includes(k);
+  const { accounts, ...rest } = connector;
+  return {
+    ...rest,
+    ...(accounts ? { accounts: accounts.map((a) => publicConnectorAccount(a, accountKeys[a.id] ?? [])) } : {}),
     ...connectorIconUrls(connector),
     secrets: {
       bearerToken: has(SECRET_KEYS.bearer),

@@ -35,8 +35,10 @@ export interface AgentCardConnector {
   status?: string;
   /** Which of its tools the agent gets: all, or how many (agent.connectorTools). */
   tools: "all" | number;
-  /** "org": the organization's; "personal": this agent's own (scope agent). */
-  scope: "org" | "personal";
+  /** "org": the organization's; "personal": this agent's own (scope agent); "identity": per identity (its own accounts). */
+  scope: "org" | "personal" | "identity";
+  /** scope "identity": this agent's accounts (labels; the default first), and whether it falls back on the org's shared one. */
+  accounts?: Array<{ label: string; default?: boolean; status?: string; shared?: boolean }>;
 }
 
 export interface AgentCardGoal {
@@ -133,7 +135,10 @@ export interface AgentCardInput {
   /** GET /agents/lines: the team's lines (the agent's row is used). */
   lines?: { agents: Array<{ agent: string; mode: string; explicit: boolean; manager?: string; reachable: string[] }> };
   /** GET /connectors: the agent's are those whose access lists it (or "*"). */
-  connectors?: Array<{ id: string; name: string; account?: string; status?: string; enabled?: boolean; access?: { agents?: string[] | "*" }; scope?: { kind: string; agent?: string } }>;
+  connectors?: Array<{
+    id: string; name: string; account?: string; status?: string; enabled?: boolean; access?: { agents?: string[] | "*" }; scope?: { kind: string; agent?: string; fallback?: boolean };
+    accounts?: Array<{ identity: string; label: string; default?: boolean; status?: string }>;
+  }>;
   drive?: {
     self?: string;
     plan?: Array<{ id: string; title: string; horizon?: string; parentId?: string; progress?: number; status: string; due?: string; measure?: string; updatedAt?: string }>;
@@ -191,6 +196,20 @@ function agentConnectors(input: AgentCardInput): AgentCardConnector[] {
     .map((c) => {
       const account = c.account?.trim();
       const pick = selection[c.id];
+      if (c.scope?.kind === "identity") {
+        // its own accounts only (another identity's never show), then the org's shared one when the fallback is on
+        const own = (c.accounts ?? []).filter((a) => a.identity === `agent:${name}`).sort((a, b) => Number(!!b.default) - Number(!!a.default));
+        const shared = c.scope.fallback ? (c.accounts ?? []).filter((a) => a.identity === "org") : [];
+        const accounts = [
+          ...own.map((a) => ({ label: a.label, ...(a.default ? { default: true } : {}), ...(a.status ? { status: a.status } : {}) })),
+          ...(own.length ? [] : shared.map((a) => ({ label: a.label, shared: true, ...(a.status ? { status: a.status } : {}) }))),
+        ];
+        const status = own.find((a) => a.default)?.status ?? own[0]?.status ?? shared[0]?.status;
+        return {
+          id: c.id, label: c.name, ...(status ? { status } : {}), tools: Array.isArray(pick) ? pick.length : "all" as const,
+          scope: "identity" as const, accounts,
+        };
+      }
       return {
         id: c.id,
         label: account && !c.name.toLowerCase().includes(account.toLowerCase()) ? `${c.name} – ${account}` : c.name,
@@ -322,6 +341,10 @@ export function agentCardText(card: AgentCard): string {
     lines.push(`Communication lines: ${card.lines.explicit ? card.lines.mode : "anyone (not set)"}`
       + ` — talks to ${card.lines.mode === "anyone" ? "any agent" : card.lines.reachable.join(", ") || "no agent"}${card.lines.manager ? `; escalates to ${card.lines.manager}` : ""}.`);
   }
-  if (card.connectors.length) lines.push(`Connectors: ${card.connectors.map((c) => `${c.label} [${c.id}]${c.scope === "personal" ? " (its own)" : ""}${c.tools === "all" ? "" : ` (${c.tools} tools)`}`).join(", ")}.`);
+  if (card.connectors.length) {
+    const accounts = (c: AgentCardConnector) => (c.scope !== "identity" ? ""
+      : c.accounts?.length ? ` (per identity: ${c.accounts.map((a) => `${a.label}${a.default ? " default" : ""}${a.shared ? " shared" : ""}`).join(", ")})` : " (per identity: no account yet)");
+    lines.push(`Connectors: ${card.connectors.map((c) => `${c.label} [${c.id}]${c.scope === "personal" ? " (its own)" : ""}${accounts(c)}${c.tools === "all" ? "" : ` (${c.tools} tools)`}`).join(", ")}.`);
+  }
   return lines.join("\n");
 }

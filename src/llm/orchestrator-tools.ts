@@ -67,7 +67,7 @@ import { BRAIN_ORCHESTRATOR_TOOLS, executeCompanyBrainTool } from "../tools/comp
 import { STORAGE_ORCHESTRATOR_TOOLS, executeStorageTool } from "../tools/storage-tools.js";
 import { CONNECTOR_TOOLS, executeConnectorTool } from "../tools/connector-tools.js";
 import { bridgedReadOnly, bridgedTools, BRIDGED_TOOLS, executeBridgedTool, isBridgedTool } from "./polpo-mcp-bridge.js";
-import { connectorManagerFor, connectorRedirectUri } from "../mcp/runtime.js";
+import { connectorManagerFor, connectorRedirectUri, currentConnectorPerson } from "../mcp/runtime.js";
 import { isMcpToolName, toolResultText } from "../mcp/tools.js";
 import { computerContext, normalizeSandboxSettings, unknownComputersProblem, type EffectiveSandbox } from "@polpo-ai/core/sandbox";
 import { normalizeConnectorTools, describeTaskToolScope, normalizeTalksTo, talksToProblem, type AgentTalksTo, AGENT_NOTIFY_TOOL, agentNotifyChannelWarnings, agentNotifyChannelsProblems, allowedToolsInclude, describeAgentNotifyAllowlist, normalizeAgentNotifyChannels } from "@polpo-ai/core";
@@ -3214,7 +3214,7 @@ export async function executeOrchestratorTool(
         }
         // ── Connector tools (mcp__<connector>__<tool>), for connectors Polpo may use ──
         if (isMcpToolName(toolName)) {
-          const { tools } = await connectorManagerFor(polpo).toolsFor(undefined);
+          const { tools } = await connectorManagerFor(polpo).toolsFor(undefined, undefined, undefined, { person: currentConnectorPerson() });
           const tool = tools.find((t) => t.name === toolName);
           if (!tool) return `Unknown or unavailable connector tool: ${toolName}`;
           return toolResultText(await tool.execute(nanoid(), args as never));
