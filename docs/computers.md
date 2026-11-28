@@ -200,6 +200,30 @@ machine, and its v2 snapshots, and create a new one: everything on its disk is l
 confirmation), **Delete** (machine, snapshots and computer; needs confirmation; refused while it is
 an agent's default).
 
+### Safe stop
+
+**Stop** (and **Restart**) is refused while the computer is **busy**, so a click never cuts an
+agent's work in half:
+
+- busy = task runs in progress on it (an `assigned` or `in_progress` task whose running run
+  resolved to this computer) or live agent harness sessions on it (task or chat sessions held by a
+  process: `starting`, `running` or `idle`; a detached or stopped session is not work);
+- the refusal is `409` with `code: "COMPUTER_BUSY"` and `details.busy`
+  `{ tasks: [{ taskId, title, status, runId, agent? }], sessions: [{ key, sessionId?, agent, harness, scope, state, taskId?, chatSessionId? }] }`;
+  the message lists them too;
+- `{ "force": true }` (body) or `?force=true` stops it anyway (the work is interrupted). The
+  dashboard shows the list in a dialog with **Stop anyway** (Hibernate anyway, Pause anyway); MCP
+  `polpo_computer_control` and Polpo's `computer_control` / `computer_stop` take `force` and are
+  told to ask the person first.
+
+A stop **does not block**: the API answers `202` at once with the computer in status `stopping`,
+and the stop goes on in the background (a Daytona v2 hibernation snapshot takes minutes). Each
+status change comes as `computer:changed` (`stopping`, then `stopped` / `paused` / `hibernated`). A
+stop that fails after the answer is never lost: it is a notice in the computer's activity
+("Could not stop it: …"), the computer's `lastError`, and its status is asked of the provider again
+(a failed hibernation leaves the VM running and retries later). Start, Restart and Reset still
+answer when they are done.
+
 ### Deleted at the provider
 
 A machine can be deleted outside Polpo: in the provider's dashboard or API, by its own clean-up, or
@@ -368,7 +392,8 @@ Details: [computer-live-view.md](computer-live-view.md#the-agents-own-chrome-rem
   task's harness session is counted in its runs), `idleStopAt`, `timeoutAt`, `runningSince`,
   `hibernate` (Daytona v2 settings), `machine { image?, snapshot?, template?, region?, resources? }`
   (what a new machine is made from)), `POST /api/v1/computers/:id/{start,stop,restart,reset}` (reset with
-  `{ "confirm": true }`). Agents: `defaultComputer` and `computers` on `POST /agents` and
+  `{ "confirm": true }`; stop and restart refused with `409 COMPUTER_BUSY` while busy unless
+  `{ "force": true }`; stop answers `202` at once with status `stopping`: see [Safe stop](#safe-stop)). Agents: `defaultComputer` and `computers` on `POST /agents` and
   `PATCH /agents/:name` (`""` clears the default). `GET /api/v1/computers/:id/egress`: a remote
   computer's egress through Tailscale (tailnet up/down, node, direct or DERP path, proxy reachable,
   where its browser goes out now; it looks inside a running machine only).

@@ -1064,6 +1064,28 @@ export class ComputerManager {
     });
   }
 
+  /**
+   * Start a stop and return at once (POST /computers/:id/stop): a running computer shows
+   * "stopping" right away, the stop goes on in the background (a Daytona v2 hibernation snapshot
+   * takes minutes) and announces each status change (onChange). A stop that fails later lands in
+   * the computer's activity (a notice, and lastError) and its status is asked of the provider again.
+   * `done` settles when the stop ends (tests; never rejects).
+   */
+  async beginStop(c: ComputerConfig): Promise<ComputerLive & { done: Promise<void> }> {
+    if (!isRemoteComputer(c)) throw new Error(`Computer "${c.id}" is this server: it cannot be stopped`);
+    if (this.deleting.has(c.id)) return { ...this.live(c.id), done: Promise.resolve() };
+    const before = this.live(c.id);
+    if (before.status === "running") await this.setStatus(c, "stopping", before.remoteId ? { remoteId: before.remoteId } : {});
+    const done = this.stop(c).then(() => undefined, async (err) => {
+      const message = `Could not stop it: ${err instanceof Error ? err.message : String(err)}`;
+      this.notify(c, "warn", message);
+      // failed before the machine changed (still "stopping" here): the provider's answer again
+      if (this.live(c.id).status === "stopping") await this.refresh(c, undefined, { force: true }).catch(() => undefined);
+      if (!this.live(c.id).lastError) await this.update(c.id, c.kind as RemoteSandboxProvider, (cur) => ({ ...cur, lastError: message })).catch(() => undefined);
+    });
+    return { ...this.live(c.id), done };
+  }
+
   async restart(c: ComputerConfig, sandbox: EffectiveSandbox): Promise<ComputerLive> {
     await this.stop(c);
     return this.start(c, sandbox);

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -494,8 +494,10 @@ describe("Polpo's computer tools", () => {
     writeFileSync(join(polpoDir, "polpo.json"), JSON.stringify({ project: "p", settings: { egressProxies: { home: "socks5://100.1.2.3:1080" } } }));
     let settings: any = {};
     const events: any[] = [];
+    const tasks: any[] = [];
     const polpo = {
-      agents, events,
+      agents, events, tasks,
+      getStore: () => ({ getAllTasks: async () => tasks }),
       getPolpoDir: () => polpoDir,
       getAgents: async () => agents,
       getConfig: () => ({ settings }),
@@ -532,10 +534,22 @@ describe("Polpo's computer tools", () => {
       expect(provider.created).toHaveLength(0);
       expect(await executeOrchestratorTool("computer_stop", { id: "host" }, polpo)).toMatch(/this server/);
 
+      // computer_stop: refused while a task runs on it, force stops it anyway (answered at once)
+      const m = new ComputerManager(polpo.getPolpoDir(), { adapter: () => provider });
+      setComputerManager(polpo.getPolpoDir(), m);
+      const ninaConfig = polpo.getConfig().settings.computers[0];
+      await m.start(ninaConfig, computerSandbox(ninaConfig));
+      polpo.tasks.push({ id: "t-1", title: "Scrape the leads", status: "in_progress", runs: [{ runId: "r1", status: "running", agent: "sitoinchat", engine: "polpo", startedAt: new Date().toISOString(), computer: { id: "nina", kind: "daytona" } }] });
+      const refused = await executeOrchestratorTool("computer_stop", { id: "nina" }, polpo);
+      expect(refused).toMatch(/^Error: Computer "nina" is busy: task t-1 "Scrape the leads" \(sitoinchat\).*force: true/);
+      expect(m.live("nina").status).toBe("running");
+      expect(await executeOrchestratorTool("computer_stop", { id: "nina", force: true }, polpo)).toMatch(/nina": stopping \(it goes on in the background/);
+      await vi.waitFor(() => expect(m.live("nina").status).toBe("stopped"));
+
       expect(await executeOrchestratorTool("computer_assign", { agent: "sitoinchat", computer: "host" }, polpo)).toMatch(/this server again/);
       expect(polpo.agents[0].defaultComputer).toBeUndefined();
     } finally {
       setComputerManager(polpo.getPolpoDir(), undefined);
     }
-  });
+  }, 30_000); // the first import of orchestrator-tools (a large module) is slow on a cold transform
 });

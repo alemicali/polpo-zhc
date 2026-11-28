@@ -289,20 +289,31 @@ export function registerComputerTools(tool: Register, deps: McpDeps): void {
     title: "Start, stop, restart or reset a computer",
     description: "Start (or resume, or wake a hibernated one) a computer's machine, stop it (Daytona v0: disk kept; E2B/VM: paused, memory kept; "
       + "Daytona v2: hibernated = memory and disk snapshot, VM deleted, wakes in a few seconds), restart it, or reset it: "
-      + "delete the machine (and its snapshots) and create a new one — everything on its disk is lost, so reset needs confirm: true.",
+      + "delete the machine (and its snapshots) and create a new one — everything on its disk is lost, so reset needs confirm: true. "
+      + "Stop and restart are refused while the computer is busy (task runs in progress on it, live agent harness or chat sessions): "
+      + "the refusal lists them; tell the person, and only with their go-ahead call again with force: true (it interrupts them). "
+      + "Stop returns at once with status \"stopping\" (a hibernation takes minutes): check it later with polpo_computer_get; "
+      + "a stop that fails later shows in its activity and error.",
     inputSchema: {
       id: z.string().min(1).describe("The computer's id (polpo_computers_list)"),
       action: z.enum(["start", "stop", "restart", "reset"]).describe("What to do"),
       confirm: confirmParam("reset it (its disk is lost)"),
+      force: z.boolean().optional().describe("stop/restart: do it even though tasks or sessions run on it (they are interrupted). Only after the person agreed"),
     },
     outputSchema: { computer: computerItem },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
-  }, async ({ id, action, confirm }) => {
+  }, async ({ id, action, confirm, force }) => {
     if (action === "reset" && confirm !== true) return fail(`Resetting ${id} deletes its machine and everything on its disk: ask the person, then call again with confirm: true.`);
-    const r = await apiSend(deps, "POST", `/computers/${enc(id)}/${action}`, action === "reset" ? { confirm: true } : undefined);
-    if (!r.ok) return r.status === 404 ? notFound(id) : apiError(r, `${action} of computer ${id}`);
+    const body = action === "reset" ? { confirm: true } : force === true && (action === "stop" || action === "restart") ? { force: true } : undefined;
+    const r = await apiSend(deps, "POST", `/computers/${enc(id)}/${action}`, body);
+    if (!r.ok) {
+      if (r.status === 404) return notFound(id);
+      if (r.code === "COMPUTER_BUSY") return fail(`${r.error}. Ask the person: wait for the work to finish, or call again with force: true to ${action} it anyway.`);
+      return apiError(r, `${action} of computer ${id}`);
+    }
     const c = r.data as Computer;
-    return ok(`${action[0]!.toUpperCase()}${action.slice(1)}: ${line(c).slice(2)}${c.note ? `\nNote: ${c.note}.` : ""}`, { computer: c });
+    const started = action === "stop" && r.status === 202 ? "\nThe stop goes on in the background (a hibernation takes minutes): check it with polpo_computer_get." : "";
+    return ok(`${action[0]!.toUpperCase()}${action.slice(1)}: ${line(c).slice(2)}${c.note ? `\nNote: ${c.note}.` : ""}${started}`, { computer: c });
   });
 
   tool("computers", "polpo_egress_status", {

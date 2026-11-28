@@ -11,9 +11,12 @@
  *   PATCH  /computers/:id             change name, description, image/snapshot/template, resources, lifecycle, network, egress, volumes, desktop { size } (id and kind stay)
  *   DELETE /computers/:id             { confirm: true }: deletes the machine and its disk (Daytona v2: and its snapshots), and the computer
  *   POST   /computers/:id/start       start, resume, or wake it from its snapshot (Daytona v2); created if it has no machine yet
- *   POST   /computers/:id/stop        stop (Daytona v0 container), pause (E2B, Daytona v0 VM) or hibernate (Daytona v2:
- *                                     memory and disk snapshot, then the VM is deleted); never loses the machine
- *   POST   /computers/:id/restart
+ *   POST   /computers/:id/stop        { force? }: stop (Daytona v0 container), pause (E2B, Daytona v0 VM) or hibernate (Daytona v2:
+ *                                     memory and disk snapshot, then the VM is deleted); never loses the machine. 409
+ *                                     COMPUTER_BUSY (details.busy: running task runs, live harness sessions) unless force
+ *                                     (body or ?force=true); else 202 at once with status "stopping": it goes on in the
+ *                                     background (computer:changed), a failure lands in its activity and lastError
+ *   POST   /computers/:id/restart     { force? }: refused while busy like stop (waits for the stop and start)
  *   POST   /computers/:id/reset       { confirm: true }: delete the machine (and its snapshots) and create a new one (its disk is lost)
  *   GET    /computers/:id/egress      a remote computer's egress through Tailscale: tailnet up/down, node, path (direct/DERP),
  *                                     proxy reachable, where its browser goes out now (looks inside only a running machine)
@@ -41,7 +44,9 @@ import { computerChangeNote, computerNetworkProblem } from "../../sandbox/manage
 import { SandboxNetworkConfigError } from "../../sandbox/remote-adapters.js";
 import { desktopUnsupported, type ComputerDesktops, type DesktopStatus } from "../../sandbox/desktop.js";
 import { ComputerControlError, type ComputerControlView } from "../../sandbox/computer-control.js";
+import { computerBusy, computerBusyMessage, isComputerBusy } from "../../sandbox/computer-busy.js";
 import type { ComputerTakeoverService } from "../../core/computer-takeover.js";
+export type { ComputerBusy } from "../../sandbox/computer-busy.js";
 
 export interface ComputerRouteDeps {
   computers: () => ComputerConfig[];
@@ -333,26 +338,46 @@ export function computerRoutes(deps: ComputerRouteDeps): Hono {
     return c.json({ ok: true, data: { deleted: id } });
   });
 
+  /** 409 COMPUTER_BUSY with what runs on it (details.busy), or undefined when it is idle. */
+  const busyRefusal = async (c: Context, computer: ComputerConfig, op: "stop" | "restart"): Promise<Response | undefined> => {
+    const tasks = await deps.tasks?.().catch(() => [] as Task[]) ?? [];
+    const busy = computerBusy(computer.id, tasks, deps.harnessSessions?.(computer.id) ?? []);
+    if (!isComputerBusy(busy)) return undefined;
+    return c.json({ ok: false, error: computerBusyMessage(computer.id, busy, op), code: "COMPUTER_BUSY", details: { busy } }, 409);
+  };
+
   const control = (op: "start" | "stop" | "restart" | "reset") => async (c: Context) => {
     const id = c.req.param("id")!;
     const computer = find(id);
     if (!computer) return fail(c, 404, `There is no computer "${id}"`, "NOT_FOUND");
     if (!isRemoteComputer(computer)) return fail(c, 400, `"${id}" runs on this server: there is no machine to ${op}`, "VALIDATION_ERROR");
+    const body = await c.req.json().catch(() => ({})) as { confirm?: unknown; force?: unknown };
     if (op === "reset") {
-      const body = await c.req.json().catch(() => ({})) as { confirm?: unknown };
       if (body.confirm !== true && c.req.query("confirm") !== "true") {
         return fail(c, 400, `Resetting computer "${id}" deletes its machine and everything on its disk, then creates a new one: send { "confirm": true }`, "CONFIRM_REQUIRED");
       }
     }
+    // a stop or restart interrupts the work on it: refused while busy, unless forced
+    if ((op === "stop" || op === "restart") && body.force !== true && c.req.query("force") !== "true") {
+      const refused = await busyRefusal(c, computer, op);
+      if (refused) return refused;
+    }
     const manager = deps.manager();
+    if (op === "stop") {
+      // started, not awaited: a hibernation snapshot takes minutes. The manager announces each
+      // status change (computer:changed); a failure lands in the computer's activity
+      try {
+        await manager.beginStop(computer);
+      } catch (err) {
+        return operationError(c, `Stop of computer "${id}"`, err);
+      }
+      return c.json({ ok: true, data: await view(computer, false) }, 202);
+    }
     try {
       // the manager announces each status change (computer:changed)
-      if (op === "stop") await manager.stop(computer);
-      else {
-        const s = sandbox(c, computer);
-        if (s instanceof Response) return s;
-        await (op === "start" ? manager.start(computer, s) : op === "restart" ? manager.restart(computer, s) : manager.reset(computer, s));
-      }
+      const s = sandbox(c, computer);
+      if (s instanceof Response) return s;
+      await (op === "start" ? manager.start(computer, s) : op === "restart" ? manager.restart(computer, s) : manager.reset(computer, s));
       return c.json({ ok: true, data: await view(computer, false) });
     } catch (err) {
       // the wipe is done: the reset did what was asked, its new machine comes on the next use

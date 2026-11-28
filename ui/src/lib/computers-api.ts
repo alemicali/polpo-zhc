@@ -135,7 +135,21 @@ export type ComputerAction = "start" | "stop" | "restart" | "reset" | "recreate"
 
 export class ComputerRequestError extends Error {
   readonly code?: string;
-  constructor(message: string, code?: string) { super(message); this.name = "ComputerRequestError"; this.code = code; }
+  readonly details?: unknown;
+  constructor(message: string, code?: string, details?: unknown) { super(message); this.name = "ComputerRequestError"; this.code = code; this.details = details; }
+}
+
+/** What runs on a computer: Stop and Restart are refused (COMPUTER_BUSY) with this, unless forced. */
+export interface ComputerBusy {
+  tasks: Array<{ taskId: string; title: string; status: string; runId: string; agent?: string }>;
+  sessions: Array<{ key: string; sessionId?: string; agent: string; harness: string; scope: "task" | "chat"; state: string; taskId?: string; chatSessionId?: string }>;
+}
+
+/** The busy list of a COMPUTER_BUSY refusal, or undefined for any other error. */
+export function computerBusyOf(err: unknown): ComputerBusy | undefined {
+  if (!(err instanceof ComputerRequestError) || err.code !== "COMPUTER_BUSY") return undefined;
+  const busy = (err.details as { busy?: Partial<ComputerBusy> } | undefined)?.busy;
+  return { tasks: busy?.tasks ?? [], sessions: busy?.sessions ?? [] };
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -148,10 +162,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   } catch {
     throw new Error("Could not reach the Polpo server");
   }
-  const body = await response.json().catch(() => null) as { ok?: boolean; data?: unknown; error?: unknown; code?: unknown } | null;
+  const body = await response.json().catch(() => null) as { ok?: boolean; data?: unknown; error?: unknown; code?: unknown; details?: unknown } | null;
   if (!response.ok || !body?.ok) {
     const error = typeof body?.error === "string" ? body.error : (body?.error as { message?: string } | undefined)?.message;
-    throw new ComputerRequestError(error || `Computers request failed (${response.status})`, typeof body?.code === "string" ? body.code : undefined);
+    throw new ComputerRequestError(error || `Computers request failed (${response.status})`, typeof body?.code === "string" ? body.code : undefined, body?.details);
   }
   return body.data as T;
 }
@@ -169,10 +183,16 @@ export const computersApi = {
   create: (input: ComputerInput) => request<Computer>("/computers", json("POST", input)),
   update: (id: string, patch: Record<string, unknown>) => request<Computer>(at(id), json("PATCH", patch)),
   remove: (id: string) => request<{ deleted: string }>(at(id), json("DELETE", { confirm: true })),
-  control: (id: string, action: ComputerAction) => {
+  /**
+   * Stop answers at once with status "stopping" (it goes on in the background). Stop and Restart
+   * are refused while tasks or sessions run on it (ComputerRequestError COMPUTER_BUSY, computerBusyOf)
+   * unless force.
+   */
+  control: (id: string, action: ComputerAction, o: { force?: boolean } = {}) => {
     // Recreate is a reset: its machine (and snapshots) are gone already, a new one comes from the image
     const op = action === "recreate" ? "reset" : action;
-    return request<Computer>(`${at(id)}/${op}`, json("POST", op === "reset" ? { confirm: true } : undefined));
+    const body = op === "reset" ? { confirm: true } : o.force && (op === "stop" || op === "restart") ? { force: true } : undefined;
+    return request<Computer>(`${at(id)}/${op}`, json("POST", body));
   },
   /** An agent's default computer ("host" or "" for this server) and the computers it may use. */
   assign: (agent: string, defaultComputer: string, computers?: string[]) =>

@@ -404,7 +404,7 @@ export type {
   AgentTalksTo, AgentLinesMode, AgentLines, AgentLinesChart,
   AgentNotifyChannel, AgentNotifyChannels, NotificationOrigin,
   ComputerControlHolder, ComputerTakeoverStatus, ComputerTakeoverRequest, ComputerControl, ComputerDesktopState, ComputerDesktopStatus,
-  ComputerDesktopView, ComputerTakeoverEvent,
+  ComputerDesktopView, ComputerTakeoverEvent, ComputerBusy, ComputerControlResult,
   ImageInput, GenerateImageRequest, EditImageRequest, MediaAsset, MediaImage, MediaResult, MediaCallerKind, MediaCaller, MediaLogEntry, MediaLogPage,
   MediaStatus, MediaSettings, ImageNodeState, MissionImage,
   CodingChatKind, CodingChatStatus, CodingChatErrorKind, CodingRiskCategory, CodingChatToolCall, CodingChatSegment, CodingChatUsage, CodingChatMessage,

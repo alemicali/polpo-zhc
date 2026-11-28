@@ -1431,8 +1431,13 @@ const computerStartTool: Tool = {
 const computerStopTool: Tool = {
   name: "computer_stop",
   description: "Stop (Daytona v0), pause (E2B) or hibernate (Daytona v2: memory and disk snapshot, its VM deleted) a computer's machine now: "
-    + "nothing is lost; it starts (wakes) again on next use.",
-  parameters: Type.Object({ id: Type.String({ description: "Computer id" }) }),
+    + "nothing is lost; it starts (wakes) again on next use. Refused while it is busy (task runs in progress on it, live agent harness or "
+    + "chat sessions): the refusal lists them; tell the person and only with their go-ahead call again with force: true (it interrupts them). "
+    + "It answers at once with status \"stopping\" (a hibernation takes minutes); a stop that fails later shows in the computer's activity.",
+  parameters: Type.Object({
+    id: Type.String({ description: "Computer id" }),
+    force: Type.Optional(Type.Boolean({ description: "Stop it even though tasks or sessions run on it (they are interrupted). Only after the person agreed" })),
+  }),
 };
 const egressStatusTool: Tool = {
   name: "egress_status",
@@ -7688,8 +7693,17 @@ async function execComputerControl(polpo: Orchestrator, op: "start" | "stop", ar
   if (!t.core.isRemoteComputer(computer)) return `Error: "${id}" runs on this server: there is no machine to ${op}`;
   try {
     if (op === "stop") {
-      const live = await t.manager().stop(computer);
-      return `Computer "${id}": ${live.status} (${live.status === "hibernated" ? "memory and disk saved in a snapshot; it wakes in a few seconds on its next use" : "disk kept"}).`;
+      if (args.force !== true) {
+        const [{ computerBusy, computerBusyMessage, isComputerBusy }, { harnessSessionViews }] = await Promise.all([
+          import("../sandbox/computer-busy.js"), import("../harness/control.js"),
+        ]);
+        const tasks = await polpo.getStore().getAllTasks().catch(() => []);
+        const busy = computerBusy(id, tasks, harnessSessionViews(polpo.getPolpoDir(), { computer: id }));
+        if (isComputerBusy(busy)) return `Error: ${computerBusyMessage(id, busy, "stop", "call computer_stop again with force: true (only with the person's go-ahead)")}.`;
+      }
+      // started, not awaited: a hibernation takes minutes; a failure lands in the computer's activity
+      const live = await t.manager().beginStop(computer);
+      return `Computer "${id}": ${live.status}${live.status === "stopping" ? " (it goes on in the background, nothing is lost: a Daytona v2 hibernation saves memory and disk in a snapshot first; check it with computers_list)" : ""}.`;
     }
     const sandbox = t.sandbox(computer);
     if ("error" in sandbox) return `Error: ${sandbox.error}`;
