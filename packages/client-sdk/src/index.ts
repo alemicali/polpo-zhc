@@ -122,6 +122,7 @@ export type {
   RunActivityEntry,
   TaskRunContext,
   TaskToolScope,
+  TaskSandbox,
   TaskRunEngine,
   AgentCliEngine,
   CliAccount,

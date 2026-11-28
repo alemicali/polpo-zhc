@@ -116,6 +116,17 @@ describe.each(DIALECTS)("%s", (dialect) => {
       expect((await stores.taskStore.getTask(task.id))!.toolScope).toBeUndefined();
     });
 
+    it("keeps a task's sandbox (the computer it runs on), and clears it (back to the agent's default)", async () => {
+      const task = await stores.taskStore.addTask({
+        title: "Boxed", description: "x", assignTo: "claude", dependsOn: [], maxRetries: 2, expectations: [], metrics: [], sandbox: { computer: "daytona-box" },
+      });
+      expect((await stores.taskStore.getTask(task.id))!.sandbox).toEqual({ computer: "daytona-box" });
+      await stores.taskStore.updateTask(task.id, { title: "Boxed 2" });
+      expect((await stores.taskStore.getAllTasks()).find((t) => t.id === task.id)!.sandbox).toEqual({ computer: "daytona-box" });
+      await stores.taskStore.updateTask(task.id, { sandbox: undefined });
+      expect((await stores.taskStore.getTask(task.id))!.sandbox).toBeUndefined();
+    });
+
     it("getAllTasks returns ordered by createdAt", async () => {
       await stores.taskStore.addTask({
         title: "A", description: "first", assignTo: "claude", dependsOn: [], maxRetries: 2, expectations: [], metrics: [],

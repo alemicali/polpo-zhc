@@ -6,6 +6,9 @@ import type { Task, TaskExpectation, ExpectedOutcome, RetryPolicy, ReviewContext
 import { setAssessment } from "./types.js";
 import { sanitizeExpectations } from "./schemas.js";
 import type { TaskDirection } from "./task-control-store.js";
+// via sandbox.js (which re-exports computers.js): loading computers.js first breaks that re-export
+import { requireTaskSandbox } from "./sandbox.js";
+import type { SandboxSettings } from "./sandbox.js";
 
 /**
  * Task CRUD: add, update, retry, reassess, kill, abort, clear.
@@ -39,6 +42,8 @@ export class TaskManager {
     agentVersion?: string;
     /** What started it, when not a person (a trigger's delivery). */
     origin?: WorkOrigin;
+    /** The task level of the sandbox cascade, above all `computer` (validated against the agent). */
+    sandbox?: SandboxSettings | null;
   }): Promise<Task> {
     if (!this.ctx.registry) throw new Error("Orchestrator not initialized");
     // "writer@1.2.0": the agent and the version it is pinned to
@@ -55,6 +60,12 @@ export class TaskManager {
       } else {
         delete opts.agentVersion;
       }
+    }
+    // a computer the agent may not use is refused here (TaskComputerError), not silently replaced
+    let sandbox: SandboxSettings | undefined;
+    if (opts.sandbox) {
+      const agent = await this.ctx.agentStore.getAgent(opts.assignTo).catch(() => undefined);
+      sandbox = requireTaskSandbox(agent ?? undefined, opts.sandbox, opts.assignTo);
     }
 
     // Run before:task:create hook (sync — addTask is synchronous)
@@ -115,6 +126,7 @@ export class TaskManager {
       ...(opts.requestedBy ? { requestedBy: opts.requestedBy } : {}),
       ...(opts.agentVersion ? { agentVersion: opts.agentVersion } : {}),
       ...(opts.origin ? { origin: opts.origin } : {}),
+      ...(sandbox ? { sandbox } : {}),
       status: hookData.draft ? "draft" : undefined,
     });
     this.ctx.emitter.emit("task:created", { task });

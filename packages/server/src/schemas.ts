@@ -49,6 +49,16 @@ export const TaskToolScopeSchema = z.object({
     .openapi({ description: "Built-in tools or patterns (read, bash, browser_*), not connector tools. Narrows the agent's allowedTools (or its default tools)." }),
 }).strict().openapi("TaskToolScope");
 
+/**
+ * The task level of the sandbox cascade (it may only tighten what the agent allows). Above all
+ * `computer`: which of the assigned agent's computers the task runs on. Other keys (network,
+ * resources, isolation, volumes…) follow the sandbox settings and are normalized server-side.
+ */
+export const TaskSandboxSchema = z.object({
+  computer: z.string().min(1).optional()
+    .openapi({ description: "One of the assigned agent's computers (its `computers`, its `defaultComputer`, or \"host\" for this server), or \"ephemeral\" for a fresh sandbox. Absent: the agent's default computer. Any other id: 400 INVALID_COMPUTER." }),
+}).passthrough().openapi("TaskSandbox");
+
 export const CreateTaskSchema = z.object({
   title: z.string().min(1),
   description: z.string().min(1),
@@ -77,6 +87,8 @@ export const CreateTaskSchema = z.object({
   sideEffects: z.boolean().optional(),
   /** Narrowing of the run's tools (connectors, their tools, built-in tools); absent: the agent's. */
   toolScope: TaskToolScopeSchema.optional(),
+  /** Where the task runs: `{ computer: "<id>" }` picks one of the agent's computers. */
+  sandbox: TaskSandboxSchema.optional(),
 });
 
 export const UpdateTaskSchema = z.object({
@@ -90,6 +102,8 @@ export const UpdateTaskSchema = z.object({
   sideEffects: z.boolean().optional(),
   /** Narrowing of the run's tools; null clears it (back to everything the agent has). */
   toolScope: TaskToolScopeSchema.nullable().optional(),
+  /** Where the task's next runs execute (`{ computer: "<id>" }`); null clears it (the agent's default computer). */
+  sandbox: TaskSandboxSchema.nullable().optional(),
 });
 
 // ── Mission schemas ──────────────────────────────────────────────────

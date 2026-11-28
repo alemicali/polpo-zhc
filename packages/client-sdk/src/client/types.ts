@@ -147,6 +147,8 @@ export interface Task {
   notReached?: import("./task-skip.js").TaskSkip;
   /** Optional narrowing of the run's tools; absent: everything the agent has. */
   toolScope?: TaskToolScope;
+  /** Where its runs execute: `computer` is one of its agent's computers (absent: the agent's default). */
+  sandbox?: TaskSandbox;
   /** The member (email) who started it, when known: a CLI engine on a personal sign-in runs only its owner's tasks. */
   requestedBy?: string;
   /** What started it, when not a person: a trigger's delivery (open it from the task). */
@@ -190,6 +192,21 @@ export interface TaskToolScope {
   connectorTools?: Record<string, "*" | string[]>;
   /** Built-in tools or patterns (read, bash, browser_*); not connector tools. */
   allowedTools?: string[];
+}
+
+/**
+ * The task level of the sandbox cascade (it may only tighten what the agent allows). Above all
+ * `computer`: which of the assigned agent's computers the task runs on.
+ */
+export interface TaskSandbox {
+  /**
+   * One of the agent's computers (its `computers`, its `defaultComputer`, or "host" for the server),
+   * or "ephemeral" for a fresh sandbox. Absent: the agent's default computer. Any other id is
+   * rejected with 400 INVALID_COMPUTER.
+   */
+  computer?: string;
+  /** Other sandbox settings (network, resources, isolation, volumes…), normalized server-side. */
+  [key: string]: unknown;
 }
 
 /**
@@ -1422,6 +1439,8 @@ export interface CreateTaskRequest {
   sideEffects?: boolean;
   /** Narrow the run's tools (rejected with INVALID_TOOL_SCOPE if it asks for more than the agent has). */
   toolScope?: TaskToolScope;
+  /** Where it runs: `{ computer: "<id>" }`, one of the agent's computers (else 400 INVALID_COMPUTER). */
+  sandbox?: TaskSandbox;
 }
 
 export interface UpdateTaskRequest {
@@ -1432,6 +1451,8 @@ export interface UpdateTaskRequest {
   sideEffects?: boolean;
   /** Narrow the run's tools; null clears it (everything the agent has). */
   toolScope?: TaskToolScope | null;
+  /** Where its next runs execute (`{ computer: "<id>" }`); null clears it (the agent's default computer). */
+  sandbox?: TaskSandbox | null;
 }
 
 export type TaskDirectionMode = "steer" | "follow_up" | "continue";

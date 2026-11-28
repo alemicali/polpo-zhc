@@ -72,6 +72,7 @@ import { isMcpToolName, toolResultText } from "../mcp/tools.js";
 import { computerContext, normalizeSandboxSettings, unknownComputersProblem, type EffectiveSandbox } from "@polpo-ai/core/sandbox";
 import { normalizeConnectorTools, describeTaskToolScope, normalizeTalksTo, talksToProblem, type AgentTalksTo, AGENT_NOTIFY_TOOL, agentNotifyChannelWarnings, agentNotifyChannelsProblems, allowedToolsInclude, describeAgentNotifyAllowlist, normalizeAgentNotifyChannels } from "@polpo-ai/core";
 import { TaskToolScopeError } from "../core/task-tool-scope.js";
+import { TaskComputerError } from "@polpo-ai/core";
 import { loadPolpoConfig, savePolpoConfig } from "../core/config.js";
 import { inkApiUrl, inkRegistry } from "../core/ink-config.js";
 import { clearBrowserProfile, finishProfileLogin, listBrowserProfiles, startProfileLogin } from "../tools/browser-profiles.js";
@@ -384,12 +385,13 @@ const createTaskTool: Tool = {
     sideEffects: Type.Optional(Type.Boolean({ description: "True if this task produces irreversible external effects (email sends, API calls, etc.). Blocks automatic retry — requires human approval." })),
     draft: Type.Optional(Type.Boolean({ description: "True to create it as a draft (\"in bozza\", \"don't start it yet\"): saved, not started, until update_task start: true starts it — use this, not a mission, for one task to keep as a draft" })),
     toolScope: Type.Optional(toolScopeParam),
+    computer: Type.Optional(Type.String({ description: "Which of the agent's computers the task runs on (get_agent shows its computers and defaultComputer; \"host\" is this server, \"ephemeral\" a fresh sandbox). Omit for the agent's default computer. Use it when the person names a computer/machine for the task." })),
   }),
 };
 
 const updateTaskTool: Tool = {
   name: "update_task",
-  description: "Update a task's description, assignment, expectations or tool scope, or start a draft task (start: true).",
+  description: "Update a task's description, assignment, expectations, computer or tool scope, or start a draft task (start: true).",
   parameters: Type.Object({
     taskId: Type.String({ description: "Task ID to update" }),
     start: Type.Optional(Type.Boolean({ description: "True to start a draft task (it becomes pending and runs)" })),
@@ -404,6 +406,7 @@ const updateTaskTool: Tool = {
     }), { description: "New acceptance criteria" })),
     sideEffects: Type.Optional(Type.Boolean({ description: "True if this task produces irreversible external effects. Blocks automatic retry." })),
     toolScope: Type.Optional(Type.Union([toolScopeParam, Type.Null()], { description: "Narrow the task's tools (see create_task); null goes back to everything the agent has." })),
+    computer: Type.Optional(Type.Union([Type.String(), Type.Null()], { description: "Which of the agent's computers its next runs use (see create_task); null goes back to the agent's default computer." })),
   }),
 };
 
@@ -4062,12 +4065,14 @@ async function execCreateTask(polpo: Orchestrator, args: Record<string, unknown>
     sideEffects: args.sideEffects as boolean | undefined,
     ...(args.draft === true ? { draft: true } : {}),
     ...(args.toolScope !== undefined && args.toolScope !== null ? { toolScope: args.toolScope } : {}),
-  }).catch((err: unknown) => err instanceof TaskToolScopeError ? err : Promise.reject(err));
+    ...(typeof args.computer === "string" && args.computer ? { sandbox: { computer: args.computer } } : {}),
+  }).catch((err: unknown) => err instanceof TaskToolScopeError || err instanceof TaskComputerError ? err : Promise.reject(err));
+  if (task instanceof TaskComputerError) return `Error: ${task.message} The task was NOT created: ask the person which computer to use (or add it to the agent with update_agent first).`;
   if (task instanceof TaskToolScopeError) return `Error: ${task.message}. ${toolScopeFix(task, agentName)} The task was NOT created: do not tell the person it was, nor that it is limited.`;
   const scoped = task.toolScope
     ? ` — tools ${describeTaskToolScope(task.toolScope, connectorManagerFor(polpo).store.list())}`
     : " — tools: everything the agent has (no toolScope set)";
-  return `Task created: [${task.id}] "${task.title}" → ${task.assignTo}${task.status === "draft" ? " (draft: not started; update_task with start: true starts it)" : ""}${scoped}`;
+  return `Task created: [${task.id}] "${task.title}" → ${task.assignTo}${task.sandbox?.computer ? ` on computer ${task.sandbox.computer}` : ""}${task.status === "draft" ? " (draft: not started; update_task with start: true starts it)" : ""}${scoped}`;
 }
 
 /** How to fix a rejected tool scope: grant the connectors first (a scope never grants), else narrow less. */
@@ -4114,6 +4119,18 @@ async function execUpdateTask(polpo: Orchestrator, args: Record<string, unknown>
       changes.push(`tools → ${describeTaskToolScope(updated.toolScope, connectorManagerFor(polpo).store.list())}`);
     } catch (err) {
       if (err instanceof TaskToolScopeError) return `Error: ${err.message}. ${toolScopeFix(err, task.assignTo)} The tool scope was NOT changed.${changes.length ? ` (Already changed: ${changes.join(", ")}.)` : ""}`;
+      throw err;
+    }
+  }
+  if (args.computer !== undefined) {
+    try {
+      // only the computer changes: the task's other sandbox settings stay
+      const { computer: _previous, ...others } = task.sandbox ?? {};
+      const next = typeof args.computer === "string" && args.computer ? { ...others, computer: args.computer } : Object.keys(others).length ? others : null;
+      const updated = await polpo.updateTaskSandbox(taskId, next);
+      changes.push(`computer → ${updated.sandbox?.computer ?? "the agent's default"}`);
+    } catch (err) {
+      if (err instanceof TaskComputerError) return `Error: ${err.message} The computer was NOT changed.${changes.length ? ` (Already changed: ${changes.join(", ")}.)` : ""}`;
       throw err;
     }
   }

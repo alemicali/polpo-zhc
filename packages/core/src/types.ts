@@ -186,6 +186,12 @@ export interface Task {
    * tools). Absent: everything the agent has. It never grants. See task-tool-scope.ts.
    */
   toolScope?: import("./task-tool-scope.js").TaskToolScope;
+  /**
+   * The task level of the sandbox cascade (it may only tighten), above all `computer`: which of
+   * its agent's computers the task runs on ("ephemeral" for a fresh sandbox). Absent: the agent's
+   * default computer. A mission task without one uses its entry in the mission document.
+   */
+  sandbox?: import("./sandbox.js").SandboxSettings;
   /** What started it, when it was not a person: a trigger's delivery (open the delivery from the task). */
   origin?: WorkOrigin;
   createdAt: string;

@@ -57,6 +57,8 @@ type FullTask = TaskRow & {
   /** Where and with what each run executed (engine, model, computer, egress, session, cost), newest last. */
   runs?: TaskRunContext[];
   toolScope?: TaskToolScope;
+  /** The task level of the sandbox cascade: `computer` is the machine it runs on (absent: the agent's default). */
+  sandbox?: { computer?: string; [key: string]: unknown };
   /** What of the tool scope its agent no longer has. */
   toolScopeStale?: string[];
   /** The approval gates it met and how they were resolved (GET /tasks/:id), oldest first. */
@@ -82,6 +84,24 @@ export function toolScopeFromArgs(a: { connectors?: string[] | "none"; connector
     ...(a.allowed_tools !== undefined ? { allowedTools: a.allowed_tools } : {}),
   };
 }
+
+/** The MCP `computer` argument of polpo_task_create / polpo_task_update (it maps to Task.sandbox.computer). */
+export const computerInput = z.string().min(1).optional()
+  .describe("Which of the agent's computers the task runs on (polpo_agents_get shows its computers and defaultComputer; \"host\" is this server, \"ephemeral\" a fresh sandbox). Omit for the agent's default computer");
+
+/** Task.sandbox from the MCP `computer` argument (undefined when none is given). */
+export function sandboxFromArgs(computer: string | undefined): { computer: string } | undefined {
+  return computer ? { computer } : undefined;
+}
+
+/** A task's sandbox with its computer set (or dropped: null when nothing else is left). */
+export function withComputer(current: Record<string, unknown> | undefined, computer: string | undefined): Record<string, unknown> | null {
+  const { computer: _previous, ...others } = current ?? {};
+  if (computer) return { ...others, computer };
+  return Object.keys(others).length ? others : null;
+}
+
+const COMPUTER_HINT = "A task may only run on one of its agent's computers: polpo_agents_get shows them (computers, defaultComputer), polpo_computers_list every computer; add one to the agent with polpo_agent_update first.";
 
 const TOOL_SCOPE_HINT = "The scope may only narrow what the agent has: polpo_connectors_list { agent } shows its connectors and tools, polpo_agents_get its allowedTools. "
   + "A scope never grants: when the agent has no access to a connector, offer the person to grant it first (polpo_connector_update { id, add_agents: [agent] }), then set the scope.";
@@ -273,6 +293,7 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
       ...(t.requestedBy ? [`for: ${t.requestedBy}`] : []),
       ...(t.origin ? [`started by trigger ${t.origin.triggerName ?? t.origin.triggerId} [${t.origin.triggerId}], delivery ${t.origin.deliveryId} (polpo_trigger_deliveries)`] : []),
       ...(t.toolScope ? [`tools: ${describeTaskToolScope(t.toolScope)}${t.toolScopeStale?.length ? ` · stale: ${t.toolScopeStale.join("; ")}` : ""}`] : []),
+      ...(t.sandbox?.computer ? [`computer: ${t.sandbox.computer} (chosen for this task)`] : []),
       `created ${t.createdAt ?? "?"} · updated ${t.updatedAt ?? "?"}`,
       "",
       short(t.description, 2000),
@@ -313,12 +334,14 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
       max_duration_minutes: z.number().positive().max(24 * 60).optional().describe("Stop it after this many minutes"),
       side_effects: z.boolean().optional().describe("true if it does something irreversible (sends, pays, deletes): it is then never retried automatically"),
       draft: z.boolean().optional().describe("true to create it without starting it (polpo_task_update with start: true starts it)"),
+      computer: computerInput,
       ...toolScopeInput,
     },
     outputSchema: { task: looseObject },
     annotations: WRITE,
-  }, async ({ max_retries, max_duration_minutes, side_effects, connectors, connector_tools, allowed_tools, ...rest }) => {
+  }, async ({ max_retries, max_duration_minutes, side_effects, computer, connectors, connector_tools, allowed_tools, ...rest }) => {
     const toolScope = toolScopeFromArgs({ connectors, connector_tools, allowed_tools });
+    const sandbox = sandboxFromArgs(computer);
     const missing = await unknownAgents(deps, [rest.assignTo]);
     if (missing) return fail(missing);
     const r = await apiSend(deps, "POST", "/tasks", {
@@ -327,21 +350,23 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
       ...(max_duration_minutes !== undefined ? { maxDuration: Math.round(max_duration_minutes * 60_000) } : {}),
       ...(side_effects !== undefined ? { sideEffects: side_effects } : {}),
       ...(toolScope ? { toolScope } : {}),
+      ...(sandbox ? { sandbox } : {}),
     });
     if (!r.ok) {
       if (r.code === "INVALID_TOOL_SCOPE") return apiError(r, "Creating the task", TOOL_SCOPE_HINT);
+      if (r.code === "INVALID_COMPUTER") return apiError(r, "Creating the task", COMPUTER_HINT);
       if (r.status === 409) return fail(`${r.error}: give it another title, or use the existing task (polpo_tasks_list with text).`);
       if (r.code === "UNKNOWN_DEPENDENCY") return apiError(r, "Creating the task", "Find the ids with polpo_tasks_list; a task waits for every task in dependsOn.");
       if (/agent/i.test(r.error)) return apiError(r, "Creating the task", "Check the agent's name with polpo_agents_list.");
       return apiError(r, "Creating the task");
     }
     const t = r.data as FullTask;
-    return ok(`Created task ${t.id} [${t.status}] ${t.title} → ${t.assignTo}${t.toolScope ? ` (tools ${describeTaskToolScope(t.toolScope)})` : ""}. Follow it with polpo_task_wait.`, { task: r.data as Record<string, unknown> });
+    return ok(`Created task ${t.id} [${t.status}] ${t.title} → ${t.assignTo}${t.sandbox?.computer ? ` on ${t.sandbox.computer}` : ""}${t.toolScope ? ` (tools ${describeTaskToolScope(t.toolScope)})` : ""}. Follow it with polpo_task_wait.`, { task: r.data as Record<string, unknown> });
   });
 
   tool("tasks", "polpo_task_update", {
     title: "Update a task",
-    description: "Change a task's description, agent, retries, side-effects flag or tool scope (connectors, connector_tools, allowed_tools; inherit_tools drops it), or start a draft. Only the fields given change; "
+    description: "Change a task's description, agent, retries, side-effects flag, computer (default_computer goes back to the agent's default) or tool scope (connectors, connector_tools, allowed_tools; inherit_tools drops it), or start a draft. Only the fields given change; "
       + "the result lists what changed. A running task keeps its current run: use polpo_task_direct to steer it.",
     inputSchema: {
       id: z.string().min(1).describe("The task's id"),
@@ -350,12 +375,15 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
       max_retries: z.number().int().min(0).max(10).optional().describe("Retries after a failure"),
       side_effects: z.boolean().optional().describe("Whether it does something irreversible"),
       start: z.boolean().optional().describe("true to start a draft task (it becomes pending)"),
+      computer: computerInput,
+      default_computer: z.boolean().optional().describe("true to drop the task's own computer: it runs on its agent's default computer again"),
       ...toolScopeInput,
       inherit_tools: z.boolean().optional().describe("true to drop the task's tool scope: it uses everything its agent has again"),
     },
     outputSchema: { task: looseObject, changed: z.array(z.string()) },
     annotations: UPDATE,
-  }, async ({ id, description, assignTo, max_retries, side_effects, start, connectors, connector_tools, allowed_tools, inherit_tools }) => {
+  }, async ({ id, description, assignTo, max_retries, side_effects, start, computer, default_computer, connectors, connector_tools, allowed_tools, inherit_tools }) => {
+    const sandbox = default_computer ? null : sandboxFromArgs(computer);
     // any of connectors / connector_tools / allowed_tools replaces the task's whole tool scope
     const toolScope = inherit_tools ? null : toolScopeFromArgs({ connectors, connector_tools, allowed_tools });
     const before = await loadTask(deps, id);
@@ -368,12 +396,14 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
       ...(side_effects !== undefined ? { sideEffects: side_effects } : {}),
       ...(start ? { status: "pending" } : {}),
       ...(toolScope !== undefined ? { toolScope } : {}),
+      // only the computer changes: the task's other sandbox settings stay
+      ...(sandbox !== undefined ? { sandbox: withComputer(before.task.sandbox, sandbox?.computer) } : {}),
     };
-    if (Object.keys(body).length === 0) return fail("Nothing to change: give at least one of description, assignTo, max_retries, side_effects, start, connectors, connector_tools, allowed_tools, inherit_tools.");
+    if (Object.keys(body).length === 0) return fail("Nothing to change: give at least one of description, assignTo, max_retries, side_effects, start, computer, default_computer, connectors, connector_tools, allowed_tools, inherit_tools.");
     const missing = await unknownAgents(deps, [assignTo]);
     if (missing) return fail(missing);
     const r = await apiSend(deps, "PATCH", `/tasks/${enc(id)}`, body);
-    if (!r.ok) return apiError(r, `Updating task ${id}`, r.code === "INVALID_TOOL_SCOPE" ? TOOL_SCOPE_HINT : /agent/i.test(r.error) ? "Check the agent's name with polpo_agents_list." : undefined);
+    if (!r.ok) return apiError(r, `Updating task ${id}`, r.code === "INVALID_TOOL_SCOPE" ? TOOL_SCOPE_HINT : r.code === "INVALID_COMPUTER" ? COMPUTER_HINT : /agent/i.test(r.error) ? "Check the agent's name with polpo_agents_list." : undefined);
     const after = (r.data ?? {}) as FullTask;
     const fields: Array<[string, unknown, unknown]> = [
       ["description", before.task.description, after.description], ["assignTo", before.task.assignTo, after.assignTo],
@@ -382,6 +412,7 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
     ];
     const changed = fields.filter(([, a, b]) => b !== undefined && JSON.stringify(a) !== JSON.stringify(b)).map(([k]) => k);
     if (toolScope !== undefined && JSON.stringify(before.task.toolScope ?? null) !== JSON.stringify(after.toolScope ?? null)) changed.push("toolScope");
+    if (sandbox !== undefined && (before.task.sandbox?.computer ?? null) !== (after.sandbox?.computer ?? null)) changed.push("computer");
     return ok(changed.length ? `Updated ${id}: ${changed.join(", ")}.` : `Nothing changed on ${id} (the values were the same).`, { task: after as Record<string, unknown>, changed });
   });
 

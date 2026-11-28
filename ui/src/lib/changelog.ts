@@ -32,6 +32,21 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-28-task-computer-selection",
+    date: "2026-11-28",
+    kind: "fixed",
+    title: "Ogni attività può scegliere su quale computer lavorare",
+    summary: "Un'attività può girare su uno qualsiasi dei computer del suo agente, non solo su quello predefinito: dalla pagina dell'attività, da Polpo, dall'API e dal connettore MCP.",
+    body: [
+      "- **La scelta viene rispettata**: prima un'attività creata con un computer diverso da quello predefinito dell'agente (per esempio \"daytona-box\" invece di \"ms-nina-01\") veniva salvata senza la scelta e lavorava sul computer predefinito. Ora la scelta resta sull'attività e l'attività lavora lì.",
+      "- **Nella pagina dell'attività** c'è la voce **Computer**: \"Agent default\" (il predefinito dell'agente), uno dei computer dell'agente, questo server oppure una sandbox nuova. Il cambio vale dalla prossima esecuzione; quella in corso continua dove è.",
+      "- **Solo i computer dell'agente**: se chiedi un computer che l'agente non usa, l'attività non viene creata e il messaggio dice quali computer può usare. Aggiungilo prima all'agente.",
+      "- **Nelle missioni** ogni attività può avere il suo computer, e vale più di quello scelto per tutta la missione.",
+      "- **Ovunque**: anche chiedendo a Polpo in chat (\"falla sul computer daytona-box\"), dall'API e dal connettore MCP.",
+    ].join("\n"),
+    cta: { label: "Apri i task", to: "/tasks" },
+  },
+  {
     id: "2026-11-28-kill-isolation-remote-computer",
     date: "2026-11-28",
     kind: "fixed",

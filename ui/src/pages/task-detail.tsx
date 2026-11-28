@@ -85,6 +85,7 @@ import { RunContextCard, TaskCostBadge } from "@/components/shared/run-context";
 import { AgentModelWithEngine, RunModelWithEngine } from "@/components/shared/model-with-engine";
 import { taskCostOf } from "@/lib/task-cost";
 import { TaskToolScopeCard } from "@/components/tasks/task-tool-scope";
+import { TaskComputerSelect } from "@/components/tasks/task-computer";
 import { TaskChatView } from "@/components/tasks/task-chat-view";
 import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { groupActivityRuns, type ActivityRunGroup } from "@/lib/task-transcript";
@@ -1714,6 +1715,15 @@ export function TaskDetailPage() {
 
               {/* Where and with what it runs: engine, model, computer, egress, session, cost (and earlier runs) */}
               <RunContextCard runs={task.runs} cost={totalCost} computers={computers} />
+
+              {/* Which of the agent's computers this task runs on (default: the agent's) */}
+              <TaskComputerSelect
+                sandbox={task.sandbox}
+                agent={agentConfig}
+                computers={computers}
+                disabled={task.status === "done"}
+                onSave={(sandbox) => updateTask({ sandbox })}
+              />
 
               {/* Tools for this task: inherit from the agent (default) or a narrower scope */}
               <TaskToolScopeCard

@@ -15,7 +15,7 @@
  * A computer's network is fixed when it is created: a task or mission asking for a stricter
  * network than the computer has gets an ephemeral sandbox with that network instead.
  */
-import type { SandboxNetwork, SandboxResources, SandboxVolumeSelection } from "./sandbox.js";
+import type { SandboxNetwork, SandboxResources, SandboxSettings, SandboxVolumeSelection } from "./sandbox.js";
 import { normalizeSandboxSettings } from "./sandbox.js";
 import { remoteEgressProblem } from "./tailnet.js";
 
@@ -321,6 +321,64 @@ export function unknownComputersProblem(known: readonly string[], body: { comput
   const ids = new Set([HOST_COMPUTER_ID, ...known]);
   const unknown = [...(body.computers ?? []), ...(body.defaultComputer ? [body.defaultComputer] : [])].filter((id) => !ids.has(id));
   return unknown.length ? `Unknown computer${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")} (create ${unknown.length > 1 ? "them" : "it"} first)` : null;
+}
+
+// ── A task's own computer (Task.sandbox.computer) ──────────────────────────────
+
+/** Sandbox fields only the instance or an agent sets: a task's (or mission task's) sandbox drops them. */
+const INSTANCE_ONLY_SANDBOX_FIELDS = ["allowedProviders", "confineExternalContent", "allowLocal", "chatIdleMinutes", "chatRemote", "warm"] as const;
+
+/** A task's sandbox settings, normalized (unknown keys, wrong types and instance-only fields dropped). */
+export function normalizeTaskSandbox(raw: unknown): SandboxSettings | undefined {
+  const s = normalizeSandboxSettings(raw);
+  if (!s) return undefined;
+  for (const k of INSTANCE_ONLY_SANDBOX_FIELDS) delete (s as Record<string, unknown>)[k];
+  return Object.keys(s).length ? s : undefined;
+}
+
+/** A task (or mission task) names a computer its agent may not use: the API answers 400 INVALID_COMPUTER. */
+export class TaskComputerError extends Error {
+  readonly code = "INVALID_COMPUTER";
+  constructor(message: string, readonly allowed: string[] = []) { super(message); this.name = "TaskComputerError"; }
+}
+
+/** The computers a task assigned to this agent may name: the agent's (with "host") and "ephemeral". */
+export function taskComputerChoices(agent: { computers?: string[]; defaultComputer?: string }): string[] {
+  return [...agentComputerIds(agent), EPHEMERAL_COMPUTER];
+}
+
+/**
+ * Why a task's `sandbox.computer` cannot be used by its agent, else null: it must be one of the
+ * agent's computers (agent.computers, defaultComputer, "host") or "ephemeral".
+ */
+export function taskComputerProblem(
+  agent: { name: string; computers?: string[]; defaultComputer?: string } | undefined,
+  computer: unknown,
+  agentName?: string,
+): string | null {
+  if (computer === undefined || computer === null || computer === "") return null;
+  if (typeof computer !== "string" || !COMPUTER_ID_PATTERN.test(computer)) return `sandbox.computer must be a computer id (lowercase letters, digits and dashes), got ${JSON.stringify(computer)}`;
+  if (computer === EPHEMERAL_COMPUTER) return null;
+  if (!agent) return `Agent "${agentName ?? "?"}" not found: cannot check computer "${computer}"`;
+  const allowed = agentComputerIds(agent);
+  if (allowed.includes(computer)) return null;
+  return `Computer "${computer}" is not one agent "${agent.name}" may use (its computers: ${allowed.join(", ")}; "ephemeral" for a fresh sandbox). Add it to the agent's computers first.`;
+}
+
+/**
+ * A task's sandbox validated against its agent: normalized, or undefined when it sets nothing.
+ * Throws TaskComputerError when it names a computer the agent may not use.
+ */
+export function requireTaskSandbox(
+  agent: { name: string; computers?: string[]; defaultComputer?: string } | undefined,
+  raw: unknown,
+  agentName?: string,
+): SandboxSettings | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== "object" || Array.isArray(raw)) throw new TaskComputerError("sandbox must be an object, e.g. { \"computer\": \"<id>\" }");
+  const problem = taskComputerProblem(agent, (raw as { computer?: unknown }).computer, agentName);
+  if (problem) throw new TaskComputerError(problem, agent ? taskComputerChoices(agent) : []);
+  return normalizeTaskSandbox(raw);
 }
 
 /** The agents that use a computer (as default or in their list). */
