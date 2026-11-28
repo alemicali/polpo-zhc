@@ -32,6 +32,24 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-28-skill-versioning",
+    date: "2026-11-28",
+    kind: "new",
+    title: "Le skill hanno versioni come gli agenti: bozza, pubblica, produzione, torna indietro",
+    summary: "Le modifiche a una skill restano in bozza finché non le pubblichi con una nota: gli agenti usano sempre la versione in produzione, e puoi tornare a una precedente in un clic.",
+    body: [
+      "- **Bozza e produzione**: i file della skill sono la sua **bozza**; gli agenti usano solo la versione **in produzione** (1.0.0, 1.1.0…). Una modifica in bozza non arriva agli agenti finché non la pubblichi.",
+      "- **Pubblica** con il tipo di cambiamento (patch, minor o major, ti suggeriamo quello giusto) e una nota: diventa la nuova versione in produzione e gli agenti la usano dalla prossima esecuzione.",
+      "- **Torna indietro**: con **Rollback** la produzione torna a una versione precedente. Se nel frattempo c'era una bozza la teniamo e ti diciamo che è **superata**: puoi riallinearla (Rebase) o scartarla.",
+      "- **Modifiche fatte fuori da Polpo**: se qualcuno cambia i file della skill sul disco, li vedi come bozza con il segno **External changes**, non vanno in produzione da sole: le pubblichi o le scarti.",
+      "- **Confronta**: vedi cosa cambia tra la bozza e la produzione, o tra due versioni qualsiasi, file per file. Ogni pubblicazione e ogni rollback dice chi, quando e perché.",
+      "- **Le tue skill di sempre**: ogni skill che avevi è diventata la versione 1.0.0 in produzione, così com'era: gli agenti non vedono differenze. Da API, MCP e chat con Polpo le modifiche si pubblicano subito come prima, a meno che tu non lo cambi in Configurazione → General → Skill versions.",
+      "- Anche da MCP (`polpo_skill_publish`, `polpo_skill_rollback`, `polpo_skill_draft`), dalla chat con Polpo, da REST (`/api/v1/skills/{name}/publish`, `/rollback`, `/draft`) e dall'SDK (`useSkillVersions`).",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri le skill", to: "/skills" },
+  },
+  {
     id: "2026-11-28-takeover-soft-hard",
     date: "2026-11-28",
     kind: "improved",

@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { AgentVersioningSetting } from "@/components/config/agent-versioning-setting";
+import { SkillVersioningSetting } from "@/components/config/skill-versioning-setting";
 import {
   Select,
   SelectContent,
@@ -1715,6 +1716,12 @@ export function ConfigPage() {
             {/* ── Agent versions ── */}
             <AgentVersioningSetting
               autoDeploy={(settings as { agents?: { versioning?: { autoDeployApiUpdates?: boolean } } }).agents?.versioning?.autoDeployApiUpdates !== false}
+              onSaved={() => void refetch()}
+            />
+
+            {/* ── Skill versions ── */}
+            <SkillVersioningSetting
+              autoPublish={(settings as { skills?: { versioning?: { autoPublishApiUpdates?: boolean } } }).skills?.versioning?.autoPublishApiUpdates !== false}
               onSaved={() => void refetch()}
             />
 

@@ -2106,6 +2106,10 @@ export interface SkillInfo {
 export interface LoadedSkill extends SkillInfo {
   /** Full SKILL.md content (markdown body without frontmatter). */
   content: string;
+  /** production (what agents run, the default) or draft (the skill's folder). */
+  view?: "production" | "draft";
+  /** The lifecycle state: production, latest, the draft. */
+  versioning?: SkillVersionState;
 }
 
 /** Skill with agent assignment info (returned by GET /skills). */
@@ -2144,14 +2148,22 @@ export interface SkillFileList {
   totalBytes: number;
 }
 
-/** How a skill version came to be. "external": found on disk (the skill before versioning, or files changed outside Polpo). */
-export type SkillVersionSource = "create" | "upload" | "git" | "local" | "edit" | "restore" | "external";
+/**
+ * How a skill version (or its draft) came to be. "external": found on disk (the skill before
+ * versioning, or files changed outside Polpo); "publish": the draft published.
+ */
+export type SkillVersionSource = "create" | "upload" | "git" | "local" | "edit" | "restore" | "external" | "publish";
+
+export type SkillVersionBump = "major" | "minor" | "patch";
 
 /** One version of a skill: a copy of the whole folder at that time. */
 export interface SkillVersion {
+  /** Its storage number (1, 2, 3…). */
   version: number;
+  /** Its semver ("1.3.0"). */
+  semver?: string;
   createdAt: string;
-  /** "person:<email>", an agent's name, "polpo", "mcp:<client>", "cli" or "unknown". */
+  /** "person:<email>", an agent's name, "polpo", "mcp:<client>", "cli", "system:…" or "unknown". */
   author: string;
   source: SkillVersionSource;
   files: number;
@@ -2162,6 +2174,60 @@ export interface SkillVersion {
   /** The version a restore brought back. */
   restoredFrom?: number;
   hash: string;
+  /** The release note. */
+  note?: string;
+  bump?: SkillVersionBump | "custom" | "initial" | "migration";
+  /** The version it was edited from. */
+  previous?: string;
+  /** It holds files changed outside Polpo. */
+  external?: boolean;
+}
+
+/** One step of a skill's lifecycle: a publish, rollback, discard or rebase, by whom and when. */
+export interface SkillVersionEvent {
+  id: string;
+  action: "initial" | "migration" | "publish" | "rollback" | "discard" | "rebase";
+  from?: string;
+  fromVersion?: number;
+  to?: string;
+  toVersion?: number;
+  actor: string;
+  at: string;
+  note?: string;
+  /** Published in the same call as the change ("Applied directly"). */
+  direct?: boolean;
+}
+
+/** A skill's lifecycle state (GET /skills/:name/versioning): production, latest and the draft. */
+export interface SkillVersionState {
+  skill: string;
+  pool: SkillPool;
+  scope: "project" | "global";
+  /** The version agents run. */
+  production?: { version: number; semver: string; createdAt: string; author: string; note?: string };
+  /** The highest version. */
+  latest?: string;
+  versions: number;
+  deleted?: boolean;
+  draft: {
+    /** The skill's folder differs from production. */
+    exists: boolean;
+    hasChanges: boolean;
+    /** Files were changed outside Polpo (edited on disk). */
+    external: boolean;
+    baseVersion?: string;
+    base?: number;
+    /** Production moved away from the draft's base: rebase or discard before publishing. */
+    stale: boolean;
+    warning?: string;
+    updatedAt?: string;
+    updatedBy?: string;
+    source?: SkillVersionSource;
+    restoredFrom?: number;
+    changes: Array<{ path: string; status: "added" | "removed" | "changed" }>;
+    suggestedBump?: SkillVersionBump;
+    nextVersion?: string;
+  };
 }
 
 /** A skill's history (GET /skills/:name/versions), newest first. */
@@ -2170,8 +2236,15 @@ export interface SkillVersionList {
   pool: SkillPool;
   scope: "project" | "global";
   versions: SkillVersion[];
-  /** The current state's version (absent for a deleted skill). */
+  /** Production's version number (absent for a deleted skill). */
   current?: number;
+  /** Production's semver. */
+  production?: string;
+  latest?: string;
+  /** The lifecycle state (the draft). */
+  state?: SkillVersionState;
+  /** Publishes, rollbacks, discards, newest first. */
+  events?: SkillVersionEvent[];
   /** The skill was deleted: its history is kept until the grace period ends. */
   deletedAt?: string;
   deletedBy?: string;
@@ -2202,21 +2275,48 @@ export interface SkillFileDiff {
   truncated?: boolean;
 }
 
-/** The diff of two versions (GET /skills/:name/versions/:a/diff/:b). */
+/** The diff of two sides of a skill (GET /skills/:name/diff, /versions/:a/diff/:b). */
 export interface SkillVersionDiff {
   skill: string;
-  a: SkillVersion;
-  b: SkillVersion;
+  /** "1.2.0", "draft", "v3". */
+  from: string;
+  to: string;
+  /** The versions compared (absent for the draft). */
+  a?: SkillVersion;
+  b?: SkillVersion;
   files: SkillFileDiff[];
   unchanged: number;
   summary: { added: number; removed: number; changed: number };
 }
 
-/** A restore (POST /skills/:name/versions/:n/restore): the new version it recorded. */
+/** A restore (POST /skills/:name/versions/:n/restore): published as a new version, or left in the draft. */
 export interface SkillRestoreResult {
   name: string;
   restoredFrom: number;
+  mode: "draft" | "publish";
+  draft: boolean;
+  /** The version published (publish mode, or a deleted skill brought back). */
+  version?: SkillVersion;
+  published?: string;
+  state?: SkillVersionState;
+}
+
+/** A publish (POST /skills/:name/publish). */
+export interface SkillPublishResult {
+  name: string;
   version: SkillVersion;
+  state?: SkillVersionState;
+}
+
+/** A rollback (POST /skills/:name/rollback). */
+export interface SkillRollbackResult {
+  name: string;
+  from?: string;
+  to: SkillVersion;
+  /** The skill's folder followed production (it had no draft changes); false: the draft was kept and is stale. */
+  folderReset: boolean;
+  event: SkillVersionEvent;
+  state?: SkillVersionState;
 }
 
 /** A skill found in an uploaded .skill / .zip archive. */

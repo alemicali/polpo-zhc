@@ -115,6 +115,10 @@ import type {
   SkillVersionList,
   SkillVersionFiles,
   SkillVersionDiff,
+  SkillVersionBump,
+  SkillVersionState,
+  SkillPublishResult,
+  SkillRollbackResult,
   AgentVersion,
   AgentVersionBump,
   AgentTestRun,
@@ -2167,14 +2171,22 @@ export class PolpoClient {
     return this.get<SkillInfo[]>("/skills/orchestrator");
   }
 
-  /** Get the full content of an agent skill by name. */
-  getSkillContent(name: string): Promise<LoadedSkill> {
-    return this.get<LoadedSkill>(`/skills/${encodeURIComponent(name)}/content`);
+  /** Get the full content of an agent skill by name: as agents run it (production), or its draft (view: "draft"). */
+  getSkillContent(name: string, opts: { view?: "production" | "draft" } = {}): Promise<LoadedSkill> {
+    return this.get<LoadedSkill>(`/skills/${encodeURIComponent(name)}/content${opts.view === "draft" ? "?view=draft" : ""}`);
   }
 
-  /** Get the full content of an orchestrator skill by name. */
-  getOrchestratorSkillContent(name: string): Promise<LoadedSkill> {
-    return this.get<LoadedSkill>(`/skills/orchestrator/${encodeURIComponent(name)}/content`);
+  /** Get the full content of an orchestrator skill by name (production, or view: "draft"). */
+  getOrchestratorSkillContent(name: string, opts: { view?: "production" | "draft" } = {}): Promise<LoadedSkill> {
+    return this.get<LoadedSkill>(`/skills/orchestrator/${encodeURIComponent(name)}/content${opts.view === "draft" ? "?view=draft" : ""}`);
+  }
+
+  /**
+   * Change a skill's description, instructions or expected tools. publish: false writes only the draft;
+   * true publishes at once; absent, the instance setting decides (default: published).
+   */
+  updateSkill(name: string, update: { description?: string; content?: string; allowedTools?: string[]; global?: boolean; publish?: boolean; bump?: SkillVersionBump; version?: string; note?: string }, pool?: SkillPool): Promise<{ name: string; updated?: boolean; versioning?: SkillVersionState & { mode: "draft" | "publish" } }> {
+    return this.put(`${this.skillBase(pool)}/${encodeURIComponent(name)}`, update);
   }
 
   /** Get the full skills index (tags and categories for all skills). */
@@ -2222,24 +2234,58 @@ export class PolpoClient {
 
   // ── Skill versions ──
 
-  /** A skill's history, newest first: every change recorded as a copy of the folder (also for a deleted skill, while kept). */
+  /** A skill's versions newest first, production, the draft's state and the lifecycle history (also for a deleted skill, while kept). */
   getSkillVersions(name: string, pool?: SkillPool): Promise<SkillVersionList> {
     return this.get<SkillVersionList>(`${this.skillBase(pool)}/${encodeURIComponent(name)}/versions`);
   }
 
+  /** A skill's lifecycle state: production, latest, the draft (changes, external, stale, suggested bump). */
+  getSkillVersioning(name: string, pool?: SkillPool): Promise<SkillVersionState> {
+    return this.get<SkillVersionState>(`${this.skillBase(pool)}/${encodeURIComponent(name)}/versioning`);
+  }
+
+  /** Publish a skill's draft as a new version in production (bump default: suggested). */
+  publishSkill(name: string, opts: { bump?: SkillVersionBump; version?: string; note?: string } = {}, pool?: SkillPool): Promise<SkillPublishResult> {
+    return this.post<SkillPublishResult>(`${this.skillBase(pool)}/${encodeURIComponent(name)}/publish`, opts);
+  }
+
+  /** Put an earlier version in production (default: the previous production). */
+  rollbackSkill(name: string, opts: { to?: string | number; note?: string } = {}, pool?: SkillPool): Promise<SkillRollbackResult> {
+    return this.post<SkillRollbackResult>(`${this.skillBase(pool)}/${encodeURIComponent(name)}/rollback`, opts);
+  }
+
+  /** Throw a skill's draft away: its files become production's again. */
+  discardSkillDraft(name: string, pool?: SkillPool): Promise<{ name: string; discarded: boolean; state?: SkillVersionState }> {
+    return this.del<{ name: string; discarded: boolean; state?: SkillVersionState }>(`${this.skillBase(pool)}/${encodeURIComponent(name)}/draft`);
+  }
+
+  /** Move a stale draft onto production (file by file: the files it changed are kept). */
+  rebaseSkillDraft(name: string, pool?: SkillPool): Promise<{ name: string; dropped: boolean; from?: string; to?: string; state?: SkillVersionState }> {
+    return this.post(`${this.skillBase(pool)}/${encodeURIComponent(name)}/draft/rebase`);
+  }
+
+  /** Compare two sides of a skill: "draft", "production", "latest", a semver or a version number (default production → draft). */
+  diffSkill(name: string, opts: { from?: string | number; to?: string | number } = {}, pool?: SkillPool): Promise<SkillVersionDiff> {
+    const q = new URLSearchParams();
+    if (opts.from !== undefined) q.set("from", String(opts.from));
+    if (opts.to !== undefined) q.set("to", String(opts.to));
+    const qs = q.toString();
+    return this.get<SkillVersionDiff>(`${this.skillBase(pool)}/${encodeURIComponent(name)}/diff${qs ? `?${qs}` : ""}`);
+  }
+
   /** The files of one version of a skill. */
-  getSkillVersionFiles(name: string, version: number, pool?: SkillPool): Promise<SkillVersionFiles> {
+  getSkillVersionFiles(name: string, version: number | string, pool?: SkillPool): Promise<SkillVersionFiles> {
     return this.get<SkillVersionFiles>(`${this.skillBase(pool)}/${encodeURIComponent(name)}/versions/${version}/files`);
   }
 
   /** The URL of one file of a version (raw, with its content type). */
-  skillVersionFileUrl(name: string, version: number, path: string, opts: { pool?: SkillPool; download?: boolean } = {}): string {
+  skillVersionFileUrl(name: string, version: number | string, path: string, opts: { pool?: SkillPool; download?: boolean } = {}): string {
     const rel = path.split("/").map(encodeURIComponent).join("/");
     return this.apiUrl(`${this.skillBase(opts.pool)}/${encodeURIComponent(name)}/versions/${version}/files/${rel}${opts.download ? "?download=1" : ""}`);
   }
 
   /** Read one text file of a version. */
-  async getSkillVersionFileText(name: string, version: number, path: string, pool?: SkillPool): Promise<string> {
+  async getSkillVersionFileText(name: string, version: number | string, path: string, pool?: SkillPool): Promise<string> {
     const res = await this.fetchFn(this.skillVersionFileUrl(name, version, path, { pool }), { headers: { ...this.headers }, credentials: "include" });
     if (!res.ok) {
       const body = await res.json().catch(() => null) as { error?: string; code?: string } | null;
@@ -2248,18 +2294,21 @@ export class PolpoClient {
     return new TextDecoder().decode(await res.arrayBuffer());
   }
 
-  /** What changed from version a to version b: files added, removed, changed, with unified diffs of text files. */
-  diffSkillVersions(name: string, a: number, b: number, pool?: SkillPool): Promise<SkillVersionDiff> {
+  /** What changed from version a to version b (numbers, semvers or "draft"): files added, removed, changed, with unified diffs of text files. */
+  diffSkillVersions(name: string, a: number | string, b: number | string, pool?: SkillPool): Promise<SkillVersionDiff> {
     return this.get<SkillVersionDiff>(`${this.skillBase(pool)}/${encodeURIComponent(name)}/versions/${a}/diff/${b}`);
   }
 
-  /** Put a version back (or bring back a deleted skill); the current state is recorded first, the restore is a new version. */
-  restoreSkillVersion(name: string, version: number, pool?: SkillPool): Promise<SkillRestoreResult> {
-    return this.post<SkillRestoreResult>(`${this.skillBase(pool)}/${encodeURIComponent(name)}/versions/${version}/restore`);
+  /**
+   * Put a version's files back (or bring back a deleted skill). publish: false leaves it in the draft;
+   * true publishes it at once as a new version; absent, the instance setting decides (default: published).
+   */
+  restoreSkillVersion(name: string, version: number | string, pool?: SkillPool, opts: { publish?: boolean; note?: string } = {}): Promise<SkillRestoreResult> {
+    return this.post<SkillRestoreResult>(`${this.skillBase(pool)}/${encodeURIComponent(name)}/versions/${encodeURIComponent(String(version))}/restore`, opts);
   }
 
   /** The URL of a version as an archive (.skill by default, or .zip). */
-  skillVersionDownloadUrl(name: string, version: number, opts: { pool?: SkillPool; format?: "skill" | "zip" } = {}): string {
+  skillVersionDownloadUrl(name: string, version: number | string, opts: { pool?: SkillPool; format?: "skill" | "zip" } = {}): string {
     return this.apiUrl(`${this.skillBase(opts.pool)}/${encodeURIComponent(name)}/versions/${version}/download${opts.format === "zip" ? "?format=zip" : ""}`);
   }
 

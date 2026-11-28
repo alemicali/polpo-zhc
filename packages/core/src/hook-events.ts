@@ -189,6 +189,8 @@ const EVENT_CATALOG: { [K in PolpoEvent]: Omit<HookEventDef, "name"> } = {
   "artifact:changed": { label: "Artifact changed", description: "An artifact (document, dashboard, design, diagram) was created, updated or deleted.", category: "registry", placeholders: ["artifactId", "action", "title"] },
   "data-view:changed": { label: "Data view changed", description: "A data view was created, updated or deleted.", category: "registry", placeholders: ["viewId", "action"] },
   "skill:changed": { label: "Skill changed", description: "A skill was created, updated, deleted, installed or (un)assigned.", category: "registry", placeholders: ["scope", "action", "skillName", "agentName"] },
+  "skill:published": { label: "Skill published", description: "A skill version was published to production (agents run it from their next run).", category: "registry", placeholders: ["scope", "skillName", "version", "previous", "author", "note"] },
+  "skill:rolled-back": { label: "Skill rolled back", description: "A skill's production was rolled back to an earlier version.", category: "registry", placeholders: ["scope", "skillName", "from", "to", "author", "note"] },
   "brain:changed": { label: "Company brain changed", description: "An item of the company brain was created, updated or deleted.", category: "registry", placeholders: ["action", "subjectType", "subjectId"] },
   "token-usage:recorded": { label: "Token usage recorded", description: "Token usage of a model call was recorded.", category: "registry", placeholders: ["timestamp"] },
   "config:reloaded": { label: "Config reloaded", description: "The instance configuration was reloaded.", category: "config", placeholders: ["timestamp"] },

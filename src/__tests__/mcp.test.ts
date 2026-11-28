@@ -148,7 +148,7 @@ describe("Polpo MCP server", () => {
       "polpo_memory_get", "polpo_memory_update",
       "polpo_skills_list", "polpo_skill_get", "polpo_skill_create", "polpo_skill_update", "polpo_skill_install", "polpo_skill_delete", "polpo_skill_assign",
       "polpo_skill_upload_prepare", "polpo_skill_upload_finalize", "polpo_skill_files", "polpo_skill_file_read",
-      "polpo_skill_versions", "polpo_skill_version_diff", "polpo_skill_restore",
+      "polpo_skill_versions", "polpo_skill_version_diff", "polpo_skill_publish", "polpo_skill_rollback", "polpo_skill_draft", "polpo_skill_restore",
       "polpo_schedules_list", "polpo_schedule_create", "polpo_schedule_update", "polpo_schedule_delete", "polpo_schedule_run",
       "polpo_checks_list", "polpo_check_create", "polpo_check_update", "polpo_check_cancel", "polpo_check_delete",
       "polpo_triggers_list", "polpo_trigger_get", "polpo_trigger_deliveries", "polpo_trigger_create", "polpo_trigger_update", "polpo_trigger_delete", "polpo_trigger_test", "polpo_trigger_run_actions", "polpo_trigger_auth", "polpo_trigger_show", "polpo_computer_show",

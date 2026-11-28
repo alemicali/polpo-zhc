@@ -146,7 +146,7 @@ import { DriveManager, FileDriveStore, type ReflectionRunner } from "./drive.js"
 import {
   assignSkillToAgent, createAgentSkill, loadSkillIndex, removeSkill, removeSkillFromIndex, unassignSkillFromAgent, updateSkillIndex,
 } from "../llm/skills.js";
-import { listSkillVersions, withSkillVersion } from "../llm/skill-versions.js";
+import { listSkillVersions, migrateSkillVersions, onSkillLifecycle, skillVersionLabel, withSkillVersion } from "../llm/skill-versions.js";
 import type { ApprovalRequest, ApprovalStatus, ChannelReplyTarget, NotificationAction } from "./types.js";
 import { EncryptedVaultStore } from "../vault/encrypted-store.js";
 import type { VaultStore } from "./vault-store.js";
@@ -272,6 +272,8 @@ export class Orchestrator extends TypedEmitter {
   private teamStore!: TeamStore;
   private agentVersionStore!: AgentVersionStore;
   private agentVersions!: AgentVersioning;
+  /** Unsubscribes the skill lifecycle listener (skill:published / skill:rolled-back events). */
+  private skillLifecycleOff?: () => void;
   /** The deploy gate (required agent suites), set by the server: absent, deploys are immediate. */
   private agentDeployGate?: AgentDeployGateHook;
   private agentStore!: AgentStore;
@@ -2173,6 +2175,11 @@ export class Orchestrator extends TypedEmitter {
     return origin.source ? `system:${origin.source}` : fallback;
   }
 
+  /** API/MCP/chat skill changes without a publish flag are published at once (settings.skills.versioning). */
+  autoPublishSkillUpdates(): boolean {
+    return this.config?.settings?.skills?.versioning?.autoPublishApiUpdates !== false;
+  }
+
   /** API/MCP updates without publish/deploy flags publish and deploy (settings.agents.versioning). */
   autoDeployApiUpdates(): boolean {
     return this.config?.settings?.agents?.versioning?.autoDeployApiUpdates !== false;
@@ -2270,6 +2277,24 @@ export class Orchestrator extends TypedEmitter {
   }
 
   private initAgentVersioning(): void {
+    // skill publishes and rollbacks (any caller: routes, learning, MCP, the CLI) → bus events
+    this.skillLifecycleOff?.();
+    this.skillLifecycleOff = onSkillLifecycle((n) => {
+      if (n.polpoDir !== this.polpoDir && !n.ref.global) return;
+      const base = { scope: n.ref.pool, skillName: n.ref.name, ...(n.ref.global ? { global: true } : {}), timestamp: n.event.at };
+      if (n.action === "published") {
+        this.emit("skill:published", {
+          ...base, version: skillVersionLabel(n.version), versionNumber: n.version.version, ...(n.from ? { previous: n.from } : {}),
+          ...(n.version.bump ? { bump: n.version.bump } : {}), author: n.event.actor, ...(n.event.note ? { note: n.event.note } : {}),
+          ...(n.event.direct ? { direct: true } : {}),
+        });
+      } else {
+        this.emit("skill:rolled-back", {
+          ...base, ...(n.from ? { from: n.from } : {}), to: skillVersionLabel(n.version), versionNumber: n.version.version,
+          author: n.event.actor, ...(n.event.note ? { note: n.event.note } : {}),
+        });
+      }
+    });
     this.agentVersionStore = (this.drizzleStores as { agentVersionStore?: AgentVersionStore } | undefined)?.agentVersionStore
       ?? new FileAgentVersionStore(this.polpoDir);
     this.agentVersions = new AgentVersioning(this.agentVersionStore, {
@@ -2291,6 +2316,13 @@ export class Orchestrator extends TypedEmitter {
   }
 
   private async migrateAgentVersions(): Promise<void> {
+    // skills first: every skill gets a production version (agent versions pin its number)
+    try {
+      const skills = migrateSkillVersions(this.polpoDir);
+      if (skills.length) this.emit("log", { level: "info", message: `Skill versions: ${skills.length} skill(s) at 1.0.0 in production (${skills.slice(0, 20).join(", ")}${skills.length > 20 ? ", …" : ""})` });
+    } catch (err) {
+      this.emit("log", { level: "warn", message: `Skill versions: migration failed: ${err instanceof Error ? err.message : String(err)}` });
+    }
     try {
       const { initialized, reconciled } = await this.agentVersions.migrateAll();
       if (initialized.length) this.emit("log", { level: "info", message: `Agent versions: ${initialized.length} agent(s) at 1.0.0 in production (${initialized.join(", ")})` });
@@ -2591,6 +2623,8 @@ export class Orchestrator extends TypedEmitter {
   /** Stop the supervisor loop (non-graceful — use gracefulStop for clean shutdown) */
   stop(): void {
     this.stopped = true;
+    this.skillLifecycleOff?.();
+    this.skillLifecycleOff = undefined;
     this.backgroundWaitMgr?.dispose();
     this.conversationCheckMgr?.dispose();
     this.driveMgr?.dispose();
@@ -2605,6 +2639,8 @@ export class Orchestrator extends TypedEmitter {
   async gracefulStop(timeoutMs = 5000): Promise<void> {
     await this.hookRegistry.runBefore("orchestrator:shutdown", {});
     this.stopped = true;
+    this.skillLifecycleOff?.();
+    this.skillLifecycleOff = undefined;
     this.backgroundWaitMgr?.dispose();
     this.conversationCheckMgr?.dispose();
     this.driveMgr?.dispose();

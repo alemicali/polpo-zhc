@@ -440,12 +440,15 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
       }).strict().nullable().optional().describe("Connectors on private addresses and their default tool timeout; null: the defaults"),
       auto_deploy_agent_updates: z.boolean().optional()
         .describe("Agent versions: true (default) — an API/MCP agent update without publish/deploy flags is published and deployed to production at once (the old immediate effect); false — it only changes the agent's draft"),
+      auto_publish_skill_updates: z.boolean().optional()
+        .describe("Skill versions: true (default) — an API/MCP/chat skill change without a publish flag is published to production at once; false — it only changes the skill's draft"),
     },
     outputSchema: { changed: z.array(z.string()), settings: settingsView },
     annotations: UPDATE,
-  }, async ({ orchestrator_name, orchestrator_model, image_model, media, reasoning, egress_proxies, allow_unlisted, general, compaction, dependency_results, tailscale, mcp, connectors, auto_deploy_agent_updates }) => {
+  }, async ({ orchestrator_name, orchestrator_model, image_model, media, reasoning, egress_proxies, allow_unlisted, general, compaction, dependency_results, tailscale, mcp, connectors, auto_deploy_agent_updates, auto_publish_skill_updates }) => {
     const body: Record<string, unknown> = {};
     if (auto_deploy_agent_updates !== undefined) body.agents = { versioning: { autoDeployApiUpdates: auto_deploy_agent_updates } };
+    if (auto_publish_skill_updates !== undefined) body.skills = { versioning: { autoPublishApiUpdates: auto_publish_skill_updates } };
     if (orchestrator_name !== undefined) body.orchestratorName = orchestrator_name || null;
     if (orchestrator_model !== undefined) body.orchestratorModel = orchestrator_model;
     if (image_model !== undefined) body.imageModel = image_model;
@@ -478,7 +481,7 @@ export function registerConfigTools(tool: Register, deps: McpDeps): void {
       };
     }
     if (Object.keys(body).length === 0) {
-      return fail("Nothing to change: give orchestrator_name, orchestrator_model, image_model, media, reasoning, egress_proxies, general, compaction, dependency_results, tailscale, mcp, connectors or auto_deploy_agent_updates.");
+      return fail("Nothing to change: give orchestrator_name, orchestrator_model, image_model, media, reasoning, egress_proxies, general, compaction, dependency_results, tailscale, mcp, connectors, auto_deploy_agent_updates or auto_publish_skill_updates.");
     }
     const missing = await missingVaultRefs(deps, refs);
     if (missing.length) {

@@ -260,14 +260,14 @@ describe("runtime: agents see bundled files", () => {
     ]));
     installSkills(file, polpoDir);
     const skills = loadAgentSkills(join(tmp, "project"), polpoDir, "dev", ["alpha"]);
-    expect(skills[0].dir).toBe(join(polpoDir, "skills", "alpha"));
+    expect(skills[0].dir).toBe(join(polpoDir, "skills", ".production", "alpha"));
     expect(skills[0].files?.map((f) => f.path)).toEqual(["assets/logo.png", "references/api.md"]);
     const prompt = buildSkillPrompt(skills);
-    expect(prompt).toContain(`Skill folder: \`${join(polpoDir, "skills", "alpha")}\``);
+    expect(prompt).toContain(`Skill folder: \`${join(polpoDir, "skills", ".production", "alpha")}\``);
     expect(prompt).toContain("- references/api.md (5 B)");
-    // via an agent's symlink the real folder is shown
+    // via an agent's symlink: production's folder too (agents run the published version)
     assignSkillToAgent(polpoDir, "dev", "alpha", join(polpoDir, "skills", "alpha"));
-    expect(loadAgentSkills(join(tmp, "project"), polpoDir, "dev")[0].dir).toBe(join(polpoDir, "skills", "alpha"));
+    expect(loadAgentSkills(join(tmp, "project"), polpoDir, "dev")[0].dir).toBe(join(polpoDir, "skills", ".production", "alpha"));
     const text = readSkillTextFiles(skills[0].dir!);
     expect(text.files).toEqual([{ path: "references/api.md", content: "# API" }]);
     expect(text.skipped).toEqual(["assets/logo.png"]);

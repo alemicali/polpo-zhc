@@ -278,6 +278,13 @@ export const UpdateSettingsSchema = z.object({
       autoDeployApiUpdates: z.boolean().optional(),
     }).strict().optional(),
   }).strict().nullable().optional(),
+  /** Skill lifecycle (null removes it: defaults). */
+  skills: z.object({
+    versioning: z.object({
+      /** API/MCP skill changes without a publish flag are published to production at once (default true). */
+      autoPublishApiUpdates: z.boolean().optional(),
+    }).strict().optional(),
+  }).strict().nullable().optional(),
   orchestratorModel: z.union([z.string(), ModelConfigSchema]).optional(),
   /** The orchestrator's display name (default "Polpo"); null or "" restores the default. */
   orchestratorName: z.string().trim().max(40, "at most 40 characters")

@@ -25,6 +25,8 @@ export interface SkillBundleDeps {
   emit: (event: "skill:changed", data: { scope: "agent" | "orchestrator"; action: "installed" | "assigned"; skillName?: string; agentName?: string; timestamp: string }) => void;
   /** Who makes a request, recorded in the skills' versions. */
   author?: (c: Context) => string;
+  /** settings.skills.versioning.autoPublishApiUpdates (default true). */
+  autoPublish?: () => boolean;
 }
 
 const errorSchema = z.object({ ok: z.boolean(), error: z.string(), code: z.string().optional(), details: z.any().optional() });
@@ -38,6 +40,7 @@ const installOptions = z.object({
   skills: z.array(z.string()).optional().describe("Only these skills of the archive (default all)"),
   renames: z.record(z.string(), z.string()).optional().describe("Archive name → name to install as"),
   assignTo: z.array(z.string()).optional().describe("Agents to assign the installed skills to (agent pool only)"),
+  publish: z.boolean().optional().describe("A skill replaced (onConflict replace): true publishes it at once as a new version in production, false leaves it in the skill's draft; absent, settings.skills.versioning.autoPublishApiUpdates decides (default: published). New skills are always published as 1.0.0."),
 });
 type InstallOptions = z.infer<typeof installOptions>;
 
@@ -69,6 +72,7 @@ export function registerSkillBundleRoutes(app: OpenAPIHono, getDeps: () => Skill
     const pool: SkillPool = opts.pool ?? "agent";
     const result: BundleInstallResult = installSkillBundleToPool(deps.polpoDir, bundle, {
       pool, global: opts.global, onConflict: (opts.onConflict ?? "fail") as ConflictPolicy, author: deps.author?.(c) ?? "person:dashboard", source: "upload",
+      mode: (opts.publish ?? deps.autoPublish?.() ?? true) ? "publish" : "draft",
       ...(opts.skills?.length ? { skills: opts.skills } : {}), ...(opts.renames ? { renames: opts.renames } : {}),
     });
     const now = () => new Date().toISOString();

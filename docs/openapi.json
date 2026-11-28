@@ -28969,6 +28969,10 @@
                       "type": "string"
                     },
                     "description": "Agents to assign the installed skills to (agent pool only)"
+                  },
+                  "publish": {
+                    "type": "boolean",
+                    "description": "A skill replaced (onConflict replace): true publishes it at once as a new version in production, false leaves it in the skill's draft; absent, settings.skills.versioning.autoPublishApiUpdates decides (default: published). New skills are always published as 1.0.0."
                   }
                 }
               }
@@ -29578,7 +29582,7 @@
           "Skills"
         ],
         "summary": "List an orchestrator skill's versions",
-        "description": "The skill's history, newest first: every change Polpo made to it (create, edit, upload, git or local install, restore) with its number, date, author, source, file count, size and SKILL.md's name and description at that time. The current state is the latest version (`current`); a deleted skill's history is kept for a grace period (`deletedAt`) and can be restored.",
+        "description": "The skill's lifecycle: its versions, newest first (semver, number, date, author, source, release note, the version it was edited from, file count, size, SKILL.md's name and description at that time), `production` (what agents run; `current` is its number), `state` (the draft: has changes, external changes made on disk, stale, suggested bump) and `events` (publishes, rollbacks, discards with who and when). A deleted skill's history is kept for a grace period (`deletedAt`) and can be restored.",
         "parameters": [
           {
             "schema": {
@@ -29678,12 +29682,643 @@
         }
       }
     },
+    "/api/v1/skills/orchestrator/{name}/versioning": {
+      "get": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "The lifecycle state of an orchestrator skill",
+        "description": "Production (the version agents run), the latest version, and the draft: whether the skill's folder differs from production (`hasChanges`), which files, whether files were changed outside Polpo (`external`), whether production moved away from the draft's base (`stale`, with `warning`), and the suggested bump and next version.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "project",
+                "global"
+              ],
+              "description": "project or global (default: where the skill is, or where its history is)"
+            },
+            "required": false,
+            "description": "project or global (default: where the skill is, or where its history is)",
+            "name": "scope",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such skill",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/orchestrator/{name}/publish": {
+      "post": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Publish an orchestrator skill's draft",
+        "description": "The skill's folder (its draft: dashboard edits, restores, files changed on disk) becomes a new version and production points at it: agents run it from their next run. The number is the highest version bumped by `bump` (default: suggested — major when files are removed or the skill renamed, minor when files are added or the description or expected tools change, patch otherwise) or an explicit `version`. `409` when the draft is stale (rebase or discard it), `400` NO_CHANGES when the draft equals production.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "project",
+                "global"
+              ],
+              "description": "project or global (default: where the skill is, or where its history is)"
+            },
+            "required": false,
+            "description": "project or global (default: where the skill is, or where its history is)",
+            "name": "scope",
+            "in": "query"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "bump": {
+                    "type": "string",
+                    "enum": [
+                      "major",
+                      "minor",
+                      "patch"
+                    ]
+                  },
+                  "version": {
+                    "type": "string",
+                    "description": "An explicit semver, above the latest"
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 2000,
+                    "description": "The release note"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Published: the version and the state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No changes or invalid version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such skill",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale draft or version taken",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/orchestrator/{name}/rollback": {
+      "post": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Roll an orchestrator skill's production back",
+        "description": "Production points at an earlier version: `to` (semver or number), or the one production ran before the publish that brought the current one (repeated rollbacks walk back). Agents run it from their next run. The skill's folder follows when it had no draft changes; a pending draft is kept and becomes stale (rebase or discard it).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "project",
+                "global"
+              ],
+              "description": "project or global (default: where the skill is, or where its history is)"
+            },
+            "required": false,
+            "description": "project or global (default: where the skill is, or where its history is)",
+            "name": "scope",
+            "in": "query"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "to": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ]
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rolled back",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Already there",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such skill or version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/orchestrator/{name}/draft": {
+      "delete": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Discard an orchestrator skill's draft",
+        "description": "The skill's folder becomes production's files again: pending edits and files changed on disk are dropped (production is unchanged).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "project",
+                "global"
+              ],
+              "description": "project or global (default: where the skill is, or where its history is)"
+            },
+            "required": false,
+            "description": "project or global (default: where the skill is, or where its history is)",
+            "name": "scope",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Discarded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such skill",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/orchestrator/{name}/draft/rebase": {
+      "post": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Rebase an orchestrator skill's stale draft onto production",
+        "description": "File by file: a file the draft changed (against the version it started from) keeps the draft's content, every other file becomes production's. Nothing left to change: the draft goes (`dropped`).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "project",
+                "global"
+              ],
+              "description": "project or global (default: where the skill is, or where its history is)"
+            },
+            "required": false,
+            "description": "project or global (default: where the skill is, or where its history is)",
+            "name": "scope",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rebased",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such skill or draft",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/orchestrator/{name}/diff": {
+      "get": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Compare two sides of an orchestrator skill",
+        "description": "Files added, removed and changed from `from` to `to` (each \"draft\" or a version: its semver (1.2.0), its number (3), production or latest), with unified diffs of text files. Default: production → draft (what publishing would change).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "to",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "project",
+                "global"
+              ]
+            },
+            "required": false,
+            "name": "scope",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The diff",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such skill or version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/skills/orchestrator/{name}/versions/{version}/files": {
       "get": {
         "tags": [
           "Skills"
         ],
         "summary": "List the files of a version of an orchestrator skill",
+        "description": "`version`: a version: its semver (1.2.0), its number (3), production or latest.",
         "parameters": [
           {
             "schema": {
@@ -29889,7 +30524,7 @@
           "Skills"
         ],
         "summary": "Compare two versions of an orchestrator skill",
-        "description": "Files added, removed and changed from version a to version b, with a unified diff for text files (binary files are only named; files over 512 KB, or diffs past the size cap, are marked truncated).",
+        "description": "Files added, removed and changed from version a to version b, with a unified diff for text files (binary files are only named; files over 512 KB, or diffs past the size cap, are marked truncated). a and b: a version: its semver (1.2.0), its number (3), production or latest, or draft.",
         "parameters": [
           {
             "schema": {
@@ -30011,7 +30646,7 @@
           "Skills"
         ],
         "summary": "Restore a version of an orchestrator skill",
-        "description": "Put that version's files back as the skill (recreating a deleted skill). The current state is recorded first, and the restore is recorded as a new version (source restore), so it can be undone.",
+        "description": "Put that version's files back as the skill's folder (recreating a deleted skill, which is always published). `publish: false` (what the dashboard sends) leaves the restore in the draft — publish it, or roll production back instead; `publish: true` publishes it at once as a new version; absent, settings.skills.versioning.autoPublishApiUpdates decides (default: published).",
         "parameters": [
           {
             "schema": {
@@ -30044,9 +30679,36 @@
             "in": "query"
           }
         ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "publish": {
+                    "type": "boolean"
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 2000
+                  },
+                  "bump": {
+                    "type": "string",
+                    "enum": [
+                      "major",
+                      "minor",
+                      "patch"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
-            "description": "Restored: the new version",
+            "description": "Restored: the version published, or the draft",
             "content": {
               "application/json": {
                 "schema": {
@@ -30093,6 +30755,31 @@
           },
           "404": {
             "description": "No such version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale draft",
             "content": {
               "application/json": {
                 "schema": {
@@ -30213,7 +30900,7 @@
           "Skills"
         ],
         "summary": "List a skill's versions",
-        "description": "The skill's history, newest first: every change Polpo made to it (create, edit, upload, git or local install, restore) with its number, date, author, source, file count, size and SKILL.md's name and description at that time. The current state is the latest version (`current`); a deleted skill's history is kept for a grace period (`deletedAt`) and can be restored.",
+        "description": "The skill's lifecycle: its versions, newest first (semver, number, date, author, source, release note, the version it was edited from, file count, size, SKILL.md's name and description at that time), `production` (what agents run; `current` is its number), `state` (the draft: has changes, external changes made on disk, stale, suggested bump) and `events` (publishes, rollbacks, discards with who and when). A deleted skill's history is kept for a grace period (`deletedAt`) and can be restored.",
         "parameters": [
           {
             "schema": {
@@ -30313,12 +31000,643 @@
         }
       }
     },
+    "/api/v1/skills/{name}/versioning": {
+      "get": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "The lifecycle state of a skill",
+        "description": "Production (the version agents run), the latest version, and the draft: whether the skill's folder differs from production (`hasChanges`), which files, whether files were changed outside Polpo (`external`), whether production moved away from the draft's base (`stale`, with `warning`), and the suggested bump and next version.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "project",
+                "global"
+              ],
+              "description": "project or global (default: where the skill is, or where its history is)"
+            },
+            "required": false,
+            "description": "project or global (default: where the skill is, or where its history is)",
+            "name": "scope",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such skill",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/{name}/publish": {
+      "post": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Publish a skill's draft",
+        "description": "The skill's folder (its draft: dashboard edits, restores, files changed on disk) becomes a new version and production points at it: agents run it from their next run. The number is the highest version bumped by `bump` (default: suggested — major when files are removed or the skill renamed, minor when files are added or the description or expected tools change, patch otherwise) or an explicit `version`. `409` when the draft is stale (rebase or discard it), `400` NO_CHANGES when the draft equals production.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "project",
+                "global"
+              ],
+              "description": "project or global (default: where the skill is, or where its history is)"
+            },
+            "required": false,
+            "description": "project or global (default: where the skill is, or where its history is)",
+            "name": "scope",
+            "in": "query"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "bump": {
+                    "type": "string",
+                    "enum": [
+                      "major",
+                      "minor",
+                      "patch"
+                    ]
+                  },
+                  "version": {
+                    "type": "string",
+                    "description": "An explicit semver, above the latest"
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 2000,
+                    "description": "The release note"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Published: the version and the state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No changes or invalid version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such skill",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale draft or version taken",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/{name}/rollback": {
+      "post": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Roll a skill's production back",
+        "description": "Production points at an earlier version: `to` (semver or number), or the one production ran before the publish that brought the current one (repeated rollbacks walk back). Agents run it from their next run. The skill's folder follows when it had no draft changes; a pending draft is kept and becomes stale (rebase or discard it).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "project",
+                "global"
+              ],
+              "description": "project or global (default: where the skill is, or where its history is)"
+            },
+            "required": false,
+            "description": "project or global (default: where the skill is, or where its history is)",
+            "name": "scope",
+            "in": "query"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "to": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ]
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rolled back",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Already there",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such skill or version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/{name}/draft": {
+      "delete": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Discard a skill's draft",
+        "description": "The skill's folder becomes production's files again: pending edits and files changed on disk are dropped (production is unchanged).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "project",
+                "global"
+              ],
+              "description": "project or global (default: where the skill is, or where its history is)"
+            },
+            "required": false,
+            "description": "project or global (default: where the skill is, or where its history is)",
+            "name": "scope",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Discarded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such skill",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/{name}/draft/rebase": {
+      "post": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Rebase a skill's stale draft onto production",
+        "description": "File by file: a file the draft changed (against the version it started from) keeps the draft's content, every other file becomes production's. Nothing left to change: the draft goes (`dropped`).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "project",
+                "global"
+              ],
+              "description": "project or global (default: where the skill is, or where its history is)"
+            },
+            "required": false,
+            "description": "project or global (default: where the skill is, or where its history is)",
+            "name": "scope",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rebased",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such skill or draft",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/{name}/diff": {
+      "get": {
+        "tags": [
+          "Skills"
+        ],
+        "summary": "Compare two sides of a skill",
+        "description": "Files added, removed and changed from `from` to `to` (each \"draft\" or a version: its semver (1.2.0), its number (3), production or latest), with unified diffs of text files. Default: production → draft (what publishing would change).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "from",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "to",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "project",
+                "global"
+              ]
+            },
+            "required": false,
+            "name": "scope",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The diff",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such skill or version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/skills/{name}/versions/{version}/files": {
       "get": {
         "tags": [
           "Skills"
         ],
         "summary": "List the files of a version of a skill",
+        "description": "`version`: a version: its semver (1.2.0), its number (3), production or latest.",
         "parameters": [
           {
             "schema": {
@@ -30524,7 +31842,7 @@
           "Skills"
         ],
         "summary": "Compare two versions of a skill",
-        "description": "Files added, removed and changed from version a to version b, with a unified diff for text files (binary files are only named; files over 512 KB, or diffs past the size cap, are marked truncated).",
+        "description": "Files added, removed and changed from version a to version b, with a unified diff for text files (binary files are only named; files over 512 KB, or diffs past the size cap, are marked truncated). a and b: a version: its semver (1.2.0), its number (3), production or latest, or draft.",
         "parameters": [
           {
             "schema": {
@@ -30646,7 +31964,7 @@
           "Skills"
         ],
         "summary": "Restore a version of a skill",
-        "description": "Put that version's files back as the skill (recreating a deleted skill). The current state is recorded first, and the restore is recorded as a new version (source restore), so it can be undone.",
+        "description": "Put that version's files back as the skill's folder (recreating a deleted skill, which is always published). `publish: false` (what the dashboard sends) leaves the restore in the draft — publish it, or roll production back instead; `publish: true` publishes it at once as a new version; absent, settings.skills.versioning.autoPublishApiUpdates decides (default: published).",
         "parameters": [
           {
             "schema": {
@@ -30679,9 +31997,36 @@
             "in": "query"
           }
         ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "publish": {
+                    "type": "boolean"
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 2000
+                  },
+                  "bump": {
+                    "type": "string",
+                    "enum": [
+                      "major",
+                      "minor",
+                      "patch"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
-            "description": "Restored: the new version",
+            "description": "Restored: the version published, or the draft",
             "content": {
               "application/json": {
                 "schema": {
@@ -30728,6 +32073,31 @@
           },
           "404": {
             "description": "No such version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale draft",
             "content": {
               "application/json": {
                 "schema": {
@@ -31130,6 +32500,28 @@
                   },
                   "global": {
                     "type": "boolean"
+                  },
+                  "publish": {
+                    "type": "boolean",
+                    "description": "true: published at once as a new version in production; false: only the draft changes (publish it later). Absent: settings.skills.versioning.autoPublishApiUpdates decides (default: published)."
+                  },
+                  "bump": {
+                    "type": "string",
+                    "enum": [
+                      "major",
+                      "minor",
+                      "patch"
+                    ],
+                    "description": "The version bump when published (default: suggested from the change)"
+                  },
+                  "version": {
+                    "type": "string",
+                    "description": "An explicit version when published (major.minor.patch, above the latest)"
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 2000,
+                    "description": "The release note when published"
                   }
                 }
               }
@@ -31138,7 +32530,7 @@
         },
         "responses": {
           "200": {
-            "description": "Skill updated",
+            "description": "Skill updated (versioning: draft or published, and the lifecycle state)",
             "content": {
               "application/json": {
                 "schema": {
@@ -31155,6 +32547,9 @@
                         },
                         "updated": {
                           "type": "boolean"
+                        },
+                        "versioning": {
+                          "nullable": true
                         }
                       },
                       "required": [
@@ -31484,6 +32879,7 @@
           "Skills"
         ],
         "summary": "Get skill content",
+        "description": "The skill as agents run it (its production version) with `versioning` (production, latest, the draft: changes, external, stale). ?view=draft returns the skill's folder instead: the draft, pending changes included.",
         "parameters": [
           {
             "schema": {
@@ -31492,6 +32888,18 @@
             "required": true,
             "name": "name",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "production",
+                "draft"
+              ]
+            },
+            "required": false,
+            "name": "view",
+            "in": "query"
           }
         ],
         "responses": {
@@ -31715,6 +33123,28 @@
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "publish": {
+                    "type": "boolean",
+                    "description": "true: published at once as a new version in production; false: only the draft changes (publish it later). Absent: settings.skills.versioning.autoPublishApiUpdates decides (default: published)."
+                  },
+                  "bump": {
+                    "type": "string",
+                    "enum": [
+                      "major",
+                      "minor",
+                      "patch"
+                    ],
+                    "description": "The version bump when published (default: suggested from the change)"
+                  },
+                  "version": {
+                    "type": "string",
+                    "description": "An explicit version when published (major.minor.patch, above the latest)"
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 2000,
+                    "description": "The release note when published"
                   }
                 }
               }
@@ -31723,7 +33153,7 @@
         },
         "responses": {
           "200": {
-            "description": "Skill updated",
+            "description": "Skill updated (versioning: draft or published, and the lifecycle state)",
             "content": {
               "application/json": {
                 "schema": {
@@ -31737,6 +33167,9 @@
                       "properties": {
                         "name": {
                           "type": "string"
+                        },
+                        "versioning": {
+                          "nullable": true
                         }
                       },
                       "required": [
@@ -31861,6 +33294,7 @@
           "Skills"
         ],
         "summary": "Get orchestrator content",
+        "description": "The skill as Polpo runs it (its production version) with `versioning`; ?view=draft returns the skill's folder (the draft).",
         "parameters": [
           {
             "schema": {
@@ -31869,6 +33303,18 @@
             "required": true,
             "name": "name",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "production",
+                "draft"
+              ]
+            },
+            "required": false,
+            "name": "view",
+            "in": "query"
           }
         ],
         "responses": {
@@ -34011,6 +35457,22 @@
                         "type": "object",
                         "properties": {
                           "autoDeployApiUpdates": {
+                            "type": "boolean"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "skills": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "versioning": {
+                        "type": "object",
+                        "properties": {
+                          "autoPublishApiUpdates": {
                             "type": "boolean"
                           }
                         },

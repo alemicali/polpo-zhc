@@ -18,9 +18,19 @@ import {
   updateSkillIndex,
   loadSkillIndex,
 } from "../../llm/skills.js";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import { registerSkillBundleRoutes } from "./skill-bundles.js";
 import { registerSkillVersionRoutes } from "./skill-versions.js";
+import { SkillVersionError, skillVersionState, type SkillRef, type SkillVersionMode } from "../../llm/skill-versions.js";
+
+/** Body fields of a change to a skill: publish it at once or leave it in the draft. */
+export const skillPublishFields = {
+  publish: z.boolean().optional().describe("true: published at once as a new version in production; false: only the draft changes (publish it later). Absent: settings.skills.versioning.autoPublishApiUpdates decides (default: published)."),
+  bump: z.enum(["major", "minor", "patch"]).optional().describe("The version bump when published (default: suggested from the change)"),
+  version: z.string().optional().describe("An explicit version when published (major.minor.patch, above the latest)"),
+  note: z.string().max(2000).optional().describe("The release note when published"),
+};
+const publishFields = skillPublishFields;
 
 
 /**
@@ -34,9 +44,22 @@ export function skillRoutes(getDeps: () => {
   emit: (event: "skill:changed", data: { scope: "agent" | "orchestrator"; action: "created" | "updated" | "deleted" | "installed" | "assigned" | "unassigned" | "indexed"; skillName?: string; agentName?: string; timestamp: string }) => void;
   /** Who makes a request, recorded in the skills' versions (default "person:dashboard"). */
   author?: (c: any) => string;
+  /** settings.skills.versioning.autoPublishApiUpdates (default true): a change without `publish` is published at once. */
+  autoPublish?: () => boolean;
 }): OpenAPIHono {
   const app = new OpenAPIHono();
   const authorOf = (c: any) => getDeps().author?.(c) ?? "person:dashboard";
+  /** publish: true → published at once; false → the draft; absent → the instance setting (default: published). */
+  const modeOf = (publish: boolean | undefined): SkillVersionMode => (publish ?? (getDeps().autoPublish?.() ?? true)) ? "publish" : "draft";
+  const stateOf = (ref: SkillRef) => {
+    try { return skillVersionState(getDeps().polpoDir, ref); } catch { return undefined; }
+  };
+  const versioningOf = (ref: SkillRef, mode: SkillVersionMode) => {
+    try {
+      const state = skillVersionState(getDeps().polpoDir, ref);
+      return state ? { mode, ...state } : { mode };
+    } catch { return { mode }; }
+  };
 
   // Bundles: upload .skill/.zip archives, browse and download a skill's files (both pools)
   registerSkillBundleRoutes(app, getDeps);
@@ -207,6 +230,7 @@ export function skillRoutes(getDeps: () => {
               content: z.string().min(1).optional(),
               allowedTools: z.array(z.string()).optional(),
               global: z.boolean().optional(),
+              ...publishFields,
             }),
           },
         },
@@ -214,8 +238,8 @@ export function skillRoutes(getDeps: () => {
     },
     responses: {
       200: {
-        content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ name: z.string(), updated: z.boolean() }) }) } },
-        description: "Skill updated",
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ name: z.string(), updated: z.boolean(), versioning: z.any().optional() }) }) } },
+        description: "Skill updated (versioning: draft or published, and the lifecycle state)",
       },
       404: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
@@ -227,12 +251,20 @@ export function skillRoutes(getDeps: () => {
   app.openapi(updateSkillRoute, (c) => {
     const deps = getDeps();
     const { name } = c.req.valid("param");
-    const { global, ...updates } = c.req.valid("json");
-    if (!updateAgentSkill(deps.polpoDir, name, updates, global, authorOf(c))) {
+    const { global, publish, bump, version, note, ...updates } = c.req.valid("json");
+    const mode = modeOf(publish);
+    let updated: boolean;
+    try {
+      updated = updateAgentSkill(deps.polpoDir, name, updates, global, authorOf(c), { mode, ...(note ? { note } : {}), ...(bump ? { bump } : {}), ...(version ? { version } : {}) });
+    } catch (err) {
+      if (err instanceof SkillVersionError) return c.json({ ok: false, error: err.message, code: err.code }, err.code === "CONFLICT" ? 409 : 400) as any;
+      throw err;
+    }
+    if (!updated) {
       return c.json({ ok: false, error: `Skill "${name}" not found${global ? " in the global pool" : ""}`, code: "NOT_FOUND" }, 404);
     }
     deps.emit("skill:changed", { scope: "agent", action: "updated", skillName: name, timestamp: new Date().toISOString() });
-    return c.json({ ok: true, data: { name, updated: true } }, 200);
+    return c.json({ ok: true, data: { name, updated: true, versioning: versioningOf({ pool: "agent", global, name }, mode) } }, 200);
   });
 
   // DELETE /skills/:name — remove a skill from the pool
@@ -369,8 +401,11 @@ export function skillRoutes(getDeps: () => {
     path: "/{name}/content",
     tags: ["Skills"],
     summary: "Get skill content",
+    description: "The skill as agents run it (its production version) with `versioning` (production, latest, the draft: changes, external, stale). "
+      + "?view=draft returns the skill's folder instead: the draft, pending changes included.",
     request: {
       params: z.object({ name: z.string() }),
+      query: z.object({ view: z.enum(["production", "draft"]).optional() }),
     },
     responses: {
       200: {
@@ -389,12 +424,14 @@ export function skillRoutes(getDeps: () => {
     const polpoDir = deps.polpoDir;
     const workDir = deps.workDir;
     const { name } = c.req.valid("param");
+    const view = c.req.query("view") === "draft" ? "draft" : "production";
 
-    const skill = getSkillByName(workDir, polpoDir, name, "agent");
+    const skill = getSkillByName(workDir, polpoDir, name, "agent", view);
     if (!skill) {
       return c.json({ ok: false, error: `Skill "${name}" not found`, code: "NOT_FOUND" }, 404);
     }
-    return c.json({ ok: true, data: skill }, 200);
+    const state = stateOf({ pool: "agent", global: skill.source === "global", name: basename(skill.path) });
+    return c.json({ ok: true, data: { ...skill, view, ...(state ? { versioning: state } : {}) } }, 200);
   });
 
   // ═══════════════════════════════════════════════════════
@@ -486,6 +523,7 @@ export function skillRoutes(getDeps: () => {
               description: z.string().optional(),
               content: z.string().optional(),
               allowedTools: z.array(z.string()).optional(),
+              ...publishFields,
             }),
           },
         },
@@ -493,8 +531,8 @@ export function skillRoutes(getDeps: () => {
     },
     responses: {
       200: {
-        content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ name: z.string() }) }) } },
-        description: "Skill updated",
+        content: { "application/json": { schema: z.object({ ok: z.boolean(), data: z.object({ name: z.string(), versioning: z.any().optional() }) }) } },
+        description: "Skill updated (versioning: draft or published, and the lifecycle state)",
       },
       404: {
         content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
@@ -507,14 +545,20 @@ export function skillRoutes(getDeps: () => {
     const deps = getDeps();
     const polpoDir = deps.polpoDir;
     const { name } = c.req.valid("param");
-    const body = c.req.valid("json");
-
-    const ok = updateOrchestratorSkill(polpoDir, name, body, false, authorOf(c));
+    const { publish, bump, version, note, ...body } = c.req.valid("json");
+    const mode = modeOf(publish);
+    let ok: boolean;
+    try {
+      ok = updateOrchestratorSkill(polpoDir, name, body, false, authorOf(c), { mode, ...(note ? { note } : {}), ...(bump ? { bump } : {}), ...(version ? { version } : {}) });
+    } catch (err) {
+      if (err instanceof SkillVersionError) return c.json({ ok: false, error: err.message, code: err.code }, err.code === "CONFLICT" ? 409 : 400) as any;
+      throw err;
+    }
     if (!ok) {
       return c.json({ ok: false, error: `Skill "${name}" not found`, code: "NOT_FOUND" }, 404);
     }
     deps.emit("skill:changed", { scope: "orchestrator", action: "updated", skillName: name, timestamp: new Date().toISOString() });
-    return c.json({ ok: true, data: { name } }, 200);
+    return c.json({ ok: true, data: { name, versioning: versioningOf({ pool: "orchestrator", name }, mode) } }, 200);
   });
 
   // DELETE /skills/orchestrator/:name — remove an orchestrator skill
@@ -557,8 +601,10 @@ export function skillRoutes(getDeps: () => {
     path: "/orchestrator/{name}/content",
     tags: ["Skills"],
     summary: "Get orchestrator content",
+    description: "The skill as Polpo runs it (its production version) with `versioning`; ?view=draft returns the skill's folder (the draft).",
     request: {
       params: z.object({ name: z.string() }),
+      query: z.object({ view: z.enum(["production", "draft"]).optional() }),
     },
     responses: {
       200: {
@@ -578,11 +624,13 @@ export function skillRoutes(getDeps: () => {
     const workDir = deps.workDir;
     const { name } = c.req.valid("param");
 
-    const skill = getSkillByName(workDir, polpoDir, name, "orchestrator");
+    const view = c.req.query("view") === "draft" ? "draft" : "production";
+    const skill = getSkillByName(workDir, polpoDir, name, "orchestrator", view);
     if (!skill) {
       return c.json({ ok: false, error: `Skill "${name}" not found`, code: "NOT_FOUND" }, 404);
     }
-    return c.json({ ok: true, data: skill }, 200);
+    const state = stateOf({ pool: "orchestrator", global: skill.source === "global", name: basename(skill.path) });
+    return c.json({ ok: true, data: { ...skill, view, ...(state ? { versioning: state } : {}) } }, 200);
   });
 
   // POST /skills/orchestrator/add — install orchestrator skills from source

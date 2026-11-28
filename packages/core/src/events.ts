@@ -215,6 +215,10 @@ export interface PolpoEventMap {
   "artifact:changed": { artifactId: string; action: "created" | "updated" | "deleted"; type: string; title: string; timestamp: string };
   "data-view:changed": { viewId: string; action: "created" | "updated" | "deleted"; timestamp: string };
   "skill:changed": { scope: "agent" | "orchestrator"; action: "created" | "updated" | "deleted" | "installed" | "assigned" | "unassigned" | "indexed"; skillName?: string; agentName?: string; timestamp: string };
+  /** A skill version was published to production (a draft published, or a change applied directly). */
+  "skill:published": { scope: "agent" | "orchestrator"; skillName: string; global?: boolean; version: string; versionNumber: number; previous?: string; bump?: string; author: string; note?: string; direct?: boolean; timestamp: string };
+  /** A skill's production was rolled back to an earlier version. */
+  "skill:rolled-back": { scope: "agent" | "orchestrator"; skillName: string; global?: boolean; from?: string; to: string; versionNumber: number; author: string; note?: string; timestamp: string };
   "token-usage:recorded": { timestamp: string };
 
   // Notifications
