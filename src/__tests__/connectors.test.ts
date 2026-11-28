@@ -1430,6 +1430,51 @@ describe("per-identity connectors: accounts per agent / person", () => {
     }
   });
 
+  it("the API: the connector's status from its accounts, and which person accounts are the caller's own", async () => {
+    const { manager, app, addAccount } = await identitySetup();
+    const status = async () => (await (await app.request("/api/v1/connectors/mail")).json()).data;
+    expect(await status()).toMatchObject({ status: "disconnected", accountSummary: { total: 0, connected: 0 } });
+    const nina = await addAccount("agent:nina", "sitoinchat", "tok-nina-site");
+    await addAccount("me", "personale", "tok-nina-personal");
+    await addAccount("person:bo@acme.com", "bo", "tok-luca");
+    await manager.test("mail", nina.id);
+    const d = await status();
+    expect(d).toMatchObject({ status: "partial", accountSummary: { total: 3, connected: 1 } });
+    expect(d.accounts.find((a: any) => a.label === "personale").isMe).toBe(true);
+    expect(d.accounts.find((a: any) => a.label === "bo").isMe).toBeUndefined();
+    const list = (await (await app.request("/api/v1/connectors")).json()).data;
+    expect(list.me).toEqual({ identity: "person:ada@acme.com", email: "ada@acme.com", signedIn: true });
+    for (const a of manager.store.get("mail")!.accounts!) await manager.test("mail", a.id);
+    expect((await status()).status).toBe("connected");
+    await app.request("/api/v1/connectors/mail", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: false }) });
+    expect((await status()).status).toBe("disabled");
+  });
+
+  it("converts an org / personal connector into a new per-identity connector in one step", async () => {
+    const { manager } = setup();
+    const app = routesAppWith(manager, { agentNames: ["nina", "luca"] });
+    await add(manager, { id: "mail-nina", name: "Mail Nina", url: `${base}/who-mcp`, auth: { type: "bearer" }, scope: { kind: "agent", agent: "nina" }, secrets: { bearerToken: "tok-legacy-nina", values: { REGION: "eu" } }, toolPolicy: { send: "off" } });
+    const r = await app.request("/api/v1/connectors/mail-nina/convert", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: "mail", name: "Mail", label: "sitoinchat" }) });
+    expect(r.status).toBe(201);
+    const d = (await r.json()).data;
+    expect(d.connector).toMatchObject({ id: "mail", name: "Mail", scope: { kind: "identity" }, access: { agents: ["nina"] }, toolPolicy: { send: "off" }, status: "disconnected" });
+    expect(d.account).toMatchObject({ identity: "agent:nina", label: "sitoinchat", default: true, importedFrom: "mail-nina" });
+    expect(manager.store.get("mail-nina")).toBeUndefined();
+    expect(await manager.secrets.get("mail")).toEqual({ "secret:REGION": "eu" });
+    const who = (await manager.toolsFor("nina")).tools.find((t) => t.name === "mcp__mail__who")!;
+    expect(text(await who.execute("1", {}))).toBe("tok-legacy-nina");
+    // an org connector needs to be told whose account it becomes; nothing is left behind on failure
+    await add(manager, { id: "plain", name: "Plain", url: `${base}/who-mcp`, auth: { type: "bearer" }, secrets: { bearerToken: "tok-org" } });
+    const bad = await app.request("/api/v1/connectors/plain/convert", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ identity: "agent:ghost" }) });
+    expect(bad.status).toBe(400);
+    expect(manager.store.list().map((c) => c.id).sort()).toEqual(["mail", "plain"]);
+    // MCP: import with as_new
+    const { call } = mcpToolsOver(app);
+    const made = await call("polpo_connector_account_import", { id: "plain-team", from: "plain", as_new: true, identity: "org", label: "shared", fallback: true, confirm: true });
+    expect(made.isError).toBeFalsy();
+    expect(manager.store.get("plain-team")).toMatchObject({ scope: { kind: "identity", fallback: true }, accounts: [expect.objectContaining({ identity: "org", label: "shared" })] });
+  });
+
   it("core resolution rules", () => {
     const c = {
       id: "m", name: "M", scope: { kind: "identity" as const },

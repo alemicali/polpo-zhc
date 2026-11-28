@@ -3088,13 +3088,16 @@ export interface Connector {
   scope?: ConnectorScope;
   /** scope "identity": the accounts the identities connected (no secrets: only which are set). */
   accounts?: ConnectorAccount[];
+  /** scope "identity": how many accounts, and how many are connected. */
+  accountSummary?: { total: number; connected: number };
   enabled: boolean;
   /** The catalog entry it came from (another account of the same app shares it). */
   catalogId?: string;
   toolPolicy?: Record<string, ConnectorToolPolicy>;
   createdAt: string;
   updatedAt?: string;
-  status?: ConnectorStatus;
+  /** A per-identity connector's comes from its accounts: "partial" when only some are connected. */
+  status?: ConnectorStatus | "partial";
   lastError?: string;
   toolCount?: number;
   lastConnectedAt?: string;
@@ -3121,6 +3124,8 @@ export interface ConnectorAccount {
   identity: ConnectorIdentity;
   /** "agent nina", "ada@acme.com", "the organization (fallback)". */
   identityLabel?: string;
+  /** A person's account that is the signed-in caller's own. */
+  isMe?: boolean;
   /** What its owner picks it by (`account: "sitoinchat"` on any of the connector's tools). */
   label: string;
   /** Its identity's default account. */
@@ -3164,6 +3169,18 @@ export interface ConnectorAccountImportInput {
   label?: string;
   default?: boolean;
   /** false: turn the source off instead of deleting it (default true). */
+  removeSource?: boolean;
+}
+
+/** POST /connectors/:id/convert: a new per-identity connector made from this one, which becomes its first account. */
+export interface ConnectorConvertInput {
+  /** Default: the catalog id, else the name, made unique. */
+  id?: string;
+  name?: string;
+  /** Default: the source's owner (an agent's own connector). */
+  identity?: ConnectorIdentity | "me";
+  label?: string;
+  fallback?: boolean;
   removeSource?: boolean;
 }
 

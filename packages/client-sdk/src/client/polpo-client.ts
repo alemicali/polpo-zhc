@@ -17,6 +17,7 @@ import type {
   ConnectorAccountImportInput,
   ConnectorAccountImportResult,
   ConnectorAccountUpdateInput,
+  ConnectorConvertInput,
   ConnectorIdentity,
   ConnectorStatus,
   ConnectorCreateInput,
@@ -1018,6 +1019,14 @@ export class PolpoClient {
   /** Turn a separate connector of the same app into an account of this per-identity connector (explicit, opt-in). */
   importConnectorAccount(id: string, input: ConnectorAccountImportInput): Promise<ConnectorAccountImportResult> {
     return this.post(`/connectors/${encodeURIComponent(id)}/accounts/import`, input);
+  }
+
+  /**
+   * In one step, a new per-identity connector made from an org / personal connector (same app, sign-in,
+   * tool policy, access), which becomes its first account (explicit, opt-in).
+   */
+  convertConnectorToIdentity(id: string, input: ConnectorConvertInput = {}): Promise<ConnectorAccountImportResult> {
+    return this.post(`/connectors/${encodeURIComponent(id)}/convert`, input);
   }
 
   // ── Computers: start, stop, restart, reset ──

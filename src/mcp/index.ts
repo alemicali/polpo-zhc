@@ -18,9 +18,9 @@ export type { ConnectorInput, ConnectorSecretsInput } from "./validate.js";
 export { publicConnector, publicConnectorAccount, connectorLabel, accountFromIdToken } from "./view.js";
 export type { PublicConnector, PublicConnectorAccount } from "./view.js";
 export {
-  addConnectorAccount, updateConnectorAccount, removeConnectorAccount, importConnectorAccount, normalizeIdentity,
+  addConnectorAccount, updateConnectorAccount, removeConnectorAccount, importConnectorAccount, convertToIdentityConnector, normalizeIdentity,
 } from "./accounts.js";
-export type { ConnectorAccountInput, ConnectorAccountImportInput, ConnectorAccountImportResult, AccountContext } from "./accounts.js";
+export type { ConnectorAccountInput, ConnectorAccountImportInput, ConnectorAccountImportResult, ConnectorConvertInput, AccountContext } from "./accounts.js";
 export { connectorManagerFor, notePublicOrigin, connectorRedirectUri, connectorsPromptSection, currentConnectorPerson } from "./runtime.js";
 export { CONNECTOR_OAUTH_CALLBACK_PATH, CONNECTOR_CLIENT_METADATA_PATH, clientMetadataDocument, clientMetadataUrlFor } from "./paths.js";
 export { normalizeCatalogEntry } from "./catalog.js";

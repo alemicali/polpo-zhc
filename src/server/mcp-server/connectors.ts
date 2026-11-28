@@ -722,9 +722,12 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
     title: "Import a connector as an account",
     description: "Turn a separate connector of the same app (gmail-2, mail-nina…) into an account of a per-identity connector: its sign-in moves to the new account "
       + "(nobody signs in again), its owner's identity and label are kept or given, and the source connector is removed (keep_source: turned off instead). "
-      + "Its tools change name: mcp__<source>__… become mcp__<id>__… with that account. Explicit, never automatic. Needs confirm: true.",
+      + "Its tools change name: mcp__<source>__… become mcp__<id>__… with that account. Explicit, never automatic. Needs confirm: true. "
+      + "as_new: true makes the per-identity connector itself from the source in the same step (same app, sign-in, tool policy, access; id = the new one's id).",
     inputSchema: {
-      id: z.string().min(1).describe("The per-identity connector's id"),
+      id: z.string().min(1).describe("The per-identity connector's id (with as_new: the id the new one gets)"),
+      as_new: z.boolean().optional().describe("Create the per-identity connector from the source first (it must not exist yet)"),
+      fallback: z.boolean().optional().describe("as_new: turn the org fallback on"),
       from: z.string().min(1).describe("The connector to import"),
       identity: identityParam.optional().describe("Whose account it becomes; default: the source's owner (an agent's own connector)"),
       label: z.string().min(1).max(64).optional().describe("Default: the source's signed-in account, else its name"),
@@ -734,7 +737,21 @@ export function registerConnectorTools(tool: Register, deps: McpDeps): void {
     },
     outputSchema: { account: accountOut, source_removed: z.boolean(), renamed: z.object({ from: z.string(), to: z.string() }) },
     annotations: DESTRUCTIVE,
-  }, async ({ id, from, identity, label, default: makeDefault, keep_source, confirm }) => {
+  }, async ({ id, as_new, fallback, from, identity, label, default: makeDefault, keep_source, confirm }) => {
+    if (as_new) {
+      if (confirm !== true) {
+        return fail(`Making the per-identity connector ${id} from ${from} moves ${from}'s sign-in to its first account and ${keep_source ? "turns " + from + " off" : "removes " + from}; `
+          + `skills and playbooks naming mcp__${from}__… must use mcp__${id}__… then. Ask the person, then call again with confirm: true.`);
+      }
+      const r = await apiSend(deps, "POST", `/connectors/${enc(from)}/convert`, {
+        id, ...(identity ? { identity: identityOf(identity) } : {}), ...(label ? { label } : {}), ...(fallback ? { fallback: true } : {}), ...(keep_source ? { removeSource: false } : {}),
+      });
+      if (!r.ok) return apiError(r, `Making ${id} from ${from}`);
+      const d = r.data as { account: Account; source: { removed: boolean }; renamed: { from: string; to: string } };
+      return ok(`Made the per-identity connector ${id}: ${from} is now its account "${d.account.label}" of ${d.account.identityLabel ?? d.account.identity} (default); `
+        + `${d.source.removed ? `${from} was removed` : `${from} was turned off`}. Tools: ${d.renamed.from} → ${d.renamed.to}. Other identities add theirs with polpo_connector_account_add.`,
+        { account: accountItem(d.account), source_removed: d.source.removed, renamed: d.renamed });
+    }
     const found = await identityConnector(id);
     if ("error" in found) return found.error!;
     if (confirm !== true) {

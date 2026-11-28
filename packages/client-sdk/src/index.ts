@@ -138,6 +138,7 @@ export type {
   ConnectorAccountUpdateInput,
   ConnectorAccountImportInput,
   ConnectorAccountImportResult,
+  ConnectorConvertInput,
   ConnectorIdentity,
   ConnectorCreateInput,
   ConnectorUpdateInput,

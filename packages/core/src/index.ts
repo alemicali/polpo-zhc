@@ -318,7 +318,7 @@ export {
   connectorOwner, connectorAccessProblem, connectorVisibleTo, isIdentityConnector,
   CONNECTOR_ACCOUNT_LABEL_PATTERN, ORG_CONNECTOR_IDENTITY, SHARED_PERSON, NO_PERSON, agentConnectorIdentity, personConnectorIdentity, callerConnectorIdentity,
   parseConnectorIdentity, connectorIdentityLabel, connectorAccountService, connectorAccountsOf, connectorFallbackOn, connectorAccountAllowed,
-  resolveConnectorAccount,
+  resolveConnectorAccount, identityConnectorStatus,
   connectorToolSelected, connectorToolsProblems, normalizeConnectorTools,
 } from "./connectors.js";
 export type {

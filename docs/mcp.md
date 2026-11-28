@@ -195,7 +195,7 @@ Group chats of people and agents (the dashboard's groups).
 | `polpo_connector_account_update` | Rename an account or make it its identity's default. | write, idempotent |
 | `polpo_connector_account_connect` | Sign an account in (again): `authorization_url`, `setup_url` or a connection test. | write, open world |
 | `polpo_connector_account_disconnect`, `polpo_connector_account_remove` | Sign one account out, or remove it with its secrets (`confirm: true`). | destructive |
-| `polpo_connector_account_import` | Turn a separate connector of the same app (`gmail-2`, `mail-nina`…) into an account of a per-identity connector: its sign-in moves, the source is removed (`keep_source`: turned off); tool names change (`confirm: true`). | destructive |
+| `polpo_connector_account_import` | Turn a separate connector of the same app (`gmail-2`, `mail-nina`…) into an account of a per-identity connector: its sign-in moves, the source is removed (`keep_source`: turned off); tool names change (`confirm: true`). `as_new: true` makes the per-identity connector (`id`) from the source in the same step. | destructive |
 
 **Connector secrets never go through MCP**: there is no parameter for a token, a header value or an OAuth app's client secret. The person enters them on the dashboard's Connectors page (`setup_url`).
 

@@ -405,6 +405,22 @@ export function connectorIdentityLabel(identity: ConnectorIdentity): string {
   return p.email === SHARED_PERSON ? "the person (no sign-in)" : p.email;
 }
 
+/**
+ * A per-identity connector's own status, from its accounts: "connected" when every account is,
+ * "partial" when some are and others are not, else the most telling problem (needs_reauth,
+ * needs_auth, error), "disconnected" without accounts; "disabled" when it is off.
+ */
+export function identityConnectorStatus(connector: Pick<ConnectorConfig, "enabled" | "accounts">): ConnectorStatus | "partial" {
+  if (!connector.enabled) return "disabled";
+  const states = (connector.accounts ?? []).map((a) => a.status ?? "disconnected");
+  if (!states.length) return "disconnected";
+  const connected = states.filter((s) => s === "connected").length;
+  if (connected === states.length) return "connected";
+  if (connected > 0) return "partial";
+  for (const s of ["needs_reauth", "needs_auth", "error", "connecting"] as const) if (states.includes(s)) return s;
+  return "disconnected";
+}
+
 /** The vault service (owner `$connectors`) of one account's secrets. */
 export function connectorAccountService(connectorId: string, accountId: string): string {
   return `${connectorId}~${accountId}`;

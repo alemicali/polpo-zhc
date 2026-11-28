@@ -24,6 +24,7 @@
  *   GET    /connectors/:id/accounts                      ?identity=agent:nina | person:<email> | org | me
  *   POST   /connectors/:id/accounts                      { identity, label, default?, secrets? } (token / headers: write-only)
  *   POST   /connectors/:id/accounts/import               { from, identity?, label?, default?, removeSource? }: another connector of the same app becomes an account
+ *   POST   /connectors/:id/convert                       { id?, name?, identity?, label?, fallback?, removeSource? }: a new per-identity connector made from this one, which becomes its first account
  *   PATCH  /connectors/:id/accounts/:account             { label?, default: true?, secrets? }
  *   DELETE /connectors/:id/accounts/:account             revoke (best effort), delete its secrets
  *   POST   /connectors/:id/accounts/:account/oauth/start { authorizationUrl } (or { authorized: true })
@@ -37,10 +38,10 @@
  * and authenticated by the single-use, 10-minute state.
  */
 import { Hono, type Context } from "hono";
-import { CONNECTOR_ID_PATTERN, isIdentityConnector, type ConnectorConfig, type PolpoSettings } from "@polpo-ai/core";
+import { CONNECTOR_ID_PATTERN, isIdentityConnector, personConnectorIdentity, type ConnectorConfig, type PolpoSettings } from "@polpo-ai/core";
 import {
-  addConnectorAccount, importConnectorAccount, normalizeIdentity, removeConnectorAccount, updateConnectorAccount,
-  type ConnectorAccountImportInput, type ConnectorAccountInput,
+  addConnectorAccount, convertToIdentityConnector, importConnectorAccount, normalizeIdentity, removeConnectorAccount, updateConnectorAccount,
+  type ConnectorAccountImportInput, type ConnectorAccountInput, type ConnectorConvertInput,
 } from "../../mcp/accounts.js";
 import { CONNECTOR_CATALOG } from "../../mcp/catalog.js";
 import { ConnectorError, type ConnectorManager } from "../../mcp/manager.js";
@@ -81,14 +82,16 @@ export function connectorRoutes(deps: ConnectorRouteDeps): Hono {
     ...(deps.agentNames ? { agentNames: await deps.agentNames() } : {}),
   });
   /** The connector for the API: which of its (and its accounts') secrets are set, never their values. */
-  const show = async (manager: ConnectorManager, connector: ConnectorConfig) => {
+  /** The caller's own identity: the signed-in person ("person:<email>"), or the shared person without sign-in. */
+  const meOf = (c: Context) => personConnectorIdentity(deps.member?.(c));
+  const show = async (manager: ConnectorManager, connector: ConnectorConfig, me?: string) => {
     const accountKeys: Record<string, string[]> = {};
     for (const a of connector.accounts ?? []) accountKeys[a.id] = await manager.secrets.keys(`${connector.id}~${a.id}`);
-    return publicConnector(connector, await manager.secrets.keys(connector.id), accountKeys);
+    return publicConnector(connector, await manager.secrets.keys(connector.id), accountKeys, me);
   };
-  const view = async (manager: ConnectorManager, id: string) => {
+  const view = async (manager: ConnectorManager, id: string, me?: string) => {
     const connector = manager.store.get(id);
-    return connector ? show(manager, connector) : undefined;
+    return connector ? show(manager, connector, me) : undefined;
   };
   const accountCtx = async (manager: ConnectorManager, c: Context) => ({
     manager,
@@ -107,10 +110,13 @@ export function connectorRoutes(deps: ConnectorRouteDeps): Hono {
   app.get("/", async (c) => {
     const manager = deps.manager();
     const list = manager.store.list();
-    const connectors = await Promise.all(list.map((connector) => show(manager, connector)));
+    const me = meOf(c);
+    const connectors = await Promise.all(list.map((connector) => show(manager, connector, me)));
     // custom connectors without an icon yet (e.g. added before discovery existed): looked up in the background
     manager.icons.ensure(list);
-    return c.json({ ok: true, data: { connectors } });
+    // who "me" is (per-identity connectors' person accounts): the signed-in person, or the shared one without sign-in
+    const email = deps.member?.(c)?.trim().toLowerCase();
+    return c.json({ ok: true, data: { connectors, me: { identity: me, ...(email ? { email } : {}), signedIn: !!email } } });
   });
 
   app.get("/catalog", async (c) => {
@@ -160,7 +166,7 @@ export function connectorRoutes(deps: ConnectorRouteDeps): Hono {
       if (Object.keys(secrets).length) await manager.secrets.patch(connector.id, secrets);
       manager.announce(connector.id, "created");
       manager.icons.discoverSoon(connector.id);
-      return c.json({ ok: true, data: await view(manager, connector.id) }, 201);
+      return c.json({ ok: true, data: await view(manager, connector.id, meOf(c)) }, 201);
     } catch (err) {
       return fail(c, err);
     }
@@ -204,7 +210,7 @@ export function connectorRoutes(deps: ConnectorRouteDeps): Hono {
     if (!connector) return c.json({ ok: false, error: "Connector not found" }, 404);
     if (connector.catalogId) return c.json({ ok: false, error: `${connector.name} is a catalog connector: it uses its official icon` }, 400);
     await manager.icons.refresh(connector.id);
-    return c.json({ ok: true, data: await view(manager, connector.id) });
+    return c.json({ ok: true, data: await view(manager, connector.id, meOf(c)) });
   });
 
   app.put("/:id/icon", async (c) => {
@@ -216,7 +222,7 @@ export function connectorRoutes(deps: ConnectorRouteDeps): Hono {
       if (typeof body.dataUri === "string" && body.dataUri) manager.icons.setFromUpload(id, body.dataUri);
       else if (typeof body.url === "string" && body.url.trim()) await manager.icons.setFromUrl(id, body.url.trim());
       else throw new IconInputError("Give url (an https image) or dataUri (an uploaded image)");
-      return c.json({ ok: true, data: await view(manager, id) });
+      return c.json({ ok: true, data: await view(manager, id, meOf(c)) });
     } catch (err) {
       return fail(c, err);
     }
@@ -228,14 +234,14 @@ export function connectorRoutes(deps: ConnectorRouteDeps): Hono {
     if (!manager.store.get(id)) return c.json({ ok: false, error: "Connector not found" }, 404);
     try {
       await manager.icons.reset(id);
-      return c.json({ ok: true, data: await view(manager, id) });
+      return c.json({ ok: true, data: await view(manager, id, meOf(c)) });
     } catch (err) {
       return fail(c, err);
     }
   });
 
   app.get("/:id", async (c) => {
-    const data = await view(deps.manager(), c.req.param("id"));
+    const data = await view(deps.manager(), c.req.param("id"), meOf(c));
     return data ? c.json({ ok: true, data }) : c.json({ ok: false, error: "Connector not found" }, 404);
   });
 
@@ -256,7 +262,7 @@ export function connectorRoutes(deps: ConnectorRouteDeps): Hono {
       else if (patch.enabled === true && current.status === "disabled") manager.setStatus(current.id, "disconnected");
       manager.announce(current.id, "updated");
       // scope org → agent: the other agents it was enabled for lose it ("*" = every other agent)
-      return c.json({ ok: true, data: await view(manager, current.id), ...(droppedAgents ? { droppedAgents } : {}) });
+      return c.json({ ok: true, data: await view(manager, current.id, meOf(c)), ...(droppedAgents ? { droppedAgents } : {}) });
     } catch (err) {
       return fail(c, err);
     }
@@ -275,7 +281,7 @@ export function connectorRoutes(deps: ConnectorRouteDeps): Hono {
     const result = await manager.test(id, typeof body.account === "string" && body.account ? body.account : undefined);
     return c.json({
       ok: true,
-      data: { ...result, tools: result.tools?.map((t) => ({ name: t.name, title: t.title, description: t.description })), connector: await view(manager, id) },
+      data: { ...result, tools: result.tools?.map((t) => ({ name: t.name, title: t.title, description: t.description })), connector: await view(manager, id, meOf(c)) },
     });
   });
 
@@ -319,8 +325,8 @@ export function connectorRoutes(deps: ConnectorRouteDeps): Hono {
       const wanted = c.req.query("identity");
       const identity = wanted ? normalizeIdentity(wanted, await accountCtx(manager, c)) : undefined;
       const accounts = (connector.accounts ?? []).filter((a) => !identity || a.identity === identity);
-      const shown = await Promise.all(accounts.map(async (a) => publicConnectorAccount(a, await manager.secrets.keys(`${connector.id}~${a.id}`))));
-      return c.json({ ok: true, data: { accounts: shown, fallback: connector.scope?.kind === "identity" && connector.scope.fallback === true } });
+      const shown = await Promise.all(accounts.map(async (a) => publicConnectorAccount(a, await manager.secrets.keys(`${connector.id}~${a.id}`), meOf(c))));
+      return c.json({ ok: true, data: { accounts: shown, fallback: connector.scope?.kind === "identity" && connector.scope.fallback === true, me: meOf(c) } });
     } catch (err) {
       return fail(c, err);
     }
@@ -333,8 +339,23 @@ export function connectorRoutes(deps: ConnectorRouteDeps): Hono {
     const body = await c.req.json().catch(() => ({})) as ConnectorAccountImportInput;
     try {
       const result = await importConnectorAccount(await accountCtx(manager, c), id, body);
-      const account = publicConnectorAccount(result.account, await manager.secrets.keys(`${id}~${result.account.id}`));
-      return c.json({ ok: true, data: { ...result, account, connector: await view(manager, id) } }, 201);
+      const account = publicConnectorAccount(result.account, await manager.secrets.keys(`${id}~${result.account.id}`), meOf(c));
+      return c.json({ ok: true, data: { ...result, account, connector: await view(manager, id, meOf(c)) } }, 201);
+    } catch (err) {
+      return fail(c, err);
+    }
+  });
+
+  // an org or agent connector → a new per-identity connector for the same app, with it as the first account
+  app.post("/:id/convert", async (c) => {
+    const manager = deps.manager();
+    const id = c.req.param("id");
+    if (!manager.store.get(id)) return c.json({ ok: false, error: "Connector not found" }, 404);
+    const body = await c.req.json().catch(() => ({})) as ConnectorConvertInput;
+    try {
+      const result = await convertToIdentityConnector(await accountCtx(manager, c), id, body);
+      const account = publicConnectorAccount(result.account, await manager.secrets.keys(`${result.connector.id}~${result.account.id}`), meOf(c));
+      return c.json({ ok: true, data: { ...result, account, connector: await view(manager, result.connector.id, meOf(c)) } }, 201);
     } catch (err) {
       return fail(c, err);
     }
@@ -347,7 +368,7 @@ export function connectorRoutes(deps: ConnectorRouteDeps): Hono {
     const body = await c.req.json().catch(() => ({})) as ConnectorAccountInput;
     try {
       const account = await addConnectorAccount(await accountCtx(manager, c), id, body);
-      return c.json({ ok: true, data: { account: publicConnectorAccount(account, await manager.secrets.keys(`${id}~${account.id}`)), connector: await view(manager, id) } }, 201);
+      return c.json({ ok: true, data: { account: publicConnectorAccount(account, await manager.secrets.keys(`${id}~${account.id}`), meOf(c)), connector: await view(manager, id, meOf(c)) } }, 201);
     } catch (err) {
       return fail(c, err);
     }
@@ -360,7 +381,7 @@ export function connectorRoutes(deps: ConnectorRouteDeps): Hono {
     const body = await c.req.json().catch(() => ({})) as ConnectorAccountInput;
     try {
       const account = await updateConnectorAccount(await accountCtx(manager, c), found.connector.id, found.account.id, body);
-      return c.json({ ok: true, data: { account: publicConnectorAccount(account, await manager.secrets.keys(`${found.connector.id}~${account.id}`)), connector: await view(manager, found.connector.id) } });
+      return c.json({ ok: true, data: { account: publicConnectorAccount(account, await manager.secrets.keys(`${found.connector.id}~${account.id}`), meOf(c)), connector: await view(manager, found.connector.id, meOf(c)) } });
     } catch (err) {
       return fail(c, err);
     }
@@ -372,7 +393,7 @@ export function connectorRoutes(deps: ConnectorRouteDeps): Hono {
     if ("error" in found) return c.json({ ok: false, error: found.error }, 404);
     try {
       await removeConnectorAccount(await accountCtx(manager, c), found.connector.id, found.account.id);
-      return c.json({ ok: true, data: { removed: true, connector: await view(manager, found.connector.id) } });
+      return c.json({ ok: true, data: { removed: true, connector: await view(manager, found.connector.id, meOf(c)) } });
     } catch (err) {
       return fail(c, err);
     }
@@ -396,7 +417,7 @@ export function connectorRoutes(deps: ConnectorRouteDeps): Hono {
     const result = await manager.test(found.connector.id, found.account.id);
     return c.json({
       ok: true,
-      data: { ...result, tools: result.tools?.map((t) => ({ name: t.name, title: t.title, description: t.description })), connector: await view(manager, found.connector.id) },
+      data: { ...result, tools: result.tools?.map((t) => ({ name: t.name, title: t.title, description: t.description })), connector: await view(manager, found.connector.id, meOf(c)) },
     });
   });
 
@@ -405,7 +426,7 @@ export function connectorRoutes(deps: ConnectorRouteDeps): Hono {
     const found = accountOf(manager, c.req.param("id"), c.req.param("account"));
     if ("error" in found) return c.json({ ok: false, error: found.error }, 404);
     await manager.disconnect(found.connector.id, found.account.id);
-    return c.json({ ok: true, data: await view(manager, found.connector.id) });
+    return c.json({ ok: true, data: await view(manager, found.connector.id, meOf(c)) });
   });
 
   app.post("/:id/disconnect", async (c) => {
@@ -415,7 +436,7 @@ export function connectorRoutes(deps: ConnectorRouteDeps): Hono {
     if (!connector) return c.json({ ok: false, error: "Connector not found" }, 404);
     if (isIdentityConnector(connector)) return c.json({ ok: false, error: `${connector.name} is per identity: disconnect one of its accounts (/accounts/:account/disconnect)` }, 400);
     await manager.disconnect(id);
-    return c.json({ ok: true, data: await view(manager, id) });
+    return c.json({ ok: true, data: await view(manager, id, meOf(c)) });
   });
 
   return app;

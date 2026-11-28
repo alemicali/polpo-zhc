@@ -10,11 +10,12 @@
  */
 import { randomBytes } from "node:crypto";
 import {
-  CONNECTOR_ACCOUNT_LABEL_PATTERN, ORG_CONNECTOR_IDENTITY, connectorAccountAllowed, connectorAccountService, connectorIdentityLabel,
-  connectorOwner, isIdentityConnector, parseConnectorIdentity, personConnectorIdentity,
+  CONNECTOR_ACCOUNT_LABEL_PATTERN, CONNECTOR_ID_PATTERN, ORG_CONNECTOR_IDENTITY, connectorAccountAllowed, connectorAccountService, connectorIdentityLabel,
+  connectorOwner, connectorSlug, isIdentityConnector, parseConnectorIdentity, personConnectorIdentity,
   type ConnectorAccount, type ConnectorConfig, type ConnectorIdentity,
 } from "@polpo-ai/core";
 import type { ConnectorManager } from "./manager.js";
+import { catalogEntry } from "./catalog.js";
 import { SECRET_KEYS } from "./secrets.js";
 import { ConnectorInputError, type ConnectorSecretsInput } from "./validate.js";
 
@@ -261,4 +262,83 @@ export async function importConnectorAccount(ctx: AccountContext, id: string, in
     source: { id: fromId, removed: removeSource, disabled: !removeSource },
     renamed: { from: `mcp__${fromId}__*`, to: `mcp__${id}__* (account "${label}")` },
   };
+}
+
+export interface ConnectorConvertInput {
+  /** The new per-identity connector's id (default: the catalog id, else the source's name, made unique). */
+  id?: string;
+  /** Its name (default: the catalog entry's name, else the source's). */
+  name?: string;
+  /** Whose account the source becomes (default: the source's owner, for an agent's own connector). */
+  identity?: string;
+  label?: string;
+  /** Turn the org fallback on. */
+  fallback?: boolean;
+  /** true (default): delete the source after the import; false: turn it off. */
+  removeSource?: boolean;
+}
+
+/**
+ * In one step: a new per-identity connector for the same app as `sourceId` (its server, sign-in,
+ * OAuth client and shared secrets, tool policy, timeout and access), then the source imported into
+ * it as its first account (importConnectorAccount). Explicit and opt-in; on failure nothing is left behind.
+ */
+export async function convertToIdentityConnector(ctx: AccountContext, sourceId: string, input: ConnectorConvertInput = {}): Promise<ConnectorAccountImportResult & { connector: ConnectorConfig }> {
+  const { manager } = ctx;
+  const source = manager.store.get(sourceId);
+  if (!source) throw new ConnectorInputError(`No connector "${sourceId}"`);
+  if (isIdentityConnector(source)) throw new ConnectorInputError(`${source.name} is per identity already`);
+  if (source.transport.type === "hosted" || source.transport.type === "stdio") throw new ConnectorInputError(`${source.name} runs locally / is hosted: only remote connectors can be per identity`);
+  const owner = connectorOwner(source);
+  const identity = input.identity !== undefined ? normalizeIdentity(input.identity, ctx) : owner ? `agent:${owner}` : undefined;
+  if (!identity) throw new ConnectorInputError(`identity: say whose account ${source.name} becomes ("agent:<name>", "person:<email>", "me" or "org" for the fallback)`);
+  const taken = manager.store.list().map((c) => c.id);
+  let id = (input.id ?? "").trim();
+  if (id) {
+    if (!CONNECTOR_ID_PATTERN.test(id)) throw new ConnectorInputError("id: use lowercase letters, digits and - (max 40)");
+    if (taken.includes(id)) throw new ConnectorInputError(`A connector "${id}" already exists`);
+  } else {
+    const base = source.catalogId ?? connectorSlug(source.name);
+    id = base;
+    let n = 1;
+    while (taken.includes(id)) id = `${base.slice(0, 36)}-${++n}`;
+  }
+  const name = (input.name ?? (source.catalogId ? catalogEntry(source.catalogId)?.name : undefined) ?? source.name).trim() || source.name;
+  // the source's access, plus what the new account's identity needs to use it
+  const access: ConnectorConfig["access"] = { agents: source.access.agents === "*" ? "*" : [...source.access.agents], polpo: source.access.polpo };
+  const p = parseConnectorIdentity(identity);
+  if (p?.kind === "agent" && access.agents !== "*" && !access.agents.includes(p.agent)) access.agents.push(p.agent);
+  if (p?.kind === "person") access.polpo = true;
+  const connector: ConnectorConfig = {
+    id, name, kind: "mcp",
+    ...(source.description ? { description: source.description } : {}),
+    transport: { ...source.transport },
+    auth: JSON.parse(JSON.stringify(source.auth)) as ConnectorConfig["auth"],
+    access,
+    scope: { kind: "identity", ...(input.fallback ? { fallback: true } : {}) },
+    enabled: true,
+    ...(source.catalogId ? { catalogId: source.catalogId } : {}),
+    ...(source.icon ? { icon: source.icon } : {}),
+    ...(source.toolTimeoutMs !== undefined ? { toolTimeoutMs: source.toolTimeoutMs } : {}),
+    ...(source.toolPolicy ? { toolPolicy: { ...source.toolPolicy } } : {}),
+    createdAt: new Date().toISOString(),
+    status: "disconnected",
+  };
+  manager.store.create(connector);
+  // what the accounts share: a pre-registered OAuth client's secret and ${vault:KEY} values
+  const shared = Object.fromEntries(Object.entries(await manager.secrets.get(sourceId)).filter(([k]) => k === SECRET_KEYS.clientSecret || k.startsWith("secret:")));
+  try {
+    if (Object.keys(shared).length) await manager.secrets.patch(id, shared);
+    manager.announce(id, "created");
+    const result = await importConnectorAccount(ctx, id, {
+      from: sourceId, identity, ...(input.label ? { label: input.label } : {}), default: true,
+      ...(input.removeSource === false ? { removeSource: false } : {}),
+    });
+    return { ...result, connector: manager.store.get(id)! };
+  } catch (err) {
+    // nothing half-made: the new connector goes, the source stays as it was
+    await manager.secrets.remove(id);
+    manager.store.remove(id);
+    throw err;
+  }
 }
