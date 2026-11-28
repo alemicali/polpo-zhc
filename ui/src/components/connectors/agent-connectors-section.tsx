@@ -1,8 +1,11 @@
 /**
- * Agent page → Tools: which connectors this agent can use, with a switch to grant or revoke each
- * one (PATCH the connector's access). Two tabs: Enabled (this agent can use them) and Available. Connectors open to every agent show as granted; turning one
- * off keeps every other agent. A granted connector expands to choose which of its tools the agent
- * gets (all, or only selected ones: agent.connectorTools).
+ * Agent page → Tools: the connectors at this agent's disposal, with a switch to enable or disable
+ * each one for it (PATCH the connector's access). Two tabs: Enabled (this agent can use them) and
+ * Available (every organization connector not enabled for it, plus its own personal ones not
+ * enabled). Another agent's personal connector (scope agent) never shows here. Each row says
+ * whether it is the organization's ("Org") or this agent's own ("Personal"). Connectors open to
+ * every agent show as enabled; turning one off keeps every other agent. An enabled connector
+ * expands to choose which of its tools the agent gets (all, or only selected ones: agent.connectorTools).
  */
 import { useState } from "react";
 import { Link } from "react-router-dom";
@@ -10,11 +13,12 @@ import { useAgents } from "@polpo-ai/react";
 import { toast } from "sonner";
 import { AlertTriangle, ChevronDown, Plug } from "lucide-react";
 import { SectionHeader } from "@/components/shared/section-header";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useConnectors } from "@/hooks/use-connectors";
 import {
-  accountLabel, agentHasAccess, allowedToolsCoverConnector, connectorState, connectorToolsEntry, connectorsApi, toggleAgentAccess,
+  accountLabel, agentHasAccess, allowedToolsCoverConnector, connectorOwner, connectorState, connectorToolsEntry, connectorVisibleTo, connectorsApi, toggleAgentAccess,
   type AgentConnectorTools as Selection, type Connector,
 } from "@/lib/connectors-api";
 import { cn } from "@/lib/utils";
@@ -39,8 +43,10 @@ export function AgentConnectorsSection({
   // the last saved selection, ahead of the agent reload
   const [selection, setSelection] = useState<{ value: Selection | undefined; base: Selection | undefined } | null>(null);
   const current = selection && selection.base === connectorTools ? selection.value : connectorTools;
-  const enabled = connectors.filter((c) => agentHasAccess(c.access, agentName));
-  const available = connectors.filter((c) => !agentHasAccess(c.access, agentName));
+  // another agent's personal connectors are never at this agent's disposal
+  const mine = connectors.filter((c) => connectorVisibleTo(c, agentName));
+  const enabled = mine.filter((c) => agentHasAccess(c.access, agentName));
+  const available = mine.filter((c) => !agentHasAccess(c.access, agentName));
   const granted = enabled.length;
   // Enabled first; with none enabled yet, open on Available. A toggle keeps the tab where it is.
   const [chosenTab, setTab] = useState<"enabled" | "available" | null>(null);
@@ -67,7 +73,7 @@ export function AgentConnectorsSection({
         <p className="text-xs text-muted-foreground">Loading connectors…</p>
       ) : error ? (
         <p className="text-xs text-destructive">{error}</p>
-      ) : connectors.length === 0 ? (
+      ) : mine.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           No connectors yet. <Link to="/connectors" className="text-primary hover:underline">Connect an app</Link> (Linear, Notion, GitHub…) and give this agent its tools.
         </p>
@@ -102,9 +108,16 @@ export function AgentConnectorsSection({
                       <span className="truncate text-sm font-medium">{connector.name}</span>
                       {/* several accounts of one app: which one this is */}
                       {account && <span className="min-w-0 truncate text-caption text-muted-foreground">{account}</span>}
+                      {/* the organization's, or this agent's own */}
+                      {connectorOwner(connector) ? (
+                        <Badge variant="outline" data-testid="connector-scope-chip" className="shrink-0 self-center border-primary/40 bg-primary/10 px-1.5 py-0 text-micro text-primary">Personal</Badge>
+                      ) : (
+                        <Badge variant="outline" data-testid="connector-scope-chip" className="shrink-0 self-center px-1.5 py-0 text-micro text-muted-foreground">Org</Badge>
+                      )}
                     </p>
                     <p className="truncate text-xs text-muted-foreground">
-                      {connector.access.agents === "*" ? "Open to every agent" : on ? "This agent can use its tools" : "Not granted"}
+                      {connectorOwner(connector) ? (on ? "Its own: only this agent can use it" : "Its own: not enabled yet")
+                        : connector.access.agents === "*" ? "Open to every agent" : on ? "This agent can use its tools" : "Not granted"}
                       {on && entry !== "*" ? ` · ${entry.length} selected tool${entry.length === 1 ? "" : "s"}` : connector.toolCount !== undefined ? ` · ${connector.toolCount} tools` : ""}
                     </p>
                     {blockedByAllowlist && (

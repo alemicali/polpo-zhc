@@ -23,7 +23,7 @@ import { randomUUID } from "node:crypto";
 import {
   AGENT_TEST_DEFAULT_CHECKS, AGENT_TEST_TITLES, HOST_COMPUTER_ID,
   agentCliEngine, agentEgressName, agentEngineProblem, agentHarness, cliAccountUseProblem, cliEngineProblem, cliSettingsOf,
-  connectorGrants, connectorToolSelected, harnessVaultRefs, harnessesSettingsOf, instanceServesCustomers, isAgentTestCheckId,
+  connectorAccessProblem, connectorGrants, connectorOwner, connectorToolSelected, harnessVaultRefs, harnessesSettingsOf, instanceServesCustomers, isAgentTestCheckId,
   isRemoteComputer, resolveCliAccount, worstAgentTestStatus,
   type AgentConfig, type AgentTestCheckId, type AgentTestCheckResult, type AgentTestFixAction, type AgentTestItem,
   type AgentTestRun, type AgentTestRunRequest, type AgentTestStatus, type AgentTestStore, type AgentVersionState,
@@ -389,6 +389,11 @@ export class AgentTester {
       const c = byId.get(id);
       if (!c) { items.push({ label: where, status: "warn", detail: `There is no connector "${id}"`, fix: { label: "Open connectors", href: "/connectors" } }); continue; }
       if (!c.enabled) { items.push({ label: `${c.name} (${where})`, status: "warn", detail: `${c.name} is turned off: the agent gets none of its tools`, fix: { label: "Open connectors", href: "/connectors" } }); continue; }
+      const owner = connectorOwner(c);
+      if (owner !== undefined && owner !== agent.name) {
+        items.push({ label: `${c.name} (${where})`, status: "fail", detail: `${where} names ${c.name}, but it belongs to agent ${owner} (a personal connector): ${agent.name} can never use it` });
+        continue;
+      }
       if (!connectorGrants(c, agent.name)) {
         items.push({
           label: `${c.name} (${where})`, status: "fail",
@@ -649,6 +654,8 @@ export class AgentTester {
     const c = this.deps.connectors().find((x) => x.id === action.connector);
     if (!c) throw Object.assign(new Error(`There is no connector "${action.connector}"`), { name: "AgentTestError", code: "NOT_FOUND" });
     if (connectorGrants({ ...c, enabled: true }, name)) return { message: `${c.name} already grants ${name}` };
+    const problem = connectorAccessProblem(c.scope, { agents: [name] });
+    if (problem) throw Object.assign(new Error(problem), { name: "AgentTestError", code: "INVALID" });
     await this.deps.grantConnector(c.id, name);
     return { message: `${c.name} now grants ${name}: its tools reach the agent from its next turn` };
   }

@@ -315,11 +315,12 @@ export type {
 // Connectors: external tools over MCP (Linear, Notion, Google Workspace, custom servers)
 export {
   CONNECTOR_ID_PATTERN, CONNECTORS_VAULT_OWNER, DEFAULT_CONNECTOR_TOOL_TIMEOUT_MS, connectorGrants, connectorSlug,
+  connectorOwner, connectorAccessProblem, connectorVisibleTo,
   connectorToolSelected, connectorToolsProblems, normalizeConnectorTools,
 } from "./connectors.js";
 export type {
   ConnectorConfig, ConnectorIcon, ConnectorIconAsset, ConnectorIconImage, ConnectorIconSource, ConnectorTransport, ConnectorAuth, ConnectorAuthType, ConnectorOAuthSettings, ConnectorAccess,
-  ConnectorToolPolicy, ConnectorStatus, ConnectorOAuthApp, AgentConnectorTools, ConnectorsFile, ConnectorCatalogEntry, ConnectorChangedEvent,
+  ConnectorScope, ConnectorToolPolicy, ConnectorStatus, ConnectorOAuthApp, AgentConnectorTools, ConnectorsFile, ConnectorCatalogEntry, ConnectorChangedEvent,
 } from "./connectors.js";
 export { EGRESS_PROXY_NAME, EGRESS_PROXY_URL, parseEgressProxies } from "./egress-proxies.js";
 export {

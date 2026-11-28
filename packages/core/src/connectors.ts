@@ -99,6 +99,13 @@ export interface ConnectorAccess {
   polpo: boolean;
 }
 
+/**
+ * Who a connector belongs to. "org" (the default, also when missing): the organization's; its
+ * access decides which agents may use it. "agent": one agent's own (a personal mailbox): only that
+ * agent may ever use its tools, whatever its access says (access.agents is [owner] or [], never "*").
+ */
+export type ConnectorScope = { kind: "org" } | { kind: "agent"; agent: string };
+
 /** Per-tool policy: "off" hides the tool, "ask" needs the person's approval before it runs (chat), "allow" (default) runs it. */
 export type ConnectorToolPolicy = "allow" | "ask" | "off";
 
@@ -124,6 +131,8 @@ export interface ConnectorConfig {
   transport: ConnectorTransport;
   auth: ConnectorAuth;
   access: ConnectorAccess;
+  /** Who it belongs to: missing = { kind: "org" } (every connector made before scopes existed). */
+  scope?: ConnectorScope;
   enabled: boolean;
   /** Catalog entry it was created from, if any. */
   catalogId?: string;
@@ -215,10 +224,41 @@ export const CONNECTOR_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,39}$/;
 export const CONNECTORS_VAULT_OWNER = "$connectors";
 export const DEFAULT_CONNECTOR_TOOL_TIMEOUT_MS = 60_000;
 
-/** True when the connector's tools may be used by `agent` (or by Polpo when agent is undefined). */
-export function connectorGrants(connector: Pick<ConnectorConfig, "access" | "enabled">, agent: string | undefined): boolean {
+/** The agent an agent-scoped connector belongs to; undefined for an org connector. */
+export function connectorOwner(connector: Pick<ConnectorConfig, "scope">): string | undefined {
+  return connector.scope?.kind === "agent" && connector.scope.agent ? connector.scope.agent : undefined;
+}
+
+/**
+ * Why `access` is not allowed for a connector of `scope` (undefined when it is): an agent-scoped
+ * connector can only be enabled for its owner (access.agents [owner] or [], never "*").
+ */
+export function connectorAccessProblem(scope: ConnectorScope | undefined, access: Pick<ConnectorAccess, "agents">): string | undefined {
+  if (scope?.kind !== "agent") return undefined;
+  const owner = scope.agent;
+  if (access.agents === "*") return `This connector belongs to agent "${owner}": it cannot be enabled for every agent`;
+  const others = access.agents.filter((a) => a !== owner);
+  if (others.length) return `This connector belongs to agent "${owner}": it cannot be enabled for ${others.map((a) => `"${a}"`).join(", ")}`;
+  return undefined;
+}
+
+/**
+ * Whether the connector is at `agent`'s disposal at all: every org connector, and its own
+ * agent-scoped ones. Another agent's personal connector is never shown or offered to it.
+ */
+export function connectorVisibleTo(connector: Pick<ConnectorConfig, "scope">, agent: string): boolean {
+  const owner = connectorOwner(connector);
+  return owner === undefined || owner === agent;
+}
+
+/**
+ * True when the connector's tools may be used by `agent` (or by Polpo when agent is undefined).
+ * An agent-scoped connector never grants another agent, even if its access was edited to.
+ */
+export function connectorGrants(connector: Pick<ConnectorConfig, "access" | "enabled" | "scope">, agent: string | undefined): boolean {
   if (!connector.enabled) return false;
   if (agent === undefined) return !!connector.access?.polpo;
+  if (!connectorVisibleTo(connector, agent)) return false;
   const agents = connector.access?.agents;
   return agents === "*" || (Array.isArray(agents) && agents.includes(agent));
 }
