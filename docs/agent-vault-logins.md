@@ -29,7 +29,8 @@ it, never the password:
 browser_fill { selector: "#password", from_vault: "notion.password" }
 ```
 
-`env_from_vault` (bash) works too: `{ "SITE_PASSWORD": "notion.password" }`.
+`env_from_vault` (bash; `run_with_vault` for agents on a Claude Code / Codex / OpenCode harness, see
+[harnesses](harnesses.md#vault-secrets-in-commands-run_with_vault)) works too: `{ "SITE_PASSWORD": "notion.password" }`.
 
 ## The password
 

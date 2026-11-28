@@ -4,15 +4,23 @@
  * email, data, artifacts, storage, outcomes…).
  *
  * Left out: the coding tools the runtime has natively and runs in the VM itself (read, write, edit,
- * bash, glob, grep, ls), and vault_get (in a VM it hands values to commands through bash's
- * env_from_vault, which the runtime's own shell does not have).
+ * bash, glob, grep, ls). The runtime's own shell cannot read the vault: commands get secrets with
+ * run_with_vault (Polpo's bash with env_from_vault, on the run's computer), and vault_get is offered
+ * only in its valueless form (key names and non-secret fields: buildAgentToolset harnessHost).
  */
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { SIDE_EFFECT_GATED_TOOLS } from "./tool-policy.js";
+import { isValuelessVaultGet } from "../tools/vault-tools.js";
 import type { HarnessHostTool } from "./types.js";
 
 /** Native to the runtimes: never offered twice. */
-export const HARNESS_NATIVE_TOOLS: ReadonlySet<string> = new Set(["read", "write", "edit", "multi_edit", "bash", "glob", "grep", "ls", "vault_get"]);
+export const HARNESS_NATIVE_TOOLS: ReadonlySet<string> = new Set(["read", "write", "edit", "multi_edit", "bash", "glob", "grep", "ls"]);
+
+/** vault_get reaches a harness only built never to return values: a value would land in the runtime's context. */
+function offeredToHarness(t: AgentTool<any>): boolean {
+  if (HARNESS_NATIVE_TOOLS.has(t.name)) return false;
+  return t.name !== "vault_get" || isValuelessVaultGet(t);
+}
 
 /** Tool names start with a letter; Claude Code (MCP) takes letters, digits, _ and - up to 64. */
 const VALID_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
@@ -36,7 +44,7 @@ export function toHarnessHostTools(
   const out: HarnessHostTool[] = [];
   const seen = new Set<string>();
   for (const t of tools) {
-    if (HARNESS_NATIVE_TOOLS.has(t.name) || seen.has(t.name) || !VALID_NAME.test(t.name)) continue;
+    if (!offeredToHarness(t) || seen.has(t.name) || !VALID_NAME.test(t.name)) continue;
     seen.add(t.name);
     const schema = (t.parameters && typeof t.parameters === "object" ? JSON.parse(JSON.stringify(t.parameters)) : { type: "object", properties: {} }) as Record<string, unknown>;
     if (schema.type !== "object") schema.type = "object";

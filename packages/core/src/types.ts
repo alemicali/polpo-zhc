@@ -486,7 +486,9 @@ export interface AgentConfig {
   /** Model to use. Format: "provider:model" (e.g. "anthropic:claude-sonnet-4-5-20250929") or bare model ID (auto-inferred). */
   model?: string;
   /** Allowed tools for the agent (e.g. ["read", "write", "edit", "bash", "glob", "grep", "browser_*", "email_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*", "whatsapp_*", "phone_*"]).
-   *  Core tools (always available): read, write, edit, bash, glob, grep, ls, http_fetch, http_download, register_outcome, vault_get, vault_list. */
+   *  Core tools (always available): read, write, edit, bash, glob, grep, ls, http_fetch, http_download, register_outcome, vault_get, vault_list.
+   *  Agents on a Claude Code / Codex / OpenCode harness also get run_with_vault (commands with vault secrets as env vars),
+   *  granted by "run_with_vault" or "bash" here, or with no list. */
   allowedTools?: string[];
   /** Filesystem sandbox — directories the agent is allowed to access.
    *  Paths can be absolute or relative to workDir. When set, all file tool operations

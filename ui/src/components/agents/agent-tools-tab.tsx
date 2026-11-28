@@ -20,7 +20,7 @@ import {
 import { cn } from "@/lib/utils";
 import { SectionHeader } from "@/components/shared/section-header";
 import { useAgentDetail } from "./agent-detail-context";
-import { getToolMeta, getSkillMeta, toolCategories } from "@/lib/agent-meta";
+import { categoryEnabled, getToolMeta, getSkillMeta, toolCategories } from "@/lib/agent-meta";
 import { AgentConnectorsSection } from "@/components/connectors/agent-connectors-section";
 import { AgentNotificationsSection } from "./agent-notifications-section";
 
@@ -69,8 +69,9 @@ export function AgentToolsTab() {
         <div>
           <SectionHeader title="Opt-in Tool Extensions" icon={Layers} count={enabledCategories.length} />
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-            {toolCategories.map(({ prefix, label, tools, icon: CategoryIcon, color: categoryColor }) => {
-              const enabled = agentAllowedTools.some(t => t.toLowerCase().startsWith(prefix));
+            {toolCategories.map((category) => {
+              const { prefix, label, tools, icon: CategoryIcon, color: categoryColor } = category;
+              const enabled = categoryEnabled(category, agentAllowedTools);
               return (
                 <Tooltip key={prefix}>
                   <TooltipTrigger asChild>

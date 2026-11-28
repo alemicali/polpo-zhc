@@ -50,7 +50,7 @@ export const DEFAULT_LIFECYCLE: Required<SandboxLifecycle> = {
 
 /** Where each tool runs (same list as the server, TOOL_PLACEMENT in @polpo-ai/core/sandbox). */
 export type ToolPlacement = "sandbox" | "host";
-const SANDBOX_TOOLS = ["read", "write", "edit", "bash", "glob", "grep", "ls", "http_download", "email_download_attachment", "run_command",
+const SANDBOX_TOOLS = ["read", "write", "edit", "bash", "glob", "grep", "ls", "http_download", "email_download_attachment", "run_command", "run_with_vault",
   "browser_*", "image_*", "video_*", "audio_*", "excel_*", "pdf_*", "docx_*"];
 const matches = (pattern: string, name: string) => pattern.endsWith("*") ? name.startsWith(pattern.slice(0, -1)) : pattern === name;
 export function toolPlacement(name: string): ToolPlacement {

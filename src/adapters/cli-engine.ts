@@ -151,6 +151,7 @@ export async function cliRunHostTools(o: {
     log: o.log,
     ...(o.task ? { task: o.task } : {}),
     ...(o.notifyOrigin ? { notifyOrigin: o.notifyOrigin } : {}),
+    harnessHost: true,
   });
   // as the harness: of the task result tools only task_result (dependencies' results are in the prompt)
   const tools = toHarnessHostTools(toolset.tools.filter((t) => t.name !== DEPENDENCY_RESULTS_TOOL), {

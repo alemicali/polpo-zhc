@@ -258,6 +258,7 @@ export function buildHarnessInstructions(o: {
     parts.push("", "## Polpo tools",
       `Besides your own tools you have Polpo's tools (they run on the Polpo server with your permissions): ${o.hostTools.join(", ")}.`);
     if (o.remoteRoots?.length) parts.push(remoteToolPathsNote(o.remoteRoots));
+    if (o.hostTools.includes("run_with_vault")) parts.push(RUN_WITH_VAULT_NOTE);
     if (o.hostTools.some((t) => t.startsWith("browser_"))) {
       parts.push("For anything in a browser use Polpo's browser: the browser_* tools above, or from scripts the same browser over $CDP_URL "
         + "(`agent-browser --session <your session> get cdp-url` when it is not set). Never launch a Chromium, Chrome or Playwright/Puppeteer browser of your own "
@@ -268,6 +269,12 @@ export function buildHarnessInstructions(o: {
   if (o.agentsMd && o.harness === "claude-code") parts.push("", "## Repository instructions (AGENTS.md)", o.agentsMd.slice(0, 40_000));
   return parts.join("\n");
 }
+
+/** How an agent on a harness uses a vault secret in a command (its own shell cannot read the vault). */
+export const RUN_WITH_VAULT_NOTE = "When a command needs a secret from your vault (API key, token, password), use run_with_vault with env_from_vault, "
+  + "e.g. { \"command\": \"curl -s -H \\\"Authorization: Bearer $OPENAI_API_KEY\\\" https://api.openai.com/v1/models\", \"env_from_vault\": { \"OPENAI_API_KEY\": \"openai.api_key\" } }: "
+  + "the value is set for that command only and shows as *** in its output (vault_list and vault_get show your services and key names, never the values). "
+  + "Never copy secrets into files, the chat or outcomes.";
 
 /**
  * For an agent on a remote computer: Polpo's tools take paths of the computer (their files are
@@ -441,6 +448,7 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
         hasExtendedTools: (agentConfig.allowedTools ?? []).some((t) => /^(browser|email|image|video|audio|excel|pdf|docx|search|whatsapp|phone)_/i.test(t)),
         log: (line) => transcript({ type: "log", message: line }),
         task,
+        harnessHost: true,
       });
       learned = toolset.secrets;
       toolsetCleanup = [

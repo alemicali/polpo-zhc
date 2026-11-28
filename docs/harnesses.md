@@ -362,6 +362,42 @@ Polpo has the same tools as the MCP server: `harnesses_get` / `harnesses_update`
 take `engine` and `defaultComputer`. Ask "create an agent on Claude Code with a computer" and it enables the harness if needed,
 creates a Daytona v2 computer and the agent.
 
+## Vault secrets in commands: `run_with_vault`
+
+The runtime has its own shell (Claude Code's Bash, Codex's and OpenCode's), and that shell cannot
+read the agent's vault. Polpo's `bash` (with its `env_from_vault`) is not offered to a harness: the
+runtime would have two shells. Instead a harness agent gets the Polpo tool **`run_with_vault`**:
+
+```json
+{ "command": "curl -s -H \"Authorization: Bearer $OPENAI_API_KEY\" https://api.openai.com/v1/models",
+  "env_from_vault": { "OPENAI_API_KEY": "openai.api_key" },
+  "cwd": "repo", "timeout": 60000 }
+```
+
+- It is Polpo's `bash` with `env_from_vault`, nothing else (same code path, same validation): the
+  references (`"service.key"` or `{ service, key }`) resolve against the agent's **own and shared**
+  vault entries only; variable names are uppercase letters, digits and `_` (not `PATH`, `HOME`,
+  `LD_*`); an unknown entry or key is an error that lists what exists (never a value) and the
+  command does not run. An empty `env_from_vault` is refused (commands without secrets go through
+  the runtime's own shell).
+- The command runs **on the run's computer**: the remote VM's shell (Daytona, E2B) or this server's
+  when the harness runs here, in the working directory (`cwd`: absolute, or relative to it). The
+  values exist only in that command's environment, never in a file; the output (result, offloaded
+  file, error) has them and their base64 / URL-encoded forms replaced with `***` (values shorter
+  than 6 characters are not masked), and with the run's own learned secrets
+  (`vault_create_login`). Details and transcripts keep only the references. `timeout` is in ms,
+  default 2 minutes (below 1000 it is seconds), as bash's.
+- Policy: as `bash`, it is not gated by an approval and not read-only.
+- **`vault_get`** is offered to harness agents too, always without values (key names, type, label
+  and non-secret fields such as host, user, region), and with `vault_list` it points to
+  `run_with_vault`. A `vault_get` that would return values is never handed to a runtime.
+- **Who gets it**: harness agents (task runs and chats of the harness engine and the CLI engine)
+  with no `allowedTools` list, or with `run_with_vault` in it, or `bash` (a bash grant already means
+  "commands with vault secrets" on Polpo's engine; wildcards such as `run_*` work). `vault_*` does
+  not grant it. Agents on Polpo's engine never get it: their `bash` keeps `env_from_vault`.
+- The harness instructions say: *when a command needs a secret from your vault, use run_with_vault
+  with env_from_vault; never copy secrets into files, the chat or outcomes.*
+
 ## How a run works
 
 1. The task runner sees `agent.engine` and starts the harness engine (`src/adapters/harness-engine.ts`)
