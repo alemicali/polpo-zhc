@@ -1551,6 +1551,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     updateTaskAssignment: (id: string, agent: string) => o.updateTaskAssignment(id, agent),
     updateTaskExpectations: (id: string, exp: any) => o.updateTaskExpectations(id, exp),
     updateTaskToolScope: (id: string, scope: unknown) => o.updateTaskToolScope(id, scope),
+    updateTaskSandbox: (id: string, sandbox: unknown) => o.updateTaskSandbox(id, sandbox),
     taskToolScopeStale: (task: any) => o.taskToolScopeStale(task),
     getTaskHarnessUsage: async (id: string) => (await harnessUsageOf([id]))[id],
     getTaskApprovals: async (id: string) => (await o.getTaskApprovals(id)) as unknown as Array<Record<string, unknown>>,

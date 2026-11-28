@@ -117,6 +117,7 @@ export class DrizzleTaskStore implements TaskStore {
       revisionCount: row.revisionCount ?? undefined,
       ...(row.runs != null ? { runs: deserializeJson(row.runs, undefined, d) } : {}),
       ...(row.toolScope != null ? { toolScope: deserializeJson(row.toolScope, undefined, d) } : {}),
+      ...(row.sandbox != null ? { sandbox: deserializeJson(row.sandbox, undefined, d) } : {}),
       ...(row.requestedBy ? { requestedBy: row.requestedBy } : {}),
       ...(row.agentVersion ? { agentVersion: row.agentVersion } : {}),
       ...(row.origin != null ? { origin: deserializeJson(row.origin, undefined, d) } : {}),
@@ -158,6 +159,8 @@ export class DrizzleTaskStore implements TaskStore {
     if (task.runs !== undefined) v.runs = serializeJson(task.runs, d);
     // present with undefined/null: cleared (back to inheriting the agent's tools)
     if ("toolScope" in task) v.toolScope = task.toolScope ? serializeJson(task.toolScope, d) : null;
+    // present with undefined/null: cleared (back to the agent's default computer)
+    if ("sandbox" in task) v.sandbox = task.sandbox ? serializeJson(task.sandbox, d) : null;
     if (task.requestedBy !== undefined) v.requestedBy = task.requestedBy || null;
     // present with undefined: cleared (back to production)
     if ("agentVersion" in task) v.agentVersion = task.agentVersion || null;
@@ -500,6 +503,7 @@ export class DrizzleTaskStore implements TaskStore {
       revisionCount: r.revision_count,
       runs: r.runs,
       toolScope: r.tool_scope,
+      sandbox: r.sandbox,
       requestedBy: r.requested_by,
       agentVersion: r.agent_version,
       origin: r.origin,

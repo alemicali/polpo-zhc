@@ -86,7 +86,7 @@ const createMissionRoute = createRoute({
     },
     400: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
-      description: "A task's toolScope asks for a connector or tool its agent does not have (INVALID_TOOL_SCOPE)",
+      description: "A task's toolScope asks for a connector or tool its agent does not have (INVALID_TOOL_SCOPE), or its sandbox.computer is not one of its agent's computers (INVALID_COMPUTER)",
     },
   },
 });
@@ -107,7 +107,7 @@ const updateMissionRoute = createRoute({
     },
     400: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
-      description: "A task's toolScope asks for a connector or tool its agent does not have (INVALID_TOOL_SCOPE)",
+      description: "A task's toolScope asks for a connector or tool its agent does not have (INVALID_TOOL_SCOPE), or its sandbox.computer is not one of its agent's computers (INVALID_COMPUTER)",
     },
   },
 });
@@ -379,6 +379,11 @@ function isToolScopeError(err: unknown): err is Error {
   return err instanceof Error && (err.name === "TaskToolScopeError" || (err as { code?: string }).code === "INVALID_TOOL_SCOPE");
 }
 
+/** A mission task naming a computer its agent may not use (TaskComputerError). */
+function isComputerError(err: unknown): err is Error {
+  return err instanceof Error && (err.name === "TaskComputerError" || (err as { code?: string }).code === "INVALID_COMPUTER");
+}
+
 export function missionRoutes(getDeps: () => {
   getAllMissions: () => Promise<any[]>;
   getResumableMissions: () => Promise<any[]>;
@@ -519,6 +524,7 @@ export function missionRoutes(getDeps: () => {
       });
     } catch (err) {
       if (isToolScopeError(err)) return c.json({ ok: false, error: err.message, code: "INVALID_TOOL_SCOPE" }, 400);
+      if (isComputerError(err)) return c.json({ ok: false, error: err.message, code: "INVALID_COMPUTER" }, 400);
       throw err;
     }
 
@@ -542,6 +548,7 @@ export function missionRoutes(getDeps: () => {
       mission = await deps.updateMission(missionId, updates);
     } catch (err) {
       if (isToolScopeError(err)) return c.json({ ok: false, error: err.message, code: "INVALID_TOOL_SCOPE" }, 400);
+      if (isComputerError(err)) return c.json({ ok: false, error: err.message, code: "INVALID_COMPUTER" }, 400);
       throw err;
     }
     return c.json({ ok: true, data: mission }, 200);

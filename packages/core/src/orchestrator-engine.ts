@@ -595,6 +595,7 @@ export class OrchestratorEngine {
     requestedBy?: string;
     agentVersion?: string;
     origin?: WorkOrigin;
+    sandbox?: import("./sandbox.js").SandboxSettings | null;
   }): Promise<Task> { return this.taskMgr.addTask(opts); }
 
   async updateTaskDescription(taskId: string, description: string): Promise<void> { return this.taskMgr.updateTaskDescription(taskId, description); }

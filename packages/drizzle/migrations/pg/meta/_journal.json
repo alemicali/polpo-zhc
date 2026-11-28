@@ -169,6 +169,13 @@
       "when": 1795764448283,
       "tag": "0023_playbook_mission_name",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1795836722695,
+      "tag": "0024_task_sandbox",
+      "breakpoints": true
     }
   ]
 }

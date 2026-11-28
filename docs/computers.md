@@ -136,6 +136,39 @@ On a remote computer the computer's network rule applies (else the instance's), 
 If its provider has no API key on this server, the cascade applies (with the usual visible
 fallback).
 
+### Choosing a computer per task
+
+A single task, or each task of a mission, may run on any of its agent's computers instead of the
+default one. The choice is the task level of the sandbox cascade, `sandbox.computer`:
+
+| Value | Runs on |
+|---|---|
+| absent | the agent's `defaultComputer` (else this server) |
+| one of the agent's `computers` or its `defaultComputer` | that computer |
+| `"host"` | this server |
+| `"ephemeral"` | a fresh sandbox from the cascade |
+
+Any other id is **refused when the task is created or changed** (400 `INVALID_COMPUTER`, with the
+agent's choices in `allowed`): add the computer to the agent first. (A task whose agent loses the
+computer later falls back to the default at run time, reported as `sandbox:override-denied`.)
+
+Precedence: the task's own `sandbox` (`Task.sandbox`) → its entry in the mission document
+(`tasks[].sandbox`) → the mission's `sandbox` → the agent's default. A change applies to the
+task's next run; a running one keeps its machine.
+
+Everywhere:
+
+- **REST**: `POST /tasks { …, "sandbox": { "computer": "daytona-box" } }`;
+  `PATCH /tasks/:id { "sandbox": { "computer": "ms-nina-01" } }` (`"sandbox": null` goes back to
+  the agent's default); `GET /tasks/:id` returns `sandbox`. Missions: `tasks[].sandbox.computer`
+  in the mission data (checked on `POST`/`PATCH /missions`).
+- **MCP**: `polpo_task_create { …, computer: "daytona-box" }`,
+  `polpo_task_update { id, computer }` or `{ id, default_computer: true }`.
+- **Polpo's chat**: `create_task { …, computer }`, `update_task { taskId, computer }` (`null`: the
+  agent's default).
+- **SDK**: `CreateTaskRequest.sandbox` / `UpdateTaskRequest.sandbox` (`TaskSandbox`).
+- **Dashboard**: the task page's **Computer** select.
+
 ## Lifecycle
 
 - The machine is found by its provider label **`polpo-computer=<instance>:<id>`** (Daytona label,

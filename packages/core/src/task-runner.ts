@@ -3,7 +3,8 @@ import type { OrchestratorContext } from "./orchestrator-context.js";
 import type { AgentConfig, Task, TaskResult, RunnerConfig } from "./types.js";
 import { agentMemoryScope } from "./memory-store.js";
 import { reachableAgents, resolveAgentLines } from "./agent-lines.js";
-import { agentEgressName, computerContext, tailnetEgressFor, normalizeSandboxSettings, resolveSandbox, SandboxVolumeGrantError, type ResolvedSandboxVolume, type SandboxSettings } from "./sandbox.js";
+import { tailnetEgressFor } from "./tailnet.js";
+import { agentEgressName, computerContext, normalizeSandboxSettings, normalizeTaskSandbox, resolveSandbox, SandboxVolumeGrantError, type ResolvedSandboxVolume, type SandboxSettings } from "./sandbox.js";
 import type { RunRecord } from "./run-store.js";
 import { buildRunContext, finishRunContext, mergeRunContext, upsertTaskRun } from "./run-context.js";
 import {
@@ -695,9 +696,10 @@ export class TaskRunner {
 
     // Sandbox: resolve the cascade instance → agent → mission → task here, where all levels are
     // known. Mission and task may only tighten; what they cannot get is reported.
-    // The mission document holds both levels: `sandbox` for the mission, and per task.
+    // The mission document holds both levels: `sandbox` for the mission, and per task. A task's
+    // own sandbox (Task.sandbox: POST/PATCH /tasks, MCP, Polpo's chat) is the task level when set.
     let missionSandbox: SandboxSettings | undefined;
-    let taskSandbox: SandboxSettings | undefined;
+    let taskSandbox: SandboxSettings | undefined = normalizeTaskSandbox(task.sandbox);
     if (task.missionId || task.group) {
       try {
         const mission = task.missionId
@@ -705,7 +707,7 @@ export class TaskRunner {
           : await this.ctx.registry.getMissionByName?.(task.group!);
         const doc = mission?.data ? JSON.parse(mission.data) as { sandbox?: unknown; tasks?: Array<{ title?: string; sandbox?: unknown }> } : undefined;
         missionSandbox = normalizeSandboxSettings(doc?.sandbox);
-        taskSandbox = normalizeSandboxSettings(doc?.tasks?.find((t) => t.title === task.title)?.sandbox);
+        taskSandbox ??= normalizeTaskSandbox(doc?.tasks?.find((t) => t.title === task.title)?.sandbox);
       } catch { /* a mission document without a sandbox section */ }
     }
     // a volume selected by a mission or task must be granted above (open Polpo's narrowing),

@@ -105,7 +105,7 @@ const createTaskRoute = createRoute({
     },
     400: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
-      description: "dependsOn names a task that does not exist (UNKNOWN_DEPENDENCY), or toolScope asks for a connector or tool the agent does not have (INVALID_TOOL_SCOPE)",
+      description: "dependsOn names a task that does not exist (UNKNOWN_DEPENDENCY), toolScope asks for a connector or tool the agent does not have (INVALID_TOOL_SCOPE), or sandbox.computer is not one of the agent's computers (INVALID_COMPUTER)",
     },
     409: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
@@ -130,7 +130,7 @@ const updateTaskRoute = createRoute({
     },
     400: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
-      description: "toolScope asks for a connector or tool the agent does not have (INVALID_TOOL_SCOPE)",
+      description: "toolScope asks for a connector or tool the agent does not have (INVALID_TOOL_SCOPE), or sandbox.computer is not one of the agent's computers (INVALID_COMPUTER)",
     },
     404: {
       content: { "application/json": { schema: z.object({ ok: z.boolean(), error: z.string(), code: z.string() }) } },
@@ -417,6 +417,8 @@ export function taskRoutes(getDeps: () => {
   updateTaskToolScope?: (taskId: string, scope: unknown) => Promise<any>;
   /** What of a task's tool scope its agent no longer has. */
   taskToolScopeStale?: (task: any) => Promise<string[]>;
+  /** Set (validated: one of the agent's computers) or clear (null) a task's sandbox. */
+  updateTaskSandbox?: (taskId: string, sandbox: unknown) => Promise<any>;
   /** The task's harness cost from the token-usage records (not capped): fills in runs dropped past the latest 20. */
   getTaskHarnessUsage?: (taskId: string) => Promise<{ usd: number; tokens: number } | undefined>;
   /** The approval gate requests of a task and their resolution (outcome, note, who, when), oldest first. */
@@ -430,6 +432,12 @@ export function taskRoutes(getDeps: () => {
           // connectors the scope names that the agent is not granted: grant them first, then set the scope
           missingGrants: (err as { missingGrants?: Array<{ agent: string; id: string; label: string }> }).missingGrants ?? [],
         }
+      : undefined;
+
+  /** A computer the task's agent may not use: 400 INVALID_COMPUTER with the agent's choices. */
+  const computerError = (err: unknown) =>
+    err instanceof Error && (err.name === "TaskComputerError" || (err as { code?: string }).code === "INVALID_COMPUTER")
+      ? { ok: false as const, error: err.message, code: "INVALID_COMPUTER", allowed: (err as { allowed?: string[] }).allowed ?? [] }
       : undefined;
 
   const app = new OpenAPIHono();
@@ -591,9 +599,10 @@ export function taskRoutes(getDeps: () => {
       // the member who started it (signed-in dashboard / API session): a CLI engine on a personal sign-in checks it
       ...(memberOf(c) ? { requestedBy: memberOf(c) } : {}),
       ...(body.agentVersion ? { agentVersion: body.agentVersion } : {}),
+      ...(body.sandbox ? { sandbox: body.sandbox } : {}),
     });
     } catch (err) {
-      const invalid = toolScopeError(err);
+      const invalid = toolScopeError(err) ?? computerError(err);
       if (invalid) return c.json(invalid, 400);
       // a pinned version that does not exist ("writer@9.9.9")
       if (err instanceof Error && /has no published version|is not a version of/.test(err.message)) {
@@ -645,6 +654,16 @@ export function taskRoutes(getDeps: () => {
         await deps.updateTaskToolScope(taskId, body.toolScope);
       } catch (err) {
         const invalid = toolScopeError(err);
+        if (invalid) return c.json(invalid, 400);
+        throw err;
+      }
+    }
+    if (body.sandbox !== undefined) {
+      if (!deps.updateTaskSandbox) return c.json({ ok: false, error: "sandbox cannot be changed on this server", code: "NOT_SUPPORTED" }, 400);
+      try {
+        await deps.updateTaskSandbox(taskId, body.sandbox);
+      } catch (err) {
+        const invalid = computerError(err);
         if (invalid) return c.json(invalid, 400);
         throw err;
       }

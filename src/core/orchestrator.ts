@@ -32,6 +32,7 @@ import { MISSION_EDIT, mayTalk } from "@polpo-ai/core";
 import { agentEngineProblem, HarnessConfigError, parseAgentEngine } from "@polpo-ai/core";
 import { agentHarnessBudgetUsd, computeMissionCost, plannedAgentsOf, summarizeMissionCost, tasksOfMission, type MissionCost, type MissionCostSummary } from "@polpo-ai/core";
 import { taskApprovals, type TaskApproval } from "@polpo-ai/core";
+import { requireTaskSandbox, taskComputerProblem, TaskComputerError, type SandboxSettings } from "@polpo-ai/core";
 import { daytonaApiVersion } from "@polpo-ai/core/sandbox";
 import { TypedEmitter, currentEventOrigin, withEventOrigin } from "./events.js";
 
@@ -1666,6 +1667,11 @@ export class Orchestrator extends TypedEmitter {
     agentVersion?: string;
     /** What started it when not a person: a trigger's delivery. */
     origin?: WorkOrigin;
+    /**
+     * The task level of the sandbox cascade, above all `computer`: one of the agent's computers
+     * ("host" included) or "ephemeral". TaskComputerError when the agent may not use it.
+     */
+    sandbox?: SandboxSettings | null;
   }): Promise<Task> {
     const { toolScope, ...given } = opts;
     // the member this work is for: given, or the person whose call (dashboard, API, Polpo's chat) created it
@@ -1709,6 +1715,37 @@ export class Orchestrator extends TypedEmitter {
     } catch {
       return [];
     }
+  }
+
+  /**
+   * Set or clear (null) a task's sandbox (above all the computer it runs on). Validated against
+   * its agent (TaskComputerError). A running task keeps its current run; the next one uses it.
+   */
+  async updateTaskSandbox(taskId: string, value: unknown): Promise<Task> {
+    const task = await this.getStore().getTask(taskId);
+    if (!task) throw new Error(`Task not found: ${taskId}`);
+    const agent = (await this.getAgents()).find((a) => a.name === task.assignTo);
+    const sandbox = value === null || value === undefined ? undefined : requireTaskSandbox(agent, value, task.assignTo);
+    return this.getStore().updateTask(taskId, { sandbox });
+  }
+
+  /** Reject a mission document whose tasks name a computer their agent may not use. */
+  private async checkMissionComputers(data: string | undefined): Promise<void> {
+    if (!data) return;
+    let doc: { tasks?: Array<{ title?: string; assignTo?: string; sandbox?: { computer?: unknown } }> };
+    try { doc = JSON.parse(data); } catch { return; }
+    const tasks = Array.isArray(doc?.tasks) ? doc.tasks : [];
+    if (!tasks.some((t) => t?.sandbox?.computer)) return;
+    const agents = await this.getAgents();
+    const problems: string[] = [];
+    for (const t of tasks) {
+      if (!t?.sandbox?.computer) continue;
+      // a task without assignTo goes to the first agent (see executeMission)
+      const agentName = t.assignTo ? parseAgentRef(t.assignTo).name : agents[0]?.name;
+      const p = taskComputerProblem(agents.find((a) => a.name === agentName), t.sandbox.computer, agentName);
+      if (p) problems.push(`task "${t.title ?? "?"}": ${p}`);
+    }
+    if (problems.length) throw new TaskComputerError(problems.join("; "));
   }
 
   /** Reject a mission document whose tasks' tool scopes ask for more than their agents have. */
@@ -2226,6 +2263,7 @@ export class Orchestrator extends TypedEmitter {
 
   async saveMission(opts: { data: string; prompt?: string; name?: string; status?: MissionStatus; notifications?: ScopedNotificationRules; budgetUsd?: number; owner?: string; origin?: WorkOrigin }): Promise<Mission> {
     await this.checkMissionToolScopes(opts.data);
+    await this.checkMissionComputers(opts.data);
     // its owner: the member who creates it (its schedule's runs are their work)
     const owner = opts.owner ?? originMember();
     return this.engine.saveMission({ ...opts, ...(owner ? { owner } : {}) });
@@ -2263,6 +2301,7 @@ export class Orchestrator extends TypedEmitter {
   async getAllMissions(): Promise<Mission[]> { return this.engine.getAllMissions(); }
   async updateMission(missionId: string, updates: Partial<Omit<Mission, "id">>): Promise<Mission> {
     await this.checkMissionToolScopes(updates.data);
+    await this.checkMissionComputers(updates.data);
     // a schedule belongs to the member who sets it: its runs are their work
     const member = updates.schedule && !("owner" in updates) ? originMember() : undefined;
     return this.engine.updateMission(missionId, member ? { ...updates, owner: member } : updates);
