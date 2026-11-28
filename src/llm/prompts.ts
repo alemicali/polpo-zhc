@@ -1400,6 +1400,8 @@ export async function buildChatSystemPrompt(
     `lists the apps that can be added; connector_catalog searches the catalog); connector_add adds one from the catalog (catalog_id) or a`,
     `custom https URL; for OAuth apps it returns a link the person must open to authorize (give it to them as is; it expires in 10 minutes);`,
     `connector_connect gives a fresh link when one shows "needs_reauth"; connector_update_access grants it to agents (or "*") and to you;`,
+    `a connector is the organization's (scope org) or one agent's own (scope agent: a personal mailbox; connector_add / connector_update`,
+    `with owner): only its owner can ever use an agent's own connector, it is never granted to another agent or "*";`,
     `connector_update also renames it, turns it on or off and sets each tool's policy (allow, ask, off); connector_test checks it;`,
     `connector_disconnect signs it out; connector_remove only after the person confirms. Which tools of a granted connector an agent gets:`,
     `update_agent connectorTools ({ "<id>": "*" } or a list of tool names). For ONE task that must be deterministic (send only from`,

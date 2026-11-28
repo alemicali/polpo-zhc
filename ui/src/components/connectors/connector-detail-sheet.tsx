@@ -4,7 +4,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, Check, ExternalLink, KeyRound, Image as ImageIcon, Link2, Loader2, Pencil, Plug, RefreshCw, RotateCw, Server, Terminal, Trash2, Undo2, Unplug, UserPlus, Users, Wrench, X } from "lucide-react";
+import { AlertTriangle, Building2, Check, ExternalLink, KeyRound, Image as ImageIcon, Link2, Loader2, Pencil, Plug, RefreshCw, RotateCw, Server, Terminal, Trash2, Undo2, Unplug, UserPlus, Users, Wrench, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -12,9 +12,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import {
-  MAX_ICON_BYTES, agentHasAccess, connectorState, connectorsApi, iconSourceLabel, oauthAppFor, registrationRefused, toggleAgentAccess, toolLabel,
-  type CatalogEntry, type Connector, type ConnectorAccess, type ConnectorTool, type ConnectorToolPolicy,
+  MAX_ICON_BYTES, agentHasAccess, connectorOwner, connectorState, connectorsApi, iconSourceLabel, oauthAppFor, registrationRefused, toggleAgentAccess, toolLabel,
+  type CatalogEntry, type Connector, type ConnectorAccess, type ConnectorScope, type ConnectorTool, type ConnectorToolPolicy,
 } from "@/lib/connectors-api";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { ConnectorIcon } from "./connector-icon";
@@ -29,27 +30,65 @@ export interface AgentOption {
   avatar?: string;
 }
 
-/** Who may use the connector: Polpo, every agent, or the chosen ones. */
+const ORG_SCOPE = "__org__";
+
+/** Who the connector belongs to: the organization, or one agent (its own: only that agent can ever use it). */
+export function ScopeEditor({
+  scope, agents, onChange, disabled,
+}: { scope: ConnectorScope | undefined; agents: AgentOption[]; onChange: (scope: ConnectorScope) => void; disabled?: boolean }) {
+  const owner = scope?.kind === "agent" ? scope.agent : undefined;
+  const known = owner === undefined || agents.some((a) => a.name === owner);
+  return (
+    <div className="flex items-center gap-3 rounded-md px-2 py-1.5" data-testid="connector-scope">
+      <span className="text-muted-foreground"><Building2 className="h-4 w-4" /></span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm">Belongs to</span>
+        <span className="block truncate text-xs text-muted-foreground">
+          {owner ? "Personal: only this agent can ever use it" : "The organization: enable it for any agent"}
+        </span>
+      </span>
+      <Select
+        value={owner ?? ORG_SCOPE}
+        disabled={disabled}
+        onValueChange={(v) => onChange(v === ORG_SCOPE ? { kind: "org" } : { kind: "agent", agent: v })}
+      >
+        <SelectTrigger size="sm" className="h-8 w-44 text-xs" aria-label="Belongs to">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent className="max-h-80">
+          <SelectItem value={ORG_SCOPE} className="text-xs">Organization</SelectItem>
+          {!known && owner && <SelectItem value={owner} className="text-xs">{owner} (personal)</SelectItem>}
+          {agents.map((a) => <SelectItem key={a.name} value={a.name} className="text-xs">{a.label} (personal)</SelectItem>)}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+/** Who may use the connector: Polpo, every agent, or the chosen ones (an agent's own connector: only its owner). */
 export function AccessEditor({
-  access, agents, onChange, disabled,
-}: { access: ConnectorAccess; agents: AgentOption[]; onChange: (access: ConnectorAccess) => void; disabled?: boolean }) {
+  access, agents, onChange, disabled, owner,
+}: { access: ConnectorAccess; agents: AgentOption[]; onChange: (access: ConnectorAccess) => void; disabled?: boolean; owner?: string }) {
   const product = productName(useInstanceBranding());
-  const all = access.agents === "*";
+  const all = !owner && access.agents === "*";
   const names = agents.map((a) => a.name);
+  const shown = owner ? agents.filter((a) => a.name === owner) : agents;
   return (
     <div className="space-y-1">
       <Row icon={<Plug className="h-4 w-4" />} label={product} hint="The orchestrator chat">
         <Switch label={`${product} can use it`} checked={access.polpo} disabled={disabled} onChange={(polpo) => onChange({ ...access, polpo })} />
       </Row>
-      <Row icon={<Users className="h-4 w-4" />} label="All agents" hint="Including agents added later">
-        <Switch
-          label="All agents can use it" checked={all} disabled={disabled}
-          onChange={(on) => onChange({ ...access, agents: on ? "*" : [] })}
-        />
-      </Row>
-      {agents.length > 0 && (
+      {!owner && (
+        <Row icon={<Users className="h-4 w-4" />} label="All agents" hint="Including agents added later">
+          <Switch
+            label="All agents can use it" checked={all} disabled={disabled}
+            onChange={(on) => onChange({ ...access, agents: on ? "*" : [] })}
+          />
+        </Row>
+      )}
+      {shown.length > 0 && (
         <div className="mt-1 space-y-1 border-l pl-3">
-          {agents.map((agent) => (
+          {shown.map((agent) => (
             <Row key={agent.name} icon={<AgentAvatar avatar={agent.avatar} name={agent.name} size="sm" fallbackVariant="circle" shape="circle" />} label={agent.label} hint={agent.label !== agent.name ? agent.name : undefined}>
               <Switch
                 label={`${agent.label} can use it`}
@@ -457,7 +496,23 @@ export function ConnectorDetailSheet({
 
           <section className="space-y-2">
             <h3 className="flex items-center gap-1.5 font-heading text-h3"><Users className="h-4 w-4" /> Who can use {accountCount > 1 ? "this account" : "it"}</h3>
-            <AccessEditor access={connector.access} agents={agents} disabled={busy === "access"} onChange={(access) => void patch({ access }, "access")} />
+            <ScopeEditor
+              scope={connector.scope}
+              agents={agents}
+              disabled={busy === "scope"}
+              onChange={(scope) => void act("scope", async () => {
+                const before = connector.access.agents;
+                const next = await connectorsApi.update(connector.id, { scope });
+                onChanged(next);
+                if (scope.kind === "agent") {
+                  // the other agents it was enabled for lose it
+                  const dropped = before === "*" ? ["every other agent"] : before.filter((a) => a !== scope.agent);
+                  const owner = agents.find((a) => a.name === scope.agent)?.label ?? scope.agent;
+                  toast.success(`${connector.name} now belongs to ${owner}${dropped.length ? `: ${dropped.join(", ")} can no longer use it` : ""}`);
+                } else toast.success(`${connector.name} now belongs to the organization`);
+              })}
+            />
+            <AccessEditor access={connector.access} agents={agents} owner={connectorOwner(connector)} disabled={busy === "access"} onChange={(access) => void patch({ access }, "access")} />
             {agents.length === 0 && <p className="text-xs text-muted-foreground">No agents yet.</p>}
           </section>
 

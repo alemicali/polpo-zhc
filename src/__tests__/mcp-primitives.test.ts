@@ -228,7 +228,15 @@ function fakeInstance() {
       if (!c) return notFound("Connector");
       const action = m[2];
       if (!action && method === "GET") return okData(c);
-      if (!action && method === "PATCH") { Object.assign(c, body); return okData(c); }
+      if (!action && method === "PATCH") {
+        // like the API: an agent's own connector keeps only its owner
+        const { scope, access } = body as { scope?: { kind: string; agent?: string }; access?: object };
+        // like the API: access fields not given are kept
+        Object.assign(c, body, access ? { access: { ...(c.access as object), ...access } } : {});
+        if (scope?.kind === "agent") c.access = { ...(c.access as object), agents: [scope.agent] };
+        if (scope?.kind === "org") delete c.scope;
+        return okData(c);
+      }
       if (!action && method === "DELETE") { connectors.delete(c.id as string); return okData({ removed: true }); }
       if (action === "/tools") return okData({ tools: [{ name: "create_issue", description: "Create an issue", policy: "allow" }, { name: "delete_issue", policy: "off" }] });
       if (action === "/oauth/start" && c.id === "slack") return reply(400, { ok: false, error: 'The "slack" OAuth app is not set up' });
@@ -678,10 +686,32 @@ describe("connectors", () => {
     expect(await call(deps(f), "polpo_connector_add", { catalog_id: "notion", detect_only: true })).toMatchObject({ isError: true });
   });
 
+  it("scope: adds an agent's own connector, makes one an agent's own (saying who loses it) and back", async () => {
+    const f = fakeInstance();
+    await call(deps(f), "polpo_connector_add", { catalog_id: "notion", owner: "coach" });
+    expect(f.calls.find((c) => c.method === "POST" && c.path === "/api/v1/connectors")!.body).toMatchObject({ catalogId: "notion", scope: { kind: "agent", agent: "coach" } });
+    expect(await call(deps(f), "polpo_connector_add", { catalog_id: "notion", owner: "coach", agents: ["writer"] })).toMatchObject({ isError: true });
+    expect(await call(deps(f), "polpo_connector_add", { catalog_id: "notion", owner: "ghost" })).toMatchObject({ isError: true });
+
+    await call(deps(f), "polpo_connector_update", { id: "linear", add_agents: ["writer"] });
+    const u = await call(deps(f), "polpo_connector_update", { id: "linear", owner: "coach" });
+    expect(f.calls.filter((c) => c.method === "PATCH").at(-1)!.body).toEqual({ scope: { kind: "agent", agent: "coach" } });
+    expect(u.structuredContent).toMatchObject({ changed: ["agents", "scope"], dropped_agents: ["writer"], connector: { scope: "agent", owner: "coach", agents: ["coach"] } });
+    expect(u.content[0].text).toMatch(/now coach's own: writer can no longer use it/);
+    // the list says whose it is, and never offers it to another agent
+    expect((await call(deps(f), "polpo_connectors_list")).content[0].text).toMatch(/coach's own \(personal\)/);
+    const forWriter = await call(deps(f), "polpo_connectors_list", { agent: "writer" });
+    expect(forWriter.structuredContent.no_access ?? []).not.toContain("linear");
+    expect(await call(deps(f), "polpo_connectors_list", { agent: "writer", id: "linear" })).toMatchObject({ isError: true });
+    const back = await call(deps(f), "polpo_connector_update", { id: "linear", owner: null });
+    expect(f.calls.filter((c) => c.method === "PATCH").at(-1)!.body).toEqual({ scope: { kind: "org" } });
+    expect(back.structuredContent).toMatchObject({ changed: ["scope"], connector: { scope: "org" } });
+  });
+
   it("updates access and tool policy, tests, links OAuth, disconnects and removes with confirm", async () => {
     const f = fakeInstance();
     const u = await call(deps(f), "polpo_connector_update", { id: "linear", add_agents: ["writer"], tool_policy: { delete_issue: "ask" } });
-    expect(f.calls.find((c) => c.method === "PATCH")!.body).toEqual({ access: { agents: ["coach", "writer"], polpo: true }, toolPolicy: { delete_issue: "ask" } });
+    expect(f.calls.find((c) => c.method === "PATCH")!.body).toEqual({ access: { agents: ["coach", "writer"] }, toolPolicy: { delete_issue: "ask" } });
     expect(u.structuredContent.changed).toEqual(["agents", "tool_policy"]);
     expect(await call(deps(f), "polpo_connector_update", { id: "linear", agents: ["ghost"] })).toMatchObject({ isError: true });
     const t = await call(deps(f), "polpo_connector_test", { id: "linear" });

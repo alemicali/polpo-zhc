@@ -554,6 +554,60 @@ test("agent page: connectors section grants and revokes this agent", async () =>
   expect(server.calls.filter((c) => c.method === "PATCH").at(-1)).toMatchObject({ path: "/notion", body: { access: { agents: ["dev"], polpo: false } } });
 });
 
+test("agent page: its own personal connectors and the org's, never another agent's personal ones; each row says Org or Personal", async () => {
+  installFetch();
+  server.connectors = [
+    connector("linear", { status: "connected", access: { agents: ["pm"], polpo: true } }),
+    connector("notion", { status: "connected", access: { agents: [], polpo: true } }),
+    // pm's own mailbox, not enabled yet
+    connector("mail-pm", { name: "Mail PM", status: "connected", access: { agents: [], polpo: false }, scope: { kind: "agent", agent: "pm" } }),
+    // pm's own calendar, enabled
+    connector("cal-pm", { name: "Cal PM", status: "connected", access: { agents: ["pm"], polpo: false }, scope: { kind: "agent", agent: "pm" } }),
+    // Nina's personal mailbox: never on pm's page, even if its access was edited to list pm
+    connector("mail-nina", { name: "Mail Nina", status: "connected", access: { agents: ["nina", "pm"], polpo: false }, scope: { kind: "agent", agent: "nina" } }),
+  ];
+  await act(async () => root.render(<MemoryRouter><AgentConnectorsSection agentName="pm" /></MemoryRouter>));
+  await flush();
+  const row = (id: string) => container.querySelector(`[data-testid="agent-connector-${id}"]`);
+  const chip = (id: string) => row(id)?.querySelector('[data-testid="connector-scope-chip"]')?.textContent;
+  expect(row("mail-nina")).toBeNull();
+  expect(container.textContent).not.toContain("Mail Nina");
+  expect(container.querySelector('[data-testid="agent-connectors-tab-enabled"]')?.textContent).toBe("Enabled (2)");
+  expect(container.querySelector('[data-testid="agent-connectors-tab-available"]')?.textContent).toBe("Available (2)");
+  expect(container.querySelector('[data-testid="agent-connectors-enabled"] [data-testid="agent-connector-linear"]')).not.toBeNull();
+  expect(container.querySelector('[data-testid="agent-connectors-enabled"] [data-testid="agent-connector-cal-pm"]')).not.toBeNull();
+  expect(container.querySelector('[data-testid="agent-connectors-available"] [data-testid="agent-connector-notion"]')).not.toBeNull();
+  expect(container.querySelector('[data-testid="agent-connectors-available"] [data-testid="agent-connector-mail-pm"]')).not.toBeNull();
+  expect(chip("linear")).toBe("Org");
+  expect(chip("notion")).toBe("Org");
+  expect(chip("cal-pm")).toBe("Personal");
+  expect(chip("mail-pm")).toBe("Personal");
+
+  // enabling its own connector from Available writes the connector's access
+  await click(row("mail-pm")!.querySelector('[role="switch"]'));
+  await flush();
+  expect(server.calls.filter((c) => c.method === "PATCH").at(-1)).toMatchObject({ path: "/mail-pm", body: { access: { agents: ["pm"], polpo: false } } });
+  expect(container.querySelector('[data-testid="agent-connectors-enabled"] [data-testid="agent-connector-mail-pm"]')).not.toBeNull();
+});
+
+test("connector settings: an agent's own connector can only be enabled for its owner", async () => {
+  installFetch();
+  const current = connector("mail-pm", { name: "Mail PM", status: "connected", access: { agents: ["pm"], polpo: false }, scope: { kind: "agent", agent: "pm" } });
+  server.connectors = [current];
+  await act(async () => root.render(
+    <TooltipProvider>
+      <ConnectorDetailSheet connector={current} agents={[{ name: "pm", label: "Marco" }, { name: "dev", label: "dev" }]} open onOpenChange={() => {}} onChanged={() => {}} onRemoved={() => {}} onReconnect={() => {}} />
+    </TooltipProvider>,
+  ));
+  await flush();
+  expect(document.querySelector('[data-testid="connector-scope"]')?.textContent).toContain("Personal: only this agent can ever use it");
+  expect(document.querySelector('[data-testid="connector-scope"] [aria-label="Belongs to"]')?.textContent).toContain("Marco (personal)");
+  // no "All agents", no other agent: only its owner
+  expect(document.querySelector('[role="switch"][aria-label="All agents can use it"]')).toBeNull();
+  expect(document.querySelector('[role="switch"][aria-label="dev can use it"]')).toBeNull();
+  expect(document.querySelector('[role="switch"][aria-label="Marco can use it"]')?.getAttribute("aria-checked")).toBe("true");
+});
+
 test("agent page: choose which of a connector's tools the agent gets", async () => {
   installFetch();
   server.connectors = [

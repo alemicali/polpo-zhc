@@ -2118,6 +2118,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
   authed.route("/connectors", connectorRoutes({
     manager: () => connectorManagerFor(o),
     settings: () => o.getConfig()?.settings,
+    agentNames: async () => (await o.getAgents()).map((a) => a.name),
     // what the provider must reach: POLPO_PUBLIC_URL when set, even when the dashboard calls the API on another port
     redirectUri: (c) => `${connectorPublicBase(publicOrigin(c))}${CONNECTOR_OAUTH_CALLBACK_PATH}`,
   }));

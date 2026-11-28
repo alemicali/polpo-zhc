@@ -16,7 +16,7 @@ export type { UseMissionsReturn } from "./hooks/use-missions.js";
 export { useMission } from "./hooks/use-mission.js";
 export { useMissionCost } from "./hooks/use-mission-cost.js";
 export type { UseMissionCostReturn } from "./hooks/use-mission-cost.js";
-export { useConnectors, connectorLabel } from "./hooks/use-connectors.js";
+export { useConnectors, connectorLabel, connectorOwner, connectorEnabledFor } from "./hooks/use-connectors.js";
 export {
   useWaBusinessStatus, useWaTemplates, useWaConversation, useWaContacts, useWaPending, useWaBusinessProfile, useWaBlocked, useWaAnalytics,
   useWaAccountEvents, useWaPhone, useWaBusinessEvents, useWaMedia,

@@ -35,6 +35,8 @@ export interface AgentCardConnector {
   status?: string;
   /** Which of its tools the agent gets: all, or how many (agent.connectorTools). */
   tools: "all" | number;
+  /** "org": the organization's; "personal": this agent's own (scope agent). */
+  scope: "org" | "personal";
 }
 
 export interface AgentCardGoal {
@@ -131,7 +133,7 @@ export interface AgentCardInput {
   /** GET /agents/lines: the team's lines (the agent's row is used). */
   lines?: { agents: Array<{ agent: string; mode: string; explicit: boolean; manager?: string; reachable: string[] }> };
   /** GET /connectors: the agent's are those whose access lists it (or "*"). */
-  connectors?: Array<{ id: string; name: string; account?: string; status?: string; enabled?: boolean; access?: { agents?: string[] | "*" } }>;
+  connectors?: Array<{ id: string; name: string; account?: string; status?: string; enabled?: boolean; access?: { agents?: string[] | "*" }; scope?: { kind: string; agent?: string } }>;
   drive?: {
     self?: string;
     plan?: Array<{ id: string; title: string; horizon?: string; parentId?: string; progress?: number; status: string; due?: string; measure?: string; updatedAt?: string }>;
@@ -184,6 +186,8 @@ function agentConnectors(input: AgentCardInput): AgentCardConnector[] {
   const selection = input.agent.connectorTools ?? {};
   return (input.connectors ?? [])
     .filter((c) => c.enabled !== false && (c.access?.agents === "*" || (Array.isArray(c.access?.agents) && c.access.agents.includes(name))))
+    // another agent's own connector never reaches this agent (connectorGrants)
+    .filter((c) => c.scope?.kind !== "agent" || c.scope.agent === name)
     .map((c) => {
       const account = c.account?.trim();
       const pick = selection[c.id];
@@ -193,6 +197,7 @@ function agentConnectors(input: AgentCardInput): AgentCardConnector[] {
         ...(account ? { account } : {}),
         ...(c.status ? { status: c.status } : {}),
         tools: Array.isArray(pick) ? pick.length : "all" as const,
+        scope: c.scope?.kind === "agent" ? "personal" as const : "org" as const,
       };
     })
     .slice(0, 30);
@@ -317,6 +322,6 @@ export function agentCardText(card: AgentCard): string {
     lines.push(`Communication lines: ${card.lines.explicit ? card.lines.mode : "anyone (not set)"}`
       + ` — talks to ${card.lines.mode === "anyone" ? "any agent" : card.lines.reachable.join(", ") || "no agent"}${card.lines.manager ? `; escalates to ${card.lines.manager}` : ""}.`);
   }
-  if (card.connectors.length) lines.push(`Connectors: ${card.connectors.map((c) => `${c.label} [${c.id}]${c.tools === "all" ? "" : ` (${c.tools} tools)`}`).join(", ")}.`);
+  if (card.connectors.length) lines.push(`Connectors: ${card.connectors.map((c) => `${c.label} [${c.id}]${c.scope === "personal" ? " (its own)" : ""}${c.tools === "all" ? "" : ` (${c.tools} tools)`}`).join(", ")}.`);
   return lines.join("\n");
 }

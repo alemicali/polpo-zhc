@@ -30,7 +30,7 @@ import { hostedLabel } from "@/lib/mcp-servers";
 import { useConnectFlow } from "@/components/connectors/use-connect-flow";
 import { useConnectors } from "@/hooks/use-connectors";
 import {
-  accountLabel, authLabel, catalogCardState, catalogCategories, connectorState, connectorsApi, filterCatalog, filterConnectors,
+  accountLabel, agentHasAccess, authLabel, catalogCardState, catalogCategories, connectorOwner, connectorState, connectorsApi, filterCatalog, filterConnectors,
   groupConnectors, nextAccountName,
   type CatalogEntry, type Connector, type ConnectorCardState,
 } from "@/lib/connectors-api";
@@ -40,7 +40,14 @@ import { PageHeader } from "@/components/shared/page-header";
 
 function accessSummary(connector: Connector, agentLabel: (name: string) => string, product: string): string {
   const parts: string[] = [];
+  const owner = connectorOwner(connector);
+  // an agent's own connector: "Nina · personal"
+  const prefix = owner ? `${agentLabel(owner)} · personal · ` : "";
   if (connector.access.polpo) parts.push(product);
+  if (owner) {
+    if (agentHasAccess(connector.access, owner)) parts.push(agentLabel(owner));
+    return `${prefix}${parts.length ? `used by ${parts.join(" and ")}` : "off"}`;
+  }
   if (connector.access.agents === "*") parts.push("all agents");
   else if (connector.access.agents.length === 1) parts.push(agentLabel(connector.access.agents[0]!));
   else if (connector.access.agents.length > 1) parts.push(`${connector.access.agents.length} agents`);
