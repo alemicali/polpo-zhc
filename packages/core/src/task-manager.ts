@@ -2,7 +2,7 @@ import { isProductionRef, isSemver, parseAgentRef } from "./agent-versions.js";
 import { normalizeTaskToolScope, type TaskToolScope } from "./task-tool-scope.js";
 import type { TaskStore } from "./task-store.js";
 import type { OrchestratorContext } from "./orchestrator-context.js";
-import type { Task, TaskExpectation, ExpectedOutcome, RetryPolicy, ReviewContext, ScopedNotificationRules, WorkOrigin } from "./types.js";
+import type { Mission, MissionStatus, Task, TaskExpectation, ExpectedOutcome, RetryPolicy, ReviewContext, ScopedNotificationRules, WorkOrigin } from "./types.js";
 import { setAssessment } from "./types.js";
 import { sanitizeExpectations } from "./schemas.js";
 import type { TaskDirection } from "./task-control-store.js";
@@ -13,10 +13,69 @@ import type { SandboxSettings } from "./sandbox.js";
 /**
  * Task CRUD: add, update, retry, reassess, kill, abort, clear.
  */
+/** A finished mission that a human continuation (or retry) of one of its tasks put back to work. */
+export interface ReopenedMission {
+  id: string;
+  name: string;
+  prevStatus: MissionStatus;
+}
+
+/** Mission states a human continuation or retry reopens: the mission runs again while its task does. */
+const REOPENABLE_MISSION_STATES: ReadonlySet<MissionStatus> = new Set<MissionStatus>(["completed", "failed"]);
+
 export class TaskManager {
   private idMap = new Map<string, string>();
+  private missionReopenListeners: Array<(mission: Mission) => void> = [];
 
   constructor(private ctx: OrchestratorContext) {}
+
+  /** Called when a task's finished mission is reopened (the mission executor forgets it was closed). */
+  onMissionReopened(listener: (mission: Mission) => void): void {
+    this.missionReopenListeners.push(listener);
+  }
+
+  private async missionOfTask(task: Task): Promise<Mission | undefined> {
+    if (task.missionId) return this.ctx.registry.getMission?.(task.missionId);
+    if (task.group) return this.ctx.registry.getMissionByName?.(task.group);
+    return undefined;
+  }
+
+  /**
+   * A task of a finished mission runs again (a human continued or retried it): the mission goes
+   * back to active while it runs, and is closed again (completed or failed) when its tasks end.
+   * Without this the orchestrator never starts a pending task of a completed mission, finds it
+   * stuck and fails it as a deadlock (seen live: the continue direction stayed queued forever).
+   *
+   * Order matters, as the tick runs concurrently: the mission is active BEFORE the task is pending
+   * (a pending task of a completed mission is a deadlock), and the executor forgets that it closed
+   * the mission only AFTER (an active mission whose tasks all ended would be closed again at once).
+   */
+  private async reopeningMissionOf(
+    task: Task,
+    mission: Mission | undefined,
+    makePending: () => Promise<void>,
+  ): Promise<ReopenedMission | undefined> {
+    const reopen = !!mission && REOPENABLE_MISSION_STATES.has(mission.status) && !!this.ctx.registry.updateMission;
+    if (!reopen) {
+      await makePending();
+      return undefined;
+    }
+    const updated = await this.ctx.registry.updateMission!(mission.id, { status: "active" });
+    try {
+      await makePending();
+    } catch (error) {
+      await this.ctx.registry.updateMission!(mission.id, { status: mission.status }).catch(() => undefined);
+      throw error;
+    }
+    for (const listener of this.missionReopenListeners) {
+      try { listener(updated); } catch { /* a listener never blocks the reopen */ }
+    }
+    this.ctx.emitter.emit("log", {
+      level: "info",
+      message: `[${task.id}] Mission "${mission.name}" reopened (${mission.status} → active) for "${task.title}"`,
+    });
+    return { id: mission.id, name: mission.name, prevStatus: mission.status };
+  }
 
   async addTask(opts: {
     title: string;
@@ -179,7 +238,9 @@ export class TaskManager {
     const task = await this.ctx.registry.getTask(taskId);
     if (!task) throw new Error("Task not found");
     if (task.status !== "failed") throw new Error(`Cannot retry task in "${task.status}" state`);
-    await this.ctx.registry.transition(taskId, "pending");
+    await this.reopeningMissionOf(task, await this.missionOfTask(task), async () => {
+      await this.ctx.registry.transition(taskId, "pending");
+    });
     this.ctx.emitter.emit("task:retried", { taskId, title: task.title });
   }
 
@@ -190,7 +251,7 @@ export class TaskManager {
       mode?: "auto" | "steer" | "follow_up" | "continue";
       confirmSideEffects?: boolean;
     } = {},
-  ): Promise<{ action: TaskDirection["mode"]; direction: TaskDirection }> {
+  ): Promise<{ action: TaskDirection["mode"]; direction: TaskDirection; reopenedMission?: ReopenedMission }> {
     const store = this.ctx.taskControlStore;
     if (!store) throw new Error("Task steering is not available for this runtime");
 
@@ -211,7 +272,9 @@ export class TaskManager {
         : undefined;
 
     if (liveMode) {
-      if (!activeRun) throw new Error("Task has no active runner to steer");
+      if (!activeRun) {
+        throw new Error(`Task has no active runner to steer (it is ${task.status}): send it with mode "continue" to run it again with this message`);
+      }
       const direction = await store.enqueueDirection({
         taskId,
         runId: activeRun.id,
@@ -231,23 +294,32 @@ export class TaskManager {
     if (task.status === "draft" || task.status === "awaiting_approval") {
       throw new Error(`Cannot continue task in "${task.status}" state`);
     }
+    const mission = await this.missionOfTask(task);
+    if (mission?.status === "cancelled") {
+      throw new Error(`Cannot continue a task of mission "${mission.name}": the mission was cancelled (run the mission again)`);
+    }
 
     const direction = await store.enqueueDirection({
       taskId,
       mode: "continue",
       message: normalized,
     });
+    let reopenedMission: ReopenedMission | undefined;
     try {
-      if (task.status !== "pending" && task.status !== "assigned") {
-        await this.ctx.registry.unsafeSetStatus(taskId, "pending", "manual continuation from human direction");
-      }
-      await this.ctx.registry.updateTask(taskId, { phase: "execution" });
+      // A finished mission runs again with its continued task: otherwise the tick never starts a
+      // pending task of a completed mission and fails it as a deadlock, the direction left queued.
+      reopenedMission = await this.reopeningMissionOf(task, mission, async () => {
+        if (task.status !== "pending" && task.status !== "assigned") {
+          await this.ctx.registry.unsafeSetStatus(taskId, "pending", "manual continuation from human direction");
+        }
+        await this.ctx.registry.updateTask(taskId, { phase: "execution" });
+      });
     } catch (error) {
       await store.failDirection(direction.id, error instanceof Error ? error.message : String(error));
       throw error;
     }
     this.ctx.emitter.emit("task:direction", { taskId, action: "continue", direction });
-    return { action: "continue", direction };
+    return { action: "continue", direction, ...(reopenedMission ? { reopenedMission } : {}) };
   }
 
   async listDirections(taskId: string): Promise<TaskDirection[]> {

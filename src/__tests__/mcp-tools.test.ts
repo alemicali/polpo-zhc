@@ -84,7 +84,10 @@ function fakeInstance() {
       if (action === "/kill") { t.status = "failed"; return okData({ killed: true }); }
       if (action === "/directions") {
         if (t.status === "done" && (body as { mode?: string }).mode === "steer") return reply(409, { ok: false, error: "Cannot steer a finished task", code: "INVALID_STATE" });
-        return okData({ action: t.status === "done" ? "continue" : "steer", direction: { id: "d1", message: (body as { message: string }).message } }, 202);
+        return okData({
+          action: t.status === "done" ? "continue" : "steer", direction: { id: "d1", message: (body as { message: string }).message },
+          ...(t.status === "done" ? { reopenedMission: { id: "m1", name: "Sito", prevStatus: "completed" } } : {}),
+        }, 202);
       }
     }
     if (p === "/missions" && method === "GET") return okData([...missions.values()].map(({ data: _d, ...x }) => x));
@@ -305,6 +308,10 @@ describe("tasks", () => {
     expect((await call(deps(f), "polpo_task_direct", { id: "t2", message: "use metric units" })).structuredContent).toMatchObject({ action: "steer" });
     expect(f.calls.at(-1)!.body).toEqual({ message: "use metric units", mode: "auto" });
     expect(await call(deps(f), "polpo_task_direct", { id: "t1", message: "x", mode: "steer" })).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/cannot take this direction/) }] });
+    // continuing a task of a finished mission reopens it: the tool says so
+    const continued = await call(deps(f), "polpo_task_direct", { id: "t1", message: "go on", mode: "continue" });
+    expect(continued.structuredContent).toMatchObject({ action: "continue", reopened_mission: { id: "m1", name: "Sito", previous_status: "completed" } });
+    expect(continued.content[0].text).toMatch(/mission "Sito" was completed and is active again/);
   });
 
   it("waits until the task settles, or times out with its current state", async () => {

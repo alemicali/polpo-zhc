@@ -32,6 +32,21 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-28-continue-reopens-mission",
+    date: "2026-11-28",
+    kind: "fixed",
+    title: "Continuare un'attività di una missione finita la fa ripartire davvero",
+    summary: "Se dai una nuova indicazione a un'attività di una missione già completata, l'attività riparte con il tuo messaggio e la missione torna attiva finché non ha finito.",
+    body: [
+      "- **Prima falliva subito**: continuando un'attività conclusa di una missione completata, l'attività tornava in attesa e dopo un secondo risultava fallita, senza ripartire, e il tuo messaggio restava in coda per sempre.",
+      "- **Ora riparte**: l'agente riprende l'attività con la tua indicazione. Intanto la missione torna **attiva**; quando l'attività finisce, la missione torna **completata** (o **fallita**, se la ripresa non va a buon fine).",
+      "- **Vale anche per le attività fallite**: continuare o riprovare un'attività fallita di una missione fallita riapre la missione allo stesso modo.",
+      "- **Missioni annullate**: un'attività di una missione annullata non si può continuare; il messaggio ti dice di rilanciare la missione.",
+      "- **Messaggi più chiari**: se mandi un \"follow-up\" a un'attività che non sta lavorando, il messaggio ti dice di usare \"continua\".",
+      "- **Ovunque**: dalla pagina dell'attività, chiedendo a Polpo in chat, dall'API e dal connettore MCP, che ti dicono anche che la missione è di nuovo attiva.",
+    ].join("\n"),
+  },
+  {
     id: "2026-11-28-computer-safe-stop",
     date: "2026-11-28",
     kind: "fixed",

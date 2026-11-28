@@ -196,6 +196,7 @@ export { parseCron, matchesCron, nextCronOccurrence, isCronExpression, scheduleE
 
 // ── Core Managers ───────────────────────────────────────────────────────
 export { TaskManager } from "./task-manager.js";
+export type { ReopenedMission } from "./task-manager.js";
 export { AgentManager } from "./agent-manager.js";
 export { ApprovalManager } from "./approval-manager.js";
 export { EscalationManager } from "./escalation-manager.js";

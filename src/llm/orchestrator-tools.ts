@@ -4186,7 +4186,10 @@ async function execSendTaskDirection(polpo: Orchestrator, args: Record<string, u
       confirmSideEffects: args.confirmSideEffects as boolean | undefined,
     },
   );
-  return `Direction sent to task ${args.taskId} using ${result.action} mode.`;
+  const reopened = result.reopenedMission
+    ? ` Mission "${result.reopenedMission.name}" was ${result.reopenedMission.prevStatus} and is active again while the task runs.`
+    : "";
+  return `Direction sent to task ${args.taskId} using ${result.action} mode.${reopened}`;
 }
 
 async function execKillTask(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {

@@ -8,7 +8,7 @@
  * - otherwise (pending, done, failed): the message continues the task in a new run, and a task
  *   with side effects asks to confirm that external actions may repeat.
  */
-import type { AgentProcess, Task, UseTaskDirectionsReturn } from "@polpo-ai/react";
+import type { AgentProcess, SendTaskDirectionResult, Task, UseTaskDirectionsReturn } from "@polpo-ai/react";
 
 export interface TaskSteering {
   /** The task accepts directions at all. */
@@ -57,4 +57,11 @@ export async function sendTaskDirection(
     mode: "auto",
     confirmSideEffects: steering.needsConfirmation ? confirmSideEffects : undefined,
   });
+}
+
+/** What the toast says once a direction is sent (a continuation may reopen the task's finished mission). */
+export function directionSentMessage(result: Pick<SendTaskDirectionResult, "action" | "reopenedMission">): string {
+  if (result.action !== "continue") return "Direction queued";
+  const reopened = result.reopenedMission;
+  return reopened ? `Continuation queued: mission "${reopened.name}" is active again` : "Continuation queued";
 }

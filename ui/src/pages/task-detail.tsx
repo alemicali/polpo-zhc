@@ -90,7 +90,7 @@ import { TaskChatView } from "@/components/tasks/task-chat-view";
 import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { groupActivityRuns, type ActivityRunGroup } from "@/lib/task-transcript";
 import { parseExecutionView, parseTaskTab, readExecutionView, writeExecutionView, type TaskDetailTab, type TaskExecutionView } from "@/lib/task-execution-view";
-import { sendTaskDirection, taskSteering } from "@/hooks/use-task-steering";
+import { directionSentMessage, sendTaskDirection, taskSteering } from "@/hooks/use-task-steering";
 import { useComputers } from "@/hooks/use-computers";
 import { toast } from "sonner";
 import { formatDistanceToNow, format } from "date-fns";
@@ -759,7 +759,7 @@ function TaskDirectionComposer({ task, process, taskDirections }: { task: Task; 
       const result = await sendTaskDirection(steering, sendDirection, message, confirmSideEffects);
       setMessage("");
       setConfirmSideEffects(false);
-      toast.success(result.action === "continue" ? "Continuation queued" : "Direction queued");
+      toast.success(directionSentMessage(result));
     } catch (cause) {
       toast.error((cause as Error).message);
     }

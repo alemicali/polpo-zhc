@@ -142,6 +142,9 @@ export class MissionExecutor {
     this.delayStore = ctx.delayStore ?? new InMemoryDelayStore();
     this.nodeStore = ctx.decisionNodeStore ?? new InMemoryDecisionNodeStore();
     this.images = new MissionImageNodes(ctx);
+    // A continued/retried task reopened its finished mission: close it again when its tasks end,
+    // even if the run ends before a tick sees the task running.
+    taskMgr.onMissionReopened?.((mission) => this.forgetCleanedGroup(mission.name));
 
     // Rebuild cleanedGroups from persisted task state — groups where ALL tasks
     // are already terminal don't need to be re-processed after a server restart.
