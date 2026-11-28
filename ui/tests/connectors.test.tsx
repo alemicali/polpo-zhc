@@ -40,7 +40,8 @@ import {
   EMPTY_CUSTOM_FORM, OAUTH_MESSAGE_TYPE, allowedToolsCoverConnector, catalogCardState, catalogCategories, customConnectorInput,
   filterCatalog, splitArgs, toggleAgentAccess, validateCustomConnector,
   accountLabel, groupConnectors, nextAccountName, suggestedAccountName,
-  type CatalogEntry, type Connector,
+  accountLabelFrom, identityTargetFor, importCandidates, importIdentity,
+  type CatalogEntry, type Connector, type ConnectorAccount,
 } from "../src/lib/connectors-api";
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
@@ -113,6 +114,8 @@ function installFetch() {
         ...(fromCatalog.oauth ? { auth: { type: "oauth" as const, oauth: fromCatalog.oauth } } : {}),
         ...(body.url ? { transport: { type: "http" as const, url: body.url } } : {}),
       } : { name: body.name, catalogId: undefined, auth: body.auth, transport: body.transport, status: body.auth?.type === "oauth" ? "needs_auth" : "disconnected" });
+      // like the server: a per-identity connector has no sign-in of its own, starts with no accounts
+      if (body.scope) Object.assign(created, { scope: body.scope }, body.scope.kind === "identity" ? { status: "disconnected", accounts: [] } : {});
       server.connectors = [...server.connectors, created];
       return ok(created, 201);
     }
@@ -120,6 +123,7 @@ function installFetch() {
     const current = server.connectors.find((c) => c.id === id);
     if (!current) return Promise.resolve(new Response(JSON.stringify({ ok: false, error: "Connector not found" }), { status: 404 }));
     const save = (next: Connector) => { server.connectors = server.connectors.map((c) => (c.id === id ? next : c)); return next; };
+    if (action === "accounts") return accountsRoute(current, path.split("/").slice(3), method, body, save);
     if (!action && method === "GET") return ok(current);
     if (!action && method === "DELETE") {
       server.connectors = server.connectors.filter((c) => c.id !== id);
@@ -149,6 +153,73 @@ function installFetch() {
   });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
+}
+
+// ── Per-identity connectors: the accounts routes ────────────────────────────
+function account(id: string, identity: string, label: string, extra: Partial<ConnectorAccount> = {}): ConnectorAccount {
+  return {
+    id, identity, label, createdAt: "2026-11-28T00:00:00Z", status: "needs_auth",
+    secrets: { bearerToken: false, headers: [], oauth: { authorized: false, pending: false } },
+    ...extra,
+  };
+}
+const authorized = { bearerToken: false, headers: [], oauth: { authorized: true, pending: false } };
+
+function accountsRoute(current: Connector, rest: string[], method: string, body: Record<string, unknown> | undefined, save: (c: Connector) => Connector) {
+  const [accId, sub] = rest;
+  const accounts = current.accounts ?? [];
+  const withAccounts = (list: ConnectorAccount[]) => save({ ...current, accounts: list });
+  if (!accId && method === "POST") {
+    const identity = body!.identity === "me" ? "person:ada@acme.com" : String(body!.identity);
+    const secrets = body!.secrets as { bearerToken?: string } | undefined;
+    const created = account(`acc-new${accounts.length + 1}`, identity, String(body!.label), {
+      ...(accounts.some((a) => a.identity === identity) ? {} : { default: true }),
+      status: current.auth.type === "oauth" ? "needs_auth" : "disconnected",
+      secrets: { bearerToken: !!secrets?.bearerToken, headers: [], oauth: { authorized: false, pending: false } },
+    });
+    return ok({ account: created, connector: withAccounts([...accounts, created]) }, 201);
+  }
+  if (accId === "import" && method === "POST") {
+    const source = server.connectors.find((c) => c.id === body!.from)!;
+    const identity = String(body!.identity);
+    const imported = account("acc-imported", identity, String(body!.label), {
+      importedFrom: source.id, status: "connected", secrets: authorized, ...(source.account ? { account: source.account } : {}),
+      ...(accounts.some((a) => a.identity === identity) ? {} : { default: true }),
+    });
+    const next = withAccounts([...accounts, imported]);
+    if (body!.removeSource !== false) server.connectors = server.connectors.filter((c) => c.id !== source.id);
+    return ok({ account: imported, source: { id: source.id, removed: body!.removeSource !== false, disabled: false }, renamed: { from: `mcp__${source.id}__*`, to: `mcp__${current.id}__*` }, connector: next }, 201);
+  }
+  const found = accounts.find((a) => a.id === accId);
+  if (!found) return Promise.resolve(new Response(JSON.stringify({ ok: false, error: "No such account" }), { status: 404 }));
+  const put = (a: ConnectorAccount, makeDefault = false) => withAccounts(accounts.map((x) => {
+    if (x.id === a.id) return a;
+    if (makeDefault && x.identity === a.identity) { const { default: _d, ...restOf } = x; return restOf; }
+    return x;
+  }));
+  if (!sub && method === "PATCH") {
+    const next = { ...found, ...(body!.label ? { label: String(body!.label) } : {}), ...(body!.default ? { default: true } : {}),
+      ...((body!.secrets as { bearerToken?: string } | undefined)?.bearerToken ? { secrets: { ...found.secrets, bearerToken: true } } : {}) };
+    return ok({ account: next, connector: put(next, !!body!.default) });
+  }
+  if (!sub && method === "DELETE") return ok({ removed: true, connector: withAccounts(accounts.filter((a) => a.id !== accId)) });
+  if (sub === "oauth") {
+    put({ ...found, secrets: { ...found.secrets, oauth: { ...found.secrets.oauth, pending: true } } });
+    return ok({ authorizationUrl: `https://auth.${current.id}.com/authorize?account=${accId}`, redirectUri: REDIRECT });
+  }
+  if (sub === "test") {
+    const next = { ...found, status: "connected" as const, toolCount: 2 };
+    return ok({ ok: true, status: "connected", account: accId, tools: [{ name: "a" }, { name: "b" }], connector: put(next) });
+  }
+  if (sub === "disconnect") return ok(put({ ...found, status: "needs_auth", secrets: { ...found.secrets, oauth: { authorized: false, pending: false } } }));
+  throw new Error(`unexpected ${method} accounts/${rest.join("/")}`);
+}
+
+/** The person finishes signing in an account at the provider. */
+function completeAccountSignIn(id: string, accId: string, signedInAs?: string) {
+  server.connectors = server.connectors.map((c) => (c.id === id
+    ? { ...c, accounts: (c.accounts ?? []).map((a) => (a.id === accId ? { ...a, status: "connected" as const, secrets: authorized, ...(signedInAs ? { account: signedInAs } : {}) } : a)) }
+    : c));
 }
 
 /** The person finishes signing in at the provider: the callback stores tokens and connects. */
@@ -873,4 +944,248 @@ test("connector dialogs fit the viewport: header, scrolling body, footer always 
   await click(byText(/OAuth apps/));
   const apps = [...document.querySelectorAll('[data-slot="dialog-content"]')].at(-1)!;
   expect(apps.querySelector('[data-slot="dialog-body"] [data-slot="dialog-footer"]')?.className).toContain("sticky");
+});
+
+// ── Per-identity connectors ─────────────────────────────────────────────────
+
+const identityGmail = (extra: Partial<Connector> = {}) => connector("gmail", {
+  name: "Gmail", catalogId: "gmail", scope: { kind: "identity" }, status: "disconnected", access: { agents: ["pm", "dev"], polpo: true },
+  accounts: [
+    account("acc-1", "agent:pm", "sitoinchat", { default: true, status: "connected", account: "pm@sitoinchat.it", secrets: authorized }),
+    account("acc-2", "agent:pm", "personale", { status: "connected", secrets: authorized }),
+    account("acc-3", "agent:dev", "devmail", { default: true, status: "connected", secrets: authorized }),
+    account("acc-4", "person:ada@acme.com", "ada", { default: true }),
+    account("acc-5", "org", "shared", { default: true, status: "connected", secrets: authorized }),
+  ],
+  ...extra,
+});
+const AGENTS = [{ name: "pm", label: "Marco" }, { name: "dev", label: "dev" }];
+
+/** The detail sheet alone, re-rendered with each change (like the page's upsert). */
+async function renderSheet(initial: Connector, props: Partial<React.ComponentProps<typeof ConnectorDetailSheet>> = {}) {
+  let current = initial;
+  const rerender = () => root.render(
+    <TooltipProvider>
+      <ConnectorDetailSheet connector={current} agents={AGENTS} open onOpenChange={() => {}} onChanged={(c) => { current = c; rerender(); }} onRemoved={() => {}} onReconnect={() => {}}
+        connectors={server.connectors} {...props} />
+    </TooltipProvider>,
+  );
+  await act(async () => rerender());
+  await flush();
+  return () => current;
+}
+
+test("type selector: adding a catalog app per identity creates scope identity, opens no sign-in, then offers Add accounts", async () => {
+  installFetch();
+  const open = vi.spyOn(window, "open");
+  await renderPage();
+  await click(container.querySelector('[aria-label="Add Linear as…"]'));
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Add Linear");
+  expect(document.querySelector('[data-testid="connector-type"]')?.textContent).toContain("Per identity");
+  await click(document.querySelector('input[name="connector-type"][value="identity"]'));
+  expect(inDialog("Add")).toBeTruthy(); // not "Continue to sign-in"
+  await click(inDialog("Add"));
+  await flush();
+  expect(server.calls.find((c) => c.method === "POST" && c.path === "/")?.body).toEqual({ catalogId: "linear", name: "Linear", scope: { kind: "identity" } });
+  expect(open).not.toHaveBeenCalled();
+  expect(server.calls.some((c) => c.path.endsWith("/oauth/start"))).toBe(false);
+  expect(document.body.textContent).toContain("Linear is added, per identity.");
+  await click(inDialog("Add accounts"));
+  await flush();
+  expect(document.querySelector('[data-testid="connector-accounts"]')).toBeTruthy();
+});
+
+test("type selector: a personal connector names its agent; the custom dialog sends per identity without a token", async () => {
+  installFetch();
+  const onSubmit = vi.fn();
+  await act(async () => root.render(<CustomConnectorDialog open onOpenChange={() => {}} redirectUri={REDIRECT} onSubmit={onSubmit} agents={AGENTS} />));
+  await type(inputByLabel("Name"), "Mailer");
+  await type(inputByLabel("Remote MCP server URL"), "https://mail.example.com/mcp");
+  await click(document.querySelector('input[name="auth"][value="bearer"]'));
+  await click(document.querySelector('input[name="connector-type"][value="identity"]'));
+  expect(document.querySelector('[data-testid="identity-token-note"]')).toBeTruthy();
+  expect(inputByLabel("Token")).toBeUndefined(); // each account brings its own
+  await click(byText("Add"));
+  expect(onSubmit).toHaveBeenCalledWith({
+    name: "Mailer", transport: { type: "http", url: "https://mail.example.com/mcp" }, auth: { type: "bearer" }, scope: { kind: "identity" },
+  });
+  // personal: the first agent is picked
+  await click(document.querySelector('input[name="connector-type"][value="agent"]'));
+  expect(document.querySelector('[aria-label="Agent it belongs to"]')?.textContent).toContain("Marco");
+});
+
+test("identity sheet: accounts listed by identity with the Default badge; no connector-level sign-in", async () => {
+  installFetch();
+  server.connectors = [identityGmail()];
+  await renderSheet(server.connectors[0]!);
+  const sheet = document.querySelector('[role="dialog"]')!;
+  expect(sheet.querySelector('[data-testid="connector-identity-chip"]')?.textContent).toBe("Identity");
+  const names = [...sheet.querySelectorAll('[data-testid="identity-name"]')].map((n) => n.textContent);
+  expect(names).toEqual(["dev", "Marco", "ada@acme.com", "Organization (fallback)"]);
+  const pm = sheet.querySelector('[data-testid="identity-agent:pm"]')!;
+  expect([...pm.querySelectorAll('[data-testid="account-label"]')].map((l) => l.textContent)).toEqual(["sitoinchat", "personale"]);
+  expect(pm.querySelector('[data-testid="account-acc-1"] [data-testid="account-default"]')?.textContent).toBe("Default");
+  expect(pm.querySelector('[data-testid="account-acc-2"] [data-testid="account-default"]')).toBeNull();
+  expect(pm.querySelector('[data-testid="account-acc-1"]')?.textContent).toContain("Signed in as pm@sitoinchat.it");
+  // the connector itself has no sign-in, test or disconnect: its accounts do
+  const top = [...sheet.querySelectorAll("button")].map((b) => b.textContent?.trim());
+  expect(top).not.toContain("Disconnect");
+  expect(top).not.toContain("Add another account");
+  expect(sheet.querySelector('[aria-label="Add another Gmail account"]')).toBeNull();
+  expect(sheet.querySelector('[data-testid="connector-scope"]')?.textContent).toContain("cannot become an organization or personal connector");
+});
+
+test("identity sheet: add an account posts identity and label, then signs that account in", async () => {
+  installFetch();
+  server.connectors = [identityGmail({ accounts: [] })];
+  const popup = popupStub();
+  await renderSheet(server.connectors[0]!);
+  expect(document.body.textContent).toContain("No accounts yet.");
+  await click(byText(/Add account/));
+  await type(document.querySelector('input[aria-label="Account name"]') as HTMLInputElement, "sitoinchat");
+  await click(byText(/Add and sign in/));
+  await flush();
+  expect(server.calls.find((c) => c.method === "POST" && c.path === "/gmail/accounts")?.body).toEqual({ identity: "agent:pm", label: "sitoinchat" });
+  expect(server.calls.some((c) => c.method === "POST" && c.path === "/gmail/accounts/acc-new1/oauth/start")).toBe(true);
+  expect(popup.location.href).toBe("https://auth.gmail.com/authorize?account=acc-new1");
+  expect(document.querySelector('[data-testid="account-acc-new1"]')?.textContent).toContain("Waiting for the sign-in");
+
+  completeAccountSignIn("gmail", "acc-new1", "pm@sitoinchat.it");
+  await act(async () => {
+    window.dispatchEvent(new MessageEvent("message", { data: { type: OAUTH_MESSAGE_TYPE, ok: true, id: "gmail", account: "acc-new1" } }));
+  });
+  await flush();
+  const row = document.querySelector('[data-testid="account-acc-new1"]')!;
+  expect(row.textContent).toContain("Connected");
+  expect(row.textContent).toContain("Signed in as pm@sitoinchat.it");
+  expect(row.querySelector('[data-testid="account-default"]')).toBeTruthy();
+});
+
+test("identity sheet: make default, and the fallback toggle patches the scope", async () => {
+  installFetch();
+  server.connectors = [identityGmail()];
+  const current = await renderSheet(server.connectors[0]!);
+  await click(document.querySelector('[aria-label="Make personale the default"]'));
+  await flush();
+  expect(server.calls.find((c) => c.method === "PATCH" && c.path === "/gmail/accounts/acc-2")?.body).toEqual({ default: true });
+  expect(document.querySelector('[data-testid="account-acc-2"] [data-testid="account-default"]')).toBeTruthy();
+  expect(document.querySelector('[data-testid="account-acc-1"] [data-testid="account-default"]')).toBeNull();
+
+  const fallback = document.querySelector('[role="switch"][aria-label="Use the organization\'s account as fallback"]')!;
+  expect(fallback.getAttribute("aria-checked")).toBe("false"); // off by default
+  await click(fallback);
+  await flush();
+  expect(server.calls.find((c) => c.method === "PATCH" && c.path === "/gmail")?.body).toEqual({ scope: { kind: "identity", fallback: true } });
+  expect(current().scope).toEqual({ kind: "identity", fallback: true });
+});
+
+test("identity sheet: import a separate connector of the same app, with its owner and account as defaults", async () => {
+  installFetch();
+  server.connectors = [
+    identityGmail({ accounts: [] }),
+    connector("mail-pm", { name: "Mail PM", catalogId: "gmail", account: "pm@sitoinchat.it", status: "connected", secrets: signedIn, scope: { kind: "agent", agent: "pm" }, access: { agents: ["pm"], polpo: false } }),
+    connector("linear", { status: "connected" }), // another app: not offered
+  ];
+  await renderPage("/connectors?connector=gmail");
+  await click(byText(/Import an existing connector/));
+  const dialog = [...document.querySelectorAll('[role="dialog"]')].at(-1)!;
+  expect(dialog.querySelector('[aria-label="Connector to import"]')?.textContent).toContain("Mail PM (mail-pm)");
+  expect(dialog.querySelector('[aria-label="Whose account it becomes"]')?.textContent).toContain("Marco");
+  expect((dialog.querySelector('input[aria-label="Imported account name"]') as HTMLInputElement).value).toBe("pm@sitoinchat.it");
+  expect((dialog.querySelector('input[aria-label="Remove the source connector"]') as HTMLInputElement).checked).toBe(true);
+  expect(dialog.querySelector('[data-testid="import-rename-warning"]')?.textContent).toContain("mcp__mail-pm__… becomes mcp__gmail__…");
+  await click([...dialog.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Import"));
+  await flush();
+  expect(server.calls.find((c) => c.method === "POST" && c.path === "/gmail/accounts/import")?.body).toEqual({
+    from: "mail-pm", identity: "agent:pm", label: "pm@sitoinchat.it", removeSource: true,
+  });
+  expect(document.querySelector('[data-testid="account-acc-imported"]')?.textContent).toContain("imported from mail-pm");
+});
+
+test("import helpers: same app and sign-in only; per identity is never switched in place, a separate connector is imported instead", async () => {
+  const gmail = identityGmail({ accounts: [] });
+  const mailPm = connector("mail-pm", { name: "Mail PM", catalogId: "gmail", status: "connected", secrets: signedIn, scope: { kind: "agent", agent: "pm" }, access: { agents: ["pm"], polpo: false } });
+  const orgGmail = connector("gmail-2", { catalogId: "gmail", access: { agents: ["dev"], polpo: true } });
+  const sameUrl = connector("mailer", { catalogId: undefined, transport: { type: "http", url: "https://mcp.gmail.com/mcp" } });
+  const token = connector("gmail-3", { catalogId: "gmail", auth: { type: "bearer" } });
+  expect(importCandidates(gmail, [gmail, mailPm, orgGmail, sameUrl, token, connector("linear")]).map((c) => c.id)).toEqual(["mail-pm", "gmail-2", "mailer"]);
+  expect(importIdentity(mailPm)).toBe("agent:pm"); // its owner
+  expect(importIdentity(orgGmail)).toBe("agent:dev"); // its only agent
+  expect(importIdentity(connector("x", { access: { agents: "*", polpo: true } }))).toBe("org");
+  expect(identityTargetFor(mailPm, [gmail, mailPm])?.id).toBe("gmail");
+  expect(identityTargetFor(gmail, [gmail, mailPm])).toBeUndefined();
+  expect(accountLabelFrom("Gmail – info@acme.com")).toBe("Gmail info@acme.com");
+
+  // the personal connector's sheet keeps its Belongs to (Per identity… is one more choice there)
+  installFetch();
+  server.connectors = [gmail, mailPm];
+  await renderPage("/connectors?connector=mail-pm");
+  expect(document.querySelector('[data-testid="scope-identity-help"]')).toBeNull();
+  expect(document.querySelector('[data-testid="connector-scope"] [aria-label="Belongs to"]')?.textContent).toContain("Marco (personal)");
+});
+
+test("agent page: a per-identity connector has the Identity chip and only this agent's accounts", async () => {
+  installFetch();
+  server.connectors = [
+    identityGmail(),
+    connector("notion", { name: "Notion", scope: { kind: "identity", fallback: true }, status: "disconnected", access: { agents: ["pm"], polpo: false },
+      accounts: [account("acc-9", "org", "team", { default: true, status: "connected", secrets: authorized })] }),
+  ];
+  const popup = popupStub();
+  await act(async () => root.render(<MemoryRouter><TooltipProvider><AgentConnectorsSection agentName="pm" /></TooltipProvider></MemoryRouter>));
+  await flush();
+  const row = (id: string) => container.querySelector(`[data-testid="agent-connector-${id}"]`)!;
+  expect(row("gmail").querySelector('[data-testid="connector-scope-chip"]')?.textContent).toBe("Identity");
+  const mine = container.querySelector('[data-testid="agent-accounts-gmail"]')!;
+  expect([...mine.querySelectorAll('[data-testid="account-label"]')].map((l) => l.textContent)).toEqual(["sitoinchat", "personale"]);
+  // never another agent's, a person's or the organization's
+  expect(mine.textContent).not.toContain("devmail");
+  expect(mine.textContent).not.toContain("ada");
+  expect(mine.textContent).not.toContain("shared");
+  expect(row("gmail").textContent).toContain("2 accounts of its own");
+  expect(container.querySelector('[data-testid="agent-accounts-notion"] [data-testid="agent-no-account"]')?.textContent)
+    .toBe("No account yet: uses the organization's shared account.");
+
+  // add one for this agent: identity agent:pm, then its sign-in
+  await click(container.querySelector('[aria-label="Add a Notion account for Marco"]'));
+  const form = container.querySelector('[data-testid="agent-accounts-notion"] [data-testid="add-account-form"]')!;
+  expect(form.querySelector('[aria-label="Whose account"]')).toBeNull(); // only this agent
+  await type(form.querySelector('input[aria-label="Account name"]') as HTMLInputElement, "personale");
+  await click([...form.querySelectorAll("button")].find((b) => b.textContent?.includes("Add and sign in")));
+  await flush();
+  expect(server.calls.find((c) => c.method === "POST" && c.path === "/notion/accounts")?.body).toEqual({ identity: "agent:pm", label: "personale" });
+  expect(popup.location.href).toBe("https://auth.notion.com/authorize?account=acc-new2");
+
+  // set default / remove act on this agent's accounts only
+  await click(container.querySelector('[aria-label="Make personale the default"]'));
+  await flush();
+  expect(server.calls.find((c) => c.method === "PATCH" && c.path === "/gmail/accounts/acc-2")?.body).toEqual({ default: true });
+});
+
+test("a setup link opens the connector's sheet on that account, its token input focused", async () => {
+  installFetch();
+  server.connectors = [connector("stripe", {
+    name: "Stripe", catalogId: "stripe", auth: { type: "bearer" }, scope: { kind: "identity" }, status: "disconnected", access: { agents: ["pm"], polpo: true },
+    accounts: [account("acc-7", "agent:pm", "eu", { default: true, status: "disconnected" }), account("acc-8", "agent:dev", "us", { default: true, status: "disconnected", secrets: { ...authorized, bearerToken: true } })],
+  })];
+  await renderPage("/connectors?connector=stripe&focus=account:acc-7&setup=abc");
+  const row = document.querySelector('[data-testid="account-acc-7"]')!;
+  expect(row.getAttribute("data-focused")).toBe("true");
+  expect(document.querySelector('[data-testid="account-acc-8"]')?.getAttribute("data-focused")).toBeNull();
+  const input = row.querySelector('input[type="password"]') as HTMLInputElement;
+  expect(document.activeElement).toBe(input);
+  await type(input, "sk_eu");
+  await click([...row.querySelectorAll("button")].find((b) => b.textContent?.includes("Save to vault")));
+  await flush();
+  expect(server.calls.find((c) => c.method === "PATCH" && c.path === "/stripe/accounts/acc-7")?.body).toEqual({ secrets: { bearerToken: "sk_eu" } });
+});
+
+test("connectors list: a per-identity connector shows the Identity chip and its account counts", async () => {
+  installFetch();
+  server.connectors = [identityGmail()];
+  await renderPage();
+  const row = container.querySelector('[data-testid="connector-row-gmail"]')!;
+  expect(row.querySelector('[data-testid="identity-badge-gmail"]')?.textContent).toBe("Identity");
+  expect(row.textContent).toContain("Per identity · 5 accounts · 4 connected");
+  expect([...row.querySelectorAll("button")].some((b) => b.textContent === "Sign in")).toBe(false);
 });

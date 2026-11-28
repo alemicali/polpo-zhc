@@ -9,9 +9,11 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
-  connectorsApi, fillTemplate, setupManifest, setupSteps, suggestedAccountName, templateFields,
-  type CatalogEntry, type Connector,
+  connectorsApi, fillTemplate, isIdentityConnector, setupManifest, setupSteps, suggestedAccountName, templateFields,
+  type CatalogEntry, type Connector, type ConnectorScope,
 } from "@/lib/connectors-api";
+import { ConnectorTypePicker } from "./connector-type-picker";
+import type { AgentOption } from "./connector-detail-sheet";
 import { cn } from "@/lib/utils";
 import { ConnectorIcon } from "./connector-icon";
 import { FixItLink } from "./connector-bits";
@@ -141,41 +143,51 @@ function SetupStep({ appId, name, entry, redirectUri, onSaved }: {
 }
 
 /** URL template fields, region variants, API key. */
-function DetailsStep({ entry, connector, accountName, onSubmit }: {
+function DetailsStep({ entry, connector, accountName, choose, initialScope, agents = [], onSubmit }: {
   entry?: CatalogEntry; connector?: Connector;
   /** Another account of `entry`: ask its display name, prefilled with this. */
   accountName?: string;
+  /** A new connector whose type is picked here (its name is asked as "Name"). */
+  choose?: boolean;
+  initialScope?: ConnectorScope;
+  agents?: AgentOption[];
   onSubmit: (details: ConnectDetails) => void;
 }) {
+  const askName = accountName !== undefined;
+  const [scope, setScope] = useState<ConnectorScope>(initialScope ?? { kind: "org" });
+  const perIdentity = askName && scope.kind === "identity";
   const fields = !connector && entry?.urlTemplate ? templateFields(entry.urlTemplate) : [];
   const variants = !connector && entry?.variants && entry.variants.length > 1 ? entry.variants : [];
-  const needsToken = connector ? connector.auth.type === "bearer" && !connector.secrets.bearerToken : entry?.auth === "bearer";
+  const needsToken = !perIdentity && (connector ? connector.auth.type === "bearer" && !connector.secrets.bearerToken : entry?.auth === "bearer");
   const [values, setValues] = useState<Record<string, string>>({});
   const [variant, setVariant] = useState(variants[0]?.url ?? "");
   const [token, setToken] = useState("");
   const [name, setName] = useState(accountName ?? "");
   const [error, setError] = useState<string | null>(null);
-  const askName = accountName !== undefined;
+  const oauth = !!entry && (entry.auth === "oauth" || entry.auth === "oauth_preregistered");
   const submit = () => {
-    if (askName && !name.trim()) { setError("Give this account a name"); return; }
+    if (askName && !name.trim()) { setError(choose ? "Give the connector a name" : "Give this account a name"); return; }
+    if (askName && scope.kind === "agent" && !scope.agent) { setError("Pick the agent it belongs to"); return; }
     if (fields.some((f) => !values[f]?.trim())) { setError("Fill in every field"); return; }
     if (needsToken && !token.trim()) { setError("Paste the key"); return; }
     onSubmit({
       ...(fields.length ? { url: fillTemplate(entry!.urlTemplate!, values) } : variants.length ? { url: variant } : {}),
       ...(needsToken ? { bearerToken: token.trim() } : {}),
       ...(askName ? { name: name.trim() } : {}),
+      ...(askName && scope.kind !== "org" ? { scope } : {}),
     });
   };
   return (
     <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); submit(); }}>
       {askName && (
         <Field
-          label="Account name"
-          hint={`How you and the agents tell it apart, e.g. ${entry?.name ?? "Gmail"} – info@lumea.dev. You can rename it later.`}
+          label={choose ? "Name" : "Account name"}
+          hint={choose ? "How you and the agents call it. You can rename it later." : `How you and the agents tell it apart, e.g. ${entry?.name ?? "Gmail"} – info@lumea.dev. You can rename it later.`}
         >
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={`${entry?.name ?? "Gmail"} – info@lumea.dev`} autoFocus spellCheck={false} maxLength={80} />
+          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={choose ? entry?.name ?? "Gmail" : `${entry?.name ?? "Gmail"} – info@lumea.dev`} autoFocus spellCheck={false} maxLength={80} />
         </Field>
       )}
+      {askName && <ConnectorTypePicker scope={scope} agents={agents} onChange={setScope} />}
       {fields.length > 0 && (
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">{entry!.name} runs a server per account: enter yours.</p>
@@ -207,7 +219,7 @@ function DetailsStep({ entry, connector, accountName, onSubmit }: {
       {entry?.authNotes && (needsToken || fields.length > 0) && <p className="text-xs text-muted-foreground">{entry.authNotes}</p>}
       {error && <p className="text-xs text-destructive" role="alert">{error}</p>}
       <DialogFooter sticky>
-        <Button type="submit">{askName && entry && (entry.auth === "oauth" || entry.auth === "oauth_preregistered") ? "Continue to sign-in" : "Connect"}</Button>
+        <Button type="submit">{perIdentity ? "Add" : askName && oauth ? "Continue to sign-in" : "Connect"}</Button>
       </DialogFooter>
     </form>
   );
@@ -241,9 +253,11 @@ function AccountNameSuggestion({ connector, entryName, onRename }: {
 }
 
 export function ConnectDialog({
-  state, redirectUri, onBegin, onSetup, onSetupSaved, onOpenFallback, onClose, onManage, onRetry, onRemove, onRename,
+  state, redirectUri, onBegin, onSetup, onSetupSaved, onOpenFallback, onClose, onManage, onRetry, onRemove, onRename, agents = [],
 }: {
   state: ConnectState;
+  /** The agents a personal connector can belong to (type picker). */
+  agents?: AgentOption[];
   redirectUri: string;
   onBegin: (details: ConnectDetails) => void;
   onSetup: () => void;
@@ -269,7 +283,9 @@ export function ConnectDialog({
   ) : null;
   const name = connector?.name ?? entry?.name ?? target?.create?.name ?? "Connector";
   const another = !!target?.another && !!entry;
+  const choose = !!target?.choose && !!entry;
   const open = phase !== "idle";
+  const perIdentity = !!connector && isIdentityConnector(connector);
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
       <DialogContent className="flex flex-col gap-0 overflow-hidden p-0 sm:max-w-lg">
@@ -277,9 +293,9 @@ export function ConnectDialog({
           <div className="flex items-center gap-3">
             <ConnectorIcon catalogId={entry?.id ?? connector?.catalogId} name={name} color={entry?.icon?.color ?? connector?.icon?.color} iconUrl={connector?.iconUrl} iconDarkUrl={connector?.iconDarkUrl} size="lg" />
             <div className="min-w-0">
-              <DialogTitle className="leading-tight">{another && !state.connector ? `Add another ${entry!.name} account` : `Connect ${name}`}</DialogTitle>
+              <DialogTitle className="leading-tight">{another && !choose && !state.connector ? `Add another ${entry!.name} account` : choose && !state.connector ? `Add ${entry!.name}` : `Connect ${name}`}</DialogTitle>
               <DialogDescription className="line-clamp-2">
-                {another && !state.connector
+                {another && !choose && !state.connector
                   ? `A separate ${entry!.name} connection with its own sign-in, name and access: e.g. a second inbox, or one per agent.`
                   : entry?.description ?? connector?.description ?? "Custom MCP server"}
               </DialogDescription>
@@ -293,7 +309,10 @@ export function ConnectDialog({
         )}
 
         {phase === "details" && (
-          <DetailsStep entry={entry} connector={connector} accountName={another && !connector ? target?.name ?? "" : undefined} onSubmit={onBegin} />
+          <DetailsStep
+            entry={entry} connector={connector} accountName={(another || choose) && !connector ? target?.name ?? "" : undefined}
+            choose={choose} initialScope={target?.scope} agents={agents} onSubmit={onBegin}
+          />
         )}
 
         {phase === "working" && (
@@ -321,7 +340,24 @@ export function ConnectDialog({
           </div>
         )}
 
-        {phase === "done" && connector && (
+        {phase === "done" && connector && perIdentity && (
+          <div className="space-y-4 py-2">
+            <div className="flex items-center gap-3 rounded-lg border border-success/30 bg-success/5 p-3 text-sm" role="status">
+              <CheckCircle2 className="h-5 w-5 shrink-0 text-success" />
+              <span><span className="font-medium">{name} is added, per identity.</span> Nobody is signed in yet.</span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Each agent with access (and each person, when {product} can use it) connects its own accounts in its Accounts section.
+              Agents call the tools mcp__{connector.id}__… with their default account, or another of their own with <code className="font-mono">account</code>.
+            </p>
+            <DialogFooter sticky>
+              <Button variant="outline" onClick={onClose}>Done</Button>
+              <Button onClick={() => onManage(connector)}>Add accounts</Button>
+            </DialogFooter>
+          </div>
+        )}
+
+        {phase === "done" && connector && !perIdentity && (
           <div className="space-y-4 py-2">
             <div className="flex items-center gap-3 rounded-lg border border-success/30 bg-success/5 p-3 text-sm" role="status">
               <CheckCircle2 className="h-5 w-5 shrink-0 text-success" />

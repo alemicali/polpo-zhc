@@ -20,6 +20,8 @@ import { ConnectorIcon } from "./connector-icon";
 import { cn } from "@/lib/utils";
 import { CopyField, Field } from "./connect-dialog";
 import { productName, useInstanceBranding } from "@/lib/branding";
+import { ConnectorTypePicker } from "./connector-type-picker";
+import type { AgentOption } from "./connector-detail-sheet";
 
 const AUTH_CHOICES: Array<{ value: CustomAuthChoice; label: string; hint: string }> = [
   { value: "oauth", label: "OAuth", hint: "Sign in with the service (most hosted servers)" },
@@ -69,9 +71,11 @@ function useDetection(url: string | undefined, onResult: (result: ConnectorDisco
 }
 
 export function CustomConnectorDialog({
-  open, onOpenChange, redirectUri, onSubmit,
+  open, onOpenChange, redirectUri, onSubmit, agents = [],
 }: {
   open: boolean;
+  /** The agents a personal connector can belong to. */
+  agents?: AgentOption[];
   onOpenChange: (open: boolean) => void;
   redirectUri?: string;
   /** Create the connector and connect it. Called from the submit click (may open a sign-in window). */
@@ -98,6 +102,7 @@ export function CustomConnectorDialog({
   const pickedScopes = form.scopes.split(/[\s,]+/).filter(Boolean);
   const toggleScope = (scope: string, on: boolean) => set("scopes", (on ? [...new Set([...pickedScopes, scope])] : pickedScopes.filter((x) => x !== scope)).join(" "));
   const pickManual = (value: CustomAuthChoice) => setForm((f) => ({ ...f, auth: value, detected: undefined }));
+  const perIdentity = form.scope?.kind === "identity";
 
   const submit = () => {
     if (Object.keys(errors).length) { setShowErrors(true); return; }
@@ -117,6 +122,12 @@ export function CustomConnectorDialog({
           <Field label="Name" error={visible.name}>
             <Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Internal tools" aria-invalid={!!visible.name} />
           </Field>
+
+          <ConnectorTypePicker
+            scope={form.scope ?? { kind: "org" }} agents={agents} onChange={(scope) => set("scope", scope)}
+            identityDisabled={form.kind === "stdio" ? "A local command cannot be per identity" : undefined}
+          />
+          {visible.scope && <p className="text-xs text-destructive" role="alert">{visible.scope}</p>}
 
           {form.kind === "remote" ? (
             <>
@@ -203,7 +214,13 @@ export function CustomConnectorDialog({
                 </fieldset>
               )}
 
-              {form.auth === "bearer" && (
+              {form.auth !== "oauth" && form.auth !== "none" && perIdentity && (
+                <p className="text-xs text-muted-foreground" data-testid="identity-token-note">
+                  Per identity: each account brings its own {form.auth === "bearer" ? "token" : "header values"} when it is added.
+                </p>
+              )}
+
+              {form.auth === "bearer" && !perIdentity && (
                 <Field label="Token" error={visible.bearerToken}>
                   <Input type="password" value={form.bearerToken} onChange={(e) => set("bearerToken", e.target.value)} autoComplete="new-password" aria-invalid={!!visible.bearerToken} />
                 </Field>
@@ -216,8 +233,10 @@ export function CustomConnectorDialog({
                     <div key={i} className="flex gap-1.5">
                       <Input aria-label={`Header ${i + 1} name`} value={h.name} placeholder="X-Api-Key" className="w-2/5" spellCheck={false}
                         onChange={(e) => set("headers", form.headers.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))} />
-                      <Input aria-label={`Header ${i + 1} value`} type="password" value={h.value} placeholder="value" autoComplete="new-password"
-                        onChange={(e) => set("headers", form.headers.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))} />
+                      {!perIdentity && (
+                        <Input aria-label={`Header ${i + 1} value`} type="password" value={h.value} placeholder="value" autoComplete="new-password"
+                          onChange={(e) => set("headers", form.headers.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))} />
+                      )}
                       <Button type="button" size="icon" variant="ghost" aria-label="Remove header" disabled={form.headers.length === 1}
                         onClick={() => set("headers", form.headers.filter((_, j) => j !== i))}>
                         <X className="h-4 w-4" />
@@ -292,7 +311,8 @@ export function CustomConnectorDialog({
             </button>
             {advanced && (
               <label className="mt-2 flex items-center gap-2 text-sm">
-                <input type="checkbox" className="accent-primary" checked={form.kind === "stdio"} onChange={(e) => set("kind", e.target.checked ? "stdio" : "remote")} />
+                <input type="checkbox" className="accent-primary" checked={form.kind === "stdio"}
+                  onChange={(e) => setForm((f) => ({ ...f, kind: e.target.checked ? "stdio" : "remote", ...(e.target.checked && f.scope?.kind === "identity" ? { scope: { kind: "org" as const } } : {}) }))} />
                 Run a local command instead (stdio, admins only)
               </label>
             )}
@@ -300,7 +320,7 @@ export function CustomConnectorDialog({
 
           <DialogFooter sticky>
             <Button type="button" variant="outline" onClick={() => { reset(); onOpenChange(false); }}>Cancel</Button>
-            <Button type="submit">{form.kind === "remote" && form.auth === "oauth" ? "Add and sign in" : "Add"}</Button>
+            <Button type="submit">{form.kind === "remote" && form.auth === "oauth" && !perIdentity ? "Add and sign in" : "Add"}</Button>
           </DialogFooter>
         </form>
         </DialogBody>

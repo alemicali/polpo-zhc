@@ -1,10 +1,12 @@
 /**
  * A connector's settings: status and actions (Reconnect, Test, Disconnect, Remove), who can use
- * it (Polpo, every agent, or chosen agents) and its tools with a per-tool policy.
+ * it (Polpo, every agent, or chosen agents) and its tools with a per-tool policy. A per-identity
+ * connector has no sign-in of its own: its Accounts section lists every identity's accounts.
  */
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AlertTriangle, Building2, Check, ExternalLink, KeyRound, Image as ImageIcon, Link2, Loader2, Pencil, Plug, RefreshCw, RotateCw, Server, Terminal, Trash2, Undo2, Unplug, UserPlus, Users, Wrench, X } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -12,7 +14,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import {
-  MAX_ICON_BYTES, agentHasAccess, connectorOwner, connectorState, connectorsApi, iconSourceLabel, oauthAppFor, registrationRefused, toggleAgentAccess, toolLabel,
+  MAX_ICON_BYTES, accountsSummary, agentHasAccess, connectorOwner, connectorState, connectorsApi, iconSourceLabel, isIdentityConnector, oauthAppFor, registrationRefused, toggleAgentAccess, toolLabel,
   type CatalogEntry, type Connector, type ConnectorAccess, type ConnectorScope, type ConnectorTool, type ConnectorToolPolicy,
 } from "@/lib/connectors-api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -22,6 +24,7 @@ import { ConnectorIcon } from "./connector-icon";
 import { bundledHostedIconSrc } from "@/lib/hosted-server-icons";
 import { FixItLink, StateBadge, Switch } from "./connector-bits";
 import { productName, useInstanceBranding } from "@/lib/branding";
+import { AccountsSection } from "./connector-accounts";
 
 export interface AgentOption {
   name: string;
@@ -31,15 +34,43 @@ export interface AgentOption {
 }
 
 const ORG_SCOPE = "__org__";
+const IDENTITY_SCOPE = "__identity__";
 
-/** Who the connector belongs to: the organization, or one agent (its own: only that agent can ever use it). */
+/**
+ * Who the connector belongs to: the organization, or one agent (its own: only that agent can ever
+ * use it). Per identity is a type of its own: a connector cannot switch to or from it in place
+ * (`identityHelp` says what to do instead: import this one into a per-identity connector).
+ */
 export function ScopeEditor({
-  scope, agents, onChange, disabled,
-}: { scope: ConnectorScope | undefined; agents: AgentOption[]; onChange: (scope: ConnectorScope) => void; disabled?: boolean }) {
+  scope, agents, onChange, disabled, identityHelp,
+}: {
+  scope: ConnectorScope | undefined; agents: AgentOption[]; onChange: (scope: ConnectorScope) => void; disabled?: boolean;
+  /** Shown when "Per identity" is picked on an org / personal connector. */
+  identityHelp?: React.ReactNode;
+}) {
+  const [wantsIdentity, setWantsIdentity] = useState(false);
+  if (scope?.kind === "identity") {
+    return (
+      <div className="space-y-1 rounded-md px-2 py-1.5" data-testid="connector-scope">
+        <div className="flex items-center gap-3">
+          <span className="text-muted-foreground"><Users className="h-4 w-4" /></span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm">Type</span>
+            <span className="block text-xs text-muted-foreground">Per identity: each agent and person connects its own accounts</span>
+          </span>
+          <Badge variant="outline" className="border-primary/40 bg-primary/10 text-micro text-primary">Per identity</Badge>
+        </div>
+        <p className="pl-7 text-xs text-muted-foreground">
+          It cannot become an organization or personal connector: its accounts would have nowhere to go. Add a separate connector for that instead.
+        </p>
+      </div>
+    );
+  }
   const owner = scope?.kind === "agent" ? scope.agent : undefined;
   const known = owner === undefined || agents.some((a) => a.name === owner);
   return (
-    <div className="flex items-center gap-3 rounded-md px-2 py-1.5" data-testid="connector-scope">
+    <div className="space-y-1" data-testid="connector-scope">
+    <div className="flex items-center gap-3 rounded-md px-2 py-1.5">
       <span className="text-muted-foreground"><Building2 className="h-4 w-4" /></span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm">Belongs to</span>
@@ -50,7 +81,11 @@ export function ScopeEditor({
       <Select
         value={owner ?? ORG_SCOPE}
         disabled={disabled}
-        onValueChange={(v) => onChange(v === ORG_SCOPE ? { kind: "org" } : { kind: "agent", agent: v })}
+        onValueChange={(v) => {
+          if (v === IDENTITY_SCOPE) { setWantsIdentity(true); return; }
+          setWantsIdentity(false);
+          onChange(v === ORG_SCOPE ? { kind: "org" } : { kind: "agent", agent: v });
+        }}
       >
         <SelectTrigger size="sm" className="h-8 w-44 text-xs" aria-label="Belongs to">
           <SelectValue />
@@ -59,23 +94,40 @@ export function ScopeEditor({
           <SelectItem value={ORG_SCOPE} className="text-xs">Organization</SelectItem>
           {!known && owner && <SelectItem value={owner} className="text-xs">{owner} (personal)</SelectItem>}
           {agents.map((a) => <SelectItem key={a.name} value={a.name} className="text-xs">{a.label} (personal)</SelectItem>)}
+          <SelectItem value={IDENTITY_SCOPE} className="text-xs">Per identity…</SelectItem>
         </SelectContent>
       </Select>
+    </div>
+      {wantsIdentity && (
+        <div className="ml-7 space-y-2 rounded-md border bg-muted/30 p-3 text-xs" data-testid="scope-identity-help">
+          <p>
+            A connector cannot turn per identity in place. Add a per-identity connector of this app, then import this one as an account:
+            its sign-in moves over, nobody signs in again.
+          </p>
+          {identityHelp}
+          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setWantsIdentity(false)}>Close</Button>
+        </div>
+      )}
     </div>
   );
 }
 
 /** Who may use the connector: Polpo, every agent, or the chosen ones (an agent's own connector: only its owner). */
 export function AccessEditor({
-  access, agents, onChange, disabled, owner,
-}: { access: ConnectorAccess; agents: AgentOption[]; onChange: (access: ConnectorAccess) => void; disabled?: boolean; owner?: string }) {
+  access, agents, onChange, disabled, owner, perIdentity,
+}: {
+  access: ConnectorAccess; agents: AgentOption[]; onChange: (access: ConnectorAccess) => void; disabled?: boolean; owner?: string;
+  /** Per identity: who may connect accounts (and use their own). */
+  perIdentity?: boolean;
+}) {
   const product = productName(useInstanceBranding());
   const all = !owner && access.agents === "*";
   const names = agents.map((a) => a.name);
   const shown = owner ? agents.filter((a) => a.name === owner) : agents;
   return (
     <div className="space-y-1">
-      <Row icon={<Plug className="h-4 w-4" />} label={product} hint="The orchestrator chat">
+      {perIdentity && <p className="px-2 text-xs text-muted-foreground">Who may connect accounts. Each uses only its own (or the organization's, when the fallback is on).</p>}
+      <Row icon={<Plug className="h-4 w-4" />} label={product} hint={perIdentity ? "People chatting with it connect their own accounts" : "The orchestrator chat"}>
         <Switch label={`${product} can use it`} checked={access.polpo} disabled={disabled} onChange={(polpo) => onChange({ ...access, polpo })} />
       </Row>
       {!owner && (
@@ -201,7 +253,8 @@ function NameEditor({ connector, disabled, onRename }: { connector: Connector; d
 function ToolsSection({ connector, onPolicyChange }: { connector: Connector; onPolicyChange: (tool: string, policy: ConnectorToolPolicy) => Promise<void> }) {
   const product = productName(useInstanceBranding());
   const state = connectorState(connector);
-  const canList = state === "connected" || state === "not_connected" || state === "error";
+  // per identity: listed through a connected account
+  const canList = isIdentityConnector(connector) ? state === "connected" : state === "connected" || state === "not_connected" || state === "error";
   const [tools, setTools] = useState<ConnectorTool[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(canList);
@@ -229,7 +282,7 @@ function ToolsSection({ connector, onPolicyChange }: { connector: Connector; onP
           </Button>
         )}
       </div>
-      {!canList && <p className="text-sm text-muted-foreground">Connect {connector.name} to see its tools.</p>}
+      {!canList && <p className="text-sm text-muted-foreground">{isIdentityConnector(connector) ? `Connect an account to ${connector.name} to see its tools.` : `Connect ${connector.name} to see its tools.`}</p>}
       {canList && loading && !tools && <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading tools…</p>}
       {error && <p className="text-sm text-destructive">{error}</p>}
       {tools && tools.length === 0 && <p className="text-sm text-muted-foreground">This server has no tools.</p>}
@@ -324,7 +377,17 @@ export function ConnectorIconEditor({ connector, onChanged, disabled }: { connec
 
 export function ConnectorDetailSheet({
   connector, entry, agents, open, onOpenChange, onChanged, onRemoved, onReconnect, onSetupApp, accountCount = 0, onAddAccount, onOpenHostedServer,
+  connectors = [], focus, importFrom, onImported, identityHelp,
 }: {
+  /** Every connector (a per-identity connector's import candidates). */
+  connectors?: Connector[];
+  /** Per identity: an account to focus (setup link), or "add". */
+  focus?: string;
+  /** Per identity: open the import dialog with this connector picked. */
+  importFrom?: string;
+  onImported?: (sourceId: string, removed: boolean) => void;
+  /** Org / personal: what to do when "Per identity" is picked (import into one, or add one). */
+  identityHelp?: React.ReactNode;
   connector: Connector | null;
   entry?: CatalogEntry;
   agents: AgentOption[];
@@ -348,7 +411,8 @@ export function ConnectorDetailSheet({
   const [confirmRemove, setConfirmRemove] = useState(false);
   if (!connector) return null;
   const state = connectorState(connector);
-  const oauth = connector.auth.type === "oauth";
+  const perIdentity = isIdentityConnector(connector);
+  const oauth = connector.auth.type === "oauth" && !perIdentity;
   const hostedServerId = connector.transport.type === "hosted" ? connector.transport.serverId : undefined;
 
   const act = async (what: string, fn: () => Promise<void>) => {
@@ -400,7 +464,9 @@ export function ConnectorDetailSheet({
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <StateBadge state={state} />
-            {connector.toolCount !== undefined && state === "connected" && <span className="text-xs text-muted-foreground">{connector.toolCount} tools</span>}
+            {perIdentity && <Badge variant="outline" data-testid="connector-identity-chip" className="border-primary/40 bg-primary/10 text-micro text-primary">Identity</Badge>}
+            {perIdentity && <span className="text-xs text-muted-foreground">{accountsSummary(connector)}</span>}
+            {!perIdentity && connector.toolCount !== undefined && state === "connected" && <span className="text-xs text-muted-foreground">{connector.toolCount} tools</span>}
             {entry?.docs && (
               <a href={entry.docs} target="_blank" rel="noreferrer noopener" className="ml-auto inline-flex items-center gap-1 text-xs text-primary hover:underline">
                 Docs <ExternalLink className="h-3 w-3" />
@@ -416,7 +482,7 @@ export function ConnectorDetailSheet({
               <dd className="truncate font-medium">{connector.account}</dd>
             </>)}
             <dt className="text-muted-foreground">Id</dt>
-            <dd className="truncate font-mono" title={`Agents see its tools as mcp__${connector.id}__…`}>{connector.id} <span className="text-muted-foreground">· tools mcp__{connector.id}__…</span></dd>
+            <dd className="truncate font-mono" title={`Agents see its tools as mcp__${connector.id}__…`}>{connector.id} <span className="text-muted-foreground">· tools mcp__{connector.id}__…{perIdentity ? " (optional account)" : ""}</span></dd>
             {entry && accountCount > 1 && (<>
               <dt className="text-muted-foreground">Accounts</dt>
               <dd>{accountCount} {entry.name} accounts connected; each has its own sign-in and access.</dd>
@@ -454,7 +520,7 @@ export function ConnectorDetailSheet({
                 <RotateCw className="h-4 w-4" /> {connector.secrets.oauth.authorized ? "Reconnect" : "Sign in"}
               </Button>
             )}
-            <Button
+            {!perIdentity && <Button
               size="sm" variant="outline" disabled={!!busy || !connector.enabled}
               onClick={() => void act("test", async () => {
                 const result = await connectorsApi.test(connector.id);
@@ -464,7 +530,7 @@ export function ConnectorDetailSheet({
               })}
             >
               {busy === "test" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plug className="h-4 w-4" />} Test
-            </Button>
+            </Button>}
             {oauth && connector.secrets.oauth.authorized && (
               <Button
                 size="sm" variant="outline" disabled={!!busy}
@@ -476,7 +542,7 @@ export function ConnectorDetailSheet({
                 {busy === "disconnect" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Unplug className="h-4 w-4" />} Disconnect
               </Button>
             )}
-            {entry && onAddAccount && (
+            {entry && onAddAccount && !perIdentity && (
               <Button size="sm" variant="outline" disabled={!!busy} onClick={onAddAccount} aria-label={`Add another ${entry.name} account`}>
                 <UserPlus className="h-4 w-4" /> Add another account
               </Button>
@@ -494,11 +560,19 @@ export function ConnectorDetailSheet({
             <Switch label="Enabled" checked={connector.enabled} disabled={!!busy} onChange={(enabled) => void patch({ enabled }, "enabled")} />
           </div>
 
+          {perIdentity && (
+            <AccountsSection
+              key={connector.id} connector={connector} connectors={connectors} agents={agents} onChanged={onChanged}
+              focus={focus} importFrom={importFrom} onImported={onImported}
+            />
+          )}
+
           <section className="space-y-2">
-            <h3 className="flex items-center gap-1.5 font-heading text-h3"><Users className="h-4 w-4" /> Who can use {accountCount > 1 ? "this account" : "it"}</h3>
+            <h3 className="flex items-center gap-1.5 font-heading text-h3"><Users className="h-4 w-4" /> Who can use {accountCount > 1 && !perIdentity ? "this account" : "it"}</h3>
             <ScopeEditor
               scope={connector.scope}
               agents={agents}
+              identityHelp={identityHelp}
               disabled={busy === "scope"}
               onChange={(scope) => void act("scope", async () => {
                 const before = connector.access.agents;
@@ -512,7 +586,7 @@ export function ConnectorDetailSheet({
                 } else toast.success(`${connector.name} now belongs to the organization`);
               })}
             />
-            <AccessEditor access={connector.access} agents={agents} owner={connectorOwner(connector)} disabled={busy === "access"} onChange={(access) => void patch({ access }, "access")} />
+            <AccessEditor access={connector.access} agents={agents} owner={connectorOwner(connector)} perIdentity={perIdentity} disabled={busy === "access"} onChange={(access) => void patch({ access }, "access")} />
             {agents.length === 0 && <p className="text-xs text-muted-foreground">No agents yet.</p>}
           </section>
 
@@ -523,7 +597,9 @@ export function ConnectorDetailSheet({
           open={confirmRemove}
           onOpenChange={setConfirmRemove}
           title={`Remove ${connector.name}?`}
-          description={`${product} signs out (revoking the access when the service allows it), deletes the stored credentials and the agents lose its tools.`}
+          description={perIdentity
+            ? `${product} signs out every account (revoking the access when the service allows it), deletes their credentials and every agent and person loses its tools.`
+            : `${product} signs out (revoking the access when the service allows it), deletes the stored credentials and the agents lose its tools.`}
           confirmLabel="Remove"
           destructive
           loading={busy === "remove"}
