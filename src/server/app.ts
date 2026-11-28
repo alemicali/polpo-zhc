@@ -1543,6 +1543,8 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     deleteTask: (id: string) => o.deleteTask(id),
     retryTask: (id: string) => o.retryTask(id),
     killTask: (id: string) => o.killTask(id),
+    pauseTask: (id: string, pauseOpts: { reason?: string }) => o.pauseTask(id, pauseOpts),
+    resumeTask: (id: string, resumeOpts: { message?: string }) => o.resumeTask(id, resumeOpts),
     sendDirection: (id: string, message: string, directionOpts?: any) => o.sendDirection(id, message, directionOpts),
     listDirections: (id: string) => o.listDirections(id),
     reassessTask: (id: string) => o.reassessTask(id),

@@ -19,7 +19,8 @@ import { engineTypeText, modelWithEngineText } from "./engine-label.js";
 
 /** "claude-cli" / "codex-cli": the official program signed in with a person's account (agent.engine { type: "cli" }). */
 export type RunEngine = "polpo" | HarnessId | "claude-cli" | "codex-cli";
-export type RunContextStatus = "running" | "completed" | "failed" | "killed";
+/** paused: the run was stopped by a pause of its task (resuming continues it). */
+export type RunContextStatus = "running" | "completed" | "failed" | "killed" | "paused";
 /** How the harness authenticates (the kind only). */
 export type RunAuthKind = "api-key" | "bedrock" | "vertex" | "ai-gateway" | "gateway" | "subscription";
 

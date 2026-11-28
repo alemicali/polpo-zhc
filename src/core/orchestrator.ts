@@ -48,6 +48,12 @@ export function originMember(): string | undefined {
   if (!o?.by || (o.source !== "api" && o.source !== "polpo")) return undefined;
   return MEMBER_EMAIL.test(o.by) ? o.by.toLowerCase() : undefined;
 }
+
+/** Who a pause or resume is recorded as: the person acting (any `by`), else Polpo for its own tools. */
+function actingAs(): string | undefined {
+  const o = currentEventOrigin();
+  return o?.by ?? (o?.source === "polpo" ? "Polpo" : undefined);
+}
 import type { PolpoEventMap } from "@polpo-ai/core";
 import type { TaskStore } from "./task-store.js";
 import type { RunStore } from "./run-store.js";
@@ -1263,6 +1269,10 @@ export class Orchestrator extends TypedEmitter {
       router: () => this.notificationRouter,
       pageUrl: (id) => (process.env.POLPO_PUBLIC_URL ? `${process.env.POLPO_PUBLIC_URL.replace(/\/+$/, "")}/computers/${encodeURIComponent(id)}` : undefined),
       log: (level, message) => this.emit("log", { level, message: `[computers] ${message}` }),
+      agent: async (name) => (await this.getAgents()).find((a) => a.name === name),
+      // a hard request nobody took in time pauses its task; completing it resumes the task
+      pauseTask: (taskId, o) => withEventOrigin({ source: "agent", by: o.by }, () => this.pauseTask(taskId, o)),
+      resumeTask: (taskId, o) => withEventOrigin({ source: "api", ...(o.by ? { by: o.by } : {}) }, () => this.resumeTask(taskId, o)),
     });
     this.unregisterComputerTakeover?.();
     this.unregisterComputerTakeover = registerComputerTakeover(this.polpoDir, this.computerTakeover);
@@ -1785,7 +1795,54 @@ export class Orchestrator extends TypedEmitter {
     return (await this.backgroundWaitMgr?.cancel(id)) ?? false;
   }
   reassessTask(taskId: string): Promise<void> { return this.engine.reassessTask(taskId); }
-  async killTask(taskId: string): Promise<boolean> { return this.engine.killTask(taskId); }
+  async killTask(taskId: string): Promise<boolean> {
+    const before = await this.registry.getTask(taskId).catch(() => undefined);
+    // read now: stores may hand out live objects the kill changes
+    const takeover = before?.status === "paused" ? before.pause?.takeover : undefined;
+    const killed = await this.engine.killTask(taskId);
+    // a task paused for a blocking takeover: nobody waits for that request any more
+    if (takeover) await this.closeParkedTakeover(takeover.requestId);
+    return killed;
+  }
+  /** Cancel a parked (hard) takeover request whose task was resumed or stopped by someone. */
+  private async closeParkedTakeover(requestId: string): Promise<void> {
+    try {
+      await this.computerTakeover?.close(requestId, "cancelled", { parked: true });
+    } catch (err) {
+      this.emit("log", { level: "warn", message: `[computers] takeover request ${requestId} could not be closed: ${(err as Error).message}` });
+    }
+  }
+  /**
+   * Pause a task (pending, assigned or in progress): not scheduled until resumed; a running one's
+   * run stops and is continued on resume. `by` defaults to who is acting (the request's member,
+   * or Polpo for its own tools).
+   */
+  async pauseTask(taskId: string, opts: { reason?: string; by?: string; takeover?: { requestId: string; computerId: string } } = {}): Promise<Task> {
+    return this.engine.pauseTask(taskId, { ...opts, ...(opts.by ?? actingAs() ? { by: opts.by ?? actingAs() } : {}) });
+  }
+  /**
+   * Resume a paused task (pending again; its stopped run continues, told `message`). A task paused
+   * for a blocking takeover that is still open: the request is cancelled and the agent told nobody
+   * completed it (when the person completes it, the takeover service resumes the task itself).
+   */
+  async resumeTask(taskId: string, opts: { message?: string; by?: string } = {}) {
+    const by = opts.by ?? actingAs();
+    const task = await this.registry.getTask(taskId);
+    const takeover = task?.status === "paused" ? task.pause?.takeover : undefined;
+    const request = takeover ? this.computerTakeover?.store.request(takeover.requestId) : undefined;
+    const stillOpen = !!request && (request.status === "pending" || request.status === "in_control");
+    let message = opts.message;
+    if (stillOpen) {
+      message = [
+        `Nobody completed the takeover you asked for on computer ${request!.computerId} ("${request!.reason}")${by ? `: ${by} resumed your task anyway` : ""}. `
+          + "The request is closed. Look at the page again (browser_snapshot): if you are still blocked, ask again (request_computer_takeover) or report clearly what is blocked.",
+        opts.message?.trim() ? opts.message.trim() : "",
+      ].filter(Boolean).join("\n\n");
+    }
+    const resumed = await this.engine.resumeTask(taskId, { ...(message ? { message } : {}), ...(by ? { by } : {}) });
+    if (stillOpen) await this.closeParkedTakeover(request!.id);
+    return resumed;
+  }
   async deleteTask(taskId: string): Promise<boolean> { return this.engine.deleteTask(taskId); }
   async abortGroup(group: string, missionId?: string): Promise<number> { return this.engine.abortGroup(group, missionId); }
   async clearTasks(filter: (task: Task) => boolean): Promise<number> { return this.engine.clearTasks(filter); }

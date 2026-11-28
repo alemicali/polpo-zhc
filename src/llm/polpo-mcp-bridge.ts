@@ -284,6 +284,8 @@ export const MCP_EQUIVALENTS: Record<string, string> = {
   polpo_task_update: "update_task",
   polpo_task_retry: "retry_task",
   polpo_task_kill: "kill_task",
+  polpo_task_pause: "pause_task",
+  polpo_task_resume: "resume_task",
   polpo_task_delete: "delete_task",
   polpo_task_direct: "send_task_direction",
   polpo_task_wait: "wait_for_task",

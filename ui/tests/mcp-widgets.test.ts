@@ -87,6 +87,28 @@ describe("the work card (MCP App)", () => {
     expect(onRefresh).toHaveBeenCalledOnce();
   });
 
+  it("a paused task: who, why and when, and Resume; a running one offers Pause", () => {
+    const root = document.createElement("div");
+    const paused = { ...done, id: "t3", title: "Sign up", status: "paused", pause: { at: new Date().toISOString(), by: "anna@acme.com", reason: "waiting for the client", from: "in_progress", runId: "r1" } };
+    const card = buildTaskCard({ task: paused as never, tasks: [paused] as never, now: new Date(), key });
+    expect(card.task.pause).toMatchObject({ by: "anna@acme.com", reason: "waiting for the client" });
+    const onPause = vi.fn();
+    const onResume = vi.fn();
+    renderView(root, env(card, { onPause, onResume }));
+    expect(root.querySelector(".paused")?.textContent).toContain("Paused by anna@acme.com");
+    expect(root.querySelector(".paused")?.textContent).toContain("waiting for the client");
+    const resume = [...root.querySelectorAll("button")].find((b) => b.textContent === "Resume")!;
+    resume.click();
+    expect(onResume).toHaveBeenCalledOnce();
+    expect([...root.querySelectorAll("button")].some((b) => b.textContent === "Pause")).toBe(false);
+
+    const running = buildTaskCard({ task: { ...done, status: "in_progress" } as never, tasks: [done] as never, now: new Date(), key });
+    renderView(root, env(running, { onPause, onResume, locale: "it" }));
+    expect(root.querySelector(".paused")).toBeNull();
+    [...root.querySelectorAll("button")].find((b) => b.textContent === "Metti in pausa")!.click();
+    expect(onPause).toHaveBeenCalledOnce();
+  });
+
   it("a mission over budget: the bar, paused by its budget, cost by engine with marks, the failed task first", () => {
     const root = document.createElement("div");
     const card = buildMissionCard({

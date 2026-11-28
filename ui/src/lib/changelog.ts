@@ -32,6 +32,39 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-28-takeover-soft-hard",
+    date: "2026-11-28",
+    kind: "improved",
+    title: "Se un agente è bloccato da un CAPTCHA o da una verifica, l'attività si mette in pausa e ti aspetta",
+    summary: "Le richieste di prendere il controllo del computer ora sono facoltative o bloccanti: se nessuno arriva in tempo, una bloccante mette in pausa l'attività invece di farla finire, e riparte quando hai fatto tu.",
+    body: [
+      "- **Prima**: se un agente chiedeva aiuto (per esempio un codice SMS durante l'iscrizione a TikTok) e nessuno prendeva il controllo in tempo, la richiesta scadeva e l'attività finiva senza aver fatto quel passo.",
+      "- **Richiesta bloccante**: per CAPTCHA, verifiche via telefono, SMS, email o app e pagine di accesso o iscrizione l'agente chiede in modo **bloccante**. Se nessuno arriva entro il tempo (15 minuti di base), l'attività va **in pausa** con il motivo \"waiting for takeover\" e la richiesta resta aperta. Quando prendi il controllo, fai il passo e restituisci il computer, l'attività **riparte da dove era** e l'agente sa chi l'ha fatto e legge la tua nota.",
+      "- **Richiesta facoltativa**: per un aiuto di cui può fare a meno, se nessuno arriva l'agente va avanti, finisce l'attività e scrive nel risultato cosa non ha potuto fare.",
+      "- **Lo vedi subito**: nella scheda della richiesta sul computer c'è il segno **Blocking** o **Optional**, il tempo che resta e cosa succede dopo; se l'attività è già in pausa te lo dice. Anche le notifiche dicono se è bloccante e fino a quando aspetta, e ti avvisano di nuovo quando l'attività va in pausa.",
+      "- **Puoi anche riprenderla tu**: con **Resume** sull'attività la richiesta viene chiusa e l'agente sa che nessuno ha fatto il passo.",
+      "- **Niente più attese interrotte**: mentre aspetta una persona l'agente non viene più fermato come se fosse bloccato.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i computer", to: "/computers" },
+  },
+  {
+    id: "2026-11-28-task-pause",
+    date: "2026-11-28",
+    kind: "new",
+    title: "Puoi mettere in pausa una singola attività",
+    summary: "Metti in pausa un'attività (anche mentre l'agente lavora) con il motivo, e riprendila quando vuoi: l'agente continua da dove era.",
+    body: [
+      "- **Pausa**: dalla pagina dell'attività scegli **Pause** e scrivi il motivo (facoltativo). Un'attività in coda non parte; se l'agente sta lavorando si ferma subito, ma l'attività **non fallisce** e non viene rifatta da capo.",
+      "- **Riprendi**: con **Resume** l'attività torna in coda. Se era stata fermata mentre lavorava, l'agente **continua da dove era** e sa che era in pausa, chi l'aveva messa e perché; puoi aggiungere un messaggio per lui.",
+      "- **Chi, quando, perché**: nella pagina dell'attività un riquadro dice chi l'ha messa in pausa, quando e il motivo; nelle liste c'è il segno **Paused** (passaci sopra per il motivo), la scheda Paused e la colonna Paused.",
+      "- **Missioni**: le attività che dipendono da quella in pausa aspettano e la missione resta attiva senza chiudersi; la pausa della missione funziona come prima ed è indipendente.",
+      "- **Ovunque**: anche chiedendo a Polpo in chat (\"metti in pausa quell'attività\"), dall'API, dal connettore MCP (con i pulsanti Pause e Resume nella scheda dell'attività) e dall'SDK. Le notifiche possono avvisarti di pausa e ripresa.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i task", to: "/tasks" },
+  },
+  {
     id: "2026-11-28-recent-activity-links",
     date: "2026-11-28",
     kind: "improved",

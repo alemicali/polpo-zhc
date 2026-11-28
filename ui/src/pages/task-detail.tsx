@@ -86,6 +86,7 @@ import { AgentModelWithEngine, RunModelWithEngine } from "@/components/shared/mo
 import { taskCostOf } from "@/lib/task-cost";
 import { TaskToolScopeCard } from "@/components/tasks/task-tool-scope";
 import { TaskComputerSelect } from "@/components/tasks/task-computer";
+import { TaskPauseControl, TaskPausedBanner } from "@/components/tasks/task-pause";
 import { TaskChatView } from "@/components/tasks/task-chat-view";
 import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { groupActivityRuns, type ActivityRunGroup } from "@/lib/task-transcript";
@@ -835,7 +836,7 @@ export function TaskDetailPage() {
   const { taskId } = useParams<{ taskId: string }>();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { task, isLoading, error, updateTask, retryTask, killTask, reassessTask, queueTask } = useTask(taskId ?? "");
+  const { task, isLoading, error, updateTask, retryTask, killTask, pauseTask, resumeTask, reassessTask, queueTask } = useTask(taskId ?? "");
   const { tasks: allTasks } = useTasks();
   const { processes } = useProcesses();
   const { agents } = useAgents();
@@ -951,6 +952,12 @@ export function TaskDetailPage() {
               {actionPending === "Retried" ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5 mr-1.5" />} Retry
             </Button>
           )}
+          <TaskPauseControl
+            task={task}
+            disabled={!!actionPending}
+            onPause={async (reason) => { await pauseTask(reason); toast.success("Paused"); }}
+            onResume={async (message) => { await resumeTask(message); toast.success("Resumed"); }}
+          />
           {/* Status change dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -984,6 +991,9 @@ export function TaskDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Paused: why, who, when (and what resumes it) */}
+      <TaskPausedBanner task={task} className="shrink-0" />
 
       {/* Content — tabs: Assessment (conditional) | Details | Execution | Rules */}
       <Tabs value={activeTab} onValueChange={setTab} className="flex flex-col flex-1 min-h-0">

@@ -82,6 +82,16 @@ function fakeInstance() {
       if (!action && method === "DELETE") { tasks.delete(t.id); return okData({ removed: true }); }
       if (action === "/retry") { t.status = "pending"; return okData({ retried: true }); }
       if (action === "/kill") { t.status = "failed"; return okData({ killed: true }); }
+      if (action === "/pause") {
+        const pause = { at: now(), from: t.status, by: "anna@acme.com", ...((body as { reason?: string })?.reason ? { reason: (body as { reason: string }).reason } : {}), ...(t.status === "in_progress" ? { runId: "r1" } : {}) };
+        Object.assign(t, { status: "paused", pause });
+        return okData({ paused: true, task: { ...t } });
+      }
+      if (action === "/resume") {
+        const continued = !!(t as { pause?: { runId?: string } }).pause?.runId;
+        t.status = "pending";
+        return okData({ resumed: true, continued, task: { ...t } });
+      }
       if (action === "/directions") {
         if (t.status === "done" && (body as { mode?: string }).mode === "steer") return reply(409, { ok: false, error: "Cannot steer a finished task", code: "INVALID_STATE" });
         return okData({
@@ -182,7 +192,7 @@ describe("the tools offered", () => {
     const tools = (await (await rpc(deps(f), "tools/list")).json()).result.tools as Array<{ name: string; annotations: Record<string, unknown>; outputSchema?: unknown }>;
     const names = tools.map((t) => t.name);
     expect(names).toEqual(expect.arrayContaining([
-      "polpo_tasks_list", "polpo_task_get", "polpo_task_create", "polpo_task_update", "polpo_task_retry", "polpo_task_kill", "polpo_task_direct", "polpo_task_wait", "polpo_task_logs",
+      "polpo_tasks_list", "polpo_task_get", "polpo_task_create", "polpo_task_update", "polpo_task_retry", "polpo_task_kill", "polpo_task_pause", "polpo_task_resume", "polpo_task_direct", "polpo_task_wait", "polpo_task_logs",
       "polpo_missions_list", "polpo_mission_get", "polpo_mission_create", "polpo_mission_update", "polpo_mission_run", "polpo_mission_abort", "polpo_mission_wait",
       "polpo_playbooks_list", "polpo_playbook_run",
       "polpo_agent_get", "polpo_agent_create", "polpo_agent_update",
@@ -196,8 +206,8 @@ describe("the tools offered", () => {
     expect(a.polpo_mission_run).toMatchObject({ openWorldHint: true });
     for (const t of tools) if (t.name !== "polpo_file_read") expect(t.outputSchema, t.name).toBeTruthy();
     for (const n of ["polpo_task_delete", "polpo_mission_delete"]) expect(a[n]).toMatchObject({ destructiveHint: true, readOnlyHint: false });
-    // every Configuration section is on by default (the settings toolset), the task and mission cards, computer_get and computer_webhooks, WhatsApp Business (7), skill bundles (4), skill versions (3), agent versions (8), artifact uploads (2), hosted MCP servers (12: templates and install), agent tests (1), agent suites (10: list, get, save, delete, run, run_get; evals: trend, baseline, review, the suite card), deploy gates (1), agent suites phase 4 (8: record, replay, cassette, cassette_edit, generate; target_suites, target_suite_save, target_suite_run for hosted servers and missions), agent suites phase 5 (9: benchmark_save, benchmark_delete, benchmark_run, benchmark_get, benchmark_leaderboard, benchmark_compare, playground_send, playground_promote, the benchmark card benchmark_show), triggers (10: list, get, deliveries, create, update, delete, test, run_actions, auth, the trigger card trigger_show), decisions (4: decide, decisions, decision_resolve, the decision card decision_show), channels parity (8: channel_access_set, peer_presence, peer_link, slack_status, notifications_list, notifications_stats, wabiz_contact, wabiz_contact_erase), communication lines (1: agent_lines): 245 tools at most for a full-access client; media (5: image_generate, image_edit, media_log, media_status, the media card image_show), computers' live view (4: computer_desktop, computer_takeover, computer_release, the computer card computer_show); data transactions (1: data_transaction)
-    expect(tools.length).toBeLessThanOrEqual(261);
+    // every Configuration section is on by default (the settings toolset), the task and mission cards, computer_get and computer_webhooks, WhatsApp Business (7), skill bundles (4), skill versions (3), agent versions (8), artifact uploads (2), hosted MCP servers (12: templates and install), agent tests (1), agent suites (10: list, get, save, delete, run, run_get; evals: trend, baseline, review, the suite card), deploy gates (1), agent suites phase 4 (8: record, replay, cassette, cassette_edit, generate; target_suites, target_suite_save, target_suite_run for hosted servers and missions), agent suites phase 5 (9: benchmark_save, benchmark_delete, benchmark_run, benchmark_get, benchmark_leaderboard, benchmark_compare, playground_send, playground_promote, the benchmark card benchmark_show), triggers (10: list, get, deliveries, create, update, delete, test, run_actions, auth, the trigger card trigger_show), decisions (4: decide, decisions, decision_resolve, the decision card decision_show), channels parity (8: channel_access_set, peer_presence, peer_link, slack_status, notifications_list, notifications_stats, wabiz_contact, wabiz_contact_erase), communication lines (1: agent_lines): 245 tools at most for a full-access client; media (5: image_generate, image_edit, media_log, media_status, the media card image_show), computers' live view (4: computer_desktop, computer_takeover, computer_release, the computer card computer_show); data transactions (1: data_transaction); task pause (2: task_pause, task_resume)
+    expect(tools.length).toBeLessThanOrEqual(263);
   });
 
   it("config and team changes need the admin scope; reads do not", async () => {
@@ -301,6 +311,19 @@ describe("tasks", () => {
     expect(f.calls.some((c) => c.path.endsWith("/kill"))).toBe(false);
     expect((await call(deps(f), "polpo_task_kill", { id: "t2", confirm: true })).structuredContent).toEqual({ id: "t2", killed: true, previous_status: "in_progress" });
     expect(await call(deps(f), "polpo_task_kill", { id: "t1", confirm: true })).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/already done/) }] });
+  });
+
+  it("pauses and resumes a task, recording why and continuing its stopped run", async () => {
+    const f = fakeInstance();
+    expect(await call(deps(f), "polpo_task_pause", { id: "t1" })).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/only pending, assigned or in-progress/) }] });
+    expect(await call(deps(f), "polpo_task_resume", { id: "t2" })).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/not paused/) }] });
+    const paused = await call(deps(f), "polpo_task_pause", { id: "t2", reason: "waiting for the client's logo" });
+    expect(paused.structuredContent).toMatchObject({ id: "t2", status: "paused", previous_status: "in_progress", stopped_run: true, pause: { reason: "waiting for the client's logo", by: "anna@acme.com" } });
+    expect(f.calls.at(-1)).toMatchObject({ method: "POST", path: "/api/v1/tasks/t2/pause", body: { reason: "waiting for the client's logo" } });
+    expect(await call(deps(f), "polpo_task_pause", { id: "t2" })).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/already paused/) }] });
+    const resumed = await call(deps(f), "polpo_task_resume", { id: "t2", message: "the logo is in the drive" });
+    expect(resumed.structuredContent).toEqual({ id: "t2", status: "pending", continued: true });
+    expect(f.calls.at(-1)).toMatchObject({ method: "POST", path: "/api/v1/tasks/t2/resume", body: { message: "the logo is in the drive" } });
   });
 
   it("sends directions, explaining a refusal", async () => {

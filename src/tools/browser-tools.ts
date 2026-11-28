@@ -576,7 +576,10 @@ export function browserPromptNote(o: { headed?: boolean; computer?: { id: string
   if (o.takeover) {
     lines.push("- When a site needs a person (a login with their password, a 2FA code, a CAPTCHA, a consent only they can give), do not ask for the password or the code: "
       + "call request_computer_takeover with the reason, the page and what they should do. A person takes control of your computer's desktop, does it, and gives it back; "
-      + "you never see what they type. Then continue from where the page is (browser_snapshot first). While a person has control, your browser tools wait.");
+      + "you never see what they type. Then continue from where the page is (browser_snapshot first). While a person has control, your browser tools wait. "
+      + "Use level \"hard\" when you cannot go on without it (a CAPTCHA, a phone, SMS, email or app verification, a login or sign-up wall): if nobody comes in time "
+      + "your task pauses until a person does it, then you continue (stop calling tools when it says the task is paused). Use \"soft\" (the default) for help you can "
+      + "do without: if nobody comes, finish what you can and say in your result what you could not do.");
   }
   return lines.join("\n");
 }

@@ -51,6 +51,8 @@ import {
   ChevronRight,
   ChevronDown,
   Settings2,
+  Pause,
+  Play,
 } from "lucide-react";
 import {
   Collapsible,
@@ -66,6 +68,7 @@ import { MultiSelectFilter } from "@/components/shared/multi-select-filter";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { TaskCostBadge, TaskEngineBadge } from "@/components/shared/run-context";
 import { taskCostSummaryOf } from "@/lib/task-cost";
+import { canPauseTask, pauseSummary } from "@/lib/task-pause";
 import {
   useTasksPageState,
   useTaskActions,
@@ -106,7 +109,7 @@ const TaskRow = memo(function TaskRow({
   process?: AgentProcess;
   allTasks?: Task[];
 }) {
-  const { retry, kill, queue, click } = useTaskActions();
+  const { retry, kill, pause, resume, queue, click } = useTaskActions();
   const { fields, agentConfigMap } = useCardSettings();
   // a task a decision left out shows "Not reached" (muted, dashed), never done
   const cfg = taskDisplayStyle(task);
@@ -146,6 +149,9 @@ const TaskRow = memo(function TaskRow({
 
       {/* Title — takes remaining space */}
       <span className="text-sm font-medium truncate min-w-0 flex-1">{task.title}</span>
+
+      {/* Paused: who and why in the tooltip */}
+      {task.status === "paused" && <PausedBadge task={task} />}
 
       {/* Phase badge */}
       {fields.phase && phase && (
@@ -274,6 +280,16 @@ const TaskRow = memo(function TaskRow({
             <RotateCcw className="h-3 w-3" />
           </Button>
         )}
+        {canPauseTask(task) && (
+          <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-muted-foreground hover:text-warning" aria-label="Pause" title="Pause" onClick={(e) => { e.stopPropagation(); pause(task.id); }}>
+            <Pause className="h-3 w-3" />
+          </Button>
+        )}
+        {task.status === "paused" && (
+          <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-muted-foreground hover:text-success" aria-label="Resume" title="Resume" onClick={(e) => { e.stopPropagation(); resume(task.id); }}>
+            <Play className="h-3 w-3" />
+          </Button>
+        )}
         {(task.status === "in_progress" || task.status === "assigned") && (
           <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); kill(task.id); }}>
             <XCircle className="h-3 w-3" />
@@ -283,6 +299,22 @@ const TaskRow = memo(function TaskRow({
     </div>
   );
 });
+
+// ── Paused badge (who and why in the tooltip) ──
+
+function PausedBadge({ task }: { task: Task }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span data-testid="task-paused-badge" className="inline-flex items-center gap-0.5 rounded-sm bg-warning/15 text-warning px-1.5 py-0.5 text-micro font-semibold leading-none shrink-0 max-w-[200px] truncate">
+          <Pause className="h-2.5 w-2.5 shrink-0" />
+          Paused
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="text-xs max-w-xs">{pauseSummary(task)}</TooltipContent>
+    </Tooltip>
+  );
+}
 
 // ── Status config ──
 
@@ -295,6 +327,7 @@ const statusKanbanColumns: { key: string; label: string; filter: (t: Task) => bo
   { key: "draft", label: "Draft", filter: (t) => t.status === "draft" },
   { key: "queued", label: "Queued", filter: (t) => t.status === "pending" || t.status === "assigned" },
   { key: "in_progress", label: "Running", filter: (t) => t.status === "in_progress" },
+  { key: "paused", label: "Paused", filter: (t) => t.status === "paused" },
   { key: "review", label: "Review", filter: (t) => t.status === "review" },
   { key: "done", label: "Done", filter: (t) => t.status === "done" && !isNotReached(t) },
   { key: "failed", label: "Failed", filter: (t) => t.status === "failed" },
@@ -396,7 +429,7 @@ const TaskCard = memo(function TaskCard({
   allTasks?: Task[];
   enableStatusDrag?: boolean;
 }) {
-  const { retry, kill, queue, click } = useTaskActions();
+  const { retry, kill, pause, resume, queue, click } = useTaskActions();
   const { fields, agentConfigMap } = useCardSettings();
   const compact = size === "compact";
   // a task a decision left out shows "Not reached" (muted, dashed), never done
@@ -461,6 +494,7 @@ const TaskCard = memo(function TaskCard({
                 {task.group}
               </span>
             )}
+            {task.status === "paused" && <PausedBadge task={task} />}
             {fields.deps && isBlocked && unresolvedDeps.map((depId) => {
               const dep = allTasks?.find(t => t.id === depId);
               return (
@@ -602,6 +636,16 @@ const TaskCard = memo(function TaskCard({
             {task.status === "failed" && (
               <Button variant="ghost" size="sm" className="h-5 px-1.5 text-micro text-muted-foreground hover:text-warning" onClick={(e) => { e.stopPropagation(); retry(task.id); }}>
                 <RotateCcw className="h-2.5 w-2.5 mr-0.5" /> Retry
+              </Button>
+            )}
+            {canPauseTask(task) && (
+              <Button variant="ghost" size="sm" className="h-5 px-1.5 text-micro text-muted-foreground hover:text-warning" onClick={(e) => { e.stopPropagation(); pause(task.id); }}>
+                <Pause className="h-2.5 w-2.5 mr-0.5" /> Pause
+              </Button>
+            )}
+            {task.status === "paused" && (
+              <Button variant="ghost" size="sm" className="h-5 px-1.5 text-micro text-muted-foreground hover:text-success" onClick={(e) => { e.stopPropagation(); resume(task.id); }}>
+                <Play className="h-2.5 w-2.5 mr-0.5" /> Resume
               </Button>
             )}
             {(task.status === "in_progress" || task.status === "assigned") && (
@@ -971,10 +1015,11 @@ function ListView({
   // Note: counts reflect the LOADED page, not the global total — with
   // cursor pagination we don't know the total until we've fetched it.
   const counts = useMemo(() => {
-    const c = { all: tasks.length, pending: 0, in_progress: 0, review: 0, done: 0, failed: 0, not_reached: 0 };
+    const c = { all: tasks.length, pending: 0, in_progress: 0, paused: 0, review: 0, done: 0, failed: 0, not_reached: 0 };
     for (const t of tasks) {
       if (t.status === "pending" || t.status === "assigned") c.pending++;
       else if (t.status === "in_progress") c.in_progress++;
+      else if (t.status === "paused") c.paused++;
       else if (t.status === "review") c.review++;
       else if (t.status === "done") { if (isNotReached(t)) c.not_reached++; else c.done++; }
       else if (t.status === "failed") c.failed++;
@@ -989,6 +1034,7 @@ function ListView({
     { value: "done", label: "Done", count: counts.done },
     { value: "failed", label: "Failed", count: counts.failed },
     { value: "pending", label: "Queued", count: counts.pending },
+    ...(counts.paused > 0 ? [{ value: "paused", label: "Paused", count: counts.paused }] : []),
     ...(counts.not_reached > 0 ? [{ value: "not_reached", label: "Not reached", count: counts.not_reached }] : []),
   ];
 

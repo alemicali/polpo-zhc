@@ -34,6 +34,35 @@ describe("the computer card (MCP App)", () => {
     expect(computerCardText(card)).toMatch(/Waiting for a person:\n- sitoinchat: LinkedIn asks for a 2FA code/);
   });
 
+  it("the level of each request and its countdown; a parked one says its task is paused", () => {
+    const soon = new Date(Date.now() + 12 * 60_000 - 1000).toISOString();
+    const card = buildComputerCard({
+      computer: { id: "nina", name: "Nina", kind: "daytona", status: "running" }, desktop: { state: "running" },
+      control: { holder: "agent", requests: [
+        { ...request, id: "tko_h", level: "hard", taskId: "t1", expiresAt: soon },
+        { ...request, id: "tko_s", expiresAt: soon },
+        { ...request, id: "tko_p", level: "hard", taskId: "t2", parkedAt: "2026-11-26T10:30:00Z" },
+      ] }, key,
+    });
+    const root = document.createElement("div");
+    renderView(root, env(card));
+    const hard = root.querySelector('[data-request="tko_h"]')!;
+    expect(hard.querySelector("[data-level]")!.textContent).toBe("Blocking");
+    expect(hard.querySelector("[data-countdown]")!.textContent).toMatch(/\(12 min left\), then its task pauses until you do it/);
+    const soft = root.querySelector('[data-request="tko_s"]')!;
+    expect(soft.querySelector("[data-level]")!.textContent).toBe("Optional");
+    expect(soft.querySelector("[data-countdown]")!.textContent).toMatch(/then the agent goes on without it/);
+    const parked = root.querySelector('[data-request="tko_p"]')!;
+    expect(parked.querySelector("[data-parked]")!.textContent).toMatch(/its task is paused until you take control/);
+    expect(parked.querySelector("[data-countdown]")).toBeNull();
+    const text = computerCardText(card);
+    expect(text).toMatch(/blocking · waits until .*12 min left.*its task pauses/);
+    expect(text).toMatch(/optional · waits until/);
+    expect(text).toMatch(/blocking · nobody took over in time: its task is paused/);
+    renderView(root, env(card, { locale: "it" }));
+    expect(root.querySelector('[data-request="tko_h"] [data-level]')!.textContent).toBe("Bloccante");
+  });
+
   it("a person holding it: Give back with a note; Italian strings", () => {
     const card = buildComputerCard({
       computer: { id: "nina", name: "Nina", kind: "daytona", status: "running" }, desktop: { state: "running" },

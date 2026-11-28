@@ -39,6 +39,7 @@ function statusIcon(status: TaskStatus): string {
     case "review":             return chalk.magenta("\u25D4"); // ◔
     case "done":               return chalk.green("\u25CF");   // ●
     case "failed":             return chalk.red("\u2717");     // ✗
+    case "paused":             return chalk.yellow("\u23F8"); // ⏸
     default:                   return chalk.gray("?");
   }
 }

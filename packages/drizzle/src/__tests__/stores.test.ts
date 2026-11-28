@@ -127,6 +127,23 @@ describe.each(DIALECTS)("%s", (dialect) => {
       expect((await stores.taskStore.getTask(task.id))!.sandbox).toBeUndefined();
     });
 
+    it("pauses a task (status paused, the pause record kept) and resumes it", async () => {
+      const task = await stores.taskStore.addTask({
+        title: "Pausable", description: "x", assignTo: "claude", dependsOn: [], maxRetries: 2, expectations: [], metrics: [],
+      });
+      const pause = { at: "2026-11-28T08:00:00.000Z", by: "anna@acme.com", reason: "waiting for the logo", from: "in_progress" as const, runId: "r1" };
+      await stores.taskStore.updateTask(task.id, { pause });
+      await stores.taskStore.transition(task.id, "paused");
+      expect(await stores.taskStore.getTask(task.id)).toMatchObject({ status: "paused", pause });
+      expect((await stores.taskStore.getAllTasks()).find((t) => t.id === task.id)).toMatchObject({ status: "paused", pause });
+      await stores.taskStore.updateTask(task.id, { pause: { ...pause, resumedAt: "2026-11-28T09:00:00.000Z", resumedBy: "bob@acme.com" } });
+      const resumed = await stores.taskStore.transition(task.id, "pending");
+      expect(resumed.retries).toBe(0);
+      expect((await stores.taskStore.getTask(task.id))!.pause).toMatchObject({ resumedBy: "bob@acme.com" });
+      await stores.taskStore.updateTask(task.id, { pause: undefined });
+      expect((await stores.taskStore.getTask(task.id))!.pause).toBeUndefined();
+    });
+
     it("getAllTasks returns ordered by createdAt", async () => {
       await stores.taskStore.addTask({
         title: "A", description: "first", assignTo: "claude", dependsOn: [], maxRetries: 2, expectations: [], metrics: [],

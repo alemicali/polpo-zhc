@@ -33,6 +33,13 @@ export interface PolpoEventMap {
   "task:retried": { taskId: string; title: string } & EventOrigin;
   /** A running or waiting task was stopped on request. */
   "task:killed": { taskId: string; title: string; runId?: string; pid?: number } & EventOrigin;
+  /**
+   * A task was paused (a person, Polpo, or a blocking computer takeover nobody took): not scheduled
+   * until resumed; `runId`: the run it stopped (resuming continues it). `pausedBy` is who asked.
+   */
+  "task:paused": { taskId: string; title: string; from: TaskStatus; reason?: string; pausedBy?: string; runId?: string; takeover?: { requestId: string; computerId: string } } & EventOrigin;
+  /** A paused task was resumed: pending again; `continued`: its stopped run goes on as a continuation. */
+  "task:resumed": { taskId: string; title: string; continued: boolean; resumedBy?: string; message?: string; reason?: string; pausedMs?: number; takeover?: { requestId: string; computerId: string } } & EventOrigin;
   /** A task was failed on purpose (deadlock, manual force-fail). */
   "task:force-failed": { taskId: string; title: string; reason?: string } & EventOrigin;
   /** The agent produced new outcomes (files, text, media…) for a task. */
@@ -69,7 +76,7 @@ export interface PolpoEventMap {
 
   // Orchestrator lifecycle
   "orchestrator:started": { project: string; agents: string[] };
-  "orchestrator:tick": { pending: number; running: number; done: number; failed: number; queued: number };
+  "orchestrator:tick": { pending: number; running: number; done: number; failed: number; queued: number; paused?: number };
   "orchestrator:deadlock": { taskIds: string[] };
   "orchestrator:shutdown": Record<string, never>;
   /** Graceful shutdown started: `activeRuns` agents are still running. */
@@ -296,7 +303,8 @@ export interface PolpoEventMap {
    */
   "computer:takeover": {
     id: string;
-    action: "requested" | "taken" | "released" | "timeout" | "cancelled" | "desktop-started" | "desktop-stopped";
+    /** parked: a hard (blocking) request nobody took in time: its task was paused, the request stays open. */
+    action: "requested" | "taken" | "released" | "timeout" | "cancelled" | "parked" | "desktop-started" | "desktop-stopped";
     /** Who holds control now. */
     holder: "agent" | "person";
     /** The person (member email, or "someone" without member sign-in). */
@@ -309,6 +317,10 @@ export interface PolpoEventMap {
     note?: string;
     taskId?: string;
     sessionId?: string;
+    /** soft (optional help: the agent goes on without it) or hard (blocking: its task pauses when the wait ends). */
+    level?: "soft" | "hard";
+    /** When the agent stops waiting (requested). */
+    expiresAt?: string;
   } & EventOrigin;
   /**
    * A computer provider's webhook delivery (Daytona, E2B) was recorded in its event log

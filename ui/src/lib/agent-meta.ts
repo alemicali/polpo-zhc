@@ -46,6 +46,7 @@ import {
   Scale,
   BellRing,
   Hand,
+  Pause,
 } from "lucide-react";
 import type { TaskStatus } from "@polpo-ai/react";
 import { agentColorClasses } from "@/lib/agent-colors";
@@ -146,6 +147,7 @@ export const taskStatusConfig: Record<TaskStatus, { color: string; icon: React.E
   review: { color: "text-warning", icon: Eye, label: "Review" },
   done: { color: "text-success", icon: CheckCircle2, label: "Done" },
   failed: { color: "text-destructive", icon: AlertTriangle, label: "Failed" },
+  paused: { color: "text-warning", icon: Pause, label: "Paused" },
 };
 
 // ── Responsibility priority colors ──
@@ -176,6 +178,7 @@ export const taskStatusOrder: Record<string, number> = {
   assigned: 2,
   pending: 3,
   awaiting_approval: 4,
+  paused: 4,
   draft: 5,
   done: 6,
   failed: 7,

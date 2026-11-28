@@ -31,7 +31,7 @@ const createWatcherRoute = createRoute({
         "application/json": {
           schema: z.object({
             taskId: z.string().min(1),
-            targetStatus: z.enum(["pending", "assigned", "in_progress", "review", "done", "failed", "awaiting_approval"]),
+            targetStatus: z.enum(["pending", "assigned", "in_progress", "review", "done", "failed", "awaiting_approval", "paused"]),
             action: z.object({
               type: z.string().min(1),
             }).passthrough(),

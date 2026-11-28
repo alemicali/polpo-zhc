@@ -13,7 +13,31 @@ export type TaskStatus =
   | "in_progress"
   | "review"
   | "done"
-  | "failed";
+  | "failed"
+  /** Stopped by a person (or a blocking takeover) until resumed: not scheduled, not finished. */
+  | "paused";
+
+/**
+ * Why and by whom a task is (or was last) paused. Kept after resume (with resumedAt/resumedBy) as
+ * the record of the last pause; `status === "paused"` is what says it is paused now.
+ */
+export interface TaskPause {
+  /** When it was paused (ISO). */
+  at: string;
+  /** Who paused it: a member's email, "polpo" (the chat), "mcp", or an agent for a blocking takeover. */
+  by?: string;
+  /** Why, as given (shown on the task). */
+  reason?: string;
+  /** The status it was paused from (pending, assigned or in_progress). */
+  from: TaskStatus;
+  /** The run the pause stopped: resuming continues it (same session and transcript). */
+  runId?: string;
+  /** Set when a blocking (hard) computer takeover request paused it: completing the takeover resumes it. */
+  takeover?: { requestId: string; computerId: string };
+  /** When it was resumed, and by whom (absent while paused). */
+  resumedAt?: string;
+  resumedBy?: string;
+}
 
 export interface EvalDimension {
   name: string;              // e.g. "correctness", "completeness"
@@ -194,6 +218,8 @@ export interface Task {
   sandbox?: import("./sandbox.js").SandboxSettings;
   /** What started it, when it was not a person: a trigger's delivery (open the delivery from the task). */
   origin?: WorkOrigin;
+  /** The current pause (status "paused") or the last one (with resumedAt). See TaskPause. */
+  pause?: TaskPause;
   createdAt: string;
   updatedAt: string;
 }

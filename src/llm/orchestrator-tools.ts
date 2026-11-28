@@ -470,6 +470,26 @@ const killTaskTool: Tool = {
   }),
 };
 
+const pauseTaskTool: Tool = {
+  name: "pause_task",
+  description: "Pause a pending, assigned or running task until it is resumed (resume_task): it is not scheduled, its mission stays active "
+    + "without completing and tasks depending on it wait. A running task's run is stopped but not failed: resuming continues it where it was. "
+    + "\"pause that task\", \"hold it\", \"stop it for now\" → pause_task (kill_task stops it for good).",
+  parameters: Type.Object({
+    taskId: Type.String({ description: "Task ID to pause" }),
+    reason: Type.Optional(Type.String({ description: "Why it is paused: recorded on the task and told to the agent when it resumes" })),
+  }),
+};
+
+const resumeTaskTool: Tool = {
+  name: "resume_task",
+  description: "Resume a paused task: pending again; if its pause stopped a run, the agent continues it where it was (same session), told it was paused, plus your message.",
+  parameters: Type.Object({
+    taskId: Type.String({ description: "Task ID to resume" }),
+    message: Type.Optional(Type.String({ description: "Something to tell the agent as it resumes" })),
+  }),
+};
+
 const reassessTaskTool: Tool = {
   name: "reassess_task",
   description: "Re-run the review pipeline on a completed task.",
@@ -2432,7 +2452,7 @@ export const READ_TOOLS = new Set([
 export const WRITE_TOOLS = new Set([
   // Task
   "create_task", "update_task", "delete_task", "delete_tasks",
-  "retry_task", "send_task_direction", "kill_task", "reassess_task", "force_fail_task",
+  "retry_task", "send_task_direction", "kill_task", "pause_task", "resume_task", "reassess_task", "force_fail_task",
   // Mission
   "create_mission", "update_mission", "execute_mission", "resume_mission", "abort_mission", "delete_mission",
   // Team
@@ -2563,7 +2583,7 @@ export const ALL_ORCHESTRATOR_TOOLS: Tool[] = [
   listSchedulesTool, listNotificationRulesTool, listWatchersTool,
   // Task (9)
   createTaskTool, updateTaskTool, deleteTaskTool, deleteTasksTool,
-  retryTaskTool, sendTaskDirectionTool, killTaskTool, reassessTaskTool, forceFailTaskTool,
+  retryTaskTool, sendTaskDirectionTool, killTaskTool, pauseTaskTool, resumeTaskTool, reassessTaskTool, forceFailTaskTool,
   // Mission (6 + 14 atomic)
   createMissionTool, updateMissionTool, executeMissionTool, resumeMissionTool, abortMissionTool, deleteMissionTool,
   addMissionTaskTool, updateMissionTaskTool, removeMissionTaskTool, reorderMissionTasksTool,
@@ -2666,6 +2686,8 @@ const TOOL_LABELS: Record<string, string> = {
   retry_task: "Retry Task",
   send_task_direction: "Direct Task",
   kill_task: "Kill Task",
+  pause_task: "Pause Task",
+  resume_task: "Resume Task",
   reassess_task: "Reassess Task",
   force_fail_task: "Force Fail Task",
   register_app: "Register App",
@@ -3001,6 +3023,8 @@ export async function executeOrchestratorTool(
       case "retry_task":       return execRetryTask(polpo, args);
       case "send_task_direction": return execSendTaskDirection(polpo, args);
       case "kill_task":        return execKillTask(polpo, args);
+      case "pause_task":       return execPauseTask(polpo, args);
+      case "resume_task":      return execResumeTask(polpo, args);
       case "reassess_task":    return execReassessTask(polpo, args);
       case "force_fail_task":  return execForceFailTask(polpo, args);
 
@@ -3338,6 +3362,14 @@ export async function formatToolDetails(
     case "reassess_task":
     case "force_fail_task":
       main.push(["Task", await resolveTask(args.taskId)]);
+      break;
+    case "pause_task":
+      main.push(["Task", await resolveTask(args.taskId)]);
+      if (args.reason) main.push(["Reason", trunc(args.reason)]);
+      break;
+    case "resume_task":
+      main.push(["Task", await resolveTask(args.taskId)]);
+      if (args.message) main.push(["Message", trunc(args.message)]);
       break;
     case "execute_mission":
     case "resume_mission":
@@ -4197,6 +4229,27 @@ async function execKillTask(polpo: Orchestrator, args: Record<string, unknown>):
   return killed ? `Task ${args.taskId} killed.` : `Task ${args.taskId} — no running process found.`;
 }
 
+async function execPauseTask(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const reason = typeof args.reason === "string" && args.reason.trim() ? args.reason.trim() : undefined;
+  try {
+    const task = await polpo.pauseTask(args.taskId as string, { ...(reason ? { reason } : {}) });
+    return `Task "${task.title}" (${task.id}) paused (was ${task.pause?.from ?? "active"})`
+      + `${task.pause?.runId ? ": its run was stopped and continues where it was when resumed" : ""}. Resume it with resume_task.`;
+  } catch (err) {
+    return `Error: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
+async function execResumeTask(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
+  const message = typeof args.message === "string" && args.message.trim() ? args.message.trim() : undefined;
+  try {
+    const r = await polpo.resumeTask(args.taskId as string, { ...(message ? { message } : {}) });
+    return `Task "${r.task.title}" (${r.task.id}) resumed: pending again${r.continued ? ", its stopped run continues where it was" : ""}.`;
+  } catch (err) {
+    return `Error: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
 async function execReassessTask(polpo: Orchestrator, args: Record<string, unknown>): Promise<string> {
   await polpo.reassessTask(args.taskId as string);
   return `Reassessment started for task ${args.taskId}.`;
@@ -4977,7 +5030,7 @@ async function execWatchTask(polpo: Orchestrator, args: Record<string, unknown>)
   if (!task) return `Error: Task "${taskId}" not found.`;
 
   const targetStatus = args.targetStatus as string;
-  const validStatuses = ["pending", "assigned", "in_progress", "review", "done", "failed", "awaiting_approval"];
+  const validStatuses = ["pending", "assigned", "in_progress", "review", "done", "failed", "awaiting_approval", "paused"];
   if (!validStatuses.includes(targetStatus)) {
     return `Error: Invalid target status "${targetStatus}". Valid: ${validStatuses.join(", ")}`;
   }
@@ -5005,6 +5058,7 @@ const WAITABLE_TASK_STATUSES: TaskStatus[] = [
   "review",
   "done",
   "failed",
+  "paused",
 ];
 const TERMINAL_TASK_STATUSES = new Set<TaskStatus>(["done", "failed"]);
 

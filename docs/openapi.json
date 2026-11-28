@@ -8959,7 +8959,8 @@
                       "in_progress",
                       "review",
                       "done",
-                      "failed"
+                      "failed",
+                      "paused"
                     ]
                   },
                   "expectations": {
@@ -9254,6 +9255,257 @@
           },
           "404": {
             "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{taskId}/pause": {
+      "post": {
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Pause task",
+        "description": "Pause a pending, assigned or in-progress task: it is not scheduled until resumed. A running task's run is stopped (it ends as paused, not failed) and resuming continues it in the same session. Its mission stays active and does not complete meanwhile; tasks that depend on it wait. The reason, who paused it and when are recorded on the task (`pause`).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "taskId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Task paused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "paused": {
+                          "type": "boolean"
+                        },
+                        "task": {
+                          "nullable": true
+                        }
+                      },
+                      "required": [
+                        "paused"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The task cannot be paused in its state (already paused, review, done, failed, draft, awaiting approval)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{taskId}/resume": {
+      "post": {
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Resume task",
+        "description": "Resume a paused task: it is pending again. When its pause stopped a run, the next run continues it (same session and transcript) and the agent is told it was paused, by whom and why, plus the optional message.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "taskId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "message": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Task resumed (continued: its stopped run goes on as a continuation)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "resumed": {
+                          "type": "boolean"
+                        },
+                        "continued": {
+                          "type": "boolean"
+                        },
+                        "task": {
+                          "nullable": true
+                        },
+                        "direction": {
+                          "nullable": true
+                        }
+                      },
+                      "required": [
+                        "resumed",
+                        "continued"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error",
+                    "code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The task is not paused, or its run is still stopping",
             "content": {
               "application/json": {
                 "schema": {
@@ -37557,7 +37809,8 @@
                       "review",
                       "done",
                       "failed",
-                      "awaiting_approval"
+                      "awaiting_approval",
+                      "paused"
                     ]
                   },
                   "action": {

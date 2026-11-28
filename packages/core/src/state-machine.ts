@@ -3,14 +3,19 @@ import type { TaskStatus } from "./types.js";
 /** Valid state transitions for the task state machine. */
 export const VALID_TRANSITIONS: Readonly<Record<TaskStatus, readonly TaskStatus[]>> = {
   draft: ["pending"],
-  pending: ["assigned", "awaiting_approval"],
+  pending: ["assigned", "awaiting_approval", "paused"],
   awaiting_approval: ["assigned", "failed", "done", "pending"],
-  assigned: ["in_progress", "awaiting_approval"],
-  in_progress: ["review", "failed", "awaiting_approval"],
+  assigned: ["in_progress", "awaiting_approval", "paused"],
+  in_progress: ["review", "failed", "awaiting_approval", "paused"],
   review: ["done", "failed", "awaiting_approval"],
   done: [],
   failed: ["pending"],
+  // resumed (back to pending, continued when a run was stopped) or stopped for good (killed)
+  paused: ["pending", "failed"],
 } as const;
+
+/** Statuses a task can be paused from. */
+export const PAUSABLE_STATUSES: readonly TaskStatus[] = ["pending", "assigned", "in_progress"];
 
 /** Check whether a transition from one status to another is valid. */
 export function isValidTransition(from: TaskStatus, to: TaskStatus): boolean {

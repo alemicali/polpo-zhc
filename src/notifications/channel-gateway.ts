@@ -1184,7 +1184,7 @@ export class ChannelGateway {
 
     const statusEmoji: Record<string, string> = {
       pending: "⏳", running: "🔄", done: "✅", failed: "❌",
-      assigned: "📋", awaiting_approval: "⏸",
+      assigned: "📋", awaiting_approval: "⏸", paused: "⏯",
     };
 
     const lines = tasks.slice(0, 20).map(t => {

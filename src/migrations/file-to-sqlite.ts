@@ -258,6 +258,7 @@ function taskToRow(task: any): Record<string, unknown> {
     runs: task.runs ? JSON.stringify(task.runs) : null,
     toolScope: task.toolScope ? JSON.stringify(task.toolScope) : null,
     sandbox: task.sandbox ? JSON.stringify(task.sandbox) : null,
+    pause: task.pause ? JSON.stringify(task.pause) : null,
     createdAt: task.createdAt ?? new Date().toISOString(),
     updatedAt: task.updatedAt ?? new Date().toISOString(),
   };

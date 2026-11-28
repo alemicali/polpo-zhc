@@ -138,6 +138,7 @@ import type {
   PlaybookDefinition,
   PlaybookRunResult,
   TaskDirection,
+  ResumeTaskResult,
   SendTaskDirectionRequest,
   SendTaskDirectionResult,
   WaBizOutcome,
@@ -632,6 +633,16 @@ export class PolpoClient {
 
   killTask(taskId: string): Promise<{ killed: boolean }> {
     return this.post<{ killed: boolean }>(`/tasks/${taskId}/kill`);
+  }
+
+  /** Pause a pending, assigned or running task (a running one's run stops; resuming continues it). */
+  pauseTask(taskId: string, req: { reason?: string } = {}): Promise<{ paused: boolean; task: Task }> {
+    return this.post<{ paused: boolean; task: Task }>(`/tasks/${taskId}/pause`, req);
+  }
+
+  /** Resume a paused task, with an optional message for its agent. */
+  resumeTask(taskId: string, req: { message?: string } = {}): Promise<ResumeTaskResult> {
+    return this.post<ResumeTaskResult>(`/tasks/${taskId}/resume`, req);
   }
 
   sendTaskDirection(taskId: string, req: SendTaskDirectionRequest): Promise<SendTaskDirectionResult> {
