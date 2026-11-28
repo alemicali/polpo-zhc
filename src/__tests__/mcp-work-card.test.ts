@@ -201,6 +201,28 @@ describe("the task and mission cards", () => {
     expect(text).toContain("Connectors: Gmail – ada@acme.com [gmail] (2 tools), Gmail – info@acme.com [gmail-2], Calendar [cal-dev] (its own).");
     expect(text).not.toContain("mail-nina");
   });
+
+  it("the agent card: a per-identity connector shows only the agent's own accounts (or the shared fallback)", () => {
+    const perIdentity = {
+      id: "mail", name: "Mail", status: "disconnected", enabled: true, access: { agents: "*", polpo: true }, scope: { kind: "identity", fallback: true },
+      accounts: [
+        { identity: "agent:nina", label: "sitoinchat", default: true, status: "connected" },
+        { identity: "agent:dev", label: "personale", status: "needs_reauth" },
+        { identity: "agent:dev", label: "lavoro", default: true, status: "connected" },
+        { identity: "org", label: "condiviso", default: true, status: "connected" },
+      ],
+    };
+    const card = (name: string) => buildAgentCard({ agent: { name }, tasks: [] as never, connectors: [perIdentity] as never, now: new Date("2026-11-22T11:00:00Z"), key });
+    expect(card("dev").connectors).toEqual([{
+      id: "mail", label: "Mail", status: "connected", tools: "all", scope: "identity",
+      accounts: [{ label: "lavoro", default: true, status: "connected" }, { label: "personale", status: "needs_reauth" }],
+    }]);
+    const text = agentCardText(card("dev"));
+    expect(text).toContain("Mail [mail] (per identity: lavoro default, personale)");
+    expect(text).not.toContain("sitoinchat");
+    // no account of its own: the organization's shared one (fallback on)
+    expect(card("bob").connectors[0]).toMatchObject({ scope: "identity", accounts: [{ label: "condiviso", shared: true }] });
+  });
 });
 
 describe("the cards through MCP", () => {

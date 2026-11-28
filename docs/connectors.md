@@ -90,9 +90,56 @@ curl -X PATCH $POLPO/api/v1/connectors/mail-nina -H "Authorization: Bearer $KEY"
 
 Surfaces: the connector's settings on the **Connectors** page have **Belongs to** (Organization, or an agent: personal) and, for a personal connector, list only its owner under who can use it; its card reads "Nina · personal · …". On an **agent's page** (Tools → Connectors) there are two tabs: **Enabled** (the connectors it can use) and **Available** (every organization connector not enabled for it, plus its own personal ones not enabled); each row has an **Org** or **Personal** chip and a switch that enables or disables it for the agent (the connector's access); another agent's personal connectors never show. MCP: `polpo_connector_add` / `polpo_connector_update` take `owner` (an agent's name; `null` on update = back to the organization; the update result has `dropped_agents`), and `polpo_connectors_list` items carry `scope` (`org` / `agent`) and `owner`. Polpo's chat uses `connector_add` / `connector_update` with `owner`. SDK: `Connector.scope`, `client.createConnector({ …, scope })`, `client.updateConnector(id, { scope })`; React `connectorOwner(c)`, `connectorEnabledFor(c, agent)` and `useConnectors({ agent })` follow the same rule. The MCP agent card marks an agent's own connectors as Personal.
 
+## Per-identity connectors (each agent and person with its own accounts)
+
+The third kind of connector: **`{ "kind": "identity", "fallback"?: boolean }`**. The app is defined **once** for the organization (server, OAuth client or setup, tool policy, who may use it), and each **identity** connects **its own accounts** to it:
+
+- an **agent** (`"agent:nina"`), when it is among the connector's `access.agents` (or `"*"`);
+- a **person** who chats with Polpo (`"person:ada@acme.com"`, the signed-in member; `"person:_shared"` on an instance without sign-in), when `access.polpo` is true;
+- the **organization** (`"org"`): the optional shared **fallback** account, used only by identities that have no account of their own, and only when `scope.fallback` is `true` (off by default).
+
+Each account has a **label** its owner picks it by (Nina: `sitoinchat` and `personale`; unique per identity, case-insensitive), its own credentials (OAuth tokens and registered client, or token / header values: in the vault, owner `$connectors`, service `<connector>~<account id>`, never shown to an agent nor returned by the API), its own connection status and signed-in `account`, and one account per identity is its **default** (the first one it connects; any can be made the default).
+
+**At run time** the tools keep **one set of names per connector** (`mcp__mail__send`, the same for every identity), so a skill or playbook says "use Mail" or "Mail, account sitoinchat" and works for any identity that has such an account. Polpo resolves the caller — the agent running (its engine, its chat, a Claude Code / Codex / OpenCode harness through the host tools), or the person chatting with Polpo — and uses its **default** account; every tool of the connector takes an optional **`account`** argument (the label; `polpo_account` when the server's tool already has an `account` parameter) to pick **another of the caller's own** accounts. The account is resolved on every call on the server (`ConnectorManager.callAs`, from the current configuration), so an identity can never use another identity's account, whatever label or id it passes; besides its own it only reaches the organization's fallback account, when that is on. A caller without an account gets the tools anyway (from the last listing of the connector) and a clear error when it uses one: `Mail (mail) is per identity and agent bob has no account on it. A person connects one in Settings → Connectors → Mail → Accounts (or on the agent's page); then try again.` The prompt's Connectors section lists the caller's own accounts (default first, status), or says it has none.
+
+**Sessions.** Each (connector, account) has its own MCP client, created lazily the first time the account is used, with that account's credentials, and the connector's usual rules: connect and tool timeouts, one reconnect after a dropped session, OAuth refresh on 401 and `needs_reauth` when it fails (on the account), `notifications/tools/list_changed`. Changing the connector closes every account's session; changing an account's token closes that one.
+
+**Accounts are connected by a person.** An agent never signs in by itself: a person connects the agent's account (an OAuth link to open, or the token entered in the dashboard); secrets never go through a chat or MCP.
+
+```bash
+# one Mail connector for the app, per identity
+curl -X POST $POLPO/api/v1/connectors -H "Authorization: Bearer $KEY" -H 'content-type: application/json' \
+  -d '{"catalogId": "gmail", "name": "Mail", "scope": {"kind": "identity"}, "access": {"agents": ["nina", "luca"], "polpo": true}}'
+# Nina's "sitoinchat" account, then the link to sign it in
+curl -X POST $POLPO/api/v1/connectors/mail/accounts -d '{"identity": "agent:nina", "label": "sitoinchat"}' …
+curl -X POST $POLPO/api/v1/connectors/mail/accounts/acc-1a2b3c4d5e/oauth/start …   # → {"authorizationUrl": "…"}
+# my own account ("me" = the signed-in person calling)
+curl -X POST $POLPO/api/v1/connectors/mail/accounts -d '{"identity": "me", "label": "personale"}' …
+# the organization's shared fallback, and turn the fallback on
+curl -X POST $POLPO/api/v1/connectors/mail/accounts -d '{"identity": "org", "label": "info"}' …
+curl -X PATCH $POLPO/api/v1/connectors/mail -d '{"scope": {"kind": "identity", "fallback": true}}' …
+```
+
+API (`/api/v1/connectors/:id/…`): `GET accounts?identity=` (`agent:<name>`, `person:<email>`, `org`, `me`), `POST accounts` `{ identity, label, default?, secrets?: { bearerToken | headers } }`, `PATCH accounts/:account` `{ label?, default: true?, secrets? }`, `DELETE accounts/:account` (revokes and deletes its secrets; the identity's next account becomes its default), `POST accounts/:account/oauth/start`, `POST accounts/:account/test`, `POST accounts/:account/disconnect`; `GET /connectors` and `GET /connectors/:id` carry `accounts` (each with `identityLabel` and which secrets are set). The OAuth callback is the same (`?connected=<id>&account=<account id>`). A per-identity connector has no token or sign-in of its own (connector-level `oauth/start` / `disconnect` → 400), cannot be a local (stdio) server, and its scope cannot change to org / agent (nor the other way: import instead).
+
+### Converting separate connectors into accounts
+
+Connectors made before (one per account: `gmail`, `gmail-2`, `mail-nina`…) keep working unchanged. To merge one into a per-identity connector of the **same app** (same catalog entry, or same server URL; same sign-in kind and OAuth client), import it explicitly — nothing converts by itself:
+
+```bash
+curl -X POST $POLPO/api/v1/connectors/mail/accounts/import -H 'content-type: application/json' \
+  -d '{"from": "mail-nina", "label": "sitoinchat"}' …
+# → {"data": {"account": {"identity": "agent:nina", "label": "sitoinchat", "importedFrom": "mail-nina", …},
+#             "source": {"id": "mail-nina", "removed": true}, "renamed": {"from": "mcp__mail-nina__*", "to": "mcp__mail__* (account \"sitoinchat\")"}}}
+```
+
+Its credentials (tokens and registered client, or token / header values) move to the new account, which keeps the signed-in account and status: nobody signs in again. `identity` defaults to the source's owner (an agent's own connector) and is required for an org connector; `label` defaults to its signed-in account, else its name. The source is then deleted **without revoking** its tokens (they moved), or with `removeSource: false` turned off instead. Tool names change (`mcp__mail-nina__…` → `mcp__mail__…` with that account), so update skills, playbooks and `connectorTools` selections that named the old ones.
+
+**Surfaces.** MCP: `polpo_connector_add { per_identity: true, fallback? }`, `polpo_connector_update { fallback }`, `polpo_connectors_list` (scope `identity`, `fallback`, `accounts`; with `agent`, only that agent's accounts and the fallback), `polpo_connector_accounts`, `polpo_connector_account_add` (returns the sign-in link or the setup link for the token), `polpo_connector_account_update` (label, default), `polpo_connector_account_connect`, `polpo_connector_account_disconnect` and `polpo_connector_account_remove` (with `confirm`), `polpo_connector_account_import` (with `confirm`); the MCP agent card shows an agent's per-identity connectors with only its own accounts. Polpo's chat: the same as `connector_accounts`, `connector_account_add`, `connector_account_update`, `connector_account_connect`, `connector_account_disconnect`, `connector_account_remove`, `connector_account_import` (on demand, group `connectors`; `"me"` is the person chatting). SDK: `Connector.accounts`, `ConnectorAccount`, `client.getConnectorAccounts`, `addConnectorAccount`, `updateConnectorAccount`, `removeConnectorAccount`, `startConnectorAccountOAuth`, `testConnectorAccount`, `disconnectConnectorAccount`, `importConnectorAccount`; React `useConnectorAccounts(id, { identity })`, `isIdentityConnector(c)`, `connectorAccountsFor(c, identity, withFallback)`. Dashboard: the type selector Org / Personal / Per identity, the per-identity connector's Accounts section (identities and their accounts, status, default, add account, fallback, import) and, on the agent page, the agent's own accounts with an **Identity** chip. Agent tests check the agent's own account (or the fallback).
+
 ## Several accounts of the same service
 
-One catalog app can be connected more than once: two Gmail inboxes, one inbox per agent, a staging and a production Linear workspace. Each account is a separate connector with its own id, OAuth tokens (or key), name, access and tool policy.
+One catalog app can be connected more than once: two Gmail inboxes, one inbox per agent, a staging and a production Linear workspace. Each account is a separate connector with its own id, OAuth tokens (or key), name, access and tool policy. (For one connector whose accounts each agent and person connects for itself, with stable tool names, see [per-identity connectors](#per-identity-connectors-each-agent-and-person-with-its-own-accounts).)
 
 - **Ids.** The first one takes the catalog id (`gmail`); adding the same `catalogId` again gives the next free one: `gmail-2`, `gmail-3`… Its tools are `mcp__gmail-2__<tool>`, so `allowedTools` and `connectorTools` can target one account (`mcp__gmail-2__*`).
 - **Names.** Give each account a name that says which it is ("Gmail – info@lumea.dev"). Without a `name`, a second account is called "Gmail 2" (never the same name as the first). Rename any connector from its sheet (pencil next to the name), with `PATCH /api/v1/connectors/:id { "name": "…" }`, `polpo_connector_update { id, name }` or Polpo's `connector_update`.

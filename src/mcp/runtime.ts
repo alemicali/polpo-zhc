@@ -3,7 +3,7 @@
  * instance, and the prompt lines that tell an agent (or Polpo) which connectors it has.
  */
 import {
-  callerConnectorIdentity, connectorAccountsOf, connectorFallbackOn, connectorGrants, connectorIdentityLabel, isIdentityConnector, ORG_CONNECTOR_IDENTITY,
+  NO_PERSON, callerConnectorIdentity, connectorAccountsOf, connectorFallbackOn, connectorGrants, connectorIdentityLabel, isIdentityConnector, ORG_CONNECTOR_IDENTITY,
   type AgentConnectorTools, type ConnectorAccount, type ConnectorChangedEvent, type ConnectorConfig, type PolpoSettings, type VaultStore,
 } from "@polpo-ai/core";
 import { getConnectorManager, type ConnectorManager } from "./manager.js";
@@ -32,13 +32,19 @@ export function connectorManagerFor(host: ConnectorHost): ConnectorManager {
 }
 
 /**
- * The person on whose behalf the code runs (the signed-in member chatting with Polpo: the event
- * origin's `by`, when it is an email), for per-identity connectors' person accounts. Undefined: no
- * sign-in (the shared person).
+ * The person on whose behalf the code runs, for per-identity connectors' person accounts: the
+ * signed-in member chatting with Polpo (the event origin's `by` when it is an email, also "ada@acme.com
+ * via Claude" through the MCP connector); undefined when nobody is signed in on the dashboard or API
+ * (the shared person of an instance without sign-in); NO_PERSON for anyone else (a channel contact,
+ * an MCP key, a schedule…), who never uses a person's accounts.
  */
 export function currentConnectorPerson(): string | undefined {
-  const by = currentEventOrigin()?.by;
-  return typeof by === "string" && by.includes("@") && !by.includes(":") ? by.trim().toLowerCase() : undefined;
+  const origin = currentEventOrigin();
+  const by = typeof origin?.by === "string" ? origin.by.trim() : "";
+  const email = /^([^\s@:]+@[^\s@:]+\.[^\s@:]+)(\s|$)/.exec(by)?.[1];
+  if (email) return email.toLowerCase();
+  if (!by && (origin?.source === undefined || origin.source === "api" || origin.source === "polpo")) return undefined;
+  return NO_PERSON;
 }
 
 let notedOrigin: string | undefined;

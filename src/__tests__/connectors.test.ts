@@ -15,7 +15,11 @@ import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
-  CONNECTORS_VAULT_OWNER, connectorGrants, connectorOwner, connectorVisibleTo, taskToolScopeGrantProblems, taskToolScopeMissingGrants, type AgentConfig, type Task, type TaskToolScope } from "@polpo-ai/core";
+  CONNECTORS_VAULT_OWNER, connectorGrants, connectorOwner, connectorVisibleTo, parseConnectorIdentity, personConnectorIdentity, resolveConnectorAccount,
+  taskToolScopeGrantProblems, taskToolScopeMissingGrants, type AgentConfig, type Task, type TaskToolScope } from "@polpo-ai/core";
+import { importConnectorAccount, updateConnectorAccount } from "../mcp/accounts.js";
+import { registerConnectorTools } from "../server/mcp-server/connectors.js";
+import type { McpDeps, Register } from "../server/mcp-server/kit.js";
 import { buildAgentToolset } from "../adapters/engine.js";
 import { toHarnessHostTools } from "../harness/host-tools.js";
 import { scopedAgentForRun } from "../core/task-tool-scope.js";
@@ -28,7 +32,8 @@ import { connectorToolAllowed, convertToolResult, mcpToolName, MAX_RESULT_TEXT, 
 import { connectorRoutes, connectorOAuthCallback, CONNECTOR_OAUTH_CALLBACK_PATH } from "../server/routes/connectors.js";
 import { CONNECTOR_CATALOG } from "../mcp/catalog.js";
 import { clientMetadataDocument, clientMetadataUrlFor } from "../mcp/paths.js";
-import { connectorDashboardBase, connectorPublicBase, connectorsPromptSection } from "../mcp/runtime.js";
+import { connectorDashboardBase, connectorPublicBase, connectorsPromptSection, currentConnectorPerson } from "../mcp/runtime.js";
+import { withEventOrigin } from "../core/events.js";
 import { accountFromIdToken, connectorLabel } from "../mcp/view.js";
 import { executeConnectorTool } from "../tools/connector-tools.js";
 
@@ -78,9 +83,24 @@ const json = (res: ServerResponse, status: number, data: unknown, headers: Recor
   res.end(JSON.stringify(data));
 };
 
-async function serveMcp(req: IncomingMessage, res: ServerResponse, raw: string): Promise<void> {
+/** Per-identity tests: a server whose `who` tool answers with the credential the call came with (which account). */
+function whoServer(credential: string): McpServer {
+  const s = new McpServer({ name: "who", version: "1.0.0" });
+  s.registerTool("who", { description: "Which credential called", inputSchema: { note: z.string().optional() } }, async ({ note }) => ({
+    content: [{ type: "text", text: `${credential}${note ? ` ${note}` : ""}` }],
+  }));
+  s.registerTool("send", { description: "Send something", inputSchema: { to: z.string(), account: z.string().optional().describe("the app's own account parameter") } }, async ({ to, account }) => ({
+    content: [{ type: "text", text: `sent to ${to} by ${credential}${account ? ` (app account ${account})` : ""}` }],
+  }));
+  return s;
+}
+
+/** Bearer tokens /who-mcp takes (one per account in the per-identity tests). */
+const WHO_TOKENS = new Set(["tok-nina-site", "tok-nina-personal", "tok-luca", "tok-org", "tok-legacy-nina"]);
+
+async function serveMcp(req: IncomingMessage, res: ServerResponse, raw: string, make: () => McpServer = mcpServer): Promise<void> {
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
-  const s = mcpServer();
+  const s = make();
   res.on("close", () => { void transport.close(); void s.close(); });
   await s.connect(transport);
   await transport.handleRequest(req as any, res, raw ? JSON.parse(raw) : undefined);
@@ -97,6 +117,19 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     return void res.end(body);
   }
   if (url.pathname === "/mcp") return serveMcp(req, res, raw);
+  if (url.pathname === "/who-mcp") {
+    if (!WHO_TOKENS.has(bearer)) return json(res, 401, { error: "unauthorized" });
+    return serveMcp(req, res, raw, () => whoServer(bearer));
+  }
+  if (url.pathname === "/who-oauth-mcp") {
+    if (!fake.access.has(bearer)) {
+      return json(res, 401, { error: "invalid_token" }, { "WWW-Authenticate": `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource/who-oauth-mcp"` });
+    }
+    return serveMcp(req, res, raw, () => whoServer(bearer));
+  }
+  if (url.pathname === "/.well-known/oauth-protected-resource/who-oauth-mcp") {
+    return json(res, 200, { resource: `${base}/who-oauth-mcp`, authorization_servers: [base], scopes_supported: ["read"] });
+  }
   if (url.pathname === "/bearer-mcp") {
     if (bearer !== BEARER) return json(res, 401, { error: "unauthorized" });
     return serveMcp(req, res, raw);
@@ -235,6 +268,35 @@ function routesApp(manager: ConnectorManager) {
     redirectUri: () => `http://127.0.0.1:3890${CONNECTOR_OAUTH_CALLBACK_PATH}`,
   }));
   return app;
+}
+
+/** The connector routes with the workspace's agents and the signed-in person ("me"). */
+function routesAppWith(manager: ConnectorManager, opts: { agentNames?: string[]; member?: string }) {
+  const app = new Hono();
+  app.get(CONNECTOR_OAUTH_CALLBACK_PATH, connectorOAuthCallback({ manager: () => manager, uiUrl: () => "https://polpo.example.com" }));
+  app.route("/api/v1/connectors", connectorRoutes({
+    manager: () => manager,
+    settings: allowLocal,
+    redirectUri: () => `http://127.0.0.1:3890${CONNECTOR_OAUTH_CALLBACK_PATH}`,
+    ...(opts.agentNames ? { agentNames: () => opts.agentNames! } : {}),
+    ...(opts.member ? { member: () => opts.member } : {}),
+  }));
+  return app;
+}
+
+/** Polpo's MCP connector tools, calling this app's API in process. */
+function mcpToolsOver(app: Hono) {
+  const handlers = new Map<string, (args: Record<string, unknown>, extra: unknown) => Promise<any>>();
+  const deps: McpDeps = {
+    version: "t", publicUrl: "https://polpo.example.com",
+    api: async (method, path, body) => {
+      const r = await app.request(path, { method, ...(body !== undefined ? { headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : {}) });
+      return { status: r.status, body: await r.json().catch(() => undefined), headers: r.headers };
+    },
+  };
+  const tool = ((_set: string, name: string, _spec: unknown, handler: (args: Record<string, unknown>, extra: unknown) => Promise<any>) => { handlers.set(name, handler); }) as unknown as Register;
+  registerConnectorTools(tool, deps);
+  return { tools: [...handlers.keys()], call: (name: string, args: Record<string, unknown>) => handlers.get(name)!(args, {}) };
 }
 
 // ── unit pieces ──
@@ -1110,5 +1172,319 @@ describe("public URLs for OAuth providers (POLPO_PUBLIC_URL)", () => {
     expect(await res.text()).toContain("https://polpo.example.com/connectors");
     expect(manager.store.get("denied")).toMatchObject({ status: "error", lastError: expect.stringContaining("invalid_client: Client metadata unreachable") });
     expect((await manager.secrets.get("denied")).oauth_state).toBeUndefined();
+  });
+});
+
+// ── per-identity connectors ──
+
+describe("per-identity connectors: accounts per agent / person", () => {
+  /** A per-identity bearer connector at /who-mcp (its `who` tool answers with the calling account's token). */
+  async function identitySetup(opts: { fallback?: boolean; agents?: string[] | "*" } = {}) {
+    const env = setup();
+    const app = routesAppWith(env.manager, { agentNames: ["nina", "luca", "bob"], member: "ada@acme.com" });
+    const created = await app.request("/api/v1/connectors", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: "mail", name: "Mail", url: `${base}/who-mcp`, auth: { type: "bearer" }, access: { agents: opts.agents ?? ["nina", "luca", "bob"], polpo: true },
+        scope: { kind: "identity", ...(opts.fallback ? { fallback: true } : {}) } }),
+    });
+    expect(created.status).toBe(201);
+    const addAccount = async (identity: string, label: string, token: string, extra: Record<string, unknown> = {}) => {
+      const r = await app.request("/api/v1/connectors/mail/accounts", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ identity, label, secrets: { bearerToken: token }, ...extra }),
+      });
+      const json = await r.json();
+      if (r.status !== 201) throw new Error(`${r.status} ${json.error}`);
+      return json.data.account as { id: string; label: string; default?: boolean; identity: string };
+    };
+    return { ...env, app, addAccount };
+  }
+  const text = (r: { content: Array<{ type: string; text?: string }> }) => r.content.map((c) => c.text ?? "").join("");
+
+  it("resolves the caller's default account, and the account argument picks another of its own", async () => {
+    const { manager, addAccount } = await identitySetup();
+    const site = await addAccount("agent:nina", "sitoinchat", "tok-nina-site");
+    const personal = await addAccount("agent:nina", "personale", "tok-nina-personal");
+    expect(site.default).toBe(true);
+    expect(personal.default).toBeUndefined();
+    const { tools, notes } = await manager.toolsFor("nina");
+    expect(notes).toEqual([]);
+    const who = tools.find((t) => t.name === "mcp__mail__who")!;
+    // one set of tools for the connector (not per account), with an optional account argument
+    expect(tools.map((t) => t.name).sort()).toEqual(["mcp__mail__send", "mcp__mail__who"]);
+    expect((who.parameters as any).properties.account).toMatchObject({ type: "string" });
+    expect((who.parameters as any).properties.account.description).toContain("\"sitoinchat\" (default)");
+    expect(text(await who.execute("1", {}))).toBe("tok-nina-site");
+    expect(text(await who.execute("2", { account: "personale" }))).toBe("tok-nina-personal");
+    expect(text(await who.execute("3", { account: "PERSONALE", note: "hi" }))).toBe("tok-nina-personal hi");
+    // the account argument never reaches the server
+    expect(text(await who.execute("4", { account: "sitoinchat", note: "x" }))).toBe("tok-nina-site x");
+    // a server tool with its own "account" parameter: Polpo's is polpo_account, the server's passes through
+    const send = tools.find((t) => t.name === "mcp__mail__send")!;
+    expect(Object.keys((send.parameters as any).properties)).toEqual(expect.arrayContaining(["to", "account", "polpo_account"]));
+    expect(text(await send.execute("5", { to: "x@y.z", account: "app-1", polpo_account: "personale" }))).toBe("sent to x@y.z by tok-nina-personal (app account app-1)");
+    // one MCP session per (connector, account), created lazily
+    expect(manager.isConnected("mail", site.id)).toBe(true);
+    expect(manager.isConnected("mail", personal.id)).toBe(true);
+    expect(manager.isConnected("mail")).toBe(false);
+    // the default can change: the next call uses it
+    await updateConnectorAccount({ manager }, "mail", personal.id, { default: true });
+    expect(text(await who.execute("6", {}))).toBe("tok-nina-personal");
+    expect(manager.store.getAccount("mail", site.id)?.default).toBeUndefined();
+  });
+
+  it("isolation: an identity never reaches another identity's account, even by passing its label", async () => {
+    const { manager, addAccount } = await identitySetup();
+    await addAccount("agent:nina", "sitoinchat", "tok-nina-site");
+    await addAccount("agent:luca", "lavoro", "tok-luca");
+    const luca = (await manager.toolsFor("luca")).tools.find((t) => t.name === "mcp__mail__who")!;
+    expect(text(await luca.execute("1", {}))).toBe("tok-luca");
+    await expect(luca.execute("2", { account: "sitoinchat" })).rejects.toThrow(/agent luca has no account "sitoinchat".*"lavoro"/);
+    // nor by the account id, nor through callAs with another identity's label
+    const ninaAccount = manager.store.get("mail")!.accounts!.find((a) => a.identity === "agent:nina")!;
+    await expect(luca.execute("3", { account: ninaAccount.id })).rejects.toThrow(/no account/);
+    await expect(manager.callAs("mail", "agent:luca", "who", {}, "sitoinchat")).rejects.toThrow(/no account "sitoinchat"/);
+    // the prompt shows only the caller's own accounts
+    const section = connectorsPromptSection(manager.store.list(), "luca");
+    expect(section).toContain("\"lavoro\" (default)");
+    expect(section).not.toContain("sitoinchat");
+  });
+
+  it("no account: a clear error naming the connector; the fallback (off by default) covers identities without one", async () => {
+    const { manager, app, addAccount } = await identitySetup();
+    await addAccount("agent:nina", "sitoinchat", "tok-nina-site");
+    await manager.toolsFor("nina"); // lists the tools through Nina's account
+    const bob = await manager.toolsFor("bob");
+    expect(bob.notes.join("\n")).toMatch(/Mail \(mail\) is per identity and agent bob has no account on it/);
+    // the tools still show (same names for everyone), and say so when used
+    const who = bob.tools.find((t) => t.name === "mcp__mail__who")!;
+    await expect(who.execute("1", {})).rejects.toThrow(/agent bob has no account on it.*Settings → Connectors/);
+    expect(connectorsPromptSection(manager.store.list(), "bob")).toContain("agent bob has no account on it yet");
+    // an org account exists, but the fallback is off: still no account for bob
+    await addAccount("org", "condiviso", "tok-org");
+    await expect(who.execute("2", {})).rejects.toThrow(/no account/);
+    // fallback on: bob uses the organization's account; nina keeps her own
+    const patched = await app.request("/api/v1/connectors/mail", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: { kind: "identity", fallback: true } }) });
+    expect(patched.status).toBe(200);
+    expect(text(await who.execute("3", {}))).toBe("tok-org");
+    const nina = (await manager.toolsFor("nina")).tools.find((t) => t.name === "mcp__mail__who")!;
+    expect(text(await nina.execute("4", {}))).toBe("tok-nina-site");
+    expect(text(await nina.execute("5", { account: "condiviso" }))).toBe("tok-org");
+    expect(connectorsPromptSection(manager.store.list(), "bob")).toContain("organization's shared account");
+    // and off again
+    await app.request("/api/v1/connectors/mail", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: { kind: "identity", fallback: false } }) });
+    await expect(who.execute("6", {})).rejects.toThrow(/no account/);
+  });
+
+  it("a person chatting with Polpo uses their own accounts (and only theirs)", async () => {
+    const { manager, addAccount, app } = await identitySetup();
+    // "me" is the signed-in member calling the API
+    const mine = await addAccount("me", "personale", "tok-nina-personal");
+    expect(mine.identity).toBe("person:ada@acme.com");
+    await addAccount("person:bo@acme.com", "bo", "tok-luca");
+    const ada = (await manager.toolsFor(undefined, undefined, undefined, { person: "Ada@Acme.com" })).tools.find((t) => t.name === "mcp__mail__who")!;
+    expect(text(await ada.execute("1", {}))).toBe("tok-nina-personal");
+    await expect(ada.execute("2", { account: "bo" })).rejects.toThrow(/ada@acme.com has no account "bo"/);
+    // no sign-in: the shared person, who has no account here
+    const anon = await manager.toolsFor(undefined, undefined, undefined, {});
+    expect(anon.notes.join()).toMatch(/the person \(no sign-in\) has no account/);
+    // a channel contact chatting with Polpo is nobody's: never a person's account, even the shared person's
+    await addAccount("person:_shared", "shared-person", "tok-org");
+    const shared = (await manager.toolsFor(undefined, undefined, undefined, {})).tools.find((t) => t.name === "mcp__mail__who")!;
+    expect(text(await shared.execute("s", {}))).toBe("tok-org");
+    const contact = (await manager.toolsFor(undefined, undefined, undefined, { person: "_nobody" })).tools.find((t) => t.name === "mcp__mail__who")!;
+    await expect(contact.execute("c", {})).rejects.toThrow(/has no account/);
+    // people need access.polpo
+    await app.request("/api/v1/connectors/mail", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ access: { polpo: false } }) });
+    await expect(addAccount("person:cy@acme.com", "cy", "tok-org")).rejects.toThrow(/People cannot connect accounts/);
+    expect((await manager.toolsFor(undefined, undefined, undefined, { person: "ada@acme.com" })).tools).toEqual([]);
+  });
+
+  it("validates accounts: access, unique labels per identity, scope changes, connector-level tokens", async () => {
+    const { manager, app, addAccount } = await identitySetup({ agents: ["nina"] });
+    await addAccount("agent:nina", "sitoinchat", "tok-nina-site");
+    await expect(addAccount("agent:luca", "lavoro", "tok-luca")).rejects.toThrow(/400 agent luca may not use Mail/);
+    await expect(addAccount("agent:ghost", "x", "tok-luca")).rejects.toThrow(/400 identity: there is no agent "ghost"/);
+    await expect(addAccount("agent:nina", "SitoInChat", "tok-luca")).rejects.toThrow(/400 agent nina already has an account "SitoInChat"/);
+    await expect(addAccount("robot", "x", "tok-luca")).rejects.toThrow(/400 identity must be/);
+    // the same label for another identity is fine
+    await addAccount("org", "sitoinchat", "tok-org");
+    const toOrg = await app.request("/api/v1/connectors/mail", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: { kind: "org" } }) });
+    expect(toOrg.status).toBe(400);
+    const token = await app.request("/api/v1/connectors/mail", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ secrets: { bearerToken: "x" } }) });
+    expect(token.status).toBe(400);
+    const conn = await app.request("/api/v1/connectors/mail/oauth/start", { method: "POST" });
+    expect(conn.status).toBe(400);
+    // an org connector cannot become per identity in place
+    await add(manager, { id: "plain", name: "Plain", url: `${base}/mcp` });
+    const toIdentity = await app.request("/api/v1/connectors/plain", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: { kind: "identity" } }) });
+    expect(toIdentity.status).toBe(400);
+    expect((await toIdentity.json()).error).toMatch(/import this one as an account/);
+    // nothing secret in the API or the config file
+    const listed = await (await app.request("/api/v1/connectors")).text();
+    expect(listed).not.toContain("tok-nina-site");
+    expect(readFileSync(manager.store.file, "utf-8")).not.toContain("tok-nina-site");
+    expect(JSON.parse(listed).data.connectors.find((c: any) => c.id === "mail").accounts[0]).toMatchObject({ identity: "agent:nina", identityLabel: "agent nina", secrets: { bearerToken: true } });
+    // removing the default promotes the identity's next account
+    await addAccount("agent:nina", "personale", "tok-nina-personal");
+    const site = manager.store.get("mail")!.accounts!.find((a) => a.label === "sitoinchat" && a.identity === "agent:nina")!;
+    const del = await app.request(`/api/v1/connectors/mail/accounts/${site.id}`, { method: "DELETE" });
+    expect(del.status).toBe(200);
+    expect(manager.store.get("mail")!.accounts!.find((a) => a.identity === "agent:nina")).toMatchObject({ label: "personale", default: true });
+    expect(await manager.secrets.get(`mail~${site.id}`)).toEqual({});
+  });
+
+  it("converts separate connectors of the same app into accounts (explicit import), credentials moved, nothing revoked", async () => {
+    const { manager, app, addAccount } = await identitySetup();
+    await addAccount("agent:luca", "lavoro", "tok-luca");
+    // Nina's own connector, made before per-identity connectors existed
+    await add(manager, { id: "mail-nina", name: "Mail Nina", url: `${base}/who-mcp`, auth: { type: "bearer" }, scope: { kind: "agent", agent: "nina" }, secrets: { bearerToken: "tok-legacy-nina" } });
+    manager.store.update("mail-nina", { account: "nina@sitoinchat.it" });
+    // another app cannot be imported
+    await add(manager, { id: "other", name: "Other", url: `${base}/mcp` });
+    const wrong = await app.request("/api/v1/connectors/mail/accounts/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ from: "other", identity: "agent:nina" }) });
+    expect(wrong.status).toBe(400);
+    expect((await wrong.json()).error).toMatch(/not the same app/);
+    const r = await app.request("/api/v1/connectors/mail/accounts/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ from: "mail-nina", label: "sitoinchat" }) });
+    expect(r.status).toBe(201);
+    const data = (await r.json()).data;
+    // the owner of the agent-scoped connector becomes the identity; its account is kept
+    expect(data.account).toMatchObject({ identity: "agent:nina", label: "sitoinchat", default: true, account: "nina@sitoinchat.it", importedFrom: "mail-nina" });
+    expect(data.source).toEqual({ id: "mail-nina", removed: true, disabled: false });
+    expect(data.renamed.from).toBe("mcp__mail-nina__*");
+    expect(manager.store.get("mail-nina")).toBeUndefined();
+    expect(await manager.secrets.get("mail-nina")).toEqual({});
+    // Nina's calls now go through the moved credentials
+    const who = (await manager.toolsFor("nina")).tools.find((t) => t.name === "mcp__mail__who")!;
+    expect(text(await who.execute("1", {}))).toBe("tok-legacy-nina");
+    // keep the source (turned off) instead
+    await add(manager, { id: "mail-2", name: "Mail 2", url: `${base}/who-mcp`, auth: { type: "bearer" }, secrets: { bearerToken: "tok-org" } });
+    const kept = await importConnectorAccount({ manager, agentNames: ["nina", "luca", "bob"] }, "mail", { from: "mail-2", identity: "org", label: "shared", removeSource: false });
+    expect(kept.source).toEqual({ id: "mail-2", removed: false, disabled: true });
+    expect(manager.store.get("mail-2")).toMatchObject({ enabled: false, status: "disabled" });
+    // an org connector needs to be told whose account it becomes
+    await add(manager, { id: "mail-3", name: "Mail 3", url: `${base}/who-mcp`, auth: { type: "bearer" }, secrets: { bearerToken: "tok-org" } });
+    await expect(importConnectorAccount({ manager }, "mail", { from: "mail-3" })).rejects.toThrow(/say whose account/);
+  });
+
+  it("OAuth per account: each account signs in on its own, tokens under the account's vault entry", async () => {
+    const { manager, vault } = setup();
+    const app = routesAppWith(manager, { agentNames: ["nina", "luca"] });
+    const created = await app.request("/api/v1/connectors", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: "gmail", name: "Gmail", url: `${base}/who-oauth-mcp`, auth: { type: "oauth" }, access: { agents: ["nina", "luca"], polpo: false }, scope: { kind: "identity" } }),
+    });
+    expect((await created.json()).data).toMatchObject({ status: "disconnected", scope: { kind: "identity" } });
+    const signIn = async (identity: string, label: string, email: string) => {
+      const acc = (await (await app.request("/api/v1/connectors/gmail/accounts", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ identity, label }) })).json()).data.account;
+      expect(acc).toMatchObject({ status: "needs_auth", secrets: { oauth: { authorized: false } } });
+      const start = await (await app.request(`/api/v1/connectors/gmail/accounts/${acc.id}/oauth/start`, { method: "POST" })).json();
+      const redirect = await fetch(new URL(start.data.authorizationUrl), { redirect: "manual" });
+      fake.idTokenEmail = email;
+      const callback = await app.request(`${CONNECTOR_OAUTH_CALLBACK_PATH}${new URL(redirect.headers.get("location")!).search}`);
+      expect(callback.status).toBe(200);
+      const html = await callback.text();
+      expect(html).toContain(`Gmail – ${label} connected`);
+      expect(html).toContain(`account=${acc.id}`);
+      return acc.id as string;
+    };
+    const ninaId = await signIn("agent:nina", "sitoinchat", "nina@sitoinchat.it");
+    const lucaId = await signIn("agent:luca", "lavoro", "luca@acme.com");
+    expect(manager.store.getAccount("gmail", ninaId)).toMatchObject({ status: "connected", account: "nina@sitoinchat.it", toolCount: 2 });
+    expect(manager.store.getAccount("gmail", lucaId)).toMatchObject({ status: "connected", account: "luca@acme.com" });
+    // the connector itself has no tokens: each account its own
+    expect((await vault.get(CONNECTORS_VAULT_OWNER, "gmail"))?.credentials?.oauth_tokens).toBeUndefined();
+    const ninaTokens = JSON.parse((await vault.get(CONNECTORS_VAULT_OWNER, `gmail~${ninaId}`))!.credentials.oauth_tokens!);
+    const lucaTokens = JSON.parse((await vault.get(CONNECTORS_VAULT_OWNER, `gmail~${lucaId}`))!.credentials.oauth_tokens!);
+    expect(ninaTokens.access_token).not.toBe(lucaTokens.access_token);
+    const who = async (agent: string) => text(await (await manager.toolsFor(agent)).tools.find((t) => t.name === "mcp__gmail__who")!.execute("1", {}));
+    expect(await who("nina")).toBe(ninaTokens.access_token);
+    expect(await who("luca")).toBe(lucaTokens.access_token);
+    // signing one account out leaves the other connected
+    const out = await app.request(`/api/v1/connectors/gmail/accounts/${ninaId}/disconnect`, { method: "POST" });
+    expect(out.status).toBe(200);
+    expect(manager.store.getAccount("gmail", ninaId)).toMatchObject({ status: "needs_auth" });
+    expect(manager.store.getAccount("gmail", ninaId)?.account).toBeUndefined();
+    expect(fake.revoked).toEqual(expect.arrayContaining([ninaTokens.refresh_token]));
+    expect(await who("luca")).toBe(lucaTokens.access_token);
+    await expect(who("nina")).rejects.toThrow(/reconnect|Not authorized/i);
+  });
+
+  it("harness host tools (Claude Code, Codex, OpenCode) and the agent's engine get the agent's own account", async () => {
+    const { polpoDir, vault, addAccount } = await identitySetup();
+    await addAccount("agent:nina", "sitoinchat", "tok-nina-site");
+    await addAccount("agent:nina", "personale", "tok-nina-personal");
+    await addAccount("agent:luca", "lavoro", "tok-luca");
+    writeFileSync(join(polpoDir, "polpo.json"), JSON.stringify({ project: "t", team: { name: "t", agents: [{ name: "nina" }] }, settings: { connectors: { allowPrivateNetwork: true } } }));
+    const toolset = await buildAgentToolset({ agentConfig: { name: "nina" } as AgentConfig, cwd: polpoDir, ctx: { polpoDir, vaultStore: vault }, sandboxProvider: "local", browserProfileDir: join(polpoDir, "bp"), hasExtendedTools: false });
+    try {
+      expect(toolset.connectorNote).toContain("\"sitoinchat\" (default)");
+      expect(toolset.connectorNote).not.toContain("lavoro");
+      const host = toHarnessHostTools(toolset.tools).find((t) => t.name === "mcp__mail__who")!;
+      expect((host.inputSchema as any).properties.account.type).toBe("string");
+      expect(await host.execute({}, { toolCallId: "1" })).toBe("tok-nina-site");
+      expect(await host.execute({ account: "personale" }, { toolCallId: "2" })).toBe("tok-nina-personal");
+      expect(await host.execute({ account: "lavoro" }, { toolCallId: "3" })).toMatch(/^Error: .*agent nina has no account "lavoro"/);
+    } finally {
+      await toolset.connectorManager?.closeAll();
+    }
+  });
+
+  it("core resolution rules", () => {
+    const c = {
+      id: "m", name: "M", scope: { kind: "identity" as const },
+      accounts: [
+        { id: "a1", identity: "agent:nina", label: "uno", createdAt: "" },
+        { id: "a2", identity: "agent:nina", label: "due", default: true, createdAt: "" },
+        { id: "o1", identity: "org", label: "shared", default: true, createdAt: "" },
+      ],
+    };
+    expect(resolveConnectorAccount(c, "agent:nina")).toMatchObject({ ok: true, account: { id: "a2" }, fallback: false });
+    expect(resolveConnectorAccount(c, "agent:nina", " Uno ")).toMatchObject({ ok: true, account: { id: "a1" } });
+    expect(resolveConnectorAccount(c, "agent:bob")).toMatchObject({ ok: false, reason: "no_account" });
+    expect(resolveConnectorAccount(c, "agent:bob", "uno")).toMatchObject({ ok: false, reason: "unknown_account" });
+    expect(resolveConnectorAccount({ ...c, scope: { kind: "identity", fallback: true } }, "agent:bob")).toMatchObject({ ok: true, account: { id: "o1" }, fallback: true });
+    expect(personConnectorIdentity(" Ada@Acme.com ")).toBe("person:ada@acme.com");
+    expect(personConnectorIdentity(undefined)).toBe("person:_shared");
+    expect(personConnectorIdentity("_nobody")).toBe("person:_nobody");
+    expect(parseConnectorIdentity("person:_nobody")).toBeUndefined();
+    // who is chatting: the signed-in member (also through an MCP client), the shared person without sign-in, nobody for a channel contact
+    expect(withEventOrigin({ source: "api", by: "Ada@Acme.com" }, () => currentConnectorPerson())).toBe("ada@acme.com");
+    expect(withEventOrigin({ source: "api", by: "ada@acme.com via Claude" }, () => currentConnectorPerson())).toBe("ada@acme.com");
+    expect(withEventOrigin({ source: "api" }, () => withEventOrigin({ source: "polpo" }, () => currentConnectorPerson()))).toBeUndefined();
+    expect(withEventOrigin({ source: "channel", by: "telegram:42" }, () => currentConnectorPerson())).toBe("_nobody");
+    expect(withEventOrigin({ source: "api", by: "mcp-key:ops" }, () => currentConnectorPerson())).toBe("_nobody");
+    expect(parseConnectorIdentity("agent:$connectors")).toBeUndefined();
+    expect(parseConnectorIdentity("person:not-an-email")).toBeUndefined();
+    // a per-identity connector grants like an org one (access), never per scope owner
+    expect(connectorGrants({ enabled: true, access: { agents: ["nina"], polpo: false }, scope: { kind: "identity" } }, "nina")).toBe(true);
+    expect(connectorGrants({ enabled: true, access: { agents: ["nina"], polpo: false }, scope: { kind: "identity" } }, "luca")).toBe(false);
+  });
+
+  it("MCP and chat tools: per_identity add, accounts list / add / default / import", async () => {
+    const { manager, addAccount, app } = await identitySetup();
+    await addAccount("agent:nina", "sitoinchat", "tok-nina-site");
+    const chat = await executeConnectorTool("connectors_list", { agent: "nina" }, { manager, agentNames: async () => ["nina", "luca", "bob"] });
+    expect(chat).toContain("per identity");
+    expect(chat).toContain("agent nina: \"sitoinchat\" (default)");
+    const connect = await executeConnectorTool("connector_connect", { id: "mail" }, { manager, agentNames: async () => [] });
+    expect(connect).toMatch(/per identity: each account signs in on its own/);
+    // the MCP server's tools over the same API
+    const { tools, call } = mcpToolsOver(app);
+    expect(tools).toEqual(expect.arrayContaining(["polpo_connector_accounts", "polpo_connector_account_add", "polpo_connector_account_update", "polpo_connector_account_connect",
+      "polpo_connector_account_disconnect", "polpo_connector_account_remove", "polpo_connector_account_import"]));
+    const listed = await call("polpo_connector_accounts", { id: "mail", identity: "agent:nina" });
+    expect(listed.structuredContent.accounts).toEqual([expect.objectContaining({ label: "sitoinchat", default: true, identity: "agent:nina" })]);
+    const added = await call("polpo_connector_account_add", { id: "mail", identity: "agent:nina", label: "personale" });
+    expect(added.structuredContent.setup_url).toContain("focus=account%3A");
+    const def = await call("polpo_connector_account_update", { id: "mail", account: "personale", identity: "agent:nina", default: true });
+    expect(def.structuredContent.account).toMatchObject({ label: "personale", default: true });
+    const add2 = await call("polpo_connector_add", { url: `${base}/who-mcp`, id: "mail-b", name: "Mail B", auth: "none", per_identity: true, agents: ["nina"] });
+    expect(add2.structuredContent.connector).toMatchObject({ scope: "identity", fallback: false, accounts: [] });
+    await add(manager, { id: "mail-nina", name: "Mail Nina", url: `${base}/who-mcp`, auth: { type: "bearer" }, scope: { kind: "agent", agent: "nina" }, secrets: { bearerToken: "tok-legacy-nina" } });
+    const refused = await call("polpo_connector_account_import", { id: "mail", from: "mail-nina", label: "vecchia" });
+    expect(refused.isError).toBe(true);
+    const imported = await call("polpo_connector_account_import", { id: "mail", from: "mail-nina", label: "vecchia", confirm: true });
+    expect(imported.structuredContent).toMatchObject({ source_removed: true, account: { identity: "agent:nina", label: "vecchia" } });
   });
 });

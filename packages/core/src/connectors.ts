@@ -360,14 +360,20 @@ export const CONNECTOR_ACCOUNT_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 ._@+-]{0,
 export const ORG_CONNECTOR_IDENTITY = "org";
 /** A person without a sign-in (single-user installs, API keys). */
 export const SHARED_PERSON = "_shared";
+/** A caller that is no person (a channel contact, an MCP key, a schedule): it never has accounts of its own. */
+export const NO_PERSON = "_nobody";
 
 export function agentConnectorIdentity(agent: string): ConnectorIdentity {
   return `agent:${agent}`;
 }
 
-/** A person's identity from their email (undefined / empty / not an email: the shared person of an instance without sign-in). */
+/**
+ * A person's identity from their email (undefined / empty / not an email: the shared person of an
+ * instance without sign-in; NO_PERSON: nobody's, an identity no account can ever belong to).
+ */
 export function personConnectorIdentity(email: string | undefined | null): ConnectorIdentity {
   const e = email?.trim().toLowerCase();
+  if (e === NO_PERSON) return `person:${NO_PERSON}`;
   return `person:${e && e.includes("@") ? e : SHARED_PERSON}`;
 }
 
@@ -391,6 +397,7 @@ export function parseConnectorIdentity(value: unknown): ParsedConnectorIdentity 
 
 /** How an identity reads: "agent nina", "ada@acme.com", "the person (no sign-in)", "the organization (fallback)". */
 export function connectorIdentityLabel(identity: ConnectorIdentity): string {
+  if (identity === `person:${NO_PERSON}`) return "this caller (not a signed-in person)";
   const p = parseConnectorIdentity(identity);
   if (!p) return identity;
   if (p.kind === "org") return "the organization (fallback)";

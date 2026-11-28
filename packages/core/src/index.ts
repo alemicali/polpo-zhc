@@ -316,7 +316,7 @@ export type {
 export {
   CONNECTOR_ID_PATTERN, CONNECTORS_VAULT_OWNER, DEFAULT_CONNECTOR_TOOL_TIMEOUT_MS, connectorGrants, connectorSlug,
   connectorOwner, connectorAccessProblem, connectorVisibleTo, isIdentityConnector,
-  CONNECTOR_ACCOUNT_LABEL_PATTERN, ORG_CONNECTOR_IDENTITY, SHARED_PERSON, agentConnectorIdentity, personConnectorIdentity, callerConnectorIdentity,
+  CONNECTOR_ACCOUNT_LABEL_PATTERN, ORG_CONNECTOR_IDENTITY, SHARED_PERSON, NO_PERSON, agentConnectorIdentity, personConnectorIdentity, callerConnectorIdentity,
   parseConnectorIdentity, connectorIdentityLabel, connectorAccountService, connectorAccountsOf, connectorFallbackOn, connectorAccountAllowed,
   resolveConnectorAccount,
   connectorToolSelected, connectorToolsProblems, normalizeConnectorTools,

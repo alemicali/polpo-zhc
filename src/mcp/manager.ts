@@ -633,7 +633,8 @@ export class ConnectorManager {
       } catch (err) {
         notes.push(`${connector.name} (${connector.id}) is unavailable: ${errorMessage(err)}`);
         this.log(`${connector.id}: ${errorMessage(err)}`);
-        return { connector, tools: [] as McpToolInfo[] };
+        // a per-identity connector keeps its tools (same names for everyone): a call then says what is wrong with the account
+        return { connector, tools: account ? this.identityTools.get(connector.id) ?? [] : [] as McpToolInfo[] };
       }
     }));
     const tools: AgentTool<any>[] = [];
