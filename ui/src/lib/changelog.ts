@@ -65,6 +65,18 @@ export const CHANGELOG: ChangelogEntry[] = [
     cta: { label: "Apri i task", to: "/tasks" },
   },
   {
+    id: "2026-11-28-recent-activity-links",
+    date: "2026-11-28",
+    kind: "improved",
+    title: "Attività recenti: ogni attività si apre con un clic",
+    summary: "Nella dashboard, ogni riga di Recent Activity apre la pagina della sua attività, e accanto al nome dell'agente c'è il suo avatar in piccolo.",
+    body: [
+      "- **Un clic e sei nell'attività**: ogni riga della scheda **Recent Activity** nella dashboard apre la pagina di quell'attività. Funziona anche da tastiera (Tab e Invio).",
+      "- **Chi ci lavora, a colpo d'occhio**: accanto al nome dell'agente c'è il suo avatar, piccolo quanto la riga di testo; se l'agente non ha un'immagine, compaiono le sue iniziali nel suo colore.",
+    ].join("\n"),
+    cta: { label: "Apri la dashboard", to: "/" },
+  },
+  {
     id: "2026-11-28-personal-connectors",
     date: "2026-11-28",
     kind: "new",
