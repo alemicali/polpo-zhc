@@ -81,6 +81,31 @@ async function bytesOf(stream: ReadableStream<Uint8Array> | AsyncIterable<Uint8A
 // ── Remote computer ────────────────────────────────────────────────────
 
 /**
+ * A long-running command in its own process group in the VM (setsid), its group id written to
+ * `groupFile`: the bridge, the runtime it starts (Codex app-server, Claude Code, OpenCode) and
+ * every command the runtime runs belong to that group and to no other run's. Without setsid in the
+ * image it runs as before (no group file: only the provider's process kill applies).
+ */
+export function inOwnProcessGroup(command: string, groupFile: string): string {
+  const inner = `printf %s "$$" > "$1"; bash -c "$2"; s=$?; rm -f "$1"; exit $s`;
+  return `if command -v setsid >/dev/null 2>&1; then exec setsid -w bash -c ${q(inner)} polpo-run ${q(groupFile)} ${q(command)}; else exec bash -c ${q(command)}; fi`;
+}
+
+/**
+ * Stops exactly the process group recorded in `groupFile` (SIGTERM, SIGKILL after a grace), never
+ * anything else: no process names, no ports, no other run's group. Nothing when the file is gone
+ * (the group already ended) or holds no plausible group id.
+ */
+export function killProcessGroupCommand(groupFile: string, graceSeconds = 3): string {
+  const f = q(groupFile);
+  return `g=$(cat ${f} 2>/dev/null); case "$g" in ''|*[!0-9]*) exit 0;; esac; [ "$g" -gt 1 ] || exit 0; `
+    + `kill -TERM -- "-$g" 2>/dev/null; i=0; while [ $i -lt ${graceSeconds * 10} ] && kill -0 -- "-$g" 2>/dev/null; do sleep 0.1; i=$((i+1)); done; `
+    + `kill -KILL -- "-$g" 2>/dev/null; rm -f ${f}; true`;
+}
+
+let groupSeq = 0;
+
+/**
  * A remote computer as a harness machine. `driver` resolves the computer's driver (the same object
  * for the whole run; it follows the computer to a new VM). Processes and ports need the driver's
  * optional `spawn`/`portEndpoint` (Daytona v2): others are refused with a clear message.
@@ -143,10 +168,20 @@ export function remoteHarnessMachine(o: {
     spawn: async (command, x) => {
       const d = await o.driver();
       if (!d.spawn) throw new Error(`Computer ${o.label} cannot start long-running processes (agent harnesses need a Daytona v2 computer)`);
-      const p = await d.spawn(command, { cwd: x.cwd ? abs(x.cwd) : o.workDir, env: x.env, ...(x.stdin ? { stdin: true } : {}) });
+      // its own process group: a kill of this run reaches its bridge, the runtime and the
+      // commands they started, and nothing of another run on the same computer
+      const groupFile = `/tmp/.polpo-harness-pg-${process.pid}-${Date.now().toString(36)}-${++groupSeq}`;
+      const p = await d.spawn(inOwnProcessGroup(command, groupFile), { cwd: x.cwd ? abs(x.cwd) : o.workDir, env: x.env, ...(x.stdin ? { stdin: true } : {}) });
+      let exited = false;
       followed.add(p);
-      void p.wait().finally(() => followed.delete(p));
-      return p;
+      void p.wait().finally(() => { exited = true; followed.delete(p); });
+      const kill = async () => {
+        if (!exited) {
+          await (await o.driver()).exec(killProcessGroupCommand(groupFile), { timeoutMs: 20_000 }).catch(() => undefined);
+        }
+        await p.kill();
+      };
+      return { ...p, kill };
     },
     portEndpoint: async (port, protocol) => {
       const d = await o.driver();
@@ -323,10 +358,16 @@ export function freeHostPort(): Promise<number> {
   });
 }
 
-/** A port in the VM no process listens on (from 4000), for this session's bridge. */
-export async function freeMachinePort(machine: Pick<HarnessMachine, "exec">, from = 4000, to = 4099): Promise<number> {
+/**
+ * A port in the VM no process listens on (4000–4099), for this session's bridge. The search starts
+ * at a random port: two runs starting together on one computer do not both take the lowest free
+ * port before either bridge listens on it.
+ */
+export async function freeMachinePort(machine: Pick<HarnessMachine, "exec">, from = 4000, to = 4099, start = from + Math.floor(Math.random() * (to - from + 1))): Promise<number> {
+  const s = Math.min(Math.max(start, from), to);
+  const order = s > from ? `$(seq ${s} ${to}) $(seq ${from} ${s - 1})` : `$(seq ${from} ${to})`;
   const r = await machine.exec(
-    `for p in $(seq ${from} ${to}); do (exec 3<>/dev/tcp/127.0.0.1/$p) 2>/dev/null || { echo $p; exit 0; }; done; exit 1`, {},
+    `for p in ${order}; do (exec 3<>/dev/tcp/127.0.0.1/$p) 2>/dev/null || { echo $p; exit 0; }; done; exit 1`, {},
   );
   const port = Number(r.stdout.trim());
   if (r.exitCode !== 0 || !Number.isInteger(port)) throw new Error(`No free port between ${from} and ${to} on the computer`);

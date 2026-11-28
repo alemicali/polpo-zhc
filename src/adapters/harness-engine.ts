@@ -70,6 +70,67 @@ export interface HarnessEngineDeps {
   publicUrl?: () => string | undefined;
   /** Opens the run's model relay lease (tests inject one). */
   openRelayLease?: (o: RelayLeaseOptions) => Promise<HarnessRelayLease>;
+  /**
+   * How long a computer that stopped answering (the provider's "sandbox not available", a bridge
+   * whose connection could not be re-established) is waited for before the run fails (default 5 min).
+   */
+  unavailableWaitMs?: number;
+  /** Waits (tests make it instant); resolves early when the signal aborts. */
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+}
+
+/**
+ * The computer stopped answering for a while — the provider's proxy cannot reach the VM ("bad
+ * gateway: sandbox … not available"), the bridge's connection dropped and could not be
+ * re-established, a gateway error — as opposed to an error of the runtime or the model. Worth
+ * checking again before the run fails (and before an automatic retry fails the same way in seconds).
+ */
+export const TRANSIENT_MACHINE_ERROR = /bad gateway|\bsandbox \S+ (?:is )?not available|bridge closed before the turn finished|reconnect (?:deadline expired|failed)|service unavailable|gateway time-?out|\bHTTP 50[234]\b|\bstatus (?:code )?50[234]\b|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|socket hang up/i;
+
+export function isTransientMachineError(message: string): boolean {
+  return TRANSIENT_MACHINE_ERROR.test(message);
+}
+
+const defaultSleep = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve) => {
+  if (signal?.aborted) { resolve(); return; }
+  const t = setTimeout(done, ms);
+  function done() { clearTimeout(t); signal?.removeEventListener("abort", done); resolve(); }
+  signal?.addEventListener("abort", done, { once: true });
+});
+
+/**
+ * Whether the computer answers again within `budgetMs`: a trivial command, tried with backoff
+ * (5 s, 10 s, 20 s, then every 30 s). Each try is bounded (a hung provider call counts as no
+ * answer). false when the budget runs out or the run is killed.
+ */
+export async function waitForMachine(
+  machine: Pick<HarnessMachine, "exec">,
+  o: { budgetMs: number; signal?: AbortSignal; sleep?: (ms: number, signal?: AbortSignal) => Promise<void>; now?: () => number; onWait?: (ms: number, why: string) => void },
+): Promise<boolean> {
+  const sleep = o.sleep ?? defaultSleep;
+  const now = o.now ?? Date.now;
+  const until = now() + o.budgetMs;
+  let delay = 5_000;
+  while (!o.signal?.aborted) {
+    let why = "no answer";
+    try {
+      const r = await Promise.race([
+        machine.exec("true", { timeoutMs: 20_000, ...(o.signal ? { signal: o.signal } : {}) }),
+        sleep(25_000, o.signal).then(() => ({ exitCode: -1, stdout: "", stderr: "no answer within 25 s" })),
+      ]);
+      if (r.exitCode === 0) return true;
+      why = r.stderr || `exit code ${r.exitCode}`;
+    } catch (err) {
+      why = (err as Error)?.message ?? String(err);
+    }
+    const left = until - now();
+    if (left <= 0 || o.signal?.aborted) return false;
+    const ms = Math.min(delay, left);
+    o.onWait?.(ms, why);
+    await sleep(ms, o.signal);
+    delay = Math.min(delay * 2, 30_000);
+  }
+  return false;
 }
 
 export interface OpenedMachine {
@@ -258,6 +319,31 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
     activity.lastUpdate = new Date().toISOString();
     try { handle.onTranscript?.(entry); } catch { /* the log never breaks the run */ }
   };
+  const sleep = deps.sleep ?? defaultSleep;
+  const unavailableWaitMs = deps.unavailableWaitMs ?? 5 * 60_000;
+  /**
+   * `fn` again while it fails because the computer is not answering (with backoff, within
+   * unavailableWaitMs): an automatic retry right after such a failure otherwise fails the same way
+   * in seconds. Other errors, and the last one once the budget is spent, are thrown.
+   */
+  const whileUnavailable = async <T>(what: string, fn: () => Promise<T>): Promise<T> => {
+    const until = Date.now() + unavailableWaitMs;
+    let delay = 5_000;
+    for (;;) {
+      try {
+        return await fn();
+      } catch (err) {
+        const message = (err as Error)?.message ?? String(err);
+        const left = until - Date.now();
+        if (abort.signal.aborted || !isTransientMachineError(message) || left <= 0) throw err;
+        const ms = Math.min(delay, left);
+        transcript({ type: "log", message: `The computer is not answering (${what}: ${scrubSecrets(message, secrets).slice(0, 200)}): checking again in ${Math.round(ms / 1000)} s` });
+        await sleep(ms, abort.signal);
+        if (abort.signal.aborted) throw err;
+        delay = Math.min(delay * 2, 30_000);
+      }
+    }
+  };
 
   handle.done = (async (): Promise<TaskResult> => {
     let workspace: import("@polpo-ai/core/sandbox").Workspace | undefined;
@@ -307,7 +393,7 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
       // ── where it runs, and the agent's Polpo tools (run here) ──
       const outputDir = ctx.outputDir;
       const remoteRun = ctx.sandbox?.provider === "daytona" || ctx.sandbox?.provider === "e2b";
-      workspace = ctx.sandbox && !deps.openMachine
+      const makeWorkspace = () => ctx.sandbox && !deps.openMachine
         ? createWorkspace(ctx.sandbox, {
             root: cwd,
             writable: [...(outputDir ? [outputDir] : [])],
@@ -319,9 +405,19 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
             onNetworkDenied: ctx.onNetworkDenied,
           })
         : undefined;
+      workspace = makeWorkspace();
+      let opening = 0;
+      opened = await whileUnavailable("opening the computer", async () => {
+        // a workspace whose first acquire failed stays failed: a fresh one for the next try (a
+        // computer's workspace never stops or deletes the computer when released)
+        if (opening++ > 0 && workspace) {
+          await workspace.dispose().catch(() => undefined);
+          workspace = makeWorkspace();
+        }
+        return (deps.openMachine ?? defaultOpenMachine)({ agent: agentConfig, cwd, ctx, settings, workspace });
+      });
       const shell = workspace ? new WorkspaceShell(workspace) : undefined;
       const remoteFs = isRemoteWorkspace(workspace) ? new WorkspaceFileSystem(workspace!) : undefined;
-      opened = await (deps.openMachine ?? defaultOpenMachine)({ agent: agentConfig, cwd, ctx, settings, workspace });
       const machine = opened.machine;
 
       const toolset = await buildAgentToolset({
@@ -394,7 +490,7 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
       };
 
       // ── the machine: pnpm for the bootstrap, credential files ──
-      const pnpm = await machine.exec(ENSURE_PNPM, {});
+      const pnpm = await whileUnavailable("preparing the computer", () => machine.exec(ENSURE_PNPM, {}));
       if (pnpm.exitCode !== 0) throw new Error(`${name} needs pnpm ${HARNESS_PNPM_VERSION} in the computer (corepack could not activate it): ${scrub(pnpm.stderr || pnpm.stdout).slice(0, 300)}`);
       if (creds.files.length) {
         const homeDir = opened.home ?? (await machine.exec("printf %s \"$HOME\"", {})).stdout.trim();
@@ -453,7 +549,9 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
         await store.forgetResumeState(key);
         await store.update(key, () => null).catch(() => undefined);
       }
-      const port = resumeFrom && prior?.bridgePort
+      // the old bridge's port only while that bridge still runs (a detached session re-attaches to
+      // it); a stopped one's port may belong to another run's bridge on this computer by now
+      const port = resumeFrom && prior?.bridgePort && prior.state === "detached"
         ? prior.bridgePort
         : opened.computerId === "host" ? await freeHostPort() : await freeMachinePort(machine);
       const sandbox: HarnessSandbox = createHarnessSandboxSession(machine, {
@@ -491,7 +589,7 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
         });
         return s;
       };
-      session = await open(resumeFrom, wantResume ? prior!.sessionId : undefined);
+      session = await whileUnavailable("starting the session", () => open(resumeFrom, wantResume ? prior!.sessionId : undefined));
       activity.sessionId = session.sessionId;
       resumeFrom = undefined;
       let parked: HarnessResumeState | undefined;
@@ -651,6 +749,35 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
       let lastResult: HarnessTurnResult | undefined;
       let retriedAfterRotation = false;
       let failure: HarnessFailure | undefined;
+      let retriedAfterUnavailable = false;
+      let unreachableFor: number | undefined;
+      /**
+       * The computer stopped answering under the turn (its bridge's connection could not be
+       * re-established, the provider's proxy cannot reach the VM): wait for it within
+       * unavailableWaitMs, then re-attach and continue, once. false: not that kind of failure, or the
+       * computer did not come back (the run fails, saying so).
+       */
+      const recoverFromUnavailable = async (why: string): Promise<boolean> => {
+        if (retriedAfterUnavailable || abort.signal.aborted || !isTransientMachineError(why)) return false;
+        retriedAfterUnavailable = true;
+        transcript({ type: "log", message: `${name}: the computer ${opened!.computerId} stopped answering during the turn (${scrub(why).slice(0, 200)}); waiting for it (up to ${Math.round(unavailableWaitMs / 60_000)} min) before giving up` });
+        const t0 = Date.now();
+        const back = await waitForMachine(machine, {
+          budgetMs: unavailableWaitMs, signal: abort.signal, sleep,
+          onWait: (ms, w) => transcript({ type: "log", message: `${name}: the computer is not answering yet (${scrub(w).slice(0, 160)}); checking again in ${Math.round(ms / 1000)} s` }),
+        });
+        if (abort.signal.aborted) return false;
+        if (!back) { unreachableFor = Date.now() - t0; return false; }
+        transcript({ type: "log", message: `${name}: the computer answers again; re-attaching the session` });
+        const s = session;
+        session = undefined;
+        parked = await s?.detach().catch(() => undefined);
+        prompt = "Your previous turn was interrupted because the computer stopped answering for a while. Check the state of your work (commands you started may have been cut) and continue the task.";
+        return true;
+      };
+      const unreachableNote = (why: string) => unreachableFor === undefined
+        ? why
+        : `${why} (the computer ${opened!.computerId} did not answer for ${Math.max(1, Math.round(unreachableFor / 60_000))} min after that)`;
       while (prompt !== undefined && !abort.signal.aborted) {
         const vmAtStart = opened.remoteId?.();
         try {
@@ -658,7 +785,12 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
           await account(lastResult);
           // an API error, a refused model, no model call: the run fails with the reason (not "done")
           const why = harnessTurnFailure({ ...turnOutcome, finishReason: lastResult.finishReason, totalTokens: lastResult.usage.totalTokens, text: lastResult.text }, name);
-          if (why && !abort.signal.aborted) { failure = label(scrub(why)); break; }
+          if (why && !abort.signal.aborted) {
+            if (await recoverFromUnavailable(why)) continue;
+            if (abort.signal.aborted) break;
+            failure = label(scrub(unreachableNote(why)));
+            break;
+          }
         } catch (err) {
           if (abort.signal.aborted) break;
           // the VM was replaced under the turn (a forced rotation, here or by the server process):
@@ -680,6 +812,10 @@ export function spawnHarnessEngine(agentConfig: AgentConfig, task: Task, cwd: st
             prompt = "Your previous turn was interrupted because the machine was moved to a new VM. Check the state of your work and continue the task.";
             continue;
           }
+          const message = (err as Error)?.message ?? String(err);
+          if (await recoverFromUnavailable(message)) continue;
+          if (abort.signal.aborted) break;
+          if (unreachableFor !== undefined && err instanceof Error) err.message = unreachableNote(err.message);
           throw err;
         }
         const next = followUps.shift();

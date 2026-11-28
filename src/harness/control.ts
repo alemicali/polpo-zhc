@@ -34,9 +34,19 @@ export function harnessSessionViews(polpoDir: string, filter: { agent?: string; 
     .map((s) => ({ ...s, liveHere: here.has(s.key), live: here.has(s.key) || (!!s.pid && processAlive(s.pid)) }));
 }
 
-/** A shell command that ends the bridge listening on `port` in the VM (found by its BRIDGE_WS_PORT). */
-export function killBridgeCommand(port: number): string {
-  return `for p in /proc/[0-9]*; do tr '\\0' '\\n' < "$p/environ" 2>/dev/null | grep -qx 'BRIDGE_WS_PORT=${port}' && kill "\${p#/proc/}" 2>/dev/null; done; true`;
+/**
+ * A shell command that ends a parked session's bridge in the VM: the process with its
+ * BRIDGE_WS_PORT and, when the session id is known, that session's id on its command line (its
+ * bridge state directory) — a stopped session's port may belong to another run's live bridge by
+ * now. A bridge started in its own process group (sandbox-session.ts) ends with its group (the
+ * runtime and its commands); any other process is never signalled.
+ */
+export function killBridgeCommand(port: number, sessionId?: string): string {
+  const id = sessionId && /^[A-Za-z0-9_-]+$/.test(sessionId) ? sessionId : undefined;
+  const ofSession = id ? ` && tr '\\0' ' ' < "$p/cmdline" 2>/dev/null | grep -qF -- '${id}'` : "";
+  return `for p in /proc/[0-9]*; do tr '\\0' '\\n' < "$p/environ" 2>/dev/null | grep -qx 'BRIDGE_WS_PORT=${port}'${ofSession} || continue; `
+    + `pid=\${p#/proc/}; g=$(awk '{print $5}' "$p/stat" 2>/dev/null); `
+    + `if [ -n "$g" ] && [ "$g" = "$pid" ]; then kill -- "-$g" 2>/dev/null; else kill "$pid" 2>/dev/null; fi; done; true`;
 }
 
 export type HarnessControlResult =
@@ -64,7 +74,7 @@ export async function controlHarnessSession(o: {
     await live.suspend("disk", o.action);
   } else if (cur.bridgePort && cur.computerId !== "host" && o.onComputer) {
     // a parked session: its bridge may still run in the VM (a detached session keeps it alive)
-    const ran = await o.onComputer(cur.computerId, killBridgeCommand(cur.bridgePort)).catch(() => false);
+    const ran = await o.onComputer(cur.computerId, killBridgeCommand(cur.bridgePort, cur.sessionId)).catch(() => false);
     note = ran ? " Its bridge in the computer was ended." : " Its computer is not running: nothing runs there.";
   }
   if (o.action === "reset") {
