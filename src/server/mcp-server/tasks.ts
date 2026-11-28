@@ -484,7 +484,10 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
       mode: z.enum(["auto", "steer", "follow_up", "continue"]).optional().describe("auto (default), steer a running task, follow_up after the current step, continue a finished task"),
       confirm_side_effects: z.boolean().optional().describe("For a task with side effects: true to allow continuing it, after the person agreed"),
     },
-    outputSchema: { action: z.string(), direction: looseObject },
+    outputSchema: {
+      action: z.string(), direction: looseObject,
+      reopened_mission: z.object({ id: z.string(), name: z.string(), previous_status: z.string() }).optional(),
+    },
     annotations: WRITE,
   }, async ({ id, message, mode, confirm_side_effects }) => {
     const r = await apiSend(deps, "POST", `/tasks/${enc(id)}/directions`, { message, mode: mode ?? "auto", ...(confirm_side_effects !== undefined ? { confirmSideEffects: confirm_side_effects } : {}) });
@@ -493,8 +496,16 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
       if (r.status === 409) return fail(`The task cannot take this direction now: ${r.error}.${/side.?effect/i.test(r.error) ? " Ask the person, then call again with confirm_side_effects: true." : " Check its status with polpo_task_get."}`);
       return apiError(r, `Sending the direction to ${id}`);
     }
-    const d = r.data as { action: string; direction: Record<string, unknown> };
-    return ok(`Direction sent to ${id} (${d.action}).`, { action: d.action, direction: d.direction });
+    const d = r.data as { action: string; direction: Record<string, unknown>; reopenedMission?: { id: string; name: string; prevStatus: string } };
+    const reopened = d.reopenedMission;
+    return ok(
+      `Direction sent to ${id} (${d.action}).`
+        + (reopened ? ` Its mission "${reopened.name}" was ${reopened.prevStatus} and is active again while the task runs: it closes again when its tasks end.` : ""),
+      {
+        action: d.action, direction: d.direction,
+        ...(reopened ? { reopened_mission: { id: reopened.id, name: reopened.name, previous_status: reopened.prevStatus } } : {}),
+      },
+    );
   });
 
   tool("tasks", "polpo_task_wait", {

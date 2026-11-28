@@ -21,7 +21,7 @@ import { AssistantSegments, ChatAssistantAvatar, ChatUserBubble } from "@/compon
 import { buildTaskTranscript, runLabel, type TaskChatMessage, type TaskTranscriptRun } from "@/lib/task-transcript";
 import { chatTimeAgo } from "@/lib/chat-time";
 import { CHAT_COMPOSER_CLASS } from "@/lib/chat-composer";
-import { sendTaskDirection, taskSteering } from "@/hooks/use-task-steering";
+import { directionSentMessage, sendTaskDirection, taskSteering } from "@/hooks/use-task-steering";
 import { cn } from "@/lib/utils";
 
 const USER_KIND_LABEL: Record<NonNullable<TaskChatMessage["kind"]>, string> = {
@@ -187,7 +187,7 @@ export function TaskChatComposer({ task, process, directions }: { task: Task; pr
       const result = await sendTaskDirection(steering, directions.sendDirection, text, confirmSideEffects);
       setConfirmSideEffects(false);
       setHasDraft(false);
-      toast.success(result.action === "continue" ? "Continuation queued" : "Direction queued");
+      toast.success(directionSentMessage(result));
     } catch (cause) {
       toast.error((cause as Error).message);
       throw cause;

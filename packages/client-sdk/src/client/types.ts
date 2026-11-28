@@ -1482,6 +1482,8 @@ export interface SendTaskDirectionRequest {
 export interface SendTaskDirectionResult {
   action: TaskDirectionMode;
   direction: TaskDirection;
+  /** A continuation of a task of a finished mission (completed or failed) reopens it: active while the task runs. */
+  reopenedMission?: { id: string; name: string; prevStatus: MissionStatus };
 }
 
 export interface CreateMissionRequest {
