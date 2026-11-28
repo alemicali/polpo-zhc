@@ -156,6 +156,6 @@ complete; a pending draft keeps its edits and receives those changes too.
 
 ## Not yet
 
-- Running a pinned skill version: versions record the skill versions current at publish time, but
-  runs load the skills' current files.
+- Running a pinned skill version: agent versions record the skills' production versions at publish time
+  (`skillVersions`), but runs load each skill's current production ([skills.md](skills.md#versions-draft-publish-production-rollback)).
 - Pointers other than production (e.g. staging) are not exposed.

@@ -107,46 +107,98 @@ skill's details stay in view (sticky, with their own scroll) while a long file s
 | Polpo (chat) | `skill_files`, `skill_file_read`; `get_skill` shows the folder |
 | SDK | `client.getSkillFiles(name, pool)`, `client.getSkillFile/getSkillFileText(name, path, pool)`, `client.skillFileUrl(...)`, `client.skillDownloadUrl(...)`; React `useSkillFiles(name, pool)` |
 
-## Versions
+## Versions: draft, publish, production, rollback
 
-Every change Polpo makes to a skill is recorded as a **version**: a copy of the whole skill folder
-(every file, not just `SKILL.md`), like artifacts have. The current state of a skill is its latest
-version, so a replace, an edit or a restore can always be undone.
+Skills have the same lifecycle as agents ([agent-versions.md](agent-versions.md)): a **draft**,
+**semver**-numbered **versions**, a **production** pointer that says what agents run, **publish** with
+a note, **rollback**, diffs.
 
-- **What records a version**: creating a skill (dashboard, MCP, Polpo, an agent learning), editing it
-  (`PUT /skills/{name}`, `polpo_skill_update`, `skill_update`, an agent updating its own skill), an
-  install over it — upload with *replace*, git or local install with `force` — and a restore. Each
-  version has its number (never reused), date, **author** (`person:<email>` for the dashboard,
-  `mcp:<client>` for an MCP client, an agent's name, `polpo` for Polpo's chat, `cli`), **source**
-  (`create`, `upload`, `git`, `local`, `edit`, `restore`), file count, total size, and `SKILL.md`'s
-  `name` / `description` at that time. A change that leaves the files identical records nothing.
-- **Changes made outside Polpo** (files edited on disk, or a skill installed before versions existed)
-  are not lost: before any change, the folder on disk is compared with the latest version and, when
-  it differs, recorded first with source `external` (author `unknown`).
+```
+edit ──▶ draft (the skill's folder) ──publish──▶ 1.3.0 = production (what agents run)
+                                                 ◀── rollback (production back to 1.2.0) ──
+```
+
+- **The draft is the skill's folder** (`.polpo/skills/<name>/`, `~/.polpo/skills/<name>/`,
+  `.polpo/.agent/skills/<name>/` for Polpo's own): whatever is there and differs from production —
+  an edit saved as a draft, a version restored into the draft, **files edited on disk** — is a pending
+  draft. Agents never see it until someone publishes it.
+- **Production is a published version.** Its files are materialised in
+  `<pool>/.production/<name>/` (e.g. `.polpo/skills/.production/pdf/`) and that is what every agent
+  loads: the system prompt (instructions, description, expected tools), the skill folder named in the
+  prompt and its bundled files, the files synced to agent harnesses (Claude Code, Codex, OpenCode),
+  progressive tools, agent tests and Polpo's own skills. Skill names, assignment (config `skills` or
+  the `.polpo/agents/<agent>/skills/` symlinks to the pool folder) and discovery are unchanged: the
+  loader resolves each skill folder to its production copy (`runtimeSkillDir`). `.production` is never
+  a skill name. A skill not yet under versioning (a folder just dropped in the pool, before the next
+  start) loads from its folder.
+- **Changes made outside Polpo** (files edited on disk) show as a pending draft flagged **external
+  changes** (dashboard badge, `state.draft.external`, MCP "includes files changed outside Polpo")
+  instead of silently becoming production: publish them (the version is flagged `external`) or
+  discard them.
+- **Draft or direct.** A change made through Polpo either goes to the draft (`publish: false`: what
+  the dashboard sends) or is published at once ("Applied directly", like agents' API updates):
+  `publish: true`, or — without the flag — `settings.skills.versioning.autoPublishApiUpdates`
+  (**default true**, so existing API, MCP and chat clients keep their immediate effect; Configuration →
+  General → Skill versions, `polpo_config_update auto_publish_skill_updates`). A direct change
+  publishes the whole folder: pending draft changes go with it. An agent updating its own skill
+  (learning), installs (upload, git, local) and the CLI publish directly; a **new skill is published
+  as 1.0.0**. An upload replacing a skill takes `publish` too.
+- **Publish** makes the next version and points production at it (for skills publish and deploy are
+  one step). The number is the highest version bumped by the **suggested bump** unless you choose one
+  or give an explicit version (above the highest):
+  - **major** — files removed, or the skill renamed (`name` in `SKILL.md`);
+  - **minor** — files added, or what agents read to choose the skill changed (`description`, expected tools);
+  - **patch** — instructions and other edits.
+  Each version records its semver, storage number, author, date, note, the version it was edited from
+  (`previous`), source (`create`, `upload`, `git`, `local`, `edit`, `restore`, `publish`, `external`),
+  file count, size, and `SKILL.md`'s `name` / `description` at that time.
+- **Rollback** points production at an earlier version: the one you choose, or the version production
+  ran before the publish that brought the current one (repeated rollbacks walk back). When the folder
+  had no draft changes it follows production; a pending draft is kept and becomes **stale** ("draft is
+  based on 1.4.0, production is now 1.2.0"): publishing it (or a direct change) is refused (`409`)
+  until it is **rebased** onto production — file by file: a file the draft changed keeps the draft's
+  content, every other file becomes production's — or **discarded** (the folder becomes production's
+  files again). Runs in flight keep what they loaded; the next runs use the new production.
+- **Restore** puts a version's files back as the skill's folder: into the draft (`publish: false`;
+  publish it, or roll back instead to switch production without a new version) or published at once
+  as a new version (source `restore`). Restoring a deleted skill recreates and publishes it.
+- **History**: every publish, rollback, discard and rebase is an event with who (`person:<email>`,
+  `mcp:<client>`, an agent's name, `polpo`, `cli`, `system:migration`), when, from → to and the note;
+  publishes and rollbacks are also bus events, `skill:published` and `skill:rolled-back` (hooks,
+  SSE, webhooks).
+- **Diff**: any two sides — `draft`, `production`, `latest`, a semver or a version number — file by
+  file (added, removed, changed) with a unified diff (3 lines of context) for text files; binary files
+  are only named; files over 512 KB, or diffs past the size cap (200 000 characters per file,
+  1 000 000 in all), are marked truncated. Default: production → draft (what publishing would change).
+- **Migration** (at start, idempotent; also on first use of a skill): a skill without history is
+  published as **1.0.0**. A history from before semver keeps its versions: what agents ran until
+  then — the folder, recorded first as an `external` version when it differs from the latest recorded
+  one, as the old model did at the next change — becomes **1.0.0 in production**, older versions
+  `0.0.<n>` (they can be diffed, restored and rolled back to). Nothing agents run changes at the
+  upgrade.
 - **Storage**: outside the skill pools, so agents never see it — `.polpo/skill-versions/<pool>/project/<name>/`
   for a project skill, `~/.polpo/skill-versions/<pool>/global/<name>/` for a global one (`<pool>` is
-  `agent` or `orchestrator`); one folder per version (`1/`, `2/`, …) and an `index.json`.
-- **Retention**: the last **20** versions and at most **50 MB** per skill; the oldest go first, the
-  latest always stays. Environment overrides: `POLPO_SKILL_VERSIONS_KEEP`, `POLPO_SKILL_VERSIONS_MAX_MB`.
-- **Deleting a skill keeps its history** (the state it had is its latest version) for **30 days**
-  (`POLPO_SKILL_VERSIONS_DELETED_DAYS`), so a deleted skill can be restored; then the history is purged
+  `agent` or `orchestrator`); one folder per version (`1/`, `2/`, …) and an `index.json` (versions,
+  production, the draft's base and author, events).
+- **Retention**: the last **20** versions and at most **50 MB** per skill; the oldest go first;
+  production, the draft's base and the latest always stay. Environment overrides:
+  `POLPO_SKILL_VERSIONS_KEEP`, `POLPO_SKILL_VERSIONS_MAX_MB`.
+- **Deleting a skill keeps its history** for **30 days** (`POLPO_SKILL_VERSIONS_DELETED_DAYS`),
+  production's copy goes with the skill; a deleted skill can be restored; then the history is purged
   (checked whenever a skill of that pool is deleted). A skill installed again under the same name
-  continues the same history. We chose this over dropping the history on delete: a delete is the
-  change people most want to undo, and keeping the last state costs one folder.
-- **Restore** puts a version's folder back (swapped in only once complete) and records the result as
-  a new version (source `restore`, `restoredFrom`); the state before it is recorded first, so a restore
-  can itself be undone. Restoring a deleted skill recreates it.
-- **Diff**: two versions compared file by file — added, removed, changed — with a unified diff
-  (3 lines of context) for text files; binary files are only named; files over 512 KB, or diffs past
-  the size cap (200 000 characters per file, 1 000 000 in all), are marked truncated.
+  continues the same history.
 
 | Where | How |
 | --- | --- |
-| Dashboard | The skill page → **Versions**: the list (number, date, author, source, files, size; the current one marked); tick two to see their diff (files added / removed / changed, a coloured unified diff per file); the eye opens a version's files read-only in the same file browser (`?version=3`); **Restore** (asks first) and **Download** per version. A deleted skill's page shows its versions to restore it. |
-| REST | `GET /api/v1/skills/{name}/versions` (newest first, `current`, `deletedAt`, `retention`); `GET …/versions/{n}/files`; `GET …/versions/{n}/files/{path}` (raw, path-safe as the current files); `GET …/versions/{a}/diff/{b}`; `POST …/versions/{n}/restore`; `GET …/versions/{n}/download?format=skill\|zip`. The same under `/api/v1/skills/orchestrator/{name}/…`. `?scope=project\|global` picks the pool's scope (default: where the skill is, or where its history is). |
-| MCP | `polpo_skill_versions`, `polpo_skill_version_diff` (read scope); `polpo_skill_restore` (`polpo:admin`, `confirm: true`); `polpo_skill_get` says how many versions a skill has. `pool: "orchestrator"` for Polpo's own skills. |
-| Polpo (chat) | `skill_versions`, `skill_version_diff`, `skill_restore` (Skills tool group) |
-| SDK | `client.getSkillVersions(name, pool)`, `getSkillVersionFiles`, `getSkillVersionFileText`, `skillVersionFileUrl`, `diffSkillVersions(name, a, b, pool)`, `restoreSkillVersion(name, n, pool)`, `skillVersionDownloadUrl`; React `useSkillVersions(name, pool)` |
+| Dashboard | The skill page header shows the production version and "Draft has changes" / "Draft out of date". **Versions**: the draft (changed files, "External changes", stale warning with Rebase / Discard, the diff production → draft, **Publish** with bump and note), the versions (semver, production marked, author, source, note; view files read-only `?version=3`, download, tick two to diff, **Rollback** and **Restore into draft**, both asking first) and the history. Configuration → General → Skill versions holds the API setting. |
+| REST | `GET /api/v1/skills/{name}/content` (production, with `versioning`; `?view=draft` the folder); `GET …/versions` (newest first, `current`, `production`, `latest`, `state`, `events`, `deletedAt`, `retention`); `GET …/versioning`; `POST …/publish` (`bump`, `version`, `note`); `POST …/rollback` (`to`, `note`); `DELETE …/draft`; `POST …/draft/rebase`; `GET …/diff?from=&to=`; `GET …/versions/{v}/files[/{path}]`, `GET …/versions/{a}/diff/{b}`, `POST …/versions/{v}/restore` (`publish`, `note`), `GET …/versions/{v}/download` (`{v}`: semver, number, `production`, `latest`); `PUT /skills/{name}` takes `publish`, `bump`, `version`, `note` and returns `versioning`. The same under `/api/v1/skills/orchestrator/{name}/…`. `?scope=project\|global` picks the pool's scope. |
+| MCP | `polpo_skill_versions`, `polpo_skill_version_diff` (read scope); `polpo_skill_publish`, `polpo_skill_rollback` (`confirm: true`), `polpo_skill_draft` (show, rebase, discard with `confirm: true`), `polpo_skill_restore` (`publish`, `confirm: true`) — `polpo:admin`; `polpo_skill_update` takes `publish`, `bump`, `version`, `note`; `polpo_skill_get` shows production and the draft. `pool: "orchestrator"` for Polpo's own skills. |
+| Polpo (chat) | `skill_versions`, `skill_version_diff`, `skill_publish`, `skill_rollback`, `skill_draft`, `skill_restore` (Skills tool group) |
+| SDK | `client.getSkillVersions`, `getSkillVersioning`, `publishSkill`, `rollbackSkill`, `discardSkillDraft`, `rebaseSkillDraft`, `diffSkill(name, { from, to })`, `updateSkill(name, { …, publish })`, `getSkillContent(name, { view })`, `getSkillVersionFiles`, `getSkillVersionFileText`, `skillVersionFileUrl`, `diffSkillVersions`, `restoreSkillVersion(name, v, pool, { publish })`, `skillVersionDownloadUrl`; React `useSkillVersions(name, pool)` (`state`, `publish`, `rollback`, `discardDraft`, `rebaseDraft`, `restore`, `diff`) |
+| Events | `skill:published` (scope, skillName, version, previous, bump, author, note, direct), `skill:rolled-back` (scope, skillName, from, to, author, note) |
+
+Agent versions record the skills' production version numbers when they are published
+(`skillVersions`); runs load each skill's production.
 
 ## How agents use bundled files
 
@@ -154,7 +206,7 @@ Progressive disclosure, as in Claude: the skill's instructions are in the agent'
 files are read only when needed.
 
 - **Polpo's engine**: under each skill's instructions the prompt names the **skill folder** (symlinks
-  resolved) and lists its bundled files with sizes (up to 60), saying that paths in the instructions
+  resolved: its production copy, `.polpo/skills/.production/<name>/`) and lists its bundled files with sizes (up to 60), saying that paths in the instructions
   are relative to that folder, to read references with the file tools when the instructions call for
   them, and to run scripts with their interpreter. The project pool (`.polpo/skills`) is readable by
   agents (a protected-path exception) and copied read-only into remote sandboxes; when an agent has a
