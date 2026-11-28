@@ -32,6 +32,18 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-28-kill-isolation-remote-computer",
+    date: "2026-11-28",
+    kind: "fixed",
+    title: "Fermare un'attività non disturba le altre sullo stesso computer",
+    summary: "Quando fermi un'attività di un agente su un computer remoto si chiude solo quello che aveva avviato lei; se il computer non risponde per un po', Polpo aspetta e riprova invece di fallire in pochi secondi.",
+    body: [
+      "- **Si ferma solo quell'attività**: ogni attività che usa Claude Code, Codex o OpenCode su un computer remoto ha ora il suo gruppo di processi. Quando la fermi (a mano, per tempo scaduto o perché bloccata) si chiudono il suo collegamento, il suo programma e i comandi che aveva lanciato, e niente delle altre attività che lavorano sullo stesso computer. Prima poteva restare acceso qualcosa dell'attività fermata, che occupava memoria.",
+      "- **Fermare una sessione in pausa** (dashboard, API, connettore MCP) chiude solo la sessione giusta, anche se nel frattempo la sua vecchia porta è usata da un'altra attività.",
+      "- **Se il computer non risponde**: quando il servizio del computer dice che la macchina non è raggiungibile, Polpo riprova con attese crescenti (5 s, 10 s, 20 s, poi ogni 30 s, fino a 5 minuti) invece di fallire subito, anche ai tentativi automatici. Se la connessione cade a metà lavoro, aspetta che il computer torni, si ricollega e l'agente continua da dove era; se non torna, l'errore dice per quanto tempo non ha risposto.",
+    ].join("\n"),
+  },
+  {
     id: "2026-11-27-approval-note-to-dependents",
     date: "2026-11-27",
     kind: "fixed",

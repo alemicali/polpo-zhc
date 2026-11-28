@@ -123,7 +123,10 @@ describe("harness sandbox session over a computer", () => {
     const p = await s.spawn({ command: "node bridge.mjs", env: { BRIDGE_WS_PORT: "4003" } });
     expect(p.processId).toBe("proc_9");
     expect(await p.wait()).toEqual({ exitCode: 0 });
-    expect(d.execs.some((e) => e.startsWith('spawn node bridge.mjs {"cwd":"/work","env":{"BRIDGE_WS_PORT":"4003"}}'))).toBe(true);
+    // in its own process group (setsid), the group id in a file of its own
+    const spawnedCmd = d.execs.find((e) => e.startsWith("spawn "))!;
+    expect(spawnedCmd).toMatch(/^spawn if command -v setsid >\/dev\/null 2>&1; then exec setsid -w bash -c .* polpo-run '\/tmp\/\.polpo-harness-pg-[^']+' 'node bridge\.mjs'; else exec bash -c 'node bridge\.mjs'; fi /);
+    expect(spawnedCmd.endsWith(' {"cwd":"/work","env":{"BRIDGE_WS_PORT":"4003"}}')).toBe(true);
     await expect(s.spawn({ command: "x", stdin: true })).rejects.toThrow(/stdin/);
     expect(await s.getPortEndpoint({ port: 4003, protocol: "ws" })).toEqual({ url: "wss://4003-sbx_1.proxy", headers: { "X-Daytona-Skip-Preview-Warning": "true" } });
     // the machine outlives the session: stop and destroy do nothing; restricted() hides the infra
@@ -528,7 +531,9 @@ describe("harness engine (tasks)", () => {
     const ran: string[] = [];
     const stop = await controlHarnessSession({ polpoDir: env.polpoDir, vault: env.vault, key: "task:t1", action: "stop", onComputer: async (id, c) => { ran.push(`${id}: ${c}`); return true; } });
     expect(stop).toMatchObject({ ok: true });
-    expect(ran[0]).toBe(`nina: ${killBridgeCommand(4007)}`);
+    // scoped to the session (its id on the bridge's command line), not only to the port
+    expect(ran[0]).toBe(`nina: ${killBridgeCommand(4007, "hs-1")}`);
+    expect(ran[0]).toContain("grep -qF -- 'hs-1'");
     const reset = await controlHarnessSession({ polpoDir: env.polpoDir, vault: env.vault, key: "task:t1", action: "reset" });
     expect(reset).toMatchObject({ ok: true });
     expect(env.vault.m.has(`${HARNESS_VAULT_OWNER}/task:t1`)).toBe(false);
