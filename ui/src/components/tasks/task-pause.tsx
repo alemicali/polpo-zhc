@@ -6,6 +6,7 @@
  * message for the agent) puts it back to pending and continues the stopped run: POST /tasks/:id/resume.
  */
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
 import { Loader2, Monitor, Pause, Play } from "lucide-react";
 import type { Task } from "@polpo-ai/react";
@@ -107,7 +108,11 @@ export function TaskPausedBanner({ task, className }: { task: Pick<Task, "status
       {p?.takeover && (
         <p className="flex items-center gap-1.5 text-muted-foreground">
           <Monitor className="h-3 w-3 shrink-0" />
-          Waiting for a person to take over computer {p.takeover.computerId}: completing the takeover resumes it (or resume it yourself).
+          <span>
+            Waiting for a person to take over computer{" "}
+            <Link to={`/computers/${encodeURIComponent(p.takeover.computerId)}`} className="underline underline-offset-2 hover:text-foreground">{p.takeover.computerId}</Link>
+            : completing the takeover resumes it (or resume it yourself).
+          </span>
         </p>
       )}
       {p?.runId && !p.takeover && <p className="text-muted-foreground">Its run was stopped: resuming continues it where it was.</p>}

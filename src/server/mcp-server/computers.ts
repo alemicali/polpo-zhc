@@ -6,6 +6,7 @@
  * polpo_computer_release); never a VNC password (it never leaves the server). Changes need polpo:computers (or polpo:admin) (they cost money and change
  * where agents run); reset and delete need confirm: true.
  */
+import { describeTakeoverWait } from "../../sandbox/computer-control.js";
 import { z } from "zod";
 import type { ComputerConfig } from "@polpo-ai/core";
 import { describeComputerEgress, type ComputerEgressStatus } from "../../sandbox/computers.js";
@@ -62,7 +63,7 @@ const line = (c: Computer) => {
     + `${c.lastError ? `, error: ${c.lastError}` : ""}${users ? ` · agents: ${users}` : ""}`;
 };
 
-type TakeoverRequest = { id: string; computerId: string; agent: string; reason: string; url?: string; whatToDo?: string; createdAt: string; expiresAt: string; status: string; takenBy?: string; note?: string; taskId?: string };
+type TakeoverRequest = { id: string; computerId: string; agent: string; reason: string; url?: string; whatToDo?: string; createdAt: string; expiresAt: string; status: string; takenBy?: string; note?: string; taskId?: string; level?: "soft" | "hard"; parkedAt?: string };
 type ControlView = { computerId: string; holder: "agent" | "person"; person?: string; since?: string; lastNote?: string; requests: TakeoverRequest[]; open: TakeoverRequest[] };
 /** What the desktop routes answer (never a password: the server answers the VM's VNC authentication itself). */
 type DesktopView = { desktop: { state: string; display: string; size?: string; note?: string; error?: string; startedAt?: string; processes?: Record<string, unknown> }; control: ControlView };
@@ -83,7 +84,7 @@ function controlLine(c: ControlView): string {
 
 function requestLines(reqs: TakeoverRequest[]): string[] {
   return reqs.map((r) => `- [${r.id}] ${r.agent} on ${r.computerId}: ${r.status}${r.takenBy ? ` (${r.takenBy})` : ""} — ${r.reason}`
-    + `${r.url ? ` · page ${r.url}` : ""}${r.whatToDo ? ` · to do: ${r.whatToDo}` : ""}${r.status === "pending" || r.status === "in_control" ? ` · waits until ${r.expiresAt}` : ""}${r.note ? ` · note: ${r.note}` : ""}${r.taskId ? ` · task ${r.taskId}` : ""}`);
+    + `${r.url ? ` · page ${r.url}` : ""}${r.whatToDo ? ` · to do: ${r.whatToDo}` : ""} · ${describeTakeoverWait(r)}${r.note ? ` · note: ${r.note}` : ""}${r.taskId ? ` · task ${r.taskId}` : ""}`);
 }
 
 const notFound = (id: string) => fail(`There is no computer "${id}". List them with polpo_computers_list.`);

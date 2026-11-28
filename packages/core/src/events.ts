@@ -303,7 +303,8 @@ export interface PolpoEventMap {
    */
   "computer:takeover": {
     id: string;
-    action: "requested" | "taken" | "released" | "timeout" | "cancelled" | "desktop-started" | "desktop-stopped";
+    /** parked: a hard (blocking) request nobody took in time: its task was paused, the request stays open. */
+    action: "requested" | "taken" | "released" | "timeout" | "cancelled" | "parked" | "desktop-started" | "desktop-stopped";
     /** Who holds control now. */
     holder: "agent" | "person";
     /** The person (member email, or "someone" without member sign-in). */
@@ -316,6 +317,10 @@ export interface PolpoEventMap {
     note?: string;
     taskId?: string;
     sessionId?: string;
+    /** soft (optional help: the agent goes on without it) or hard (blocking: its task pauses when the wait ends). */
+    level?: "soft" | "hard";
+    /** When the agent stops waiting (requested). */
+    expiresAt?: string;
   } & EventOrigin;
   /**
    * A computer provider's webhook delivery (Daytona, E2B) was recorded in its event log

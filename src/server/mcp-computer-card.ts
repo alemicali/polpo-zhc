@@ -5,6 +5,7 @@
  * form is what hosts without apps (and the model) read. Never carries a VNC password (it never
  * leaves the server: the server answers the VM's VNC authentication itself).
  */
+import { describeTakeoverWait } from "../sandbox/computer-control.js";
 import type { CardAppearance } from "./mcp-server/card-appearance.js";
 
 export interface ComputerCardRequest {
@@ -19,6 +20,10 @@ export interface ComputerCardRequest {
   takenBy?: string;
   note?: string;
   taskId?: string;
+  /** soft (optional help) or hard (blocking: its task pauses when the wait ends). */
+  level?: "soft" | "hard";
+  /** A hard request nobody took in time: its task is paused until a person completes it. */
+  parkedAt?: string;
 }
 
 export interface ComputerCard {
@@ -55,6 +60,7 @@ export function buildComputerCard(i: ComputerCardInput): ComputerCard {
     id: r.id, agent: r.agent, reason: r.reason, status: r.status, expiresAt: r.expiresAt, createdAt: r.createdAt,
     ...(r.url ? { url: r.url } : {}), ...(r.whatToDo ? { whatToDo: r.whatToDo } : {}), ...(r.takenBy ? { takenBy: r.takenBy } : {}),
     ...(r.note ? { note: r.note } : {}), ...(r.taskId ? { taskId: r.taskId } : {}),
+    level: r.level === "hard" ? "hard" : "soft", ...(r.parkedAt ? { parkedAt: r.parkedAt } : {}),
   });
   return {
     kind: "computer",
@@ -85,7 +91,7 @@ export function computerCardText(c: ComputerCard): string {
   const open = c.requests.filter((r) => OPEN.has(r.status));
   if (open.length) {
     lines.push("Waiting for a person:");
-    for (const r of open) lines.push(`- ${r.agent}: ${r.reason}${r.url ? ` (page ${r.url})` : ""}${r.whatToDo ? `; to do: ${r.whatToDo}` : ""}; waits until ${r.expiresAt}${r.status === "in_control" ? ` (${r.takenBy ?? "a person"} has control)` : ""}`);
+    for (const r of open) lines.push(`- ${r.agent}: ${r.reason}${r.url ? ` (page ${r.url})` : ""}${r.whatToDo ? `; to do: ${r.whatToDo}` : ""}; ${describeTakeoverWait(r)}${r.status === "in_control" ? ` (${r.takenBy ?? "a person"} has control)` : ""}`);
   }
   if (c.link) lines.push(`Live view: ${c.link}`);
   return lines.join("\n");

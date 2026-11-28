@@ -2,6 +2,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Task } from "@polpo-ai/react";
+import { MemoryRouter } from "react-router-dom";
 import { TaskPauseControl, TaskPausedBanner } from "../src/components/tasks/task-pause";
 import { canPauseTask, canResumeTask, pauseSummary, pausedForTakeover } from "../src/lib/task-pause";
 import { taskStatusStyles } from "../src/lib/status-tokens";
@@ -36,11 +37,12 @@ test("which tasks can be paused or resumed, and how a pause reads", () => {
 });
 
 test("the banner says who paused it, why, and that completing the takeover resumes it", () => {
-  act(() => root.render(<TaskPausedBanner task={paused({ at: new Date().toISOString(), from: "in_progress", by: "nina", reason: "waiting for takeover", runId: "r1", takeover: { requestId: "r1", computerId: "nina-01" } })} />));
+  act(() => root.render(<MemoryRouter><TaskPausedBanner task={paused({ at: new Date().toISOString(), from: "in_progress", by: "nina", reason: "waiting for takeover", runId: "r1", takeover: { requestId: "r1", computerId: "nina-01" } })} /></MemoryRouter>));
   const banner = host.querySelector("[data-testid=task-paused-banner]")!;
   expect(banner.textContent).toContain("Paused by nina");
   expect(banner.textContent).toContain("waiting for takeover");
   expect(banner.textContent).toContain("completing the takeover resumes it");
+  expect(banner.querySelector("a")!.getAttribute("href")).toBe("/computers/nina-01");
   act(() => root.render(<TaskPausedBanner task={{ status: "pending" }} />));
   expect(host.querySelector("[data-testid=task-paused-banner]")).toBeNull();
 });

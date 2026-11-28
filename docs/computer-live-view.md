@@ -242,7 +242,7 @@ watch, lighter ones (5 and 7) to save bandwidth. It switches on the fly, without
 ## `request_computer_takeover`
 
 ```
-request_computer_takeover({ reason: string, url?: string, what_to_do?: string, timeout_minutes?: number })
+request_computer_takeover({ reason: string, level?: "soft" | "hard", url?: string, what_to_do?: string, timeout_minutes?: number })
 ```
 
 The agent asks for a person. The request is recorded on the computer (a banner on its page and in
@@ -256,10 +256,31 @@ you open the page. You are notified:
 - otherwise through the instance's notification router: its rules on `computer:takeover`, or (no
   such rule) its first configured channels.
 
-The tool then **waits** (default 30 minutes, at most 24 hours; a stopped run stops waiting) until a
-person took control and gave it back, and returns their note; or it reports the timeout. It works on
-every engine: Polpo's, and Claude Code / Codex / OpenCode harnesses as a host tool. A task run asks
-the server over the notification socket, as the run's agent.
+The tool then **waits** (at most 24 hours; a stopped run stops waiting) until a person took control
+and gave it back, and returns their note. While it waits it reports progress every minute, so the run
+is not taken for stale. It works on every engine: Polpo's, and Claude Code / Codex / OpenCode
+harnesses as a host tool. A task run asks the server over the notification socket, as the run's agent.
+
+### Soft and hard requests
+
+The agent says how much it needs the person (`level`; the tool description and the browser prompt
+tell agents to choose `hard` for a CAPTCHA, a phone, SMS, email or app verification, a login or
+sign-up wall):
+
+| | soft (default) | hard |
+|---|---|---|
+| Meaning | Optional help: the agent can do without it | Blocking: the task cannot go on without it |
+| Default wait | 30 min | 15 min |
+| Nobody takes over in time | The request is closed (`timeout`); the agent is told to go on, finish the task and say in its result what it could not do | In a task: the request is **parked** (stays open, never expires, `parkedAt`) and the task is **paused** with reason `waiting for takeover` ([tasks.md](tasks.md#pausing-a-task): its run stops, not failed; `Task.pause.takeover` names the request). Its agent is told to stop. The person is notified again ("… task is paused: it needs you"). The browser on the computer is left as it is. In a chat (no task): closed, and the agent told the step is blocked and to report it |
+| Then | — | When a person takes control and gives it back, the task is **resumed**: its run continues (same session) told who completed the takeover and their note. Resuming the task by hand instead cancels the request and tells the agent nobody completed it (ask again if still blocked); killing the task cancels it too |
+
+A hard request of a task is not expired by the server when its wait ends: the run parks it (op
+`park` over the notification socket). If the run is gone and never does, it expires 2 minutes later.
+The takeover card (computer page, agent's Computer tab, the MCP computer card), the text answers
+(MCP, Polpo's chat) and the notifications show the level and the time left ("12 min left, then its
+task pauses until you do it"); a parked request shows that its task is paused.
+
+Note: a task's own timeout (`maxDuration`, default `taskTimeout`) still counts while its agent waits.
 
 ## CDP_URL: scripts drive the same browser
 
@@ -285,7 +306,7 @@ agent to run `agent-browser --session <name> get cdp-url` (the same endpoint).
 | MCP | `polpo_computer_desktop` (status, start, stop; without `id`: every agent waiting for a person), `polpo_computer_takeover`, `polpo_computer_release`, and the card `polpo_computer_show` (an MCP App with Take control / Give back and a link to the live view). No VNC password exists outside the server. |
 | Polpo (chat) | `computer_desktop`, `computer_takeover`, `computer_release` (group "computers") |
 | React SDK | `useComputerDesktop(id, { viewer })` (view, start, stop, takeover, release), `useComputerTakeovers()`; client `getComputerDesktop`, `startComputerDesktop`, `stopComputerDesktop`, `getComputerControl`, `takeoverComputer`, `releaseComputer`, `getComputerTakeovers` |
-| Event | `computer:takeover` `{ id, action: requested / taken / released / timeout / cancelled / desktop-started / desktop-stopped, holder, person?, requestId?, agent?, reason?, url?, note?, taskId? }` |
+| Event | `computer:takeover` `{ id, action: requested / taken / released / timeout / cancelled / parked / desktop-started / desktop-stopped, holder, person?, requestId?, agent?, reason?, url?, note?, taskId?, level?, expiresAt? }`; a hard request's paused task also emits `task:paused` / `task:resumed` |
 
 ## Security
 

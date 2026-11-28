@@ -9,6 +9,13 @@ export type ComputerControlHolder = "agent" | "person";
 
 export type ComputerTakeoverStatus = "pending" | "in_control" | "released" | "timeout" | "cancelled";
 
+/**
+ * soft: optional help (when nobody takes over in time the agent goes on without it); hard: blocking
+ * (a CAPTCHA, a phone or app verification, a login wall): when nobody takes over in time its task is
+ * paused and the request stays open until a person completes it (which resumes the task).
+ */
+export type ComputerTakeoverLevel = "soft" | "hard";
+
 /** An agent's request for a person to take control (request_computer_takeover: a login, 2FA, a CAPTCHA). */
 export interface ComputerTakeoverRequest {
   id: string;
@@ -18,9 +25,13 @@ export interface ComputerTakeoverRequest {
   url?: string;
   whatToDo?: string;
   createdAt: string;
-  /** When the agent stops waiting. */
+  /** When the agent stops waiting (hard, in a task: when its task pauses). */
   expiresAt: string;
   status: ComputerTakeoverStatus;
+  /** Absent: soft. */
+  level?: ComputerTakeoverLevel;
+  /** A hard request nobody took in time: its task is paused, the request stays open (never expires). */
+  parkedAt?: string;
   taskId?: string;
   runId?: string;
   sessionId?: string;
