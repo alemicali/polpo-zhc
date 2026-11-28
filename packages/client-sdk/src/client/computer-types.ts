@@ -91,3 +91,27 @@ export interface ComputerTakeoverEvent {
   taskId?: string;
   sessionId?: string;
 }
+
+/**
+ * What runs on a computer now: POST /computers/:id/stop and /restart refuse with 409
+ * COMPUTER_BUSY and this in the error's details.busy, unless { force: true }.
+ */
+export interface ComputerBusy {
+  /** Task runs in progress on it (assigned or in_progress tasks whose running run is on it). */
+  tasks: Array<{ taskId: string; title: string; status: string; runId: string; agent?: string }>;
+  /** Live agent harness sessions on it (tasks and chats). */
+  sessions: Array<{ key: string; sessionId?: string; agent: string; harness: string; scope: "task" | "chat"; state: string; taskId?: string; chatSessionId?: string }>;
+}
+
+/** POST /computers/:id/{start,stop,restart,reset}: the computer (stop: 202 at once, status "stopping"). */
+export interface ComputerControlResult {
+  id: string;
+  name?: string;
+  kind: string;
+  status: string;
+  lastError?: string;
+  notice?: string;
+  /** reset: the wipe is done, the new machine comes on its next use. */
+  note?: string;
+  [key: string]: unknown;
+}

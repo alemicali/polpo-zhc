@@ -35,7 +35,15 @@ class FakeProvider implements RemoteAdapter {
     return [...this.machines.entries()].filter(([, m]) => !m.deleted && Object.entries(labels).every(([k, v]) => m.labels[k] === v)).map(([id, m]) => ({ remoteId: id, state: m.state, labels: m.labels }));
   }
   async remove(id: string) { this.machines.get(id)!.deleted = true; this.removed.push(id); }
-  async suspendById(id: string) { this.machines.get(id)!.state = "stopped"; }
+  /** A stop that fails (the provider refuses it). */
+  failStop?: string;
+  /** Holds every stop until released (a long hibernation). */
+  hold?: Promise<void>;
+  async suspendById(id: string) {
+    await this.hold;
+    if (this.failStop) throw new Error(this.failStop);
+    this.machines.get(id)!.state = "stopped";
+  }
 }
 
 function makeApp(opts: { computers?: ComputerConfig[]; agents?: any[]; withoutKey?: boolean; tasks?: any[]; sessions?: any[] } = {}) {
@@ -43,7 +51,7 @@ function makeApp(opts: { computers?: ComputerConfig[]; agents?: any[]; withoutKe
   dirs.push(polpoDir);
   const provider = new FakeProvider("daytona");
   const manager = new ComputerManager(polpoDir, { adapter: () => provider });
-  const state = { computers: [...(opts.computers ?? [])], agents: opts.agents ?? [], events: [] as any[] };
+  const state = { computers: [...(opts.computers ?? [])], agents: opts.agents ?? [], events: [] as any[], tasks: opts.tasks ?? [] as any[], sessions: opts.sessions ?? [] as any[] };
   manager.onChange = (id, live) => state.events.push({ id, action: "status", status: live.status });
   const deps: ComputerRouteDeps = {
     computers: () => state.computers,
@@ -55,8 +63,8 @@ function makeApp(opts: { computers?: ComputerConfig[]; agents?: any[]; withoutKe
       ? { error: "Daytona has no API key on this server: choose one in Settings → Sandbox" }
       : resolveSandbox({}, { scope: "task", computers: { computers: [computer], defaultComputer: computer.id, allowed: [computer.id] } }),
     emit: (payload) => state.events.push(payload),
-    tasks: async () => opts.tasks ?? [],
-    harnessSessions: (id) => (opts.sessions ?? []).filter((s) => s.computerId === id),
+    tasks: async () => state.tasks,
+    harnessSessions: (id) => state.sessions.filter((s) => s.computerId === id),
   };
   const app = computerRoutes(deps);
   const egress = egressRoutes({ ...deps, reachable: async () => true });
@@ -112,8 +120,11 @@ describe("/computers", () => {
     const t = makeApp({ computers: [{ id: "nina", name: "Nina", kind: "daytona" }] });
     const started = await t.app.request("/nina/start", { method: "POST" });
     expect((await started.json()).data.status).toBe("running");
+    // 202 at once, "stopping"; the stop goes on in the background
     const stopped = await t.app.request("/nina/stop", { method: "POST" });
-    expect((await stopped.json()).data.status).toBe("stopped");
+    expect(stopped.status).toBe(202);
+    expect((await stopped.json()).data.status).toBe("stopping");
+    await vi.waitFor(() => expect(t.manager.live("nina").status).toBe("stopped"));
     expect(t.provider.removed).toEqual([]);
     const restarted = await t.app.request("/nina/restart", { method: "POST" });
     expect((await restarted.json()).data.status).toBe("running");
@@ -124,6 +135,62 @@ describe("/computers", () => {
     const res = await noKey.app.request("/nina/start", { method: "POST" });
     expect(res.status).toBe(409);
     expect((await res.json()).error).toMatch(/no API key/);
+  });
+
+  it("stop refuses a busy computer (running task runs, live harness sessions) with 409 COMPUTER_BUSY; force stops it anyway", async () => {
+    const now = new Date().toISOString();
+    const run = (computer: string, status = "running") => ({ runId: `r-${computer}-${status}`, status, agent: "sitoinchat", engine: "polpo", startedAt: now, computer: { id: computer, kind: "daytona" } });
+    const t = makeApp({
+      computers: [{ id: "nina", name: "Nina", kind: "daytona" }],
+      tasks: [
+        { id: "t-1", title: "Scrape the leads", status: "in_progress", runs: [run("nina")] },
+        // not busy: done, a finished run, another computer
+        { id: "t-2", title: "Old", status: "done", runs: [run("nina")] },
+        { id: "t-3", title: "Failed run", status: "in_progress", runs: [run("nina", "failed")] },
+        { id: "t-4", title: "Elsewhere", status: "in_progress", runs: [run("box")] },
+      ],
+      sessions: [
+        { key: "chat:c1", sessionId: "sess-9", agent: "growth", harness: "claude-code", computerId: "nina", scope: "chat", chatSessionId: "c1", state: "running", live: true },
+        { key: "task:t9", agent: "growth", harness: "codex", computerId: "nina", scope: "task", state: "detached", live: false },
+      ],
+    });
+    await t.app.request("/nina/start", { method: "POST" });
+    const refused = await t.app.request("/nina/stop", { method: "POST" });
+    expect(refused.status).toBe(409);
+    const body = await refused.json();
+    expect(body.code).toBe("COMPUTER_BUSY");
+    expect(body.error).toMatch(/task t-1 "Scrape the leads".*chat session sess-9 \(growth, claude-code, running\).*"force": true/);
+    expect(body.details.busy).toEqual({
+      tasks: [{ taskId: "t-1", title: "Scrape the leads", status: "in_progress", runId: "r-nina-running", agent: "sitoinchat" }],
+      sessions: [{ key: "chat:c1", sessionId: "sess-9", agent: "growth", harness: "claude-code", scope: "chat", state: "running", chatSessionId: "c1" }],
+    });
+    expect(t.manager.live("nina").status).toBe("running");
+    // restart is refused too
+    expect((await t.app.request("/nina/restart", { method: "POST" })).status).toBe(409);
+    // force: in the body or the query
+    const forced = await t.app.request("/nina/stop?force=true", { method: "POST" });
+    expect(forced.status).toBe(202);
+    await vi.waitFor(() => expect(t.manager.live("nina").status).toBe("stopped"));
+    await t.app.request("/nina/start", { method: "POST" });
+    expect((await t.app.request("/nina/stop", json({ force: true }))).status).toBe(202);
+    await vi.waitFor(() => expect(t.manager.live("nina").status).toBe("stopped"));
+  });
+
+  it("stop answers 202 before the stop ends; a failure after the answer lands in its activity and error", async () => {
+    const t = makeApp({ computers: [{ id: "nina", name: "Nina", kind: "daytona" }] });
+    await t.app.request("/nina/start", { method: "POST" });
+    let release!: () => void;
+    t.provider.hold = new Promise((r) => { release = r; });
+    const res = await t.app.request("/nina/stop", { method: "POST" });
+    // answered while the provider still works on it
+    expect(res.status).toBe(202);
+    expect((await res.json()).data.status).toBe("stopping");
+    expect(t.state.events.filter((e) => e.action === "status").map((e) => e.status)).toContain("stopping");
+    t.provider.failStop = "provider says no";
+    release();
+    await vi.waitFor(() => expect(t.manager.live("nina").lastError).toMatch(/provider says no/));
+    const detail = (await (await t.app.request("/nina?detail=1&live=0")).json()).data;
+    expect(detail.activity.some((a: any) => a.kind === "notice" && /Could not stop it: provider says no/.test(a.message))).toBe(true);
   });
 
   it("reset and delete need confirm; delete refuses a computer that is an agent's default", async () => {
@@ -280,7 +347,20 @@ describe("MCP computer tools", () => {
     expect(t.state.computers[0]!.desktop).toBeUndefined();
 
     expect((await call("polpo_computer_control", { id: "nina", action: "start" })).structuredContent.computer.status).toBe("running");
-    expect((await call("polpo_computer_control", { id: "nina", action: "stop" })).structuredContent.computer.status).toBe("stopped");
+    const stop = await call("polpo_computer_control", { id: "nina", action: "stop" });
+    expect(stop.structuredContent.computer.status).toBe("stopping");
+    expect(stop.content[0].text).toMatch(/goes on in the background/);
+    await vi.waitFor(() => expect(t.manager.live("nina").status).toBe("stopped"));
+    // busy: refused with what runs on it; force: true stops it anyway
+    await call("polpo_computer_control", { id: "nina", action: "start" });
+    t.state.tasks = [{ id: "t-42", title: "Scrape the leads", status: "in_progress", runs: [{ runId: "r1", status: "running", agent: "sitoinchat", engine: "polpo", startedAt: new Date().toISOString(), computer: { id: "nina", kind: "daytona" } }] }];
+    const busy = await call("polpo_computer_control", { id: "nina", action: "stop" });
+    expect(busy.isError).toBe(true);
+    expect(busy.content[0].text).toMatch(/is busy: task t-42 "Scrape the leads".*force: true/s);
+    expect(t.manager.live("nina").status).toBe("running");
+    expect((await call("polpo_computer_control", { id: "nina", action: "stop", force: true })).structuredContent.computer.status).toBe("stopping");
+    await vi.waitFor(() => expect(t.manager.live("nina").status).toBe("stopped"));
+    t.state.tasks = [];
     const noConfirm = await call("polpo_computer_control", { id: "nina", action: "reset" });
     expect(noConfirm.isError).toBe(true);
     expect(t.provider.removed).toEqual([]);

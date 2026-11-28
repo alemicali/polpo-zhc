@@ -1405,6 +1405,8 @@ export type ErrorCode =
   | "CONFLICT"
   /** A deploy the agent's required suites blocked (details: { status, gate, entry }). */
   | "GATE_BLOCKED"
+  /** A computer has tasks or sessions running on it: stop/restart need force (details: { busy: ComputerBusy }). */
+  | "COMPUTER_BUSY"
   | "INTERNAL_ERROR";
 
 export interface ApiResponse<T> {

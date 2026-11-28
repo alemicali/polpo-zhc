@@ -32,6 +32,20 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-28-computer-safe-stop",
+    date: "2026-11-28",
+    kind: "fixed",
+    title: "Fermare un computer non interrompe più per sbaglio il lavoro degli agenti",
+    summary: "Se su un computer stanno lavorando attività o sessioni, Stop e Hibernate te le mostrano e chiedono conferma; e lo stop non fa più aspettare minuti.",
+    body: [
+      "- **Prima di fermarlo, ti dice chi ci lavora**: se sul computer ci sono attività in corso o sessioni di un agente (di attività o di chat), Stop, Hibernate, Pause e Restart non lo fermano subito ma aprono una finestra con l'elenco. Puoi aspettare che finiscano oppure scegliere **Stop anyway** (o Hibernate anyway, Pause anyway): in quel caso il lavoro in corso viene interrotto.",
+      "- **Niente più attese**: lo stop parte e la pagina risponde subito; il computer resta in \"Stopping\" finché non è fermo (l'ibernazione su Daytona v2 può richiedere qualche minuto) e lo stato si aggiorna da solo.",
+      "- **Se qualcosa va storto lo vedi**: se lo stop fallisce dopo, l'errore compare nell'attività del computer, nella sua pagina.",
+      "- **Ovunque**: la stessa regola vale chiedendo a Polpo in chat, dall'API e dal connettore MCP, che prima di forzare devono chiederti conferma.",
+    ].join("\n"),
+    cta: { label: "Apri i computer", to: "/computers" },
+  },
+  {
     id: "2026-11-28-task-computer-selection",
     date: "2026-11-28",
     kind: "fixed",

@@ -359,7 +359,7 @@ export type {
 } from "./client/agent-suite-types.js";
 export type {
   ComputerControlHolder, ComputerTakeoverStatus, ComputerTakeoverRequest, ComputerControl, ComputerDesktopState, ComputerDesktopStatus,
-  ComputerDesktopView, ComputerTakeoverEvent,
+  ComputerDesktopView, ComputerTakeoverEvent, ComputerBusy, ComputerControlResult,
 } from "./client/computer-types.js";
 export type {
   DecisionQuestionType, DecisionQuestion, DecisionFallbackModel, DecisionModelSetting, DecisionSettings, DecideRequest, DecisionAnswer, DecisionUsage, DecideResult,

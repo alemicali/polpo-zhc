@@ -63,6 +63,8 @@ type FakeRequest = { id: string; computerId: string; agent: string; reason: stri
 let server: {
   computers: Computer[]; calls: Array<{ method: string; path: string; body?: unknown }>; detail: Partial<ComputerDetail>;
   desktop: { state: string; holder: "agent" | "person"; person?: string; requests: FakeRequest[] };
+  /** Computers with work on them: stop and restart answer 409 COMPUTER_BUSY unless force. */
+  busy?: Record<string, unknown>;
 };
 
 function ok(data: unknown, status = 200) {
@@ -112,6 +114,9 @@ function installFetch() {
     if (action === "egress") return ok({ computerId: id, proxy: current.egress, tailnet: "up", node: "polpo-nina", path: "direct", proxyReachable: true, effective: `via ${current.egress}`, machine: "running" });
     if (!action && method === "PATCH") return ok(save({ ...current, ...body }));
     if (!action && method === "DELETE") { server.computers = server.computers.filter((c) => c.id !== id); return ok({ deleted: id }); }
+    if ((action === "stop" || action === "restart") && server.busy?.[id!] && body?.force !== true) {
+      return Promise.resolve(new Response(JSON.stringify({ ok: false, error: `Computer "${id}" is busy`, code: "COMPUTER_BUSY", details: { busy: server.busy[id!] } }), { status: 409 }));
+    }
     if (action === "start" || action === "restart" || action === "reset") return ok(save({ ...current, status: "running", notice: undefined }));
     if (action === "stop") return ok(save({ ...current, status: current.providerApi === "v2" ? "hibernated" : "stopped" }));
     throw new Error(`unexpected ${method} ${path}`);
@@ -275,6 +280,30 @@ test("the main action is in the row: start, then stop (Hibernate on Daytona v2)"
   expect(row("v2").querySelector('[data-testid="computer-kind"]')!.textContent).toMatch(/^Daytona v2/);
   await click(button("Hibernate Vee"));
   await flush();
+  expect(status(row("v2"))).toBe("Hibernated");
+});
+
+test("stopping a busy computer: the refusal lists its tasks and sessions, and offers to stop it anyway", async () => {
+  installFetch();
+  server.computers = [HOST, box({ id: "v2", name: "Vee", kind: "daytona", providerApi: "v2", status: "running" })];
+  server.busy = {
+    v2: {
+      tasks: [{ taskId: "t-42", title: "Scrape the leads", status: "in_progress", runId: "r1", agent: "sitoinchat" }],
+      sessions: [{ key: "chat:c1", sessionId: "sess-9", agent: "growth", harness: "claude-code", scope: "chat", state: "running" }],
+    },
+  };
+  await render();
+  await click(button("Hibernate Vee"));
+  await flush();
+  // refused: nothing stopped yet, the dialog says what runs on it
+  expect(status(row("v2"))).toBe("Running");
+  const list = document.querySelector('[data-testid="computer-busy-list"]')!;
+  expect(list.textContent).toMatch(/Scrape the leads.*t-42.*sitoinchat/);
+  expect(list.textContent).toMatch(/Chat session.*sess-9.*growth/);
+  await click(byText("Hibernate anyway"));
+  await flush();
+  const stops = server.calls.filter((c) => c.method === "POST" && c.path === "/computers/v2/stop");
+  expect(stops.map((c) => c.body)).toEqual([undefined, { force: true }]);
   expect(status(row("v2"))).toBe("Hibernated");
 });
 

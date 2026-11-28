@@ -1,4 +1,4 @@
-import type { ComputerControl, ComputerDesktopView, ComputerTakeoverRequest } from "./computer-types.js";
+import type { ComputerControl, ComputerControlResult, ComputerDesktopView, ComputerTakeoverRequest } from "./computer-types.js";
 import { PolpoApiError } from "./errors.js";
 import type { DataTransactionRequest, DataTransactionResult } from "./data-types.js";
 import type {
@@ -936,6 +936,24 @@ export class PolpoClient {
   /** The connectors (external apps over MCP), with their status, account and who may use them. */
   getConnectors(): Promise<Connector[]> {
     return this.get<{ connectors: Connector[] }>("/connectors").then((d) => d.connectors);
+  }
+
+  // ── Computers: start, stop, restart, reset ──
+
+  /**
+   * Start, stop, restart or reset a remote computer. stop and restart are refused while it is busy
+   * (PolpoApiError code COMPUTER_BUSY, details.busy: ComputerBusy) unless force; stop answers at once
+   * with status "stopping" (the stop goes on in the background, computer:changed events follow);
+   * reset needs confirm (its disk is lost).
+   */
+  controlComputer(id: string, action: "start" | "stop" | "restart" | "reset", o: { force?: boolean; confirm?: boolean } = {}): Promise<ComputerControlResult> {
+    const body = { ...(o.force ? { force: true } : {}), ...(o.confirm ? { confirm: true } : {}) };
+    return this.post(`/computers/${encodeURIComponent(id)}/${action}`, body);
+  }
+
+  /** Stop (or hibernate) a computer: refused while busy (COMPUTER_BUSY) unless force; answers at once with status "stopping". */
+  stopComputer(id: string, o: { force?: boolean } = {}): Promise<ComputerControlResult> {
+    return this.controlComputer(id, "stop", o);
   }
 
   // ── Computers: live view and take control ──
