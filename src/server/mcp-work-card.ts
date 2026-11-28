@@ -32,6 +32,8 @@ export interface CardTaskRef {
   notReached?: TaskSkip;
   /** Its runs get only part of the agent's tools (Task.toolScope). */
   toolScoped?: boolean;
+  /** Paused (status "paused"): why, who and when; takeover: a blocking computer takeover paused it. */
+  pause?: { at: string; by?: string; reason?: string; takeover?: { requestId: string; computerId: string } };
 }
 
 export interface TaskCard {
@@ -119,6 +121,7 @@ type InTask = {
   notReached?: TaskSkip;
   toolScope?: TaskToolScope;
   toolScopeStale?: string[];
+  pause?: { at: string; by?: string; reason?: string; takeover?: { requestId: string; computerId: string } };
   /** GET /tasks/:id: every run's cost in all (it recovers runs dropped past the latest 20). */
   cost?: Partial<TaskCost>;
 };
@@ -134,6 +137,12 @@ const ref = (t: InTask): CardTaskRef => {
     ...(failure ? { failure } : {}),
     ...(skip ? { notReached: skip } : {}),
     ...(t.toolScope ? { toolScoped: true } : {}),
+    ...(t.status === "paused" && t.pause ? {
+      pause: {
+        at: t.pause.at, ...(t.pause.by ? { by: t.pause.by } : {}), ...(t.pause.reason ? { reason: t.pause.reason } : {}),
+        ...(t.pause.takeover ? { takeover: t.pause.takeover } : {}),
+      },
+    } : {}),
   };
 };
 

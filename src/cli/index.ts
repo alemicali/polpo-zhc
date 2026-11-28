@@ -407,6 +407,7 @@ program
           case "review":            return chalk.magenta(spin);
           case "done":              return chalk.green("●");
           case "failed":            return chalk.red("✗");
+          case "paused":            return chalk.yellow("⏸");
         }
       };
 
@@ -420,6 +421,7 @@ program
           case "review":            return chalk.magenta.bold("REVIEW    ");
           case "done":              return chalk.green("DONE      ");
           case "failed":            return chalk.red.bold("FAILED    ");
+          case "paused":            return chalk.yellow("PAUSED    ");
         }
       };
 

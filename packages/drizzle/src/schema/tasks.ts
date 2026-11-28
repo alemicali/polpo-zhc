@@ -37,6 +37,8 @@ export const tasksSqlite = sqliteTable("tasks", {
   toolScope: text("tool_scope"),
   /** The task level of the sandbox cascade (above all the computer it runs on), JSON: Task.sandbox. */
   sandbox: text("sandbox"),
+  /** The current or last pause (why, who, when, the run it stopped), JSON: Task.pause. */
+  pause: text("pause"),
   /** The member (email) who started the task, when known: Task.requestedBy. */
   requestedBy: text("requested_by"),
   /** The assignee's published version the task is pinned to (absent: production): Task.agentVersion. */
@@ -131,6 +133,8 @@ export const tasksPg = pgTable("tasks", {
   toolScope: jsonb("tool_scope"),
   /** The task level of the sandbox cascade (above all the computer it runs on): Task.sandbox. */
   sandbox: jsonb("sandbox"),
+  /** The current or last pause (why, who, when, the run it stopped): Task.pause. */
+  pause: jsonb("pause"),
   /** The member (email) who started the task, when known: Task.requestedBy. */
   requestedBy: pgText("requested_by"),
   /** The assignee's published version the task is pinned to (absent: production): Task.agentVersion. */

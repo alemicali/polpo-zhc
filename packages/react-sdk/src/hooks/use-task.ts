@@ -10,6 +10,10 @@ export interface UseTaskReturn {
   updateTask: (req: UpdateTaskRequest) => Promise<Task>;
   deleteTask: () => Promise<void>;
   killTask: () => Promise<void>;
+  /** Pause it (pending, assigned or running): a running one's run stops and continues on resume. */
+  pauseTask: (reason?: string) => Promise<void>;
+  /** Resume it (paused), with an optional message for its agent. */
+  resumeTask: (message?: string) => Promise<void>;
   reassessTask: () => Promise<void>;
   retryTask: () => Promise<void>;
   queueTask: () => Promise<void>;
@@ -72,6 +76,14 @@ export function useTask(taskId: string): UseTaskReturn {
     await client.killTask(taskId);
   }, [client, taskId]);
 
+  const pauseTask = useCallback(async (reason?: string) => {
+    await client.pauseTask(taskId, reason?.trim() ? { reason: reason.trim() } : {});
+  }, [client, taskId]);
+
+  const resumeTask = useCallback(async (message?: string) => {
+    await client.resumeTask(taskId, message?.trim() ? { message: message.trim() } : {});
+  }, [client, taskId]);
+
   const reassessTask = useCallback(async () => {
     await client.reassessTask(taskId);
   }, [client, taskId]);
@@ -84,5 +96,5 @@ export function useTask(taskId: string): UseTaskReturn {
     await client.queueTask(taskId);
   }, [client, taskId]);
 
-  return { task, isLoading, error, updateTask, deleteTask, killTask, reassessTask, retryTask, queueTask };
+  return { task, isLoading, error, updateTask, deleteTask, killTask, pauseTask, resumeTask, reassessTask, retryTask, queueTask };
 }

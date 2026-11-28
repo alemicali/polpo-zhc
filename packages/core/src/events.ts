@@ -33,6 +33,13 @@ export interface PolpoEventMap {
   "task:retried": { taskId: string; title: string } & EventOrigin;
   /** A running or waiting task was stopped on request. */
   "task:killed": { taskId: string; title: string; runId?: string; pid?: number } & EventOrigin;
+  /**
+   * A task was paused (a person, Polpo, or a blocking computer takeover nobody took): not scheduled
+   * until resumed; `runId`: the run it stopped (resuming continues it). `pausedBy` is who asked.
+   */
+  "task:paused": { taskId: string; title: string; from: TaskStatus; reason?: string; pausedBy?: string; runId?: string; takeover?: { requestId: string; computerId: string } } & EventOrigin;
+  /** A paused task was resumed: pending again; `continued`: its stopped run goes on as a continuation. */
+  "task:resumed": { taskId: string; title: string; continued: boolean; resumedBy?: string; message?: string; reason?: string; pausedMs?: number; takeover?: { requestId: string; computerId: string } } & EventOrigin;
   /** A task was failed on purpose (deadlock, manual force-fail). */
   "task:force-failed": { taskId: string; title: string; reason?: string } & EventOrigin;
   /** The agent produced new outcomes (files, text, media…) for a task. */
@@ -69,7 +76,7 @@ export interface PolpoEventMap {
 
   // Orchestrator lifecycle
   "orchestrator:started": { project: string; agents: string[] };
-  "orchestrator:tick": { pending: number; running: number; done: number; failed: number; queued: number };
+  "orchestrator:tick": { pending: number; running: number; done: number; failed: number; queued: number; paused?: number };
   "orchestrator:deadlock": { taskIds: string[] };
   "orchestrator:shutdown": Record<string, never>;
   /** Graceful shutdown started: `activeRuns` agents are still running. */

@@ -15,16 +15,21 @@ import {
   type McpDeps, type Register,
 } from "./kit.js";
 
-export const TASK_STATUSES = ["draft", "pending", "awaiting_approval", "assigned", "in_progress", "review", "done", "failed"] as const;
+export const TASK_STATUSES = ["draft", "pending", "awaiting_approval", "assigned", "in_progress", "review", "done", "failed", "paused"] as const;
 type TaskStatus = (typeof TASK_STATUSES)[number];
 /** Where a task waits for someone or is finished: what polpo_task_wait waits for by default. */
-const SETTLED: TaskStatus[] = ["done", "failed", "review", "awaiting_approval"];
+const SETTLED: TaskStatus[] = ["done", "failed", "review", "awaiting_approval", "paused"];
 
 export const notReachedShape = z.object({ node: z.string(), branch: z.string().nullable(), answer: z.string().optional(), confidence: z.number().optional() }).passthrough()
   .describe("A mission decision node took another branch: the task was closed (status done) without running. Not reached is not done: never count it as work that ran");
 
 const failureShape = z.object({ reason: z.string(), retryable: z.boolean(), kind: z.string() }).passthrough()
   .describe("Why it failed: the labelled reason of its last run; retryable false: not retried automatically (a re-run would fail the same way); kind: model_access, auth, budget, killed, assessment, error");
+
+export const pauseShape = z.object({
+  at: z.string(), by: z.string().optional(), reason: z.string().optional(), from: z.string(), runId: z.string().optional(),
+  takeover: z.object({ requestId: z.string(), computerId: z.string() }).optional(), resumedAt: z.string().optional(), resumedBy: z.string().optional(),
+}).passthrough().describe("Paused: why, who paused it and when; runId: the run it stopped (resuming continues it); takeover: a blocking computer takeover nobody took paused it (completing the takeover resumes it)");
 
 export const taskSummary = z.object({
   id: z.string(), title: z.string(), status: z.string(), assignTo: z.string().optional(),
@@ -35,6 +40,7 @@ export const taskSummary = z.object({
     .describe("What every run of it cost in all (first run, retries, continuations), USD; partial: older runs were dropped"),
   failure: failureShape.optional(),
   not_reached: notReachedShape.optional(),
+  pause: pauseShape.optional(),
 }).passthrough();
 
 type TaskRow = {
@@ -61,6 +67,8 @@ type FullTask = TaskRow & {
   sandbox?: { computer?: string; [key: string]: unknown };
   /** What of the tool scope its agent no longer has. */
   toolScopeStale?: string[];
+  /** The current pause (status paused) or the last one (resumedAt). */
+  pause?: { at: string; by?: string; reason?: string; from: string; runId?: string; takeover?: { requestId: string; computerId: string }; resumedAt?: string; resumedBy?: string };
   /** The approval gates it met and how they were resolved (GET /tasks/:id), oldest first. */
   approvals?: Array<{ requestId: string; gateName: string; status: string; note?: string; resolvedBy?: string; requestedAt?: string; resolvedAt?: string }>;
 };
@@ -450,6 +458,53 @@ export function registerTaskTools(tool: Register, deps: McpDeps): void {
     const r = await apiSend(deps, "POST", `/tasks/${enc(id)}/kill`);
     if (!r.ok) return apiError(r, `Stopping ${id}`);
     return ok(`Stopped task ${id} (was ${t.task.status}).`, { id, killed: true, previous_status: t.task.status });
+  });
+
+  tool("tasks", "polpo_task_pause", {
+    title: "Pause a task",
+    description: "Pause a pending, assigned or running task until someone resumes it (polpo_task_resume): it is not scheduled, its mission stays "
+      + "active without completing and tasks that depend on it wait. A running task's run is stopped but not failed: its session is kept and "
+      + "resuming continues it where it was. Give the reason: it is recorded on the task with who paused it and when.",
+    inputSchema: {
+      id: z.string().min(1).describe("The task's id"),
+      reason: z.string().max(2000).optional().describe("Why it is paused (shown on the task, and told to the agent when it resumes)"),
+    },
+    outputSchema: { id: z.string(), status: z.string(), previous_status: z.string(), stopped_run: z.boolean(), pause: pauseShape.optional() },
+    annotations: WRITE,
+  }, async ({ id, reason }) => {
+    const t = await loadTask(deps, id);
+    if (!t.ok) return t.status === 404 ? notFound(id) : apiError(t, `Reading task ${id}`);
+    if (t.task.status === "paused") return fail(`Task ${id} is already paused${t.task.pause?.reason ? ` (${t.task.pause.reason})` : ""}: resume it with polpo_task_resume.`);
+    if (!["pending", "assigned", "in_progress"].includes(t.task.status)) {
+      return fail(`Task ${id} is ${t.task.status}: only pending, assigned or in-progress tasks can be paused${t.task.status === "failed" ? " (polpo_task_retry runs a failed one again)" : ""}.`);
+    }
+    const r = await apiSend(deps, "POST", `/tasks/${enc(id)}/pause`, { ...(reason?.trim() ? { reason: reason.trim() } : {}) });
+    if (!r.ok) return r.status === 404 ? notFound(id) : apiError(r, `Pausing ${id}`);
+    const task = ((r.data as { task?: FullTask } | undefined)?.task ?? {}) as FullTask;
+    const stopped = !!task.pause?.runId;
+    return ok(`Paused task ${id} (was ${t.task.status})${stopped ? ": its run was stopped and will continue where it was when resumed" : ""}. Resume it with polpo_task_resume.`,
+      { id, status: "paused", previous_status: t.task.status, stopped_run: stopped, ...(task.pause ? { pause: task.pause } : {}) });
+  });
+
+  tool("tasks", "polpo_task_resume", {
+    title: "Resume a task",
+    description: "Resume a paused task: it is pending again and an agent picks it up. If its pause stopped a run, the run continues where it was "
+      + "(same session), and the agent is told it was paused and resumed, with your message if you give one.",
+    inputSchema: {
+      id: z.string().min(1).describe("The paused task's id"),
+      message: z.string().max(2000).optional().describe("Something to tell the agent as it resumes (e.g. what changed meanwhile)"),
+    },
+    outputSchema: { id: z.string(), status: z.string(), continued: z.boolean() },
+    annotations: WRITE,
+  }, async ({ id, message }) => {
+    const t = await loadTask(deps, id);
+    if (!t.ok) return t.status === 404 ? notFound(id) : apiError(t, `Reading task ${id}`);
+    if (t.task.status !== "paused") return fail(`Task ${id} is ${t.task.status}, not paused: there is nothing to resume${t.task.status === "failed" ? " (polpo_task_retry runs a failed one again)" : ""}.`);
+    const r = await apiSend(deps, "POST", `/tasks/${enc(id)}/resume`, { ...(message?.trim() ? { message: message.trim() } : {}) });
+    if (!r.ok) return r.status === 404 ? notFound(id) : apiError(r, `Resuming ${id}`);
+    const continued = !!(r.data as { continued?: boolean } | undefined)?.continued;
+    return ok(`Resumed task ${id}: it is pending again${continued ? " and its stopped run continues where it was" : ""}. Follow it with polpo_task_wait.`,
+      { id, status: "pending", continued });
   });
 
   tool("tasks", "polpo_task_delete", {

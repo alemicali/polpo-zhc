@@ -35,6 +35,7 @@ const STATUS_TONE: Record<TaskRunContext["status"], string> = {
   completed: "border-success/30 bg-success/10 text-success",
   failed: "border-destructive/30 bg-destructive/10 text-destructive",
   killed: "border-warning/30 bg-warning/10 text-warning",
+  paused: "border-warning/30 bg-warning/10 text-warning",
 };
 
 /** An engine's mark (and optionally its name and model). Nothing for Polpo's engine unless `showPolpo`. */

@@ -48,6 +48,12 @@ export function originMember(): string | undefined {
   if (!o?.by || (o.source !== "api" && o.source !== "polpo")) return undefined;
   return MEMBER_EMAIL.test(o.by) ? o.by.toLowerCase() : undefined;
 }
+
+/** Who a pause or resume is recorded as: the person acting (any `by`), else Polpo for its own tools. */
+function actingAs(): string | undefined {
+  const o = currentEventOrigin();
+  return o?.by ?? (o?.source === "polpo" ? "Polpo" : undefined);
+}
 import type { PolpoEventMap } from "@polpo-ai/core";
 import type { TaskStore } from "./task-store.js";
 import type { RunStore } from "./run-store.js";
@@ -1786,6 +1792,18 @@ export class Orchestrator extends TypedEmitter {
   }
   reassessTask(taskId: string): Promise<void> { return this.engine.reassessTask(taskId); }
   async killTask(taskId: string): Promise<boolean> { return this.engine.killTask(taskId); }
+  /**
+   * Pause a task (pending, assigned or in progress): not scheduled until resumed; a running one's
+   * run stops and is continued on resume. `by` defaults to who is acting (the request's member,
+   * or Polpo for its own tools).
+   */
+  async pauseTask(taskId: string, opts: { reason?: string; by?: string; takeover?: { requestId: string; computerId: string } } = {}): Promise<Task> {
+    return this.engine.pauseTask(taskId, { ...opts, ...(opts.by ?? actingAs() ? { by: opts.by ?? actingAs() } : {}) });
+  }
+  /** Resume a paused task (pending again; its stopped run continues, told `message`). */
+  async resumeTask(taskId: string, opts: { message?: string; by?: string } = {}) {
+    return this.engine.resumeTask(taskId, { ...opts, ...(opts.by ?? actingAs() ? { by: opts.by ?? actingAs() } : {}) });
+  }
   async deleteTask(taskId: string): Promise<boolean> { return this.engine.deleteTask(taskId); }
   async abortGroup(group: string, missionId?: string): Promise<number> { return this.engine.abortGroup(group, missionId); }
   async clearTasks(filter: (task: Task) => boolean): Promise<number> { return this.engine.clearTasks(filter); }

@@ -75,6 +75,7 @@ const statusOrder: Record<TaskStatus, number> = {
   in_progress: 0,
   review: 1,
   awaiting_approval: 2,
+  paused: 2,
   assigned: 3,
   pending: 4,
   draft: 5,
@@ -112,6 +113,9 @@ function sortTasks(tasks: Task[], key: SortKey): Task[] {
 export interface TaskActions {
   retry: (id: string) => void;
   kill: (id: string) => void;
+  /** Pause (pending, assigned, running) or resume (paused) without a reason or message: the task page asks for them. */
+  pause: (id: string) => void;
+  resume: (id: string) => void;
   queue: (id: string) => void;
   moveToKanbanColumn: (task: Task, columnKey: string) => void;
   click: (id: string) => void;
@@ -339,6 +343,26 @@ export function useTasksPageState() {
     }
   }, [client, refetch]);
 
+  const handlePause = useCallback(async (id: string) => {
+    try {
+      await client.pauseTask(id);
+      toast.success("Task paused");
+      refetch();
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }, [client, refetch]);
+
+  const handleResume = useCallback(async (id: string) => {
+    try {
+      const r = await client.resumeTask(id);
+      toast.success(r.continued ? "Task resumed: it continues where it was" : "Task resumed");
+      refetch();
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }, [client, refetch]);
+
   const handleQueue = useCallback(async (id: string) => {
     try {
       await client.queueTask(id);
@@ -378,10 +402,12 @@ export function useTasksPageState() {
   const taskActions: TaskActions = useMemo(() => ({
     retry: handleRetry,
     kill: handleKill,
+    pause: handlePause,
+    resume: handleResume,
     queue: handleQueue,
     moveToKanbanColumn: handleMoveToKanbanColumn,
     click: handleTaskClick,
-  }), [handleRetry, handleKill, handleQueue, handleMoveToKanbanColumn, handleTaskClick]);
+  }), [handleRetry, handleKill, handlePause, handleResume, handleQueue, handleMoveToKanbanColumn, handleTaskClick]);
 
   return {
     // Data

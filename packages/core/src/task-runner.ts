@@ -91,6 +91,12 @@ export class TaskRunner {
       }
       const recoveredContinuation = await this.recoverInterruptedDirections(run);
       const task = await this.ctx.registry.getTask(run.taskId);
+      // A paused task: the run its pause stopped ends as "paused", never as a result (no review,
+      // no retry). Its session and outcomes stay: resuming continues it.
+      if (task?.status === "paused") {
+        await this.finishPausedRun(run, task);
+        continue;
+      }
       const queuedContinuation = (task?.status === "pending" || recoveredContinuation) && this.ctx.taskControlStore
         ? (await this.ctx.taskControlStore.listDirections(run.taskId)).some(
             (direction) => direction.mode === "continue" && direction.status === "queued",
@@ -158,17 +164,37 @@ export class TaskRunner {
     }
   }
 
+  /** The run a pause stopped: closed as "paused", its session and outcomes kept, no result. */
+  private async finishPausedRun(run: RunRecord, task: Task): Promise<void> {
+    await this.finishTaskRun(run, "paused");
+    this.knownRunContexts.delete(run.id);
+    const sid = run.sessionId ?? run.activity.sessionId;
+    const patch: Partial<Task> = {};
+    if (sid) patch.sessionId = sid;
+    // what it produced before the pause stays; the continuation adds to it (by id: never twice)
+    if (run.outcomes?.length) {
+      const fresh = new Set(run.outcomes.map((o) => o.id));
+      patch.outcomes = [...(task.outcomes ?? []).filter((o) => !fresh.has(o.id)), ...run.outcomes];
+    }
+    if (Object.keys(patch).length) {
+      try { await this.ctx.registry.updateTask(run.taskId, patch); } catch { /* task may already be gone */ }
+    }
+    this.ctx.emitter.emit("log", { level: "info", message: `[${run.taskId}] Run ${run.id} stopped: the task is paused` });
+    await this.ctx.runStore.deleteRun(run.id);
+    this.staleWarned.delete(run.taskId);
+  }
+
   /** Close a terminal run's entry in Task.runs (status, end, duration, exit code, engine report). */
-  private async finishTaskRun(run: RunRecord): Promise<void> {
+  private async finishTaskRun(run: RunRecord, as?: "paused"): Promise<void> {
     try {
       const task = await this.ctx.registry.getTask(run.taskId);
       const entry = task?.runs?.find((r) => r.runId === run.id);
       if (!task || !entry) return;
-      const status = run.status === "running" ? "failed" : run.status;
+      const status = as ?? (run.status === "running" ? "failed" : run.status);
       const finished = finishRunContext(entry, {
         status,
         endedAt: run.updatedAt,
-        ...(run.result ? { exitCode: run.status === "killed" ? 1 : run.result.exitCode, durationMs: run.result.duration || undefined } : {}),
+        ...(run.result ? { exitCode: run.status === "killed" && !as ? 1 : run.result.exitCode, durationMs: run.result.duration || undefined } : {}),
       }, run.activity?.runContext);
       if (run.activity?.totalTokens && finished.cost?.tokens === undefined) finished.cost = { ...finished.cost, tokens: run.activity.totalTokens };
       await this.ctx.registry.updateTask(run.taskId, { runs: upsertTaskRun(task.runs, finished) });
@@ -211,7 +237,8 @@ export class TaskRunner {
 
     if (recoveredContinuation) {
       const task = await this.ctx.registry.getTask(run.taskId);
-      if (task && task.status !== "draft" && task.status !== "awaiting_approval") {
+      // a paused task keeps the continuation queued: it runs when the task is resumed
+      if (task && task.status !== "draft" && task.status !== "awaiting_approval" && task.status !== "paused") {
         await this.ctx.registry.unsafeSetStatus(
           run.taskId,
           "pending",
@@ -502,7 +529,8 @@ export class TaskRunner {
         await this.ctx.runStore.completeRun(run.id, "failed", {
           exitCode: 1, stdout: "", stderr: "Runner process died", duration: 0,
         });
-        await this.finishTaskRun({ ...run, status: "failed", result: { exitCode: 1, stdout: "", stderr: "Runner process died", duration: 0 } });
+        const paused = (await this.ctx.registry.getTask(run.taskId))?.status === "paused";
+        await this.finishTaskRun({ ...run, status: "failed", result: { exitCode: 1, stdout: "", stderr: "Runner process died", duration: 0 } }, paused ? "paused" : undefined);
         await this.ctx.runStore.deleteRun(run.id);
       }
     }
@@ -601,8 +629,14 @@ export class TaskRunner {
       return;  // task stays pending — will be re-evaluated next tick
     }
 
-    await this.ctx.registry.transition(task.id, "assigned");
-    await this.ctx.registry.transition(task.id, "in_progress");
+    try {
+      await this.ctx.registry.transition(task.id, "assigned");
+      await this.ctx.registry.transition(task.id, "in_progress");
+    } catch (err) {
+      // paused meanwhile (a person, between the tick's snapshot and now): it waits to be resumed
+      if ((await this.ctx.registry.getTask(task.id))?.status === "paused") return;
+      throw err;
+    }
 
     // Set phase if not already set (new tasks start in execution phase)
     if (!task.phase) {
@@ -803,6 +837,16 @@ export class TaskRunner {
         configPath: spawnResult.configPath,
       };
       await this.ctx.runStore.upsertRun(runRecord);
+
+      // Paused while the runner was starting (no run to stop yet): stop it now, as the pause would
+      // have. The run ends as "paused" and resuming continues it.
+      const now2 = await this.ctx.registry.getTask(task.id);
+      if (now2?.status === "paused") {
+        if (now2.pause && !now2.pause.runId) {
+          await this.ctx.registry.updateTask(task.id, { pause: { ...now2.pause, runId } }).catch(() => undefined);
+        }
+        try { this.ctx.spawner.kill(spawnResult.pid); } catch { /* already gone */ }
+      }
 
       // where and with what this run executes (no secrets): the task keeps one entry per run
       let runCtx: ReturnType<typeof buildRunContext> | undefined;

@@ -159,6 +159,7 @@ const taskStatusConfig: Record<TaskStatus, TaskNodeStatusStyle> = {
   review: nodeStatus("review", true),
   done: nodeStatus("done", true),
   failed: nodeStatus("failed", true),
+  paused: nodeStatus("paused", true),
 };
 
 const notReachedNodeStatus: TaskNodeStatusStyle = { icon: taskNotReachedStyle.icon, color: taskNotReachedStyle.color, label: taskNotReachedStyle.short, nodeColor: taskNotReachedStyle.border };

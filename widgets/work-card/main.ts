@@ -8,8 +8,8 @@
  *   and outcomes.
  * - Mission, inline: status, what it cost against its budget (a bar; paused when over), cost by
  *   engine, and its tasks with their latest run and failure. Full screen: every task, cost by agent.
- * - Actions: Open (full screen), Refresh, and Ask (a chat message, so the model follows up: why it
- *   failed, how it is going). Several cards of the same task or mission: the newest stays live.
+ * - Actions: Open (full screen), Refresh, Ask (a chat message, so the model follows up: why it
+ *   failed, how it is going), and Pause / Resume for a task (polpo_task_pause / polpo_task_resume). Several cards of the same task or mission: the newest stays live.
  *
  * Built by widgets/build.mjs into one HTML file (src/server/mcp-widgets.generated.ts).
  */
@@ -45,6 +45,7 @@ function render(): void {
     card, pending, error, locale: ctx.locale ?? navigator.language, timeZone: ctx.timeZone,
     full: fullscreen(), canFullscreen: canFullscreen(), busy, superseded,
     onOpen: () => void openFull(), onAsk: () => void ask(), onRefresh: () => void refresh(),
+    onPause: () => void setPaused(true), onResume: () => void setPaused(false),
   });
 }
 
@@ -87,6 +88,22 @@ async function refresh(): Promise<void> {
     render();
     tellModel();
   }
+}
+
+/** Pause or resume the card's task (polpo_task_pause / polpo_task_resume), then show it again. */
+async function setPaused(pause: boolean): Promise<void> {
+  if (!card || card.kind !== "task" || busy || superseded) return;
+  busy = true;
+  render();
+  try {
+    const res = await app.callServerTool({ name: pause ? "polpo_task_pause" : "polpo_task_resume", arguments: { id: card.task.id } });
+    if (res.isError) throw new Error(res.content?.map((x) => ("text" in x ? x.text : "")).join(" ") || "error");
+  } catch (err) {
+    error = err instanceof Error ? err.message : String(err);
+  } finally {
+    busy = false;
+  }
+  await refresh();
 }
 
 /** What the person sees full screen, for the model's next turn (only the live card speaks). */

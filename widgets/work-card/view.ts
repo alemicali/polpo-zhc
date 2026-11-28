@@ -25,6 +25,8 @@ export const STRINGS = {
     kind: { model_access: "Model not enabled", auth: "Authentication", budget: "Spend limit", killed: "Stopped", assessment: "Review", error: "Error" } as Record<string, string>,
     status: { pending: "Pending", assigned: "Assigned", in_progress: "In progress", review: "In review", done: "Done", failed: "Failed", awaiting_approval: "To approve", draft: "Draft", missing: "Missing", not_reached: "Not reached", running: "Running", completed: "Completed", killed: "Stopped", active: "Active", paused: "Paused", cancelled: "Cancelled", scheduled: "Scheduled", recurring: "Recurring" } as Record<string, string>,
     error: "Could not load the card",
+    pause: "Pause", resume: "Resume", pausedBy: (by: string | undefined, at: string) => `Paused${by ? ` by ${by}` : ""} ${at}`,
+    pausedTakeover: "Waiting for a person to take over the computer: completing the takeover resumes it.",
     chose: (node: string, branch: string | null) => `Decision ${node} chose ${branch ?? "no branch"}`,
     notReachedWhy: "The decision took another branch: this task was closed without running.",
   },
@@ -43,6 +45,8 @@ export const STRINGS = {
     kind: { model_access: "Modello non abilitato", auth: "Autenticazione", budget: "Limite di spesa", killed: "Fermato", assessment: "Verifica", error: "Errore" } as Record<string, string>,
     status: { pending: "In coda", assigned: "Assegnato", in_progress: "In corso", review: "In verifica", done: "Fatto", failed: "Fallito", awaiting_approval: "Da approvare", draft: "Bozza", missing: "Mancante", not_reached: "Non raggiunto", running: "In corso", completed: "Completata", killed: "Fermata", active: "Attiva", paused: "In pausa", cancelled: "Annullata", scheduled: "Programmata", recurring: "Ricorrente" } as Record<string, string>,
     error: "Non riesco a caricare la scheda",
+    pause: "Metti in pausa", resume: "Riprendi", pausedBy: (by: string | undefined, at: string) => `In pausa${by ? ` da ${by}` : ""} ${at}`,
+    pausedTakeover: "In attesa che una persona prenda il controllo del computer: completare la presa di controllo lo riprende.",
     chose: (node: string, branch: string | null) => `La decisione ${node} ha scelto ${branch ?? "nessun ramo"}`,
     notReachedWhy: "La decisione ha preso un altro ramo: questo task è stato chiuso senza essere eseguito.",
   },
@@ -66,6 +70,9 @@ export interface ViewEnv {
   onOpen?: () => void;
   onAsk?: () => void;
   onRefresh?: () => void;
+  /** Pause (pending, assigned, in progress) or resume (paused) the card's task. */
+  onPause?: () => void;
+  onResume?: () => void;
 }
 
 let env: ViewEnv = { full: false, canFullscreen: false, busy: false, superseded: false };
@@ -157,9 +164,14 @@ function header(title: string, subtitle: string, status: string, s: Strings, ext
     extra, chip(s, status, false));
 }
 
-function actions(s: Strings): HTMLElement {
+/** Statuses a task can be paused from (state-machine.ts PAUSABLE_STATUSES). */
+const PAUSABLE = new Set(["pending", "assigned", "in_progress"]);
+
+function actions(s: Strings, task?: Pick<CardTaskRef, "status">): HTMLElement {
   return h("div", { class: "actions" },
     env.canFullscreen && !env.full ? h("button", { class: "btn btn-primary", disabled: env.superseded, onclick: () => env.onOpen?.() }, s.open) : null,
+    task?.status === "paused" && env.onResume ? h("button", { class: "btn btn-primary", disabled: env.superseded || env.busy, onclick: () => env.onResume?.() }, s.resume) : null,
+    task && PAUSABLE.has(task.status) && env.onPause ? h("button", { class: "btn", disabled: env.superseded || env.busy, onclick: () => env.onPause?.() }, s.pause) : null,
     h("button", { class: "btn", disabled: env.superseded, onclick: () => env.onAsk?.() }, s.ask),
     h("button", { class: "btn", disabled: env.superseded || env.busy, onclick: () => env.onRefresh?.() }, s.refresh));
 }
@@ -189,6 +201,10 @@ export function taskView(c: TaskCard, s: Strings, full: boolean): HTMLElement {
     header(tk.title, [tk.id, tk.group].filter(Boolean).join(" · "), tk.notReached ? "not_reached" : tk.status, s,
       c.toolScope ? h("span", { class: "chip chip-info", title: c.toolScope.label }, s.toolsRestricted) : null),
     tk.failure ? failureBox(tk.failure, s) : null,
+    tk.status === "paused" && tk.pause ? h("div", { class: "paused", role: "status" },
+      h("div", {}, s.pausedBy(tk.pause.by, formatTime(tk.pause.at))),
+      tk.pause.reason ? h("p", { class: "prose" }, tk.pause.reason) : null,
+      tk.pause.takeover ? h("div", { class: "small muted" }, s.pausedTakeover) : null) : null,
     tk.notReached ? h("div", { class: "not-reached", title: s.chose(tk.notReached.node, tk.notReached.branch) },
       h("div", {}, s.chose(tk.notReached.node, tk.notReached.branch), tk.notReached.answer ? h("span", { class: "muted" }, ` (${tk.notReached.answer})`) : null),
       h("div", { class: "small muted" }, s.notReachedWhy)) : null,
@@ -197,7 +213,7 @@ export function taskView(c: TaskCard, s: Strings, full: boolean): HTMLElement {
       h("div", { class: "row-main" }, runLine(r, s, true), h("div", { class: "muted small" }, `${r.runId} · ${formatTime(r.startedAt)}`)), chip(s, r.status)))) : null,
     full && c.result?.text ? h("section", {}, h("h3", {}, s.result), h("p", { class: "prose" }, c.result.text)) : null,
     full && c.outcomes.length ? h("section", {}, h("h3", {}, s.outcomes), ...c.outcomes.map((o) => h("div", { class: "row" }, h("div", { class: "row-main" }, h("div", {}, o.label), o.ref ? h("div", { class: "muted small" }, o.ref) : null), h("span", { class: "chip chip-sm" }, o.type)))) : null,
-    actions(s),
+    actions(s, tk),
     full ? h("p", { class: "muted small foot" }, `${s.updated} ${formatTime(c.generatedAt)}`) : null);
 }
 
