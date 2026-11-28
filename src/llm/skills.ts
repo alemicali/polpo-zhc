@@ -46,7 +46,7 @@ import {
   installSkillBundle, listSkillFiles, parseSkillBundle,
   type BundleInstallOptions, type BundleInstallResult, type ParsedSkillBundle, type SkillFileEntry,
 } from "./skill-bundle.js";
-import { markSkillDeleted, withSkillVersion, type SkillVersionSource } from "./skill-versions.js";
+import { markSkillDeleted, runtimeSkillDir, withSkillVersion, type SkillVersionMode, type SkillVersionSource } from "./skill-versions.js";
 
 // ── Types ──
 
@@ -337,17 +337,26 @@ export function loadAgentSkills(
   return [];
 }
 
-/** Load SKILL.md content for a discovered skill. Returns null if unreadable. */
-export function loadSkillContent(info: SkillInfo): LoadedSkill | null {
-  const skillPath = resolve(info.path, "SKILL.md");
+/**
+ * Load SKILL.md content for a discovered skill, as agents run it: its production version when the
+ * skill is versioned (`<pool>/.production/<name>/`, see skill-versions.ts), so a pending draft —
+ * dashboard edits not yet published, files changed on disk — never reaches agents. A skill not yet
+ * under versioning loads from its folder. Returns null if unreadable.
+ */
+export function loadSkillContent(info: SkillInfo, opts: { view?: "production" | "draft" } = {}): LoadedSkill | null {
+  const source = opts.view === "draft" ? info.path : runtimeSkillDir(info.path);
+  const skillPath = resolve(source, "SKILL.md");
   try {
     const raw = readFileSync(skillPath, "utf-8");
     let dir: string | undefined;
-    try { dir = realpathSync(info.path); } catch { dir = undefined; }
+    try { dir = realpathSync(source); } catch { dir = undefined; }
     const listed = dir ? listSkillFiles(dir, MAX_PROMPT_FILES + 1) : { files: [], truncated: false };
     const files = listed.files.filter((f) => f.path !== "SKILL.md");
+    // production's description and expected tools (the folder may hold a draft)
+    const fm = source !== info.path ? parseSkillFrontmatter(raw) : null;
     return {
       ...info,
+      ...(fm ? { description: fm.description || info.description, allowedTools: fm.allowedTools } : {}),
       content: extractBody(raw),
       ...(dir ? { dir } : {}),
       ...(files.length ? { files: files.slice(0, MAX_PROMPT_FILES) } : {}),
@@ -366,6 +375,8 @@ export function getSkillByName(
   polpoDir: string,
   name: string,
   pool: "agent" | "orchestrator" = "agent",
+  /** "production" (default): what agents run; "draft": the skill's folder (pending changes included). */
+  view: "production" | "draft" = "production",
 ): LoadedSkill | null {
   const skills = pool === "orchestrator"
     ? discoverOrchestratorSkills(polpoDir)
@@ -373,7 +384,7 @@ export function getSkillByName(
 
   const info = skills.find(s => s.name === name);
   if (!info) return null;
-  return loadSkillContent(info);
+  return loadSkillContent(info, { view });
 }
 
 // ── Skill assignment helpers ──
@@ -457,7 +468,7 @@ const SAFE_SKILL_NAME_RE = /^[A-Za-z0-9._-]+$/;
 const RESERVED_OBJECT_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 export function isSafeSkillName(name: unknown): name is string {
-  return typeof name === "string" && SAFE_SKILL_NAME_RE.test(name) && name !== "." && name !== ".."
+  return typeof name === "string" && SAFE_SKILL_NAME_RE.test(name) && name !== "." && name !== ".." && name !== ".production"
     && name.length <= 128 && !RESERVED_OBJECT_KEYS.has(name);
 }
 
@@ -732,14 +743,14 @@ export function skillNamesIn(poolDir: string): Set<string> {
 export function installSkillBundleToPool(
   polpoDir: string,
   bundle: ParsedSkillBundle,
-  options: BundleInstallOptions & { pool?: SkillPool; global?: boolean; author?: string; source?: SkillVersionSource } = {},
+  options: BundleInstallOptions & { pool?: SkillPool; global?: boolean; author?: string; source?: SkillVersionSource; mode?: SkillVersionMode } = {},
 ): BundleInstallResult {
   const pool = options.pool ?? "agent";
   const dir = skillPoolDir(polpoDir, pool, options.global);
   return installSkillBundle(bundle, dir, {
     ...options,
     existingNames: [...skillNamesIn(dir), ...(options.existingNames ?? [])],
-    wrap: (name, write) => withSkillVersion(polpoDir, { pool, global: options.global, name }, { author: options.author, source: options.source ?? "upload" }, write),
+    wrap: (name, write) => withSkillVersion(polpoDir, { pool, global: options.global, name }, { author: options.author, source: options.source ?? "upload", ...(options.mode ? { mode: options.mode } : {}) }, write),
   });
 }
 
@@ -1107,10 +1118,12 @@ export function updateAgentSkill(
   updates: { description?: string; content?: string; allowedTools?: string[] },
   global = false,
   author?: string,
+  /** "publish" (default): published at once as a new version in production; "draft": left in the draft. */
+  publish?: { mode?: SkillVersionMode; note?: string; bump?: "major" | "minor" | "patch"; version?: string },
 ): boolean {
   const targetBase = global ? join(getGlobalPolpoDir(), "skills") : join(polpoDir, "skills");
   if (!isSafeSkillName(name) || !existsSync(join(targetBase, name, "SKILL.md"))) return false;
-  return withSkillVersion(polpoDir, { pool: "agent", global, name }, { author, source: "edit" }, () => updateSkillIn(targetBase, name, updates));
+  return withSkillVersion(polpoDir, { pool: "agent", global, name }, { author, source: "edit", ...publish }, () => updateSkillIn(targetBase, name, updates));
 }
 
 /**
@@ -1123,12 +1136,14 @@ export function updateOrchestratorSkill(
   updates: { description?: string; content?: string; allowedTools?: string[] },
   global = false,
   author?: string,
+  /** "publish" (default): published at once as a new version in production; "draft": left in the draft. */
+  publish?: { mode?: SkillVersionMode; note?: string; bump?: "major" | "minor" | "patch"; version?: string },
 ): boolean {
   const targetBase = global
     ? join(getGlobalPolpoDir(), ORCHESTRATOR_AGENT_DIR, "skills")
     : join(polpoDir, ORCHESTRATOR_AGENT_DIR, "skills");
   if (!isSafeSkillName(name) || !existsSync(join(targetBase, name, "SKILL.md"))) return false;
-  return withSkillVersion(polpoDir, { pool: "orchestrator", global, name }, { author, source: "edit" }, () => updateSkillIn(targetBase, name, updates));
+  return withSkillVersion(polpoDir, { pool: "orchestrator", global, name }, { author, source: "edit", ...publish }, () => updateSkillIn(targetBase, name, updates));
 }
 
 function updateSkillIn(

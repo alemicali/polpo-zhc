@@ -101,7 +101,7 @@ export const POLPO_TOOL_GROUPS: ToolGroupRule[] = [
     names: ["list_orchestrator_skills", "create_orchestrator_skill", "update_orchestrator_skill", "remove_orchestrator_skill",
       "install_orchestrator_skill", "list_agent_skills", "create_agent_skill", "install_agent_skill", "remove_agent_skill",
       "search_skills", "get_skill", "tag_skill", "skill_update",
-      "skill_upload_prepare", "skill_upload_finalize", "skill_files", "skill_file_read", "skill_versions", "skill_version_diff", "skill_restore", "list_playbooks", "get_playbook", "create_playbook", "instantiate_playbook",
+      "skill_upload_prepare", "skill_upload_finalize", "skill_files", "skill_file_read", "skill_versions", "skill_version_diff", "skill_restore", "skill_publish", "skill_rollback", "skill_draft", "list_playbooks", "get_playbook", "create_playbook", "instantiate_playbook",
       "run_playbook", "delete_playbook"],
   },
   { id: "ink", label: "Ink Hub (skills and packages)", prefixes: ["ink_"] },

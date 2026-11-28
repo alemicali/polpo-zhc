@@ -1936,6 +1936,7 @@ export function createApp(orchestrator: Orchestrator, sseBridge: SSEBridge, opts
     emit: (event, data) => o.emit(event, data),
     // who changes a skill, recorded in its versions: a person, Polpo's chat, an agent, or an MCP client
     author: (c) => requestAuthor(c),
+    autoPublish: () => o.autoPublishSkillUpdates(),
   })));
 
   authed.route("/notifications", notificationRoutes(() => ({

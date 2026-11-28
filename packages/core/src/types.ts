@@ -1160,6 +1160,17 @@ export interface PolpoSettings {
       autoDeployApiUpdates?: boolean;
     };
   };
+  /** Skill lifecycle: draft, publish to production, rollback. */
+  skills?: {
+    versioning?: {
+      /**
+       * An API, MCP or Polpo chat change to a skill without a publish flag is published to production
+       * at once ("Applied directly"), so existing clients keep their immediate effect. Default true.
+       * The dashboard always edits the draft and publishes explicitly.
+       */
+      autoPublishApiUpdates?: boolean;
+    };
+  };
   /** Where agents' tools run: default sandbox and what lower levels may choose. */
   sandbox?: import("./sandbox.js").SandboxSettings;
   /** Persistent machines agents work on (agent.defaultComputer); "host" (this server) is implicit. */

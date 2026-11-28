@@ -67,19 +67,21 @@ describe("recording", () => {
     expect(existsSync(join(polpoDir, "skills", "alpha", "1"))).toBe(false);
   });
 
-  it("a skill that predates versioning (or was changed on disk) is captured first, as external", () => {
+  it("a skill that predates versioning is captured first as 1.0.0; outside changes ride along a direct publish, flagged external", () => {
     const dir = join(polpoDir, "skills", "legacy");
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "SKILL.md"), skillMd("legacy", "Old."));
     updateAgentSkill(polpoDir, "legacy", { content: "New." }, false, "person:ada@example.com");
-    expect(versions("legacy").map((v) => [v.version, v.source, v.author])).toEqual([[2, "edit", "person:ada@example.com"], [1, "external", "unknown"]]);
-    // changed outside Polpo, then edited: the outside state is kept too
+    expect(versions("legacy").map((v) => [v.version, v.semver, v.source, v.author])).toEqual([
+      [2, "1.0.1", "edit", "person:ada@example.com"], [1, "1.0.0", "external", "system:migration"],
+    ]);
+    // changed outside Polpo, then edited directly: one version holding both, flagged external
     writeFileSync(join(dir, "notes.md"), "hand-made");
     updateAgentSkill(polpoDir, "legacy", { content: "Newer." }, false, "coach");
-    expect(versions("legacy").map((v) => v.source)).toEqual(["edit", "external", "edit", "external"]);
+    expect(versions("legacy").map((v) => [v.semver, v.source, !!v.external])).toEqual([["1.1.0", "edit", true], ["1.0.1", "edit", false], ["1.0.0", "external", false]]);
     // nothing changed: nothing recorded
     updateAgentSkill(polpoDir, "legacy", { content: "Newer." }, false, "coach");
-    expect(versions("legacy")).toHaveLength(4);
+    expect(versions("legacy")).toHaveLength(3);
   });
 
   it("a local install with force records the replaced skill and the new one (source local)", () => {
@@ -156,8 +158,8 @@ describe("restore and delete", () => {
   it("restore round trip: the current state is kept, the restore is a new version", () => {
     installSkillBundleToPool(polpoDir, parseSkillBundle(zipOf({ "r/SKILL.md": skillMd("r", "first"), "r/a.md": "a" })));
     installSkillBundleToPool(polpoDir, parseSkillBundle(zipOf({ "r/SKILL.md": skillMd("r", "second"), "r/b.md": "b" })), { onConflict: "replace" });
-    const v = restoreSkillVersion(polpoDir, agent("r"), 1, "person:ada@example.com");
-    expect(v).toMatchObject({ version: 3, source: "restore", restoredFrom: 1, author: "person:ada@example.com" });
+    const r = restoreSkillVersion(polpoDir, agent("r"), 1, "person:ada@example.com");
+    expect(r.published).toMatchObject({ version: 3, source: "restore", restoredFrom: 1, author: "person:ada@example.com" });
     const dir = join(polpoDir, "skills", "r");
     expect(readFileSync(join(dir, "SKILL.md"), "utf8")).toContain("first");
     expect(existsSync(join(dir, "a.md"))).toBe(true);
@@ -180,7 +182,9 @@ describe("restore and delete", () => {
     expect(readFileSync(join(polpoDir, "skills", "gone", "SKILL.md"), "utf8")).toContain("kept");
     const back = listSkillVersions(polpoDir, agent("gone"))!;
     expect(back.deletedAt).toBeUndefined();
-    expect(back.versions[0]).toMatchObject({ version: 2, source: "restore" });
+    // brought back exactly as it was: its last version is production again
+    expect(back.current).toBe(1);
+    expect(back.events?.[0]).toMatchObject({ action: "publish", to: "1.0.0" });
     // delete again; 31 days later the history is purged
     removeSkill(polpoDir, "gone");
     expect(purgeDeletedSkillVersions(polpoDir, "agent", false, Date.now() + 29 * 86_400_000)).toEqual([]);
@@ -218,7 +222,7 @@ describe("REST", () => {
       expect(restored.status).toBe(200);
       expect((await restored.json() as any).data).toMatchObject({ restoredFrom: 1, version: { version: 3, source: "restore", author: "person:ada@example.com" } });
       const dl = await a.request(`${prefix}/${name}/versions/2/download`);
-      expect(dl.headers.get("content-disposition")).toContain(`${name}-v2.skill`);
+      expect(dl.headers.get("content-disposition")).toContain(`${name}-1.0.1.skill`);
       expect(parseSkillBundle(Buffer.from(await dl.arrayBuffer())).preview.skills[0].name).toBe(name);
     }
     expect(emit).toHaveBeenCalledWith("skill:changed", expect.objectContaining({ action: "updated", skillName: "alpha" }));
@@ -283,18 +287,18 @@ describe("MCP", () => {
     const list = await call("polpo_skill_versions", { name: "alpha" });
     expect(list.structuredContent).toMatchObject({ name: "alpha", current: 2, total: 2 });
     expect(list.structuredContent.versions[0]).toMatchObject({ version: 2, author: "mcp:Claude", source: "edit", current: true });
-    expect(list.content[0].text).toContain("v2 (current)");
+    expect(list.content[0].text).toContain("1.0.1 (production)");
     const diff = await call("polpo_skill_version_diff", { name: "alpha", a: 1, b: 2 });
     expect(diff.structuredContent.files).toEqual([{ path: "SKILL.md", status: "changed", additions: 1, deletions: 1 }]);
     expect(diff.structuredContent.diff).toContain("-one\n+two");
     const unconfirmed = await call("polpo_skill_restore", { name: "alpha", version: 1 });
     expect(unconfirmed).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/confirm: true/) }] });
     const restored = await call("polpo_skill_restore", { name: "alpha", version: 1, confirm: true });
-    expect(restored.structuredContent).toEqual({ name: "alpha", restored_from: 1, version: 3 });
+    expect(restored.structuredContent).toEqual({ name: "alpha", restored_from: 1, version: 3, published: "1.0.2", draft: false });
     expect(readFileSync(join(polpoDir, "skills", "alpha", "SKILL.md"), "utf8")).toContain("one");
     const got = await call("polpo_skill_get", { name: "alpha" });
     expect(got.structuredContent.skill).toMatchObject({ versions: 3, current_version: 3 });
-    expect(got.content[0].text).toMatch(/versions: 3 \(current v3/);
+    expect(got.content[0].text).toMatch(/version: 1\.0\.2 in production .*3 versions/);
     expect(await call("polpo_skill_version_diff", { name: "alpha", a: 1, b: 9 })).toMatchObject({ isError: true });
     // the scope matrix: list and diff are reads, restore needs admin
     const tools = (await (await rpc("tools/list")).json()).result.tools as Array<{ name: string; annotations: Record<string, unknown> }>;
