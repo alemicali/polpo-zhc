@@ -3086,13 +3086,18 @@ export interface Connector {
   access: { agents: string[] | "*"; polpo: boolean };
   /** Who it belongs to; missing = { kind: "org" }. An agent's own connector is only ever enabled for that agent. */
   scope?: ConnectorScope;
+  /** scope "identity": the accounts the identities connected (no secrets: only which are set). */
+  accounts?: ConnectorAccount[];
+  /** scope "identity": how many accounts, and how many are connected. */
+  accountSummary?: { total: number; connected: number };
   enabled: boolean;
   /** The catalog entry it came from (another account of the same app shares it). */
   catalogId?: string;
   toolPolicy?: Record<string, ConnectorToolPolicy>;
   createdAt: string;
   updatedAt?: string;
-  status?: ConnectorStatus;
+  /** A per-identity connector's comes from its accounts: "partial" when only some are connected. */
+  status?: ConnectorStatus | "partial";
   lastError?: string;
   toolCount?: number;
   lastConnectedAt?: string;
@@ -3100,10 +3105,91 @@ export interface Connector {
 }
 
 /**
- * Who a connector belongs to: the organization ("org": its access decides which agents use it) or one
- * agent ("agent": only that agent can ever use it; access.agents is [agent] or [], never "*").
+ * Who a connector belongs to: the organization ("org": its access decides which agents use it), one
+ * agent ("agent": only that agent can ever use it; access.agents is [agent] or [], never "*"), or
+ * per identity ("identity": one connector for the app, each agent / person connects its own
+ * accounts; `fallback` lets identities without one use the organization's shared account).
  */
-export type ConnectorScope = { kind: "org" } | { kind: "agent"; agent: string };
+export type ConnectorScope = { kind: "org" } | { kind: "agent"; agent: string } | { kind: "identity"; fallback?: boolean };
+
+/**
+ * Whose an account of a per-identity connector is: "agent:<name>", "person:<email>" (a member;
+ * "person:_shared" without sign-in) or "org" (the fallback account).
+ */
+export type ConnectorIdentity = string;
+
+/** One account of a per-identity connector (its credentials stay in the vault: only which are set). */
+export interface ConnectorAccount {
+  id: string;
+  identity: ConnectorIdentity;
+  /** "agent nina", "ada@acme.com", "the organization (fallback)". */
+  identityLabel?: string;
+  /** A person's account that is the signed-in caller's own. */
+  isMe?: boolean;
+  /** What its owner picks it by (`account: "sitoinchat"` on any of the connector's tools). */
+  label: string;
+  /** Its identity's default account. */
+  default?: boolean;
+  /** The signed-in account (e.g. an email), when known. */
+  account?: string;
+  /** The connector it was imported from. */
+  importedFrom?: string;
+  status?: ConnectorStatus;
+  lastError?: string;
+  toolCount?: number;
+  lastConnectedAt?: string;
+  createdAt: string;
+  updatedAt?: string;
+  secrets?: { bearerToken: boolean; headers: string[]; oauth: { authorized: boolean; pending?: boolean } };
+}
+
+/** POST /connectors/:id/accounts. Token-based apps take the account's token here (write-only). */
+export interface ConnectorAccountCreateInput {
+  /** "agent:<name>", "person:<email>", "org" (the fallback account) or "me" (the person calling). */
+  identity: ConnectorIdentity | "me";
+  label: string;
+  default?: boolean;
+  secrets?: { bearerToken?: string; headers?: Record<string, string> };
+}
+
+/** PATCH /connectors/:id/accounts/:account. */
+export interface ConnectorAccountUpdateInput {
+  label?: string;
+  /** true makes it its identity's default. */
+  default?: true;
+  secrets?: { bearerToken?: string; headers?: Record<string, string> };
+}
+
+/** POST /connectors/:id/accounts/import: another connector of the same app becomes an account. */
+export interface ConnectorAccountImportInput {
+  from: string;
+  /** Default: the source's owner (an agent's own connector). */
+  identity?: ConnectorIdentity | "me";
+  /** Default: the source's signed-in account, else its name. */
+  label?: string;
+  default?: boolean;
+  /** false: turn the source off instead of deleting it (default true). */
+  removeSource?: boolean;
+}
+
+/** POST /connectors/:id/convert: a new per-identity connector made from this one, which becomes its first account. */
+export interface ConnectorConvertInput {
+  /** Default: the catalog id, else the name, made unique. */
+  id?: string;
+  name?: string;
+  /** Default: the source's owner (an agent's own connector). */
+  identity?: ConnectorIdentity | "me";
+  label?: string;
+  fallback?: boolean;
+  removeSource?: boolean;
+}
+
+export interface ConnectorAccountImportResult {
+  account: ConnectorAccount;
+  source: { id: string; removed: boolean; disabled: boolean };
+  renamed: { from: string; to: string };
+  connector: Connector;
+}
 
 /** POST /connectors (the fields an SDK caller sets; secrets are entered in the dashboard). */
 export interface ConnectorCreateInput {

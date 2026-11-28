@@ -62,6 +62,14 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_connector_update", name: "connector_update", group: "connectors" },
   { mcp: "polpo_connector_test", name: "connector_test", group: "connectors" },
   { mcp: "polpo_connector_disconnect", name: "connector_disconnect", group: "connectors" },
+  // Per-identity connectors: each agent / person connects its own accounts (sign-in from a link, never a secret in chat)
+  { mcp: "polpo_connector_accounts", name: "connector_accounts", group: "connectors" },
+  { mcp: "polpo_connector_account_add", name: "connector_account_add", group: "connectors" },
+  { mcp: "polpo_connector_account_update", name: "connector_account_update", group: "connectors" },
+  { mcp: "polpo_connector_account_connect", name: "connector_account_connect", group: "connectors" },
+  { mcp: "polpo_connector_account_disconnect", name: "connector_account_disconnect", group: "connectors" },
+  { mcp: "polpo_connector_account_remove", name: "connector_account_remove", group: "connectors" },
+  { mcp: "polpo_connector_account_import", name: "connector_account_import", group: "connectors" },
   // Hosted MCP servers: Polpo builds and serves its own ("create a connector for Printful")
   { mcp: "polpo_mcp_servers_list", name: "mcp_servers_list", group: "hosted-servers" },
   { mcp: "polpo_mcp_server_get", name: "mcp_server_get", group: "hosted-servers" },

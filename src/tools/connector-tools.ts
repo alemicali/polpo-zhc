@@ -4,10 +4,15 @@
  * connector_add, the MCP server's own tool run in process (src/llm/polpo-mcp-bridge.ts): secrets
  * (tokens, OAuth app secrets) never pass through the chat, the person enters them from a setup link. Local (stdio) connectors
  * are not available here: they run a command on the server, so only an admin adds them via the API.
+ * Per-identity connectors' accounts are managed with connector_accounts / connector_account_* (also
+ * MCP tools run in process): each agent / person signs its own accounts in from a link.
  */
 import { Type } from "typebox";
 import type { Tool } from "@earendil-works/pi-ai";
-import { connectorGrants, connectorOwner, connectorVisibleTo, type ConnectorConfig } from "@polpo-ai/core";
+import {
+  agentConnectorIdentity, connectorAccountsOf, connectorFallbackOn, connectorGrants, connectorIdentityLabel, connectorOwner, connectorVisibleTo,
+  isIdentityConnector, ORG_CONNECTOR_IDENTITY, type ConnectorAccount, type ConnectorConfig,
+} from "@polpo-ai/core";
 import { CONNECTOR_CATALOG } from "../mcp/catalog.js";
 import type { ConnectorManager } from "../mcp/manager.js";
 import { allowPrivateNetwork } from "../mcp/net.js";
@@ -21,7 +26,8 @@ export const CONNECTOR_TOOLS: Tool[] = [
   {
     name: "connectors_list",
     description: "List the connectors (external apps over MCP: Linear, Notion, Gmail, GitHub, custom servers): status (connected, needs (re)authorization, error), "
-      + "tool count, who may use them (agents, Polpo). Several accounts of one app have their own ids (gmail, gmail-2…) and names. "
+      + "tool count, who may use them (agents, Polpo). Several accounts of one app have their own ids (gmail, gmail-2…) and names, unless the connector is "
+      + "per identity (one id for the app, each agent / person with its own accounts: connector_accounts). "
       + "With catalog: true, also the catalog of apps that can be added with connector_add (again, with a name, for another account).",
     parameters: Type.Object({
       catalog: Type.Optional(Type.Boolean({ description: "Also list the catalog of well-known apps (ids and names)" })),
@@ -77,12 +83,27 @@ export function noAccessNote(agent: string, c: Pick<ConnectorConfig, "id" | "nam
     + `Offer the person to grant it first (connector_update_access { id: "${c.id}", addAgents: ["${agent}"]${c.enabled ? "" : ", enabled: true"} }), then set the scope.`;
 }
 
-function describe(c: ConnectorConfig): string {
+const accountText = (a: ConnectorAccount) => `"${a.label}"${a.default ? " (default)" : ""}${a.account && a.account !== a.label ? ` = ${a.account}` : ""} ${a.status ?? "not connected yet"}`;
+
+/** A per-identity connector's accounts, by identity (`agent`: only its own, and the fallback when on). */
+function describeAccounts(c: ConnectorConfig, agent?: string): string {
+  const accounts = agent
+    ? [...connectorAccountsOf(c, agentConnectorIdentity(agent)), ...(connectorFallbackOn(c) ? connectorAccountsOf(c, ORG_CONNECTOR_IDENTITY) : [])]
+    : c.accounts ?? [];
+  if (!accounts.length) return agent ? `${agent} has no account on it yet (connector_account_add)` : "no account yet (connector_account_add)";
+  const byIdentity = new Map<string, ConnectorAccount[]>();
+  for (const a of accounts) byIdentity.set(a.identity, [...(byIdentity.get(a.identity) ?? []), a]);
+  return [...byIdentity].map(([identity, list]) => `${connectorIdentityLabel(identity)}: ${list.map(accountText).join(", ")}`).join("; ");
+}
+
+function describe(c: ConnectorConfig, agent?: string): string {
   const who = [c.access.agents === "*" ? "every agent" : c.access.agents.length ? `agents: ${c.access.agents.join(", ")}` : "no agent", c.access.polpo ? "Polpo" : ""].filter(Boolean).join(" + ");
   const owner = connectorOwner(c);
-  const scope = owner ? `${owner}'s own (personal: only ${owner} can ever use it)` : "org";
+  const scope = isIdentityConnector(c)
+    ? `per identity (each uses its own accounts${connectorFallbackOn(c) ? ", org fallback on" : ""}; accounts: ${describeAccounts(c, agent)})`
+    : owner ? `${owner}'s own (personal: only ${owner} can ever use it)` : "org";
   const where = c.transport.type === "stdio" ? `local command ${c.transport.command}` : c.transport.type === "hosted" ? `hosted by Polpo${c.hostedVersion ? ` (v${c.hostedVersion})` : ""}` : c.transport.url;
-  const status = c.enabled ? (c.status ?? "not connected yet") : "disabled";
+  const status = c.enabled ? (isIdentityConnector(c) ? "per identity" : c.status ?? "not connected yet") : "disabled";
   return `- ${connectorLabel(c)} [${c.id}${c.catalogId && c.catalogId !== c.id ? `, another ${c.catalogId} account` : ""}] ${status}${c.toolCount !== undefined ? `, ${c.toolCount} tools` : ""}${c.lastError ? ` (${c.lastError.slice(0, 160)})` : ""}; `
     + `auth ${c.auth.type}; scope ${scope}; used by ${who}; ${where}; tools mcp__${c.id}__*${c.iconAsset ? `; icon: ${c.iconAsset.pinned ? "set by the person" : `found (${c.iconAsset.source})`}` : ""}`;
 }
@@ -140,13 +161,13 @@ export async function executeConnectorTool(name: string, args: Record<string, un
             return picked === undefined || picked === "*" ? "all its tools" : picked.length ? `tools: ${picked.join(", ")}` : "no tools (its connectorTools select none)";
           };
           return [
-            mine.length ? `Connectors ${agent} may use:\n${mine.map((c) => `${describe(c)}; ${agent} gets ${toolsOf(c)}`).join("\n")}` : `No connector is granted to ${agent}.`,
+            mine.length ? `Connectors ${agent} may use:\n${mine.map((c) => `${describe(c, agent)}; ${agent} gets ${toolsOf(c)}`).join("\n")}` : `No connector is granted to ${agent}.`,
             ...(others.length ? [`${agent} has no access to: ${others.map((c) => `${connectorLabel(c)} (${c.id})${c.enabled ? "" : " (turned off)"}`).join(", ")}. `
               + `A task's toolScope never grants: to scope a task of ${agent} to one of these, offer the person to grant it first `
               + `(connector_update_access { id, addAgents: ["${agent}"] }), then set the scope.`] : []),
           ].join("\n");
         }
-        const lines = [list.length ? `Connectors:\n${list.map(describe).join("\n")}` : "No connectors yet."];
+        const lines = [list.length ? `Connectors:\n${list.map((c) => describe(c)).join("\n")}` : "No connectors yet."];
         if (args.catalog || typeof args.search === "string") {
           const words = typeof args.search === "string" ? args.search.toLowerCase().split(/\s+/).filter(Boolean) : [];
           const entries = CONNECTOR_CATALOG.filter((e) => words.every((w) => `${e.id} ${e.name} ${e.category} ${e.description}`.toLowerCase().includes(w)));
@@ -160,6 +181,10 @@ export async function executeConnectorTool(name: string, args: Record<string, un
       case "connector_connect": {
         const connector = manager.store.get(String(args.id ?? ""));
         if (!connector) return `No connector "${args.id}".`;
+        if (isIdentityConnector(connector)) {
+          return `${connectorLabel(connector)} (${connector.id}) is per identity: each account signs in on its own. `
+            + `Use connector_account_connect { id: "${connector.id}", account } (or connector_account_add for a new one; connector_accounts lists them).`;
+        }
         if (connector.auth.type === "oauth") return oauthLink(ctx, connector.id);
         const test = await manager.test(connector.id);
         return test.ok ? `${connector.name} is connected: ${test.tools?.length ?? 0} tools.` : `${connector.name} could not connect: ${test.error}`;

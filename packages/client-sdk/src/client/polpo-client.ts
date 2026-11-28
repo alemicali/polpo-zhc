@@ -12,6 +12,14 @@ import type { EditImageRequest, GenerateImageRequest, ImageNodeState, MediaCalle
 import type { CodingChatAccountInfo, CodingChatApproval, CodingChatCreateRequest, CodingChatEvent, CodingChatKind, CodingChatSession, CodingChatSummary } from "./coding-types.js";
 import type {
   Connector,
+  ConnectorAccount,
+  ConnectorAccountCreateInput,
+  ConnectorAccountImportInput,
+  ConnectorAccountImportResult,
+  ConnectorAccountUpdateInput,
+  ConnectorConvertInput,
+  ConnectorIdentity,
+  ConnectorStatus,
   ConnectorCreateInput,
   ConnectorTool,
   ConnectorUpdateInput,
@@ -969,6 +977,56 @@ export class PolpoClient {
    */
   updateConnector(id: string, patch: ConnectorUpdateInput): Promise<Connector> {
     return this.patch<Connector>(`/connectors/${encodeURIComponent(id)}`, patch);
+  }
+
+  // ── Per-identity connectors: accounts ──
+
+  /** A per-identity connector's accounts; `identity` ("agent:nina", "person:<email>", "org", "me") narrows to one identity's. */
+  getConnectorAccounts(id: string, identity?: ConnectorIdentity | "me"): Promise<{ accounts: ConnectorAccount[]; fallback: boolean }> {
+    return this.get(`/connectors/${encodeURIComponent(id)}/accounts${identity ? `?identity=${encodeURIComponent(identity)}` : ""}`);
+  }
+
+  /** Add an account (OAuth apps then sign in: startConnectorAccountOAuth). The identity's first account becomes its default. */
+  addConnectorAccount(id: string, input: ConnectorAccountCreateInput): Promise<{ account: ConnectorAccount; connector: Connector }> {
+    return this.post(`/connectors/${encodeURIComponent(id)}/accounts`, input);
+  }
+
+  /** Rename an account, make it its identity's default, or change its token. */
+  updateConnectorAccount(id: string, account: string, patch: ConnectorAccountUpdateInput): Promise<{ account: ConnectorAccount; connector: Connector }> {
+    return this.patch(`/connectors/${encodeURIComponent(id)}/accounts/${encodeURIComponent(account)}`, patch);
+  }
+
+  /** Remove an account (tokens revoked, secrets deleted). */
+  removeConnectorAccount(id: string, account: string): Promise<{ removed: boolean; connector: Connector }> {
+    return this.del(`/connectors/${encodeURIComponent(id)}/accounts/${encodeURIComponent(account)}`);
+  }
+
+  /** The OAuth link the account's owner opens to sign in (or authorized: true). */
+  startConnectorAccountOAuth(id: string, account: string): Promise<{ authorizationUrl?: string; authorized?: boolean; redirectUri: string }> {
+    return this.post(`/connectors/${encodeURIComponent(id)}/accounts/${encodeURIComponent(account)}/oauth/start`);
+  }
+
+  /** Connect the account and list the tools. */
+  testConnectorAccount(id: string, account: string): Promise<{ ok: boolean; status: ConnectorStatus; error?: string; tools?: Array<{ name: string; title?: string; description?: string }>; connector: Connector }> {
+    return this.post(`/connectors/${encodeURIComponent(id)}/accounts/${encodeURIComponent(account)}/test`);
+  }
+
+  /** Sign the account out (its OAuth tokens revoked and forgotten; the account stays). */
+  disconnectConnectorAccount(id: string, account: string): Promise<Connector> {
+    return this.post(`/connectors/${encodeURIComponent(id)}/accounts/${encodeURIComponent(account)}/disconnect`);
+  }
+
+  /** Turn a separate connector of the same app into an account of this per-identity connector (explicit, opt-in). */
+  importConnectorAccount(id: string, input: ConnectorAccountImportInput): Promise<ConnectorAccountImportResult> {
+    return this.post(`/connectors/${encodeURIComponent(id)}/accounts/import`, input);
+  }
+
+  /**
+   * In one step, a new per-identity connector made from an org / personal connector (same app, sign-in,
+   * tool policy, access), which becomes its first account (explicit, opt-in).
+   */
+  convertConnectorToIdentity(id: string, input: ConnectorConvertInput = {}): Promise<ConnectorAccountImportResult> {
+    return this.post(`/connectors/${encodeURIComponent(id)}/convert`, input);
   }
 
   // ── Computers: start, stop, restart, reset ──

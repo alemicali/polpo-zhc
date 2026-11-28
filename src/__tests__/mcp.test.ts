@@ -156,6 +156,8 @@ describe("Polpo MCP server", () => {
       "polpo_image_generate", "polpo_image_edit", "polpo_media_log", "polpo_media_status", "polpo_image_show",
       "polpo_coding_chats_list", "polpo_coding_chat_get", "polpo_coding_chat_start", "polpo_coding_chat_send", "polpo_coding_chat_control", "polpo_coding_chat_show",
       "polpo_connectors_list", "polpo_connector_catalog", "polpo_connector_add", "polpo_connector_update", "polpo_connector_test", "polpo_connector_connect", "polpo_connector_disconnect", "polpo_connector_remove",
+      "polpo_connector_accounts", "polpo_connector_account_add", "polpo_connector_account_update", "polpo_connector_account_connect", "polpo_connector_account_disconnect",
+      "polpo_connector_account_remove", "polpo_connector_account_import",
       "polpo_mcp_servers_list", "polpo_mcp_server_get", "polpo_mcp_server_create", "polpo_mcp_server_templates", "polpo_mcp_server_install", "polpo_mcp_server_generate", "polpo_mcp_server_update", "polpo_mcp_server_test",
       "polpo_mcp_server_publish", "polpo_mcp_server_deploy", "polpo_mcp_server_logs", "polpo_mcp_server_delete",
       "polpo_channels_list", "polpo_channel_test", "polpo_message_send", "polpo_notifications_list", "polpo_notifications_stats", "polpo_notification_rule_save", "polpo_notification_rule_delete",

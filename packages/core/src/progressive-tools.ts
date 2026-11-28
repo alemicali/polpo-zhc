@@ -122,7 +122,10 @@ export const POLPO_TOOL_GROUPS: ToolGroupRule[] = [
   },
   {
     id: "connectors", label: "Connectors: catalog search, settings (name, on/off, tool policy allow/ask/off, access), test, sign out",
-    names: ["connector_catalog", "connector_update", "connector_test", "connector_disconnect"],
+    names: ["connector_catalog", "connector_update", "connector_test", "connector_disconnect",
+      // per-identity connectors: each agent / person's accounts
+      "connector_accounts", "connector_account_add", "connector_account_update", "connector_account_connect", "connector_account_disconnect",
+      "connector_account_remove", "connector_account_import"],
   },
   {
     id: "hosted-servers", label: "Hosted MCP servers Polpo builds and serves (each becomes a connector): create from a template (Printful) or draft from an API / a description, test, publish, deploy, roll back, visibility, logs",

@@ -106,7 +106,8 @@ export interface AgentTestDeps {
   knownTools: () => Promise<string[]>;
   // connectors
   connectors: () => ConnectorConfig[];
-  testConnector: (id: string) => Promise<ConnectorTestResult>;
+  /** Test the connector as `agent` uses it (a per-identity connector: the agent's default account, or the fallback). */
+  testConnector: (id: string, agent?: string) => Promise<ConnectorTestResult>;
   /** Add the agent to the connector's access.agents. */
   grantConnector: (id: string, agent: string) => Promise<void>;
   // vault
@@ -406,7 +407,7 @@ export class AgentTester {
     if (!granted.length && !items.length) return result("connectors", [], t0, "No connectors for this agent");
     await Promise.all(granted.map(async (c) => {
       let r: ConnectorTestResult;
-      try { r = await within(30_000, this.deps.testConnector(c.id), `${c.name}`); } catch (err) {
+      try { r = await within(30_000, this.deps.testConnector(c.id, agent.name), `${c.name}`); } catch (err) {
         items.push({ label: c.name, status: "fail", detail: errorText(err), fix: { label: "Open connectors", href: "/connectors" } });
         return;
       }

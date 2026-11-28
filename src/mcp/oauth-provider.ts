@@ -37,6 +37,11 @@ export interface VaultOAuthProviderOptions {
   clientMetadataUrl?: string;
   /** The HTTP client underneath (default: the global fetch); the catalog health check injects its own. */
   fetch?: typeof fetch;
+  /**
+   * The vault service the tokens, registered client and pending state live under: the connector id
+   * (default), or one account's service (`<connector>~<account>`) of a per-identity connector.
+   */
+  service?: string;
 }
 
 function parse<T>(raw: string | undefined): T | undefined {
@@ -103,11 +108,16 @@ export class VaultOAuthProvider implements OAuthClientProvider {
 
   /** Read fresh every time: another process (a task runner) may have refreshed the tokens meanwhile. */
   private creds(): Promise<Record<string, string>> {
-    return this.secrets.get(this.connector.id);
+    return this.secrets.get(this.service);
   }
 
   private async save(values: Record<string, string | undefined>): Promise<void> {
-    await this.secrets.patch(this.connector.id, values);
+    await this.secrets.patch(this.service, values);
+  }
+
+  /** Where this provider's secrets are (the connector, or one of its accounts). */
+  get service(): string {
+    return this.options.service ?? this.connector.id;
   }
 
   /** Load the stored redirect URI (non-interactive refreshes reuse the one the tokens were issued for). */

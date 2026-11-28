@@ -5,7 +5,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { ConnectorConfig, ConnectorIconAsset, ConnectorOAuthApp, ConnectorsFile, ConnectorStatus } from "@polpo-ai/core";
+import type { ConnectorAccount, ConnectorConfig, ConnectorIconAsset,ConnectorOAuthApp, ConnectorsFile, ConnectorStatus } from "@polpo-ai/core";
 
 export class ConnectorStore {
   readonly file: string;
@@ -72,6 +72,49 @@ export class ConnectorStore {
     if (state.lastConnectedAt) current.lastConnectedAt = state.lastConnectedAt;
     this.write(data);
     return current;
+  }
+
+  // ── per-identity connectors: accounts ──
+
+  getAccount(id: string, accountId: string): ConnectorAccount | undefined {
+    return this.get(id)?.accounts?.find((a) => a.id === accountId);
+  }
+
+  /** Replace a connector's accounts with `change(accounts)` (touches the connector's updatedAt). */
+  updateAccounts(id: string, change: (accounts: ConnectorAccount[]) => ConnectorAccount[]): ConnectorConfig {
+    const data = this.read();
+    const current = data.connectors.find((c) => c.id === id);
+    if (!current) throw new Error(`No connector "${id}"`);
+    const next = change([...(current.accounts ?? [])]);
+    if (next.length) current.accounts = next;
+    else delete current.accounts;
+    current.updatedAt = new Date().toISOString();
+    this.write(data);
+    return current;
+  }
+
+  /** An account's cached connection state (does not touch updatedAt). */
+  setAccountStatus(id: string, accountId: string, state: { status: ConnectorStatus; lastError?: string; toolCount?: number; lastConnectedAt?: string }): ConnectorAccount | undefined {
+    const data = this.read();
+    const account = data.connectors.find((c) => c.id === id)?.accounts?.find((a) => a.id === accountId);
+    if (!account) return undefined;
+    account.status = state.status;
+    if (state.lastError) account.lastError = state.lastError.slice(0, 500);
+    else delete account.lastError;
+    if (state.toolCount !== undefined) account.toolCount = state.toolCount;
+    if (state.lastConnectedAt) account.lastConnectedAt = state.lastConnectedAt;
+    this.write(data);
+    return account;
+  }
+
+  /** An account's signed-in identity (e.g. its email); undefined forgets it (does not touch updatedAt). */
+  setAccountSignedIn(id: string, accountId: string, signedIn: string | undefined): void {
+    const data = this.read();
+    const account = data.connectors.find((c) => c.id === id)?.accounts?.find((a) => a.id === accountId);
+    if (!account) return;
+    if (signedIn) account.account = signedIn;
+    else delete account.account;
+    this.write(data);
   }
 
   /** The custom connector's icon metadata and when discovery last ran (does not touch updatedAt). */

@@ -3,7 +3,7 @@
  * calls the same code as the existing connection tests (harness test, CLI account status, connector
  * test, sandbox provider test, computer status and egress), so a test here behaves as the real thing.
  */
-import { HOST_COMPUTER_ID, isRemoteComputer, type AgentConfig, type ComputerConfig, type ConnectorConfig } from "@polpo-ai/core";
+import { HOST_COMPUTER_ID, agentConnectorIdentity, isRemoteComputer, type AgentConfig, type ComputerConfig, type ConnectorConfig } from "@polpo-ai/core";
 import type { Orchestrator } from "../core/orchestrator.js";
 import type { ComputerManager } from "../sandbox/computers.js";
 import { AgentTester, type AgentTestDeps, type SmokeResult } from "./agent-tests.js";
@@ -78,8 +78,8 @@ export function agentTestDeps(opts: AgentTestHostOptions): AgentTestDeps {
     instanceAuth: opts.instanceAuth,
     knownTools: async () => (await import("../core/task-tool-scope.js")).knownBuiltinTools(),
     connectors: (): ConnectorConfig[] => connectors().store.list(),
-    testConnector: async (id) => {
-      const r = await connectors().test(id);
+    testConnector: async (id, agent) => {
+      const r = agent !== undefined ? await connectors().testAs(id, agentConnectorIdentity(agent)) : await connectors().test(id);
       return { ok: r.ok, status: r.status, ...(r.tools ? { tools: r.tools.map((t) => ({ name: t.name })) } : {}), ...(r.error ? { error: r.error } : {}) };
     },
     grantConnector: async (id, agent) => {
