@@ -9,6 +9,7 @@ Connectors link a Polpo workspace to the apps people already use (Linear, Notion
 - A connector is a remote MCP server (Streamable HTTP, falling back to SSE automatically; or legacy SSE), or a local process (stdio, admin only).
 - Its tools appear to the model as `mcp__<connector>__<tool>` (only `a-z A-Z 0-9 _ -`, at most 64 characters; long names end with a short hash). Parameters are the server's own JSON Schema.
 - **Who may use it** is set on the connector: `access.agents` (agent names, or `"*"` for every agent) and `access.polpo` (Polpo's chat). New connectors default to Polpo only; grant agents explicitly.
+- **Who it belongs to** is its `scope` (see [below](#organization-and-personal-connectors)): the organization's (the default) or one agent's own (a personal mailbox), which only that agent can ever use.
 - **Which tools** of a granted connector an agent gets is set on the agent: `connectorTools` (see [below](#choosing-an-agents-tools)). By default, all of them.
 - An agent with `allowedTools` gets a connector's tools only when its list matches them: `mcp__*` (every connector granted to it), `mcp__linear__*` (one connector), or exact names such as `mcp__linear__create_issue`. Agents without `allowedTools` get every tool of the connectors granted to them.
 - **Per-tool policy** (`toolPolicy`): `"off"` hides a tool from everyone; `"ask"` is reserved for asking the person before the call runs (today it behaves like `"allow"`); `"allow"` is the default.
@@ -41,10 +42,10 @@ Catalog entries with a per-account URL (`urlTemplate`, e.g. `https://mcp.dev.azu
 | Method | Path | |
 |---|---|---|
 | `GET` | `/api/v1/connectors` | List: status, tool count, access, and which secrets are set (never their values) |
-| `POST` | `/api/v1/connectors` | Create (`catalogId` or `url`/`transport`, `auth`, `access`, `toolPolicy`, `toolTimeoutMs`, `secrets`) |
+| `POST` | `/api/v1/connectors` | Create (`catalogId` or `url`/`transport`, `auth`, `access`, `scope`, `toolPolicy`, `toolTimeoutMs`, `secrets`) |
 | `GET` | `/api/v1/connectors/catalog` | The catalog, this instance's redirect URI, the OAuth apps |
 | `GET` / `PUT` / `DELETE` | `/api/v1/connectors/oauth-apps[/:app]` | Shared OAuth apps (`{ clientId, clientSecret }`; the secret is write-only) |
-| `GET` / `PATCH` / `DELETE` | `/api/v1/connectors/:id` | Read, change (secrets write-only), remove (revokes when possible, deletes the secrets) |
+| `GET` / `PATCH` / `DELETE` | `/api/v1/connectors/:id` | Read, change (secrets write-only; `scope` org ↔ agent, answering `droppedAgents`), remove (revokes when possible, deletes the secrets) |
 | `POST` | `/api/v1/connectors/:id/test` | Connect and list the tools |
 | `GET` | `/api/v1/connectors/:id/tools` | The tools (`?refresh=1`), with their policy |
 | `POST` | `/api/v1/connectors/:id/oauth/start` | `{ authorizationUrl }` to open (or `{ authorized: true }`) |
@@ -59,6 +60,35 @@ Catalog entries with a per-account URL (`urlTemplate`, e.g. `https://mcp.dev.azu
 ### Polpo's tools
 
 `connectors_list` (status, tools, who may use them, where a custom connector's icon came from; `catalog: true` or `search` for the catalog), `connector_add` (catalog id or custom URL, probed first to pick the transport, sign-in, scopes and name; `detect_only: true` only reports how to connect; for OAuth it returns the link the person opens; a token or an OAuth app's secret is entered by the person from a setup link, never in chat, and Polpo waits with `setup_wait`), `connector_connect` (a fresh link after `needs_reauth`), `connector_update_access`, `connector_remove` (only with `confirm: true`, after the person agreed); on demand (group `connectors`): `connector_catalog`, `connector_update` (name, on/off, tool policy), `connector_test`, `connector_disconnect`. Which tools of a connector an agent gets: `add_agent` / `update_agent` `connectorTools`. Polpo cannot add local (stdio) connectors.
+
+## Organization and personal connectors
+
+Every connector has a scope:
+
+- **`{ "kind": "org" }`** (the default; a connector without `scope`, such as every connector made before scopes existed, is the organization's): its `access.agents` decides which agents may use it, any of them or `"*"`.
+- **`{ "kind": "agent", "agent": "nina" }`**: Nina's own connector (her mailbox, her calendar). Only Nina can ever use its tools:
+  - `access.agents` is `["nina"]` (on) or `[]` (off), never another agent nor `"*"`. Creating or changing one to enable it for anyone else is refused with **400** ("This connector belongs to agent "nina": it cannot be enabled for …"), on every path: the API, Polpo's `connector_update_access` / `connector_update`, MCP `polpo_connector_update`, an agent test's "grant access" fix, a hosted server's install access.
+  - It is enforced where tools are handed out too (`connectorGrants`): even if `connectors.json` is edited by hand to list other agents, no other agent gets its tools, sees it in its prompt, finds it with progressive `tools_search`, or can name it in a task's `toolScope` (the scope check says it belongs to Nina).
+  - It never shows on another agent's page, in `connectors_list { agent }` / `polpo_connectors_list { agent }` for another agent, nor among the connectors offered to grant to another agent.
+  - New ones default to `access: { agents: ["nina"], polpo: false }`; `access.polpo` stays editable.
+  - Its secrets stay where every connector's are (the vault, owner `$connectors`, service = connector id).
+
+Changing the scope is an explicit update (`PATCH /api/v1/connectors/:id { "scope": … }`):
+
+- **org → agent** keeps only the owner in `access.agents` (if it had it, or `"*"`); every other agent loses it, and the answer lists them: `{ "ok": true, "data": {…}, "droppedAgents": ["claudio", "bob"] }` (`["*"]` when it was open to every agent).
+- **agent → org** keeps `access` as it is; other agents can then be granted.
+- `scope.agent` must name an existing agent.
+
+```bash
+# Nina's own Gmail
+curl -X POST $POLPO/api/v1/connectors -H "Authorization: Bearer $KEY" -H 'content-type: application/json' \
+  -d '{"catalogId": "gmail", "name": "Mail Nina", "scope": {"kind": "agent", "agent": "nina"}}'
+# make an existing one hers (the other agents lose it)
+curl -X PATCH $POLPO/api/v1/connectors/mail-nina -H "Authorization: Bearer $KEY" -H 'content-type: application/json' \
+  -d '{"scope": {"kind": "agent", "agent": "nina"}}'
+```
+
+Surfaces: the connector's settings on the **Connectors** page have **Belongs to** (Organization, or an agent: personal) and, for a personal connector, list only its owner under who can use it; its card reads "Nina · personal · …". On an **agent's page** (Tools → Connectors) there are two tabs: **Enabled** (the connectors it can use) and **Available** (every organization connector not enabled for it, plus its own personal ones not enabled); each row has an **Org** or **Personal** chip and a switch that enables or disables it for the agent (the connector's access); another agent's personal connectors never show. MCP: `polpo_connector_add` / `polpo_connector_update` take `owner` (an agent's name; `null` on update = back to the organization; the update result has `dropped_agents`), and `polpo_connectors_list` items carry `scope` (`org` / `agent`) and `owner`. Polpo's chat uses `connector_add` / `connector_update` with `owner`. SDK: `Connector.scope`, `client.createConnector({ …, scope })`, `client.updateConnector(id, { scope })`; React `connectorOwner(c)`, `connectorEnabledFor(c, agent)` and `useConnectors({ agent })` follow the same rule. The MCP agent card marks an agent's own connectors as Personal.
 
 ## Several accounts of the same service
 

@@ -5,7 +5,7 @@
  */
 import { randomUUID } from "node:crypto";
 import type { ConnectorConfig, VaultStore } from "@polpo-ai/core";
-import { CONNECTOR_ID_PATTERN } from "@polpo-ai/core";
+import { CONNECTOR_ID_PATTERN, connectorAccessProblem } from "@polpo-ai/core";
 import type { ConnectorManager } from "../mcp/manager.js";
 import type { HostedServerSuiteSettings } from "@polpo-ai/core/agent-suites";
 import { runTool, secretStatus, type HostedRuntimeDeps } from "./runtime.js";
@@ -748,6 +748,9 @@ export class McpServerService {
       return normalized !== undefined ? { access: { agents: normalized, polpo: true } } : {};
     }
     if (normalized !== undefined) {
+      // an agent's own connector: only its owner (same rule as the connectors API)
+      const problem = connectorAccessProblem(connector.scope, { agents: normalized });
+      if (problem) throw new McpServerError(problem);
       manager.store.update(connector.id, { access: { ...connector.access, agents: normalized } });
       manager.announce(connector.id, "updated");
     }

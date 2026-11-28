@@ -42,6 +42,8 @@ export { CONNECTOR_OAUTH_CALLBACK_PATH } from "../../mcp/runtime.js";
 export interface ConnectorRouteDeps {
   manager: () => ConnectorManager;
   settings: () => PolpoSettings | undefined;
+  /** The workspace's agents: an agent-scoped connector must belong to one of them. */
+  agentNames?: () => Promise<string[]> | string[];
   /** This instance's OAuth redirect URI as the browser reaches it (public origin + callback path). */
   redirectUri: (c: Context) => string;
   /** Tests: the network the probe (POST /discover) uses. */
@@ -56,10 +58,11 @@ function fail(c: Context, err: unknown) {
 
 export function connectorRoutes(deps: ConnectorRouteDeps): Hono {
   const app = new Hono();
-  const ctx = (manager: ConnectorManager) => ({
+  const ctx = async (manager: ConnectorManager) => ({
     allowStdio: true, // this API is authenticated (API key / dashboard session): an admin
     existingIds: manager.store.list().map((c) => c.id),
     allowPrivateNetwork: allowPrivateNetwork(deps.settings()),
+    ...(deps.agentNames ? { agentNames: await deps.agentNames() } : {}),
   });
   const view = async (manager: ConnectorManager, id: string) => {
     const connector = manager.store.get(id);
@@ -116,7 +119,7 @@ export function connectorRoutes(deps: ConnectorRouteDeps): Hono {
     const manager = deps.manager();
     const body = await c.req.json().catch(() => ({})) as ConnectorInput;
     try {
-      const { connector, secrets } = await buildConnector(body, ctx(manager));
+      const { connector, secrets } = await buildConnector(body, await ctx(manager));
       if (Object.values(secrets).some(Boolean) && !manager.secrets.available) throw new ConnectorInputError("The vault is not available: cannot store the connector's secrets");
       manager.store.create(connector);
       if (Object.keys(secrets).length) await manager.secrets.patch(connector.id, secrets);
@@ -207,7 +210,7 @@ export function connectorRoutes(deps: ConnectorRouteDeps): Hono {
     if (!current) return c.json({ ok: false, error: "Connector not found" }, 404);
     const body = await c.req.json().catch(() => ({})) as ConnectorInput;
     try {
-      const { patch, secrets, reconnect } = await applyConnectorPatch(current, body, ctx(manager));
+      const { patch, secrets, reconnect, droppedAgents } = await applyConnectorPatch(current, body, await ctx(manager));
       if (Object.values(secrets).some(Boolean) && !manager.secrets.available) throw new ConnectorInputError("The vault is not available: cannot store the connector's secrets");
       manager.store.update(current.id, patch);
       if (Object.keys(secrets).length) await manager.secrets.patch(current.id, secrets);
@@ -217,7 +220,8 @@ export function connectorRoutes(deps: ConnectorRouteDeps): Hono {
       if (patch.enabled === false) manager.setStatus(current.id, "disabled");
       else if (patch.enabled === true && current.status === "disabled") manager.setStatus(current.id, "disconnected");
       manager.announce(current.id, "updated");
-      return c.json({ ok: true, data: await view(manager, current.id) });
+      // scope org → agent: the other agents it was enabled for lose it ("*" = every other agent)
+      return c.json({ ok: true, data: await view(manager, current.id), ...(droppedAgents ? { droppedAgents } : {}) });
     } catch (err) {
       return fail(c, err);
     }

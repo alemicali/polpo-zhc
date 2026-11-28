@@ -32,6 +32,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-28-personal-connectors",
+    date: "2026-11-28",
+    kind: "new",
+    title: "Connettori personali: un connettore può appartenere a un solo agente",
+    summary: "La casella di posta di un agente può essere solo sua: nessun altro agente la vede o la può usare, e nella pagina di ogni agente vedi solo i connettori a sua disposizione.",
+    body: [
+      "- **Dell'organizzazione o di un agente**: nelle impostazioni di un connettore, alla voce **Belongs to**, scegli **Organization** (com'è sempre stato) oppure un agente: il connettore diventa **personale** di quell'agente.",
+      "- **Solo suo, sempre**: un connettore personale si può attivare solo per il suo agente. Nessun altro agente ne riceve gli strumenti, nemmeno per una singola attività, e se provi ad attivarlo per un altro agente o per tutti ricevi un errore.",
+      "- **Pagina dell'agente più chiara**: in Tools → Connectors ci sono due schede, **Enabled** (quelli che l'agente usa) e **Available** (quelli dell'organizzazione non ancora attivi per lui e i suoi personali). Ogni riga ha l'etichetta **Org** o **Personal**. I connettori personali degli altri agenti non compaiono più.",
+      "- **Cambiare proprietario**: se rendi personale un connettore dell'organizzazione, gli altri agenti lo perdono e ti diciamo quali; se lo riporti all'organizzazione, chi lo usava continua a usarlo.",
+      "- **I connettori di oggi restano come sono**: sono tutti dell'organizzazione finché non decidi altrimenti.",
+      "- **Ovunque**: dalla pagina Connectors, chiedendo a Polpo in chat, dall'API, dall'SDK e dal connettore MCP.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i connettori", to: "/connectors" },
+  },
+  {
     id: "2026-11-28-continue-reopens-mission",
     date: "2026-11-28",
     kind: "fixed",

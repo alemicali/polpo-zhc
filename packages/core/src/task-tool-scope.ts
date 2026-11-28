@@ -16,7 +16,7 @@
  * The tools every run gets whatever its allowedTools (register_outcome, task_result,
  * dependency_results) are not affected.
  */
-import { CONNECTOR_ID_PATTERN, connectorGrants, normalizeConnectorTools, type AgentConnectorTools, type ConnectorConfig } from "./connectors.js";
+import { CONNECTOR_ID_PATTERN, connectorGrants, connectorOwner, connectorVisibleTo, normalizeConnectorTools, type AgentConnectorTools, type ConnectorConfig } from "./connectors.js";
 
 export interface TaskToolScope {
   /** Connector ids the run may use, or "none". Absent: every connector the agent has. */
@@ -126,6 +126,10 @@ export function taskToolScopeGrantProblems(scope: TaskToolScope | undefined, ctx
   const connectorProblem = (field: string, id: string): string | undefined => {
     const c = byId.get(id);
     if (!c) return `${field}: there is no connector "${id}"`;
+    const owner = connectorOwner(c);
+    if (owner !== undefined && owner !== agent.name) {
+      return `${field}: ${connectorScopeLabel(c)} belongs to agent "${owner}" (a personal connector): agent "${agent.name}" can never use it`;
+    }
     if (!connectorGrants(c, agent.name)) {
       return `${field}: agent "${agent.name}" has no access to ${connectorScopeLabel(c)}${c.enabled ? "" : " (it is turned off)"}`
         + ` (a tool scope never grants: grant the connector to "${agent.name}" first)`;
@@ -190,7 +194,8 @@ export function taskToolScopeMissingGrants(
   const out: Array<{ id: string; label: string; enabled: boolean }> = [];
   for (const id of ids) {
     const c = connectors.find((x) => x.id === id);
-    if (c && !connectorGrants(c, agentName)) out.push({ id, label: connectorScopeLabel(c), enabled: c.enabled });
+    // another agent's own connector cannot be granted: taskToolScopeGrantProblems says so
+    if (c && connectorVisibleTo(c, agentName) && !connectorGrants(c, agentName)) out.push({ id, label: connectorScopeLabel(c), enabled: c.enabled });
   }
   return out;
 }

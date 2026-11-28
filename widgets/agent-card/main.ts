@@ -41,7 +41,7 @@ const STRINGS = {
     horizon: { long: "6–12 months", quarter: "Quarter", month: "Month", week: "Week", day: "Today" } as Record<string, string>,
     status: { pending: "Pending", assigned: "Assigned", in_progress: "In progress", review: "In review", done: "Done", failed: "Failed", awaiting_approval: "To approve", draft: "Draft" } as Record<string, string>,
     error: "Could not load the agent",
-    on: "on", connectors: "Connectors", allTools: "all tools", tools: (n: number) => `${n} tool${n === 1 ? "" : "s"}`,
+    on: "on", connectors: "Connectors", org: "Org", personal: "Personal", allTools: "all tools", tools: (n: number) => `${n} tool${n === 1 ? "" : "s"}`,
     notRetried: "not retried", failedBecause: "Failed", toolsRestricted: "Tools restricted",
     lines: "Communication", talksTo: "Talks to", anyAgent: "any agent", noAgent: "no other agent", notSet: "not restricted yet",
     escalatesTo: "Escalates to", linesMode: { org: "Org chart", list: "Only listed agents", anyone: "Anyone", none: "Nobody" } as Record<string, string>,
@@ -61,7 +61,7 @@ const STRINGS = {
     horizon: { long: "6–12 mesi", quarter: "Trimestre", month: "Mese", week: "Settimana", day: "Oggi" } as Record<string, string>,
     status: { pending: "In coda", assigned: "Assegnato", in_progress: "In corso", review: "In verifica", done: "Fatto", failed: "Fallito", awaiting_approval: "Da approvare", draft: "Bozza" } as Record<string, string>,
     error: "Non riesco a caricare l'agente",
-    on: "su", connectors: "Connettori", allTools: "tutti gli strumenti", tools: (n: number) => `${n} strument${n === 1 ? "o" : "i"}`,
+    on: "su", connectors: "Connettori", org: "Organizzazione", personal: "Personale", allTools: "tutti gli strumenti", tools: (n: number) => `${n} strument${n === 1 ? "o" : "i"}`,
     notRetried: "non ritentato", failedBecause: "Fallito", toolsRestricted: "Strumenti ristretti",
     lines: "Comunicazione", talksTo: "Parla con", anyAgent: "qualsiasi agente", noAgent: "nessun altro agente", notSet: "non ancora limitato",
     escalatesTo: "Escala a", linesMode: { org: "Organigramma", list: "Solo gli agenti elencati", anyone: "Chiunque", none: "Nessuno" } as Record<string, string>,
@@ -185,7 +185,7 @@ function taskSummary(x: AgentCardTask, s: Strings): HTMLElement {
 function connectorsSection(c: AgentCard, s: Strings): HTMLElement | null {
   if (!c.connectors?.length) return null;
   return h("section", {}, h("h3", {}, s.connectors), ...c.connectors.map((x) => h("div", { class: "row" },
-    h("div", { class: "row-main" }, h("div", {}, x.label), h("div", { class: "muted small" }, `${x.id} · ${x.tools === "all" ? s.allTools : s.tools(x.tools)}`)),
+    h("div", { class: "row-main" }, h("div", {}, x.label), h("div", { class: "muted small" }, `${x.id} · ${x.scope === "personal" ? s.personal : s.org} · ${x.tools === "all" ? s.allTools : s.tools(x.tools)}`)),
     x.status ? h("span", { class: `chip chip-sm chip-${x.status === "connected" ? "success" : x.status === "error" || x.status === "needs_reauth" ? "danger" : "neutral"}` }, x.status.replace(/_/g, " ")) : null)));
 }
 

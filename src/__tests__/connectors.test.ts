@@ -14,7 +14,8 @@ import { getRequestListener } from "@hono/node-server";
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { CONNECTORS_VAULT_OWNER, type AgentConfig, type Task, type TaskToolScope } from "@polpo-ai/core";
+import {
+  CONNECTORS_VAULT_OWNER, connectorGrants, connectorOwner, connectorVisibleTo, taskToolScopeGrantProblems, taskToolScopeMissingGrants, type AgentConfig, type Task, type TaskToolScope } from "@polpo-ai/core";
 import { buildAgentToolset } from "../adapters/engine.js";
 import { toHarnessHostTools } from "../harness/host-tools.js";
 import { scopedAgentForRun } from "../core/task-tool-scope.js";
@@ -718,7 +719,7 @@ describe("Polpo's connector tools", () => {
     const ctx = { manager, settings: allowLocal(), redirectUri: "http://127.0.0.1:3890/cb", agentNames: async () => ["alice", "bob"] };
     await add(manager, { url: `${base}/mcp`, name: "Fake", access: { agents: ["alice"] } });
     expect(await executeConnectorTool("connector_connect", { id: "fake" }, ctx)).toMatch(/Fake is connected: 5 tools/);
-    expect(await executeConnectorTool("connectors_list", {}, ctx)).toMatch(/Fake \[fake\] connected, 5 tools; auth none; used by agents: alice \+ Polpo/);
+    expect(await executeConnectorTool("connectors_list", {}, ctx)).toMatch(/Fake \[fake\] connected, 5 tools; auth none; scope org; used by agents: alice \+ Polpo/);
     expect(await executeConnectorTool("connector_update_access", { id: "fake", addAgents: ["ghost"] }, ctx)).toMatch(/Unknown agents: ghost/);
     expect(await executeConnectorTool("connector_update_access", { id: "fake", addAgents: ["bob"], polpo: false }, ctx)).toMatch(/agents: alice, bob;/);
     expect(manager.store.get("fake")?.access).toEqual({ agents: ["alice", "bob"], polpo: false });
@@ -736,6 +737,123 @@ describe("Polpo's connector tools", () => {
     const out = await executeConnectorTool("connector_connect", { id: "oa" }, ctx);
     expect(out).toMatch(/must open this link/);
     expect(out).toContain(`${base}/authorize?`);
+  });
+});
+
+describe("connector scope: the organization's or one agent's own", () => {
+  const json = (method: string, body: unknown) => ({ method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  function scopedApp(manager: ConnectorManager) {
+    const app = new Hono();
+    app.route("/api/v1/connectors", connectorRoutes({
+      manager: () => manager, settings: allowLocal, agentNames: () => ["nina", "claudio", "bob"],
+      redirectUri: () => `http://127.0.0.1:3890${CONNECTOR_OAUTH_CALLBACK_PATH}`,
+    }));
+    return app;
+  }
+
+  it("existing connectors (no scope field) are the organization's: nothing changes for them", async () => {
+    const { polpoDir } = setup();
+    // a connectors.json written before scopes existed
+    writeFileSync(join(polpoDir, "connectors.json"), JSON.stringify({ connectors: [{
+      id: "lin", name: "Lin", kind: "mcp", transport: { type: "http", url: `${base}/mcp` }, auth: { type: "none" },
+      access: { agents: "*", polpo: true }, enabled: true, createdAt: "2026-01-01T00:00:00Z",
+    }] }));
+    const manager = new ConnectorManager({ polpoDir, vaultStore: new EncryptedVaultStore(polpoDir), settings: allowLocal, emit: () => undefined, log: () => undefined });
+    managers.push(manager);
+    const lin = manager.store.get("lin")!;
+    expect(lin.scope).toBeUndefined();
+    expect(connectorOwner(lin)).toBeUndefined();
+    expect(connectorGrants(lin, "nina")).toBe(true);
+    expect(connectorGrants(lin, "claudio")).toBe(true);
+    expect(connectorVisibleTo(lin, "claudio")).toBe(true);
+    // the API shows it without a scope (= org) and lets any agent be granted
+    const app = scopedApp(manager);
+    const res = await app.request("/api/v1/connectors/lin", json("PATCH", { access: { agents: ["nina", "claudio"] } }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.access.agents).toEqual(["nina", "claudio"]);
+  });
+
+  it("an agent's own connector: only the owner gets its tools, even if its access is edited in the store", async () => {
+    const { manager } = setup();
+    const app = scopedApp(manager);
+    let res = await app.request("/api/v1/connectors", json("POST", { id: "mail-nina", name: "Mail Nina", url: `${base}/mcp`, scope: { kind: "agent", agent: "nina" } }));
+    expect(res.status).toBe(201);
+    const created = (await res.json()).data;
+    expect(created.scope).toEqual({ kind: "agent", agent: "nina" });
+    // default access: its owner only, not Polpo
+    expect(created.access).toEqual({ agents: ["nina"], polpo: false });
+    expect((await manager.toolsFor("nina")).tools.some((t) => t.name.startsWith("mcp__mail-nina__"))).toBe(true);
+    expect((await manager.toolsFor("claudio")).tools.some((t) => t.name.startsWith("mcp__mail-nina__"))).toBe(false);
+
+    // someone edits connectors.json by hand: still nobody but nina
+    manager.store.update("mail-nina", { access: { agents: "*", polpo: false } });
+    expect(connectorGrants(manager.store.get("mail-nina")!, "claudio")).toBe(false);
+    expect((await manager.toolsFor("claudio")).tools.some((t) => t.name.startsWith("mcp__mail-nina__"))).toBe(false);
+    expect((await manager.toolsFor("nina")).tools.some((t) => t.name.startsWith("mcp__mail-nina__"))).toBe(true);
+    // a task tool scope cannot name it for another agent either (nor offer to grant it)
+    const scope: TaskToolScope = { connectors: ["mail-nina"] };
+    const problems = taskToolScopeGrantProblems(scope, { agent: { name: "claudio" }, connectors: manager.store.list() });
+    expect(problems.join("\n")).toMatch(/belongs to agent "nina".*can never use it/);
+    expect(taskToolScopeMissingGrants(scope, "claudio", manager.store.list())).toEqual([]);
+    // progressive discovery only sees what toolsFor gave
+    const set = new ProgressiveToolSet({ tools: (await manager.toolsFor("claudio")).tools, mode: "always", connectorNames: { "mail-nina": "Mail Nina" } });
+    expect(set.search("echo").some((h) => h.name.startsWith("mcp__mail-nina__"))).toBe(false);
+    // the prompt does not list it for claudio
+    expect(connectorsPromptSection(manager.store.list(), "claudio")).not.toContain("mail-nina");
+  });
+
+  it("enabling an agent's own connector for another agent or every agent is refused (400)", async () => {
+    const { manager } = setup();
+    const app = scopedApp(manager);
+    await app.request("/api/v1/connectors", json("POST", { id: "mail-nina", name: "Mail Nina", url: `${base}/mcp`, scope: { kind: "agent", agent: "nina" } }));
+    for (const agents of [["nina", "claudio"], ["claudio"], "*"]) {
+      const res = await app.request("/api/v1/connectors/mail-nina", json("PATCH", { access: { agents } }));
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toMatch(/belongs to agent "nina"/);
+    }
+    expect(manager.store.get("mail-nina")?.access.agents).toEqual(["nina"]);
+    // creating one already granted to others is refused too; so is an unknown owner
+    expect((await app.request("/api/v1/connectors", json("POST", { name: "X", url: `${base}/mcp`, scope: { kind: "agent", agent: "nina" }, access: { agents: "*" } }))).status).toBe(400);
+    expect((await app.request("/api/v1/connectors", json("POST", { name: "Y", url: `${base}/mcp`, scope: { kind: "agent", agent: "ghost" } }))).status).toBe(400);
+    expect((await app.request("/api/v1/connectors", json("POST", { name: "Z", url: `${base}/mcp`, scope: { kind: "team" } }))).status).toBe(400);
+    // the owner can be turned off and on; Polpo stays editable
+    expect((await app.request("/api/v1/connectors/mail-nina", json("PATCH", { access: { agents: [] } }))).status).toBe(200);
+    expect((await app.request("/api/v1/connectors/mail-nina", json("PATCH", { access: { agents: ["nina"], polpo: true } }))).status).toBe(200);
+    expect(manager.store.get("mail-nina")?.access).toEqual({ agents: ["nina"], polpo: true });
+    // Polpo's own chat tool goes through the same rule
+    const ctx = { manager, settings: allowLocal(), redirectUri: "http://127.0.0.1:3890/cb", agentNames: async () => ["nina", "claudio"] };
+    expect(await executeConnectorTool("connector_update_access", { id: "mail-nina", addAgents: ["claudio"] }, ctx)).toMatch(/Error: .*belongs to agent "nina"/);
+    // and connectors_list for claudio never offers it
+    const listed = await executeConnectorTool("connectors_list", { agent: "claudio" }, ctx);
+    expect(listed).not.toContain("mail-nina");
+  });
+
+  it("changing scope: org → agent keeps only the owner and reports the others; agent → org keeps access", async () => {
+    const { manager } = setup();
+    const app = scopedApp(manager);
+    await add(manager, { id: "mail", name: "Mail", url: `${base}/mcp`, access: { agents: ["nina", "claudio", "bob"], polpo: true } });
+    let res = await app.request("/api/v1/connectors/mail", json("PATCH", { scope: { kind: "agent", agent: "nina" } }));
+    expect(res.status).toBe(200);
+    let body = await res.json();
+    expect(body.data.scope).toEqual({ kind: "agent", agent: "nina" });
+    expect(body.data.access.agents).toEqual(["nina"]);
+    expect(body.droppedAgents).toEqual(["claudio", "bob"]);
+    // from "*": "*" is reported
+    await add(manager, { id: "all", name: "All", url: `${base}/mcp`, access: { agents: "*", polpo: true } });
+    body = await (await app.request("/api/v1/connectors/all", json("PATCH", { scope: { kind: "agent", agent: "bob" } }))).json();
+    expect(body.data.access.agents).toEqual(["bob"]);
+    expect(body.droppedAgents).toEqual(["*"]);
+    // scope + access to others in one call: refused
+    await add(manager, { id: "cal", name: "Cal", url: `${base}/mcp`, access: { agents: ["nina"], polpo: true } });
+    expect((await app.request("/api/v1/connectors/cal", json("PATCH", { scope: { kind: "agent", agent: "nina" }, access: { agents: ["claudio"] } }))).status).toBe(400);
+    // back to org: access as it was
+    res = await app.request("/api/v1/connectors/mail", json("PATCH", { scope: { kind: "org" } }));
+    body = await res.json();
+    expect(body.data.scope).toBeUndefined();
+    expect(body.data.access.agents).toEqual(["nina"]);
+    expect(body.droppedAgents).toBeUndefined();
+    // now any agent can be granted again
+    expect((await app.request("/api/v1/connectors/mail", json("PATCH", { access: { agents: ["nina", "claudio"] } }))).status).toBe(200);
   });
 });
 

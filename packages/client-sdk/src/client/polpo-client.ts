@@ -12,7 +12,9 @@ import type { EditImageRequest, GenerateImageRequest, ImageNodeState, MediaCalle
 import type { CodingChatAccountInfo, CodingChatApproval, CodingChatCreateRequest, CodingChatEvent, CodingChatKind, CodingChatSession, CodingChatSummary } from "./coding-types.js";
 import type {
   Connector,
+  ConnectorCreateInput,
   ConnectorTool,
+  ConnectorUpdateInput,
   McpServerSummary, McpServerTemplateInfo, McpServerInstallRequest, McpServerInstallResult, McpSecretRef, McpHostedServer, McpServerSpec, McpServerGenerateRequest, McpServerGenerateResult,
   McpServerTestCase, McpToolTestResult, McpServerVersionInfo, McpServerDeploy, McpServerDeployBlocked, McpServerDiff, McpServerCallLog, McpPendingCall,
   AuthStatusResponse,
@@ -936,6 +938,22 @@ export class PolpoClient {
   /** The connectors (external apps over MCP), with their status, account and who may use them. */
   getConnectors(): Promise<Connector[]> {
     return this.get<{ connectors: Connector[] }>("/connectors").then((d) => d.connectors);
+  }
+
+  /**
+   * Add a connector (from the catalog or a remote URL). scope { kind: "agent", agent } makes it that
+   * agent's own: only that agent can ever use it. Secrets (tokens, OAuth sign-in) are finished in the dashboard.
+   */
+  createConnector(input: ConnectorCreateInput): Promise<Connector> {
+    return this.post<Connector>("/connectors", input);
+  }
+
+  /**
+   * Change a connector: name, on/off, access, tool policy, scope. Granting an agent's own connector to
+   * another agent or "*" is refused (PolpoApiError, 400); scope org → agent keeps only the owner in access.
+   */
+  updateConnector(id: string, patch: ConnectorUpdateInput): Promise<Connector> {
+    return this.patch<Connector>(`/connectors/${encodeURIComponent(id)}`, patch);
   }
 
   // ── Computers: start, stop, restart, reset ──
