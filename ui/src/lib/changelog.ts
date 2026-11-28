@@ -32,6 +32,24 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "2026-11-28-per-identity-connectors",
+    date: "2026-11-28",
+    kind: "new",
+    title: "Connettori per identità: un'app, e ognuno collega i propri account",
+    summary: "Definisci Gmail una volta sola: ogni agente e ogni persona collega i suoi account con un nome, e gli strumenti si chiamano sempre uguale per tutti.",
+    body: [
+      "- **Un terzo tipo di connettore**: oltre a **Organization** e **Personal** c'è **Per identity**. L'app si definisce una volta per l'organizzazione (app OAuth, regole sugli strumenti, chi può usarla) e ogni agente e ogni persona collega i **propri account**, ciascuno con un nome (per esempio \"sitoinchat\" o \"personale\").",
+      "- **Account predefinito**: il primo account di ognuno diventa il suo predefinito, e puoi cambiarlo quando vuoi. Gli strumenti accettano l'argomento **`account`** per usarne un altro dei propri.",
+      "- **Gli strumenti si chiamano sempre uguale** (`mcp__gmail__…` per tutti): skill e playbook possono dire \"usa Gmail\" oppure \"Gmail, account sitoinchat\", e ogni agente usa il suo.",
+      "- **Ognuno vede e usa solo i propri account**: un agente non raggiunge mai l'account di un altro, qualunque nome passi. Nella pagina dell'agente, in Tools → Connectors, il connettore ha l'etichetta **Identity** e mostra solo gli account di quell'agente: li colleghi, li togli o scegli il predefinito da lì.",
+      "- **Account condiviso dell'organizzazione (facoltativo)**: spento di default. Se lo accendi, chi non ha un account suo usa quello dell'organizzazione.",
+      "- **Conversione dei connettori separati, solo se la chiedi**: un connettore separato della stessa app (per esempio `mail-nina`) diventa un account (\"sitoinchat\" di Nina) con **Import** nella sezione Accounts. L'accesso già fatto si sposta, non serve rifare il login; gli strumenti passano da `mcp__mail-nina__…` a `mcp__<connettore>__…` con quell'account. Niente viene convertito da solo.",
+      "- **Ovunque**: dalla pagina Connectors (scegli il tipo quando aggiungi un connettore), dalla pagina dell'agente, chiedendo a Polpo in chat, dall'API, dall'SDK e dal connettore MCP.",
+    ].join("\n"),
+    highlight: true,
+    cta: { label: "Apri i connettori", to: "/connectors" },
+  },
+  {
     id: "2026-11-28-run-with-vault",
     date: "2026-11-28",
     kind: "new",

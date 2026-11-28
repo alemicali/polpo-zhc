@@ -11,7 +11,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAgents } from "@polpo-ai/react";
 import { toast } from "sonner";
-import { BadgeCheck, KeyRound, Loader2, Plug, Plus, Search, Server, Sparkles, UserPlus, X } from "lucide-react";
+import { ArrowRightLeft, BadgeCheck, KeyRound, Loader2, Plug, Plus, Search, Server, SlidersHorizontal, Sparkles, UserPlus, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,8 +30,8 @@ import { hostedLabel } from "@/lib/mcp-servers";
 import { useConnectFlow } from "@/components/connectors/use-connect-flow";
 import { useConnectors } from "@/hooks/use-connectors";
 import {
-  accountLabel, agentHasAccess, authLabel, catalogCardState, catalogCategories, connectorOwner, connectorState, connectorsApi, filterCatalog, filterConnectors,
-  groupConnectors, nextAccountName,
+  accountLabel, accountsSummary, agentHasAccess, authLabel, catalogCardState, catalogCategories, connectorOwner, connectorState, connectorsApi, filterCatalog, filterConnectors,
+  groupConnectors, identityTargetFor, isIdentityConnector, nextAccountName,
   type CatalogEntry, type Connector, type ConnectorCardState,
 } from "@/lib/connectors-api";
 import { cn } from "@/lib/utils";
@@ -41,8 +41,8 @@ import { PageHeader } from "@/components/shared/page-header";
 function accessSummary(connector: Connector, agentLabel: (name: string) => string, product: string): string {
   const parts: string[] = [];
   const owner = connectorOwner(connector);
-  // an agent's own connector: "Nina · personal"
-  const prefix = owner ? `${agentLabel(owner)} · personal · ` : "";
+  // an agent's own connector: "Nina · personal"; per identity: "Per identity · 3 accounts"
+  const prefix = owner ? `${agentLabel(owner)} · personal · ` : isIdentityConnector(connector) ? `Per identity · ${accountsSummary(connector)} · ` : "";
   if (connector.access.polpo) parts.push(product);
   if (owner) {
     if (agentHasAccess(connector.access, owner)) parts.push(agentLabel(owner));
@@ -51,7 +51,7 @@ function accessSummary(connector: Connector, agentLabel: (name: string) => strin
   if (connector.access.agents === "*") parts.push("all agents");
   else if (connector.access.agents.length === 1) parts.push(agentLabel(connector.access.agents[0]!));
   else if (connector.access.agents.length > 1) parts.push(`${connector.access.agents.length} agents`);
-  return parts.length ? `Used by ${parts.join(" and ")}` : "Nobody can use it yet";
+  return `${prefix}${parts.length ? `${prefix ? "used" : "Used"} by ${parts.join(" and ")}` : prefix ? "nobody can use it yet" : "Nobody can use it yet"}`;
 }
 
 /** The main button of a card / row for a given state. */
@@ -67,22 +67,25 @@ function actionLabel(state: ConnectorCardState): string {
 }
 
 function CatalogCard({
-  entry, state, connector, accounts, onConnect, onManage, onAddAccount,
+  entry, state, connector, accounts, onConnect, onManage, onAddAccount, onChoose,
 }: {
   entry: CatalogEntry; state: ConnectorCardState; connector?: Connector; accounts: number;
   onConnect: () => void; onManage: () => void;
+  /** Add it choosing its type first (organization, personal, per identity). */
+  onChoose: () => void;
   /** Connect another account of this app (a second inbox, one per agent…). */
   onAddAccount: () => void;
 }) {
   const primary = state === "connect" || state === "needs_setup" || state === "needs_auth" || state === "needs_reauth";
   // an added connector waiting for sign-in (or setup) can also be managed: sign in, or remove it
   const manageToo = primary && !!connector;
+  const perIdentity = !!connector && isIdentityConnector(connector);
   return (
     <ConnectorCard
       testId={`catalog-card-${entry.id}`}
       icon={<ConnectorIcon catalogId={entry.id} name={entry.name} color={entry.icon?.color} />}
       title={entry.name}
-      subtitle={`${entry.category}${accounts > 1 ? ` · ${accounts} accounts` : ""}`}
+      subtitle={`${entry.category}${perIdentity ? ` · per identity · ${accountsSummary(connector!).toLowerCase()}` : accounts > 1 ? ` · ${accounts} accounts` : ""}`}
       status={state !== "connect" ? <StateBadge state={state} /> : undefined}
       description={entry.description}
       footer={<>
@@ -95,9 +98,17 @@ function CatalogCard({
         {connector && (
           <Button
             size="sm" variant="ghost" className="ml-auto h-7 gap-1 px-2 text-xs"
-            onClick={onAddAccount} aria-label={`Add another ${entry.name} account`} title={`Connect another ${entry.name} account`}
+            onClick={onAddAccount} aria-label={`Add another ${entry.name} account`} title={perIdentity ? `Add an account to ${entry.name}` : `Connect another ${entry.name} account`}
           >
             <UserPlus className="h-3.5 w-3.5" /> Account
+          </Button>
+        )}
+        {!connector && (
+          <Button
+            size="icon" variant="ghost" className="ml-auto h-7 w-7"
+            onClick={onChoose} aria-label={`Add ${entry.name} as…`} title="Choose the type: organization, personal or per identity"
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5" />
           </Button>
         )}
         {manageToo && (
@@ -108,7 +119,7 @@ function CatalogCard({
         <Button
           size="sm"
           variant={primary ? "default" : "outline"}
-          className={cn("h-7 px-3 text-xs", !connector && "ml-auto")}
+          className="h-7 px-3 text-xs"
           onClick={primary ? onConnect : onManage}
           aria-label={`${actionLabel(state)} ${entry.name}`}
         >
@@ -137,6 +148,9 @@ function ConnectorRow({
       title={connector.name}
       badges={<>
         {account && <span className="min-w-0 truncate text-xs text-muted-foreground" data-testid={`connector-account-${connector.id}`}>{account}</span>}
+        {isIdentityConnector(connector) && (
+          <Badge variant="outline" data-testid={`identity-badge-${connector.id}`} className="border-primary/40 bg-primary/10 text-micro font-normal text-primary">Identity</Badge>
+        )}
         {connector.transport.type === "hosted"
           ? <Badge variant="secondary" className="text-micro font-normal" data-testid={`hosted-badge-${connector.id}`}>{hostedLabel(product, connector.hostedVersion)}</Badge>
           : !connector.catalogId && <Badge variant="secondary" className="text-micro font-normal">Custom</Badge>}
@@ -156,15 +170,24 @@ export function ConnectorsPage() {
   const [params, setParams] = useSearchParams();
   const connectedParam = params.get("connected");
   const serverParam = params.get("server");
+  // a setup link (MCP / Polpo's chat): ?connector=<id>&focus=account:<account id>
+  const connectorParam = params.get("connector");
+  const focusParam = params.get("focus");
+  const accountParam = params.get("account");
   const { connectors, catalog, loading, error, refresh, refreshCatalog, upsert, drop } = useConnectors({ withCatalog: true });
   const { agents } = useAgents();
   const product = productName(useInstanceBranding());
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string | null>(null);
-  const [tab, setTab] = useState<string | null>(connectedParam ? "connected" : serverParam || params.get("tab") === "servers" ? "servers" : null);
+  const [tab, setTab] = useState<string | null>(connectedParam || connectorParam ? "connected" : serverParam || params.get("tab") === "servers" ? "servers" : null);
   const [serverId, setServerId] = useState<string | null>(serverParam);
   const [createServerOpen, setCreateServerOpen] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(connectedParam);
+  const [selectedId, setSelectedId] = useState<string | null>(connectedParam ?? connectorParam);
+  // per identity: the account to focus in the sheet ("add": the add form), the connector to import
+  const [focus, setFocus] = useState<string | undefined>(
+    focusParam?.startsWith("account:") ? focusParam.slice("account:".length) : accountParam ?? undefined,
+  );
+  const [importFrom, setImportFrom] = useState<string | undefined>(undefined);
   const [customOpen, setCustomOpen] = useState(false);
   const [appsOpen, setAppsOpen] = useState(false);
 
@@ -176,6 +199,7 @@ export function ConnectorsPage() {
     toast.success("Connected");
     const next = new URLSearchParams(params);
     next.delete("connected");
+    next.delete("account");
     setParams(next, { replace: true });
   }, [connectedParam, params, setParams]);
 
@@ -194,12 +218,28 @@ export function ConnectorsPage() {
   const activeTab = tab ?? (loading || connectors.length > 0 ? "connected" : "browse");
   const oauthApps = catalog?.oauthApps ?? [];
 
-  const manage = (connector: Connector) => { flow.close(); setSelectedId(connector.id); };
-  /** Another account of a catalog app (a click: may open the sign-in window after the name step). */
+  const manage = (connector: Connector, opts: { focus?: string; importFrom?: string } = {}) => {
+    flow.close();
+    setFocus(opts.focus);
+    setImportFrom(opts.importFrom);
+    setSelectedId(connector.id);
+  };
+  /**
+   * Another account of a catalog app (a click: may open the sign-in window after the name step).
+   * When the app is per identity, its sheet opens on the add-account form instead.
+   */
   const addAccount = (entry: CatalogEntry) => {
+    const identity = connectors.find((c) => c.catalogId === entry.id && isIdentityConnector(c));
+    if (identity) { manage(identity, { focus: "add" }); return; }
     setSelectedId(null);
     flow.open({ entry, another: true, name: nextAccountName(entry, connectors) });
   };
+  /** Add a catalog app choosing its type first (`perIdentity`: preselected). */
+  const chooseType = (entry: CatalogEntry, perIdentity = false) => {
+    setSelectedId(null);
+    flow.open({ entry, choose: true, name: entry.name, ...(perIdentity ? { scope: { kind: "identity" as const } } : {}) });
+  };
+  const identityTarget = selected ? identityTargetFor(selected, connectors) : undefined;
   /** Keep the tab the person is on (the default tab follows whether anything is connected). */
   const stay = () => setTab((t) => t ?? activeTab);
 
@@ -338,6 +378,7 @@ export function ConnectorsPage() {
                     connector={connector}
                     accounts={accounts.length}
                     onAddAccount={() => { stay(); addAccount(entry); }}
+                    onChoose={() => { stay(); chooseType(entry); }}
                     onConnect={() => { stay(); flow.open({ entry, ...(connector ? { connector } : {}) }); }}
                     onManage={() => connector && manage(connector)}
                   />
@@ -350,6 +391,7 @@ export function ConnectorsPage() {
 
       <ConnectDialog
         state={flow.state}
+        agents={agentOptions}
         redirectUri={catalog?.redirectUri ?? ""}
         onBegin={flow.begin}
         onSetup={flow.openSetup}
@@ -383,6 +425,7 @@ export function ConnectorsPage() {
         open={customOpen}
         onOpenChange={setCustomOpen}
         redirectUri={catalog?.redirectUri}
+        agents={agentOptions}
         onSubmit={(input) => { setCustomOpen(false); setTab("connected"); flow.open({ create: input }); }}
       />
 
@@ -405,7 +448,24 @@ export function ConnectorsPage() {
         entry={selectedEntry}
         agents={agentOptions}
         open={!!selected}
-        onOpenChange={(open) => { if (!open) setSelectedId(null); }}
+        onOpenChange={(open) => { if (!open) { setSelectedId(null); setFocus(undefined); setImportFrom(undefined); } }}
+        connectors={connectors}
+        focus={focus}
+        importFrom={importFrom}
+        onImported={(sourceId, removed) => { if (removed) drop(sourceId); else void refresh(); }}
+        identityHelp={selected && !isIdentityConnector(selected) ? (
+          identityTarget ? (
+            <Button size="sm" className="h-7 text-xs" onClick={() => manage(identityTarget, { importFrom: selected.id })}>
+              <ArrowRightLeft className="h-3.5 w-3.5" /> Import into {identityTarget.name}
+            </Button>
+          ) : selectedEntry ? (
+            <Button size="sm" className="h-7 text-xs" onClick={() => chooseType(selectedEntry, true)}>
+              <Plus className="h-3.5 w-3.5" /> Add {selectedEntry.name} per identity
+            </Button>
+          ) : (
+            <p className="text-muted-foreground">Add it again with Add custom connector, type Per identity, then import this one from its Accounts section.</p>
+          )
+        ) : undefined}
         onChanged={upsert}
         onRemoved={(id) => { drop(id); setSelectedId(null); }}
         onReconnect={(c) => { setSelectedId(null); flow.open({ connector: c, entry: selectedEntry }); }}

@@ -6,25 +6,65 @@
  * whether it is the organization's ("Org") or this agent's own ("Personal"). Connectors open to
  * every agent show as enabled; turning one off keeps every other agent. An enabled connector
  * expands to choose which of its tools the agent gets (all, or only selected ones: agent.connectorTools).
+ *
+ * A per-identity connector ("Identity" chip) is enabled like an organization one; once enabled, its
+ * row lists this agent's own accounts (never another agent's) with sign-in, default and remove, and
+ * adds new ones for this agent.
  */
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useAgents } from "@polpo-ai/react";
 import { toast } from "sonner";
-import { AlertTriangle, ChevronDown, Plug } from "lucide-react";
+import { AlertTriangle, ChevronDown, Plug, Plus } from "lucide-react";
 import { SectionHeader } from "@/components/shared/section-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useConnectors } from "@/hooks/use-connectors";
 import {
-  accountLabel, agentHasAccess, allowedToolsCoverConnector, connectorOwner, connectorState, connectorToolsEntry, connectorVisibleTo, connectorsApi, toggleAgentAccess,
+  ORG_IDENTITY, accountLabel, accountsOf, agentHasAccess, agentIdentity, allowedToolsCoverConnector, connectorOwner, connectorState, connectorToolsEntry,
+  connectorVisibleTo, connectorsApi, fallbackOn, isIdentityConnector, toggleAgentAccess,
   type AgentConnectorTools as Selection, type Connector,
 } from "@/lib/connectors-api";
+import { AccountRow, AddAccountForm, useAccountSignIn } from "./connector-accounts";
 import { cn } from "@/lib/utils";
 import { AgentConnectorTools } from "./agent-connector-tools";
 import { ConnectorIcon } from "./connector-icon";
 import { StateBadge, Switch } from "./connector-bits";
+
+/** This agent's accounts on a per-identity connector: list, sign in, default, remove, add. */
+function AgentAccounts({ connector, agentName, agentLabel, onChanged }: {
+  connector: Connector; agentName: string; agentLabel: string; onChanged: (c: Connector) => void;
+}) {
+  const identity = agentIdentity(agentName);
+  const signIn = useAccountSignIn(onChanged);
+  const [adding, setAdding] = useState(false);
+  const mine = accountsOf(connector, identity);
+  const shared = fallbackOn(connector) && accountsOf(connector, ORG_IDENTITY).length > 0;
+  return (
+    <div className="space-y-2 border-t border-border/40 px-3 py-2" data-testid={`agent-accounts-${connector.id}`}>
+      {mine.length === 0 ? (
+        <p className="text-xs text-muted-foreground" data-testid="agent-no-account">
+          No account yet{shared ? ": uses the organization's shared account" : ""}.
+        </p>
+      ) : (
+        <ul className="divide-y rounded-md border border-border/40">
+          {mine.map((account) => (
+            <AccountRow key={account.id} connector={connector} account={account} signIn={signIn} onChanged={onChanged} compact />
+          ))}
+        </ul>
+      )}
+      {adding ? (
+        <AddAccountForm connector={connector} options={[{ value: identity, label: agentLabel }]} signIn={signIn} onChanged={onChanged} onDone={() => setAdding(false)} />
+      ) : (
+        <Button size="sm" variant="outline" className="h-7 text-xs" disabled={!connector.enabled} onClick={() => setAdding(true)}
+          aria-label={`Add a ${connector.name} account for ${agentLabel}`}>
+          <Plus className="h-3.5 w-3.5" /> Add account
+        </Button>
+      )}
+    </div>
+  );
+}
 
 export function AgentConnectorsSection({
   agentName, allowedTools, connectorTools, onConnectorToolsSaved,
@@ -38,6 +78,8 @@ export function AgentConnectorsSection({
 }) {
   const { connectors, loading, error, upsert } = useConnectors();
   const { agents } = useAgents();
+  const agent = agents.find((a) => a.name === agentName);
+  const agentLabel = agent?.identity?.displayName?.trim() || agentName;
   const [saving, setSaving] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   // the last saved selection, ahead of the agent reload
@@ -99,6 +141,8 @@ export function AgentConnectorsSection({
             const entry = connectorToolsEntry(current, connector.id);
             const open = on && expanded === connector.id;
             const account = accountLabel(connector, connectors);
+            const perIdentity = isIdentityConnector(connector);
+            const myAccounts = perIdentity ? accountsOf(connector, agentIdentity(agentName)) : [];
             return (
               <div key={connector.id} className="rounded-lg border border-border/40 bg-card/60">
                 <div data-testid={`agent-connector-${connector.id}`} className="flex items-center gap-3 px-3 py-2">
@@ -109,14 +153,17 @@ export function AgentConnectorsSection({
                       {/* several accounts of one app: which one this is */}
                       {account && <span className="min-w-0 truncate text-caption text-muted-foreground">{account}</span>}
                       {/* the organization's, or this agent's own */}
-                      {connectorOwner(connector) ? (
+                      {perIdentity ? (
+                        <Badge variant="outline" data-testid="connector-scope-chip" className="shrink-0 self-center border-primary/40 bg-primary/10 px-1.5 py-0 text-micro text-primary">Identity</Badge>
+                      ) : connectorOwner(connector) ? (
                         <Badge variant="outline" data-testid="connector-scope-chip" className="shrink-0 self-center border-primary/40 bg-primary/10 px-1.5 py-0 text-micro text-primary">Personal</Badge>
                       ) : (
                         <Badge variant="outline" data-testid="connector-scope-chip" className="shrink-0 self-center px-1.5 py-0 text-micro text-muted-foreground">Org</Badge>
                       )}
                     </p>
                     <p className="truncate text-xs text-muted-foreground">
-                      {connectorOwner(connector) ? (on ? "Its own: only this agent can use it" : "Its own: not enabled yet")
+                      {perIdentity ? (on ? (myAccounts.length ? `${myAccounts.length} account${myAccounts.length === 1 ? "" : "s"} of its own` : "No account yet") : "Not granted: enable it to connect its accounts")
+                        : connectorOwner(connector) ? (on ? "Its own: only this agent can use it" : "Its own: not enabled yet")
                         : connector.access.agents === "*" ? "Open to every agent" : on ? "This agent can use its tools" : "Not granted"}
                       {on && entry !== "*" ? ` · ${entry.length} selected tool${entry.length === 1 ? "" : "s"}` : connector.toolCount !== undefined ? ` · ${connector.toolCount} tools` : ""}
                     </p>
@@ -127,7 +174,8 @@ export function AgentConnectorsSection({
                       </p>
                     )}
                   </div>
-                  <StateBadge state={connectorState(connector)} className="hidden sm:inline-flex" />
+                  {/* per identity: the state of this agent's accounts, below (never the others') */}
+                  {!perIdentity && <StateBadge state={connectorState(connector)} className="hidden sm:inline-flex" />}
                   {on && (
                     <Button
                       variant="ghost"
@@ -147,6 +195,7 @@ export function AgentConnectorsSection({
                     onChange={(next) => void toggle(connector, next)}
                   />
                 </div>
+                {perIdentity && on && <AgentAccounts connector={connector} agentName={agentName} agentLabel={agentLabel} onChanged={upsert} />}
                 {open && (
                   <AgentConnectorTools
                     agentName={agentName}

@@ -46,8 +46,70 @@ export interface ConnectorAccess {
   polpo: boolean;
 }
 
-/** The organization's (its access decides which agents use it) or one agent's own (only that agent). */
-export type ConnectorScope = { kind: "org" } | { kind: "agent"; agent: string };
+/**
+ * The organization's (its access decides which agents use it), one agent's own (only that agent), or
+ * per identity (defined once; each agent / person connects its own accounts; `fallback`: identities
+ * without one use the organization's shared account).
+ */
+export type ConnectorScope = { kind: "org" } | { kind: "agent"; agent: string } | { kind: "identity"; fallback?: boolean };
+
+/** The three kinds of connector, as the type selector names them. */
+export type ConnectorKind = ConnectorScope["kind"];
+
+/**
+ * Whose an account of a per-identity connector is: "agent:<name>", "person:<email>" (a member;
+ * "person:_shared" without sign-in) or "org" (the shared fallback account).
+ */
+export type ConnectorIdentity = string;
+
+/** One account of a per-identity connector (mirrors src/mcp/view.ts PublicConnectorAccount). */
+export interface ConnectorAccount {
+  /** "acc-…" */
+  id: string;
+  identity: ConnectorIdentity;
+  /** "agent nina", "ada@acme.com", "the organization (fallback)". */
+  identityLabel?: string;
+  /** What its owner picks it by (`account: "sitoinchat"` on any of the connector's tools). */
+  label: string;
+  /** Its identity's default account. */
+  default?: boolean;
+  /** The signed-in account (e.g. an email), when known. */
+  account?: string;
+  /** The connector it was imported from. */
+  importedFrom?: string;
+  status?: ConnectorStatus;
+  lastError?: string;
+  toolCount?: number;
+  lastConnectedAt?: string;
+  createdAt: string;
+  updatedAt?: string;
+  secrets: { bearerToken: boolean; headers: string[]; oauth: { authorized: boolean; pending: boolean } };
+}
+
+/** POST /connectors/:id/accounts (token / headers are write-only). */
+export interface ConnectorAccountInput {
+  /** "agent:<name>", "person:<email>", "org" or "me" (the signed-in person). */
+  identity: ConnectorIdentity | "me";
+  label: string;
+  default?: boolean;
+  secrets?: { bearerToken?: string; headers?: Record<string, string> };
+}
+
+export interface ConnectorAccountImportInput {
+  from: string;
+  identity?: ConnectorIdentity | "me";
+  label?: string;
+  default?: boolean;
+  /** false: turn the source off instead of deleting it (default true). */
+  removeSource?: boolean;
+}
+
+export interface ConnectorAccountImportResult {
+  account: ConnectorAccount;
+  source: { id: string; removed: boolean; disabled: boolean };
+  renamed: { from: string; to: string };
+  connector: Connector;
+}
 
 export interface ConnectorOAuthSettings {
   clientId?: string;
@@ -71,6 +133,8 @@ export interface Connector {
   access: ConnectorAccess;
   /** Who it belongs to; missing = the organization. An agent's own is only ever enabled for that agent. */
   scope?: ConnectorScope;
+  /** scope "identity": every identity's accounts (which secrets are set, never their values). */
+  accounts?: ConnectorAccount[];
   enabled: boolean;
   catalogId?: string;
   icon?: ConnectorIconRef;
@@ -147,6 +211,8 @@ export interface ConnectorTool {
 
 export interface ConnectorTestResult {
   ok: boolean;
+  /** A per-identity connector: the account that was tested. */
+  account?: string;
   error?: string;
   status?: ConnectorStatus;
   tools?: Array<{ name: string; title?: string; description?: string }>;
@@ -250,6 +316,22 @@ export const connectorsApi = {
   resetIcon: (id: string) => request<Connector>(`${at(id)}/icon`, json("DELETE")),
 };
 
+const acc = (id: string, account: string) => `${at(id)}/accounts/${encodeURIComponent(account)}`;
+
+/** A per-identity connector's accounts. Every mutation returns the updated connector too. */
+export const connectorAccountsApi = {
+  list: (id: string, identity?: ConnectorIdentity | "me") =>
+    request<{ accounts: ConnectorAccount[]; fallback: boolean }>(`${at(id)}/accounts${identity ? `?identity=${encodeURIComponent(identity)}` : ""}`),
+  add: (id: string, input: ConnectorAccountInput) => request<{ account: ConnectorAccount; connector: Connector }>(`${at(id)}/accounts`, json("POST", input)),
+  update: (id: string, account: string, patch: { label?: string; default?: true; secrets?: ConnectorAccountInput["secrets"] }) =>
+    request<{ account: ConnectorAccount; connector: Connector }>(acc(id, account), json("PATCH", patch)),
+  remove: (id: string, account: string) => request<{ removed: boolean; connector: Connector }>(acc(id, account), json("DELETE")),
+  startOAuth: (id: string, account: string) => request<{ authorizationUrl?: string; authorized?: boolean; redirectUri: string }>(`${acc(id, account)}/oauth/start`, json("POST")),
+  test: (id: string, account: string) => request<ConnectorTestResult>(`${acc(id, account)}/test`, json("POST")),
+  disconnect: (id: string, account: string) => request<Connector>(`${acc(id, account)}/disconnect`, json("POST")),
+  import: (id: string, input: ConnectorAccountImportInput) => request<ConnectorAccountImportResult>(`${at(id)}/accounts/import`, json("POST", input)),
+};
+
 /** Largest icon a person can upload (the server's limit). */
 export const MAX_ICON_BYTES = 512 * 1024;
 
@@ -341,6 +423,7 @@ export function missingOAuthApp(entry: CatalogEntry, apps: OAuthApp[], connector
 
 export function connectorState(connector: Connector): Exclude<ConnectorCardState, "connect" | "needs_setup"> {
   if (!connector.enabled || connector.status === "disabled") return "disabled";
+  if (isIdentityConnector(connector)) return identityConnectorState(connector);
   switch (connector.status) {
     case "connected": return "connected";
     case "needs_auth": return "needs_auth";
@@ -355,7 +438,7 @@ export function catalogCardState(entry: CatalogEntry, connectors: Connector[], a
   const connector = accounts[0];
   if (connector) {
     const state = connectorState(connector);
-    return { state: (state === "needs_auth" || state === "needs_reauth" || state === "error")
+    return { state: !isIdentityConnector(connector) && (state === "needs_auth" || state === "needs_reauth" || state === "error")
       && missingOAuthApp(entry, apps, connector) ? "needs_setup" : state, connector, accounts };
   }
   return { state: missingOAuthApp(entry, apps) ? "needs_setup" : "connect", accounts };
@@ -381,6 +464,7 @@ export function nextAccountName(entry: { id: string; name: string }, connectors:
  * when its name does not say it already, else its id when there are other accounts.
  */
 export function accountLabel(connector: Connector, connectors: Connector[]): string | undefined {
+  if (isIdentityConnector(connector)) return undefined; // its accounts are listed on their own
   const account = connector.account?.trim();
   if (account && !connector.name.toLowerCase().includes(account.toLowerCase())) return account;
   if (connector.catalogId && catalogAccounts(connector.catalogId, connectors).length > 1) return connector.id;
@@ -403,10 +487,12 @@ export function groupConnectors(connectors: Connector[]): Array<{ key: string; c
   const groups: Array<{ key: string; catalogId?: string; connectors: Connector[] }> = [];
   const byApp = new Map<string, { key: string; catalogId?: string; connectors: Connector[] }>();
   for (const c of connectors) {
-    const existing = c.catalogId ? byApp.get(c.catalogId) : undefined;
+    // a per-identity connector holds its accounts itself: never grouped with separate connectors
+    const app = c.catalogId && !isIdentityConnector(c) ? c.catalogId : undefined;
+    const existing = app ? byApp.get(app) : undefined;
     if (existing) { existing.connectors.push(c); continue; }
-    const group = { key: c.catalogId ? `app:${c.catalogId}` : `id:${c.id}`, ...(c.catalogId ? { catalogId: c.catalogId } : {}), connectors: [c] };
-    if (c.catalogId) byApp.set(c.catalogId, group);
+    const group = { key: app ? `app:${app}` : `id:${c.id}`, ...(app ? { catalogId: app } : {}), connectors: [c] };
+    if (app) byApp.set(app, group);
     groups.push(group);
   }
   return groups;
@@ -461,12 +547,12 @@ export function agentHasAccess(access: ConnectorAccess, agent: string): boolean 
   return access.agents === "*" || access.agents.includes(agent);
 }
 
-/** The agent an agent-scoped connector belongs to; undefined for an org connector. */
+/** The agent an agent-scoped connector belongs to; undefined for an org or per-identity connector. */
 export function connectorOwner(connector: Pick<Connector, "scope">): string | undefined {
   return connector.scope?.kind === "agent" ? connector.scope.agent : undefined;
 }
 
-/** At `agent`'s disposal at all: every org connector and its own ones (never another agent's own). */
+/** At `agent`'s disposal at all: every org and per-identity connector and its own ones (never another agent's own). */
 export function connectorVisibleTo(connector: Pick<Connector, "scope">, agent: string): boolean {
   const owner = connectorOwner(connector);
   return owner === undefined || owner === agent;
@@ -475,6 +561,125 @@ export function connectorVisibleTo(connector: Pick<Connector, "scope">, agent: s
 /** Enabled for `agent` (the server's rule: another agent's own connector never is, whatever its access says). */
 export function connectorEnabledFor(connector: Pick<Connector, "scope" | "access">, agent: string): boolean {
   return connectorVisibleTo(connector, agent) && agentHasAccess(connector.access, agent);
+}
+
+// ── Per-identity connectors ──────────────────────────────────────────────────
+
+/** Whether each agent / person connects its own accounts to the connector. */
+export function isIdentityConnector(connector: Pick<Connector, "scope">): boolean {
+  return connector.scope?.kind === "identity";
+}
+
+/** "org", "agent" or "identity" (missing scope = org). */
+export function connectorKind(connector: Pick<Connector, "scope">): ConnectorKind {
+  return connector.scope?.kind ?? "org";
+}
+
+/** Whether identities without an account of their own use the organization's shared one. */
+export function fallbackOn(connector: Pick<Connector, "scope">): boolean {
+  return connector.scope?.kind === "identity" && connector.scope.fallback === true;
+}
+
+export const ORG_IDENTITY = "org";
+export const agentIdentity = (agent: string): ConnectorIdentity => `agent:${agent}`;
+
+export type ParsedIdentity = { kind: "agent"; agent: string } | { kind: "person"; email: string } | { kind: "org" };
+
+export function parseIdentity(identity: ConnectorIdentity): ParsedIdentity | undefined {
+  if (identity === ORG_IDENTITY) return { kind: "org" };
+  const m = /^(agent|person):(.+)$/.exec(identity);
+  if (!m) return undefined;
+  return m[1] === "agent" ? { kind: "agent", agent: m[2]! } : { kind: "person", email: m[2]! };
+}
+
+/** How an identity reads in the dashboard: an agent's display name, a person's email, "Organization (fallback)". */
+export function identityName(identity: ConnectorIdentity, agentLabel: (name: string) => string = (n) => n): string {
+  const p = parseIdentity(identity);
+  if (!p) return identity;
+  if (p.kind === "org") return "Organization (fallback)";
+  if (p.kind === "agent") return agentLabel(p.agent);
+  return p.email === "_shared" ? "You (no sign-in)" : p.email;
+}
+
+/** An identity's own accounts on the connector, the default first. */
+export function accountsOf(connector: Pick<Connector, "accounts">, identity: ConnectorIdentity): ConnectorAccount[] {
+  const own = (connector.accounts ?? []).filter((a) => a.identity === identity);
+  return [...own.filter((a) => a.default), ...own.filter((a) => !a.default)];
+}
+
+/** Every identity with accounts, in order: agents, people, then the organization's fallback. */
+export function accountIdentities(connector: Pick<Connector, "accounts">): ConnectorIdentity[] {
+  const seen = [...new Set((connector.accounts ?? []).map((a) => a.identity))];
+  const rank = (i: string) => (i.startsWith("agent:") ? 0 : i.startsWith("person:") ? 1 : 2);
+  return seen.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+}
+
+/** Whether `identity` may connect accounts: an agent with access, a person when Polpo may use it, the organization always. */
+export function identityMayConnect(connector: Pick<Connector, "access" | "scope">, identity: ConnectorIdentity): boolean {
+  if (!isIdentityConnector(connector)) return false;
+  const p = parseIdentity(identity);
+  if (!p) return false;
+  if (p.kind === "org") return true;
+  if (p.kind === "person") return connector.access.polpo;
+  return agentHasAccess(connector.access, p.agent);
+}
+
+/** One account's state, like a connector's. */
+export function accountState(account: ConnectorAccount, connector: Pick<Connector, "enabled" | "auth">): Exclude<ConnectorCardState, "connect" | "needs_setup"> {
+  if (!connector.enabled) return "disabled";
+  switch (account.status) {
+    case "connected": return "connected";
+    case "needs_reauth": return "needs_reauth";
+    case "error": return "error";
+    case "needs_auth": return "needs_auth";
+    default: return connector.auth.type === "oauth" && !account.secrets.oauth.authorized ? "needs_auth" : "not_connected";
+  }
+}
+
+/** A per-identity connector as a whole: connected when an account is, an error when one failed, else not connected. */
+function identityConnectorState(connector: Connector): "connected" | "error" | "not_connected" {
+  const states = (connector.accounts ?? []).map((a) => accountState(a, connector));
+  if (states.includes("connected")) return "connected";
+  if (states.includes("error") || states.includes("needs_reauth")) return "error";
+  return "not_connected";
+}
+
+/** "2 accounts · 1 connected" */
+export function accountsSummary(connector: Pick<Connector, "accounts" | "enabled" | "auth">): string {
+  const accounts = connector.accounts ?? [];
+  if (!accounts.length) return "No accounts yet";
+  const connected = accounts.filter((a) => accountState(a, connector) === "connected").length;
+  return `${accounts.length} account${accounts.length === 1 ? "" : "s"}${connected ? ` · ${connected} connected` : ""}`;
+}
+
+/** Another connector of the same app that can become an account (same catalog entry or URL, same sign-in). */
+export function importCandidates(target: Connector, connectors: Connector[]): Connector[] {
+  return connectors.filter((c) => c.id !== target.id && !isIdentityConnector(c)
+    && c.transport.type !== "hosted" && c.transport.type !== "stdio"
+    && ((!!target.catalogId && c.catalogId === target.catalogId) || (!!target.transport.url && c.transport.url === target.transport.url))
+    && c.auth.type === target.auth.type);
+}
+
+/** The per-identity connector of the same app a separate connector can be imported into, if any. */
+export function identityTargetFor(source: Connector, connectors: Connector[]): Connector | undefined {
+  if (isIdentityConnector(source)) return undefined;
+  return connectors.find((c) => isIdentityConnector(c) && importCandidates(c, [source]).length > 0);
+}
+
+/** Whose account an imported connector becomes by default: its owner, else its only agent, else the organization. */
+export function importIdentity(source: Connector): ConnectorIdentity {
+  const owner = connectorOwner(source);
+  if (owner) return agentIdentity(owner);
+  if (Array.isArray(source.access.agents) && source.access.agents.length === 1) return agentIdentity(source.access.agents[0]!);
+  return ORG_IDENTITY;
+}
+
+export const ACCOUNT_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 ._@+-]{0,63}$/;
+
+/** An account label the server accepts ("sitoinchat", "info@acme.com"): `text` made to fit. */
+export function accountLabelFrom(text: string): string {
+  const cleaned = text.trim().replace(/[^A-Za-z0-9 ._@+-]+/g, " ").replace(/\s+/g, " ").trim().replace(/^[^A-Za-z0-9]+/, "");
+  return cleaned.slice(0, 64).trim() || "account";
 }
 
 /** Grant / revoke one agent. Revoking from "every agent" keeps every other known agent. */
@@ -554,6 +759,8 @@ export interface CustomConnectorForm {
   scopes: string;
   command: string;
   args: string;
+  /** Who it belongs to (default: the organization). Per identity: the token / header values go with each account. */
+  scope?: ConnectorScope;
 }
 
 export const EMPTY_CUSTOM_FORM: CustomConnectorForm = {
@@ -581,13 +788,15 @@ export function validateCustomConnector(form: CustomConnectorForm): Partial<Reco
       errors.url = "Use an https:// URL";
     }
   }
-  if (form.auth === "bearer" && !form.bearerToken.trim()) errors.bearerToken = "Paste the token";
+  const perIdentity = form.scope?.kind === "identity";
+  if (form.auth === "bearer" && !perIdentity && !form.bearerToken.trim()) errors.bearerToken = "Paste the token";
   if (form.auth === "headers") {
     const rows = form.headers.filter((h) => h.name.trim() || h.value);
     if (rows.length === 0) errors.headers = "Add at least one header";
     else if (rows.some((h) => !HEADER_NAME.test(h.name.trim()))) errors.headers = "Header names: letters, digits and - only";
-    else if (rows.some((h) => !h.value)) errors.headers = "Every header needs a value";
+    else if (!perIdentity && rows.some((h) => !h.value)) errors.headers = "Every header needs a value";
   }
+  if (form.scope?.kind === "agent" && !form.scope.agent) errors.scope = "Pick the agent it belongs to";
   if (form.auth === "oauth" && form.clientSecret.trim() && !form.clientId.trim()) errors.clientId = "A client secret needs its client id";
   if (form.auth === "oauth" && form.detected === "oauth-preregistered" && !form.clientId.trim()) errors.clientId = "Enter the client id of the OAuth client you created";
   return errors;
@@ -601,6 +810,15 @@ export function splitArgs(input: string): string[] {
 }
 
 export function customConnectorInput(form: CustomConnectorForm): ConnectorInput {
+  const input = baseCustomInput(form);
+  if (!form.scope || form.scope.kind === "org") return input;
+  if (form.scope.kind === "agent") return { ...input, scope: form.scope };
+  // per identity: no token of its own (each account brings its own); header names are kept
+  const { secrets, ...rest } = input;
+  return { ...rest, ...(secrets?.clientSecret ? { secrets: { clientSecret: secrets.clientSecret } } : {}), scope: form.scope };
+}
+
+function baseCustomInput(form: CustomConnectorForm): ConnectorInput {
   const name = form.name.trim();
   if (form.kind === "stdio") {
     const [command = "", ...inline] = splitArgs(form.command.trim());
@@ -702,7 +920,11 @@ export type OAuthOutcome =
 export function waitForOAuth(
   id: string,
   popup: Window | null,
-  { signal, intervalMs = 1500, timeoutMs = 10 * 60_000 }: { signal?: AbortSignal; intervalMs?: number; timeoutMs?: number } = {},
+  { signal, intervalMs = 1500, timeoutMs = 10 * 60_000, account }: {
+    signal?: AbortSignal; intervalMs?: number; timeoutMs?: number;
+    /** A per-identity connector: the account signing in (its own state is watched). */
+    account?: string;
+  } = {},
 ): Promise<OAuthOutcome> {
   return new Promise((resolve) => {
     let done = false;
@@ -723,18 +945,21 @@ export function waitForOAuth(
       try {
         const c = await connectorsApi.get(id);
         if (done) return;
-        if (!c.secrets.oauth.pending) {
-          if (c.status === "connected") return finish({ kind: "connected", connector: c });
-          if (c.secrets.oauth.authorized) {
+        const a = account ? c.accounts?.find((x) => x.id === account) : undefined;
+        if (account && !a) return finish({ kind: "failed", error: "The account was removed" });
+        const s = a ?? { status: c.status, lastError: c.lastError, secrets: c.secrets };
+        if (!s.secrets.oauth.pending) {
+          if (s.status === "connected") return finish({ kind: "connected", connector: c });
+          if (s.secrets.oauth.authorized) {
             // the tokens land before the first connection finishes: wait for it (or its error)
-            if (c.lastError) return finish({ kind: "authorized_with_error", connector: c, error: c.lastError });
+            if (s.lastError) return finish({ kind: "authorized_with_error", connector: c, error: s.lastError });
             authorizedAt ??= Date.now();
             if (Date.now() - authorizedAt > FIRST_CONNECTION_GRACE_MS) {
               return finish({ kind: "authorized_with_error", connector: c, error: "The first connection failed" });
             }
             return;
           }
-          if (c.lastError) return finish({ kind: "failed", error: c.lastError });
+          if (s.lastError) return finish({ kind: "failed", error: s.lastError });
         }
       } catch { /* keep waiting */ }
       if (Date.now() - started > timeoutMs) return finish({ kind: "failed", error: "The sign-in link expired. Try again." });
@@ -742,9 +967,10 @@ export function waitForOAuth(
       if (popup?.closed && ++closedPolls >= 3) finish({ kind: "cancelled" });
     };
     const onMessage = (event: MessageEvent) => {
-      const data = event.data as { type?: string; ok?: boolean; id?: string | null } | null;
+      const data = event.data as { type?: string; ok?: boolean; id?: string | null; account?: string } | null;
       if (!data || data.type !== OAUTH_MESSAGE_TYPE) return;
       if (data.id && data.id !== id) return;
+      if (account && data.account && data.account !== account) return;
       void check();
     };
     const onAbort = () => finish({ kind: "cancelled" });

@@ -10,8 +10,8 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ConnectorRequestError, connectorsApi, missingOAuthApp, openAuthWindow, waitForOAuth,
-  type CatalogEntry, type Connector, type ConnectorInput, type OAuthApp,
+  ConnectorRequestError, connectorsApi, isIdentityConnector, missingOAuthApp, openAuthWindow, waitForOAuth,
+  type CatalogEntry, type Connector, type ConnectorInput, type ConnectorScope, type OAuthApp,
 } from "@/lib/connectors-api";
 
 export type ConnectPhase = "idle" | "setup" | "details" | "working" | "authorizing" | "done" | "error";
@@ -31,6 +31,12 @@ export interface ConnectTarget {
    */
   another?: boolean;
   name?: string;
+  /**
+   * A new connector of `entry` whose type (organization, personal, per identity) is picked first,
+   * with its name (`scope`: the type preselected).
+   */
+  choose?: boolean;
+  scope?: ConnectorScope;
 }
 
 export interface ConnectDetails {
@@ -38,6 +44,8 @@ export interface ConnectDetails {
   bearerToken?: string;
   /** Display name of another account. */
   name?: string;
+  /** The type picked for a new connector (default: the organization's). */
+  scope?: ConnectorScope;
 }
 
 export interface ConnectState {
@@ -58,8 +66,10 @@ export function needsDetails(entry: CatalogEntry | undefined, connector: Connect
   return !!entry.urlTemplate || (entry.variants?.length ?? 0) > 1 || entry.auth === "bearer";
 }
 
-const usesOAuth = (target: ConnectTarget) =>
-  target.connector ? target.connector.auth.type === "oauth"
+const usesOAuth = (target: ConnectTarget, details: ConnectDetails = {}) =>
+  // a per-identity connector signs in per account, later: nothing opens now
+  (details.scope ?? target.create?.scope ?? target.scope)?.kind === "identity" ? false
+  : target.connector ? target.connector.auth.type === "oauth" && !isIdentityConnector(target.connector)
   : target.create ? target.create.auth?.type === "oauth"
   : target.entry ? target.entry.auth === "oauth" || target.entry.auth === "oauth_preregistered"
   : false;
@@ -99,13 +109,17 @@ export function useConnectFlow({
     };
     try {
       let connector = target.connector
-        ?? (target.entry && !target.another ? connectors.find((c) => c.catalogId === target.entry!.id) : undefined);
-      const secrets = details.bearerToken ? { bearerToken: details.bearerToken.trim() } : undefined;
+        ?? (target.entry && !target.another && !target.choose ? connectors.find((c) => c.catalogId === target.entry!.id) : undefined);
+      const scope = details.scope ?? target.scope;
+      const perIdentity = scope?.kind === "identity";
+      // per identity: each account brings its own token later
+      const secrets = details.bearerToken && !perIdentity ? { bearerToken: details.bearerToken.trim() } : undefined;
       const name = (details.name ?? target.name)?.trim();
       if (!connector) {
         // another account: the server gives it the next free id (gmail-2…) and its own sign-in
         const input: ConnectorInput = target.create ?? {
           catalogId: target.entry!.id, ...(name ? { name } : {}), ...(details.url ? { url: details.url } : {}), ...(secrets ? { secrets } : {}),
+          ...(scope && scope.kind !== "org" ? { scope } : {}),
         };
         connector = await connectorsApi.create(input);
       } else {
@@ -126,6 +140,12 @@ export function useConnectFlow({
       if (ctrl.signal.aborted) return;
       onChangedRef.current?.(connector);
       setState((s) => ({ ...s, connector, target: { ...s.target, connector } }));
+      if (isIdentityConnector(connector)) {
+        // nobody signs in to the connector itself: each identity adds its accounts next
+        closePopup();
+        setState((s) => ({ ...s, phase: "done" }));
+        return;
+      }
 
       if (connector.auth.type === "oauth") {
         const start = await connectorsApi.startOAuth(connector.id);
@@ -178,7 +198,7 @@ export function useConnectFlow({
       return;
     }
     // another account first asks its name (with the other details, if any)
-    if ((target.another && !target.connector) || needsDetails(target.entry, target.connector)) {
+    if (((target.another || target.choose) && !target.connector) || needsDetails(target.entry, target.connector)) {
       setState({ phase: "details", target });
       return;
     }
@@ -190,7 +210,7 @@ export function useConnectFlow({
   const begin = useCallback((details: ConnectDetails = {}) => {
     const target = state.target;
     if (!target) return;
-    const popup = usesOAuth(target) ? openAuthWindow() : null;
+    const popup = usesOAuth(target, details) ? openAuthWindow() : null;
     void run(target, details, popup);
   }, [run, state.target]);
 
