@@ -208,7 +208,8 @@ test("?file= opens a file directly; a relative link in SKILL.md opens that file 
 
 test("orchestrator skills open in the same browser (?pool=orchestrator)", async () => {
   await renderPage("/skills/helper?pool=orchestrator");
-  expect(client.getOrchestratorSkillContent).toHaveBeenCalledWith("helper");
+  // the folder's SKILL.md (the draft), like the file tree next to it
+  expect(client.getOrchestratorSkillContent).toHaveBeenCalledWith("helper", { view: "draft" });
   expect(q('[data-testid="skill-file-view"]')!.textContent).toContain("# Helper");
   expect(document.body.textContent).toContain("One of Polpo's own skills");
 });

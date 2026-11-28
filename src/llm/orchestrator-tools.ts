@@ -1779,6 +1779,8 @@ const updateOrchestratorSkillTool: Tool = {
     description: Type.Optional(Type.String({ description: "New description" })),
     content: Type.Optional(Type.String({ description: "New markdown body content" })),
     allowedTools: Type.Optional(Type.Array(Type.String(), { description: "New allowed tools list. MUST be a JSON array of strings (e.g. [\"read\",\"write\"]) — never a single comma-separated string." })),
+    publish: Type.Optional(Type.Boolean({ description: "true: publish at once as a new version in production; false: only the skill's draft (publish it later with skill_publish pool orchestrator). Default: the instance setting (published at once)." })),
+    note: Type.Optional(Type.String({ description: "Release note when published" })),
   }),
 };
 
@@ -5728,13 +5730,19 @@ function execUpdateOrchestratorSkill(polpo: Orchestrator, args: Record<string, u
   if (args.content !== undefined) updates.content = args.content as string;
   if (args.allowedTools !== undefined) updates.allowedTools = args.allowedTools as string[];
 
-  const ok = updateOrchestratorSkill(polpo.getPolpoDir(), name, updates, false, "polpo");
+  const publish = typeof args.publish === "boolean" ? args.publish : polpo.autoPublishSkillUpdates();
+  let ok: boolean;
+  try {
+    ok = updateOrchestratorSkill(polpo.getPolpoDir(), name, updates, false, "polpo", { mode: publish ? "publish" : "draft", ...(typeof args.note === "string" && args.note ? { note: args.note } : {}) });
+  } catch (err) {
+    return `Error: ${err instanceof Error ? err.message : String(err)}`;
+  }
   if (!ok) return `Error: Orchestrator skill "${name}" not found.`;
 
   emitSkillChanged(polpo, "orchestrator", "updated", name);
 
   const fields = Object.keys(updates);
-  return `Updated orchestrator skill "${name}": ${fields.join(", ")}`;
+  return `Updated orchestrator skill "${name}": ${fields.join(", ")}${publish ? " (published to production)" : " (saved in the draft: production is unchanged)"}`;
 }
 
 function execRemoveOrchestratorSkill(polpo: Orchestrator, args: Record<string, unknown>): string {

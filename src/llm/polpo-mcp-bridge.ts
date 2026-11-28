@@ -220,6 +220,9 @@ export const BRIDGED_TOOLS: BridgedTool[] = [
   { mcp: "polpo_skill_versions", name: "skill_versions", group: "skills" },
   { mcp: "polpo_skill_version_diff", name: "skill_version_diff", group: "skills" },
   { mcp: "polpo_skill_restore", name: "skill_restore", group: "skills" },
+  { mcp: "polpo_skill_publish", name: "skill_publish", group: "skills" },
+  { mcp: "polpo_skill_rollback", name: "skill_rollback", group: "skills" },
+  { mcp: "polpo_skill_draft", name: "skill_draft", group: "skills" },
   // Agent versions: draft → publish → deploy (production), rollback, history
   { mcp: "polpo_agent_versions", name: "agent_versions", group: "agent-versions" },
   { mcp: "polpo_agent_version_get", name: "agent_version_get", group: "agent-versions" },

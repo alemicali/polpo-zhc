@@ -1,35 +1,50 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePolpoContext } from "../provider/polpo-context.js";
 import { useEvents } from "./use-events.js";
-import type { SkillPool, SkillRestoreResult, SkillVersionDiff, SkillVersionFiles, SkillVersionList } from "@polpo-ai/sdk";
+import type {
+  SkillPool, SkillPublishResult, SkillRestoreResult, SkillRollbackResult, SkillVersionBump, SkillVersionDiff, SkillVersionFiles, SkillVersionList,
+  SkillVersionState,
+} from "@polpo-ai/sdk";
 
 export interface UseSkillVersionsReturn {
-  /** The skill's history, newest first (undefined while loading, or when the skill has none). */
+  /** The skill's versions newest first, production, the draft's state and the lifecycle history (undefined while loading, or when the skill has none). */
   data: SkillVersionList | undefined;
+  /** The lifecycle state: production, latest, the draft (changes, external, stale, suggested bump). */
+  state: SkillVersionState | undefined;
   isLoading: boolean;
   error: Error | null;
   refetch: () => Promise<void>;
-  /** The files of one version. */
-  files: (version: number) => Promise<SkillVersionFiles>;
-  /** What changed from version a to version b. */
-  diff: (a: number, b: number) => Promise<SkillVersionDiff>;
-  /** Put a version back (the current state is recorded first); refetches the history. */
-  restore: (version: number) => Promise<SkillRestoreResult>;
+  /** The files of one version (number or semver). */
+  files: (version: number | string) => Promise<SkillVersionFiles>;
+  /** What changed from a to b: version numbers, semvers, "draft" or "production". */
+  diff: (a: number | string, b: number | string) => Promise<SkillVersionDiff>;
+  /** Publish the draft as a new version in production; refetches. */
+  publish: (opts?: { bump?: SkillVersionBump; version?: string; note?: string }) => Promise<SkillPublishResult>;
+  /** Put an earlier version in production (default: the previous one); refetches. */
+  rollback: (opts?: { to?: number | string; note?: string }) => Promise<SkillRollbackResult>;
+  /** Throw the draft away (the files become production's); refetches. */
+  discardDraft: () => Promise<boolean>;
+  /** Move a stale draft onto production; refetches. */
+  rebaseDraft: () => Promise<{ dropped: boolean }>;
+  /** Put a version's files back: into the draft (publish: false, the dashboard's default) or published at once; refetches. */
+  restore: (version: number | string, opts?: { publish?: boolean; note?: string }) => Promise<SkillRestoreResult>;
   /** URL of one file of a version (raw), for <img>, <iframe> or a download link. */
-  fileUrl: (version: number, path: string, opts?: { download?: boolean }) => string;
+  fileUrl: (version: number | string, path: string, opts?: { download?: boolean }) => string;
   /** Read one text file of a version. */
-  readText: (version: number, path: string) => Promise<string>;
+  readText: (version: number | string, path: string) => Promise<string>;
   /** URL of a version as a .skill (default) or .zip archive. */
-  downloadUrl: (version: number, format?: "skill" | "zip") => string;
+  downloadUrl: (version: number | string, format?: "skill" | "zip") => string;
 }
 
 /**
- * A skill's versions (every change recorded as a copy of the whole folder), refetched when the skill
- * changes; diff two, browse one's files, restore one, download one.
+ * A skill's lifecycle, like an agent's: versions (semver) and production, the draft (unpublished
+ * edits and files changed on disk), publish, rollback, discard and rebase of the draft, diffs; browse
+ * a version's files, restore one, download one. Refetched when the skill changes, is published or
+ * rolled back.
  */
 export function useSkillVersions(name: string | undefined, pool: SkillPool = "agent"): UseSkillVersionsReturn {
   const { client } = usePolpoContext();
-  const { events } = useEvents(["skill:changed"], 1);
+  const { events } = useEvents(["skill:changed", "skill:published", "skill:rolled-back"], 1);
   const [state, setState] = useState<{ key: string; data?: SkillVersionList; error: Error | null } | null>(null);
   const key = `${pool}:${name ?? ""}`;
 
@@ -54,23 +69,29 @@ export function useSkillVersions(name: string | undefined, pool: SkillPool = "ag
     if (!d?.skillName || d.skillName === name) void fetch_();
   }, [fetch_, latest, name]);
 
-  const restore = useCallback(async (version: number) => {
-    const r = await client.restoreSkillVersion(name ?? "", version, pool);
+  const after = useCallback(async <T,>(p: Promise<T>): Promise<T> => {
+    const r = await p;
     await fetch_();
     return r;
-  }, [client, name, pool, fetch_]);
+  }, [fetch_]);
 
+  const n = name ?? "";
   const current = state?.key === key ? state : null;
   return {
     data: current?.data,
+    state: current?.data?.state,
     isLoading: !!name && !current,
     error: current?.error ?? null,
     refetch: fetch_,
-    files: (version) => client.getSkillVersionFiles(name ?? "", version, pool),
-    diff: (a, b) => client.diffSkillVersions(name ?? "", a, b, pool),
-    restore,
-    fileUrl: (version, path, opts) => client.skillVersionFileUrl(name ?? "", version, path, { pool, ...(opts?.download ? { download: true } : {}) }),
-    readText: (version, path) => client.getSkillVersionFileText(name ?? "", version, path, pool),
-    downloadUrl: (version, format) => client.skillVersionDownloadUrl(name ?? "", version, { pool, ...(format ? { format } : {}) }),
+    files: (version) => client.getSkillVersionFiles(n, version, pool),
+    diff: (a, b) => client.diffSkill(n, { from: a, to: b }, pool),
+    publish: (opts) => after(client.publishSkill(n, opts ?? {}, pool)),
+    rollback: (opts) => after(client.rollbackSkill(n, opts ?? {}, pool)),
+    discardDraft: async () => (await after(client.discardSkillDraft(n, pool))).discarded,
+    rebaseDraft: async () => ({ dropped: (await after(client.rebaseSkillDraft(n, pool))).dropped }),
+    restore: (version, opts) => after(client.restoreSkillVersion(n, version, pool, opts ?? {})),
+    fileUrl: (version, path, opts) => client.skillVersionFileUrl(n, version, path, { pool, ...(opts?.download ? { download: true } : {}) }),
+    readText: (version, path) => client.getSkillVersionFileText(n, version, path, pool),
+    downloadUrl: (version, format) => client.skillVersionDownloadUrl(n, version, { pool, ...(format ? { format } : {}) }),
   };
 }

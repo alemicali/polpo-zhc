@@ -451,6 +451,12 @@ export function configRoutes(getDeps: () => {
         settings.agents = { ...(settings.agents ?? {}), ...body.agents,
           ...(body.agents.versioning ? { versioning: { ...(settings.agents?.versioning ?? {}), ...body.agents.versioning } } : {}) };
       }
+      // skill lifecycle: merged (versioning flags)
+      if (body.skills === null) delete settings.skills;
+      else if (body.skills !== undefined) {
+        settings.skills = { ...(settings.skills ?? {}), ...body.skills,
+          ...(body.skills.versioning ? { versioning: { ...(settings.skills?.versioning ?? {}), ...body.skills.versioning } } : {}) };
+      }
       // Polpo's MCP server settings merge: the keys given change (toolsets, keys)
       if (body.mcp === null) delete settings.mcp;
       else if (body.mcp !== undefined) {

@@ -9,7 +9,7 @@
  * because they use git clone, symlinks, and other Node-specific ops.
  */
 
-import { resolve, join } from "node:path";
+import { basename, dirname, resolve, join } from "node:path";
 import type { FileSystem } from "./filesystem.js";
 
 // ── Types ──
@@ -275,9 +275,13 @@ async function loadSkillIndex(fs: FileSystem, polpoDir: string): Promise<SkillIn
 
 // ── Per-agent loading ──
 
-/** Load a single skill's content. */
+/**
+ * Load a single skill's content, as agents run it: its production version when the skill is versioned
+ * (`<pool>/.production/<name>/`, written by the self-hosted skill lifecycle), else its folder.
+ */
 async function loadSkillContent(fs: FileSystem, info: SkillInfo): Promise<LoadedSkill | null> {
-  const skillPath = resolve(info.path, "SKILL.md");
+  const production = join(dirname(info.path), ".production", basename(info.path), "SKILL.md");
+  const skillPath = (await fs.exists(production).catch(() => false)) ? production : resolve(info.path, "SKILL.md");
   try {
     const raw = await fs.readFile(skillPath);
     return { ...info, content: extractSkillBody(raw) };

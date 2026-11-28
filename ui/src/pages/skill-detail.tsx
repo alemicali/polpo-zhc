@@ -33,14 +33,14 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { useSkills, useOrchestratorSkills, useAgents, usePolpo, useSkillFiles, useSkillVersions } from "@polpo-ai/react";
-import type { SkillInfo, Team, LoadedSkill, SkillPool, SkillVersionFiles } from "@polpo-ai/react";
+import type { SkillInfo, Team, LoadedSkill, SkillPool, SkillVersionFiles, SkillVersionState } from "@polpo-ai/react";
 import { cn } from "@/lib/utils";
 import { AgentAvatar } from "@/components/shared/agent-avatar";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { SegmentedControl, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { SkillFileTree, SkillFileViewer } from "@/components/skills/skill-file-browser";
-import { SkillVersionsPanel } from "@/components/skills/skill-versions";
-import { versionAuthor, versionSourceLabel } from "@/lib/skill-versions";
+import { SkillVersionBadges, SkillVersionsPanel } from "@/components/skills/skill-versions";
+import { versionAuthor, versionLabel, versionSourceLabel } from "@/lib/skill-versions";
 import { formatSize } from "@/lib/skill-files";
 
 type ShownSkill = SkillInfo & { assignedTo?: string[] };
@@ -255,8 +255,9 @@ function MetadataCard({
  * A skill as a file browser: its files as a tree, the selected file in the main pane (SKILL.md by
  * default; ?file=references/api.md is linkable), relative links in markdown opening files in place,
  * downloads of one file or the whole skill. ?pool=orchestrator shows one of Polpo's own skills.
- * ?tab=versions shows its history (compare two, restore, download); ?version=3 browses that version's
- * files read-only in the same tree and viewer.
+ * The files shown are the skill's folder, i.e. its draft; ?tab=versions shows its lifecycle (draft,
+ * publish, production and rollback, versions, history); ?version=3 browses that version's files
+ * read-only in the same tree and viewer.
  *
  * Desktop: the layout's main area does not scroll, the page does inside it; here each column scrolls
  * on its own, so the file tree and the skill's details (left, sticky) stay in view while a long file
@@ -282,6 +283,7 @@ export function SkillDetailPage() {
   const [versionFiles, setVersionFiles] = useState<{ key: string; data?: SkillVersionFiles; error?: string } | null>(null);
   const [confirmRestore, setConfirmRestore] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
   const { files: loadVersionFiles } = versions;
   useEffect(() => {
     if (!viewVersion) return;
@@ -315,7 +317,8 @@ export function SkillDetailPage() {
   useEffect(() => {
     if (!skillName || !client) return;
     let cancelled = false;
-    const load = pool === "orchestrator" ? client.getOrchestratorSkillContent(skillName) : client.getSkillContent(skillName);
+    // the folder's SKILL.md (the draft), like the file tree and the other files shown next to it
+    const load = pool === "orchestrator" ? client.getOrchestratorSkillContent(skillName, { view: "draft" }) : client.getSkillContent(skillName, { view: "draft" });
     load
       .then((data) => {
         if (!cancelled) setContent({ key: contentKey, skill: data, error: null });
@@ -393,13 +396,19 @@ export function SkillDetailPage() {
   const missing = viewVersion ? !!shownVersion?.data && !current : !!files.data && !current;
   const versionCount = versions.data?.versions.length;
   const isCurrentVersion = viewVersion !== undefined && viewVersion === versions.data?.current;
+  const versionState = versions.state ?? (skill as { versioning?: SkillVersionState }).versioning;
+  const viewedMeta = viewVersion ? (shownVersion?.data?.version ?? versions.data?.versions.find((v) => v.version === viewVersion)) : undefined;
+  const viewedLabel = viewVersion ? (viewedMeta ? versionLabel(viewedMeta) : `v${viewVersion}`) : "";
   const restoreViewed = async () => {
     if (!viewVersion) return;
     setRestoring(true);
+    setRestoreError(null);
     try {
-      await versions.restore(viewVersion);
+      await versions.restore(viewVersion, { publish: false });
       setConfirmRestore(false);
       setView({ version: null });
+    } catch (e) {
+      setRestoreError(e instanceof Error ? e.message : "The restore failed");
     } finally {
       setRestoring(false);
     }
@@ -420,8 +429,9 @@ export function SkillDetailPage() {
               <span className="text-caption text-chart-4 shrink-0">{skill.category}</span>
             )}
           </div>
-          <div className="flex items-center gap-2 mt-0.5">
+          <div className="flex flex-wrap items-center gap-2 mt-0.5">
             <SourceBadge source={skill.source} />
+            <SkillVersionBadges state={versionState} />
             {(skill.assignedTo?.length ?? 0) > 0 && (
               <span className="text-caption text-muted-foreground">
                 {skill.assignedTo!.length} agent{skill.assignedTo!.length !== 1 ? "s" : ""}
@@ -470,7 +480,7 @@ export function SkillDetailPage() {
           >
             <nav aria-label="Files" className="rounded-lg border border-border/40 bg-card/80 p-2">
               <div className="flex items-center justify-between px-2 pb-1.5">
-                <span className="text-label text-muted-foreground">{viewVersion ? `Files of v${viewVersion}` : "Files"}</span>
+                <span className="text-label text-muted-foreground">{viewVersion ? `Files of ${viewedLabel}` : versionState?.draft.hasChanges ? "Files (draft)" : "Files"}</span>
                 {(viewVersion ? !shownVersion : files.isLoading) && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
               </div>
               <SkillFileTree files={fileList} selected={selected} onSelect={openFile} />
@@ -490,20 +500,18 @@ export function SkillDetailPage() {
               <div className="flex flex-wrap items-center gap-2 rounded-lg border border-info/30 bg-info/10 px-4 py-2" role="status" data-testid="version-banner">
                 <History className="h-3.5 w-3.5 text-info" />
                 <span className="min-w-0 flex-1 text-caption text-foreground">
-                  Version {viewVersion} (read-only)
+                  Version {viewedLabel} (read-only)
                   {shownVersion?.data && ` · ${new Date(shownVersion.data.version.createdAt).toLocaleString()} · ${versionAuthor(shownVersion.data.version.author)} · ${versionSourceLabel(shownVersion.data.version)}`}
-                  {isCurrentVersion && " · current"}
+                  {isCurrentVersion && " · production"}
                 </span>
                 <Button variant="ghost" size="sm" className="h-7" asChild>
-                  <a href={versions.downloadUrl(viewVersion)} download aria-label={`Download version ${viewVersion}`}><Download className="h-3.5 w-3.5" /></a>
+                  <a href={versions.downloadUrl(viewVersion)} download aria-label={`Download version ${viewedLabel}`}><Download className="h-3.5 w-3.5" /></a>
                 </Button>
-                {!isCurrentVersion && (
-                  <Button variant="outline" size="sm" className="h-7" onClick={() => setConfirmRestore(true)}>
-                    <RotateCcw className="h-3.5 w-3.5 mr-1" /> Restore
-                  </Button>
-                )}
+                <Button variant="outline" size="sm" className="h-7" onClick={() => { setRestoreError(null); setConfirmRestore(true); }}>
+                  <RotateCcw className="h-3.5 w-3.5 mr-1" /> Restore into draft
+                </Button>
                 <Button variant="outline" size="sm" className="h-7" onClick={() => setView({ version: null, tab: "versions" })}>Back to versions</Button>
-                <Button variant="ghost" size="sm" className="h-7" onClick={() => setView({ version: null, tab: "files" })}>Current files</Button>
+                <Button variant="ghost" size="sm" className="h-7" onClick={() => setView({ version: null, tab: "files" })}>Draft files</Button>
               </div>
             )}
             {tab === "versions" && !viewVersion ? (
@@ -557,8 +565,14 @@ export function SkillDetailPage() {
       <ConfirmDialog
         open={confirmRestore}
         onOpenChange={setConfirmRestore}
-        title={`Restore version ${viewVersion ?? ""}?`}
-        description={`The skill's files become those of version ${viewVersion ?? ""}. The current files are kept as a version first, so you can undo this.`}
+        title={`Restore ${viewedLabel} into the draft?`}
+        description={(
+          <>
+            The draft's files become those of {viewedLabel}. Production does not change: publish the draft from the Versions tab to put them in production.
+            {versionState?.draft.hasChanges && <span className="mt-2 block">The draft's unpublished changes are replaced.</span>}
+            {restoreError && <span className="mt-2 block text-destructive">{restoreError}</span>}
+          </>
+        )}
         confirmLabel="Restore"
         loading={restoring}
         onConfirm={() => void restoreViewed()}
