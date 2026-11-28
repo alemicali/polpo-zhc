@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { AGENT_DEFAULT, sandboxWithComputer, taskComputerOptions } from "../src/components/tasks/task-computer";
+import { AGENT_DEFAULT, sandboxWithComputer, taskComputerOptions } from "../src/lib/task-computer";
 
 const computers = [{ id: "ms-nina-01", name: "Nina" }, { id: "daytona-box", name: "Daytona box" }];
 const nina = { name: "nina", computers: ["ms-nina-01", "daytona-box"], defaultComputer: "ms-nina-01" };
